@@ -1,0 +1,9 @@
+# 降级链配置 (docs/DEGRADATION.md 主干+备用; 数据是配置不是代码)
+# 链序 = 优先顺序; 修改无需改代码。v0.2.0 接入 Wind 后 financials 改为 [wind, ths, akshare]。
+chains:
+  search: [ths, akshare]
+  quote: [ths, akshare]         # 快照不烧 Wind 积分 (v0.1.0 无 Wind)
+  klines: [ths, akshare]
+  financials: [ths, akshare]
+  calendar: [ths, akshare]
+  special: [ths, akshare]
