@@ -108,3 +108,50 @@
 | 全量 dump 下载体量/时长（~945 万行） | 增量策略（daily-k-10d）+ 断点续传 + 后台任务 + 目录可配置 |
 | 东财封锁未解除（kline golden） | 保持显式 skip，v0.1.1 顺带项部分完成即可 |
 | 估时乐观 | 合计 +20% buffer；M0 三决策门逐个过 gate |
+
+## 8. 遗留 live 验证项 (2026-08-15 记录, 待 THS 网关恢复后补做)
+
+> 发布时 (786803f, tag v0.3.0) 全部离线工作完成 (197 tests + 9 skip, CI 全绿)。
+> 以下四项依赖 THS 网关 (间歇 2003 限流, 见 `docs/LESSONS.md` §6.5), 均不阻塞发布;
+> 对应测试已就位 (缺失时显式 skip), 补做后自动激活。
+
+### 8.1 THS fund/index fixtures 录制 (11 条)
+
+- 目标文件: `tests/fixtures/ths/{fund_snapshot_510300,fund_snapshot_lof_160105,fund_kline_510300,
+  fund_nav_510300,fund_returns_510300,fund_holdings_510300,fund_holders_161725,
+  fund_profile_510300,index_snapshot_000300,index_kline_000300,index_constituents_000300}.json`
+- 格式: 原始信封 `{"code":0,"message":"success","request_id":"fixture","data":{...}}`
+  (与既有 `tests/fixtures/ths/*.json` 同款; 端点/参数清单见 `tests/adapters/test_ths.py`
+  `FUND_INDEX_FIXTURES` 表)
+- 录制节奏: **单发探测成功 → 立即 ≥3s 节奏连录 11 条 → 遇 2003 冷却 5-10 分钟重来**
+  (THS 高频限流无稳定数学模型; 严禁连发)
+- 强制 IPv4: 沙箱 IPv6 出口不可达 → patch asyncio 事件循环 `getaddrinfo` 为
+  `family=AF_INET` (**注意: patch `socket.getaddrinfo` 属性对事件循环无效**)
+- 录到后: `tests/adapters/test_ths.py::TestFundIndexFixtures` 8 条回放测试自动激活,
+  跑 `uv run pytest tests -q` 全绿后补提交
+
+### 8.2 数据湖全量同步 + 复权对账
+
+- `HITHINK_FINANCE_API_KEY=<ths_key> uv run python scripts/lake.py sync` (auto-sync 自动判
+  全量/增量; 首次全量 = daily-k 10 年 ~945 万行 + adjustment-factors + 增量 daily-k-10d)
+  → `lake.py validate --json` (8 项, error 级退出码 1)
+- 复权对账 (原 `/tmp/verify_adjust.py` 已删, 逻辑):
+  1. 湖侧: `lake.py query --json --sql "SELECT thscode, date, close FROM v_daily_qfq
+     WHERE thscode IN ('600519.SH','000001.SZ') ORDER BY thscode, date"`
+  2. THS 侧: `THSAdapter.get_klines(symbol, start_ms, end_ms, adjust="forward")`,
+     窗口取 2026-06-01 ~ 2026-07-10 (含除息日)
+  3. 按 `(symbol, date)` 对齐, `|lake - ths| / ths > tolerance_pct` (0.5%,
+     `config/reconcile.yaml`) 计 mismatch; 0 mismatch 即通过
+
+### 8.3 live-probe 全链路
+
+- `THS_API_KEY=<key> WIND_API_KEY=<key> uv run python scripts/live-probe.py`
+- 期望: tools/list 11/11; 新增用例含 `fin_data__get_fund_data` (nav/holdings/kline)、
+  `fin_data__get_index_data` (quote/constituents)、Wind 兜底用例
+  (000037 OTC 基金 quote: THS 3004 → Wind 分钟行情, degraded 可观测)
+
+### 8.4 东财 kline golden 补录 (v0.1.1 余项)
+
+- 东财 push2his IP 封锁未解除 (2026-08-15 重试仍 TCP 层 ConnectionError, LESSONS §5.4);
+  封锁解除后 `uv run python scripts/record-goldens.py` (kline_600519_1m 不再 skip,
+  同时补录 quote_600519); 新浪/腾讯 golden 已录, 不受影响
