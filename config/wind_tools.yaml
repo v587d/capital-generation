@@ -1,8 +1,10 @@
 # Wind MCP 接线映射 — M0 契约盘点产物 (2026-08-15, 官方契约 live 核实)
 # 官方契约基线: config/wind/manifest.json + config/wind/call-rules.json
 #   (scripts/verify-contracts.py --wind 做漂移检查; 双形状解析兜底)
-# 接线范围: v0.2.0 按需最小 — financials / intraday / announcements / edb。
-#   fund/index/bond/analytics 域未接线 → v0.3.0 (用户裁定)。
+# 接线范围: v0.2.0 按需最小 — financials / intraday / announcements / edb;
+#   v0.3.0 + fund (quote/kline/holdings/performance/info) + index
+#   (quote/kline/fundamentals/basicinfo)。analytics 域出局 (M0 决策门 B:
+#   get_financial_data 返回评级/目标价, 触及 LESSONS §1 研报裁定)。
 # 传输: JSON-RPC POST + Authorization: Bearer <WIND_API_KEY>; 响应 SSE 或纯 JSON。
 
 endpoints:
@@ -28,15 +30,29 @@ tool_by_domain:
   intraday:     {server: stock_data, tool: get_stock_kline}
   announcements: {server: financial_docs, tool: get_company_announcements}
   edb:          {server: economic_data, tool: natural_language_get_edb_data}
+  # v0.3.0 fund 域 (M0 live 核实: .SZ/.SH/.OF 直通 OK; fund kline 无 VOLUME 列 → L3 标注)
+  fund:
+    quote:      {server: fund_data, tool: get_fund_quote}          # 分钟行情 (仅当日)
+    kline:      {server: fund_data, tool: get_fund_kline}          # period 数字码, aftype=0
+    holdings:   {server: fund_data, tool: get_fund_holdings}       # question 类
+    performance: {server: fund_data, tool: get_fund_performance}   # question 类
+    info:       {server: fund_data, tool: get_fund_info}           # question 类
+  # v0.3.0 index 域 (M0 live 核实: 000300.SH/H11077.SH 直通 OK; index kline 含 VOLUME/TURNOVER)
+  index:
+    quote:      {server: index_data, tool: get_index_quote}        # 分钟行情 (仅当日)
+    kline:      {server: index_data, tool: get_index_kline}
+    fundamentals: {server: index_data, tool: get_index_fundamentals}  # question 类
+    basicinfo:  {server: index_data, tool: get_index_basicinfo}      # question 类
 
 # period 公共值 → Wind 后端数字码 (config/wind/call-rules.json kline_period_map 子集;
-# 1d 不走 Wind; 周/月/季明确拒绝 — LESSONS §5.2 多周期 K 只有日线是真的)
+# 1d 仅 fund/index K线用 (stock 日K不走 Wind); 周/月/季明确拒绝 — LESSONS §5.2)
 kline_period_map:
   1m: "1"
   5m: "3"
   15m: "5"
   30m: "6"
   60m: "7"
+  1d: "10"
 
 # EDB executionMode 中文别名 (call-rules.json economic_edb)
 edb_execution_mode_aliases:

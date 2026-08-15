@@ -1,0 +1,17 @@
+# pre-commit hooks (v0.3.0 M6) — `pip install pre-commit && pre-commit install`
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [check]
+      - id: ruff-format
+        args: [--check]
+  - repo: local
+    hooks:
+      - id: quick-ci
+        name: quick-ci (pytest 离线)
+        entry: uv run python scripts/ci.py --quick
+        language: system
+        pass_filenames: false
+        always_run: true

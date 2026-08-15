@@ -39,6 +39,17 @@
     - 新增 `fin_data__reconcile(domain, symbols, start, end, tolerance_pct)` — 对账引擎
       (未复权+免费源间; 分歧不自动修复, 交 LLM 裁决; 信封 `source=""` + `engine: "reconcile"`)
     - v0.1.0 六个工具名与 schema 一字不动 (冻结契约保持)
+13. **v0.3.0 工具面变更 schema 评审记录 (2026-08-15 用户批准, PLAN-0.3.0.md §2.3)**
+    - 新增 `fin_data__get_fund_data(symbol, kind=quote|nav|kline|holdings|holders|performance|info,
+      start, end, limit)` — 资产 gate: fund (etf/lof/otc/reits); kline 需 start/end;
+      THS 免费主干 (快照仅 ETF; LOF/OTC 由 Wind 兜底=当日分钟行情 L3 标注)
+    - 新增 `fin_data__get_index_data(symbol, kind=quote|kline|fundamentals|constituents|basicinfo,
+      start, end, limit)` — 资产 gate: index; 行情 THS 主干 (无复权语义);
+      fundamentals/basicinfo Wind 独家 (question 类, 无降级源); constituents 仅当前无历史
+    - **analytics 域出局**: Wind `get_financial_data` 实测返回盈利预测+最高目标价+机构评级
+      (100 行评级表) — 触及 LESSONS §1「研报/评级/目标价不覆盖」裁定, 不接线 (决策门 B, 2026-08-15)
+    - `Instrument` L1 模型加 `subtype` 字段 (vendor 叶类别, 供 THS fund_type 细分) — 非工具面变更
+    - v0.1.0/v0.2.0 九工具名与 schema 一字不动 (冻结契约保持)
 
 ## 结构(为什么不再 refactor)
 

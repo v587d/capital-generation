@@ -69,8 +69,7 @@ def render_ambiguity(query: str, candidates: tuple[Instrument, ...]) -> dict[str
             f"{query!r} 有歧义: 请先调用 fin_data__search_symbols 消歧, 或用 market 参数限定",
         ],
         "ambiguous": [
-            {"symbol": c.symbol, "name": c.name, "asset_type": c.asset_type}
-            for c in candidates
+            {"symbol": c.symbol, "name": c.name, "asset_type": c.asset_type} for c in candidates
         ],
     }
 
@@ -113,15 +112,16 @@ def _split_symbols(symbols: str) -> list[str]:
     return parts
 
 
-def _not_stock_response(hit: Instrument) -> dict[str, Any]:
+def _not_asset_response(hit: Instrument, expected: str) -> dict[str, Any]:
+    desc = {"stock": "A股股票", "fund": "基金 (ETF/LOF/场外/REITs)", "index": "指数"}[expected]
     return {
         "data": None,
         "source": "",
         "tier": "",
         "ts": utc_iso(now_ms()),
         "warnings": [
-            f"{hit.symbol} ({hit.name}) 是 {hit.asset_type}, 行情/财务/公告工具仅支持"
-            " A股股票; 指数行情等能力在后续版本",
+            f"{hit.symbol} ({hit.name}) 是 {hit.asset_type}, 该工具仅支持 {desc}; "
+            "请用 fin_data__search_symbols 确认标的类型",
         ],
     }
 
@@ -141,7 +141,7 @@ async def tool_get_quote(
         if isinstance(hit, dict):
             return hit
         if hit.asset_type != "stock":
-            return _not_stock_response(hit)
+            return _not_asset_response(hit, "stock")
         canonical.append(hit.symbol)
     env = await router.call("quote", symbols=canonical)
     return render_envelope(env)
@@ -162,20 +162,16 @@ async def tool_get_klines(
     elif period in _MINUTE_PERIODS:
         domain = "intraday"
         if start != end:
-            raise ParamError(
-                f"分钟线仅支持单交易日窗口 (start == end), 收到 {start} ~ {end}"
-            )
+            raise ParamError(f"分钟线仅支持单交易日窗口 (start == end), 收到 {start} ~ {end}")
     else:
-        raise ParamError(
-            f"period 仅支持 1d 与分钟线 {'/'.join(_MINUTE_PERIODS)} (周/月/季不支持)"
-        )
+        raise ParamError(f"period 仅支持 1d 与分钟线 {'/'.join(_MINUTE_PERIODS)} (周/月/季不支持)")
     if not start or not end:
         raise ParamError("start/end 必填 (YYYY-MM-DD)")
     hit = resolve_or_guide(resolver, symbol, "A股")
     if isinstance(hit, dict):
         return hit
     if hit.asset_type != "stock":
-        return _not_stock_response(hit)
+        return _not_asset_response(hit, "stock")
     start_ms, end_ms = date_to_ms(start), date_to_ms(end)
     if domain == "klines":
         env = await router.call(
@@ -187,8 +183,11 @@ async def tool_get_klines(
         )
     else:
         env = await router.call(
-            "intraday", symbol=hit.symbol, period=period,
-            start_ms=start_ms, end_ms=end_ms,
+            "intraday",
+            symbol=hit.symbol,
+            period=period,
+            start_ms=start_ms,
+            end_ms=end_ms,
         )
     return render_envelope(env)
 
@@ -202,17 +201,19 @@ async def tool_get_financials(
     limit: int = 4,
 ) -> dict[str, Any]:
     if statement not in ("income", "balance", "cashflow", "indicators"):
-        raise ParamError(
-            f"statement 必须是 income/balance/cashflow/indicators, 收到 {statement!r}"
-        )
+        raise ParamError(f"statement 必须是 income/balance/cashflow/indicators, 收到 {statement!r}")
     hit = resolve_or_guide(resolver, symbol, "A股")
     if isinstance(hit, dict):
         return hit
     if hit.asset_type != "stock":
-        return _not_stock_response(hit)
+        return _not_asset_response(hit, "stock")
     env = await router.call(
-        "financials", symbol=hit.symbol, statement=statement, period=period,
-        limit=limit, name=hit.name,
+        "financials",
+        symbol=hit.symbol,
+        statement=statement,
+        period=period,
+        limit=limit,
+        name=hit.name,
     )
     return render_envelope(env)
 
@@ -240,6 +241,97 @@ async def tool_get_special_data(
     return render_envelope(env)
 
 
+# ── v0.3.0 新工具 (PLAN-0.3.0.md §2.3, schema 评审记录: DESIGN_REVIEW 决策 13) ──
+
+_FUND_KINDS = ("quote", "nav", "kline", "holdings", "holders", "performance", "info")
+_INDEX_KINDS = ("quote", "kline", "fundamentals", "constituents", "basicinfo")
+
+
+async def tool_get_fund_data(
+    router: Router,
+    resolver: SymbolResolver,
+    symbol: str,
+    kind: str = "quote",
+    start: str = "",
+    end: str = "",
+    limit: int = 10,
+) -> dict[str, Any]:
+    """基金数据: quote/nav/kline/holdings/holders/performance/info.
+
+    THS 免费主干 (净值/收益/持仓/持有人/基本信息/场内快照仅ETF), Wind 补缺
+    (LOF/OTC 快照=分钟行情 L3 标注; kline 全类型)。资产 gate: fund。
+    """
+    if kind not in _FUND_KINDS:
+        raise ParamError(f"kind 仅支持 {'/'.join(_FUND_KINDS)}, 收到 {kind!r}")
+    if not 1 <= limit <= 100:
+        raise ParamError(f"limit 1-100, 收到 {limit}")
+    hit = resolve_or_guide(resolver, symbol, "基金")
+    if isinstance(hit, dict):
+        return hit
+    if hit.asset_type != "fund":
+        return _not_asset_response(hit, "fund")
+    domain = f"fund_{kind}"
+    kwargs: dict[str, Any] = {
+        "symbol": hit.symbol,
+        "asset_type": hit.subtype or hit.asset_type,
+        "name": hit.name,
+    }
+    if kind == "kline":
+        if not start or not end:
+            raise ParamError("fund kline 需要 start/end (YYYY-MM-DD)")
+        kwargs["start_ms"] = date_to_ms(start)
+        kwargs["end_ms"] = date_to_ms(end)
+    else:
+        kwargs["limit"] = limit
+    env = await router.call(domain, **kwargs)
+    return render_envelope(env)
+
+
+async def tool_get_index_data(
+    router: Router,
+    resolver: SymbolResolver,
+    symbol: str,
+    kind: str = "quote",
+    start: str = "",
+    end: str = "",
+    limit: int = 10,
+) -> dict[str, Any]:
+    """指数数据: quote/kline/fundamentals/constituents/basicinfo.
+
+    指数行情 THS 主干 (无复权语义); fundamentals/basicinfo Wind 独家
+    (question 类, 无降级源); constituents 仅当前成分 (THS 无历史)。
+    资产 gate: index。
+    """
+    if kind not in _INDEX_KINDS:
+        raise ParamError(f"kind 仅支持 {'/'.join(_INDEX_KINDS)}, 收到 {kind!r}")
+    if not 1 <= limit <= 100:
+        raise ParamError(f"limit 1-100, 收到 {limit}")
+    hit = resolve_or_guide(resolver, symbol, "指数")
+    if isinstance(hit, dict):
+        return hit
+    if hit.asset_type != "index":
+        return _not_asset_response(hit, "index")
+    domain = f"index_{kind}"
+    if kind == "quote":
+        env = await router.call(domain, symbols=[hit.symbol])
+    elif kind == "kline":
+        if not start or not end:
+            raise ParamError("index kline 需要 start/end (YYYY-MM-DD)")
+        env = await router.call(
+            domain,
+            symbol=hit.symbol,
+            start_ms=date_to_ms(start),
+            end_ms=date_to_ms(end),
+        )
+    elif kind == "constituents":
+        env = await router.call(domain, symbol=hit.symbol)
+    else:  # fundamentals / basicinfo (Wind 独家)
+        env = await router.call(
+            domain, symbol=hit.symbol, asset_type=hit.subtype, name=hit.name, limit=limit
+        )
+    return render_envelope(env)
+
+
 # ── v0.2.0 新工具 (PLAN-0.2.0.md §2.3, schema 评审记录: DESIGN_REVIEW 决策 12) ──
 
 
@@ -260,11 +352,14 @@ async def tool_get_announcements(
     if isinstance(hit, dict):
         return hit
     if hit.asset_type != "stock":
-        return _not_stock_response(hit)
+        return _not_asset_response(hit, "stock")
     env = await router.call(
-        "announcements", symbol=hit.symbol,
-        start_ms=date_to_ms(start), end_ms=date_to_ms(end),
-        top_k=top_k, name=hit.name,
+        "announcements",
+        symbol=hit.symbol,
+        start_ms=date_to_ms(start),
+        end_ms=date_to_ms(end),
+        top_k=top_k,
+        name=hit.name,
     )
     return render_envelope(env)
 
@@ -297,17 +392,19 @@ def render_reconcile(rep: Any) -> dict[str, Any]:
     """对账报告渲染: 信封 source="" + engine 字段; 行自带各源值 (规范名) 与数据时点."""
     rows = []
     for r in rep.rows:
-        rows.append({
-            "key": r.key,
-            "field": r.field,
-            "同花顺": r.left,
-            "AKShare": r.right,
-            "ths_as_of_ms": r.left_as_of_ms,
-            "akshare_as_of_ms": r.right_as_of_ms,
-            "diff_pct": r.diff_pct,
-            "matched": r.matched,
-            "note": r.note,
-        })
+        rows.append(
+            {
+                "key": r.key,
+                "field": r.field,
+                "同花顺": r.left,
+                "AKShare": r.right,
+                "ths_as_of_ms": r.left_as_of_ms,
+                "akshare_as_of_ms": r.right_as_of_ms,
+                "diff_pct": r.diff_pct,
+                "matched": r.matched,
+                "note": r.note,
+            }
+        )
     return {
         "data": rows,
         "source": "",
@@ -340,11 +437,18 @@ async def tool_reconcile(
     missing = [v for v, a in (("ths", ths), ("akshare", akshare)) if a is None]
     if missing:
         return {
-            "data": None, "source": "", "tier": "",
+            "data": None,
+            "source": "",
+            "tier": "",
             "ts": utc_iso(now_ms()),
             "engine": "reconcile",
-            "summary": {"domain": domain, "compared": 0, "matched": 0,
-                        "mismatched": 0, "skipped": 0},
+            "summary": {
+                "domain": domain,
+                "compared": 0,
+                "matched": 0,
+                "mismatched": 0,
+                "skipped": 0,
+            },
             "warnings": [f"对账需要 THS×AKShare 双源, 当前缺少: {missing}"],
         }
     if domain == "quote":
@@ -354,10 +458,9 @@ async def tool_reconcile(
             if isinstance(hit, dict):
                 return hit
             if hit.asset_type != "stock":
-                return _not_stock_response(hit)
+                return _not_asset_response(hit, "stock")
             canonical.append(hit.symbol)
-        rep = await reconcile_quotes(ths, akshare, canonical,
-                                     tolerance_pct=tolerance_pct)
+        rep = await reconcile_quotes(ths, akshare, canonical, tolerance_pct=tolerance_pct)
     else:
         if not start or not end:
             raise ParamError("klines 对账需要 start/end (YYYY-MM-DD)")
@@ -365,9 +468,13 @@ async def tool_reconcile(
         if isinstance(hit, dict):
             return hit
         if hit.asset_type != "stock":
-            return _not_stock_response(hit)
+            return _not_asset_response(hit, "stock")
         rep = await reconcile_klines(
-            ths, akshare, hit.symbol, date_to_ms(start), date_to_ms(end),
+            ths,
+            akshare,
+            hit.symbol,
+            date_to_ms(start),
+            date_to_ms(end),
             tolerance_pct=tolerance_pct,
         )
     return render_reconcile(rep)
@@ -427,6 +534,17 @@ def build_server_components() -> tuple[Router, SymbolResolver, list[str]]:
 
     adapters["akshare"] = AKShareAdapter()
     resolver = default_resolver()
+    # v0.3.0 M6: symbols 快照新鲜度检测 (自动同步入口: scripts/sync-symbols.py --if-stale)
+    from core.domain.symbols import snapshot_age_days
+
+    age = snapshot_age_days()
+    if age is None:
+        warnings.append("config/symbols.json 缺失或不可解析: 请运行 scripts/sync-symbols.py")
+    elif age >= 30:
+        warnings.append(
+            f"config/symbols.json 距今 {age} 天未同步: 建议运行 "
+            "scripts/sync-symbols.py --if-stale 30 (本地快照仍可用)"
+        )
     router = Router(adapters)
     return router, resolver, warnings
 
@@ -438,10 +556,12 @@ def create_app() -> Any:
     mcp = FastMCP(
         "finance-unified",
         instructions=(
-            "统一金融数据入口。v0.2.0 覆盖: A股行情快照/日K/分钟线(当日,W独家)/财务三表与指标/"
-            "交易日历/特色数据/标的检索/公告(W独家)/EDB宏观(W主干)/双源对账。不支持: 周月季K、"
-            "港股美股、宏观白名单外指标经AKShare兜底、全市场快照。每个结果携带 "
-            "source(同花顺/Wind/AKShare)/tier/ts 溯源; 分钟线/公告无降级源, 明确告知。"
+            "统一金融数据入口。v0.3.0 覆盖: A股行情快照/日K/分钟线(当日,W独家)/财务三表与指标/"
+            "交易日历/特色数据/标的检索/公告(W独家)/EDB宏观(W主干)/双源对账/"
+            "基金(净值/收益/持仓/持有人/场内快照/K线)/指数(行情/K线/成分/基本面)。"
+            "不支持: 周月季K、港股美股、宏观白名单外指标经AKShare兜底、全市场扫描"
+            "(数据湖为离线资产, 见 scripts/lake.py)、研报/评级/目标价。每个结果携带 "
+            "source(同花顺/Wind/AKShare)/tier/ts 溯源; 分钟线/公告/指数基本面无降级源, 明确告知。"
             + (" 注意: " + "; ".join(warnings) if warnings else "")
         ),
     )
@@ -529,6 +649,31 @@ def create_app() -> Any:
         """双源对账 (THS×AKShare, 未复权, 只比数据时点): domain=quote/klines;
         分歧不自动修复 — 交 LLM 裁决 (报告含双源值 + 数据时点 + diff)。"""
         return await tool_reconcile(router, resolver, domain, symbols, start, end, tolerance_pct)
+
+    @mcp.tool()
+    async def fin_data__get_fund_data(
+        symbol: str,
+        kind: str = "quote",
+        start: str = "",
+        end: str = "",
+        limit: int = 10,
+    ) -> dict:
+        """基金数据 (THS 免费主干, Wind 补缺): kind=quote(场内快照,仅ETF;Wind兜底=当日分钟行情)/
+        nav(净值)/kline(日K,需start/end;THS仅ETF≤5年无复权)/holdings(重仓股,定期披露)/
+        holders(持有人结构)/performance(区间收益)/info(基本信息)。资产 gate: fund。"""
+        return await tool_get_fund_data(router, resolver, symbol, kind, start, end, limit)
+
+    @mcp.tool()
+    async def fin_data__get_index_data(
+        symbol: str,
+        kind: str = "quote",
+        start: str = "",
+        end: str = "",
+        limit: int = 10,
+    ) -> dict:
+        """指数数据 (行情 THS 主干, 无复权语义): kind=quote(快照)/kline(日K,需start/end)/
+        constituents(成分,仅当前无历史)/fundamentals(Wind独家,市盈率市净率)/basicinfo(Wind独家)。"""
+        return await tool_get_index_data(router, resolver, symbol, kind, start, end, limit)
 
     return mcp
 

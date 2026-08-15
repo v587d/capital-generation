@@ -58,6 +58,43 @@ class FakeAdapter(BaseAdapter):
     async def get_special_data(self, kind, **params):
         return await self._hit("special")
 
+    # v0.3.0 fund/index (FakeAdapter 全能力 → 全部覆写走 _hit)
+    async def get_fund_quote(self, symbol, *, asset_type="", name="", limit=10):
+        return await self._hit("fund_quote")
+
+    async def get_fund_nav(self, symbol, *, asset_type="", name="", limit=10):
+        return await self._hit("fund_nav")
+
+    async def get_fund_kline(self, symbol, start_ms, end_ms, *, asset_type="", name="", limit=10):
+        return await self._hit("fund_kline")
+
+    async def get_fund_holdings(self, symbol, *, asset_type="", name="", limit=10):
+        return await self._hit("fund_holdings")
+
+    async def get_fund_holders(self, symbol, *, asset_type="", name="", limit=10):
+        return await self._hit("fund_holders")
+
+    async def get_fund_performance(self, symbol, *, asset_type="", name="", limit=10):
+        return await self._hit("fund_performance")
+
+    async def get_fund_info(self, symbol, *, asset_type="", name="", limit=10):
+        return await self._hit("fund_info")
+
+    async def get_index_quote(self, symbols):
+        return await self._hit("index_quote")
+
+    async def get_index_kline(self, symbol, start_ms, end_ms):
+        return await self._hit("index_kline")
+
+    async def get_index_constituents(self, symbol):
+        return await self._hit("index_constituents")
+
+    async def get_index_fundamentals(self, symbol, *, asset_type="", name="", limit=10):
+        return await self._hit("index_fundamentals")
+
+    async def get_index_basicinfo(self, symbol, *, asset_type="", name="", limit=10):
+        return await self._hit("index_basicinfo")
+
     async def get_intraday(self, symbol, period, start_ms, end_ms):
         return await self._hit("intraday")
 
@@ -71,9 +108,17 @@ class FakeAdapter(BaseAdapter):
 def ok_quote() -> list[Quote]:
     return [
         Quote(
-            symbol="600519.SH", last_price=1.0, open_price=None, high_price=None,
-            low_price=None, prev_close=None, change_pct=None, volume=1, turnover=1,
-            as_of_ms=now_ms(), source="同花顺",
+            symbol="600519.SH",
+            last_price=1.0,
+            open_price=None,
+            high_price=None,
+            low_price=None,
+            prev_close=None,
+            change_pct=None,
+            volume=1,
+            turnover=1,
+            as_of_ms=now_ms(),
+            source="同花顺",
         )
     ]
 
@@ -192,6 +237,7 @@ class TestQuotaGate:
         gate = QuotaGate(ttl_ms=-1)  # 已过期
         gate.disable("wind", "exhausted")
         assert not gate.disabled("wind")  # 到期自动恢复
+
     @pytest.mark.asyncio
     async def test_disabled_vendor_skipped_with_warning(self) -> None:
         r = make_router(
@@ -282,8 +328,7 @@ class TestCapabilities:
                 "edb": ["fake"],
             },
         )
-        env = await r.call("intraday", symbol="600519.SH", period="5m",
-                           start_ms=1, end_ms=2)
+        env = await r.call("intraday", symbol="600519.SH", period="5m", start_ms=1, end_ms=2)
         assert env.data == [1]
         env = await r.call("announcements", symbol="600519.SH", start_ms=1, end_ms=2)
         assert env.data == [2]
@@ -300,3 +345,76 @@ class TestCapabilities:
 
         with pytest.raises(InternalError):
             await r.call("quote", symbols=["600519.SH"])
+
+
+class TestFundIndexChain:
+    """v0.3.0 M3/M4: fund/index 链 — THS 免费主干, 3004 能力边界 → NoData → Wind 兜底."""
+
+    async def test_fund_quote_lof_falls_to_wind(self) -> None:
+        """THS 3004 (LOF 无场内快照, 转 NoDataError) → 链内下一源 Wind 接管, degraded 可观测."""
+        ths = FakeAdapter(
+            {
+                "fund_quote": NoDataError(
+                    "同花顺不支持该基金类型", source="同花顺", vendor="ths", code=3004
+                )
+            }
+        )
+        ths.vendor_id = "ths"
+        wind = FakeAdapter({"fund_quote": "wind-bars"})
+        wind.vendor_id = "wind"
+        router = Router(
+            {"ths": ths, "wind": wind},
+            chains={"fund_quote": ["ths", "wind"]},
+        )
+        env = await router.call(
+            "fund_quote", symbol="160105.SZ", asset_type="fund-lof", name="南方积配LOF"
+        )
+        assert env.data == "wind-bars"
+        assert any("同花顺" in w for w in env.warnings)  # 降级可观测
+
+    async def test_fund_kline_ths_serves_first(self) -> None:
+        ths = FakeAdapter({"fund_kline": "ths-bars"})
+        ths.vendor_id = "ths"
+        wind = FakeAdapter({"fund_kline": "wind-bars"})
+        wind.vendor_id = "wind"
+        router = Router(
+            {"ths": ths, "wind": wind},
+            chains={"fund_kline": ["ths", "wind"]},
+        )
+        env = await router.call("fund_kline", symbol="510300.SH", start_ms=1, end_ms=2)
+        assert env.data == "ths-bars"  # 免费主干优先
+        assert not env.warnings
+
+    async def test_index_fundamentals_wind_only(self) -> None:
+        ths = FakeAdapter({})
+        ths.vendor_id = "ths"
+        wind = FakeAdapter({"index_fundamentals": "pe-pb"})
+        wind.vendor_id = "wind"
+        router = Router(
+            {"ths": ths, "wind": wind},
+            chains={"index_fundamentals": ["wind"]},
+        )
+        env = await router.call(
+            "index_fundamentals", symbol="000300.SH", asset_type="index", name="沪深300", limit=10
+        )
+        assert env.data == "pe-pb"
+
+    async def test_all_domains_registered(self) -> None:
+        """新域都在 router 方法表 (无域遗漏 → ParamError 兜底)."""
+        from core.domain.routing import _METHODS
+
+        for d in (
+            "fund_quote",
+            "fund_nav",
+            "fund_kline",
+            "fund_holdings",
+            "fund_holders",
+            "fund_performance",
+            "fund_info",
+            "index_quote",
+            "index_kline",
+            "index_constituents",
+            "index_fundamentals",
+            "index_basicinfo",
+        ):
+            assert d in _METHODS

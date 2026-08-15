@@ -41,6 +41,19 @@ ALL_DOMAINS = frozenset(
         "intraday",
         "announcements",
         "edb",
+        # v0.3.0 fund/index 域 (PLAN-0.3.0.md M3/M4; 按域主干+备用)
+        "fund_quote",
+        "fund_nav",
+        "fund_kline",
+        "fund_holdings",
+        "fund_holders",
+        "fund_performance",
+        "fund_info",
+        "index_quote",
+        "index_kline",
+        "index_constituents",
+        "index_fundamentals",
+        "index_basicinfo",
     }
 )
 
@@ -58,7 +71,8 @@ class BaseAdapter:
         return InternalError(
             f"{source_name(self.vendor_id)} 不支持域 {domain} (capabilities: "
             f"{sorted(self.capabilities)})",
-            source=source_name(self.vendor_id), vendor=self.vendor_id,
+            source=source_name(self.vendor_id),
+            vendor=self.vendor_id,
         )
 
     # ── v0.1.0 domains ─────────────────────────────────────────────────
@@ -131,3 +145,71 @@ class BaseAdapter:
     ) -> list[EDBPoint]:
         """EDB macro/industry indicator series (Wind 主干; AKShare 白名单兜底)."""
         raise self._unsupported("edb")
+
+    # ── v0.3.0 fund 域 (THS 主干免费 + Wind 补缺; 资产 gate 在工具层) ─────
+
+    async def get_fund_quote(
+        self, symbol: str, *, asset_type: str = "", name: str = "", limit: int = 10
+    ) -> list[Quote]:
+        """基金场内行情快照 (THS: 仅 ETF; Wind 兜底: 当日分钟行情, L3 标注)."""
+        raise self._unsupported("fund_quote")
+
+    async def get_fund_nav(
+        self, symbol: str, *, asset_type: str = "", name: str = "", limit: int = 10
+    ) -> list[FinancialStatement]:
+        """基金净值 (unit/adj; THS 免费主干)."""
+        raise self._unsupported("fund_nav")
+
+    async def get_fund_kline(self, symbol: str, start_ms: int, end_ms: int) -> list[Kline]:
+        """基金日K (THS: ETF ≤5 年无复权; Wind 兜底: 全类型, 前复权标注)."""
+        raise self._unsupported("fund_kline")
+
+    async def get_fund_holdings(
+        self, symbol: str, *, asset_type: str = "", name: str = "", limit: int = 10
+    ) -> list[FinancialStatement]:
+        """基金重仓股 (定期披露, 非实时)."""
+        raise self._unsupported("fund_holdings")
+
+    async def get_fund_holders(
+        self, symbol: str, *, asset_type: str = "", name: str = "", limit: int = 10
+    ) -> list[FinancialStatement]:
+        """基金持有人结构 (机构/个人)."""
+        raise self._unsupported("fund_holders")
+
+    async def get_fund_performance(
+        self, symbol: str, *, asset_type: str = "", name: str = "", limit: int = 10
+    ) -> list[FinancialStatement]:
+        """基金收益表现 (区间收益率)."""
+        raise self._unsupported("fund_performance")
+
+    async def get_fund_info(
+        self, symbol: str, *, asset_type: str = "", name: str = "", limit: int = 10
+    ) -> list[FinancialStatement]:
+        """基金基本信息 (名称/管理人/经理/规模等)."""
+        raise self._unsupported("fund_info")
+
+    # ── v0.3.0 index 域 ─────────────────────────────────────────────────
+
+    async def get_index_quote(self, symbols: Sequence[str]) -> list[Quote]:
+        """指数行情快照 (THS 批量主干; Wind 兜底: 当日分钟行情, L3 标注)."""
+        raise self._unsupported("index_quote")
+
+    async def get_index_kline(self, symbol: str, start_ms: int, end_ms: int) -> list[Kline]:
+        """指数日K (THS ≤10 年无复权; Wind 兜底)."""
+        raise self._unsupported("index_kline")
+
+    async def get_index_constituents(self, symbol: str) -> list[FinancialStatement]:
+        """指数成分股 (THS 仅当前, 无历史)."""
+        raise self._unsupported("index_constituents")
+
+    async def get_index_fundamentals(
+        self, symbol: str, *, asset_type: str = "", name: str = "", limit: int = 10
+    ) -> list[FinancialStatement]:
+        """指数基本面 (Wind 独家, question 类)."""
+        raise self._unsupported("index_fundamentals")
+
+    async def get_index_basicinfo(
+        self, symbol: str, *, asset_type: str = "", name: str = "", limit: int = 10
+    ) -> list[FinancialStatement]:
+        """指数基本信息 (Wind 独家, question 类)."""
+        raise self._unsupported("index_basicinfo")

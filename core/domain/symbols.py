@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from core.domain.models import Instrument
@@ -67,6 +68,7 @@ class SymbolRecord:
             asset_type=self.canonical_asset,
             exchange=self.exchange or "",
             currency=self.currency,
+            subtype=self.asset_type,  # THS 叶类别 (fund-etf/... 供 vendor 细分能力)
         )
 
 
@@ -172,3 +174,19 @@ def default_resolver() -> SymbolResolver:
     """Resolver over the repo snapshot (config/symbols.json)."""
     path = Path(__file__).resolve().parents[2] / "config" / "symbols.json"
     return SymbolResolver.from_json(path)
+
+
+def snapshot_age_days(path: Path | None = None) -> int | None:
+    """symbols.json 快照距今天数; 缺失/解析失败 → None (视为需同步).
+
+    v0.3.0 M6: 服务启动 stale 检测 (mcp_data 警告) 与 sync-symbols --if-stale 共用。
+    """
+    p = path or (Path(__file__).resolve().parents[2] / "config" / "symbols.json")
+    if not p.exists():
+        return None
+    try:
+        doc = json.loads(p.read_text(encoding="utf-8"))
+        generated = datetime.fromisoformat(doc.get("generated_at", "")).replace(tzinfo=UTC)
+        return max(0, int((datetime.now(UTC) - generated).total_seconds() // 86400))
+    except (ValueError, KeyError, TypeError):
+        return None

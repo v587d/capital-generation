@@ -1,5 +1,8 @@
 """M2: symbol normalization rules (docs/DESIGN_REVIEW.md 决策 5 + LESSONS §5)."""
 
+from pathlib import Path
+from typing import Any
+
 from core.domain.symbols import SymbolRecord, SymbolResolver
 
 
@@ -7,21 +10,25 @@ def rec(thscode: str, name: str = "", asset_type: str = "a-share") -> SymbolReco
     ticker = thscode.split(".")[0]
     exchange = thscode.split(".")[1] if "." in thscode else None
     return SymbolRecord(
-        thscode=thscode, ticker=ticker, name=name,
-        exchange=exchange, asset_type=asset_type, currency="CNY",
+        thscode=thscode,
+        ticker=ticker,
+        name=name,
+        exchange=exchange,
+        asset_type=asset_type,
+        currency="CNY",
     )
 
 
 FIXTURE = [
-    rec("600519.SH", "贵州茅台"),            # stock SH
-    rec("000001.SZ", "平安银行"),            # stock SZ
-    rec("300750.SZ", "宁德时代"),            # stock SZ (创业板)
+    rec("600519.SH", "贵州茅台"),  # stock SH
+    rec("000001.SZ", "平安银行"),  # stock SZ
+    rec("300750.SZ", "宁德时代"),  # stock SZ (创业板)
     rec("000001.SH", "上证指数", "a-share-index"),  # index: THS 权威表用 .SH + ticker 1A0001
     rec("000300.SH", "沪深300", "a-share-index"),  # index SH, ticker 1B0300 (非裸码)
     rec("883970.TI", "昨日涨停", "a-share-index"),  # THS 板块概念码 .TI
-    rec("510300.SH", "沪深300ETF", "fund-etf"),   # ETF
-    rec("113050.SH", "南银转债", "a-share"),      # 可转债 (THS 类别以表为准)
-    rec("430047.BJ", "诺思兰德"),            # stock BJ (北交所)
+    rec("510300.SH", "沪深300ETF", "fund-etf"),  # ETF
+    rec("113050.SH", "南银转债", "a-share"),  # 可转债 (THS 类别以表为准)
+    rec("430047.BJ", "诺思兰德"),  # stock BJ (北交所)
     rec("00700.HK", "腾讯控股", "a-share"),  # HK (THS 无港股; 仅测试隔离)
 ]
 
@@ -124,3 +131,86 @@ class TestIndexCodes:
     def test_hk_code_from_table(self) -> None:
         r = resolver().resolve("00700.HK")
         assert r.instrument is not None and r.instrument.symbol == "00700.HK"
+
+
+class TestSnapshotAge:
+    """v0.3.0 M6: symbols 快照新鲜度 (启动检测 + sync --if-stale 共用)."""
+
+    def test_age_from_generated_at(self, tmp_path) -> None:
+        import json
+        from datetime import UTC, datetime, timedelta
+
+        from core.domain.symbols import snapshot_age_days
+
+        p = tmp_path / "symbols.json"
+        old = (datetime.now(UTC) - timedelta(days=40)).isoformat(timespec="seconds")
+        p.write_text(json.dumps({"generated_at": old, "records": []}), encoding="utf-8")
+        assert snapshot_age_days(p) == 40
+
+    def test_missing_returns_none(self, tmp_path) -> None:
+        from core.domain.symbols import snapshot_age_days
+
+        assert snapshot_age_days(tmp_path / "nope.json") is None
+
+    def test_corrupt_returns_none(self, tmp_path) -> None:
+        from core.domain.symbols import snapshot_age_days
+
+        p = tmp_path / "symbols.json"
+        p.write_text("{not json", encoding="utf-8")
+        assert snapshot_age_days(p) is None
+
+
+class TestSyncIfStale:
+    """v0.3.0 M6: sync-symbols --if-stale 跳过新鲜快照 (自动同步入口).
+
+    文件名带连字符 (sync-symbols.py) 无法常规 import → importlib 按路径加载。
+    """
+
+    @staticmethod
+    def _load_sync() -> Any:
+        import importlib.util
+
+        path = Path(__file__).resolve().parents[2] / "scripts" / "sync-symbols.py"
+        spec = importlib.util.spec_from_file_location("sync_symbols_mod", path)
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_skips_fresh_snapshot(self, monkeypatch) -> None:
+        sync = self._load_sync()
+        monkeypatch.setattr(sync, "snapshot_age_days", lambda: 5)
+        monkeypatch.setattr(
+            sync,
+            "fetch_all",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("不应触发网络同步")),
+        )
+        args = sync.argparse.Namespace(asset_types="x", exchanges="SH", if_stale=30)
+        assert sync.main_with_args(args) == 0
+
+    def test_syncs_stale_snapshot(self, monkeypatch, tmp_path) -> None:
+        import json
+
+        monkeypatch.setenv("THS_API_KEY", "sk-test")
+        sync = self._load_sync()
+        monkeypatch.setattr(sync, "snapshot_age_days", lambda: 40)
+        out = tmp_path / "symbols.json"
+        monkeypatch.setattr(sync, "OUT", out)
+        monkeypatch.setattr(
+            sync,
+            "fetch_all",
+            lambda *a, **k: [
+                {
+                    "thscode": "600519.SH",
+                    "ticker": "600519",
+                    "name": "贵州茅台",
+                    "exchange": "SH",
+                    "asset_type": "a-share",
+                    "currency": "CNY",
+                }
+            ],
+        )
+        args = sync.argparse.Namespace(asset_types="a-share", exchanges="SH", if_stale=30)
+        assert sync.main_with_args(args) == 0
+        doc = json.loads(out.read_text(encoding="utf-8"))
+        assert doc["count"] == 1

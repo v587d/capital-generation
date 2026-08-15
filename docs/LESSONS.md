@@ -124,15 +124,82 @@
 - 复权价跨源不可比（PB：ths MRQ 6.25 vs mx 7.18，口径不同）→ 验证 DESIGN_REVIEW P0-1（对账只限未复权，Wind 只作基准）
 - 数据时滞 → 对账必须用数据时点，不是查询时点
 
+## 6.5 v0.3.0 M0 核实结论 (2026-08-15, live)
+
+### THS 网关突发封禁 (新行为)
+
+- **高密度突发请求会触发临时封禁, 封禁期内合法 key 返回 `code=2003 "Invalid or revoked API key"`**
+  (不是 429 限流码) — 实测: 12 连发全 2003, 恢复后单发/1s 节奏 20/20 全通, 再突发再封;
+  恢复时间分钟级, 反复触发可能延长
+- 与 pi-fin-prism 记录的"429 间歇性"不同: 2003 是**业务层 auth 拒绝**, 路由会按 AUTH 立即返回
+  → 合法 key 偶发 2003 时, 模型看到"Key 无效"是误导; 对策: 探针/脚本加节奏 (≥1s) + 封禁期
+  等待重试 (仅脚本层, adapter 不重试); live-probe 打印"疑似临时封禁, 稍后重试"
+- 教训: 对 THS 的探测/录制必须串行 + 间隔, 严禁连发 (与东财 §5.4 同理)
+
+### Wind fund/index 域 (M0 决策门 B/C)
+
+- **analytics 域出局**: `get_financial_data` (analytics_data server) 实测返回
+  {盈利预测(营收/净利/EBIT/EPS/ROE/PE/PEG 均值) + 各机构最高目标价 + 投资评级(100 行)} —
+  触及 LESSONS §1「研报/评级/目标价不覆盖」裁定 → 不接线, 记录在案 (DESIGN_REVIEW 决策 13)
+- **指数特殊码 windcode 直通 OK**: H11077.SH (中债指数) 实测 8 行日K 正常; 无需映射表
+  (决策门 C: 直通成立; 950116CNY050.SH 等 ABS 指数未测, 遇失败再补映射表)
+- fund/index price-indicators 的 `indexes` 词汇表**与股票不同** (单位净值/最新收盘价被拒,
+  "Invalid value ... for field 'indexes'") — 官方无公开词汇快照 (stock-indicators.md 仅股票) →
+  最小接线砍掉这两个工具 (净值走 THS 免费, PE/PB 走 question 类)
+- **fund kline 无 VOLUME/TURNOVER 列** (columnar: TIME/OPEN/MATCH/HIGH/LOW/CHANGEHANDRATE/AVPRICE);
+  index kline 含 VOLUME/TURNOVER; 指数特殊码 H11077 kline 也无 VOLUME — 双形状, 缺失时
+  0 + extra.volume_unavailable 标注 (空值纪律)
+- fund/index quote = **分钟行情** (begin/end 单日), 与 THS 快照语义不同 → 链上兜底时 L3 标注
+- question 类 (holdings/performance/info/fundamentals/basicinfo) 返回嵌套多表
+  {data: {data: [{columns, rows}]}}, 报告期/口径在列名 — 复用 fundamentals NL 解析模式
+
+### THS fund/index REST 域 (M4 接线面)
+
+- 端点面: 快照 `/api/fund/market/snapshot` (仅 ETF, LOF/OTC/REITs → 3004)、历史日线
+  `/api/fund/market/historical` (仅 ETF, ≤5 年, adjust=null 无复权)、净值 `/performance/nav`
+  (fund_type + range + nav_type=unit,adj)、收益 `/performance/returns`、重仓 `/portfolio/holdings`
+  (定期披露)、持有人 `/holders/detail` (merge_scope)、资料 `/profile/detail`、指数快照
+  `/a-share-index/prices/snapshot` (批量 thscodes)、指数日K `/prices/historical` (≤10 年)、
+  成分 `/constituents/ths-stock-list` (仅当前无历史)
+- **3004 定向例外**: error_map 中 3004=PARAM (选对端点即可); 但 fund 场内快照/日K 对 LOF 等
+  是**能力边界**而非调用错误 → THS adapter 在 fund 方法内把 3004 转 NoDataError (链内换源),
+  路由才能落到 Wind 兜底 — 已记录 (adapter 注释 + 单测), 不改全局判定表
+- fund_type 由 resolver 叶类别 (fund-etf→exchange / fund-lof→exchange / fund-otc→otc /
+  fund-reits→reits) 映射 — Instrument 增加 `subtype` 字段保留叶类别 (L1 扩展, 决策 13)
+
+### marketdb 官方 CLI (M0 决策门 A, 整体采用)
+
+- 官方仓库 `HiThink-Tech/Financial-API` (**MIT License**, 根 LICENSE; python/pyproject.toml
+  的 license 字段写 Proprietary 与根 LICENSE 矛盾, 以根为准), 本机 github.com 直连不通,
+  **gh-proxy.com 镜像可达** (`git clone https://gh-proxy.com/https://github.com/...`)
+- 不在 PyPI; `pip install -e ./python` 安装, CLI 入口 `python -m marketdb.cli`
+- 命令面: init / import-parquet / rebuild-views / rebuild-factors / validate (8 项, --json,
+  error 级问题退出码 1) / status / describe / query (--json --sql) / export / update-daily /
+  auto-sync (自动判 FULL/INCREMENTAL) / sync-symbols / version; key 规范名 `HITHINK_FINANCE_API_KEY`
+- 四层表确认: raw_kline_daily / raw_adjustment_events / dim_symbol / calc_adjust_factor_daily
+  (forward_factor = backward / last, 前复权最新对齐真实) + stg_* + `_meta` (schema_version) +
+  `_import_batches` (审计); 视图 v_daily / v_daily_qfq / v_daily_hfq / v_symbol
+- **官方 marketdb 无 data.lock** (LESSONS §3.4 的锁来自 pi-fin-prism 参考) → 并发排他由
+  调用方保证 (scripts/lake.py 用 flock); dump 下载器内置 presigned URL 过期重取 + Range 断点续传
+- **离线测试可行**: 构造合成 parquet (raw schema: thscode/currency/interval/adjusted/date_ms/
+  open_price/high_price/low_price/close_price/volume/turnover; 事件: thscode/ticker/ex_date_ms/
+  dividend_per_share/per_share_bonus/allotment_ratio/allotment_price/currency) → init +
+  import-parquet → validate/rebuild/query 全离线全通 (已入 tests/unit/test_lake.py)
+- dump 端点契约: `/api/dump/market-dumps/{daily-k,daily-k-10d,adjustment-factors}/download-url`
+  → presigned_url (TTL ~5 分钟) + presigned_url_expires_at; 错误码 2002/2004=认证失败,
+  4040=数据尚未就绪
+
 ## 7. 已知缺口与待决策
 
 | 项 | 状态 |
 |---|---|
-| 基金域（THS 7 端点：净值/收益/持仓/持有人/场内行情） | 未规划，待决策 |
-| Wind fund/index/analytics 域（24 个工具） | pi-fin-prism 未接线；做 Wind 适配器时决策是否全量 |
-| 指数历史成分 | THS 只给当前成分，无历史 |
-| 研报 | §1 裁定不覆盖 |
+| 基金域（THS 7 端点 + Wind fund 子集） | **v0.3.0 已接线** (PLAN-0.3.0.md M3/M4; quote/nav/kline/holdings/holders/performance/info) |
+| Wind fund/index/analytics 域 | fund/index 按需最小接线 (v0.3.0); **analytics 出局** (get_financial_data 含评级/目标价, 触研报裁定, §6.5) |
+| Wind bond 域（4 工具） | 未排期 (v0.3.0 非目标) |
+| 指数历史成分 | THS 只给当前成分，无历史 (工具明示"仅当前") |
+| 研报 | §1 裁定不覆盖 (analytics 域连带出局) |
 | 分钟K/公告/新闻/宏观 | 归 Wind（与 DEGRADATION 一致）；分钟K 注意 §5.2 边界（仅当日分钟序列） |
+| 950116CNY050.SH 等 ABS 指数 windcode | 未实测; 直通失败时补 config/windcode_map.yaml (决策门 C 余项) |
 
 ## 8. 已采纳的小改动（2026-08-15 用户确认）
 

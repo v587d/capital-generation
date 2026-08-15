@@ -26,15 +26,25 @@ RESOLVER = SymbolResolver(
         SymbolRecord("600519.SH", "600519", "贵州茅台", "SH", "a-share", "CNY"),
         SymbolRecord("000001.SZ", "000001", "平安银行", "SZ", "a-share", "CNY"),
         SymbolRecord("000001.SH", "1A0001", "上证指数", "SH", "a-share-index", "CNY"),
+        SymbolRecord("510300.SH", "510300", "沪深300ETF", "SH", "fund-etf", "CNY"),
     ]
 )
 
 
 def ok_quote(symbol: str) -> Quote:
     return Quote(
-        symbol=symbol, last_price=1.0, open_price=None, high_price=None,
-        low_price=None, prev_close=None, change_pct=None, volume=1, turnover=1,
-        as_of_ms=date_to_ms("2026-08-15"), source="同花顺", tier="free",
+        symbol=symbol,
+        last_price=1.0,
+        open_price=None,
+        high_price=None,
+        low_price=None,
+        prev_close=None,
+        change_pct=None,
+        volume=1,
+        turnover=1,
+        as_of_ms=date_to_ms("2026-08-15"),
+        source="同花顺",
+        tier="free",
     )
 
 
@@ -117,9 +127,7 @@ class TestToolLogic:
     @pytest.mark.asyncio
     async def test_klines_passes_dates(self) -> None:
         router = FakeRouter(result=[ok_quote("600519.SH")])
-        d = await tool_get_klines(
-            router, RESOLVER, "600519", start="2026-07-01", end="2026-07-10"
-        )
+        d = await tool_get_klines(router, RESOLVER, "600519", start="2026-07-01", end="2026-07-10")
         assert d["data"][0]["symbol"] == "600519.SH"
         domain, kw = router.calls[0]
         assert domain == "klines"
@@ -157,8 +165,9 @@ class TestToolLogicV02:
     @pytest.mark.asyncio
     async def test_klines_daily_still_routes_klines(self) -> None:
         router = FakeRouter(result=[])
-        await tool_get_klines(router, RESOLVER, "600519", "1d",
-                              start="2026-07-01", end="2026-07-10")
+        await tool_get_klines(
+            router, RESOLVER, "600519", "1d", start="2026-07-01", end="2026-07-10"
+        )
         domain, kw = router.calls[0]
         assert domain == "klines"
         assert kw["adjust"] == "none"
@@ -166,8 +175,9 @@ class TestToolLogicV02:
     @pytest.mark.asyncio
     async def test_klines_minute_routes_intraday(self) -> None:
         router = FakeRouter(result=[])
-        await tool_get_klines(router, RESOLVER, "600519", "5m",
-                              start="2026-07-08", end="2026-07-08")
+        await tool_get_klines(
+            router, RESOLVER, "600519", "5m", start="2026-07-08", end="2026-07-08"
+        )
         domain, kw = router.calls[0]
         assert domain == "intraday"
         assert kw["period"] == "5m"
@@ -176,22 +186,25 @@ class TestToolLogicV02:
     async def test_klines_minute_requires_single_day(self) -> None:
         router = FakeRouter(result=[])
         with pytest.raises(ParamError):
-            await tool_get_klines(router, RESOLVER, "600519", "5m",
-                                  start="2026-07-08", end="2026-07-09")
+            await tool_get_klines(
+                router, RESOLVER, "600519", "5m", start="2026-07-08", end="2026-07-09"
+            )
 
     @pytest.mark.asyncio
     async def test_klines_weekly_rejected(self) -> None:
         router = FakeRouter(result=[])
         with pytest.raises(ParamError) as ei:
-            await tool_get_klines(router, RESOLVER, "600519", "1w",
-                                  start="2026-07-01", end="2026-07-10")
+            await tool_get_klines(
+                router, RESOLVER, "600519", "1w", start="2026-07-01", end="2026-07-10"
+            )
         assert "周/月/季" in str(ei.value)
 
     @pytest.mark.asyncio
     async def test_announcements_routes_with_name(self) -> None:
         router = FakeRouter(result=[])
-        await tool_get_announcements(router, RESOLVER, "600519",
-                                     start="2024-01-01", end="2025-12-31", top_k=5)
+        await tool_get_announcements(
+            router, RESOLVER, "600519", start="2024-01-01", end="2025-12-31", top_k=5
+        )
         domain, kw = router.calls[0]
         assert domain == "announcements"
         assert kw["symbol"] == "600519.SH"
@@ -211,8 +224,7 @@ class TestToolLogicV02:
     @pytest.mark.asyncio
     async def test_edb_with_dates(self) -> None:
         router = FakeRouter(result=[])
-        await tool_get_edb(router, RESOLVER, "中国GDP",
-                           start="2024-01-01", end="2024-12-31")
+        await tool_get_edb(router, RESOLVER, "中国GDP", start="2024-01-01", end="2024-12-31")
         domain, kw = router.calls[0]
         assert kw["start_ms"] == date_to_ms("2024-01-01")
         assert kw["end_ms"] == date_to_ms("2024-12-31")
@@ -227,7 +239,7 @@ class TestToolLogicV02:
 
 
 class TestServer:
-    def test_nine_tools_registered(self) -> None:
+    def test_eleven_tools_registered(self) -> None:
         app = mcp_data.create_app()
         names = {t.name for t in app._tool_manager.list_tools()}
         assert names == {
@@ -240,6 +252,8 @@ class TestServer:
             "fin_data__get_announcements",
             "fin_data__get_edb",
             "fin_data__reconcile",
+            "fin_data__get_fund_data",
+            "fin_data__get_index_data",
         }
 
     def test_build_without_key_warns_and_keeps_akshare(self, monkeypatch) -> None:
@@ -266,3 +280,101 @@ class TestServer:
         (tmp_path / ".credentials.yaml").write_text("wind_api_key: ak-file-789\n", encoding="utf-8")
         monkeypatch.setenv("DSH_HOME", str(tmp_path))
         assert mcp_data.load_wind_key() == "ak-file-789"
+
+
+class TestFundIndexTools:
+    """v0.3.0 新工具 (PLAN-0.3.0.md §2.3, 决策 13)."""
+
+    @pytest.mark.asyncio
+    async def test_fund_quote_routes_with_asset_type(self) -> None:
+        router = FakeRouter()
+        d = await mcp_data.tool_get_fund_data(router, RESOLVER, "510300")
+        assert router.calls[0][0] == "fund_quote"
+        assert router.calls[0][1] == {
+            "symbol": "510300.SH",
+            "asset_type": "fund-etf",
+            "name": "沪深300ETF",
+            "limit": 10,
+        }
+        assert d["data"] == []
+
+    @pytest.mark.asyncio
+    async def test_fund_kline_requires_dates(self) -> None:
+        router = FakeRouter()
+        with pytest.raises(ParamError):
+            await mcp_data.tool_get_fund_data(router, RESOLVER, "510300", kind="kline")
+        await mcp_data.tool_get_fund_data(
+            router, RESOLVER, "510300", kind="kline", start="2026-07-01", end="2026-07-10"
+        )
+        assert router.calls[0][0] == "fund_kline"
+        assert router.calls[0][1]["start_ms"] == date_to_ms("2026-07-01")
+
+    @pytest.mark.asyncio
+    async def test_fund_gate_rejects_stock(self) -> None:
+        router = FakeRouter()
+        d = await mcp_data.tool_get_fund_data(router, RESOLVER, "600519")
+        assert d["data"] is None
+        assert any("仅支持 基金" in w for w in d["warnings"])
+
+    @pytest.mark.asyncio
+    async def test_fund_kind_validation(self) -> None:
+        router = FakeRouter()
+        with pytest.raises(ParamError, match="kind 仅支持"):
+            await mcp_data.tool_get_fund_data(router, RESOLVER, "510300", kind="foo")
+
+    @pytest.mark.asyncio
+    async def test_index_quote_routes_symbols(self) -> None:
+        router = FakeRouter()
+        await mcp_data.tool_get_index_data(router, RESOLVER, "000001", kind="quote")
+        assert router.calls[0][0] == "index_quote"
+        assert router.calls[0][1]["symbols"] == ["000001.SH"]
+
+    @pytest.mark.asyncio
+    async def test_index_fundamentals_wind_only(self) -> None:
+        router = FakeRouter()
+        await mcp_data.tool_get_index_data(router, RESOLVER, "000001", kind="fundamentals")
+        assert router.calls[0][0] == "index_fundamentals"
+        assert router.calls[0][1]["name"] == "上证指数"
+
+    @pytest.mark.asyncio
+    async def test_index_kline_requires_dates(self) -> None:
+        router = FakeRouter()
+        with pytest.raises(ParamError):
+            await mcp_data.tool_get_index_data(router, RESOLVER, "000001", kind="kline")
+
+    @pytest.mark.asyncio
+    async def test_index_gate_rejects_stock(self) -> None:
+        router = FakeRouter()
+        d = await mcp_data.tool_get_index_data(router, RESOLVER, "600519")
+        assert d["data"] is None
+        assert any("仅支持 指数" in w for w in d["warnings"])
+
+
+class TestSymbolsStaleWarning:
+    """v0.3.0 M6: 启动 stale 检测 warning (无 key/失败降级本地快照, 可观测)."""
+
+    def test_stale_warns(self, monkeypatch, tmp_path) -> None:
+        import json
+        from datetime import UTC, datetime, timedelta
+
+        import core.domain.symbols as sym_mod
+        import servers.mcp_data as mcp_mod
+
+        p = tmp_path / "symbols.json"
+        old = (datetime.now(UTC) - timedelta(days=60)).isoformat(timespec="seconds")
+        p.write_text(json.dumps({"generated_at": old, "records": []}), encoding="utf-8")
+        monkeypatch.setattr(sym_mod, "snapshot_age_days", lambda *a, **k: 60)
+        monkeypatch.setattr(mcp_mod, "load_ths_key", lambda: None)
+        monkeypatch.setattr(mcp_mod, "load_wind_key", lambda: None)
+        _, _, warnings = mcp_mod.build_server_components()
+        assert any("未同步" in w for w in warnings)
+
+    def test_fresh_no_warning(self, monkeypatch) -> None:
+        import core.domain.symbols as sym_mod
+        import servers.mcp_data as mcp_mod
+
+        monkeypatch.setattr(sym_mod, "snapshot_age_days", lambda *a, **k: 0)
+        monkeypatch.setattr(mcp_mod, "load_ths_key", lambda: None)
+        monkeypatch.setattr(mcp_mod, "load_wind_key", lambda: None)
+        _, _, warnings = mcp_mod.build_server_components()
+        assert not any("未同步" in w for w in warnings)

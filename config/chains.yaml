@@ -1,5 +1,6 @@
 # 降级链配置 (docs/DEGRADATION.md 主干+备用; 数据是配置不是代码)
 # 链序 = 优先顺序; 修改无需改代码。v0.2.0: Wind 接财务权威链头 + 独家域。
+# v0.3.0: fund/index 域 — THS 免费主干, Wind 补缺 (PLAN-0.3.0.md §2.3)。
 chains:
   search: [ths, akshare]
   quote: [ths, akshare]         # 快照不烧 Wind 积分 (DEGRADATION 主干表)
@@ -10,3 +11,16 @@ chains:
   special: [ths, akshare]
   announcements: [wind]         # 公告: Wind 独家, 无降级源 (明确告知)
   edb: [wind, akshare]          # EDB/宏观: Wind 主干, AKShare 仅白名单兜底 (config/akshare_edb.yaml)
+  # ── v0.3.0 fund/index (THS 免费主干; 3004 能力边界 → NoDataError 链内换源) ──
+  fund_quote: [ths, wind]       # 场内快照 THS 仅 ETF; LOF/OTC → Wind 分钟行情 (L3 标注)
+  fund_nav: [ths, wind]
+  fund_kline: [ths, wind]       # THS 仅 ETF ≤5 年无复权; Wind 兜底全类型
+  fund_holdings: [ths, wind]
+  fund_holders: [ths, wind]
+  fund_performance: [ths, wind]
+  fund_info: [ths, wind]
+  index_quote: [ths, wind]      # 指数行情 THS 主干
+  index_kline: [ths, wind]
+  index_constituents: [ths, wind]
+  index_fundamentals: [wind]    # 基本面 Wind 独家 (question 类, 无降级源)
+  index_basicinfo: [wind]       # 基本信息 Wind 独家 (question 类, 无降级源)

@@ -23,13 +23,19 @@ Market = str  # "A股" | "港股" | "美股" | "指数" | "板块" | "基金" | 
 
 @dataclass(frozen=True)
 class Instrument:
-    """L1: unified instrument identity (canonical symbol is the mapping key)."""
+    """L1: unified instrument identity (canonical symbol is the mapping key).
+
+    `asset_type` is the canonical class (stock/fund/index/...); `subtype` keeps
+    the vendor leaf class (THS: fund-etf/fund-lof/fund-otc/fund-reits/...) — some
+    vendor endpoints need the leaf (THS fund_type), v0.3.0 (PLAN-0.3.0.md M4).
+    """
 
     symbol: str  # canonical, e.g. 600519.SH
     name: str
     asset_type: str
     exchange: str  # SH / SZ / BJ / HK / US / ...
     currency: str = "CNY"
+    subtype: str = ""  # vendor leaf class (THS ticker-list asset_type), "" = 无
 
 
 # ──────────────────────────────────────────────────────────────────────

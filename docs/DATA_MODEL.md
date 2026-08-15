@@ -22,6 +22,8 @@ class Instrument:      # L1
     asset_type: str    # stock/bond/index/fund
     exchange: str
     currency: str = "CNY"
+    subtype: str = ""  # v0.3.0: vendor 叶类别 (THS: fund-etf/fund-lof/fund-otc/fund-reits...)
+                       # 某些 vendor 端点需要叶类别 (THS fund_type), canonical 类别不够
 
 @dataclass(frozen=True)
 class Kline:           # L1 + L2
@@ -63,6 +65,10 @@ class EDBPoint:        # L1 + L2 (v0.2.0, Wind EDB / AKShare 白名单兜底)
 # L1+L2 字段统一,provider 特有字段进 extra 或显式标注
 # v0.2.0: FinancialStatement.report_date_ms 可为 None — Wind NL 回答报告期在列名,
 #   源未声明报告期时不猜 (L3: 标注不转换)
+# v0.3.0: 基金/指数域行数据 (nav/holdings/holders/performance/info/fundamentals/
+#   basicinfo/constituents) 一律用 FinancialStatement(statement=<kind>, rows=透传)
+#   — vendor 字段名即口径, 只标注不归一 (与财务行同款 L3 纪律); 快照/K线用 Quote/Kline
+#   (fund_quote Wind 兜底为分钟行情 → Kline period="1m" + extra.note 标注差异)
 ```
 
 ## 单位与时间转换表(显式、可配置)

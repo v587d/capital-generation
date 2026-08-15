@@ -29,7 +29,9 @@ from core.config import CONFIG_DIR, load_yaml
 
 CONTRACT_URL = "https://fuyao.aicubes.cn/llms-full.txt"
 ADAPTER = Path(__file__).resolve().parents[1] / "core" / "adapters" / "ths.py"
-OFFLINE_CONTRACT = Path("/home/shawn/projects/research/ths_llms-full.txt")
+# 仓库内缓存 (CI 离线用; 仓库外缓存仅作向后兼容)
+OFFLINE_CONTRACT = Path(__file__).resolve().parents[1] / "config" / "ths" / "llms-full.txt"
+LEGACY_OFFLINE = Path("/home/shawn/projects/research/ths_llms-full.txt")
 
 _ENDPOINT_RE = re.compile(r'"/?(api|dump)/[a-zA-Z0-9/_-]+"')
 
@@ -55,18 +57,20 @@ def normalize(p: str) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--offline", action="store_true", help="use cached THS contract copy")
-    ap.add_argument("--wind", action="store_true",
-                    help="Wind 契约漂移检查 (本地官方 manifest 快照, 无需网络)")
+    ap.add_argument(
+        "--wind", action="store_true", help="Wind 契约漂移检查 (本地官方 manifest 快照, 无需网络)"
+    )
     args = ap.parse_args()
 
     if args.wind:
         return verify_wind()
 
     if args.offline:
-        if not OFFLINE_CONTRACT.exists():
+        path = OFFLINE_CONTRACT if OFFLINE_CONTRACT.exists() else LEGACY_OFFLINE
+        if not path.exists():
             print(f"--offline 需要缓存文件 {OFFLINE_CONTRACT}", file=sys.stderr)
             return 2
-        text = OFFLINE_CONTRACT.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8")
     else:
         try:
             resp = httpx.get(CONTRACT_URL, timeout=30)

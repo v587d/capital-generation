@@ -84,19 +84,22 @@ class AKShareAdapter(BaseAdapter):
         except TimeoutError as e:
             raise FinTimeoutError(
                 f"AKShare {fn_name} timeout ({CALL_TIMEOUT_S}s, 结果已丢弃)",
-                source=source_name(self.vendor_id), vendor=self.vendor_id,
+                source=source_name(self.vendor_id),
+                vendor=self.vendor_id,
                 endpoint=fn_name,
             ) from e
         except KeyError as e:
             raise SourceDownError(
                 f"AKShare {fn_name} 接口漂移 (缺字段 {e}) — 检查 akshare 版本/golden 回归",
-                source=source_name(self.vendor_id), vendor=self.vendor_id,
+                source=source_name(self.vendor_id),
+                vendor=self.vendor_id,
                 endpoint=fn_name,
             ) from e
         except Exception as e:  # noqa: BLE001 — 爬虫源异常种类多, 统一按源故障
             raise SourceDownError(
                 f"AKShare {fn_name} 失败: {type(e).__name__}: {e}",
-                source=source_name(self.vendor_id), vendor=self.vendor_id,
+                source=source_name(self.vendor_id),
+                vendor=self.vendor_id,
                 endpoint=fn_name,
             ) from e
 
@@ -142,14 +145,14 @@ class AKShareAdapter(BaseAdapter):
         out: list[Quote] = []
         for s in symbols[:50]:
             # stock_bid_ask_em 返回竖表 [item, value] (最新/今开/最高/最低/昨收/涨幅/总手/金额)
-            df = await self._call(
-                "stock_bid_ask_em", ak.stock_bid_ask_em, symbol=s.split(".")[0]
-            )
+            df = await self._call("stock_bid_ask_em", ak.stock_bid_ask_em, symbol=s.split(".")[0])
             kv = {str(r["item"]): r["value"] for r in self._rows(df)}
             if not kv:
                 raise NoDataError(
-                    f"AKShare 无 {s} 行情", source=source_name(self.vendor_id),
-                    vendor=self.vendor_id, endpoint="stock_bid_ask_em",
+                    f"AKShare 无 {s} 行情",
+                    source=source_name(self.vendor_id),
+                    vendor=self.vendor_id,
+                    endpoint="stock_bid_ask_em",
                 )
             out.append(
                 Quote(
@@ -174,40 +177,124 @@ class AKShareAdapter(BaseAdapter):
     async def get_klines(
         self, symbol: str, start_ms: int, end_ms: int, *, adjust: str = "none"
     ) -> list[Kline]:
+        """日K — 上游链 东财 → 新浪 → 腾讯 (v0.1.1, PLAN.md §6; LESSONS §5.4).
+
+        东财 push2his 对本机 IP 间歇限频 (TCP 层 ConnectionError, 无 HTTP 响应),
+        表现为 SourceDownError/FinTimeoutError — 仅此类错误才换上游; NO_DATA/空结果
+        不换 (空值纪律: 不模拟)。三个上游全挂 → SourceDownError 带全部上游上下文,
+        交路由层按链降级。每次结果 extra.upstream 记录实际服务上游 (可观测)。
+        """
         if "." in symbol:
             symbol = symbol.split(".")[0]
-        df = await self._call(
-            "stock_zh_a_hist",
-            ak.stock_zh_a_hist,
-            symbol=symbol,
-            period="daily",
-            start_date=ms_to_date(start_ms),
-            end_date=ms_to_date(end_ms),
-            adjust=_ADJUST_MAP[adjust],
+        errors: list[str] = []
+        for fn_name, fn, kw in self._kline_upstreams(symbol, start_ms, end_ms, adjust):
+            try:
+                df = await self._call(fn_name, fn, **kw)
+                return self._kline_rows(fn_name, df, symbol, adjust)
+            except (SourceDownError, FinTimeoutError) as e:
+                errors.append(f"{fn_name}: {type(e).__name__}: {str(e)[:80]}")
+        raise SourceDownError(
+            f"AKShare kline 全部上游失败: {'; '.join(errors)}",
+            source=source_name(self.vendor_id),
+            vendor=self.vendor_id,
+            endpoint="kline",
         )
+
+    @staticmethod
+    def _kline_upstreams(
+        symbol: str, start_ms: int, end_ms: int, adjust: str
+    ) -> list[tuple[str, Any, dict[str, Any]]]:
+        a = _ADJUST_MAP[adjust]
+        start, end = ms_to_date(start_ms), ms_to_date(end_ms)
+        return [
+            # 东财 (原 M4 主干; 封锁期可能整源不可用)
+            (
+                "stock_zh_a_hist",
+                ak.stock_zh_a_hist,
+                {
+                    "symbol": symbol,
+                    "period": "daily",
+                    "start_date": start,
+                    "end_date": end,
+                    "adjust": a,
+                },
+            ),
+            # 新浪 (LESSONS §5.4 验证稳定; volume 单位=股; 仅 sh/sz)
+            (
+                "stock_zh_a_daily",
+                ak.stock_zh_a_daily,
+                {
+                    "symbol": AKShareAdapter._sina_stock_code(symbol),
+                    "start_date": start,
+                    "end_date": end,
+                    "adjust": a,
+                },
+            ),
+            # 腾讯 (LESSONS §5.4 验证稳定; volume 单位=手 → to_shares)
+            (
+                "stock_zh_a_hist_tx",
+                ak.stock_zh_a_hist_tx,
+                {
+                    "symbol": symbol,
+                    "start_date": start,
+                    "end_date": end,
+                    "adjust": a,
+                },
+            ),
+        ]
+
+    @staticmethod
+    def _kline_rows(fn_name: str, df: Any, symbol: str, adjust: str) -> list[Kline]:
+        """各上游形状归一 (L2: date_ms/股/原始货币); extra.upstream 记录服务上游."""
+        rows = AKShareAdapter._rows(df)
+        if not rows:
+            return []
+        # 东财: 中文列, volume 手; 新浪/腾讯: 英文列 (sina volume 股 / tx 手)
+        if "日期" in rows[0]:
+            get, vol_unit = (
+                lambda r, k: r[k],  # noqa: E731 — 中文列直取
+                "手",
+            )
+            date_key, open_key = "日期", "开盘"
+            high_key, low_key, close_key = "最高", "最低", "收盘"
+            vol_key, amt_key = "成交量", "成交额"
+        else:
+            get = lambda r, k: r.get(k)  # noqa: E731
+            vol_unit = "股" if fn_name == "stock_zh_a_daily" else "手"
+            date_key, open_key = "date", "open"
+            high_key, low_key, close_key = "high", "low", "close"
+            vol_key, amt_key = "volume", "amount"
         out: list[Kline] = []
-        for r in self._rows(df):
+        for r in rows:
             out.append(
                 Kline(
                     symbol=symbol,
-                    date_ms=date_to_ms(str(r["日期"])),
-                    open=float(r["开盘"]),
-                    high=float(r["最高"]),
-                    low=float(r["最低"]),
-                    close=float(r["收盘"]),
-                    volume=to_shares(float(r["成交量"]), "手"),
-                    turnover=float(r.get("成交额") or 0),
+                    date_ms=date_to_ms(str(get(r, date_key))),
+                    open=float(get(r, open_key)),
+                    high=float(get(r, high_key)),
+                    low=float(get(r, low_key)),
+                    close=float(get(r, close_key)),
+                    volume=to_shares(_f(get(r, vol_key)) or 0.0, vol_unit),
+                    turnover=_f(get(r, amt_key)) or 0.0,
                     currency="CNY",
                     adjust=adjust,  # L3: 声明请求口径 (akshare 实际 qfq/hfq 见 extra)
-                    source=source_name(self.vendor_id),
+                    source=source_name("akshare"),
                     tier="free",
-                    extra={"akshare_adjust": _ADJUST_MAP[adjust]},
+                    extra={
+                        "akshare_adjust": _ADJUST_MAP[adjust],
+                        "upstream": fn_name,  # 实际服务上游 (可观测)
+                    },
                 )
             )
         return out
 
     async def get_financials(
-        self, symbol: str, statement: str, *, period: str = "annual", limit: int = 4,
+        self,
+        symbol: str,
+        statement: str,
+        *,
+        period: str = "annual",
+        limit: int = 4,
         name: str = "",  # Wind NL 问句需要名称; AKShare 忽略
     ) -> list[FinancialStatement]:
         if statement == "indicators":
@@ -269,7 +356,8 @@ class AKShareAdapter(BaseAdapter):
         if fn is None:
             raise NoDataError(
                 f"AKShare 无 {kind} 兜底 (仅支持 limit-up/hot/dragon-tiger)",
-                source=source_name(self.vendor_id), vendor=self.vendor_id,
+                source=source_name(self.vendor_id),
+                vendor=self.vendor_id,
                 endpoint=f"special/{kind}",
             )
         kw: dict[str, Any] = {}
@@ -315,7 +403,8 @@ class AKShareAdapter(BaseAdapter):
         if match is None:
             raise NoDataError(
                 f"AKShare 兜底仅覆盖白名单宏观指标 {sorted(cfg)}; {indicator!r} 请走 Wind EDB",
-                source=source_name(self.vendor_id), vendor=self.vendor_id,
+                source=source_name(self.vendor_id),
+                vendor=self.vendor_id,
                 endpoint="edb",
             )
         key, entry = match
@@ -324,7 +413,9 @@ class AKShareAdapter(BaseAdapter):
         if fn is None:
             raise InternalError(
                 f"akshare 无函数 {fn_name} (白名单配置失效)",
-                source=source_name(self.vendor_id), vendor=self.vendor_id, endpoint="edb",
+                source=source_name(self.vendor_id),
+                vendor=self.vendor_id,
+                endpoint="edb",
             )
         df = await self._call(f"edb/{key}", fn)
         rows = self._rows(df)
@@ -340,9 +431,13 @@ class AKShareAdapter(BaseAdapter):
                 indicator = f"{name}·{col}" if name else col
                 out.append(
                     EDBPoint(
-                        indicator=indicator, code=key, date_ms=date_ms,
-                        value=_f(raw), date_label=date_label,
-                        source=source_name(self.vendor_id), tier="free",
+                        indicator=indicator,
+                        code=key,
+                        date_ms=date_ms,
+                        value=_f(raw),
+                        date_label=date_label,
+                        source=source_name(self.vendor_id),
+                        tier="free",
                         extra={"note": "AKShare 白名单兜底, 口径与 Wind EDB 不同 (L3 标注不转换)"},
                     )
                 )
@@ -357,8 +452,9 @@ def _parse_cn_period(label: str) -> int | None:
     m = _re.match(r"^(\d{4})年?[第]?([一二三四1-4])?季度?$", label)
     if m:
         year, q = int(m.group(1)), m.group(2)
-        month = {"一": 3, "二": 6, "三": 9, "四": 12,
-                 "1": 3, "2": 6, "3": 9, "4": 12}.get(q or "四", 12)
+        month = {"一": 3, "二": 6, "三": 9, "四": 12, "1": 3, "2": 6, "3": 9, "4": 12}.get(
+            q or "四", 12
+        )
         return date_to_ms(f"{year}-{month:02d}-28")
     m = _re.match(r"^(\d{4})[-年](\d{1,2})月?(?:份)?$", label)
     if m:

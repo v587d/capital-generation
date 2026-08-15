@@ -2,9 +2,9 @@
 
 统一金融数据访问（DeepSeek Harness 插件生态）：一个入口覆盖 **同花顺（主干，官方 REST）+ AKShare（免费兜底）**，降级全程可观测。基于 MCP，DSH 侧零 TS。
 
-> 版本：v0.2.0（2026-08-15 发布）· 设计决策见 [`docs/`](docs/DESIGN_REVIEW.md) · v0.1.0 计划（冻结面）见 [`PLAN.md`](PLAN.md) · v0.2.0 计划见 [`PLAN-0.2.0.md`](PLAN-0.2.0.md) · **v0.3.0 计划见 [`PLAN-0.3.0.md`](PLAN-0.3.0.md)（数据湖 / 基金·指数域 / symbols 自动同步 / CI 自动化）**
+> 版本：v0.3.0（2026-08-15 发布）· 设计决策见 [`docs/`](docs/DESIGN_REVIEW.md) · v0.1.0 计划（冻结面）见 [`PLAN.md`](PLAN.md) · v0.2.0 计划见 [`PLAN-0.2.0.md`](PLAN-0.2.0.md) · **v0.3.0 计划见 [`PLAN-0.3.0.md`](PLAN-0.3.0.md)（数据湖 / 基金·指数域 / symbols 自动同步 / CI 自动化）**
 
-## 能力（v0.2.0）
+## 能力（v0.3.0）
 
 | 工具 | 说明 | 内部链 |
 |---|---|---|
@@ -17,10 +17,24 @@
 | `fin_data__get_announcements` | 上市公司公告检索（**Wind 独家 RAG，无降级源**） | Wind |
 | `fin_data__get_edb` | EDB 宏观/行业指标（指标简称，如"中国GDP"；AKShare 仅白名单兜底） | Wind → AKShare |
 | `fin_data__reconcile` | **双源对账**（quote/klines 未复权，THS×AKShare，只比数据时点；分歧不自动修复，交 LLM 裁决） | 双源直取 |
+| `fin_data__get_fund_data` | **基金数据**（quote/nav/kline/holdings/holders/performance/info；THS 免费主干，Wind 补缺；场内快照/日K 仅 ETF，LOF/OTC 由 Wind 兜底并 L3 标注） | 同花顺 → Wind |
+| `fin_data__get_index_data` | **指数数据**（quote/kline/constituents 行情 THS 主干无复权语义；fundamentals/basicinfo **Wind 独家无降级源**；成分仅当前无历史） | 同花顺 → Wind（基本面 Wind） |
 
-每个结果携带溯源：`source`（规范名 同花顺/Wind/AKShare）+ `tier`（free/quota/paid）+ `ts`（查询时点）+ `warnings[]`（降级说明）+ 数据时点（`as_of_ms`/`date_ms`）。降级从不静默；分钟线/公告无降级源，明确告知。
+每个结果携带溯源：`source`（规范名 同花顺/Wind/AKShare）+ `tier`（free/quota/paid）+ `ts`（查询时点）+ `warnings[]`（降级说明）+ 数据时点（`as_of_ms`/`date_ms`）。降级从不静默；分钟线/公告/指数基本面无降级源，明确告知。
 
-**边界**：仅 A股股票行情/财务/日历/特色数据 + Wind 独家域（分钟线/公告/EDB）。不做：周/月/季K、港股/美股、宏观白名单外经 AKShare 兜底、基金域、研报、全市场快照（见 `PLAN-0.2.0.md` §2.2）。
+**边界**：A股股票 + 基金（净值/收益/持仓/持有人/场内快照/K线）+ 指数（行情/K线/成分/基本面）+ Wind 独家域（分钟线/公告/EDB）。不做：周/月/季K、港股/美股、宏观白名单外经 AKShare 兜底、研报/评级/目标价、**全市场扫描（数据湖为离线资产，走 `scripts/lake.py` CLI，不进 LLM）**（见 `PLAN-0.3.0.md` §2.2）。
+
+## 数据湖（离线资产，v0.3.0）
+
+官方 THS marketdb CLI（`HiThink-Tech/Financial-API`，MIT）整体采用：全市场 10 年日K + 复权因子 + 近 10 交易日增量，四层表 raw/calc/dim/stg + 8 项质量校验 + validate/rebuild 修复（禁删 raw）。**纯离线，不进 LLM**（用户裁定）；入口 `scripts/lake.py`：
+
+```bash
+HITHINK_FINANCE_API_KEY=<ths_key> uv run python scripts/lake.py sync    # 全量/增量同步
+uv run python scripts/lake.py validate | rebuild | status | describe     # 质量/修复/状态
+uv run python scripts/lake.py query --sql "SELECT * FROM v_daily_qfq ..."  # 只读查询
+```
+
+安装：`git clone https://gh-proxy.com/https://github.com/HiThink-Tech/Financial-API`（github.com 直连不通，走镜像）→ `uv pip install -e <克隆>/python`。合成样本离线测试已内置（`tests/unit/test_lake.py`）。
 
 ## 安装
 
@@ -46,9 +60,10 @@ export WIND_API_KEY=ak_...         # Wind Key (aifinmarket.wind.com.cn; 可选, 
 uv run python -m servers.mcp_data          # 启动 MCP server (stdio)
 THS_API_KEY=... WIND_API_KEY=... uv run python scripts/live-probe.py  # 真实 key 端到端冒烟
 uv run pytest tests                        # 全量单测 (离线: fixture/golden 回放, 无实时网络)
+uv run python scripts/ci.py                # 本地 CI (ruff + pytest 离线 + 契约漂移; v0.3.0)
 uv run python scripts/verify-contracts.py  # THS 契约漂移检查 (llms-full.txt diff)
 uv run python scripts/verify-contracts.py --wind  # Wind 契约漂移检查 (官方 tool-manifest diff)
-uv run python scripts/sync-symbols.py      # 刷新 config/symbols.json (THS ticker-list 权威映射)
+uv run python scripts/sync-symbols.py --if-stale 30  # symbols 自动同步 (新鲜则跳过; 启动时自动检测)
 uv run python scripts/record-fixtures.py   # 重录 THS 脱敏 fixture (真实 key, 开发期)
 uv run python scripts/record-goldens.py    # 重录 AKShare golden (锁版本后; 东财封锁期 kline 显式 skip)
 ```
@@ -65,10 +80,10 @@ core/             纯 Python, 零协议依赖 (domain + FinError 是唯一跨层
   adapters/       base / ths / akshare_adapter / wind (注册式: 新源 = 新文件 + 配置)
 servers/          MCP 薄壳: mcp_data.py + cordis 示例 (唯一协议层)
 config/           chains.yaml / error_map.yaml / symbols.json / wind_tools.yaml /
-                  akshare_edb.yaml / reconcile.yaml / wind/ (官方契约快照, 数据不是代码)
+                  akshare_edb.yaml / reconcile.yaml / wind/ / ths/ (官方契约快照, 数据不是代码)
 scripts/          sync-symbols / record-fixtures / record-goldens / live-probe /
-                  verify-contracts (--wind)
-tests/            unit / adapters / golden / fixtures (CI 无实时网络; fixtures/wind 14 条)
+                  verify-contracts (--wind) / lake (数据湖 CLI) / ci (本地 CI)
+tests/            unit / adapters / golden / fixtures (CI 无实时网络; fixtures/wind 24 条)
 docs/             DATA_MODEL / DEGRADATION / DESIGN_REVIEW / PYTHON / LESSONS
 PLAN.md           v0.1.0 范围与里程碑（冻结面存档）
 PLAN-0.2.0.md     v0.2.0 计划（Wind 适配器/对账引擎/分钟线/公告/EDB）
@@ -78,10 +93,15 @@ PLAN-0.3.0.md     v0.3.0 计划（数据湖/基金·指数域/symbols 自动同�
 ## 测试纪律
 
 - THS：fixture 回放（`tests/fixtures/ths/`，录制一次脱敏，CI 离线）
-- Wind：fixture 回放（`tests/fixtures/wind/`，2026-08-15 真实 key 录制 14 条，含错误信封）
-- AKShare：golden 回归（`tests/golden/akshare/`，锁版本后录制；东财封锁期间 kline golden 显式 skip）
+- Wind：fixture 回放（`tests/fixtures/wind/`，2026-08-15 真实 key 录制 24 条，含错误信封）
+- AKShare：golden 回归（`tests/golden/akshare/`，锁版本后录制；东财封锁期间 kline golden 显式 skip；
+  v0.1.1 新浪/腾讯 kline golden 已录）
+- 数据湖：`scripts/lake.py` wrapper 单测（mock 子进程）+ 合成 parquet 离线全流程
+  （`tests/unit/test_lake.py`；marketdb 未安装时显式 skip）
 - 真实 key 冒烟：`live-probe.py`（不进 CI；无 WIND_API_KEY 时跳过 Wind 用例）
-- 契约漂移：`verify-contracts.py`（THS llms-full.txt）+ `--wind`（官方 tool-manifest 快照 diff）
+- 契约漂移：`verify-contracts.py`（THS llms-full.txt，`--offline` 用仓库内缓存）+ `--wind`
+  （官方 tool-manifest 快照 diff）
+- 本地 CI：`scripts/ci.py`（ruff + pytest 离线 + 双源契约漂移 + symbols 新鲜度）+ pre-commit
 
 ## 文档
 

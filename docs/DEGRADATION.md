@@ -13,6 +13,9 @@
 | 公告 | Wind | —(无备) | 独家 RAG, 无降级, **明确告知用户** |
 | EDB/宏观 | Wind | AKShare **白名单** | 白名单外指标 AKShare 不兜底 (config/akshare_edb.yaml); 口径不同 L3 标注 |
 | 热榜/异动/连板/龙虎榜 | THS | AKShare 同名接口 | THS 独家能力为主 |
+| **基金 (v0.3.0)** | THS(免费) | Wind | 净值/收益/持仓/持有人/资料 THS 全类型; 场内快照/日K 仅 ETF → LOF/OTC 由 Wind 兜底 (分钟行情/全类型K, L3 标注差异) |
+| **指数 (v0.3.0)** | THS(免费) | Wind | 行情/K线/成分 THS 主干 (无复权语义, 成分仅当前); 基本面/基本信息 Wind 独家 (question 类, 无降级源) |
+| **数据湖 (v0.3.0)** | 官方 marketdb CLI | — | **纯离线数据资产, 不进 LLM** (用户裁定); 全市场扫描类需求走 `scripts/lake.py`, 工具面明示不支持 |
 | 美股/加密/另类 | AKShare | —(无备) | 免费源独占域, 接受其不稳定性 |
 
 ```yaml
@@ -25,13 +28,26 @@ announcements: [wind]             # 公告 Wind 独家 (无降级源, 明确告�
 edb:        [wind, akshare]       # 宏观: Wind 主干, AKShare 仅白名单兜底
 special:    [ths, akshare]
 macro:      [wind, akshare]
+# v0.3.0 (PLAN-0.3.0.md §2.3): 基金/指数 — THS 免费主干, Wind 补缺
+fund_quote: [ths, wind]           # 场内快照 THS 仅 ETF; LOF/OTC → Wind 分钟行情 (L3 标注)
+fund_nav:   [ths, wind]
+fund_kline: [ths, wind]           # THS 仅 ETF ≤5 年无复权; Wind 兜底全类型
+fund_holdings: [ths, wind]
+fund_holders: [ths, wind]
+fund_performance: [ths, wind]
+fund_info:  [ths, wind]
+index_quote: [ths, wind]          # 指数行情 THS 主干
+index_kline: [ths, wind]
+index_constituents: [ths, wind]   # 成分仅当前无历史 (THS 能力边界, 明示)
+index_fundamentals: [wind]        # Wind 独家 (question 类, 无降级源)
+index_basicinfo: [wind]           # Wind 独家 (question 类, 无降级源)
 ```
 
 ## 错误分类(判定表外置,新源接入只声明自己的错误码映射)
 
 ```python
 class FinError(Exception):
-    kind: str      # AUTH / PARAM / RATE_LIMIT / TIMEOUT / NO_DATA / SOURCE_DOWN / QUOTA / INTERNAL
+    kind: str  # AUTH / PARAM / RATE_LIMIT / TIMEOUT / NO_DATA / SOURCE_DOWN / QUOTA / INTERNAL
     retryable: bool
     source: str
 ```

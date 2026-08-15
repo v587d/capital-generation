@@ -4,8 +4,12 @@ Authoritative source for canonical symbol mapping (docs/DESIGN_REVIEW.md 决策 
 Pulls /api/meta/tickers/list for A-share + index + fund asset classes (SH,SZ,BJ),
 writes config/symbols.json, prints per-class counts. NEVER logs the API key.
 
+v0.3.0 (M6): --if-stale DAYS — 快照新鲜 (generated_at 距今 < DAYS) 时直接跳过,
+配合定时/启动调用实现自动同步; 无 key 或失败时退出码 2, 不覆盖本地快照。
+
 Usage:
     THS_API_KEY=<key> uv run python scripts/sync-symbols.py [--asset-types a-share,a-share-index]
+    THS_API_KEY=<key> uv run python scripts/sync-symbols.py --if-stale 30
 """
 
 from __future__ import annotations
@@ -24,6 +28,9 @@ LIST_URL = f"{BASE}/api/meta/tickers/list"
 DEFAULT_ASSET_TYPES = "a-share,a-share-index,fund-etf,fund-lof,fund-otc,fund-reits"
 PAGE = 10000
 OUT = Path(__file__).resolve().parents[1] / "config" / "symbols.json"
+
+
+from core.domain.symbols import snapshot_age_days  # noqa: E402  (M6: 与启动检测共用)
 
 
 def fetch_all(key: str, asset_types: str, exchanges: str) -> list[dict]:
@@ -59,11 +66,13 @@ def fetch_all(key: str, asset_types: str, exchanges: str) -> list[dict]:
     return items
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--asset-types", default=DEFAULT_ASSET_TYPES)
-    ap.add_argument("--exchanges", default="SH,SZ,BJ")
-    args = ap.parse_args()
+def main_with_args(args: argparse.Namespace) -> int:
+    """main 的可测体 (M6: --if-stale 跳过逻辑单测)."""
+    if args.if_stale > 0:
+        age = snapshot_age_days()
+        if age is not None and age < args.if_stale:
+            print(f"symbols.json 距今 {age} 天 (< {args.if_stale}), 跳过同步")
+            return 0
 
     key = os.environ.get("THS_API_KEY", "")
     if not key:
@@ -88,6 +97,20 @@ def main() -> int:
     for k, v in sorted(by_class.items()):
         print(f"  {k}: {v}")
     return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--asset-types", default=DEFAULT_ASSET_TYPES)
+    ap.add_argument("--exchanges", default="SH,SZ,BJ")
+    ap.add_argument(
+        "--if-stale",
+        type=int,
+        default=0,
+        metavar="DAYS",
+        help="快照距今 < DAYS 天时跳过 (自动同步用; 0 = 总是同步)",
+    )
+    return main_with_args(ap.parse_args())
 
 
 if __name__ == "__main__":

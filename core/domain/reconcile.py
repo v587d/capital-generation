@@ -118,38 +118,68 @@ async def reconcile_quotes(
     for sym in symbols:
         lq, rq = left_map.get(sym), right_map.get(sym)
         if lq is None or rq is None:
-            rows.append(ReconcileRow(
-                key=sym, field="last_price",
-                left=lq.last_price if lq else None, right=rq.last_price if rq else None,
-                left_as_of_ms=lq.as_of_ms if lq else None,
-                right_as_of_ms=rq.as_of_ms if rq else None,
-                diff_pct=None, matched=False, note="单边缺失",
-            ))
+            rows.append(
+                ReconcileRow(
+                    key=sym,
+                    field="last_price",
+                    left=lq.last_price if lq else None,
+                    right=rq.last_price if rq else None,
+                    left_as_of_ms=lq.as_of_ms if lq else None,
+                    right_as_of_ms=rq.as_of_ms if rq else None,
+                    diff_pct=None,
+                    matched=False,
+                    note="单边缺失",
+                )
+            )
             continue
         lag = abs(lq.as_of_ms - rq.as_of_ms)
         if lag > asof_tol:
-            rows.append(ReconcileRow(
-                key=sym, field="last_price", left=lq.last_price, right=rq.last_price,
-                left_as_of_ms=lq.as_of_ms, right_as_of_ms=rq.as_of_ms,
-                diff_pct=None, matched=False,
-                note=f"数据时滞超窗 ({lag / 1000:.0f}s > {asof_tol / 1000:.0f}s), 不比价",
-            ))
+            rows.append(
+                ReconcileRow(
+                    key=sym,
+                    field="last_price",
+                    left=lq.last_price,
+                    right=rq.last_price,
+                    left_as_of_ms=lq.as_of_ms,
+                    right_as_of_ms=rq.as_of_ms,
+                    diff_pct=None,
+                    matched=False,
+                    note=f"数据时滞超窗 ({lag / 1000:.0f}s > {asof_tol / 1000:.0f}s), 不比价",
+                )
+            )
             continue
-        for field, lv, rv in (("last_price", lq.last_price, rq.last_price),
-                              ("volume", lq.volume, rq.volume)):
+        for field, lv, rv in (
+            ("last_price", lq.last_price, rq.last_price),
+            ("volume", lq.volume, rq.volume),
+        ):
             if lv is None or rv is None:
-                rows.append(ReconcileRow(
-                    key=sym, field=field, left=lv, right=rv,
-                    left_as_of_ms=lq.as_of_ms, right_as_of_ms=rq.as_of_ms,
-                    diff_pct=None, matched=False, note="单侧缺值",
-                ))
+                rows.append(
+                    ReconcileRow(
+                        key=sym,
+                        field=field,
+                        left=lv,
+                        right=rv,
+                        left_as_of_ms=lq.as_of_ms,
+                        right_as_of_ms=rq.as_of_ms,
+                        diff_pct=None,
+                        matched=False,
+                        note="单侧缺值",
+                    )
+                )
                 continue
             diff = _diff_pct(lv, rv)
-            rows.append(ReconcileRow(
-                key=sym, field=field, left=lv, right=rv,
-                left_as_of_ms=lq.as_of_ms, right_as_of_ms=rq.as_of_ms,
-                diff_pct=diff, matched=diff <= tol,
-            ))
+            rows.append(
+                ReconcileRow(
+                    key=sym,
+                    field=field,
+                    left=lv,
+                    right=rv,
+                    left_as_of_ms=lq.as_of_ms,
+                    right_as_of_ms=rq.as_of_ms,
+                    diff_pct=diff,
+                    matched=diff <= tol,
+                )
+            )
 
     return _report("quote", rows, tol, warnings)
 
@@ -184,20 +214,34 @@ async def reconcile_klines(
     for date_ms in sorted(set(lmap) | set(rmap)):
         lk, rk = lmap.get(date_ms), rmap.get(date_ms)
         if lk is None or rk is None:
-            rows.append(ReconcileRow(
-                key=f"{symbol}@{date_ms}", field="close",
-                left=lk.close if lk else None, right=rk.close if rk else None,
-                left_as_of_ms=date_ms, right_as_of_ms=date_ms,
-                diff_pct=None, matched=False, note="单边缺失",
-            ))
+            rows.append(
+                ReconcileRow(
+                    key=f"{symbol}@{date_ms}",
+                    field="close",
+                    left=lk.close if lk else None,
+                    right=rk.close if rk else None,
+                    left_as_of_ms=date_ms,
+                    right_as_of_ms=date_ms,
+                    diff_pct=None,
+                    matched=False,
+                    note="单边缺失",
+                )
+            )
             continue
         for field, lv, rv in (("close", lk.close, rk.close), ("volume", lk.volume, rk.volume)):
             diff = _diff_pct(lv, rv)
-            rows.append(ReconcileRow(
-                key=f"{symbol}@{date_ms}", field=field, left=lv, right=rv,
-                left_as_of_ms=date_ms, right_as_of_ms=date_ms,
-                diff_pct=diff, matched=diff <= tol,
-            ))
+            rows.append(
+                ReconcileRow(
+                    key=f"{symbol}@{date_ms}",
+                    field=field,
+                    left=lv,
+                    right=rv,
+                    left_as_of_ms=date_ms,
+                    right_as_of_ms=date_ms,
+                    diff_pct=diff,
+                    matched=diff <= tol,
+                )
+            )
     return _report("klines", rows, tol, warnings)
 
 
@@ -209,9 +253,15 @@ def _report(
     mismatched = sum(1 for r in rows if r.diff_pct is not None and not r.matched)
     skipped = len(rows) - compared
     return ReconcileReport(
-        domain=domain, rows=tuple(rows), compared=compared, matched=matched,
-        mismatched=mismatched, skipped=skipped, tolerance_pct=tol,
-        ts_ms=now_ms(), warnings=tuple(warnings),
+        domain=domain,
+        rows=tuple(rows),
+        compared=compared,
+        matched=matched,
+        mismatched=mismatched,
+        skipped=skipped,
+        tolerance_pct=tol,
+        ts_ms=now_ms(),
+        warnings=tuple(warnings),
     )
 
 

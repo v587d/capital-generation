@@ -35,8 +35,12 @@ def test_kline_adjust_is_declaration() -> None:
     k = Kline(
         symbol="600519.SH",
         date_ms=date_to_ms("2026-08-15"),
-        open=1, high=2, low=1, close=1.5,
-        volume=100, turnover=200,
+        open=1,
+        high=2,
+        low=1,
+        close=1.5,
+        volume=100,
+        turnover=200,
         adjust="forward",  # L3: declared, never converted
     )
     assert k.adjust == "forward"
@@ -44,9 +48,17 @@ def test_kline_adjust_is_declaration() -> None:
 
 def test_envelope_wraps_with_query_time() -> None:
     q = Quote(
-        symbol="600519.SH", last_price=1.0, open_price=None, high_price=None,
-        low_price=None, prev_close=None, change_pct=None, volume=1, turnover=1,
-        as_of_ms=1, source="同花顺",
+        symbol="600519.SH",
+        last_price=1.0,
+        open_price=None,
+        high_price=None,
+        low_price=None,
+        prev_close=None,
+        change_pct=None,
+        volume=1,
+        turnover=1,
+        as_of_ms=1,
+        source="同花顺",
     )
     env = Envelope(data=q, ts_ms=2, warnings=("degraded from 同花顺 to AKShare",))
     assert env.data is q

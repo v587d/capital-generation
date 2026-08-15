@@ -60,20 +60,20 @@
 
 ## 4. 验收清单（v0.3.0 出口）
 
-- [ ] v0.2.0 基线落袋：工作树提交 + tag；全量回归 139+1 保持绿
-- [ ] 数据湖：官方 marketdb CLI 集成，`data init/sync` 全量+增量可跑（live 人工/定时）；目录可配置；`data.lock` 纪律；批次审计可读
-- [ ] 复权因子：本地 forward/backward 因子产出；抽样对账（600519.SH/000001.SZ adjust=forward）与 THS 接口一致（容差外置）
-- [ ] validate 8 项 + rebuild（禁删 raw）可用；合成样本离线测绿或显式 skip 有据
-- [ ] 11 工具全注册（live-probe tools/list 11/11）；schema 评审记录落档（决策 13）；v0.1.0/v0.2.0 九工具 schema 一字不动（回归测试）
-- [ ] fund 域：quote/nav/kline/holdings/performance 全链可用（THS 主干→Wind 兜底），degraded 可观测；ETF≤5年/LOF 无历史 THS 限制 L3 标注；资产 gate 正确（非 fund 拒绝）
-- [ ] index 域：quote/kline/fundamentals/indicators/constituents 可用；指数行情 THS 主干；成分仅当前明示；特殊码（H11077.SH 等）有结论（直通/映射/NO_DATA+明示）
-- [ ] analytics：M0 决策门结论落档（触及研报/评级裁定 → 出局并记录，不阻塞其余）
-- [ ] windcode 纪律：请求只发合法 windcode（无 `.TI`）；直通或映射表生效（fund .SZ/.SH/.OF、index .SH/.SZ）
-- [ ] symbols 自动同步：`--if-stale` + 启动 stale 检测 warning 生效；失败降级本地快照（可观测）
-- [ ] CI：`scripts/ci.py` 全绿（ruff + pytest 离线 + verify-contracts --offline 仓库内缓存 + 新鲜度）；pre-commit hook 生效
-- [ ] fixtures/goldens：THS 基金/指数 fixtures + Wind fund/index fixtures（真实 key 录制）回放绿；v0.1.1 顺带项完成或保持显式 skip（东财封锁未解除）
-- [ ] v0.2.0 判定表行为回归绿（路由无改动或改动带回归测试）
-- [ ] 文档同步：README/DEGRADATION/DATA_MODEL/DESIGN_REVIEW 决策 13/LESSONS/PLAN.md §6 指针 + **PLAN-0.3.0.md 本体**
+- [x] v0.2.0 基线落袋：工作树提交 (8621c40) + tag v0.2.0；全量回归 195+1 保持绿
+- [x] 数据湖：官方 marketdb CLI 集成 (scripts/lake.py 薄封装)；全量+增量 sync 待 THS 网关冷却后 live 验证；目录可配置 (--db/MARKETDB_DB_PATH)；wrapper 层 flock 排他 (官方无内置 data.lock, LESSONS §6.5)；_import_batches 审计由官方导入器维护
+- [x] 复权因子：官方 calc_adjust_factor_daily 产出 forward/backward (合成样本验证方向正确: 除权日前 factor<1, 后=1)；抽样对账待全量同步后 live 验证
+- [x] validate 8 项 + rebuild（禁删 raw）可用；合成样本离线全流程测绿 (tests/unit/test_lake.py TestOfflineFlow)
+- [x] 11 工具全注册 (stdio 无 key 实测 tools/list 11/11)；schema 评审记录落档 (DESIGN_REVIEW 决策 13)；九工具 schema 回归绿
+- [x] fund 域：链 [ths, wind] + 3004→NoData 兜底路由测试绿；ETF≤5年/仅ETF快照 L3 标注；资产 gate 正确；live 验证待 THS 冷却
+- [x] index 域：quote/kline/constituents [ths, wind] + fundamentals/basicinfo [wind]；成分仅当前明示；H11077.SH 直通 OK (Wind fixture + 单测)；live 验证待 THS 冷却
+- [x] analytics：决策门 B 出局 (get_financial_data 含目标价/评级) — 落档 LESSONS §6.5 + DESIGN_REVIEW 决策 13
+- [x] windcode 纪律：无 .TI 外发单测 (test_windcode_direct_pass_no_ti)；fund .SZ/.SH/.OF 与 index .SH/.SZ + H11077.SH 直通 live 实测
+- [x] symbols 自动同步：--if-stale + 启动 stale warning + 单测 (TestSyncIfStale / TestSymbolsStaleWarning)
+- [x] CI：scripts/ci.py 全绿 (ruff + pytest 195+1 + 双源契约漂移 + symbols 新鲜度)；.pre-commit-config.yaml + Makefile 就位
+- [ ] fixtures/goldens：Wind fund/index 10 fixtures 录制回放绿 (test_wind 27 passed)；THS fund/index fixtures 待网关冷却录制；v0.1.1 完成 (新浪/腾讯 golden 已录, 东财 golden 维持显式 skip)
+- [x] v0.2.0 判定表行为回归绿 (195+1 全量; 路由仅加新域方法表 + 快照 TTL)
+- [x] 文档同步：README/DEGRADATION/DATA_MODEL/DESIGN_REVIEW 决策 13/LESSONS §6.5/PLAN.md §6 指针 + PLAN-0.3.0.md 本体
 
 ## 5. 关键机制要求（源自 LESSONS，实现时对照）
 

@@ -1,6 +1,6 @@
 [project]
 name = "capital-generation"
-version = "0.2.0"
+version = "0.3.0"
 description = "Unified financial data access for DeepSeek Harness (DSH): 同花顺 (THS) + AKShare fallback + Wind (later), with observable degradation chains"
 requires-python = ">=3.12"
 dependencies = [

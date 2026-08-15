@@ -30,6 +30,57 @@ def make_adapter(rows_by_fn: dict[str, list[dict]], *, interval: float = 0.0) ->
     return adapter
 
 
+def make_adapter_raising(
+    rows_by_fn: dict[str, list[dict]], raise_by_fn: dict[str, Exception]
+) -> AKShareAdapter:
+    """上游链测试: 指定 fn 抛错 (模拟东财封锁/上游故障)."""
+    adapter = AKShareAdapter(min_interval_s=0.0)
+
+    async def fake_call(fn_name: str, fn: Any, **kw: Any) -> list[dict]:
+        if fn_name in raise_by_fn:
+            raise raise_by_fn[fn_name]
+        return rows_by_fn.get(getattr(fn, "__name__", ""), rows_by_fn.get(fn_name))
+
+    adapter._call = fake_call  # type: ignore[method-assign]
+    return adapter
+
+
+_EM_ROWS = [
+    {
+        "日期": "2026-06-01",
+        "开盘": 1,
+        "最高": 2,
+        "最低": 1,
+        "收盘": 1.5,
+        "成交量": 100.0,
+        "成交额": 1000.0,
+    }
+]
+_SINA_ROWS = [
+    {
+        "date": "2026-06-01",
+        "open": 1,
+        "high": 2,
+        "low": 1,
+        "close": 1.5,
+        "volume": 100.0,
+        "amount": 1000.0,
+    }
+]
+_TX_ROWS = [
+    {
+        "date": "2026-06-01",
+        "open": 1,
+        "close": 1.5,
+        "high": 2,
+        "low": 1,
+        "volume": 100.0,
+        "turnover": 0.01,
+        "amount": 1000.0,
+    }
+]
+
+
 class TestKline:
     @pytest.mark.asyncio
     async def test_parses_golden(self) -> None:
@@ -53,8 +104,13 @@ class TestKline:
     async def test_hand_to_share_conversion(self) -> None:
         rows = [
             {
-                "日期": "2026-06-01", "开盘": 1, "最高": 2, "最低": 1,
-                "收盘": 1.5, "成交量": 100.0, "成交额": 1000.0,
+                "日期": "2026-06-01",
+                "开盘": 1,
+                "最高": 2,
+                "最低": 1,
+                "收盘": 1.5,
+                "成交量": 100.0,
+                "成交额": 1000.0,
             }
         ]
         adapter = make_adapter({"stock_zh_a_hist": rows})
@@ -68,16 +124,137 @@ class TestKline:
     async def test_adjust_mapping_tagged(self) -> None:
         rows = [
             {
-                "日期": "2026-06-01", "开盘": 1, "最高": 2, "最低": 1,
-                "收盘": 1.5, "成交量": 1, "成交额": 1,
+                "日期": "2026-06-01",
+                "开盘": 1,
+                "最高": 2,
+                "最低": 1,
+                "收盘": 1.5,
+                "成交量": 1,
+                "成交额": 1,
             }
         ]
         adapter = make_adapter({"stock_zh_a_hist": rows})
-        bars = await adapter.get_klines(
-            "600519.SH", start_ms=1, end_ms=2, adjust="forward"
-        )
+        bars = await adapter.get_klines("600519.SH", start_ms=1, end_ms=2, adjust="forward")
         assert bars[0].adjust == "forward"  # L3: 声明请求口径
         assert bars[0].extra["akshare_adjust"] == "qfq"  # 实际实现
+
+    # ── v0.1.1 上游链 (东财 → 新浪 → 腾讯; LESSONS §5.4) ──────────────
+
+    @pytest.mark.asyncio
+    async def test_sina_golden(self) -> None:
+        """新浪上游: 英文列, volume 单位=股 (不 ×100), extra.upstream 标注."""
+        golden = GOLDEN / "kline_sina_600519.json"
+        if not golden.exists():
+            pytest.skip("kline_sina golden 未录制")
+        adapter = make_adapter_raising(
+            {"stock_zh_a_daily": load_golden("kline_sina_600519")},
+            {
+                "stock_zh_a_hist": SourceDownError(
+                    "eastmoney blocked",
+                    source="AKShare",
+                    vendor="akshare",
+                    endpoint="stock_zh_a_hist",
+                )
+            },
+        )
+        bars = await adapter.get_klines(
+            "600519.SH", start_ms=date_to_ms("2026-06-01"), end_ms=date_to_ms("2026-07-01")
+        )
+        assert bars
+        assert bars[0].symbol == "600519"
+        assert bars[0].volume > 0
+        assert bars[0].extra["upstream"] == "stock_zh_a_daily"
+        assert bars[0].source == "AKShare"
+
+    @pytest.mark.asyncio
+    async def test_tx_golden_hand_to_share(self) -> None:
+        """腾讯上游: volume 单位=手 → ×100; extra.upstream 标注."""
+        golden = GOLDEN / "kline_tx_000001.json"
+        if not golden.exists():
+            pytest.skip("kline_tx golden 未录制")
+        adapter = make_adapter_raising(
+            {"stock_zh_a_hist_tx": load_golden("kline_tx_000001")},
+            {
+                "stock_zh_a_hist": SourceDownError(
+                    "eastmoney blocked",
+                    source="AKShare",
+                    vendor="akshare",
+                    endpoint="stock_zh_a_hist",
+                ),
+                "stock_zh_a_daily": SourceDownError(
+                    "sina down", source="AKShare", vendor="akshare", endpoint="stock_zh_a_daily"
+                ),
+            },
+        )
+        bars = await adapter.get_klines(
+            "000001.SZ", start_ms=date_to_ms("2026-06-01"), end_ms=date_to_ms("2026-07-01")
+        )
+        assert bars
+        assert bars[0].symbol == "000001"
+        assert bars[0].extra["upstream"] == "stock_zh_a_hist_tx"
+        assert bars[0].volume > 0
+
+    @pytest.mark.asyncio
+    async def test_fallback_sina_when_eastmoney_down(self) -> None:
+        """东财 SourceDown (IP 封锁) → 新浪接管, 结果带 upstream 标注."""
+        adapter = make_adapter_raising(
+            {"stock_zh_a_daily": _SINA_ROWS},
+            {
+                "stock_zh_a_hist": SourceDownError(
+                    "eastmoney blocked",
+                    source="AKShare",
+                    vendor="akshare",
+                    endpoint="stock_zh_a_hist",
+                )
+            },
+        )
+        bars = await adapter.get_klines("600519.SH", start_ms=1, end_ms=2)
+        assert bars[0].extra["upstream"] == "stock_zh_a_daily"
+        assert bars[0].volume == 100.0  # 新浪 volume 单位=股, 不转换
+
+    @pytest.mark.asyncio
+    async def test_fallback_tx_when_sina_down(self) -> None:
+        """东财+新浪都挂 → 腾讯接管; volume 手→股."""
+        down = SourceDownError("down", source="AKShare", vendor="akshare")
+        adapter = make_adapter_raising(
+            {"stock_zh_a_hist_tx": _TX_ROWS},
+            {"stock_zh_a_hist": down, "stock_zh_a_daily": down},
+        )
+        bars = await adapter.get_klines("000001.SZ", start_ms=1, end_ms=2)
+        assert bars[0].extra["upstream"] == "stock_zh_a_hist_tx"
+        assert bars[0].volume == 10000.0  # 100 手 → 10000 股
+
+    @pytest.mark.asyncio
+    async def test_all_upstreams_down_raises_with_context(self) -> None:
+        """三上游全挂 → SourceDownError 带全部上游上下文 (交路由链降级)."""
+        down = SourceDownError("down", source="AKShare", vendor="akshare")
+        adapter = make_adapter_raising(
+            {},
+            {
+                "stock_zh_a_hist": down,
+                "stock_zh_a_daily": down,
+                "stock_zh_a_hist_tx": FinTimeoutError("slow", source="AKShare", vendor="akshare"),
+            },
+        )
+        with pytest.raises(
+            SourceDownError, match="stock_zh_a_hist.*stock_zh_a_daily.*stock_zh_a_hist_tx"
+        ):
+            await adapter.get_klines("600519.SH", start_ms=1, end_ms=2)
+
+    @pytest.mark.asyncio
+    async def test_no_data_does_not_switch_upstream(self) -> None:
+        """东财返回空 → 返回空结果, 不切上游 (空值纪律: 不模拟)."""
+        called: list[str] = []
+        adapter = AKShareAdapter(min_interval_s=0.0)
+
+        async def fake_call(fn_name: str, fn: Any, **kw: Any) -> list[dict]:
+            called.append(fn_name)
+            return []
+
+        adapter._call = fake_call  # type: ignore[method-assign]
+        bars = await adapter.get_klines("600519.SH", start_ms=1, end_ms=2)
+        assert bars == []
+        assert called == ["stock_zh_a_hist"]
 
 
 class TestQuote:

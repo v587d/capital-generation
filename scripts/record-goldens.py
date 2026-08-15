@@ -29,9 +29,16 @@ CASES: dict[str, tuple[object, dict]] = {
             "adjust": "",
         },
     ),
-    "income_600519": (
-        ak.stock_financial_report_sina, {"stock": "sh600519", "symbol": "利润表"}
+    # v0.1.1 备用上游 (LESSONS §5.4 东财封锁常态): 新浪/腾讯 golden 已录, 东财保持 skip
+    "kline_sina_600519": (
+        ak.stock_zh_a_daily,
+        {"symbol": "sh600519", "start_date": "20260601", "end_date": "20260701", "adjust": ""},
     ),
+    "kline_tx_000001": (
+        ak.stock_zh_a_hist_tx,
+        {"symbol": "sz000001", "start_date": "20260601", "end_date": "20260701", "adjust": ""},
+    ),
+    "income_600519": (ak.stock_financial_report_sina, {"stock": "sh600519", "symbol": "利润表"}),
     "indicators_600519": (ak.stock_financial_analysis_indicator, {"symbol": "600519"}),
     "calendar_sample": (ak.tool_trade_date_hist_sina, {}),
     "zt_pool_20260814": (ak.stock_zt_pool_em, {"date": "20260814"}),
@@ -45,6 +52,8 @@ CASES: dict[str, tuple[object, dict]] = {
 
 # push2 实时报价接口偶发被东财 IP 封锁 (stock_bid_ask_em); 封锁解除后补录:
 #   "quote_600519": (ak.stock_bid_ask_em, {"symbol": "600519"}),
+# v0.1.1: 东财 push2his 封锁未解除 (2026-08-15 重试仍 TCP 层 ConnectionError, LESSONS §5.4)
+#   → kline_600519_1m 保持显式 skip; 新浪/腾讯 golden 已录 (kline_sina_600519 / kline_tx_000001)
 
 
 def to_jsonable(df) -> list[dict]:

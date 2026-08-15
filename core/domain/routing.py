@@ -33,7 +33,8 @@ _BACKOFF_MS = (200, 400)  # RATE_LIMIT 退避序列 (×2), cap 3 tries 含首次
 _BREAKER_THRESHOLD = 5
 _BREAKER_COOLDOWN_S = 60.0
 
-# domain → adapter method (v0.1.0 六个 + v0.2.0 intraday/announcements/edb)
+# domain → adapter method (v0.1.0 六个 + v0.2.0 intraday/announcements/edb
+# + v0.3.0 fund/index 十二域, PLAN-0.3.0.md M3/M4)
 _METHODS: dict[str, str] = {
     "search": "search_symbols",
     "quote": "get_quote",
@@ -44,10 +45,22 @@ _METHODS: dict[str, str] = {
     "intraday": "get_intraday",
     "announcements": "get_announcements",
     "edb": "get_edb",
+    "fund_quote": "get_fund_quote",
+    "fund_nav": "get_fund_nav",
+    "fund_kline": "get_fund_kline",
+    "fund_holdings": "get_fund_holdings",
+    "fund_holders": "get_fund_holders",
+    "fund_performance": "get_fund_performance",
+    "fund_info": "get_fund_info",
+    "index_quote": "get_index_quote",
+    "index_kline": "get_index_kline",
+    "index_constituents": "get_index_constituents",
+    "index_fundamentals": "get_index_fundamentals",
+    "index_basicinfo": "get_index_basicinfo",
 }
 
 # 缓存 TTL (ms): 快照 30s, 其余当日
-_CACHE_TTL_MS = {"quote": 30_000}
+_CACHE_TTL_MS = {"quote": 30_000, "fund_quote": 30_000, "index_quote": 30_000}
 
 
 class Cache:
@@ -60,9 +73,7 @@ class Cache:
         ] = OrderedDict()
 
     @staticmethod
-    def _key(
-        domain: str, kwargs: dict[str, Any]
-    ) -> tuple[str, tuple[tuple[str, Any], ...]]:
+    def _key(domain: str, kwargs: dict[str, Any]) -> tuple[str, tuple[tuple[str, Any], ...]]:
         return (domain, tuple(sorted((k, repr(v)) for k, v in kwargs.items())))
 
     def get(self, domain: str, kwargs: dict[str, Any]) -> Envelope | None:
@@ -221,7 +232,8 @@ class Router:
             except Exception as e:  # noqa: BLE001 — adapter 必须抛 FinError; 兜底
                 raise InternalError(
                     f"{source_name(vendor_id)} 未分类异常: {type(e).__name__}: {e}",
-                    source=source_name(vendor_id), vendor=vendor_id,
+                    source=source_name(vendor_id),
+                    vendor=vendor_id,
                 ) from e
 
         if last_error is not None and last_error.kind == "NO_DATA":

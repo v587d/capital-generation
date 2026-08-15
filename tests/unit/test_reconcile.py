@@ -16,16 +16,31 @@ from core.domain.units import date_to_ms, ms_to_date
 
 def quote(symbol: str, price: float, volume: float = 1000.0, as_of_ms: int = 1_000_000) -> Quote:
     return Quote(
-        symbol=symbol, last_price=price, open_price=None, high_price=None,
-        low_price=None, prev_close=None, change_pct=None, volume=volume,
-        turnover=0.0, as_of_ms=as_of_ms, source="同花顺",
+        symbol=symbol,
+        last_price=price,
+        open_price=None,
+        high_price=None,
+        low_price=None,
+        prev_close=None,
+        change_pct=None,
+        volume=volume,
+        turnover=0.0,
+        as_of_ms=as_of_ms,
+        source="同花顺",
     )
 
 
 def kline(symbol: str, date: str, close: float, volume: float = 1000.0) -> Kline:
     return Kline(
-        symbol=symbol, date_ms=date_to_ms(date), open=close, high=close, low=close,
-        close=close, volume=volume, turnover=0.0, source="同花顺",
+        symbol=symbol,
+        date_ms=date_to_ms(date),
+        open=close,
+        high=close,
+        low=close,
+        close=close,
+        volume=volume,
+        turnover=0.0,
+        source="同花顺",
     )
 
 
@@ -33,9 +48,12 @@ class StubTHS(BaseAdapter):
     vendor_id = "ths"
     capabilities = frozenset({"quote", "klines"})
 
-    def __init__(self, quotes: dict[str, Quote] | None = None,
-                 klines: dict[str, list[Kline]] | None = None,
-                 fail: str | None = None) -> None:
+    def __init__(
+        self,
+        quotes: dict[str, Quote] | None = None,
+        klines: dict[str, list[Kline]] | None = None,
+        fail: str | None = None,
+    ) -> None:
         self._quotes = quotes or {}
         self._klines = klines or {}
         self._fail = fail
@@ -55,9 +73,12 @@ class StubAK(BaseAdapter):
     vendor_id = "akshare"
     capabilities = frozenset({"quote", "klines"})
 
-    def __init__(self, quotes: dict[str, Quote] | None = None,
-                 klines: dict[str, list[Kline]] | None = None,
-                 fail: str | None = None) -> None:
+    def __init__(
+        self,
+        quotes: dict[str, Quote] | None = None,
+        klines: dict[str, list[Kline]] | None = None,
+        fail: str | None = None,
+    ) -> None:
         self._quotes = quotes or {}
         self._klines = klines or {}
         self._fail = fail
@@ -124,14 +145,22 @@ async def test_quote_source_down_warning() -> None:
 
 
 async def test_klines_align_by_date_ms() -> None:
-    ths = StubTHS(klines={"600519.SH": [
-        kline("600519.SH", "2026-07-01", 100.0),
-        kline("600519.SH", "2026-07-02", 101.0),
-    ]})
-    ak = StubAK(klines={"600519.SH": [
-        kline("600519.SH", "2026-07-01", 100.2),
-        kline("600519.SH", "2026-07-03", 99.0),  # 07-02 缺失, 07-03 单边
-    ]})
+    ths = StubTHS(
+        klines={
+            "600519.SH": [
+                kline("600519.SH", "2026-07-01", 100.0),
+                kline("600519.SH", "2026-07-02", 101.0),
+            ]
+        }
+    )
+    ak = StubAK(
+        klines={
+            "600519.SH": [
+                kline("600519.SH", "2026-07-01", 100.2),
+                kline("600519.SH", "2026-07-03", 99.0),  # 07-02 缺失, 07-03 单边
+            ]
+        }
+    )
     rep = await reconcile_klines(
         ths, ak, "600519.SH", date_to_ms("2026-07-01"), date_to_ms("2026-07-03")
     )

@@ -58,9 +58,27 @@ async def main() -> int:
                 ("fin_data__reconcile", {"domain": "quote", "symbols": "600519,000001"}),
                 (
                     "fin_data__reconcile",
-                    {"domain": "klines", "symbols": "600519",
-                     "start": "2026-07-01", "end": "2026-07-10"},
+                    {
+                        "domain": "klines",
+                        "symbols": "600519",
+                        "start": "2026-07-01",
+                        "end": "2026-07-10",
+                    },
                 ),
+                # v0.3.0 fund/index (THS 主干; 需 THS key)
+                ("fin_data__get_fund_data", {"symbol": "510300", "kind": "nav"}),
+                ("fin_data__get_fund_data", {"symbol": "510300", "kind": "holdings"}),
+                (
+                    "fin_data__get_fund_data",
+                    {
+                        "symbol": "510300",
+                        "kind": "kline",
+                        "start": "2026-07-01",
+                        "end": "2026-07-10",
+                    },
+                ),
+                ("fin_data__get_index_data", {"symbol": "000300", "kind": "quote"}),
+                ("fin_data__get_index_data", {"symbol": "000300", "kind": "constituents"}),
             ]
             if os.environ.get("WIND_API_KEY"):
                 cases += [
@@ -70,15 +88,26 @@ async def main() -> int:
                     ),
                     (
                         "fin_data__get_klines",
-                        {"symbol": "600519", "period": "5m",
-                         "start": "2026-07-08", "end": "2026-07-08"},
+                        {
+                            "symbol": "600519",
+                            "period": "5m",
+                            "start": "2026-07-08",
+                            "end": "2026-07-08",
+                        },
                     ),
                     (
                         "fin_data__get_announcements",
-                        {"symbol": "600519", "start": "2025-01-01", "end": "2025-12-31",
-                         "top_k": 2},
+                        {
+                            "symbol": "600519",
+                            "start": "2025-01-01",
+                            "end": "2025-12-31",
+                            "top_k": 2,
+                        },
                     ),
                     ("fin_data__get_edb", {"indicator": "中国GDP", "observation": 3}),
+                    # v0.3.0 Wind 补缺: LOF/OTC 基金快照 (THS 3004 → Wind 分钟行情兜底)
+                    ("fin_data__get_fund_data", {"symbol": "000037", "kind": "quote"}),
+                    ("fin_data__get_index_data", {"symbol": "000300", "kind": "fundamentals"}),
                 ]
             else:
                 print("\n(WIND_API_KEY 未设置, 跳过 Wind 用例)")

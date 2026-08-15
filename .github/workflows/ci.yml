@@ -1,0 +1,19 @@
+# 可选: GitHub Actions CI (仓库尚无 remote; remote 就位后启用)
+# 本地 gate 见 scripts/ci.py (v0.3.0 M6); 本 workflow 为未来 remote 预留。
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - name: CI (ruff + pytest 离线 + 契约漂移)
+        run: uv run python scripts/ci.py
