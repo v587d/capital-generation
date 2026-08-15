@@ -186,6 +186,15 @@ class WindAdapter(BaseAdapter):
                     vendor=self.vendor_id,
                     endpoint=server,
                 ) from e
+            except httpx.ConnectError as e:
+                # 连接层失败 (DNS/网络不可达) — 与业务错误区分: 稍后重试/检查网络
+                # (2026-08-15 实测: 沙箱代理链路瞬时抖动会间歇 ConnectError)
+                raise SourceDownError(
+                    f"Wind {server}.{tool} 网络不可达 (ConnectError): {e} — 请稍后重试或检查网络",
+                    source=source_name(self.vendor_id),
+                    vendor=self.vendor_id,
+                    endpoint=server,
+                ) from e
             except httpx.HTTPError as e:
                 raise SourceDownError(
                     f"Wind {server}.{tool} 网络错误: {type(e).__name__}: {e}",

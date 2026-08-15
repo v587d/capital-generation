@@ -444,3 +444,26 @@ async def test_fund_holders_fallback(adapter: WindAdapter) -> None:
     stmts = await adapter.get_fund_holders("158001.SZ", asset_type="fund-etf", name="价值ETF嘉实")
     assert stmts and stmts[0].statement == "holders"
     assert stmts[0].rows  # question 类兜底, 列以响应为准 (fixture 为 info 表)
+
+
+async def test_connect_error_message_hint() -> None:
+    """ConnectError → SourceDownError 带网络提示 (2026-08-15 实测抖动, 可诊断性)."""
+    import httpx as _httpx
+
+    from core.domain.units import date_to_ms
+
+    def handler(request: _httpx.Request) -> _httpx.Response:
+        raise _httpx.ConnectError("connection refused", request=request)
+
+    client = _httpx.AsyncClient(transport=_httpx.MockTransport(handler), timeout=10.0)
+    a = WindAdapter("ak_test", client=client)
+    try:
+        with pytest.raises(SourceDownError, match="网络不可达.*请稍后重试"):
+            await a.get_announcements(
+                "300803.SZ",
+                start_ms=date_to_ms("2026-07-01"),
+                end_ms=date_to_ms("2026-08-15"),
+                top_k=10,
+            )
+    finally:
+        await a.aclose()
