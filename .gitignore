@@ -1,0 +1,26 @@
+# secrets — never commit
+KEYS*
+*.pem
+*.key
+.env
+.env.*
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# runtime data & downloads (dump parquet, live cassettes with real keys)
+data/
+dumps/
+tests/fixtures/live/
+
+# local editor stuff
+.idea/
+.vscode/
+*.swp
