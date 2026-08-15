@@ -31,6 +31,14 @@
     Key 保管走 DSH credentials 服务,不塞进 cordis.yml 明文。
 11. **DSH 接入形态:Python 统一 MCP server(FastMCP)+ dsh-mcp-client stdio 一条配置,TS 零代码**
     直连官方 MCP 是方案 A(~70 散装工具、无降级),原生 TS 插件是方案 C(重复造轮子)。
+12. **v0.2.0 工具面变更 schema 评审记录 (2026-08-15 用户批准, PLAN-0.2.0.md §2.3)**
+    - `fin_data__get_klines.period` 扩展 `1m/5m/15m/30m/60m`(向后兼容枚举扩展; 分钟线仅单交易日
+      `start==end`, Wind 独家无降级源; 周/月/季明确拒绝) — 用户裁定"扩展 period 而非新工具"
+    - 新增 `fin_data__get_announcements(symbol, start, end, top_k)` — Wind 独家 RAG, 无降级源
+    - 新增 `fin_data__get_edb(indicator, start, end, observation)` — Wind 主干, AKShare 白名单兜底
+    - 新增 `fin_data__reconcile(domain, symbols, start, end, tolerance_pct)` — 对账引擎
+      (未复权+免费源间; 分歧不自动修复, 交 LLM 裁决; 信封 `source=""` + `engine: "reconcile"`)
+    - v0.1.0 六个工具名与 schema 一字不动 (冻结契约保持)
 
 ## 结构(为什么不再 refactor)
 

@@ -60,7 +60,11 @@ class Quote:
 
 @dataclass(frozen=True)
 class Kline:
-    """L1 + L2: one OHLCV bar. adjust is an L3 declaration, never converted."""
+    """L1 + L2: one OHLCV bar. adjust is an L3 declaration, never converted.
+
+    `period` (1d / 1m / 5m / 15m / 30m / 60m) tags the bar frequency; intraday
+    bars are Wind-exclusive (v0.2.0, single trading day window).
+    """
 
     symbol: str
     date_ms: int  # L2: Asia/Shanghai ms
@@ -71,6 +75,7 @@ class Kline:
     volume: float  # L2: 股
     turnover: float
     currency: str = "CNY"
+    period: str = "1d"  # L3: bar frequency tag (1d / 1m / 5m / 15m / 30m / 60m)
     adjust: str = "none"  # L3: none/forward/backward — declared only
     source: str = ""  # 规范名
     tier: str = ""  # free/quota/paid
@@ -85,11 +90,15 @@ class FinancialStatement:
     Statement rows keep vendor field names verbatim (`rows` as dicts is deliberate:
     statement line items are vendor-defined and must not be normalized — see
     docs/DATA_MODEL.md L3 "annotate only, never convert").
+
+    `report_date_ms` is None when the source does not declare a report period
+    (e.g. Wind fundamentals answer rows key periods in column names, and Wind
+    price-indicators are point-in-time — see docs/LESSONS.md §5.2/§7).
     """
 
     symbol: str
     statement: str  # income / balance / cashflow / indicators
-    report_date_ms: int  # report period date (Asia/Shanghai ms)
+    report_date_ms: int | None  # report period date (Asia/Shanghai ms), None = 源未声明
     rows: tuple[dict[str, Any], ...]
     currency: str = "CNY"
     caliber: str = ""  # L3 tag: 年度/季度/半年度/TTM/MRQ
@@ -121,6 +130,50 @@ class CalendarDay:
     source: str = ""
     tier: str = ""
     degraded: bool = False
+
+
+@dataclass(frozen=True)
+class Announcement:
+    """Wind-exclusive announcement RAG hit (financial_docs.get_company_announcements).
+
+    `content` is the announcement text verbatim (L3 passthrough); the vendor also
+    reports title / publish date / relevance / url.
+    """
+
+    symbol: str
+    title: str
+    date_ms: int  # 公告发布日期 (Asia/Shanghai ms)
+    content: str
+    url: str = ""
+    source: str = ""  # 规范名
+    tier: str = ""  # free/quota/paid
+    degraded: bool = False
+    extra: dict[str, Any] = field(default_factory=dict)  # doc_type / relevance 等
+
+
+@dataclass(frozen=True)
+class EDBPoint:
+    """One EDB (宏观/行业指标) observation — Wind EDB or AKShare 白名单兜底.
+
+    L3: unit / magnitude / freq / currency are *annotated*, never converted
+    (docs/DATA_MODEL.md 铁律: 只做物理单位转换, 不做语义转换).
+    `date_ms` is None when the source period label cannot be parsed (AKShare
+    兜底用 label + extra 标注, 不猜日期).
+    """
+
+    indicator: str  # 指标名称 (Wind: meta.name; AKShare: 白名单别名)
+    code: str  # Wind EDB 指标代码 (如 M5567876); AKShare 兜底为白名单 key
+    date_ms: int | None  # Asia/Shanghai ms (yyyyMMdd); None = 源未给出可解析日期
+    value: float | None  # 原始值 (INVALID → None, 不猜)
+    unit: str = ""  # L3 标注: 亿元 / % / 万元 ...
+    magnitude: str = ""  # L3 标注: 亿 / 万 / 10k ...
+    freq: str = ""  # L3 标注: 季 / 月 / 年 ...
+    currency: str = ""  # L3 标注
+    date_label: str = ""  # 源给出的原始日期/期间标签 (AKShare 兜底)
+    source: str = ""  # 规范名
+    tier: str = ""  # free/quota/paid
+    degraded: bool = False
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 # ──────────────────────────────────────────────────────────────────────

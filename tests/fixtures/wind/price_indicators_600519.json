@@ -1,0 +1,13 @@
+{
+ "jsonrpc": "2.0",
+ "id": 1,
+ "result": {
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"data\": {\"columns\": [{\"name\": \"中文简称\", \"type\": \"string\"}, {\"name\": \"最新成交价\", \"type\": \"string\"}, {\"name\": \"涨跌幅\", \"type\": \"string\"}, {\"name\": \"成交量\", \"type\": \"string\"}, {\"name\": \"市盈率(TTM)\", \"type\": \"string\"}, {\"name\": \"市净率(LF)\", \"type\": \"string\"}, {\"name\": \"总市值1\", \"type\": \"string\"}, {\"name\": \"Wind代码\", \"type\": \"string\"}], \"rows\": [[\"贵州茅台\", \"1341.99\", \"-0.98\", \"2985315\", \"20.282\", \"7.204\", \"1.6776e+12\", \"600519.SH\"]], \"unit\": {\"总市值1\": \"元\", \"成交量\": \"股\", \"最新成交价\": \"元\"}}, \"error\": null}"
+   }
+  ],
+  "isError": false
+ }
+}

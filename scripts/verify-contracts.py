@@ -1,25 +1,31 @@
-"""Contract drift check — THS adapter endpoints vs official llms-full.txt (M7).
+"""Contract drift check — THS adapter endpoints vs official llms-full.txt (M7),
+Wind adapter tools vs official tool-manifest (v0.2.0 M0/M5).
 
 docs/LESSONS.md §4.2: vendor contracts drift; the machine-readable contract
-(https://fuyao.aicubes.cn/llms-full.txt) is the baseline. This script diffs the
-endpoints the adapter actually calls against the contract and reports:
-- MISSING: adapter endpoint not in the contract → vendor renamed/removed it (drift!)
-- UNCOVERED: contract endpoint the adapter does not use → informational (coverage gap)
-- alias match: docs may omit the /api prefix → tolerated (LESSONS §4.2)
+(THS: https://fuyao.aicubes.cn/llms-full.txt; Wind: 官方 wind-skills 仓库
+scripts/tool-manifest.json, 快照在 config/wind/manifest.json) is the baseline.
+This script diffs what the adapters actually use against the contract and reports:
+- MISSING: adapter uses something not in the contract → vendor renamed/removed it (drift!)
+- UNCOVERED: contract surface the adapter does not use → informational (coverage gap)
+- alias match: THS docs may omit the /api prefix → tolerated (LESSONS §4.2)
 
 Usage:
     uv run python scripts/verify-contracts.py           # needs network
     uv run python scripts/verify-contracts.py --offline  # cached copy
+    uv run python scripts/verify-contracts.py --wind     # Wind manifest diff (离线)
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
 
 import httpx
+
+from core.config import CONFIG_DIR, load_yaml
 
 CONTRACT_URL = "https://fuyao.aicubes.cn/llms-full.txt"
 ADAPTER = Path(__file__).resolve().parents[1] / "core" / "adapters" / "ths.py"
@@ -48,8 +54,13 @@ def normalize(p: str) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--offline", action="store_true", help="use cached contract copy")
+    ap.add_argument("--offline", action="store_true", help="use cached THS contract copy")
+    ap.add_argument("--wind", action="store_true",
+                    help="Wind 契约漂移检查 (本地官方 manifest 快照, 无需网络)")
     args = ap.parse_args()
+
+    if args.wind:
+        return verify_wind()
 
     if args.offline:
         if not OFFLINE_CONTRACT.exists():
@@ -83,6 +94,34 @@ def main() -> int:
     for p in uncovered:
         print(f"   {p}")
 
+    return 1 if missing else 0
+
+
+def verify_wind() -> int:
+    """Wind: config/wind_tools.yaml 使用的工具 ⊆ 官方 tool-manifest 快照."""
+    cfg = load_yaml("wind_tools.yaml")
+    used: set[str] = set()
+    for entry in cfg["tool_by_domain"].values():
+        if isinstance(entry, dict) and "tool" in entry:
+            used.add(entry["tool"])
+        else:
+            for e in entry.values():
+                if isinstance(e, dict) and "tool" in e:
+                    used.add(e["tool"])
+
+    manifest_path = CONFIG_DIR / "wind" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    official = {t for tools in manifest.values() for t in tools}
+
+    missing = sorted(used - official)
+    print(f"Wind 契约基线: {manifest_path} (官方 wind-skills tool-manifest 快照)")
+    print(f"适配器使用 {len(used)} 个工具: {sorted(used)}")
+    if missing:
+        print("❌ DRIFT — 适配器在用但官方 manifest 没有 (工具改名/下线, 需立即处理):")
+        for t in missing:
+            print(f"   {t}")
+    else:
+        print("✅ 无漂移: 适配器全部 Wind 工具都在官方 manifest 中")
     return 1 if missing else 0
 
 

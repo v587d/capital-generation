@@ -86,7 +86,7 @@
 |---|---|
 | **v0.1.1（已记录在案，未排期）** | ① kline 兜底加备用上游：akshare 适配器内 东财 → 新浪(`stock_zh_a_daily`) → 腾讯(`stock_zh_a_hist_tx`) 顺序尝试，各配 golden（2026-08-15 实测：东财 push2his/push2 对本机 IP 限频间歇不可用，新浪/腾讯稳定，见 LESSONS §5.4）② 补录 kline golden（东财限频解除后或换网络执行 `record-goldens.py`；当前测试显式 skip） |
 | v0.2.0 | Wind 适配器（按需接线，fund/index/analytics 域待决策）+ 对账引擎（未复权、免费源间）+ 分钟线/公告/EDB/宏观域 + QUOTA 门控启用 |
-| v0.3.0 | dump 落盘 + 数据湖（参考 THS 官方 marketdb：四层表/复权因子推导/validate+rebuild 修复）+ symbols 自动同步 + CI 自动化 |
+| v0.3.0 | 数据湖（官方 marketdb CLI，离线资产不进 LLM）+ Wind fund/index 最小接线 + THS 基金/指数域 + symbols 自动同步 + CI 自动化 — 计划见 [`PLAN-0.3.0.md`](PLAN-0.3.0.md) |
 | v0.4.0 | `fin_agent__*` 编排层（数据层零改动） |
 
 ## 7. 风险

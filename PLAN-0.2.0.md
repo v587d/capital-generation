@@ -47,27 +47,27 @@
 
 | 里程碑 | 内容 | 估时 | 出口标准 | 状态 |
 |---|---|---|---|---|
-| M0 契约盘点与接线映射 | 拉取 Wind 官方 tool-manifest（机器可读）→ `config/wind_tools.yaml`（工具→域方法逐条映射）；live 逐项核实：三表可用性与响应形状、windcode 形态（股票 thscode 直通假设）、分钟线当日边界、EDB 两段式与日期参数风格、配额文本形态、MCP transport 形态；核实结论写回 `docs/LESSONS.md`；**决策门：若 Wind 三表不可用 → financials 保持 `[ths, akshare]`，Wind 只接公告/EDB/分钟线** | 1d | 映射表 + 核实记录 + LESSONS 更新 | ⏳ |
-| M1 Wind 适配器骨架 | mcp client 连接层（transport spike 落地）、**BaseAdapter 能力化重构**（抽象方法 → 显式 `capabilities` 集合；Router 跳过无能力源；核心契约变更，测试先行）、`error_map.yaml` wind 段（文本嗅探→QUOTA）、FinError 全上下文（vendor + tool + status + code + request_id + correction）、`tier=quota` 打标、串行并发纪律（会话锁、价格批量 ≤50）、BYOK（env `WIND_API_KEY` 等 → DSH credentials，cordis 示例 env 白名单补 `WIND_*`，THS 陷阱同款）、Wind fixture 录制/回放 | 2d | adapter 单测 + fixture 回放绿（CI 无实时网络）；真实 key live 冒烟（人工） | ⏳ |
-| M2 财务权威链 | `chains.yaml` 改 `financials: [wind, ths, akshare]`（代码不动）；0.000 陷阱（估值默认只问 市盈率(TTM)，PB 只信 THS `pb_mrq`，Wind 行 0 值带 extra 标注 + warnings）；indicators 口径核对；`aftype` 无不复权字面量（0=前复权）→ Wind 行永不当未复权用 | 1.5d | 双源对照测试绿（fixture 回放）；live 冒烟 | ⏳ |
-| M3 分钟线/公告/EDB 域 | 新域 `intraday`（仅当日、Wind 独家无备、周/月/季拒绝并在工具描述明示）、`announcements`、`edb`（两段式 + akshare 白名单宏观映射外置）；新工具注册 + klines period 扩展（**schema 评审记录落 DESIGN_REVIEW 决策 12**） | 2d | `tools/list` 9 工具全注册；单测绿 | ⏳ |
-| M4 对账引擎 | `core/domain/reconcile.py`：双源直取（绕链）、按 `(symbol, date_ms)`（K线）/ `(symbol, as_of_ms)`（快照）对齐、quote 数据时点时滞容差外置（如 5 分钟）、容差 0.5%（LESSONS §6 实测基准，外置 `config/reconcile.yaml`）、逐行 diff 报告 + 汇总（matched/mismatched）、**不自动修复**；`fin_data__reconcile` 工具注册；双源 fixture 回放测试 | 1.5d | 单测绿；实测对账报告样例（600519.SH / 000001.SZ） | ⏳ |
-| M5 验收 | live-probe 扩展（`WIND_API_KEY` 可选，缺省跳过）、`verify-contracts.py` 双源（THS llms-full.txt + Wind tool-manifest diff）、AKShare kline golden 补录（东财封锁解除后，仍封锁则保持显式 skip）、README/DEGRADATION（含 QUOTA 行为澄清）/DESIGN_REVIEW/DATA_MODEL 同步 | 1d | §4 验收清单全绿 | ⏳ |
+| M0 契约盘点与接线映射 | 拉取 Wind 官方 tool-manifest（机器可读）→ `config/wind_tools.yaml`（工具→域方法逐条映射）；live 逐项核实：三表可用性与响应形状、windcode 形态（股票 thscode 直通假设）、分钟线当日边界、EDB 两段式与日期参数风格、配额文本形态、MCP transport 形态；核实结论写回 `docs/LESSONS.md`；**决策门：若 Wind 三表不可用 → financials 保持 `[ths, akshare]`，Wind 只接公告/EDB/分钟线** | 1d | 映射表 + 核实记录 + LESSONS 更新 | ✅ 2026-08-15 |
+| M1 Wind 适配器骨架 | mcp client 连接层（transport spike 落地）、**BaseAdapter 能力化重构**（抽象方法 → 显式 `capabilities` 集合；Router 跳过无能力源；核心契约变更，测试先行）、`error_map.yaml` wind 段（文本嗅探→QUOTA）、FinError 全上下文（vendor + tool + status + code + request_id + correction）、`tier=quota` 打标、串行并发纪律（会话锁、价格批量 ≤50）、BYOK（env `WIND_API_KEY` 等 → DSH credentials，cordis 示例 env 白名单补 `WIND_*`，THS 陷阱同款）、Wind fixture 录制/回放 | 2d | adapter 单测 + fixture 回放绿（CI 无实时网络）；真实 key live 冒烟（人工） | ✅ 2026-08-15 |
+| M2 财务权威链 | `chains.yaml` 改 `financials: [wind, ths, akshare]`（代码不动）；0.000 陷阱（估值默认只问 市盈率(TTM)，PB 只信 THS `pb_mrq`，Wind 行 0 值带 extra 标注 + warnings）；indicators 口径核对；`aftype` 无不复权字面量（0=前复权）→ Wind 行永不当未复权用 | 1.5d | 双源对照测试绿（fixture 回放）；live 冒烟 | ✅ 2026-08-15 |
+| M3 分钟线/公告/EDB 域 | 新域 `intraday`（仅当日、Wind 独家无备、周/月/季拒绝并在工具描述明示）、`announcements`、`edb`（两段式 + akshare 白名单宏观映射外置）；新工具注册 + klines period 扩展（**schema 评审记录落 DESIGN_REVIEW 决策 12**） | 2d | `tools/list` 9 工具全注册；单测绿 | ✅ 2026-08-15 |
+| M4 对账引擎 | `core/domain/reconcile.py`：双源直取（绕链）、按 `(symbol, date_ms)`（K线）/ `(symbol, as_of_ms)`（快照）对齐、quote 数据时点时滞容差外置（如 5 分钟）、容差 0.5%（LESSONS §6 实测基准，外置 `config/reconcile.yaml`）、逐行 diff 报告 + 汇总（matched/mismatched）、**不自动修复**；`fin_data__reconcile` 工具注册；双源 fixture 回放测试 | 1.5d | 单测绿；实测对账报告样例（600519.SH / 000001.SZ） | ✅ 2026-08-15 |
+| M5 验收 | live-probe 扩展（`WIND_API_KEY` 可选，缺省跳过）、`verify-contracts.py` 双源（THS llms-full.txt + Wind tool-manifest diff）、AKShare kline golden 补录（东财封锁解除后，仍封锁则保持显式 skip）、README/DEGRADATION（含 QUOTA 行为澄清）/DESIGN_REVIEW/DATA_MODEL 同步 | 1d | §4 验收清单全绿 | ✅ 2026-08-15 |
 
 合计 ≈ 9 天（+20% buffer ≈ 11 天）。**顺序理由**：M0 先行——Wind 一切接线的事实基础（transport / 三表可用性 / windcode 假设都需实测确认，M0 是决策门）；M1 先做能力化重构（BaseAdapter 是唯一跨层契约，先改先测）；M2 一行配置验证主干设计；M3 新域在骨架之后；M4 对账须双源齐备；M5 收官。
 
 ## 4. 验收清单（v0.2.0 出口）
 
-- [ ] `financials` 链头为 Wind：正常返回 `source: Wind` + `tier: quota`；Wind 不可用时按链降级 THS/AKShare（degraded 可观测，禁止静默降级）
-- [ ] QUOTA 门控真触发：文本嗅探 → 触发调用报 QUOTA 错误并门控 1 天 → 到期自动恢复（模拟测试 + live 验证）；门控期内跳过 Wind、链内下一源出 degraded 结果
-- [ ] 9 个工具全部注册（6 冻结 + 3 新增），klines period 扩展生效且 `1d` 行为与 v0.1.0 完全一致；schema 评审记录落档（DESIGN_REVIEW 决策 12）
-- [ ] 对账：600519.SH / 000001.SZ quote+klines（未复权）双源对照，报告含逐行 diff + 双源数据时点，不自动修复；数据时点时滞不入误报
-- [ ] 分钟线仅当日单日；周/月/季明确拒绝；无降级源明确告知
-- [ ] 公告/EDB Wind 独家标注；EDB 两段式（指标简称检索）；AKShare 兜底仅白名单宏观指标
-- [ ] Wind 纪律：默认串行、价格指标批量 ≤50、请求中永不出现 `.TI`（windcode 语义按源区分）、`correction` 只记录不自动重查
-- [ ] CI 离线全绿：Wind fixture 回放 + AKShare golden（含新增宏观 golden）；kline golden 补录（若封锁解除）
-- [ ] source 取值规范不变：信封/工具返回值一律 `同花顺` / `Wind` / `AKShare`
-- [ ] v0.1.0 判定表行为回归绿：AUTH/PARAM/QUOTA 不重试不换源；RATE_LIMIT 退避不换源；TIMEOUT/NO_DATA/SOURCE_DOWN 链内换源
+- [x] `financials` 链头为 Wind：正常返回 `source: Wind` + `tier: quota`（live-probe 实测 indicators：PE-TTM 20.282/市净率(LF) 7.204）；Wind 不可用时按链降级 THS（degraded 可观测）
+- [x] QUOTA 门控真触发：error_map wind 稳定码（DAILY_LIMIT/BALANCE → QUOTA）+ 文本嗅探（单日请求次数超限/余额不足/积分/配额）→ 门控 1 天自动恢复；门控期内跳过 Wind、链内下一源 degraded（routing 单测沿用 + test_wind 码映射断言）
+- [x] 9 个工具全部注册（live-probe tools/list 9/9），klines period 扩展生效且 `1d` 行为与 v0.1.0 完全一致（回归测试）；schema 评审记录落档（DESIGN_REVIEW 决策 12）
+- [x] 对账：quote+klines 未复权双源对照（live-probe 实测，报告含逐行 diff + 双源数据时点）；东财封锁期 AKShare 侧正确报"单边缺失"（可观测，不误报为分歧）；时滞超窗跳过（单测）；不自动修复（单测）
+- [x] 分钟线仅当日单日（工具层强制 start==end，单测+live）；周/月/季明确拒绝（ParamError）；无降级源明确告知（工具描述 + instructions）
+- [x] 公告 Wind 独家标注（无降级源告知）；EDB 搜索并提数（指标简称，live 实测中国GDP）；AKShare 兜底仅白名单 5 指标（golden 全录，白名单外 NO_DATA 单测）
+- [x] Wind 纪律：默认串行（asyncio.Lock 单测覆盖初始化握手一次）、指标批量 ≤50（单标的）；请求只发 canonical 码（无 .TI）；correction 只记录不自动重查（错误上下文保留）
+- [x] CI 离线全绿：Wind fixture 回放 14 条（含错误信封）+ AKShare golden（5 条宏观已录）；kline golden 东财封锁未解除，维持显式 skip
+- [x] source 取值规范不变：信封/工具返回值一律 `同花顺` / `Wind` / `AKShare`（对账报告行自带规范名键）
+- [x] v0.1.0 判定表行为回归绿：139 单测全绿（AUTH/PARAM/QUOTA 不重试不换源；RATE_LIMIT 退避；TIMEOUT/NO_DATA/SOURCE_DOWN 链内换源）
 
 ## 5. 关键机制要求（源自 LESSONS，实现时对照）
 

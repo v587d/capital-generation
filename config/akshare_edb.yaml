@@ -1,0 +1,19 @@
+# AKShare EDB 兜底白名单 (edb 域降级用; docs/DEGRADATION.md + PLAN-0.2.0.md M3)
+# 仅这些指标可兜底; 其余返回 NO_DATA 提示走 Wind (AKShare 宏观口径与 Wind EDB 不同, L3 标注不转换)。
+# 升级 akshare 前先跑 golden 回归 (tests/golden/akshare/edb_*.json)。
+indicators:
+  gdp:
+    function: macro_china_gdp_yearly
+    aliases: [gdp, 国内生产总值]
+  cpi:
+    function: macro_china_cpi
+    aliases: [cpi, 居民消费价格]
+  pmi:
+    function: macro_china_pmi
+    aliases: [pmi, 采购经理]
+  money_supply:
+    function: macro_china_money_supply
+    aliases: [货币供应, m2]
+  shrzgm:
+    function: macro_china_shrzgm
+    aliases: [社会融资, shrzgm]

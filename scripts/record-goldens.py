@@ -35,6 +35,12 @@ CASES: dict[str, tuple[object, dict]] = {
     "indicators_600519": (ak.stock_financial_analysis_indicator, {"symbol": "600519"}),
     "calendar_sample": (ak.tool_trade_date_hist_sina, {}),
     "zt_pool_20260814": (ak.stock_zt_pool_em, {"date": "20260814"}),
+    # v0.2.0 EDB 白名单兜底 (config/akshare_edb.yaml → 域 edb 降级链)
+    "edb_gdp": (ak.macro_china_gdp_yearly, {}),
+    "edb_cpi": (ak.macro_china_cpi, {}),
+    "edb_pmi": (ak.macro_china_pmi, {}),
+    "edb_money_supply": (ak.macro_china_money_supply, {}),
+    "edb_shrzgm": (ak.macro_china_shrzgm, {}),
 }
 
 # push2 实时报价接口偶发被东财 IP 封锁 (stock_bid_ask_em); 封锁解除后补录:

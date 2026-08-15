@@ -1,6 +1,7 @@
-# Vendor error code → FinError kind (docs/DEGRADATION.md 判定表, LESSONS §4.5).
+# Vendor error → FinError kind (docs/DEGRADATION.md 判定表, LESSONS §4.5).
 # 外置配置:新源接入只声明自己的错误码映射,不改路由代码。
 # 语义:1xxx/2xxx 可修复不重试;4xxx 退避重试;5xxx 退避后换源;3001/3002 换源一次。
+# 稳定码优先 (Wind 官方 ERROR_PATTERNS 稳定码), 文本嗅探兜底 (text_patterns)。
 
 ths:
   1001: PARAM        # 缺少必填参数
@@ -22,8 +23,41 @@ ths:
   "429": RATE_LIMIT
   "5xx": SOURCE_DOWN
 
-# wind: v0.2.0 接入时声明(如 积分/配额 文本 → QUOTA)
-wind: {}
+# Wind: 稳定错误码 (官方 ERROR_PATTERNS, 2026-08-15 由官方 CLI 契约核实)
+wind:
+  AUTH_ERROR: AUTH                # 密钥无效/认证失败
+  DAILY_LIMIT_ERROR: QUOTA        # 单日请求次数超限 (门控 1 天, 对齐每日重置)
+  BALANCE_ERROR: QUOTA            # 余额不足 (门控 1 天)
+  RATE_LIMIT_ERROR: RATE_LIMIT    # QPS 限流 (退避同源, 不换源)
+  CONCURRENCY_LIMIT_ERROR: RATE_LIMIT  # 工具并发超限 (退避同源)
+  NO_RESULTS: NO_DATA             # 未获取到数据
+  EDB_INDICATOR_NOT_FOUND: NO_DATA      # EDB 指标未找到 (业务码 1003)
+  MARKET_TARGET_NOT_FOUND: NO_DATA      # 行情标未识别
+  PARAM_TYPE_ERROR: PARAM
+  PARAM_VALIDATION_ERROR: PARAM
+  INVALID_PARAM_VALUE: PARAM
+  INVALID_PARAM_NAME: PARAM
+  PERIOD_PARSE_ERROR: PARAM
+  NETWORK_ERROR: SOURCE_DOWN      # 服务不可用
+  TEMPORARILY_UNAVAILABLE: SOURCE_DOWN
+  TOOL_RUNTIME_ERROR: INTERNAL
+  # HTTP 层 (实测: 坏 key 返回 HTTP 200 + isError "认证失败" → 走文本嗅探)
+  "401": AUTH
+  "403": AUTH
+  "429": RATE_LIMIT
+  "5xx": SOURCE_DOWN
+
+# 文本嗅探兜底 (判定表外置; 正则命中即分类, 顺序优先)
+text_patterns:
+  wind:
+    - {pattern: "未识别到有效的金融标的|未识别实体|未识别到有效|ner_error", kind: NO_DATA}
+    - {pattern: "认证失败|密钥无效|unauthorized|认证/权限", kind: AUTH}
+    - {pattern: "没找到数据|未获取到数据|NO_RESULTS|QUERY_FAILED", kind: NO_DATA}
+    - {pattern: "没有搜索到指标|indicator_not_found", kind: NO_DATA}
+    - {pattern: "单日请求次数超限|余额不足|请先充值|积分|配额|quota", kind: QUOTA}
+    - {pattern: "请求过于频繁|qps.*limit|rate.*limit|并发请求数量超限", kind: RATE_LIMIT}
+    - {pattern: "参数格式不正确|参数.*不合法|缺少必填参数|missing required|invalid_param", kind: PARAM}
+    - {pattern: "服务.*不可用|temporarily_unavailable|网关", kind: SOURCE_DOWN}
 
 akshare:
   "rate_limit": RATE_LIMIT

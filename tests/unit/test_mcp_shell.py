@@ -12,7 +12,10 @@ from servers import mcp_data
 from servers.mcp_data import (
     render_ambiguity,
     render_envelope,
+    tool_get_announcements,
     tool_get_calendar,
+    tool_get_edb,
+    tool_get_financials,
     tool_get_klines,
     tool_get_quote,
     tool_get_special_data,
@@ -148,8 +151,83 @@ class TestToolLogic:
         assert kw["date"] == "2026-08-14"
 
 
+class TestToolLogicV02:
+    """v0.2.0 新工具与 period 扩展 (PLAN-0.2.0.md §2.3)."""
+
+    @pytest.mark.asyncio
+    async def test_klines_daily_still_routes_klines(self) -> None:
+        router = FakeRouter(result=[])
+        await tool_get_klines(router, RESOLVER, "600519", "1d",
+                              start="2026-07-01", end="2026-07-10")
+        domain, kw = router.calls[0]
+        assert domain == "klines"
+        assert kw["adjust"] == "none"
+
+    @pytest.mark.asyncio
+    async def test_klines_minute_routes_intraday(self) -> None:
+        router = FakeRouter(result=[])
+        await tool_get_klines(router, RESOLVER, "600519", "5m",
+                              start="2026-07-08", end="2026-07-08")
+        domain, kw = router.calls[0]
+        assert domain == "intraday"
+        assert kw["period"] == "5m"
+
+    @pytest.mark.asyncio
+    async def test_klines_minute_requires_single_day(self) -> None:
+        router = FakeRouter(result=[])
+        with pytest.raises(ParamError):
+            await tool_get_klines(router, RESOLVER, "600519", "5m",
+                                  start="2026-07-08", end="2026-07-09")
+
+    @pytest.mark.asyncio
+    async def test_klines_weekly_rejected(self) -> None:
+        router = FakeRouter(result=[])
+        with pytest.raises(ParamError) as ei:
+            await tool_get_klines(router, RESOLVER, "600519", "1w",
+                                  start="2026-07-01", end="2026-07-10")
+        assert "周/月/季" in str(ei.value)
+
+    @pytest.mark.asyncio
+    async def test_announcements_routes_with_name(self) -> None:
+        router = FakeRouter(result=[])
+        await tool_get_announcements(router, RESOLVER, "600519",
+                                     start="2024-01-01", end="2025-12-31", top_k=5)
+        domain, kw = router.calls[0]
+        assert domain == "announcements"
+        assert kw["symbol"] == "600519.SH"
+        assert kw["name"] == "贵州茅台"
+        assert kw["top_k"] == 5
+
+    @pytest.mark.asyncio
+    async def test_edb_observation_default(self) -> None:
+        router = FakeRouter(result=[])
+        await tool_get_edb(router, RESOLVER, "中国GDP")
+        domain, kw = router.calls[0]
+        assert domain == "edb"
+        assert kw["indicator"] == "中国GDP"
+        assert kw["observation"] == 10
+        assert "start_ms" not in kw
+
+    @pytest.mark.asyncio
+    async def test_edb_with_dates(self) -> None:
+        router = FakeRouter(result=[])
+        await tool_get_edb(router, RESOLVER, "中国GDP",
+                           start="2024-01-01", end="2024-12-31")
+        domain, kw = router.calls[0]
+        assert kw["start_ms"] == date_to_ms("2024-01-01")
+        assert kw["end_ms"] == date_to_ms("2024-12-31")
+
+    @pytest.mark.asyncio
+    async def test_financials_passes_name_for_wind_nl(self) -> None:
+        router = FakeRouter(result=[])
+        await tool_get_financials(router, RESOLVER, "600519", "income")
+        domain, kw = router.calls[0]
+        assert domain == "financials"
+        assert kw["name"] == "贵州茅台"  # Wind NL 问句需要名称 (M2 权威链头)
+
+
 class TestServer:
-    def test_six_tools_registered(self) -> None:
+    def test_nine_tools_registered(self) -> None:
         app = mcp_data.create_app()
         names = {t.name for t in app._tool_manager.list_tools()}
         assert names == {
@@ -159,14 +237,19 @@ class TestServer:
             "fin_data__get_financials",
             "fin_data__get_calendar",
             "fin_data__get_special_data",
+            "fin_data__get_announcements",
+            "fin_data__get_edb",
+            "fin_data__reconcile",
         }
 
     def test_build_without_key_warns_and_keeps_akshare(self, monkeypatch) -> None:
         monkeypatch.setenv("THS_API_KEY", "")
         monkeypatch.setattr(mcp_data, "load_ths_key", lambda: None)
+        monkeypatch.setattr(mcp_data, "load_wind_key", lambda: None)
         router, resolver, warnings = mcp_data.build_server_components()
         assert "AKShare" in router._adapters or "akshare" in router._adapters
         assert any("THS_API_KEY" in w for w in warnings)
+        assert any("WIND_API_KEY" in w for w in warnings)
 
     def test_load_ths_key_env_first(self, monkeypatch) -> None:
         monkeypatch.setenv("THS_API_KEY", "sk-test-123")
@@ -177,3 +260,9 @@ class TestServer:
         (tmp_path / ".credentials.yaml").write_text("ths_api_key: sk-file-456\n", encoding="utf-8")
         monkeypatch.setenv("DSH_HOME", str(tmp_path))
         assert mcp_data.load_ths_key() == "sk-file-456"
+
+    def test_load_wind_key_credentials_file(self, monkeypatch, tmp_path) -> None:
+        monkeypatch.delenv("WIND_API_KEY", raising=False)
+        (tmp_path / ".credentials.yaml").write_text("wind_api_key: ak-file-789\n", encoding="utf-8")
+        monkeypatch.setenv("DSH_HOME", str(tmp_path))
+        assert mcp_data.load_wind_key() == "ak-file-789"

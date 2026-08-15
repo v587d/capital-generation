@@ -8,16 +8,21 @@
 | 数据域 | 主干 | 备用 | 说明 |
 |---|---|---|---|
 | A股行情/K线 | THS(免费官方) | AKShare | 不用 Wind 兜行情(贵) |
-| 财务三表/指标 | Wind(权威) | THS → AKShare | 权威性优先 |
-| 分钟线/公告/EDB | Wind | —(无备) | 独家,无降级,**明确告知用户** |
+| 财务三表/指标 | Wind(权威) | THS → AKShare | 权威性优先; v0.2.0 链 `[wind, ths, akshare]` |
+| 分钟线 | Wind | —(无备) | 独家, 无降级, **明确告知用户**; 仅单交易日 (积分纪律) |
+| 公告 | Wind | —(无备) | 独家 RAG, 无降级, **明确告知用户** |
+| EDB/宏观 | Wind | AKShare **白名单** | 白名单外指标 AKShare 不兜底 (config/akshare_edb.yaml); 口径不同 L3 标注 |
 | 热榜/异动/连板/龙虎榜 | THS | AKShare 同名接口 | THS 独家能力为主 |
-| 美股/加密/另类 | AKShare | —(无备) | 免费源独占域,接受其不稳定性 |
+| 美股/加密/另类 | AKShare | —(无备) | 免费源独占域, 接受其不稳定性 |
 
 ```yaml
 # config/chains.yaml(配置外置,不写死在代码里)
 quote:      [ths, akshare]        # 快照不烧 Wind 积分
 klines:     [ths, akshare]
+intraday:   [wind]                # 分钟线 Wind 独家 (无降级源, 明确告知)
 financials: [wind, ths, akshare]
+announcements: [wind]             # 公告 Wind 独家 (无降级源, 明确告知)
+edb:        [wind, akshare]       # 宏观: Wind 主干, AKShare 仅白名单兜底
 special:    [ths, akshare]
 macro:      [wind, akshare]
 ```
@@ -40,6 +45,8 @@ class FinError(Exception):
 | NO_DATA | 标的不存在(3001)/无数据;**3002=数据尚未准备(暂不可得)** | 换源一次,仍无则返回空;**3002 保留 request_id 稍后可重试** | 空结果 + 说明(3002 注明"稍后再查",不得补零/模拟) |
 | SOURCE_DOWN | 5xx/熔断 | 换源 | 结果 + `degraded: true` |
 | QUOTA | Wind 积分不足 | **门控跳过该源 + 降级提示**(不重试、不换源);门控 **TTL 1 天**(对齐 Wind 每日积分重置),到期自动恢复 | 结果 + `degraded: true`(注明"Wind 配额不足,已降级") |
+
+> **QUOTA 行为澄清 (v0.2.0 实测语义)**：触发配额错误的那一次调用**立即报 QUOTA 错误并门控 1 天**（不换源——换源也救不了本次请求）；门控期内后续调用**跳过 Wind、走链内下一源**（如 financials → THS），返回 `degraded: true` 结果。不允许"降级一次后永久按降级处理"。
 
 **为什么**:认证失败重试一万次也没用;限流应退避而不是换源烧别的源;只有 TIMEOUT/NO_DATA/SOURCE_DOWN 才值得在链内消耗下一个源。
 

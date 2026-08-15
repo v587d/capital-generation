@@ -23,7 +23,8 @@ def make_adapter(rows_by_fn: dict[str, list[dict]], *, interval: float = 0.0) ->
     adapter = AKShareAdapter(min_interval_s=interval)
 
     async def fake_call(fn_name: str, fn: Any, **kw: Any) -> list[dict]:
-        return rows_by_fn[fn_name]
+        # lambda (special 白名单) 无 __name__ → 回退 fn_name 键
+        return rows_by_fn.get(getattr(fn, "__name__", ""), rows_by_fn.get(fn_name))
 
     adapter._call = fake_call  # type: ignore[method-assign]
     return adapter
@@ -198,3 +199,56 @@ class TestErrors:
         await adapter._call("tool_trade_date_hist_sina", ok)
         elapsed = time.monotonic() - t0
         assert elapsed >= 0.3  # 第二次调用被频率闸挡住 ≥0.3s
+
+
+class TestEdbFallback:
+    """v0.2.0 EDB 白名单兜底 (config/akshare_edb.yaml, golden 驱动)."""
+
+    @pytest.mark.asyncio
+    async def test_whitelist_gdp(self) -> None:
+        adapter = make_adapter({"macro_china_gdp_yearly": load_golden("edb_gdp")})
+        points = await adapter.get_edb("中国GDP", observation=5)
+        assert points
+        p = points[0]
+        assert p.code == "gdp"
+        assert p.date_label == "2011-01-20"
+        from core.domain.units import date_to_ms
+
+        assert p.date_ms == date_to_ms("2011-01-20")
+        assert p.indicator == "中国GDP年率报告·今值"
+        assert p.value == 9.8
+        assert p.source == "AKShare"
+        assert p.tier == "free"
+
+    @pytest.mark.asyncio
+    async def test_whitelist_cpi_month_label(self) -> None:
+        adapter = make_adapter({"macro_china_cpi": load_golden("edb_cpi")})
+        points = await adapter.get_edb("CPI")
+        assert points
+        p = points[0]
+        assert p.date_label == "2026年07月份"
+        assert p.date_ms is not None  # "2026年07月份" 可解析
+        assert p.indicator == "全国-当月"
+
+    @pytest.mark.asyncio
+    async def test_whitelist_shrzgm_yyyymm_label(self) -> None:
+        adapter = make_adapter({"macro_china_shrzgm": load_golden("edb_shrzgm")})
+        points = await adapter.get_edb("社会融资")
+        assert points
+        p = points[0]
+        assert p.date_label == "201501"
+        assert p.date_ms is not None  # "201501" 可解析
+
+    @pytest.mark.asyncio
+    async def test_unknown_indicator_no_data(self) -> None:
+        adapter = make_adapter({})
+        with pytest.raises(NoDataError) as ei:
+            await adapter.get_edb("美联储利率")
+        assert "白名单" in ei.value.message
+
+    @pytest.mark.asyncio
+    async def test_alias_matching_case_insensitive(self) -> None:
+        adapter = make_adapter({"macro_china_pmi": load_golden("edb_pmi")})
+        points = await adapter.get_edb("制造业PMI")
+        assert points
+        assert points[0].code == "pmi"

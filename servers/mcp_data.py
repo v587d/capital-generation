@@ -120,10 +120,13 @@ def _not_stock_response(hit: Instrument) -> dict[str, Any]:
         "tier": "",
         "ts": utc_iso(now_ms()),
         "warnings": [
-            f"{hit.symbol} ({hit.name}) 是 {hit.asset_type}, v0.1.0 行情/财务工具仅支持"
+            f"{hit.symbol} ({hit.name}) 是 {hit.asset_type}, 行情/财务/公告工具仅支持"
             " A股股票; 指数行情等能力在后续版本",
         ],
     }
+
+
+_MINUTE_PERIODS = ("1m", "5m", "15m", "30m", "60m")
 
 
 async def tool_get_quote(
@@ -153,8 +156,19 @@ async def tool_get_klines(
     end: str = "",
     adjust: str = "none",
 ) -> dict[str, Any]:
-    if period != "1d":
-        raise ParamError("v0.1.0 仅支持日线 period=1d (分钟/周/月线在后续版本)")
+    """日线 (1d, THS 主干) 或分钟线 (1m/5m/15m/30m/60m, Wind 独家仅当日)."""
+    if period == "1d":
+        domain = "klines"
+    elif period in _MINUTE_PERIODS:
+        domain = "intraday"
+        if start != end:
+            raise ParamError(
+                f"分钟线仅支持单交易日窗口 (start == end), 收到 {start} ~ {end}"
+            )
+    else:
+        raise ParamError(
+            f"period 仅支持 1d 与分钟线 {'/'.join(_MINUTE_PERIODS)} (周/月/季不支持)"
+        )
     if not start or not end:
         raise ParamError("start/end 必填 (YYYY-MM-DD)")
     hit = resolve_or_guide(resolver, symbol, "A股")
@@ -162,13 +176,20 @@ async def tool_get_klines(
         return hit
     if hit.asset_type != "stock":
         return _not_stock_response(hit)
-    env = await router.call(
-        "klines",
-        symbol=hit.symbol,
-        start_ms=date_to_ms(start),
-        end_ms=date_to_ms(end),
-        adjust=adjust,
-    )
+    start_ms, end_ms = date_to_ms(start), date_to_ms(end)
+    if domain == "klines":
+        env = await router.call(
+            "klines",
+            symbol=hit.symbol,
+            start_ms=start_ms,
+            end_ms=end_ms,
+            adjust=adjust,
+        )
+    else:
+        env = await router.call(
+            "intraday", symbol=hit.symbol, period=period,
+            start_ms=start_ms, end_ms=end_ms,
+        )
     return render_envelope(env)
 
 
@@ -190,7 +211,8 @@ async def tool_get_financials(
     if hit.asset_type != "stock":
         return _not_stock_response(hit)
     env = await router.call(
-        "financials", symbol=hit.symbol, statement=statement, period=period, limit=limit
+        "financials", symbol=hit.symbol, statement=statement, period=period,
+        limit=limit, name=hit.name,
     )
     return render_envelope(env)
 
@@ -218,16 +240,149 @@ async def tool_get_special_data(
     return render_envelope(env)
 
 
+# ── v0.2.0 新工具 (PLAN-0.2.0.md §2.3, schema 评审记录: DESIGN_REVIEW 决策 12) ──
+
+
+async def tool_get_announcements(
+    router: Router,
+    resolver: SymbolResolver,
+    symbol: str,
+    start: str = "",
+    end: str = "",
+    top_k: int = 10,
+) -> dict[str, Any]:
+    """公告检索 (Wind 独家 RAG, 无降级源 — 明确告知)."""
+    if not start or not end:
+        raise ParamError("start/end 必填 (YYYY-MM-DD)")
+    if not 1 <= top_k <= 20:
+        raise ParamError(f"top_k 1-20, 收到 {top_k}")
+    hit = resolve_or_guide(resolver, symbol, "A股")
+    if isinstance(hit, dict):
+        return hit
+    if hit.asset_type != "stock":
+        return _not_stock_response(hit)
+    env = await router.call(
+        "announcements", symbol=hit.symbol,
+        start_ms=date_to_ms(start), end_ms=date_to_ms(end),
+        top_k=top_k, name=hit.name,
+    )
+    return render_envelope(env)
+
+
+async def tool_get_edb(
+    router: Router,
+    resolver: SymbolResolver,
+    indicator: str,
+    start: str = "",
+    end: str = "",
+    observation: int = 10,
+) -> dict[str, Any]:
+    """EDB 宏观/行业指标 (Wind 搜索并提数; AKShare 仅白名单兜底)."""
+    indicator = indicator.strip()
+    if not indicator:
+        raise ParamError("indicator 必填 (指标简称, 如 中国GDP)")
+    if not 1 <= observation <= 100:
+        raise ParamError(f"observation 1-100, 收到 {observation}")
+    kwargs: dict[str, Any] = {"indicator": indicator, "observation": observation}
+    if start or end:
+        if not (start and end):
+            raise ParamError("start/end 需成对提供 (YYYY-MM-DD)")
+        kwargs["start_ms"] = date_to_ms(start)
+        kwargs["end_ms"] = date_to_ms(end)
+    env = await router.call("edb", **kwargs)
+    return render_envelope(env)
+
+
+def render_reconcile(rep: Any) -> dict[str, Any]:
+    """对账报告渲染: 信封 source="" + engine 字段; 行自带各源值 (规范名) 与数据时点."""
+    rows = []
+    for r in rep.rows:
+        rows.append({
+            "key": r.key,
+            "field": r.field,
+            "同花顺": r.left,
+            "AKShare": r.right,
+            "ths_as_of_ms": r.left_as_of_ms,
+            "akshare_as_of_ms": r.right_as_of_ms,
+            "diff_pct": r.diff_pct,
+            "matched": r.matched,
+            "note": r.note,
+        })
+    return {
+        "data": rows,
+        "source": "",
+        "tier": "",
+        "ts": utc_iso(rep.ts_ms),
+        "engine": "reconcile",
+        "summary": rep.summary(),
+        "warnings": list(rep.warnings),
+    }
+
+
+async def tool_reconcile(
+    router: Router,
+    resolver: SymbolResolver,
+    domain: str,
+    symbols: str,
+    start: str = "",
+    end: str = "",
+    tolerance_pct: float | None = None,
+) -> dict[str, Any]:
+    """双源对账 (THS×AKShare, 未复权; 分歧不自动修复, 交 LLM 裁决)."""
+    from core.domain.reconcile import reconcile_klines, reconcile_quotes
+
+    if domain not in ("quote", "klines"):
+        raise ParamError(f"domain 仅支持 quote/klines, 收到 {domain!r}")
+    if tolerance_pct is not None and not 0 < tolerance_pct <= 100:
+        raise ParamError(f"tolerance_pct 需在 (0, 100], 收到 {tolerance_pct}")
+    ths = router.adapters.get("ths")
+    akshare = router.adapters.get("akshare")
+    missing = [v for v, a in (("ths", ths), ("akshare", akshare)) if a is None]
+    if missing:
+        return {
+            "data": None, "source": "", "tier": "",
+            "ts": utc_iso(now_ms()),
+            "engine": "reconcile",
+            "summary": {"domain": domain, "compared": 0, "matched": 0,
+                        "mismatched": 0, "skipped": 0},
+            "warnings": [f"对账需要 THS×AKShare 双源, 当前缺少: {missing}"],
+        }
+    if domain == "quote":
+        canonical: list[str] = []
+        for s in _split_symbols(symbols):
+            hit = resolve_or_guide(resolver, s, "A股")
+            if isinstance(hit, dict):
+                return hit
+            if hit.asset_type != "stock":
+                return _not_stock_response(hit)
+            canonical.append(hit.symbol)
+        rep = await reconcile_quotes(ths, akshare, canonical,
+                                     tolerance_pct=tolerance_pct)
+    else:
+        if not start or not end:
+            raise ParamError("klines 对账需要 start/end (YYYY-MM-DD)")
+        hit = resolve_or_guide(resolver, symbols, "A股")
+        if isinstance(hit, dict):
+            return hit
+        if hit.asset_type != "stock":
+            return _not_stock_response(hit)
+        rep = await reconcile_klines(
+            ths, akshare, hit.symbol, date_to_ms(start), date_to_ms(end),
+            tolerance_pct=tolerance_pct,
+        )
+    return render_reconcile(rep)
+
+
 # ──────────────────────────────────────────────────────────────────────
 # FastMCP 装配
 # ──────────────────────────────────────────────────────────────────────
 
 
-def load_ths_key() -> str | None:
-    key = os.environ.get("THS_API_KEY", "").strip()
+def _load_key(env_var: str, creds_key: str) -> str | None:
+    """BYOK: env → DSH credentials 文件 (AGENTS.md; THS/Wind 同款)."""
+    key = os.environ.get(env_var, "").strip()
     if key:
         return key
-    # DSH credentials 文件兜底 (BYOK, AGENTS.md)
     home = Path(os.environ.get("DSH_HOME", str(Path.home() / ".dsh")))
     creds = home / ".credentials.yaml"
     if creds.exists():
@@ -235,11 +390,19 @@ def load_ths_key() -> str | None:
             import yaml
 
             data = yaml.safe_load(creds.read_text(encoding="utf-8")) or {}
-            key = data.get("ths_api_key") or data.get("THS_API_KEY") or ""
+            key = data.get(creds_key) or data.get(env_var) or ""
             return key.strip() or None
         except Exception:  # noqa: BLE001 — credentials 损坏不应阻断启动
             return None
     return None
+
+
+def load_ths_key() -> str | None:
+    return _load_key("THS_API_KEY", "ths_api_key")
+
+
+def load_wind_key() -> str | None:
+    return _load_key("WIND_API_KEY", "wind_api_key")
 
 
 def build_server_components() -> tuple[Router, SymbolResolver, list[str]]:
@@ -251,6 +414,16 @@ def build_server_components() -> tuple[Router, SymbolResolver, list[str]]:
         adapters["ths"] = THSAdapter(api_key=ths_key)
     else:
         warnings.append("未配置 THS_API_KEY: 同花顺不可用, 仅 AKShare 兜底")
+
+    from core.adapters.wind import WindAdapter
+
+    wind_key = load_wind_key()
+    if wind_key:
+        adapters["wind"] = WindAdapter(api_key=wind_key)
+    else:
+        warnings.append(
+            "未配置 WIND_API_KEY: Wind 不可用 (financials 降级 THS; 分钟线/公告/EDB 不可用)"
+        )
 
     adapters["akshare"] = AKShareAdapter()
     resolver = default_resolver()
@@ -265,9 +438,10 @@ def create_app() -> Any:
     mcp = FastMCP(
         "finance-unified",
         instructions=(
-            "统一金融数据入口。v0.1.0 覆盖: A股行情快照/日K/财务三表与指标/交易日历/"
-            "特色数据(涨停/连板/热榜/龙虎榜)/标的检索。不支持: 分钟线、港股/美股、"
-            "宏观、基金域、全市场快照。每个结果携带 source(同花顺/Wind/AKShare)/tier/ts 溯源。"
+            "统一金融数据入口。v0.2.0 覆盖: A股行情快照/日K/分钟线(当日,W独家)/财务三表与指标/"
+            "交易日历/特色数据/标的检索/公告(W独家)/EDB宏观(W主干)/双源对账。不支持: 周月季K、"
+            "港股美股、宏观白名单外指标经AKShare兜底、全市场快照。每个结果携带 "
+            "source(同花顺/Wind/AKShare)/tier/ts 溯源; 分钟线/公告无降级源, 明确告知。"
             + (" 注意: " + "; ".join(warnings) if warnings else "")
         ),
     )
@@ -293,7 +467,8 @@ def create_app() -> Any:
         end: str = "",
         adjust: str = "none",
     ) -> dict:
-        """A股历史日K (≤10 年, 含起止日)。adjust: none/forward(前复权)/backward(后复权)。"""
+        """K线: period=1d 日线 (≤10年, THS 主干); 分钟线 1m/5m/15m/30m/60m
+        仅单交易日 (start==end, Wind 独家无降级源)。adjust: none/forward/backward (仅日线)。"""
         return await tool_get_klines(router, resolver, symbol, period, start, end, adjust)
 
     @mcp.tool()
@@ -322,6 +497,38 @@ def create_app() -> Any:
         """特色数据: kind=limit-up(涨停池)/limit-up-ladder(连板天梯)/hot(热股榜)/
         hot-history(历史热榜,date)/dragon-tiger(龙虎榜,date)/anomaly-stock(异动)。"""
         return await tool_get_special_data(router, resolver, kind, date, page, size)
+
+    @mcp.tool()
+    async def fin_data__get_announcements(
+        symbol: str,
+        start: str = "",
+        end: str = "",
+        top_k: int = 10,
+    ) -> dict:
+        """上市公司公告检索 (Wind 独家 RAG, 无降级源)。start/end 必填 (YYYY-MM-DD)。"""
+        return await tool_get_announcements(router, resolver, symbol, start, end, top_k)
+
+    @mcp.tool()
+    async def fin_data__get_edb(
+        indicator: str,
+        start: str = "",
+        end: str = "",
+        observation: int = 10,
+    ) -> dict:
+        """EDB 宏观/行业指标 (Wind 搜索并提数, 指标简称如 中国GDP; AKShare 仅白名单兜底)。"""
+        return await tool_get_edb(router, resolver, indicator, start, end, observation)
+
+    @mcp.tool()
+    async def fin_data__reconcile(
+        domain: str,
+        symbols: str,
+        start: str = "",
+        end: str = "",
+        tolerance_pct: float | None = None,
+    ) -> dict:
+        """双源对账 (THS×AKShare, 未复权, 只比数据时点): domain=quote/klines;
+        分歧不自动修复 — 交 LLM 裁决 (报告含双源值 + 数据时点 + diff)。"""
+        return await tool_reconcile(router, resolver, domain, symbols, start, end, tolerance_pct)
 
     return mcp
 

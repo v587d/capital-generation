@@ -19,13 +19,16 @@ from collections.abc import Sequence
 from typing import Any
 
 from core.adapters.base import BaseAdapter
+from core.config import load_yaml
 from core.domain.errors import (
     FinTimeoutError,
+    InternalError,
     NoDataError,
     SourceDownError,
 )
 from core.domain.models import (
     CalendarDay,
+    EDBPoint,
     FinancialStatement,
     Instrument,
     Kline,
@@ -52,6 +55,10 @@ _SPECIAL_FUNCS = {
 
 class AKShareAdapter(BaseAdapter):
     vendor_id = "akshare"
+    # v0.1.0 六个域 + edb (宏观白名单兜底, config/akshare_edb.yaml)
+    capabilities = frozenset(
+        {"search", "quote", "klines", "financials", "calendar", "special", "edb"}
+    )
 
     def __init__(self, *, min_interval_s: float = MIN_INTERVAL_S) -> None:
         self._min_interval = min_interval_s
@@ -200,7 +207,8 @@ class AKShareAdapter(BaseAdapter):
         return out
 
     async def get_financials(
-        self, symbol: str, statement: str, *, period: str = "annual", limit: int = 4
+        self, symbol: str, statement: str, *, period: str = "annual", limit: int = 4,
+        name: str = "",  # Wind NL 问句需要名称; AKShare 忽略
     ) -> list[FinancialStatement]:
         if statement == "indicators":
             df = await self._call(
@@ -279,6 +287,89 @@ class AKShareAdapter(BaseAdapter):
             source=source_name(self.vendor_id),
             tier="free",
         )
+
+    # ── edb (宏观白名单兜底, config/akshare_edb.yaml) ─────────────────
+
+    async def get_edb(
+        self,
+        indicator: str,
+        start_ms: int | None = None,
+        end_ms: int | None = None,
+        *,
+        observation: int = 10,
+    ) -> list[EDBPoint]:
+        """AKShare 宏观兜底 — 仅白名单指标 (config/akshare_edb.yaml)。
+
+        口径与 Wind EDB 不同: L3 标注 (unit/magnitude 未知不猜), 日期标签解析
+        失败 → date_ms=None + date_label 标注 (DATA_MODEL 铁律: 不猜)。
+        白名单外 → NO_DATA 提示走 Wind (免费兜底源不能最先挂, DEGRADATION 纪律)。
+        """
+        cfg = load_yaml("akshare_edb.yaml")["indicators"]
+        q = indicator.lower().replace(" ", "")
+        match: tuple[str, dict] | None = None
+        for key, entry in cfg.items():
+            aliases = [str(a).lower().replace(" ", "") for a in entry.get("aliases", [])]
+            if any(a and a in q for a in aliases) or key in q:
+                match = (key, entry)
+                break
+        if match is None:
+            raise NoDataError(
+                f"AKShare 兜底仅覆盖白名单宏观指标 {sorted(cfg)}; {indicator!r} 请走 Wind EDB",
+                source=source_name(self.vendor_id), vendor=self.vendor_id,
+                endpoint="edb",
+            )
+        key, entry = match
+        fn_name = str(entry["function"])
+        fn = getattr(ak, fn_name, None)
+        if fn is None:
+            raise InternalError(
+                f"akshare 无函数 {fn_name} (白名单配置失效)",
+                source=source_name(self.vendor_id), vendor=self.vendor_id, endpoint="edb",
+            )
+        df = await self._call(f"edb/{key}", fn)
+        rows = self._rows(df)
+        out: list[EDBPoint] = []
+        for r in rows:
+            # 日期列: 优先 "日期" 列 (gdp 等), 否则首列 (月份/期间标签)
+            date_label = str(r.get("日期") or next(iter(r.values())))
+            date_ms = _parse_cn_period(date_label)
+            for col, raw in r.items():
+                if col in ("日期",) or col == next(iter(r.keys())):
+                    continue
+                name = str(r.get("商品", ""))
+                indicator = f"{name}·{col}" if name else col
+                out.append(
+                    EDBPoint(
+                        indicator=indicator, code=key, date_ms=date_ms,
+                        value=_f(raw), date_label=date_label,
+                        source=source_name(self.vendor_id), tier="free",
+                        extra={"note": "AKShare 白名单兜底, 口径与 Wind EDB 不同 (L3 标注不转换)"},
+                    )
+                )
+        return out
+
+
+def _parse_cn_period(label: str) -> int | None:
+    """'2023年第一季度' / '2026年07月份' / '201501' / '2024-12' → Asia/Shanghai 零点 ms;
+    解析失败 None (DATA_MODEL: 不猜日期)."""
+    import re as _re
+
+    m = _re.match(r"^(\d{4})年?[第]?([一二三四1-4])?季度?$", label)
+    if m:
+        year, q = int(m.group(1)), m.group(2)
+        month = {"一": 3, "二": 6, "三": 9, "四": 12,
+                 "1": 3, "2": 6, "3": 9, "4": 12}.get(q or "四", 12)
+        return date_to_ms(f"{year}-{month:02d}-28")
+    m = _re.match(r"^(\d{4})[-年](\d{1,2})月?(?:份)?$", label)
+    if m:
+        return date_to_ms(f"{int(m.group(1))}-{int(m.group(2)):02d}-01")
+    m = _re.match(r"^(\d{4})(\d{2})$", label)
+    if m:
+        return date_to_ms(f"{int(m.group(1))}-{int(m.group(2))}-01")
+    m = _re.match(r"^(\d{4})-(\d{2})-(\d{2})$", label)
+    if m:
+        return date_to_ms(label)
+    return None
 
 
 def _f(v: Any) -> float | None:

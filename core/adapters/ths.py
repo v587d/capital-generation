@@ -63,6 +63,8 @@ _TIMEOUTS = {"snapshot": 10.0, "kline": 30.0, "batch": 60.0}
 
 class THSAdapter(BaseAdapter):
     vendor_id = "ths"
+    # v0.1.0 六个域; 无分钟线/公告/EDB (LESSONS §3.3 能力边界)
+    capabilities = frozenset({"search", "quote", "klines", "financials", "calendar", "special"})
 
     def __init__(
         self,
@@ -297,6 +299,7 @@ class THSAdapter(BaseAdapter):
         *,
         period: str = "annual",
         limit: int = 4,
+        name: str = "",  # Wind NL 问句需要名称; THS 忽略
     ) -> list[FinancialStatement]:
         if statement == "indicators":
             return await self._indicators(symbol)

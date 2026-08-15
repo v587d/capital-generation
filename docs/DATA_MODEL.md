@@ -31,14 +31,38 @@ class Kline:           # L1 + L2
     volume: float      # L2: 统一"股"(手→股由转换表驱动)
     turnover: float    # L2: 原始货币
     currency: str = "CNY"
-    adjust: str = "none"   # L3: 声明,不转换
+    period: str = "1d"     # L3: 频率标签 1d/1m/5m/15m/30m/60m (v0.2.0 分钟线 Wind 独家)
+    adjust: str = "none"   # L3: 声明,不转换 (Wind aftype=0 → 标注 forward, 永不当未复权)
     source: str = ""       # 可观测性(规范名:同花顺/Wind/AKShare,见 DEGRADATION.md)
     tier: str = ""         # free/quota/paid:配额消耗可见(Wind=quota)
     degraded: bool = False
     extra: dict = field(default_factory=dict)  # provider 特有字段透传(OpenBB 同款)
 
+@dataclass(frozen=True)
+class Announcement:    # L1 + L2 (v0.2.0, Wind 独家 RAG)
+    symbol: str
+    title: str
+    date_ms: int       # 公告发布日期 (Asia/Shanghai 毫秒)
+    content: str       # 公告文本逐字透传 (L3)
+    url: str = ""
+    source: str = ""; tier: str = ""; degraded: bool = False
+    extra: dict = field(default_factory=dict)  # doc_type / relevance
+
+@dataclass(frozen=True)
+class EDBPoint:        # L1 + L2 (v0.2.0, Wind EDB / AKShare 白名单兜底)
+    indicator: str     # 指标名称 (Wind meta.name / AKShare 列名)
+    code: str          # Wind EDB 指标代码 (如 M5567876) / AKShare 白名单 key
+    date_ms: int | None  # yyyyMMdd → Asia/Shanghai 毫秒; None = 源期间标签不可解析 (不猜)
+    value: float | None  # 原始值 (INVALID → None, 不猜)
+    unit: str = ""     # L3 标注 (亿元/%/万元), 不转换
+    magnitude: str = ""; freq: str = ""; currency: str = ""
+    date_label: str = ""  # 源原始期间标签 (AKShare 兜底)
+    source: str = ""; tier: str = ""; degraded: bool = False
+
 # Quote / CorporateAction(除复权事件流)/ FinancialStatement / SpecialData 同理:
 # L1+L2 字段统一,provider 特有字段进 extra 或显式标注
+# v0.2.0: FinancialStatement.report_date_ms 可为 None — Wind NL 回答报告期在列名,
+#   源未声明报告期时不猜 (L3: 标注不转换)
 ```
 
 ## 单位与时间转换表(显式、可配置)

@@ -85,10 +85,24 @@
 - **`000001.TI`（上证指数）被 Wind 静默读成平安银行**且币种变 JPY → 指数必须用 windcode（`000001.SH`）；`.TI` 只在 THS 侧合法——symbol 表必须按源区分语义
 - 指数行用 `最新成交价`、个股用 `最新收盘价`；`indexes` 参数会**替换字段集**（要涨跌幅就丢 OHLC）
 - quote 分钟序列**仅当日单日**（非跨日）；周/月/季 K 被钳到日线（240min 上限）——多周期 K 只有日线是真的
+- **`get_stock_kline` 分钟级 K 可跨日（2026-08-15 实测：5min 07-08~07-09 共 96 行）**，与 `get_stock_quote`（仅当日）不同；本项目按积分纪律强制分钟线单日窗口（PLAN-0.2.0.md），跨日放开是未来决策
 - EDB 两段式 search→fetch（**长句搜不到，用指标简称**，如"中国GDP"）；`executionMode` 有中文别名（仅搜索/仅提数/搜索并提数）；日期参数三风格（`begin/end` 分钟行情、`begin_date/end_date` K线、`beginDate/endDate` EDB）
 - 并发纪律：**默认串行、先探针后扩散、上限 10**；价格指标批量 ≤50 代码
 - 错误信封带 `correction`（change_only + agent_action）可驱动自动重查（v1 候选，v0 只记录）
 - 配额：免费 1000 积分/天 ≈ 1 积分/请求；耗尽 → 门控跳过 + 降级提示；**门控 TTL 1 天（对齐每日积分重置），到期自动恢复**（§8 已确认）
+
+### 5.5 Wind MCP 接入契约事实（2026-08-15 live 核实，官方 wind-skills 仓库 + 真实 key 实测）
+
+- **传输**：`https://mcp.wind.com.cn/vserver_<server_type>/mcp/` 7 个端点（stock/fund/index/bond/financial_docs/economic/analytics_data），**裸 JSON-RPC POST**（`method=tools/call`，参数在 `params.name` + `params.arguments`），鉴权 `Authorization: Bearer <WIND_API_KEY>`（`~/.wind-aifinmarket/config` 或 env）；每 server 先 `initialize` 握手（protocolVersion 2025-03-26）；响应为 SSE（最后一条 `data:`）或纯 JSON
+- **信封**：业务数据在 `result.content[0].text` 的 JSON 字符串里；`inner.data` 形状按工具族分化（双形状解析必须）：
+  - 列式（行情/K线/指标）：`{data: {columns: [{name,type}], rows: [[...]], unit: {...}}, error: null}`，无业务码
+  - fundamentals（NL 回答）：`{data: {data: [{columns, rows}, ...]}}`（多表），**报告期在列名**（如"2024年ROE"），无结构化三表工具
+  - EDB：`{data: {code: 0, data: [{meta, date[], value[]}]}}`（有业务码；`meta` 带 unit/magnitude/freq/currency）
+  - RAG（公告/新闻）：`{data: {items: [{title, date, content, url, relevance, doc_type}]}}`
+- **period 是数字码**：`1min→1, 5min→3, 10min→4, 15min→5, 30min→6, 60min→7, 120min→8, 240min→9, 1d→10, 1w→11, 1mo→12`；传 `"5min"` 会被拒（isError "参数格式不正确:5min"）
+- **错误形态多样**：坏 key → HTTP 200 + isError 文本"认证失败"（**不能只看状态码**）；未识别标的 → isError"未识别到有效的金融标的:999999.SH"；EDB 指标未找到 → 业务码 `1003` + "没有搜索到指标"；fundamentals 无数据 → content 纯文本"没找到数据"（非 JSON）；官方稳定错误码见 error_map.yaml（`DAILY_LIMIT_ERROR`/`BALANCE_ERROR` → QUOTA 门控）
+- **`top_k` 是软上限**（实测请求 2 返回 4 条公告）；`get_stock_price_indicators` 的 `indexes` 词汇逐字取自官方 stock-indicators.md（快照在 `config/wind/stock-indicators.md`）
+- 契约基线：官方 `scripts/tool-manifest.json`/`call-rules.json` 快照在 `config/wind/`，`verify-contracts.py --wind` 做漂移检查
 
 ### 5.3 MX 连带教训（源已排除，教训保留）
 

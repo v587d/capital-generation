@@ -1,0 +1,13 @@
+{
+ "jsonrpc": "2.0",
+ "id": 1,
+ "result": {
+  "content": [
+   {
+    "type": "text",
+    "text": "未识别到有效的金融标的:999999.SH"
+   }
+  ],
+  "isError": true
+ }
+}

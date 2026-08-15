@@ -1,0 +1,5 @@
+# 对账引擎配置 (PLAN-0.2.0.md M4; docs/LESSONS.md §6 实测基准)
+# tolerance_pct: 双源容差 (%) — LESSONS §6: 同 caliber 估值三源 <0.2%, 0.5% 有实测依据
+# asof_tolerance_ms: 快照数据时点时滞窗口 — 时滞可达分钟级 (LESSONS §5.3), 超窗不比价
+tolerance_pct: 0.5
+asof_tolerance_ms: 300000

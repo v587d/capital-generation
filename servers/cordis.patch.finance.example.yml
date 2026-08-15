@@ -2,8 +2,8 @@
 # 放置: ~/.dsh/profiles/web/cordis.patch.yml
 #
 # 注意: dsh-mcp-client 的 stdio 子进程默认只转发白名单环境变量 (MCP SDK 安全设计),
-# THS_API_KEY 必须在此显式声明, 否则子进程拿不到 key → 同花顺适配器不构建 → 全链降级。
-# (live-probe.py 踩过同一个坑, 2026-08-15 实测)
+# THS_API_KEY / WIND_API_KEY 必须在此显式声明, 否则子进程拿不到 key → 对应适配器
+# 不构建 → 全链降级。 (live-probe.py 踩过同一个坑, 2026-08-15 实测)
 - insert:
     - id: finance-unified
       name: '@deepseek-ai/dsh-mcp-client'
@@ -14,5 +14,6 @@
         args: ['run', '--directory', '/home/shawn/projects/capital-generation', '-m', 'servers.mcp_data']
         env:
           THS_API_KEY: !!js process.env.THS_API_KEY
-        toolCallTimeoutMs: 90000
+          WIND_API_KEY: !!js process.env.WIND_API_KEY
+        toolCallTimeoutMs: 120000
         failOnStartupError: true

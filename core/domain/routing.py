@@ -33,7 +33,7 @@ _BACKOFF_MS = (200, 400)  # RATE_LIMIT 退避序列 (×2), cap 3 tries 含首次
 _BREAKER_THRESHOLD = 5
 _BREAKER_COOLDOWN_S = 60.0
 
-# domain → adapter method
+# domain → adapter method (v0.1.0 六个 + v0.2.0 intraday/announcements/edb)
 _METHODS: dict[str, str] = {
     "search": "search_symbols",
     "quote": "get_quote",
@@ -41,6 +41,9 @@ _METHODS: dict[str, str] = {
     "financials": "get_financials",
     "calendar": "get_calendar",
     "special": "get_special_data",
+    "intraday": "get_intraday",
+    "announcements": "get_announcements",
+    "edb": "get_edb",
 }
 
 # 缓存 TTL (ms): 快照 30s, 其余当日
@@ -157,6 +160,11 @@ class Router:
         self._breaker = Breaker()
         self._gate = QuotaGate()
 
+    @property
+    def adapters(self) -> dict[str, BaseAdapter]:
+        """Exposed for the reconcile engine (双源直取, 绕链 — PLAN-0.2.0.md M4)."""
+        return self._adapters
+
     async def call(self, domain: str, **kwargs: Any) -> Envelope:
         method = _METHODS.get(domain)
         if method is None:
@@ -180,6 +188,9 @@ class Router:
                 continue
             adapter = self._adapters.get(vendor_id)
             if adapter is None:
+                continue
+            if not adapter.supports(domain):
+                # 链上存在但无此能力的源 (能力化表面, PLAN-0.2.0.md M1): 跳过
                 continue
             try:
                 data = await self._invoke(adapter, method, kwargs, vendor_id, warnings)

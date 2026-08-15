@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from core.adapters.base import BaseAdapter
+from core.adapters.base import ALL_DOMAINS, BaseAdapter
 from core.domain.errors import (
     AuthError,
     NoDataError,
@@ -25,6 +25,7 @@ from core.domain.units import now_ms
 
 class FakeAdapter(BaseAdapter):
     vendor_id = "fake"
+    capabilities = ALL_DOMAINS  # v0.2.0 能力化表面: 测试桩默认全能力
 
     def __init__(self, behavior: dict[str, Any]) -> None:
         self.behavior = behavior
@@ -48,7 +49,7 @@ class FakeAdapter(BaseAdapter):
     async def get_klines(self, symbol, start_ms, end_ms, *, adjust="none"):
         return await self._hit("klines")
 
-    async def get_financials(self, symbol, statement, *, period="annual", limit=4):
+    async def get_financials(self, symbol, statement, *, period="annual", limit=4, name=""):
         return await self._hit("financials")
 
     async def get_calendar(self):
@@ -56,6 +57,15 @@ class FakeAdapter(BaseAdapter):
 
     async def get_special_data(self, kind, **params):
         return await self._hit("special")
+
+    async def get_intraday(self, symbol, period, start_ms, end_ms):
+        return await self._hit("intraday")
+
+    async def get_announcements(self, symbol, start_ms, end_ms, *, top_k=10, name=""):
+        return await self._hit("announcements")
+
+    async def get_edb(self, indicator, start_ms=None, end_ms=None, *, observation=10):
+        return await self._hit("edb")
 
 
 def ok_quote() -> list[Quote]:
@@ -244,3 +254,49 @@ class TestCache:
         cache.put("quote", {"c": 3}, Envelope(data=3, ts_ms=1))
         assert cache.get("quote", {"a": 1}) is None  # 最久未用被淘汰
         assert cache.get("quote", {"c": 3}) is not None
+
+
+class TestCapabilities:
+    """v0.2.0 能力化表面 (PLAN-0.2.0.md M1): Router 跳过无能力的源."""
+
+    @pytest.mark.asyncio
+    async def test_skips_vendor_without_capability(self) -> None:
+        class Limited(FakeAdapter):
+            capabilities = frozenset({"financials"})  # 无 quote 能力
+
+        limited = Limited({"quote": ok_quote()})
+        ak = FakeAdapter({"quote": ok_quote()})
+        r = Router({"limited": limited, "ak": ak}, chains={"quote": ["limited", "ak"]})
+        env = await r.call("quote", symbols=["600519.SH"])
+        assert env.data[0].source == "同花顺"
+        assert limited.calls == []  # 能力不足 → 未调用
+        assert ak.calls == ["quote"]
+
+    @pytest.mark.asyncio
+    async def test_new_domain_routes_to_method(self) -> None:
+        r = make_router(
+            {"fake": {"intraday": [1], "announcements": [2], "edb": [3]}},
+            chains={
+                "intraday": ["fake"],
+                "announcements": ["fake"],
+                "edb": ["fake"],
+            },
+        )
+        env = await r.call("intraday", symbol="600519.SH", period="5m",
+                           start_ms=1, end_ms=2)
+        assert env.data == [1]
+        env = await r.call("announcements", symbol="600519.SH", start_ms=1, end_ms=2)
+        assert env.data == [2]
+        env = await r.call("edb", indicator="中国GDP", observation=3)
+        assert env.data == [3]
+
+    @pytest.mark.asyncio
+    async def test_chain_of_incapable_vendors_raises_internal(self) -> None:
+        class Nothing(FakeAdapter):
+            capabilities = frozenset()
+
+        r = Router({"nothing": Nothing({})}, chains={"quote": ["nothing"]})
+        from core.domain.errors import InternalError
+
+        with pytest.raises(InternalError):
+            await r.call("quote", symbols=["600519.SH"])

@@ -1,0 +1,45 @@
+# Wind MCP 接线映射 — M0 契约盘点产物 (2026-08-15, 官方契约 live 核实)
+# 官方契约基线: config/wind/manifest.json + config/wind/call-rules.json
+#   (scripts/verify-contracts.py --wind 做漂移检查; 双形状解析兜底)
+# 接线范围: v0.2.0 按需最小 — financials / intraday / announcements / edb。
+#   fund/index/bond/analytics 域未接线 → v0.3.0 (用户裁定)。
+# 传输: JSON-RPC POST + Authorization: Bearer <WIND_API_KEY>; 响应 SSE 或纯 JSON。
+
+endpoints:
+  stock_data: https://mcp.wind.com.cn/vserver_stock_data/mcp/
+  fund_data: https://mcp.wind.com.cn/vserver_fund_data/mcp/
+  index_data: https://mcp.wind.com.cn/vserver_index_data/mcp/
+  bond_data: https://mcp.wind.com.cn/vserver_bond_data/mcp/
+  financial_docs: https://mcp.wind.com.cn/vserver_financial_docs/mcp/
+  economic_data: https://mcp.wind.com.cn/vserver_economic_data/mcp/
+  analytics_data: https://mcp.wind.com.cn/vserver_analytics_data/mcp/
+
+# 域 → Wind 工具 (v0.2.0 接线面)
+tool_by_domain:
+  # 三表: Wind 无结构化三表工具, 走 get_stock_fundamentals (NL 问句, 行 L3 透传)
+  financials:
+    income:     {server: stock_data, tool: get_stock_fundamentals}
+    balance:    {server: stock_data, tool: get_stock_fundamentals}
+    cashflow:   {server: stock_data, tool: get_stock_fundamentals}
+    # 指标: 结构化截面 (估值默认只问 市盈率(TTM); 市净率 0.000 陷阱见 LESSONS §5.2)
+    indicators: {server: stock_data, tool: get_stock_price_indicators,
+                 indexes: "市盈率(TTM),市盈率(LYR),市净率(LF),市净率,股息率,总市值1,流通市值,中文简称"}
+  # 分钟线: 仅当日单日 (计划裁定; get_stock_kline 实测可跨日, 见 LESSONS — 按积分纪律强制单日)
+  intraday:     {server: stock_data, tool: get_stock_kline}
+  announcements: {server: financial_docs, tool: get_company_announcements}
+  edb:          {server: economic_data, tool: natural_language_get_edb_data}
+
+# period 公共值 → Wind 后端数字码 (config/wind/call-rules.json kline_period_map 子集;
+# 1d 不走 Wind; 周/月/季明确拒绝 — LESSONS §5.2 多周期 K 只有日线是真的)
+kline_period_map:
+  1m: "1"
+  5m: "3"
+  15m: "5"
+  30m: "6"
+  60m: "7"
+
+# EDB executionMode 中文别名 (call-rules.json economic_edb)
+edb_execution_mode_aliases:
+  仅搜索: search
+  仅提数: fetch
+  搜索并提数: searchFetch

@@ -1,0 +1,13 @@
+{
+ "jsonrpc": "2.0",
+ "id": 1,
+ "result": {
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"data\": {\"code\": 1003, \"message\": \"没有搜索到指标，不存在的指标xyzabc\"}, \"error\": null}"
+   }
+  ],
+  "isError": false
+ }
+}

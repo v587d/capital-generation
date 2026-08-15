@@ -1,0 +1,13 @@
+{
+ "jsonrpc": "2.0",
+ "id": 1,
+ "result": {
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"data\": {\"data\": [{\"columns\": [{\"name\": \"Wind代码\", \"type\": \"string\"}, {\"name\": \"证券简称\", \"type\": \"string\"}, {\"name\": \"2024年ROE\", \"type\": \"number\", \"unit\": \"%\"}, {\"name\": \"2024年营业收入\", \"type\": \"number\", \"unit\": \"亿元\"}, {\"name\": \"2024年净利润\", \"type\": \"number\", \"unit\": \"亿元\"}], \"rows\": [[\"600519.SH\", \"贵州茅台\", 38.4283, 1708.9915, 893.3473]]}]}, \"error\": null}"
+   }
+  ],
+  "isError": false
+ }
+}
