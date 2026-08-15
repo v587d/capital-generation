@@ -1,0 +1,1715 @@
+{
+ "code": 0,
+ "message": "success",
+ "request_id": "5a30ec861a0b4b3abaf1a8a3ad8a3339",
+ "data": {
+  "timestamp": 1786636800000,
+  "board_type": "all",
+  "trade_date": "2026-08-14",
+  "count": 72,
+  "stock_count": 67,
+  "stock_items": [
+   {
+    "thscode": "002081.SZ",
+    "ticker": "002081",
+    "name": "金螳螂",
+    "concept_list": [
+     {
+      "name": "装配式建筑"
+     },
+     {
+      "name": "光伏建筑一体化"
+     },
+     {
+      "name": "新型城镇化"
+     }
+    ],
+    "change": 0.099792,
+    "net_value": 54746002.39,
+    "net_rate": 0.02067079,
+    "hot_rank": 9,
+    "buy_value": 345970774.66,
+    "sell_value": 291224772.27,
+    "limit_reason": "洁净室+参建数据中心+海外业务+建筑装饰龙头",
+    "range_days": 1,
+    "org_net_value": -80519784.43
+   },
+   {
+    "thscode": "600721.SH",
+    "ticker": "600721",
+    "name": "百花医药",
+    "concept_list": [
+     {
+      "name": "青蒿素"
+     },
+     {
+      "name": "肝炎概念"
+     },
+     {
+      "name": "物业管理"
+     }
+    ],
+    "change": -0.047586,
+    "net_value": -8900356.49,
+    "net_rate": -0.00534693,
+    "hot_rank": 12,
+    "buy_value": 75980961.08,
+    "sell_value": 84881317.57,
+    "range_days": 1,
+    "hot_money_net_value": -11576942.6
+   },
+   {
+    "thscode": "002437.SZ",
+    "ticker": "002437",
+    "name": "誉衡药业",
+    "concept_list": [
+     {
+      "name": "创新药"
+     },
+     {
+      "name": "仿制药一致性评价"
+     },
+     {
+      "name": "医药电商"
+     }
+    ],
+    "change": 0.065882,
+    "net_value": -89425705.16,
+    "net_rate": -0.02131952,
+    "hot_rank": 18,
+    "buy_value": 511149867.16,
+    "sell_value": 600575572.32,
+    "range_days": 1,
+    "org_net_value": -136251051.81
+   },
+   {
+    "thscode": "300017.SZ",
+    "ticker": "300017",
+    "name": "网宿科技",
+    "concept_list": [
+     {
+      "name": "云计算"
+     },
+     {
+      "name": "东数西算(算力)"
+     },
+     {
+      "name": "算力租赁"
+     }
+    ],
+    "change": 0.200139,
+    "net_value": 971840548.6,
+    "net_rate": 0.12683075,
+    "hot_rank": 23,
+    "buy_value": 1378737145.86,
+    "sell_value": 406896597.26,
+    "limit_reason": "CDN涨价+液冷+算力租赁+边缘AI",
+    "range_days": 1,
+    "org_net_value": 184040289.93
+   },
+   {
+    "thscode": "603118.SH",
+    "ticker": "603118",
+    "name": "共进股份",
+    "concept_list": [
+     {
+      "name": "F5G概念"
+     },
+     {
+      "name": "WiFi 6"
+     },
+     {
+      "name": "共封装光学(CPO)"
+     }
+    ],
+    "change": 0.100251,
+    "net_value": 78943527.8,
+    "net_rate": 0.04049205,
+    "hot_rank": 27,
+    "buy_value": 256326720.16,
+    "sell_value": 177383192.36,
+    "limit_reason": "数据中心交换机+机器人+网通设备+唐山国资",
+    "range_days": 1,
+    "hot_money_net_value": -18164206.87
+   },
+   {
+    "thscode": "603118.SH",
+    "ticker": "603118",
+    "name": "共进股份",
+    "concept_list": [
+     {
+      "name": "F5G概念"
+     },
+     {
+      "name": "WiFi 6"
+     },
+     {
+      "name": "共封装光学(CPO)"
+     }
+    ],
+    "change": 0.100251,
+    "net_value": 228506279.9,
+    "net_rate": 0.06219374,
+    "hot_rank": 27,
+    "buy_value": 465881719.73,
+    "sell_value": 237375439.83,
+    "limit_reason": "数据中心交换机+机器人+网通设备+唐山国资",
+    "range_days": 3,
+    "hot_money_net_value": 62310538.9
+   },
+   {
+    "thscode": "000831.SZ",
+    "ticker": "000831",
+    "name": "中国稀土",
+    "concept_list": [
+     {
+      "name": "稀土永磁"
+     },
+     {
+      "name": "央企国企改革"
+     },
+     {
+      "name": "小金属概念"
+     }
+    ],
+    "change": 0.099982,
+    "net_value": 521659068.47,
+    "net_rate": 0.09630805,
+    "hot_rank": 28,
+    "buy_value": 1124041297.05,
+    "sell_value": 602382228.58,
+    "limit_reason": "稀土+半年报增长+央企",
+    "range_days": 1,
+    "org_net_value": 253096854.61,
+    "hot_money_net_value": 32742590.16
+   },
+   {
+    "thscode": "603083.SH",
+    "ticker": "603083",
+    "name": "剑桥科技",
+    "concept_list": [
+     {
+      "name": "F5G概念"
+     },
+     {
+      "name": "共封装光学(CPO)"
+     },
+     {
+      "name": "WiFi 6"
+     }
+    ],
+    "change": 0.1,
+    "net_value": 24274943.58,
+    "net_rate": 0.00143381,
+    "hot_rank": 30,
+    "buy_value": 2211441289.02,
+    "sell_value": 2187166345.44,
+    "limit_reason": "高速光模块+CPO+中报预增",
+    "range_days": 3,
+    "hot_money_net_value": -532645067.53
+   },
+   {
+    "thscode": "000802.SZ",
+    "ticker": "000802",
+    "name": "北京文化",
+    "concept_list": [
+     {
+      "name": "文化传媒概念"
+     },
+     {
+      "name": "旅游概念"
+     },
+     {
+      "name": "IP经济(谷子经济)"
+     }
+    ],
+    "change": -0.054313,
+    "net_value": -33011070.1,
+    "net_rate": -0.0166433,
+    "hot_rank": 31,
+    "buy_value": 246520688.58,
+    "sell_value": 279531758.68,
+    "range_days": 1,
+    "org_net_value": 72379751.99,
+    "hot_money_net_value": 44334892.99
+   },
+   {
+    "thscode": "003032.SZ",
+    "ticker": "003032",
+    "name": "传智教育",
+    "concept_list": [
+     {
+      "name": "华为概念"
+     },
+     {
+      "name": "人形机器人"
+     },
+     {
+      "name": "机器人概念"
+     }
+    ],
+    "change": 0.055077,
+    "net_value": -6397865.0,
+    "net_rate": -0.0062397,
+    "hot_rank": 35,
+    "buy_value": 59763147,
+    "sell_value": 66161012,
+    "range_days": 1,
+    "hot_money_net_value": 1145677.0
+   },
+   {
+    "thscode": "603618.SH",
+    "ticker": "603618",
+    "name": "杭电股份",
+    "concept_list": [
+     {
+      "name": "富时罗素概念股"
+     },
+     {
+      "name": "特高压"
+     },
+     {
+      "name": "PET铜箔"
+     },
+     {
+      "name": "光纤概念"
+     }
+    ],
+    "change": 0.100184,
+    "net_value": 395941795.91,
+    "net_rate": 0.12066455,
+    "hot_rank": 36,
+    "buy_value": 653458598.24,
+    "sell_value": 257516802.33,
+    "limit_reason": "光纤光缆+定增扩产+PCB铜箔",
+    "range_days": 1,
+    "hot_money_net_value": 136463603.57
+   },
+   {
+    "thscode": "600272.SH",
+    "ticker": "600272",
+    "name": "开开实业",
+    "concept_list": [
+     {
+      "name": "参股银行"
+     },
+     {
+      "name": "民营医院"
+     },
+     {
+      "name": "医药电商"
+     }
+    ],
+    "change": 0.1,
+    "net_value": 91129451.72,
+    "net_rate": 0.11905531,
+    "hot_rank": 40,
+    "buy_value": 148824289.6,
+    "sell_value": 57694837.88,
+    "limit_reason": "SPD+医药商业+资产收购+上海国资",
+    "range_days": 1,
+    "hot_money_net_value": 67821218.12
+   },
+   {
+    "thscode": "002229.SZ",
+    "ticker": "002229",
+    "name": "鸿博股份",
+    "concept_list": [
+     {
+      "name": "Web3.0"
+     },
+     {
+      "name": "数字水印"
+     },
+     {
+      "name": "算力租赁"
+     }
+    ],
+    "change": -0.079853,
+    "net_value": -52027127.29,
+    "net_rate": -0.02638973,
+    "hot_rank": 46,
+    "buy_value": 176678242.35,
+    "sell_value": 228705369.64,
+    "range_days": 1,
+    "hot_money_net_value": 12015637.32
+   },
+   {
+    "thscode": "600881.SH",
+    "ticker": "600881",
+    "name": "亚泰集团",
+    "concept_list": [
+     {
+      "name": "富时罗素概念股"
+     },
+     {
+      "name": "体育产业"
+     },
+     {
+      "name": "水泥概念"
+     },
+     {
+      "name": "物业管理"
+     }
+    ],
+    "change": -0.039648,
+    "net_value": -13812450.85,
+    "net_rate": -0.00801971,
+    "hot_rank": 52,
+    "buy_value": 149142464.12,
+    "sell_value": 162954914.97,
+    "range_days": 1,
+    "hot_money_net_value": 8537481.2
+   },
+   {
+    "thscode": "300862.SZ",
+    "ticker": "300862",
+    "name": "蓝盾光电",
+    "concept_list": [
+     {
+      "name": "专精特新"
+     },
+     {
+      "name": "传感器"
+     },
+     {
+      "name": "商业航天"
+     }
+    ],
+    "change": 0.199949,
+    "net_value": 373823224.21,
+    "net_rate": 0.10697262,
+    "hot_rank": 54,
+    "buy_value": 692549215.61,
+    "sell_value": 318725991.4,
+    "limit_reason": "拟收购岚创科技+真空镀膜设备+环境监测+低空经济",
+    "range_days": 1,
+    "hot_money_net_value": -85003618.2
+   },
+   {
+    "thscode": "600683.SH",
+    "ticker": "600683",
+    "name": "京投发展",
+    "concept_list": [
+     {
+      "name": "土地流转"
+     },
+     {
+      "name": "特色小镇"
+     },
+     {
+      "name": "物业管理"
+     }
+    ],
+    "change": -0.099768,
+    "net_value": -93543588.91,
+    "net_rate": -0.08051947,
+    "hot_rank": 55,
+    "buy_value": 82582686.54,
+    "sell_value": 176126275.45,
+    "range_days": 1,
+    "org_net_value": -66177411,
+    "hot_money_net_value": -12806748.02
+   },
+   {
+    "thscode": "603890.SH",
+    "ticker": "603890",
+    "name": "春秋电子",
+    "concept_list": [
+     {
+      "name": "富士康概念"
+     },
+     {
+      "name": "F5G概念"
+     },
+     {
+      "name": "AI PC"
+     }
+    ],
+    "change": 0.080196,
+    "net_value": -139220058.26,
+    "net_rate": -0.04595735,
+    "hot_rank": 61,
+    "buy_value": 222424517.78,
+    "sell_value": 361644576.04,
+    "range_days": 3,
+    "hot_money_net_value": -78959805.86
+   },
+   {
+    "thscode": "002329.SZ",
+    "ticker": "002329",
+    "name": "皇氏集团",
+    "concept_list": [
+     {
+      "name": "乳业"
+     },
+     {
+      "name": "绿色电力"
+     },
+     {
+      "name": "生态农业"
+     }
+    ],
+    "change": -0.075758,
+    "net_value": 11107819.43,
+    "net_rate": 0.01081905,
+    "hot_rank": 64,
+    "buy_value": 104905074.75,
+    "sell_value": 93797255.32,
+    "range_days": 1,
+    "org_net_value": -8687177.82,
+    "hot_money_net_value": 32747527.52
+   },
+   {
+    "thscode": "000779.SZ",
+    "ticker": "000779",
+    "name": "甘咨询",
+    "concept_list": [
+     {
+      "name": "新型城镇化"
+     },
+     {
+      "name": "乡村振兴"
+     },
+     {
+      "name": "房屋检测"
+     }
+    ],
+    "change": -0.09972,
+    "net_value": -6348772.23,
+    "net_rate": -0.00673141,
+    "hot_rank": 67,
+    "buy_value": 84007196.03,
+    "sell_value": 90355968.26,
+    "range_days": 1,
+    "hot_money_net_value": 4332948.16
+   },
+   {
+    "thscode": "000779.SZ",
+    "ticker": "000779",
+    "name": "甘咨询",
+    "concept_list": [
+     {
+      "name": "新型城镇化"
+     },
+     {
+      "name": "乡村振兴"
+     },
+     {
+      "name": "房屋检测"
+     }
+    ],
+    "change": -0.09972,
+    "net_value": -55098780.16,
+    "net_rate": -0.01476138,
+    "hot_rank": 67,
+    "buy_value": 263776185.57,
+    "sell_value": 318874965.73,
+    "range_days": 3,
+    "org_net_value": -64816648.94,
+    "hot_money_net_value": 21959732.69
+   },
+   {
+    "thscode": "603538.SH",
+    "ticker": "603538",
+    "name": "美诺华",
+    "concept_list": [
+     {
+      "name": "CRO概念"
+     },
+     {
+      "name": "减肥药"
+     },
+     {
+      "name": "流感"
+     }
+    ],
+    "change": -0.072459,
+    "net_value": -63570054.32,
+    "net_rate": -0.02546071,
+    "hot_rank": 70,
+    "buy_value": 266401793.48,
+    "sell_value": 329971847.8,
+    "range_days": 1,
+    "hot_money_net_value": -41828899.69
+   },
+   {
+    "thscode": "002400.SZ",
+    "ticker": "002400",
+    "name": "省广集团",
+    "concept_list": [
+     {
+      "name": "快手概念"
+     },
+     {
+      "name": "短剧游戏"
+     },
+     {
+      "name": "小红书概念"
+     }
+    ],
+    "change": -0.099371,
+    "net_value": -199800029.33,
+    "net_rate": -0.10970953,
+    "hot_rank": 71,
+    "buy_value": 177747477.03,
+    "sell_value": 377547506.36,
+    "range_days": 1,
+    "org_net_value": -20396961.44,
+    "hot_money_net_value": -77449846.49
+   },
+   {
+    "thscode": "300404.SZ",
+    "ticker": "300404",
+    "name": "博济医药",
+    "concept_list": [
+     {
+      "name": "CRO概念"
+     },
+     {
+      "name": "幽门螺杆菌概念"
+     },
+     {
+      "name": "细胞免疫治疗"
+     }
+    ],
+    "change": 0.2,
+    "net_value": 36966832.34,
+    "net_rate": 0.02800435,
+    "hot_rank": 98,
+    "buy_value": 166166490.06,
+    "sell_value": 129199657.72,
+    "limit_reason": "中药创新药+CRO+战略合作",
+    "range_days": 1,
+    "org_net_value": 49399942.34,
+    "hot_money_net_value": -29752076
+   },
+   {
+    "thscode": "300404.SZ",
+    "ticker": "300404",
+    "name": "博济医药",
+    "concept_list": [
+     {
+      "name": "CRO概念"
+     },
+     {
+      "name": "幽门螺杆菌概念"
+     },
+     {
+      "name": "细胞免疫治疗"
+     }
+    ],
+    "change": 0.2,
+    "net_value": 82328833.54,
+    "net_rate": 0.0384182,
+    "hot_rank": 98,
+    "buy_value": 282568118.91,
+    "sell_value": 200239285.37,
+    "limit_reason": "中药创新药+CRO+战略合作",
+    "range_days": 3,
+    "org_net_value": 85902705.54,
+    "hot_money_net_value": -3573872.0
+   },
+   {
+    "thscode": "301520.SZ",
+    "ticker": "301520",
+    "name": "万邦医药",
+    "concept_list": [
+     {
+      "name": "CRO概念"
+     },
+     {
+      "name": "仿制药一致性评价"
+     },
+     {
+      "name": "创新药"
+     }
+    ],
+    "change": -0.032589,
+    "net_value": -97187137.2,
+    "net_rate": -0.08369192,
+    "hot_rank": 101,
+    "buy_value": 54188129.76,
+    "sell_value": 151375266.96,
+    "range_days": 1,
+    "org_net_value": -108824864.17,
+    "hot_money_net_value": 19888373.02
+   },
+   {
+    "thscode": "000620.SZ",
+    "ticker": "000620",
+    "name": "盈新发展",
+    "concept_list": [
+     {
+      "name": "数据要素"
+     },
+     {
+      "name": "AI智能体"
+     },
+     {
+      "name": "短剧游戏"
+     }
+    ],
+    "change": 0.101818,
+    "net_value": 205079680.0,
+    "net_rate": 0.12960082,
+    "hot_rank": 104,
+    "buy_value": 322382314.4,
+    "sell_value": 117302634.4,
+    "limit_reason": "存储芯片+AI算力+转型科技",
+    "range_days": 1,
+    "org_net_value": -6810708.81,
+    "hot_money_net_value": 66573548.55
+   },
+   {
+    "thscode": "603466.SH",
+    "ticker": "603466",
+    "name": "风语筑",
+    "concept_list": [
+     {
+      "name": "手机游戏"
+     },
+     {
+      "name": "ChatGPT概念"
+     },
+     {
+      "name": "AI视频"
+     }
+    ],
+    "change": -0.083819,
+    "net_value": -73579080.09,
+    "net_rate": -0.03732196,
+    "hot_rank": 111,
+    "buy_value": 236122745.56,
+    "sell_value": 309701825.65,
+    "range_days": 1,
+    "hot_money_net_value": 72115012.54
+   },
+   {
+    "thscode": "000593.SZ",
+    "ticker": "000593",
+    "name": "德龙汇能",
+    "concept_list": [
+     {
+      "name": "股权转让(并购重组)"
+     },
+     {
+      "name": "天然气"
+     },
+     {
+      "name": "信托概念"
+     },
+     {
+      "name": "青蒿素"
+     }
+    ],
+    "change": -0.1,
+    "net_value": -113342926.85,
+    "net_rate": -0.12028696,
+    "hot_rank": 119,
+    "buy_value": 96437307.19,
+    "sell_value": 209780234.04,
+    "range_days": 1,
+    "org_net_value": -29958355.34,
+    "hot_money_net_value": -76381068
+   },
+   {
+    "thscode": "603137.SH",
+    "ticker": "603137",
+    "name": "恒尚节能",
+    "concept_list": [
+     {
+      "name": "建筑节能"
+     },
+     {
+      "name": "新型城镇化"
+     },
+     {
+      "name": "装配式建筑"
+     }
+    ],
+    "change": -0.100069,
+    "net_value": -19048500.99,
+    "net_rate": -0.02086266,
+    "hot_rank": 120,
+    "buy_value": 66592886.74,
+    "sell_value": 85641387.73,
+    "range_days": 1,
+    "hot_money_net_value": 3708922.22
+   },
+   {
+    "thscode": "300534.SZ",
+    "ticker": "300534",
+    "name": "陇神戎发",
+    "concept_list": [
+     {
+      "name": "流感"
+     },
+     {
+      "name": "医药电商"
+     },
+     {
+      "name": "三胎概念"
+     }
+    ],
+    "change": -0.001057,
+    "net_value": -68756118.2,
+    "net_rate": -0.03653985,
+    "hot_rank": 127,
+    "buy_value": 294273106.96,
+    "sell_value": 363029225.16,
+    "range_days": 1,
+    "org_net_value": 55859254.25,
+    "hot_money_net_value": -103746609.01
+   },
+   {
+    "thscode": "002248.SZ",
+    "ticker": "002248",
+    "name": "华东数控",
+    "concept_list": [
+     {
+      "name": "高端装备"
+     },
+     {
+      "name": "工业母机"
+     },
+     {
+      "name": "新型工业化"
+     }
+    ],
+    "change": 0.003407,
+    "net_value": 9923616.95,
+    "net_rate": 0.00996737,
+    "hot_rank": 133,
+    "buy_value": 108503841.74,
+    "sell_value": 98580224.79,
+    "range_days": 1,
+    "org_net_value": 20100417.95
+   },
+   {
+    "thscode": "605286.SH",
+    "ticker": "605286",
+    "name": "同力天启",
+    "concept_list": [
+     {
+      "name": "人工智能"
+     },
+     {
+      "name": "虚拟电厂"
+     },
+     {
+      "name": "东数西算(算力)"
+     }
+    ],
+    "change": -0.100029,
+    "net_value": -27357258.22,
+    "net_rate": -0.04644894,
+    "hot_rank": 139,
+    "buy_value": 37846148,
+    "sell_value": 65203406.22,
+    "range_days": 1,
+    "hot_money_net_value": 3448620.52
+   },
+   {
+    "thscode": "002724.SZ",
+    "ticker": "002724",
+    "name": "海洋王",
+    "concept_list": [
+     {
+      "name": "物联网"
+     },
+     {
+      "name": "智慧城市"
+     },
+     {
+      "name": "智慧灯杆"
+     }
+    ],
+    "change": 0.100649,
+    "net_value": 35705037.08,
+    "net_rate": 0.13415336,
+    "hot_rank": 145,
+    "buy_value": 72391422.08,
+    "sell_value": 36686385,
+    "limit_reason": "照明+智慧灯杆+物联网",
+    "range_days": 3,
+    "hot_money_net_value": 12708432
+   },
+   {
+    "thscode": "600829.SH",
+    "ticker": "600829",
+    "name": "人民同泰",
+    "concept_list": [
+     {
+      "name": "振兴东北"
+     },
+     {
+      "name": "民营医院"
+     },
+     {
+      "name": "医药电商"
+     },
+     {
+      "name": "流感"
+     }
+    ],
+    "change": 0.100465,
+    "net_value": 68557502,
+    "net_rate": 0.12128235,
+    "hot_rank": 149,
+    "buy_value": 126306098,
+    "sell_value": 57748596,
+    "limit_reason": "医药商业+DTP药房+半年报增长",
+    "range_days": 1,
+    "hot_money_net_value": 44564838
+   },
+   {
+    "thscode": "003031.SZ",
+    "ticker": "003031",
+    "name": "中瓷电子",
+    "concept_list": [
+     {
+      "name": "第三代半导体"
+     },
+     {
+      "name": "光刻机"
+     },
+     {
+      "name": "共封装光学(CPO)"
+     }
+    ],
+    "change": 0.100042,
+    "net_value": 242340563.21,
+    "net_rate": 0.14851155,
+    "hot_rank": 153,
+    "buy_value": 446184227.31,
+    "sell_value": 203843664.1,
+    "limit_reason": "电子陶瓷+CPO+央企",
+    "range_days": 1,
+    "org_net_value": 73316464.42,
+    "hot_money_net_value": 92786441.4
+   },
+   {
+    "thscode": "603696.SH",
+    "ticker": "603696",
+    "name": "安记食品",
+    "concept_list": [
+     {
+      "name": "互联网金融"
+     },
+     {
+      "name": "海峡两岸"
+     }
+    ],
+    "change": -0.100183,
+    "net_value": -33158215.39,
+    "net_rate": -0.06081172,
+    "hot_rank": 159,
+    "buy_value": 31344591,
+    "sell_value": 64502806.39,
+    "range_days": 1,
+    "hot_money_net_value": -39630290.57
+   },
+   {
+    "thscode": "601609.SH",
+    "ticker": "601609",
+    "name": "金田股份",
+    "concept_list": [
+     {
+      "name": "稀土永磁"
+     },
+     {
+      "name": "金属铜"
+     },
+     {
+      "name": "铜缆高速连接"
+     }
+    ],
+    "change": 0.100503,
+    "net_value": 85686672.19,
+    "net_rate": 0.13471633,
+    "hot_rank": 190,
+    "buy_value": 150083971.3,
+    "sell_value": 64397299.11,
+    "limit_reason": "算力散热+液冷服务器+铜加工龙头+稀土",
+    "range_days": 1,
+    "org_net_value": -12846322,
+    "hot_money_net_value": 87564771.08
+   },
+   {
+    "thscode": "000692.SZ",
+    "ticker": "000692",
+    "name": "惠天热电",
+    "concept_list": [
+     {
+      "name": "振兴东北"
+     },
+     {
+      "name": "充电桩"
+     },
+     {
+      "name": "风电"
+     }
+    ],
+    "change": -0.061475,
+    "net_value": -22617111.87,
+    "net_rate": -0.04556309,
+    "hot_rank": 191,
+    "buy_value": 41394941.2,
+    "sell_value": 64012053.07,
+    "range_days": 1,
+    "org_net_value": -12026935.25,
+    "hot_money_net_value": 2780571.0
+   },
+   {
+    "thscode": "601579.SH",
+    "ticker": "601579",
+    "name": "会稽山",
+    "concept_list": [
+     {
+      "name": "白酒概念"
+     },
+     {
+      "name": "共同富裕示范区"
+     }
+    ],
+    "change": 0.070487,
+    "net_value": 1511685.1,
+    "net_rate": 0.00091857,
+    "hot_rank": 196,
+    "buy_value": 250517289.06,
+    "sell_value": 249005603.96,
+    "range_days": 3,
+    "org_net_value": -82985794.35,
+    "hot_money_net_value": 32692178.32
+   },
+   {
+    "thscode": "603341.SH",
+    "ticker": "603341",
+    "name": "龙旗科技",
+    "concept_list": [
+     {
+      "name": "星闪概念"
+     },
+     {
+      "name": "智能音箱"
+     },
+     {
+      "name": "车联网(车路协同)"
+     }
+    ],
+    "change": -0.026895,
+    "net_value": -342584258.38,
+    "net_rate": -0.2074212,
+    "hot_rank": 199,
+    "buy_value": 160844151.74,
+    "sell_value": 503428410.12,
+    "range_days": 1,
+    "hot_money_net_value": -97798795.21
+   },
+   {
+    "thscode": "002645.SZ",
+    "ticker": "002645",
+    "name": "华宏科技",
+    "concept_list": [
+     {
+      "name": "稀土永磁"
+     },
+     {
+      "name": "新能源汽车"
+     },
+     {
+      "name": "消费电子概念"
+     }
+    ],
+    "change": 0.099846,
+    "net_value": 49128019.99,
+    "net_rate": 0.04683136,
+    "hot_rank": 211,
+    "buy_value": 234415472.62,
+    "sell_value": 185287452.63,
+    "limit_reason": "稀土永磁+机器人概念+中报预增",
+    "range_days": 1,
+    "org_net_value": 7134604.1,
+    "hot_money_net_value": 49404401.28
+   },
+   {
+    "thscode": "600613.SH",
+    "ticker": "600613",
+    "name": "神奇制药",
+    "concept_list": [
+     {
+      "name": "流感"
+     },
+     {
+      "name": "医药电商"
+     }
+    ],
+    "change": 0.099485,
+    "net_value": 34898304.4,
+    "net_rate": 0.16460482,
+    "hot_rank": 214,
+    "buy_value": 62983027,
+    "sell_value": 28084722.6,
+    "limit_reason": "化学制药+抗肿瘤+感冒止咳",
+    "range_days": 3,
+    "org_net_value": -13992000.0,
+    "hot_money_net_value": 27234532
+   },
+   {
+    "thscode": "000582.SZ",
+    "ticker": "000582",
+    "name": "北部湾港",
+    "concept_list": [
+     {
+      "name": "自由贸易港"
+     },
+     {
+      "name": "统一大市场"
+     },
+     {
+      "name": "航运概念"
+     }
+    ],
+    "change": -0.1,
+    "net_value": -66961716.6,
+    "net_rate": -0.05982723,
+    "hot_rank": 235,
+    "buy_value": 69867845,
+    "sell_value": 136829561.6,
+    "range_days": 1,
+    "org_net_value": -20871991.34,
+    "hot_money_net_value": 21014414.73
+   },
+   {
+    "thscode": "301583.SZ",
+    "ticker": "301583",
+    "name": "托伦斯",
+    "concept_list": [],
+    "change": 0.04352,
+    "net_value": 55410156.88,
+    "net_rate": 0.03056197,
+    "hot_rank": 250,
+    "buy_value": 261498822.45,
+    "sell_value": 206088665.57,
+    "range_days": 1,
+    "org_net_value": 76198947.27,
+    "hot_money_net_value": -2660504.31
+   },
+   {
+    "thscode": "600936.SH",
+    "ticker": "600936",
+    "name": "北投科技",
+    "concept_list": [
+     {
+      "name": "数字乡村"
+     },
+     {
+      "name": "5G"
+     },
+     {
+      "name": "机器人概念"
+     }
+    ],
+    "change": -0.100671,
+    "net_value": -33927896.56,
+    "net_rate": -0.04511495,
+    "hot_rank": 262,
+    "buy_value": 54268334.1,
+    "sell_value": 88196230.66,
+    "range_days": 1,
+    "hot_money_net_value": 1664403.8
+   },
+   {
+    "thscode": "002047.SZ",
+    "ticker": "002047",
+    "name": "宝鹰股份",
+    "concept_list": [
+     {
+      "name": "股权转让(并购重组)"
+     },
+     {
+      "name": "光伏建筑一体化"
+     },
+     {
+      "name": "横琴新区"
+     },
+     {
+      "name": "装配式建筑"
+     }
+    ],
+    "change": -0.1,
+    "net_value": -68166526.04,
+    "net_rate": -0.19861776,
+    "hot_rank": 267,
+    "buy_value": 55494036,
+    "sell_value": 123660562.04,
+    "range_days": 1,
+    "hot_money_net_value": -44322196
+   },
+   {
+    "thscode": "002322.SZ",
+    "ticker": "002322",
+    "name": "理工能科",
+    "concept_list": [
+     {
+      "name": "电力物联网"
+     },
+     {
+      "name": "智能电网"
+     },
+     {
+      "name": "数据要素"
+     }
+    ],
+    "change": 0.100337,
+    "net_value": 28099339.94,
+    "net_rate": 0.07269913,
+    "hot_rank": 273,
+    "buy_value": 84350002,
+    "sell_value": 56250662.06,
+    "limit_reason": "半年报增长+高分红+AI应用",
+    "range_days": 3,
+    "hot_money_net_value": 24947184
+   },
+   {
+    "thscode": "301419.SZ",
+    "ticker": "301419",
+    "name": "阿莱德",
+    "concept_list": [
+     {
+      "name": "5G"
+     },
+     {
+      "name": "富士康概念"
+     },
+     {
+      "name": "共封装光学(CPO)"
+     }
+    ],
+    "change": 0.2,
+    "net_value": 42980988.88,
+    "net_rate": 0.0981601,
+    "hot_rank": 298,
+    "buy_value": 109340567.14,
+    "sell_value": 66359578.26,
+    "limit_reason": "CPO+存储芯片+导热材料",
+    "range_days": 1,
+    "org_net_value": 11391517.74,
+    "hot_money_net_value": 41506342.14
+   },
+   {
+    "thscode": "300120.SZ",
+    "ticker": "300120",
+    "name": "经纬辉开",
+    "concept_list": [
+     {
+      "name": "风电"
+     },
+     {
+      "name": "智慧灯杆"
+     },
+     {
+      "name": "安防"
+     }
+    ],
+    "change": 0.199482,
+    "net_value": 109294225.89,
+    "net_rate": 0.07897174,
+    "hot_rank": 330,
+    "buy_value": 235809991.34,
+    "sell_value": 126515765.45,
+    "limit_reason": "专网通信+电磁线+液晶显示+收购完成",
+    "range_days": 3,
+    "org_net_value": 52983279.57
+   },
+   {
+    "thscode": "300120.SZ",
+    "ticker": "300120",
+    "name": "经纬辉开",
+    "concept_list": [
+     {
+      "name": "风电"
+     },
+     {
+      "name": "智慧灯杆"
+     },
+     {
+      "name": "安防"
+     }
+    ],
+    "change": 0.199482,
+    "net_value": 86877651.89,
+    "net_rate": 0.09618314,
+    "hot_rank": 330,
+    "buy_value": 179957463.34,
+    "sell_value": 93079811.45,
+    "limit_reason": "专网通信+电磁线+液晶显示+收购完成",
+    "range_days": 1,
+    "org_net_value": 32229917.41,
+    "hot_money_net_value": 22888584
+   },
+   {
+    "thscode": "688662.SH",
+    "ticker": "688662",
+    "name": "富信科技",
+    "concept_list": [
+     {
+      "name": "共封装光学(CPO)"
+     },
+     {
+      "name": "5G"
+     },
+     {
+      "name": "芯片概念"
+     }
+    ],
+    "change": 0.2,
+    "net_value": 181256178.07,
+    "net_rate": 0.10743058,
+    "hot_rank": 348,
+    "buy_value": 380921449,
+    "sell_value": 199665270.93,
+    "limit_reason": "CPO+Micro TEC+产能扩张",
+    "range_days": 1,
+    "hot_money_net_value": 27976256.37
+   },
+   {
+    "thscode": "688635.SH",
+    "ticker": "688635",
+    "name": "长进光子",
+    "concept_list": [
+     {
+      "name": "科创次新股"
+     },
+     {
+      "name": "注册制次新股"
+     },
+     {
+      "name": "光纤概念"
+     }
+    ],
+    "change": 0.139949,
+    "net_value": 1343936.95,
+    "net_rate": 0.00027457,
+    "hot_rank": 359,
+    "buy_value": 701471459.23,
+    "sell_value": 700127522.28,
+    "range_days": 3,
+    "hot_money_net_value": 14668482.42
+   },
+   {
+    "thscode": "688635.SH",
+    "ticker": "688635",
+    "name": "长进光子",
+    "concept_list": [
+     {
+      "name": "科创次新股"
+     },
+     {
+      "name": "注册制次新股"
+     },
+     {
+      "name": "光纤概念"
+     }
+    ],
+    "change": 0.139949,
+    "net_value": -46595510.95,
+    "net_rate": -0.0244654,
+    "hot_rank": 359,
+    "buy_value": 240857720.07,
+    "sell_value": 287453231.02,
+    "range_days": 1,
+    "hot_money_net_value": -28946168.56
+   },
+   {
+    "thscode": "688143.SH",
+    "ticker": "688143",
+    "name": "长盈通",
+    "concept_list": [
+     {
+      "name": "光纤概念"
+     },
+     {
+      "name": "共封装光学(CPO)"
+     },
+     {
+      "name": "芯片概念"
+     }
+    ],
+    "change": 0.148765,
+    "net_value": -99582685.38,
+    "net_rate": -0.01289423,
+    "hot_rank": 365,
+    "buy_value": 1106979896.09,
+    "sell_value": 1206562581.47,
+    "range_days": 3,
+    "org_net_value": -331023921.87,
+    "hot_money_net_value": 90873659.21
+   },
+   {
+    "thscode": "600800.SH",
+    "ticker": "600800",
+    "name": "渤海化学",
+    "concept_list": [
+     {
+      "name": "天津自贸区"
+     },
+     {
+      "name": "丙烯酸"
+     },
+     {
+      "name": "环氧丙烷"
+     }
+    ],
+    "change": -0.040107,
+    "net_value": -32806455.93,
+    "net_rate": -0.06389226,
+    "hot_rank": 372,
+    "buy_value": 30025922,
+    "sell_value": 62832377.93,
+    "range_days": 1,
+    "hot_money_net_value": -4620361.3
+   },
+   {
+    "thscode": "920083.BJ",
+    "ticker": "920083",
+    "name": "金戈新材",
+    "concept_list": [],
+    "change": 0.299746,
+    "net_value": 5428734.08,
+    "net_rate": 0.01659347,
+    "hot_rank": 393,
+    "buy_value": 50948553.51,
+    "sell_value": 45519819.43,
+    "range_days": 1,
+    "org_net_value": 14559150.65
+   },
+   {
+    "thscode": "300937.SZ",
+    "ticker": "300937",
+    "name": "药易购",
+    "concept_list": [
+     {
+      "name": "医药电商"
+     },
+     {
+      "name": "智能医疗"
+     },
+     {
+      "name": "民营医院"
+     }
+    ],
+    "change": -0.031546,
+    "net_value": -47477203.38,
+    "net_rate": -0.08151548,
+    "hot_rank": 456,
+    "buy_value": 90984783.78,
+    "sell_value": 138461987.16,
+    "range_days": 1,
+    "org_net_value": -2234687.58,
+    "hot_money_net_value": -39319935.2
+   },
+   {
+    "thscode": "688167.SH",
+    "ticker": "688167",
+    "name": "炬光科技",
+    "concept_list": [
+     {
+      "name": "光纤概念"
+     },
+     {
+      "name": "光刻机"
+     },
+     {
+      "name": "共封装光学(CPO)"
+     }
+    ],
+    "change": 0.058978,
+    "net_value": -45452949,
+    "net_rate": -0.00417144,
+    "hot_rank": 464,
+    "buy_value": 1666148371.54,
+    "sell_value": 1711601320.54,
+    "range_days": 3,
+    "org_net_value": 532808368.32,
+    "hot_money_net_value": -512216392.74
+   },
+   {
+    "thscode": "603682.SH",
+    "ticker": "603682",
+    "name": "锦和商管",
+    "concept_list": [
+     {
+      "name": "物业管理"
+     },
+     {
+      "name": "新型城镇化"
+     },
+     {
+      "name": "租售同权"
+     }
+    ],
+    "change": -0.100304,
+    "net_value": -6529197.0,
+    "net_rate": -0.0128536,
+    "hot_rank": 477,
+    "buy_value": 86473594,
+    "sell_value": 93002791,
+    "range_days": 1,
+    "hot_money_net_value": 9361099.0
+   },
+   {
+    "thscode": "688137.SH",
+    "ticker": "688137",
+    "name": "近岸蛋白",
+    "concept_list": [
+     {
+      "name": "重组蛋白"
+     },
+     {
+      "name": "CRO概念"
+     },
+     {
+      "name": "细胞免疫治疗"
+     }
+    ],
+    "change": 0.087188,
+    "net_value": -36288310.04,
+    "net_rate": -0.03410128,
+    "hot_rank": 487,
+    "buy_value": 153906145.5,
+    "sell_value": 190194455.54,
+    "range_days": 3,
+    "org_net_value": 20571845.93,
+    "hot_money_net_value": -56860155.97
+   },
+   {
+    "thscode": "688286.SH",
+    "ticker": "688286",
+    "name": "敏芯股份",
+    "concept_list": [
+     {
+      "name": "传感器"
+     },
+     {
+      "name": "专精特新"
+     },
+     {
+      "name": "智能穿戴"
+     }
+    ],
+    "change": 0.20009,
+    "net_value": 110192385.9,
+    "net_rate": 0.17912162,
+    "hot_rank": 516,
+    "buy_value": 181133063.03,
+    "sell_value": 70940677.13,
+    "limit_reason": "MEMS传感器+人形机器人",
+    "range_days": 1,
+    "hot_money_net_value": 101479188.49
+   },
+   {
+    "thscode": "688485.SH",
+    "ticker": "688485",
+    "name": "九州一轨",
+    "concept_list": [
+     {
+      "name": "专精特新"
+     },
+     {
+      "name": "芯片概念"
+     },
+     {
+      "name": "光纤概念"
+     }
+    ],
+    "change": 0.200067,
+    "net_value": 119816725.86,
+    "net_rate": 0.09370823,
+    "hot_rank": 574,
+    "buy_value": 287273683.88,
+    "sell_value": 167456958.02,
+    "limit_reason": "半导体切割+光纤传感+声纹监测",
+    "range_days": 1,
+    "hot_money_net_value": 155574088.11
+   },
+   {
+    "thscode": "603089.SH",
+    "ticker": "603089",
+    "name": "正裕工业",
+    "concept_list": [
+     {
+      "name": "人民币贬值受益"
+     },
+     {
+      "name": "机器人概念"
+     },
+     {
+      "name": "专精特新"
+     }
+    ],
+    "change": 0.100451,
+    "net_value": 5528692.59,
+    "net_rate": 0.09397403,
+    "hot_rank": 782,
+    "buy_value": 18605138,
+    "sell_value": 13076445.41,
+    "limit_reason": "机器人概念+汽车减震器龙头+定增完成",
+    "range_days": 1,
+    "org_net_value": -1480136.0,
+    "hot_money_net_value": -1215727.41
+   },
+   {
+    "thscode": "920367.BJ",
+    "ticker": "920367",
+    "name": "新赣江",
+    "concept_list": [],
+    "change": -0.055895,
+    "net_value": -11022630.45,
+    "net_rate": -0.03294163,
+    "hot_rank": 844,
+    "buy_value": 38690820.95,
+    "sell_value": 49713451.4,
+    "range_days": 1,
+    "org_net_value": -2876299.26,
+    "hot_money_net_value": -9566947.11
+   },
+   {
+    "thscode": "920117.BJ",
+    "ticker": "920117",
+    "name": "龙鑫智能",
+    "concept_list": [],
+    "change": 0.098953,
+    "net_value": 32862035.58,
+    "net_rate": 0.09954557,
+    "hot_rank": 872,
+    "buy_value": 63816680.79,
+    "sell_value": 30954645.21,
+    "range_days": 1,
+    "org_net_value": 8475559.04,
+    "hot_money_net_value": 697365.2
+   },
+   {
+    "thscode": "920138.BJ",
+    "ticker": "920138",
+    "name": "杰理科技",
+    "concept_list": [],
+    "change": -0.028976,
+    "net_value": -4050243.81,
+    "net_rate": -0.00888305,
+    "hot_rank": 1083,
+    "buy_value": 37323443.48,
+    "sell_value": 41373687.29,
+    "range_days": 1,
+    "org_net_value": -3458686.19,
+    "hot_money_net_value": 2533694.94
+   },
+   {
+    "thscode": "920161.BJ",
+    "ticker": "920161",
+    "name": "龙辰科技",
+    "concept_list": [],
+    "change": 0.16129,
+    "net_value": 12609104.14,
+    "net_rate": 0.0493175,
+    "hot_rank": 1091,
+    "buy_value": 43072761.45,
+    "sell_value": 30463657.31,
+    "range_days": 1,
+    "org_net_value": 7127866.13,
+    "hot_money_net_value": 2904150.67
+   },
+   {
+    "thscode": "603284.SH",
+    "ticker": "603284",
+    "name": "林平发展",
+    "concept_list": [
+     {
+      "name": "注册制次新股"
+     },
+     {
+      "name": "乡村振兴"
+     },
+     {
+      "name": "参股银行"
+     }
+    ],
+    "change": 0.021164,
+    "net_value": -282360.0,
+    "net_rate": -0.00137441,
+    "hot_rank": 1429,
+    "buy_value": 44668905.85,
+    "sell_value": 44951265.85,
+    "range_days": 1,
+    "org_net_value": 5652996.36,
+    "hot_money_net_value": -13994445.66
+   },
+   {
+    "thscode": "001311.SZ",
+    "ticker": "001311",
+    "name": "多利科技",
+    "concept_list": [
+     {
+      "name": "一体化压铸"
+     },
+     {
+      "name": "比亚迪概念"
+     },
+     {
+      "name": "机器人概念"
+     }
+    ],
+    "change": 0.003863,
+    "net_value": -53905022.79,
+    "net_rate": -0.18836108,
+    "hot_rank": 1718,
+    "buy_value": 69375767.48,
+    "sell_value": 123280790.27,
+    "range_days": 1,
+    "org_net_value": -33035712.27,
+    "hot_money_net_value": 649501.17
+   },
+   {
+    "thscode": "920165.BJ",
+    "ticker": "920165",
+    "name": "珈凯生物",
+    "concept_list": [],
+    "change": -0.046852,
+    "net_value": 2078228.57,
+    "net_rate": 0.02262809,
+    "hot_rank": 2928,
+    "buy_value": 15200165.72,
+    "sell_value": 13121937.15,
+    "range_days": 1,
+    "org_net_value": -2119426.44
+   },
+   {
+    "thscode": "123277.SZ",
+    "ticker": "123277",
+    "name": "玉禾转债",
+    "concept_list": [],
+    "change": 0.573,
+    "net_value": 121456647,
+    "net_rate": 0.61532708,
+    "buy_value": 137786896,
+    "sell_value": 16330249,
+    "range_days": 1,
+    "hot_money_net_value": -2885689.3
+   },
+   {
+    "thscode": "127115.SZ",
+    "ticker": "127115",
+    "name": "炬申转债",
+    "concept_list": [],
+    "change": 0.2,
+    "net_value": 33721218.96,
+    "net_rate": 0.63892734,
+    "buy_value": 52777862.28,
+    "sell_value": 19056643.32,
+    "range_days": 1
+   }
+  ],
+  "hot_money_items": []
+ }
+}

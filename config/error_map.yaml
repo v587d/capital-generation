@@ -1,0 +1,31 @@
+# Vendor error code → FinError kind (docs/DEGRADATION.md 判定表, LESSONS §4.5).
+# 外置配置:新源接入只声明自己的错误码映射,不改路由代码。
+# 语义:1xxx/2xxx 可修复不重试;4xxx 退避重试;5xxx 退避后换源;3001/3002 换源一次。
+
+ths:
+  1001: PARAM        # 缺少必填参数
+  1002: PARAM        # 参数格式无效
+  1003: PARAM        # 参数超出范围
+  1004: PARAM        # 参数冲突
+  2001: AUTH         # 未认证
+  2003: AUTH         # 无权限或 Key 无效
+  3001: NO_DATA      # 标的不存在
+  3002: NO_DATA      # 数据尚未准备(暂不可得;保留 request_id 稍后可重试,不得补零)
+  3004: PARAM        # 目标类型不支持该能力(选对端点即可,不重试原请求)
+  4001: RATE_LIMIT   # 限流(指数退避,不换源)
+  5001: SOURCE_DOWN  # 服务端/上游异常
+  5002: SOURCE_DOWN
+  5003: SOURCE_DOWN
+  # HTTP 层
+  "401": AUTH
+  "403": AUTH
+  "429": RATE_LIMIT
+  "5xx": SOURCE_DOWN
+
+# wind: v0.2.0 接入时声明(如 积分/配额 文本 → QUOTA)
+wind: {}
+
+akshare:
+  "rate_limit": RATE_LIMIT
+  "timeout": TIMEOUT
+  "no_data": NO_DATA

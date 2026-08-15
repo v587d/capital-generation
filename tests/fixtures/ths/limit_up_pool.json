@@ -1,0 +1,15 @@
+{
+ "code": 0,
+ "message": "success",
+ "request_id": "7849d3b3f89b41ddb030f6b74c7f3abc",
+ "data": {
+  "timestamp": 1786768039068,
+  "pagination": {
+   "total": 0,
+   "pages": 0,
+   "size": 5,
+   "page": 1
+  },
+  "item": []
+ }
+}

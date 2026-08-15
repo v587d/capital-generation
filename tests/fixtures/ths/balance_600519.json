@@ -1,0 +1,44 @@
+{
+ "code": 0,
+ "message": "success",
+ "request_id": "e80f6a71b58546a2a3417987e01ddadd",
+ "data": {
+  "timestamp": 1767110400000,
+  "item": [
+   {
+    "thscode": "600519.SH",
+    "ticker": "600519",
+    "period": "annual",
+    "fiscal_year": 2025,
+    "fiscal_period": "FY",
+    "report_date_ms": 1786723200000,
+    "period_end_ms": 1767110400000,
+    "currency": "CNY",
+    "assets_total": 303834844021.44,
+    "total_current_assets": 252518662398.57,
+    "non_current_nets_total": 51316181622.87,
+    "cash": 51690610946.5,
+    "accounts_receivable": 2609048.49,
+    "total_debt": 49875590112.37,
+    "holder_equity_total": 253959253909.07
+   },
+   {
+    "thscode": "600519.SH",
+    "ticker": "600519",
+    "period": "annual",
+    "fiscal_year": 2024,
+    "fiscal_period": "FY",
+    "report_date_ms": 1776355200000,
+    "period_end_ms": 1735574400000,
+    "currency": "CNY",
+    "assets_total": 298944579918.7,
+    "total_current_assets": 251726674636.66,
+    "non_current_nets_total": 47217905282.04,
+    "cash": 59295822956.89,
+    "accounts_receivable": 18974192.75,
+    "total_debt": 56933264798.1,
+    "holder_equity_total": 242011315120.6
+   }
+  ]
+ }
+}

@@ -1,0 +1,56 @@
+{
+ "code": 0,
+ "message": "success",
+ "request_id": "c53d4a4c0a7c4df09118a1a141f3bdcf",
+ "data": {
+  "timestamp": 1767110400000,
+  "item": [
+   {
+    "thscode": "600519.SH",
+    "ticker": "600519",
+    "period": "annual",
+    "fiscal_year": 2025,
+    "fiscal_period": "FY",
+    "report_date_ms": 1776355200000,
+    "period_end_ms": 1767110400000,
+    "currency": "CNY",
+    "operating_income": 168838102514.79,
+    "operating_costs": 14892277570.91,
+    "operating_expenses": 57370818034.33,
+    "sales_fee": 7253499600.68,
+    "manage_fee": 8320061659.66,
+    "research_and_development_expenses": 190112246.58,
+    "operating_profit": 114808950164.24,
+    "interest_expenses": 175775959.12,
+    "profit_total": 114755261605.08,
+    "income_tax_expense": 29444936771.41,
+    "net_profit": 85310324833.67,
+    "parent_holder_net_profit": 82320067101.68,
+    "basic_eps": 65.66
+   },
+   {
+    "thscode": "600519.SH",
+    "ticker": "600519",
+    "period": "annual",
+    "fiscal_year": 2024,
+    "fiscal_period": "FY",
+    "report_date_ms": 1776355200000,
+    "period_end_ms": 1735574400000,
+    "currency": "CNY",
+    "operating_income": 170899152276.34,
+    "operating_costs": 13789482367.98,
+    "operating_expenses": 54523971452.57,
+    "sales_fee": 5639300059.49,
+    "manage_fee": 9315650060.38,
+    "research_and_development_expenses": 218375472.87,
+    "operating_profit": 119688579453.23,
+    "interest_expenses": 105127802.03,
+    "profit_total": 119638578194.46,
+    "income_tax_expense": 30303850168.56,
+    "net_profit": 89334728025.9,
+    "parent_holder_net_profit": 86228146421.62,
+    "basic_eps": 68.64
+   }
+  ]
+ }
+}

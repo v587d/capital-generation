@@ -1,0 +1,280 @@
+{
+ "code": 0,
+ "message": "success",
+ "request_id": "b05e8d6e528b478199a4661c8f4f914c",
+ "data": {
+  "timestamp": 1786768030481,
+  "item": [
+   {
+    "thscode": "600487.SH",
+    "ticker": "600487",
+    "name": "亨通光电",
+    "rank": 1,
+    "heat": "5967288",
+    "rank_change": 0,
+    "rank_trend": "flat"
+   },
+   {
+    "thscode": "688825.SH",
+    "ticker": "688825",
+    "name": "长鑫科技",
+    "rank": 2,
+    "heat": "4394162",
+    "rank_change": 0,
+    "rank_trend": "flat"
+   },
+   {
+    "thscode": "600667.SH",
+    "ticker": "600667",
+    "name": "太极实业",
+    "rank": 3,
+    "heat": "3616337",
+    "rank_change": 0,
+    "rank_trend": "flat"
+   },
+   {
+    "thscode": "300017.SZ",
+    "ticker": "300017",
+    "name": "网宿科技",
+    "rank": 4,
+    "heat": "3527921",
+    "rank_change": 2,
+    "rank_trend": "up"
+   },
+   {
+    "thscode": "603629.SH",
+    "ticker": "603629",
+    "name": "利通电子",
+    "rank": 5,
+    "heat": "3522614",
+    "rank_change": -1,
+    "rank_trend": "down"
+   },
+   {
+    "thscode": "600522.SH",
+    "ticker": "600522",
+    "name": "中天科技",
+    "rank": 6,
+    "heat": "3202102",
+    "rank_change": 2,
+    "rank_trend": "up"
+   },
+   {
+    "thscode": "002407.SZ",
+    "ticker": "002407",
+    "name": "多氟多",
+    "rank": 7,
+    "heat": "3053429",
+    "rank_change": 0,
+    "rank_trend": "flat"
+   },
+   {
+    "thscode": "000636.SZ",
+    "ticker": "000636",
+    "name": "风华高科",
+    "rank": 8,
+    "heat": "2968087",
+    "rank_change": -3,
+    "rank_trend": "down"
+   },
+   {
+    "thscode": "000938.SZ",
+    "ticker": "000938",
+    "name": "紫光股份",
+    "rank": 9,
+    "heat": "2709684",
+    "rank_change": 0,
+    "rank_trend": "flat"
+   },
+   {
+    "thscode": "600664.SH",
+    "ticker": "600664",
+    "name": "哈药股份",
+    "rank": 10,
+    "heat": "2690738",
+    "rank_change": 0,
+    "rank_trend": "flat"
+   },
+   {
+    "thscode": "600721.SH",
+    "ticker": "600721",
+    "name": "百花医药",
+    "rank": 11,
+    "heat": "2511235",
+    "rank_change": 0,
+    "rank_trend": "flat"
+   },
+   {
+    "thscode": "605179.SH",
+    "ticker": "605179",
+    "name": "一鸣食品",
+    "rank": 12,
+    "heat": "2424162",
+    "rank_change": 0,
+    "rank_trend": "flat"
+   },
+   {
+    "thscode": "600396.SH",
+    "ticker": "600396",
+    "name": "华电辽能",
+    "rank": 13,
+    "heat": "2383934",
+    "rank_change": 0,
+    "rank_trend": "flat"
+   },
+   {
+    "thscode": "300308.SZ",
+    "ticker": "300308",
+    "name": "中际旭创",
+    "rank": 14,
+    "heat": "2317186",
+    "rank_change": 1,
+    "rank_trend": "up"
+   },
+   {
+    "thscode": "002081.SZ",
+    "ticker": "002081",
+    "name": "金螳螂",
+    "rank": 15,
+    "heat": "2243787",
+    "rank_change": 2,
+    "rank_trend": "up"
+   },
+   {
+    "thscode": "601991.SH",
+    "ticker": "601991",
+    "name": "大唐发电",
+    "rank": 16,
+    "heat": "2217242",
+    "rank_change": 0,
+    "rank_trend": "flat"
+   },
+   {
+    "thscode": "603986.SH",
+    "ticker": "603986",
+    "name": "兆易创新",
+    "rank": 17,
+    "heat": "2166261",
+    "rank_change": 2,
+    "rank_trend": "up"
+   },
+   {
+    "thscode": "600186.SH",
+    "ticker": "600186",
+    "name": "莲花控股",
+    "rank": 18,
+    "heat": "2126367",
+    "rank_change": -4,
+    "rank_trend": "down"
+   },
+   {
+    "thscode": "300209.SZ",
+    "ticker": "300209",
+    "name": "行云科技",
+    "rank": 19,
+    "heat": "2019114",
+    "rank_change": 1,
+    "rank_trend": "up"
+   },
+   {
+    "thscode": "603881.SH",
+    "ticker": "603881",
+    "name": "数据港",
+    "rank": 20,
+    "heat": "2000597",
+    "rank_change": 11,
+    "rank_trend": "up"
+   },
+   {
+    "thscode": "600176.SH",
+    "ticker": "600176",
+    "name": "中国巨石",
+    "rank": 21,
+    "heat": "1993463",
+    "rank_change": -3,
+    "rank_trend": "down"
+   },
+   {
+    "thscode": "603618.SH",
+    "ticker": "603618",
+    "name": "杭电股份",
+    "rank": 22,
+    "heat": "1873480",
+    "rank_change": 8,
+    "rank_trend": "up"
+   },
+   {
+    "thscode": "000815.SZ",
+    "ticker": "000815",
+    "name": "美利云",
+    "rank": 23,
+    "heat": "1858593",
+    "rank_change": 1,
+    "rank_trend": "up"
+   },
+   {
+    "thscode": "300394.SZ",
+    "ticker": "300394",
+    "name": "天孚通信",
+    "rank": 24,
+    "heat": "1850302",
+    "rank_change": -1,
+    "rank_trend": "down"
+   },
+   {
+    "thscode": "603083.SH",
+    "ticker": "603083",
+    "name": "剑桥科技",
+    "rank": 25,
+    "heat": "1771818",
+    "rank_change": -3,
+    "rank_trend": "down"
+   },
+   {
+    "thscode": "300502.SZ",
+    "ticker": "300502",
+    "name": "新易盛",
+    "rank": 26,
+    "heat": "1745390",
+    "rank_change": 0,
+    "rank_trend": "flat"
+   },
+   {
+    "thscode": "600584.SH",
+    "ticker": "600584",
+    "name": "长电科技",
+    "rank": 27,
+    "heat": "1728706",
+    "rank_change": -2,
+    "rank_trend": "down"
+   },
+   {
+    "thscode": "002491.SZ",
+    "ticker": "002491",
+    "name": "通鼎互联",
+    "rank": 28,
+    "heat": "1693326",
+    "rank_change": 4,
+    "rank_trend": "up"
+   },
+   {
+    "thscode": "002131.SZ",
+    "ticker": "002131",
+    "name": "利欧股份",
+    "rank": 29,
+    "heat": "1641899",
+    "rank_change": -8,
+    "rank_trend": "down"
+   },
+   {
+    "thscode": "002428.SZ",
+    "ticker": "002428",
+    "name": "云南锗业",
+    "rank": 30,
+    "heat": "1595352",
+    "rank_change": -3,
+    "rank_trend": "down"
+   }
+  ]
+ }
+}
