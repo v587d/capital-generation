@@ -94,6 +94,8 @@
 |---|---|
 | v0.4.0 | `fin_agent__*` 编排层（数据层零改动） |
 | 未排期 | Wind bond 域（4 工具）、分钟线跨日、Wind correction 自动重查、数据湖进 LLM（若未来裁定 = 新工具 + 评审）、基金/指数对账、v0.1.1 剩余项（kline golden 补录，东财封锁解除后） |
+| 顺带优化 A | **LLM-first 错误消息规范**（§9.1）：全量审计错误/引导消息，三要素 = 发生了什么+为什么+下一步动作 |
+| 顺带优化 B | **上下文 token 优化**（§9.2）：Kline 渲染压缩 / announcements content 截断 / schema 精简 / 结果 token 预算 |
 
 ## 7. 风险
 
@@ -155,3 +157,54 @@
 - 东财 push2his IP 封锁未解除 (2026-08-15 重试仍 TCP 层 ConnectionError, LESSONS §5.4);
   封锁解除后 `uv run python scripts/record-goldens.py` (kline_600519_1m 不再 skip,
   同时补录 quote_600519); 新浪/腾讯 golden 已录, 不受影响
+
+
+## 9. 后续优化备忘 (2026-08-15 用户提出, 顺带项)
+
+### 9.1 LLM-first 错误消息规范
+
+**定位**: MCP 的消费方是 LLM 不是人 — 每条错误/引导消息都是给 LLM 的下一条指令。
+这是本项目区别于同花顺/万得原生 SDK 的核心优势: 不只转发错误, 而是翻译成可执行动作。
+
+**现状审计结论**:
+- ✅ 已有好的先例: DEGRADATION 判定表"模型看到"列 (AUTH→"请检查配置"),
+  3002→"保留 request_id 稍后可重试, 不得补零", ConnectError→"请稍后重试或检查网络" (5d53ed5)
+- ❌ 典型反例: THS `2003 "Invalid or revoked API key"` 原文透传 — 2026-08-15 实测它
+  **可能是临时限流而非 key 失效**, LLM 看到英文原文会误判并引导用户换 key (错误动作!)
+- ❌ 其他: akshare "接口漂移" 无下一步; InternalError "未分类异常" 无下一步;
+  部分 warnings 只有描述没有动作建议
+
+**规范草案 (每条消息三要素)**:
+1. 发生了什么 (vendor + endpoint + code/类型, 保留原文细节)
+2. 为什么 (归类: 限流/权限/参数/暂无数据/网络/内部)
+3. 下一步动作 (LLM 可执行: 等多久重试 / 改什么参数 / 换什么标的 / 检查什么配置)
+
+**实施清单 (顺带, 全量审计)**: `core/domain/errors.py` + `ths.py` + `wind.py` +
+`akshare_adapter.py` + `servers/mcp_data.py` + `routing.py` 的全部 raise/warnings 消息;
+重点: THS 2003/4001 消息按本次实测语义改写 (2003 可能=临时限流, 引导"稍后重试");
+非错误返回 (ambiguity/not_found/not_asset/降级 warnings) 同步 review。
+
+### 9.2 上下文 token 优化
+
+**量化实测 (2026-08-15, DSH 会话)**:
+- 用户实测: 两轮 10 steps ≈ 5 万+ tokens; tool result ≈ 4 万; tool schema ≈ 1 万
+- 本仓库侧实测:
+  - **工具 schema+desc 11 个 ≈ 1373 tokens/轮** — DSH 每轮注入工具列表,
+    10 steps ≈ 1.4 万 (与用户感知吻合); 大头是 FastMCP 冗余 title + 长 description
+  - **Kline 渲染 ≈ 100 tokens/根** — 每根重复 symbol/currency/period/adjust/source/tier/
+    degraded/extra 全字段; 30 根=3165, 1 年≈2.5 万, **10 年窗口≈24 万 (灾难)**
+  - **announcements content 全文透传** — 600519 单条 8466 chars ≈ 2100 tokens;
+    top_k=10 可达 2-4 万 ← result 大头 #1
+
+**优化清单 (顺带, 边做边想)**:
+1. **Kline/Quote 渲染压缩**: 表头提取公共字段 (symbol/currency/adjust/source/tier 只出现一次)
+   或紧凑行格式; 目标 -60~80%; 渲染层改动不碰数据层
+2. **announcements content 截断**: 默认每条约 500-800 字符 + `truncated: true` 标注 +
+   url 保留 (全文可让 LLM 提示用户自取); top_k 默认 10→5 或描述写明
+3. **schema 精简**: FastMCP 是否可关冗余 title (如支持省 ~20-30%); description 压缩为
+   行动指令 (参数含义交给 schema, 描述只写"何时用/怎么用")
+4. **工具描述引导**: get_klines 明示"窗口 ≤1 年、优先日线, 分钟线仅当日";
+   EDB observation 默认 10; special size 默认 50 可再降
+5. **结果 token 预算 (远期)**: 渲染层统一预算 + 截断 + warnings 标注 (可配置外置,
+   绝不静默丢数据 — 与"降级可观测"同哲学)
+6. 注意: 工具 schema 冻结依赖 (KV-cache 前缀稳定) — 优化只减字数不改参数名/结构
