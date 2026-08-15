@@ -138,6 +138,12 @@
 - **同 key 多进程并发加剧封禁**: DSH 常驻 MCP server (servers.mcp_data, 持同 key) 与
   探针/录制进程并存时, 2003 窗口更频繁且恢复更慢 (2026-08-15 实测: 15:22 起的常驻 server
   与我的探针互相叠加, 封禁持续 >1.5h); 批量录制应选常驻 server 空闲时段, 或改用独立测试 key
+- **根因排查结论 (2026-08-15 深入定位)**: ① 沙箱 IPv6 出口对 THS 不可达 (curl -6 无响应;
+  DNS 常返回 IPv6 优先 → 进程随机成败), 生产/脚本需强制 IPv4 (asyncio 事件循环
+  getaddrinfo 层 patch family=AF_INET; 注意 socket.getaddrinfo 属性 patch 对事件循环无效);
+  ② 即使 IPv4-only, THS 对高频请求仍有间歇 2003 限流 (探针成功数请求后紧跟的请求被拒,
+  冷却数分钟恢复; 无稳定数学模型) → 批量抓取/录制的可靠模式 = 单发探测成功 → 立即低节奏
+  (≥3s) 连录 → 遇 2003 冷却 5-10 分钟重来; 适配器层不改语义 (AUTH 仍立即返回)
 
 ### Wind fund/index 域 (M0 决策门 B/C)
 
