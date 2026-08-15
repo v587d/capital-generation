@@ -2,7 +2,7 @@
 
 统一金融数据访问（DeepSeek Harness 插件生态）：一个入口覆盖 **同花顺（主干，官方 REST）+ AKShare（免费兜底）**，降级全程可观测。基于 MCP，DSH 侧零 TS。
 
-> 版本：v0.1.0（2026-08-15）· 范围与里程碑见 [`PLAN.md`](PLAN.md) · 设计决策见 [`docs/`](docs/DESIGN_REVIEW.md)
+> 版本：v0.1.0（2026-08-15 已发布）· 设计决策见 [`docs/`](docs/DESIGN_REVIEW.md) · v0.1.0 计划（冻结面）见 [`PLAN.md`](PLAN.md) · **v0.2.0 计划见 [`PLAN-0.2.0.md`](PLAN-0.2.0.md)（Wind 适配器 / 对账引擎 / 分钟线·公告·EDB）**
 
 ## 能力（v0.1.0）
 
@@ -63,7 +63,8 @@ config/           chains.yaml / error_map.yaml / symbols.json (数据不是代�
 scripts/          sync-symbols / record-fixtures / record-goldens / live-probe / verify-contracts
 tests/            unit / adapters / golden / fixtures (CI 无实时网络)
 docs/             DATA_MODEL / DEGRADATION / DESIGN_REVIEW / PYTHON / LESSONS
-PLAN.md           v0.1.0 范围与里程碑
+PLAN.md           v0.1.0 范围与里程碑（冻结面存档）
+PLAN-0.2.0.md     v0.2.0 计划（Wind 适配器/对账引擎/分钟线/公告/EDB）
 ```
 
 ## 测试纪律
@@ -75,4 +76,4 @@ PLAN.md           v0.1.0 范围与里程碑
 
 ## 文档
 
-渐进披露，按需阅读：`docs/DESIGN_REVIEW.md`（决策）→ `docs/DATA_MODEL.md`（模型）→ `docs/DEGRADATION.md`（链与错误）→ `docs/LESSONS.md`（契约事实与坑）→ `docs/PYTHON.md`（风格）→ `PLAN.md`（版本计划）。
+渐进披露，按需阅读：`docs/DESIGN_REVIEW.md`（决策）→ `docs/DATA_MODEL.md`（模型）→ `docs/DEGRADATION.md`（链与错误）→ `docs/LESSONS.md`（契约事实与坑）→ `docs/PYTHON.md`（风格）→ [`PLAN.md`](PLAN.md)（v0.1.0 冻结面）→ [`PLAN-0.2.0.md`](PLAN-0.2.0.md)（当前版本计划）。

@@ -96,6 +96,14 @@
 - **通用结论：数据时点(asOf) ≠ 查询时点(ts) 对所有源成立；对账只比数据时点**（DATA_MODEL 已补充）
 - 免费新增源也要评估维护成本（无版本契约、响应形状漂移、配额不可预测）
 
+### 5.4 AKShare / 东财（2026-08-15 实测，双 IP 四客户端验证）
+
+- **东财对高价值行情接口（push2his 历史K、push2 实时报价）有 IP 级限频/风控**：概率性放行、冷却期长（小时级）、反复探测会刷新封锁；失败形态是 TCP 层 `ConnectionError/RemoteDisconnected`（连接被掐断，无 HTTP 响应），与"接口变更"（4xx/5xx/JSON 解析错）可明确区分
+- 实测覆盖两种出口 IP（代理节点、直连）与四种客户端（curl/requests/httpx/akshare）→ 与 akshare 代码无关；社区长期记录同一问题（akshare issue #6092/#6100）
+- 同会话内其他东财主机（datacenter-web 财务指标、push2ex 板块）与全部新浪/腾讯源**稳定可用**
+- **已验证的备用上游**（同为 akshare 白名单函数，本环境可用）：新浪 `stock_zh_a_daily`（日K，支持复权）、腾讯 `stock_zh_a_hist_tx`（日K）——kline 兜底备用方案（v0.1.1 计划，见 PLAN §6）
+- 教训：AKShare 兜底源会间歇性整体不可用是常态（DEGRADATION 已写"免费源会变成最先挂的源"）；对高频接口要防"探测即触发封锁"（重试间隔放大、成功后即停）
+
 ## 6. 对账实测基准
 
 - PE(TTM) 三源一致：ths 20.48 / wind 20.47 / mx 20.48（<0.2%）→ **同 caliber 估值可对账**；0.5% 阈值有实测依据（不限于未复权 OHLC）

@@ -1,6 +1,7 @@
 # 研发计划 — capital-generation v0.1.0
 
-> 2026-08-15 | 版本边界与里程碑。实施前必读：`docs/DESIGN_REVIEW.md`（决策，改动前先讨论）、`docs/DATA_MODEL.md`（模型）、`docs/DEGRADATION.md`（链与错误）、`docs/LESSONS.md`（契约事实与坑）、`docs/PYTHON.md`（风格）。
+> 2026-08-15 收官（全部里程碑 ✅）。**v0.1.0 冻结面存档**；当前版本计划见 [`PLAN-0.2.0.md`](PLAN-0.2.0.md)。
+> 实施前必读：`docs/DESIGN_REVIEW.md`（决策，改动前先讨论）、`docs/DATA_MODEL.md`（模型）、`docs/DEGRADATION.md`（链与错误）、`docs/LESSONS.md`（契约事实与坑）、`docs/PYTHON.md`（风格）。
 
 ## 1. v0.1.0 定位
 
@@ -83,6 +84,7 @@
 
 | 版本 | 内容 |
 |---|---|
+| **v0.1.1（已记录在案，未排期）** | ① kline 兜底加备用上游：akshare 适配器内 东财 → 新浪(`stock_zh_a_daily`) → 腾讯(`stock_zh_a_hist_tx`) 顺序尝试，各配 golden（2026-08-15 实测：东财 push2his/push2 对本机 IP 限频间歇不可用，新浪/腾讯稳定，见 LESSONS §5.4）② 补录 kline golden（东财限频解除后或换网络执行 `record-goldens.py`；当前测试显式 skip） |
 | v0.2.0 | Wind 适配器（按需接线，fund/index/analytics 域待决策）+ 对账引擎（未复权、免费源间）+ 分钟线/公告/EDB/宏观域 + QUOTA 门控启用 |
 | v0.3.0 | dump 落盘 + 数据湖（参考 THS 官方 marketdb：四层表/复权因子推导/validate+rebuild 修复）+ symbols 自动同步 + CI 自动化 |
 | v0.4.0 | `fin_agent__*` 编排层（数据层零改动） |
