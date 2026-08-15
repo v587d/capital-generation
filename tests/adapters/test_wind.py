@@ -76,6 +76,8 @@ def pick(server: str, method: str, args: dict) -> dict:
             return load("fund_kline_158001")
         if method == "get_fund_holdings":
             return load("fund_holdings_158001")
+        if method == "get_fund_holders":
+            return load("fund_info_158001")  # question 类同形状 (holders 未单独录制)
         if method == "get_fund_performance":
             return load("fund_performance_158001")
         if method == "get_fund_info":
@@ -429,3 +431,16 @@ async def test_windcode_direct_pass_no_ti(adapter: WindAdapter) -> None:
     calls = [c for c in captured if c["method"] == "tools/call"]
     assert calls[0]["params"]["arguments"]["windcode"] == "158001.SZ"
     assert ".TI" not in str(calls)
+
+
+async def test_fund_nav_fallback_via_info(adapter: WindAdapter) -> None:
+    """Wind 无独立净值工具 → get_fund_info 兜底 (净值在列内, L3 标注)."""
+    stmts = await adapter.get_fund_nav("158001.SZ", asset_type="fund-etf", name="价值ETF嘉实")
+    assert stmts and stmts[0].statement == "nav"
+    assert "单位净值" in stmts[0].rows[0]
+
+
+async def test_fund_holders_fallback(adapter: WindAdapter) -> None:
+    stmts = await adapter.get_fund_holders("158001.SZ", asset_type="fund-etf", name="价值ETF嘉实")
+    assert stmts and stmts[0].statement == "holders"
+    assert stmts[0].rows  # question 类兜底, 列以响应为准 (fixture 为 info 表)

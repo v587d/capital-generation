@@ -21,6 +21,6 @@ chains:
   fund_info: [ths, wind]
   index_quote: [ths, wind]      # 指数行情 THS 主干
   index_kline: [ths, wind]
-  index_constituents: [ths, wind]
+  index_constituents: [ths]           # Wind 无成分工具, THS 独有 (仅当前)
   index_fundamentals: [wind]    # 基本面 Wind 独家 (question 类, 无降级源)
   index_basicinfo: [wind]       # 基本信息 Wind 独家 (question 类, 无降级源)

@@ -705,6 +705,29 @@ class WindAdapter(BaseAdapter):
             f"查询{self._label(symbol, name)}的前十大重仓股",
         )
 
+    async def get_fund_nav(
+        self, symbol: str, *, asset_type: str = "", name: str = "", limit: int = 10
+    ) -> list[FinancialStatement]:
+        """净值兜底: Wind 无独立净值工具, 净值/规模在 get_fund_info 结果内 (L3 标注)."""
+        tool = self._tool_by_domain["fund"]["nav"]
+        return await self._question_statement(
+            tool,
+            symbol,
+            "nav",
+            f"查询{self._label(symbol, name)}的最新单位净值和累计净值",
+        )
+
+    async def get_fund_holders(
+        self, symbol: str, *, asset_type: str = "", name: str = "", limit: int = 10
+    ) -> list[FinancialStatement]:
+        tool = self._tool_by_domain["fund"]["holders"]
+        return await self._question_statement(
+            tool,
+            symbol,
+            "holders",
+            f"查询{self._label(symbol, name)}的持有人结构",
+        )
+
     async def get_fund_performance(
         self, symbol: str, *, asset_type: str = "", name: str = "", limit: int = 10
     ) -> list[FinancialStatement]:

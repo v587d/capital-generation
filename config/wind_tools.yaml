@@ -35,6 +35,8 @@ tool_by_domain:
     quote:      {server: fund_data, tool: get_fund_quote}          # 分钟行情 (仅当日)
     kline:      {server: fund_data, tool: get_fund_kline}          # period 数字码, aftype=0
     holdings:   {server: fund_data, tool: get_fund_holdings}       # question 类
+    holders:    {server: fund_data, tool: get_fund_holders}        # question 类
+    nav:        {server: fund_data, tool: get_fund_info}           # 净值在 info 结果内 (L3 标注)
     performance: {server: fund_data, tool: get_fund_performance}   # question 类
     info:       {server: fund_data, tool: get_fund_info}           # question 类
   # v0.3.0 index 域 (M0 live 核实: 000300.SH/H11077.SH 直通 OK; index kline 含 VOLUME/TURNOVER)
