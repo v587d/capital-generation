@@ -113,6 +113,19 @@ def _split_symbols(symbols: str) -> list[str]:
     return parts
 
 
+def _not_stock_response(hit: Instrument) -> dict[str, Any]:
+    return {
+        "data": None,
+        "source": "",
+        "tier": "",
+        "ts": utc_iso(now_ms()),
+        "warnings": [
+            f"{hit.symbol} ({hit.name}) 是 {hit.asset_type}, v0.1.0 行情/财务工具仅支持"
+            " A股股票; 指数行情等能力在后续版本",
+        ],
+    }
+
+
 async def tool_get_quote(
     router: Router,
     resolver: SymbolResolver,
@@ -124,6 +137,8 @@ async def tool_get_quote(
         hit = resolve_or_guide(resolver, s, market)
         if isinstance(hit, dict):
             return hit
+        if hit.asset_type != "stock":
+            return _not_stock_response(hit)
         canonical.append(hit.symbol)
     env = await router.call("quote", symbols=canonical)
     return render_envelope(env)
@@ -145,6 +160,8 @@ async def tool_get_klines(
     hit = resolve_or_guide(resolver, symbol, "A股")
     if isinstance(hit, dict):
         return hit
+    if hit.asset_type != "stock":
+        return _not_stock_response(hit)
     env = await router.call(
         "klines",
         symbol=hit.symbol,
@@ -170,6 +187,8 @@ async def tool_get_financials(
     hit = resolve_or_guide(resolver, symbol, "A股")
     if isinstance(hit, dict):
         return hit
+    if hit.asset_type != "stock":
+        return _not_stock_response(hit)
     env = await router.call(
         "financials", symbol=hit.symbol, statement=statement, period=period, limit=limit
     )

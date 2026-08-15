@@ -85,6 +85,20 @@ class TestToolLogic:
         assert router.calls == []  # 未发起数据请求
 
     @pytest.mark.asyncio
+    async def test_index_rejected_with_clear_guidance(self) -> None:
+        # v0.1.0 行情/财务仅服务 A股股票; 指数解析成功但明确引导 (不模糊失败)
+        router = FakeRouter()
+        d = await tool_get_quote(router, RESOLVER, "000001.SH")
+        assert d["data"] is None
+        assert any("仅支持" in w and "股票" in w for w in d["warnings"])
+        assert router.calls == []
+        d2 = await tool_get_klines(
+            router, RESOLVER, "000001.SH", start="2026-07-01", end="2026-07-10"
+        )
+        assert d2["data"] is None
+        assert router.calls == []
+
+    @pytest.mark.asyncio
     async def test_quote_unknown_guides_to_search(self) -> None:
         router = FakeRouter()
         d = await tool_get_quote(router, RESOLVER, "113050")

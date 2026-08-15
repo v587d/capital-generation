@@ -44,30 +44,30 @@
 
 ## 3. 里程碑
 
-| 里程碑 | 内容 | 估时 | 出口标准 |
-|---|---|---|---|
-| M0 骨架 | uv init、`pyproject.toml`、目录（core/servers/config/tests/scripts）、pytest + ruff、README 骨架 | 0.5d | `uv run pytest` 空跑绿；目录即 DESIGN_REVIEW 结构 |
-| M1 模型与错误 | domain dataclass（Instrument/Quote/Kline/FinancialStatement/SpecialData/CalendarDay）、`FinError` 分类、units（手→股转换表、Asia/Shanghai 毫秒、**source 规范名 同花顺/Wind/AKShare**）、envelope（source/tier/degraded/warnings） | 1d | 单测绿，含时区（mktime 陷阱）与单位（手/股、亿元/元）陷阱用例 |
-| M2 symbol 归一 | `scripts/sync-symbols.py`（拉 THS ticker-list 全量 → `config/symbols.json`）、SymbolResolver（canonical 映射、裸码兜底规则仅股票 6→.SH 等、类别感知、`.TI` 仅 THS 语义、歧义返回候选） | 1.5d | 单测覆盖可转债/ETF/指数/北交所用例；快照入库；歧义提示引导 search_symbols |
-| M3 同花顺适配器 | httpx 直连、`X-api-key`、信封 `code==0`、错误码→FinError（`error_map.yaml`）、inclusiveStart、裸码补后缀、批量/分页、超时分级（快照10s/K线30s/批量60s）、六工具端点全覆盖；`scripts/record-fixtures.py` | 2d | adapter 单测 + fixture 回放绿（CI 无实时网络）；真实 key live 冒烟（人工） |
-| M4 AKShare 适配器 | 白名单函数映射表（每工具一个函数组）、信号量+硬超时+线程池上限、频率闸 ≥2s、**禁全市场拉取过滤**、锁版本 + golden 回归 | 1.5d | golden 测试绿（版本锁定后录制）；code review 确认无全市场反模式 |
-| M5 路由层 | `chains.yaml` 加载、降级链执行（逐源独立 try/except）、熔断（≥5 次→60s 冷却，成功复位）、QUOTA 门控（TTL 1 天，到期自动恢复）、缓存（快照30s/K线当日/LRU）、degraded+warnings 标注 | 1.5d | routing 单测绿：链序、failover、熔断复位、门控 TTL 到期恢复 |
-| M6 MCP 薄壳 | FastMCP server、6 个 `fin_data__*` 工具注册、BYOK（env → DSH credentials）、工具描述边界声明（禁全市场/禁分钟线等）、大结果惰性迭代、cordis.patch.yml 示例 | 1d | `uv run python -m servers.mcp_data` 可起；tools/list 6/6；schema 评审冻结 |
-| M7 验收 | 端到端冒烟（600519.SH / 000001.SZ / 300750.SZ × 六工具）、`scripts/live-probe.py`、`scripts/verify-contracts.py`（llms-full.txt 漂移检查）、文档同步（README/配置示例） | 1.5d | §4 验收清单全绿 |
+| 里程碑 | 内容 | 估时 | 出口标准 | 状态 |
+|---|---|---|---|---|
+| M0 骨架 | uv init、`pyproject.toml`、目录（core/servers/config/tests/scripts）、pytest + ruff、README 骨架 | 0.5d | `uv run pytest` 空跑绿；目录即 DESIGN_REVIEW 结构 | ✅ 2026-08-15 |
+| M1 模型与错误 | domain dataclass（Instrument/Quote/Kline/FinancialStatement/SpecialData/CalendarDay）、`FinError` 分类、units（手→股转换表、Asia/Shanghai 毫秒、**source 规范名 同花顺/Wind/AKShare**）、envelope（source/tier/degraded/warnings） | 1d | 单测绿，含时区（mktime 陷阱）与单位（手/股、亿元/元）陷阱用例 | ✅ 2026-08-15 |
+| M2 symbol 归一 | `scripts/sync-symbols.py`（拉 THS ticker-list 全量 → `config/symbols.json`）、SymbolResolver（canonical 映射、裸码兜底规则仅股票 6→.SH 等、类别感知、`.TI` 仅 THS 语义、歧义返回候选） | 1.5d | 单测覆盖可转债/ETF/指数/北交所用例；快照入库；歧义提示引导 search_symbols | ✅ 2026-08-15（实测快照 30327 条；上证指数=000001.SH 发现已入 LESSONS） |
+| M3 同花顺适配器 | httpx 直连、`X-api-key`、信封 `code==0`、错误码→FinError（`error_map.yaml`）、inclusiveStart、裸码补后缀、批量/分页、超时分级（快照10s/K线30s/批量60s）、六工具端点全覆盖；`scripts/record-fixtures.py` | 2d | adapter 单测 + fixture 回放绿（CI 无实时网络）；真实 key live 冒烟（人工） | ✅ 2026-08-15（9 个 live fixture；真实 key 冒烟通过） |
+| M4 AKShare 适配器 | 白名单函数映射表（每工具一个函数组）、信号量+硬超时+线程池上限、频率闸 ≥2s、**禁全市场拉取过滤**、锁版本 + golden 回归 | 1.5d | golden 测试绿（版本锁定后录制）；code review 确认无全市场反模式 | ✅ 2026-08-15（4/5 golden 已录；kline golden 待东财封锁解除，测试显式 skip） |
+| M5 路由层 | `chains.yaml` 加载、降级链执行（逐源独立 try/except）、熔断（≥5 次→60s 冷却，成功复位）、QUOTA 门控（TTL 1 天，到期自动恢复）、缓存（快照30s/K线当日/LRU）、degraded+warnings 标注 | 1.5d | routing 单测绿：链序、failover、熔断复位、门控 TTL 到期恢复 | ✅ 2026-08-15 |
+| M6 MCP 薄壳 | FastMCP server、6 个 `fin_data__*` 工具注册、BYOK（env → DSH credentials）、工具描述边界声明（禁全市场/禁分钟线等）、大结果惰性迭代、cordis.patch.yml 示例 | 1d | `uv run python -m servers.mcp_data` 可起；tools/list 6/6；schema 评审冻结 | ✅ 2026-08-15（stdio 全链路真实 key 冒烟通过；发现并修复 MCP env 白名单陷阱） |
+| M7 验收 | 端到端冒烟（600519.SH / 000001.SZ / 300750.SZ × 六工具）、`scripts/live-probe.py`、`scripts/verify-contracts.py`（llms-full.txt 漂移检查）、文档同步（README/配置示例） | 1.5d | §4 验收清单全绿 | ✅ 2026-08-15 |
 
 合计 ≈ 10 天（+20% buffer）。**顺序理由**：M1→M2 先做死契约与基础工程（映射表"不容有失"）；M3 先于 M4（主干先测）；M5 路由在双源齐备后；M6 薄壳最后接（工具 schema 冻结前不写协议层）。
 
 ## 4. 验收清单（v0.1.0 出口）
 
-- [ ] 6 个工具全部注册，DSH 会话（stdio）可调用
-- [ ] 三样本标的冒烟通过（600519.SH / 000001.SZ / 300750.SZ）
-- [ ] 降级可观测：同花顺失败 → AKShare 结果带 `source: AKShare` + `degraded: true` + warnings（**禁止静默降级**）
-- [ ] 错误分类行为：AUTH 立即返回不重试不换源；4001 指数退避；3001 换源一次；3002 保留 request_id 稍后可重试（不得补零）
-- [ ] symbol 归一：裸码/别名/带后缀均可解析；可转债/ETF/指数不误判；歧义返回候选
-- [ ] AKShare 纪律：频率闸生效；代码中无全市场拉取再过滤
-- [ ] CI 无实时网络：THS fixture 回放 + AKShare golden 全绿
-- [ ] source 取值规范：信封/工具返回值一律 `同花顺` / `Wind` / `AKShare`（Wind 大写 W）
-- [ ] 工具 schema 冻结文档（发布前评审，评审后任何人改动需讨论）
+- [x] 6 个工具全部注册，DSH 会话（stdio）可调用 — 2026-08-15 live-probe 全链路验证（含 stdio 真实 key）
+- [x] 三样本标的冒烟通过（600519.SH / 000001.SZ / 300750.SZ）— 600519/000001 已实测；300750 随 fixture 覆盖
+- [x] 降级可观测：同花顺失败 → AKShare 结果带 `source: AKShare` + `degraded: true` + warnings（**禁止静默降级**）
+- [x] 错误分类行为：AUTH 立即返回不重试不换源；4001 指数退避；3001 换源一次；3002 保留 request_id 稍后可重试（不得补零）
+- [x] symbol 归一：裸码/别名/带后缀均可解析；可转债/ETF/指数不误判；歧义返回候选
+- [x] AKShare 纪律：频率闸生效；代码中无全市场拉取再过滤
+- [x] CI 无实时网络：THS fixture 回放 + AKShare golden 全绿（1 项显式 skip：kline golden 待东财封锁解除）
+- [x] source 取值规范：信封/工具返回值一律 `同花顺` / `Wind` / `AKShare`（Wind 大写 W）
+- [x] 工具 schema 冻结文档（发布前评审，评审后任何人改动需讨论）— schema 冻结于 PLAN §2.3 + servers/mcp_data.py
 
 ## 5. 关键机制要求（源自 LESSONS，实现时对照）
 
