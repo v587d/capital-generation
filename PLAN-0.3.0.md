@@ -186,25 +186,31 @@
 
 ### 9.2 上下文 token 优化
 
-**量化实测 (2026-08-15, DSH 会话)**:
-- 用户实测: 两轮 10 steps ≈ 5 万+ tokens; tool result ≈ 4 万; tool schema ≈ 1 万
-- 本仓库侧实测:
-  - **工具 schema+desc 11 个 ≈ 1373 tokens/轮** — DSH 每轮注入工具列表,
-    10 steps ≈ 1.4 万 (与用户感知吻合); 大头是 FastMCP 冗余 title + 长 description
-  - **Kline 渲染 ≈ 100 tokens/根** — 每根重复 symbol/currency/period/adjust/source/tier/
-    degraded/extra 全字段; 30 根=3165, 1 年≈2.5 万, **10 年窗口≈24 万 (灾难)**
-  - **announcements content 全文透传** — 600519 单条 8466 chars ≈ 2100 tokens;
-    top_k=10 可达 2-4 万 ← result 大头 #1
+> **研究完成 (2026-08-15)** — 结论与完整设计方案见
+> [`docs/DESIGN_CONTEXT_BUDGET.md`](docs/DESIGN_CONTEXT_BUDGET.md)(测量脚本
+> `scripts/measure_tokens.py`, 可复现)。本节保留实测数字摘要。
 
-**优化清单 (顺带, 边做边想)**:
-1. **Kline/Quote 渲染压缩**: 表头提取公共字段 (symbol/currency/adjust/source/tier 只出现一次)
-   或紧凑行格式; 目标 -60~80%; 渲染层改动不碰数据层
-2. **announcements content 截断**: 默认每条约 500-800 字符 + `truncated: true` 标注 +
-   url 保留 (全文可让 LLM 提示用户自取); top_k 默认 10→5 或描述写明
-3. **schema 精简**: FastMCP 是否可关冗余 title (如支持省 ~20-30%); description 压缩为
-   行动指令 (参数含义交给 schema, 描述只写"何时用/怎么用")
-4. **工具描述引导**: get_klines 明示"窗口 ≤1 年、优先日线, 分钟线仅当日";
-   EDB observation 默认 10; special size 默认 50 可再降
-5. **结果 token 预算 (远期)**: 渲染层统一预算 + 截断 + warnings 标注 (可配置外置,
-   绝不静默丢数据 — 与"降级可观测"同哲学)
-6. 注意: 工具 schema 冻结依赖 (KV-cache 前缀稳定) — 优化只减字数不改参数名/结构
+**量化实测 (2026-08-15, DSH 会话 + 本仓库脚本 + live 调用)**:
+- **成本模型修正**: DSH 每步全量注入工具面 (H1 ✅ 源码确认), 但 DeepSeek 磁盘缓存
+  自动命中 (H2 ✅ provider usage 实证: 384 步会话 cacheRead 1.07 亿 tokens,
+  uncached 仅 79.6 万) — **每步边际成本 = 新结果 token, 不是 schema 重复计费**。
+  工具面 32 工具 ~8.6K tokens 全价仅一次, 之后 1/50 价 (cache hit $0.0028 vs miss $0.14)。
+- **本仓库两个灾难级单次调用**: announcements top_k=10 → **137K tokens**
+  (600519 半年报全文; 截断 800 字符/条 → 6.7K, **-95%**); klines 1 年窗口 →
+  **34K tokens** (表头外提+紧凑键+精度 → 12K, **-65%**)。
+- **工具面**: 11 工具 1,623 tokens/轮, 其中 pydantic title 冗余 17.1% (FastMCP
+  上游已合并 [PR #449](https://github.com/PrefectHQ/fastmcp/pull/449) 裁剪, 本版本未含);
+  instructions 267 tokens。
+- **DSH 兜底现状**: spill (50KB 阈值) 激活但预览仍 ~18K tokens 且需 read 往返;
+  compaction / tool-result-pruner **本部署 disabled** — 无会话级压缩。
+
+**实施清单 (顺带, 见设计文档 §6/§7, 待用户裁定 A2/A3/B2)**:
+1. **渲染压缩 (A1 表头外提 + A2 紧凑键/精度 + 紧凑序列化)**: klines -49~65%,
+   calendar -78%, quote -34%, edb -79% — 渲染层纯函数, 不动数据层
+2. **announcements 截断 (A3)**: 默认 800 字符/条 + `truncated: true` + url 兜底 (-95%)
+3. **schema 去 title (B1)**: -17.1%; 参数名/类型/required/语义零改动, 一次合入
+4. **描述行动指令化 + 调用预算引导 (B2/C)**: klines 明示"窗口 ≤1 年", announcements
+   明示 top_k ≤5
+5. **统一结果 token 预算 (D, 远期)**: render 层预算 + 截断 + warnings 标注, 外置可配
+6. 红线: schema 只减冗余不改语义 (KV-cache 前缀一次性变更后重新稳定); 截断显式标注
+   不静默丢数据; 价格按 0.01 圆整无精度损失; `date_ms` 保持 ms int (实测比 ISO 更省)

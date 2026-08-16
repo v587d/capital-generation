@@ -15,6 +15,9 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "ruff>=0.6",
+    # 上下文预算测量 (docs/RESEARCH_MCP_CONTEXT_WINDOW.md §8.4: 真实 tokenizer 复测)。
+    # 仅 scripts/measure_tokens.py 离线使用, 不进服务端路径。
+    "tiktoken>=0.8",
 ]
 
 [build-system]
