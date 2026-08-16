@@ -1,0 +1,26 @@
+{
+  "name": "capital-generation",
+  "version": "0.3.1",
+  "description": "China A-share financial data MCP server for DeepSeek Harness: 11 fin_data__* tools (quotes/K-lines/financials/calendar/special-data/announcements/EDB/reconcile/funds/indices) over THS (free official REST, primary) + AKShare (fallback) + Wind (authoritative/exclusive), with observable degradation and context-budget compression",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "mcp",
+    "finance",
+    "a-share",
+    "china-stock",
+    "同花顺",
+    "万得"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/v587d/capital-generation.git"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

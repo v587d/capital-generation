@@ -1,0 +1,28 @@
+# capital-generation — DeepSeek Harness bundle layer
+#
+# `dsh plugin --profile web add capital-generation` (安装后) 或本 patch 手动
+# insert, 都会把 fin server 以 stdio MCP 子进程接入, 注册 11 个
+# `mcp__fin__fin_data__*` 工具 (DSH 视角命名)。
+#
+# 前置条件:
+# - 本机已安装 uv (https://docs.astral.sh/uv) 与 Python 3.12+;
+# - 仓库已 clone 到本地 (本 patch 需要仓库路径, 见 cwd);
+# - Key 由使用者自备 (BYOK): THS_API_KEY / WIND_API_KEY 写入
+#   ~/.dsh/.credentials.yaml (0600), 或作为环境变量; 缺失的源自动跳过并告警
+#   (降级可观测, 不阻断启动)。
+#
+# 路径解析: cwd 默认取环境变量 CAPITAL_GENERATION_DIR; 未设置时使用仓库默认
+# 路径 (按本机实际位置修改, 或 export CAPITAL_GENERATION_DIR=/path/to/repo)。
+# 安装后如 cwd 指向错误, 在 Settings → Plugins 禁用再启用即可热重载。
+
+- insert:
+    - id: finance-unified
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: fin
+        transport: stdio
+        command: uv
+        args: ['run', '-m', 'servers.mcp_data']
+        cwd: !!js process.env.CAPITAL_GENERATION_DIR || '/home/shawn/projects/capital-generation'
+        toolCallTimeoutMs: 120000
+        failOnStartupError: true
