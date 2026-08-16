@@ -24,3 +24,6 @@ tests/fixtures/live/
 .idea/
 .vscode/
 *.swp
+
+# 研发计划 — 内部文档, 不上传 GitHub (用户裁定 2026-08-16)
+PLAN*.md
