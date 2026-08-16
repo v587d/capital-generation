@@ -8,6 +8,10 @@
 
 ## 1. 结论摘要 (Executive Summary)
 
+> **实施状态 (2026-08-15)**: A1/A3/B1/B2/C 已实现并通过真实 KEY 前后对比
+> (**结果侧 -72.2%, 工具面 -9.2%**), 正式数据见
+> [`docs/CONTEXT_BUDGET_RESULTS.md`](CONTEXT_BUDGET_RESULTS.md), 待用户决定合并。
+
 1. **成本模型被实证推翻了一半**:DSH 每步确实全量注入工具面(H1 ✅),但 DeepSeek
    服务端自动磁盘缓存(KV cache)让**工具面只按全价计费一次**,后续每步按 1/50 价格
    从缓存读取(实测单会话 384 步:cacheRead 1.07 亿 tokens、uncached 仅 79.6 万)。
@@ -161,7 +165,9 @@ uv run python scripts/measure_tokens.py all   # surface + results
 
 - 行键缩写仅用于**自描述性强的领域约定**:`d/o/h/l/c/v/t`(K线,金融 API 通用
   惯例)、`s/last/chg%/vol/amt`(quote)。EDB/calendar 行不缩键(V1 已足够)。
-- 精度(外置 `config/render.yaml`,不写死):
+- 精度(外置 **规划新增** `config/render.yaml` —— 当前**不存在**,实施时创建;
+  与 chains.yaml / error_map.yaml / reconcile.yaml 同款"配置外置,不写死在代码里"
+  惯例):
   - 价格/指数点位:round 2 位(A 股最小变动价位 0.01,无损失)
   - 基金净值:round 4 位(场内/场外净值惯例)
   - volume:int(股);turnover:round 2
@@ -171,7 +177,7 @@ uv run python scripts/measure_tokens.py all   # surface + results
 
 **A3. announcements 截断(最大单项,独立决策)**
 
-- 默认每条 `content` 截断 **800 字符**(可配置 `config/render.yaml`)。
+- 默认每条 `content` 截断 **800 字符**(阈值同上,规划新增 `config/render.yaml`)。
 - 输出 `truncated: true` + meta.note 说明"content 为摘要,全文见 url"(降级可观测)。
 - `url` 恒保留(全文兜底;模型可提示用户自取)。
 - 排序保持 Wind relevance 序;title/date 恒保留。
@@ -201,7 +207,7 @@ uv run python scripts/measure_tokens.py all   # surface + results
 
 ### D. 统一结果 token 预算(远期,本期不定)
 
-- `config/render.yaml` 增加 `budget`(如单次结果 ≤ 8K tokens)+ 超限截断 +
+- 远期在 `config/render.yaml` 增加 `budget`(如单次结果 ≤ 8K tokens)+ 超限截断 +
   `truncated` 标注 —— 与 A3 同哲学,统一到所有工具。
 - 设计前提:预算外置可配置;绝不静默丢数据。
 - 本期不实现:DSH 侧无 compaction(部署配置问题,非本仓库可改);协议层无缓存;

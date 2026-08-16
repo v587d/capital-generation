@@ -99,7 +99,12 @@ def measure_surface() -> dict[str, Any]:
     rows.sort(key=lambda r: -r["tokens"])
     instructions = str(app.instructions or "")
     inst_tokens = tok(instructions)
-    return {"rows": rows, "total": total, "title_total": title_tokens, "instructions_tokens": inst_tokens}
+    return {
+        "rows": rows,
+        "total": total,
+        "title_total": title_tokens,
+        "instructions_tokens": inst_tokens,
+    }
 
 
 def _strip_title_keys(node: Any) -> Any:
@@ -546,7 +551,11 @@ def measure_results() -> list[dict[str, Any]]:
         else:
             v0 = render_envelope(env)
         t0 = tok_json(v0)
-        row: dict[str, Any] = {"case": label, "V0_tokens": t0, "V0_chars": len(json.dumps(v0, ensure_ascii=False))}
+        row: dict[str, Any] = {
+            "case": label,
+            "V0_tokens": t0,
+            "V0_chars": len(json.dumps(v0, ensure_ascii=False)),
+        }
         v1 = fn(env, "V1") if not isinstance(env, dict) else compact_reconcile(env)
         row["V1_tokens"] = tok_json(v1)
         if not isinstance(env, dict):
@@ -562,11 +571,55 @@ def measure_results() -> list[dict[str, Any]]:
 # ──────────────────────────────────────────────────────────────────────
 
 
+# ──────────────────────────────────────────────────────────────────────
+# compare: 真实 KEY 两次 capture 的正式对比 (scripts/capture_live.py 产物)
+# ──────────────────────────────────────────────────────────────────────
+
+# 优化前基线 (2026-08-15 capture, 旧渲染): dumps/token_compare/
+# 优化后 (A1+A3+B, 新渲染):              dumps/token_compare_new/
+BASELINE_DIR = REPO / "dumps" / "token_compare"
+OPTIMIZED_DIR = REPO / "dumps" / "token_compare_new"
+# 工具面优化前基线 (DESIGN_CONTEXT_BUDGET.md §2.2, 旧描述+title 冗余): 1,623
+SURFACE_BASELINE_TOKENS = 1_623
+
+
+def compare_live() -> None:
+    old: dict[str, dict] = {}
+    for p in sorted(BASELINE_DIR.glob("*.json")):
+        d = json.loads(p.read_text(encoding="utf-8"))
+        old[p.stem] = d
+    new: dict[str, dict] = {}
+    for p in sorted(OPTIMIZED_DIR.glob("*.json")):
+        d = json.loads(p.read_text(encoding="utf-8"))
+        new[p.stem] = d
+    if not old or not new:
+        raise SystemExit("缺存档: 先跑 scripts/capture_live.py (旧/新各一次)")
+    names = [n for n in old if n in new]
+    print("\n== 真实 KEY 前后对比 (同一用例集, 模型侧 wire 文本, cl100k_base) ==")
+    print(f"{'case':<22} {'优化前':>8} {'优化后':>8} {'节省':>8}")
+    tot_old = tot_new = 0
+    for name in names:
+        o, n = old[name]["tokens_cl100k"], new[name]["tokens_cl100k"]
+        tot_old += o
+        tot_new += n
+        print(f"{name:<22} {o:>8} {n:>8} {pct(o - n, o):>8}")
+    print(f"{'合计':<22} {tot_old:>8} {tot_new:>8} {pct(tot_old - tot_new, tot_old):>8}")
+
+    print("\n== 工具注册面 (每轮注入, 前后对比) ==")
+    s = measure_surface()
+    print(
+        f"  11 工具: {SURFACE_BASELINE_TOKENS} → {s['total']} tokens "
+        f"({pct(SURFACE_BASELINE_TOKENS - s['total'], SURFACE_BASELINE_TOKENS)})"
+    )
+    print(f"  title 冗余: {s['title_total']} tokens (已剥离)")
+    print(f"  instructions: {s['instructions_tokens']} tokens (未动)")
+
+
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else "all"
     if mode in ("surface", "all"):
         s = measure_surface()
-        print(f"\n== 工具注册面 (DSH 视角: mcp__fin__ 前缀, cl100k_base) ==")
+        print("\n== 工具注册面 (DSH 视角: mcp__fin__ 前缀, cl100k_base) ==")
         print(f"{'tool':<40} {'tokens':>7} {'desc':>6} {'title冗余':>8}")
         for r in s["rows"]:
             print(
@@ -577,21 +630,23 @@ def main() -> None:
         print(f"其中 title 冗余: {s['title_total']} tokens ({pct(s['title_total'], s['total'])})")
         print(f"instructions 长文本: {s['instructions_tokens']} tokens")
     if mode in ("results", "all"):
-        print(f"\n== 结果渲染 (fixture 真实数据, cl100k_base) ==")
+        print("\n== 结果渲染 (fixture 真实数据, cl100k_base) ==")
         print(f"{'case':<26} {'V0':>7} {'V1':>7} {'V2':>7} {'V1节省':>8} {'V2节省':>8}")
         for r in measure_results():
             v2 = r.get("V2_tokens")
             print(
                 f"{r['case']:<26} {r['V0_tokens']:>7} {r['V1_tokens']:>7} "
-                f"{str(v2):>7} {pct(r['V0_tokens']-r['V1_tokens'], r['V0_tokens']):>8} "
-                f"{pct(r['V0_tokens']-v2, r['V0_tokens']) if v2 else '-':>8}"
+                f"{str(v2):>7} {pct(r['V0_tokens'] - r['V1_tokens'], r['V0_tokens']):>8} "
+                f"{pct(r['V0_tokens'] - v2, r['V0_tokens']) if v2 else '-':>8}"
             )
             v2b = r.get("V2_noISO_tokens")
             if v2b:
                 print(
                     f"{'  └ V2 保持 date_ms':<26} {r['V0_tokens']:>7} {'':>7} "
-                    f"{v2b:>7} {'':>8} {pct(r['V0_tokens']-v2b, r['V0_tokens']):>8}"
+                    f"{v2b:>7} {'':>8} {pct(r['V0_tokens'] - v2b, r['V0_tokens']):>8}"
                 )
+    if mode in ("compare", "all"):
+        compare_live()
 
 
 if __name__ == "__main__":

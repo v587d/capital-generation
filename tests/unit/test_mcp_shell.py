@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from core.domain.errors import ParamError
-from core.domain.models import Envelope, Quote
+from core.domain.models import Announcement, Envelope, Kline, Quote
 from core.domain.symbols import SymbolRecord, SymbolResolver
 from core.domain.units import date_to_ms, utc_iso
 from servers import mcp_data
@@ -71,13 +73,117 @@ class TestRender:
         assert d["source"] == "同花顺"
         assert d["tier"] == "free"
         assert d["ts"] == utc_iso(date_to_ms("2026-08-15"))
-        assert d["data"][0]["symbol"] == "600519.SH"
+        assert d["data"][0]["symbol"] == "600519.SH"  # 单行平铺 (无外提空间)
 
     def test_ambiguity_rendering(self) -> None:
         d = render_ambiguity("000001", RESOLVER.resolve("000001").candidates)
         assert d["data"] is None
         assert len(d["ambiguous"]) == 2
         assert any("有歧义" in w for w in d["warnings"])
+
+
+class TestRenderCompact:
+    """DESIGN_CONTEXT_BUDGET.md A1/A3: 表头外提 + 公告截断 (渲染层)."""
+
+    def _kline(self, date_ms: int, source: str = "同花顺", close: float = 1.0) -> Kline:
+        return Kline(
+            symbol="600519.SH",
+            date_ms=date_ms,
+            open=1.0,
+            high=1.1,
+            low=0.9,
+            close=close,
+            volume=100,
+            turnover=200,
+            source=source,
+            tier="free",
+        )
+
+    def test_multirow_meta_extraction(self) -> None:
+        env = Envelope(
+            data=[self._kline(1), self._kline(2, close=1.2)],
+            ts_ms=date_to_ms("2026-08-15"),
+        )
+        d = render_envelope(env)
+        assert d["data"]["meta"]["symbol"] == "600519.SH"
+        assert d["data"]["meta"]["source"] == "同花顺"
+        assert d["data"]["meta"]["tier"] == "free"
+        # 行内只留差异字段
+        assert "date_ms" in d["data"]["rows"][0]
+        assert "symbol" not in d["data"]["rows"][0]
+        assert d["source"] == "同花顺"  # 信封溯源保留
+
+    def test_mixed_source_stays_in_rows(self) -> None:
+        env = Envelope(
+            data=[self._kline(1, source="同花顺"), self._kline(2, source="AKShare")],
+            ts_ms=date_to_ms("2026-08-15"),
+        )
+        d = render_envelope(env)
+        assert "source" not in d["data"]["meta"]  # 混合源自动回退: 留行内
+        assert d["data"]["rows"][0]["source"] == "同花顺"
+        assert d["data"]["rows"][1]["source"] == "AKShare"
+
+    def test_announcement_truncated_with_flag(self) -> None:
+        long_ann = Announcement(
+            symbol="600519.SH",
+            title="半年报",
+            date_ms=date_to_ms("2026-08-15"),
+            content="字" * 2000,
+            url="https://u",
+            source="Wind",
+            tier="quota",
+        )
+        short_ann = Announcement(
+            symbol="600519.SH",
+            title="短公告",
+            date_ms=date_to_ms("2026-08-14"),
+            content="短",
+            url="https://u2",
+            source="Wind",
+            tier="quota",
+        )
+        env = Envelope(data=[long_ann, short_ann], ts_ms=date_to_ms("2026-08-15"))
+        d = render_envelope(env)
+        assert d["data"]["meta"]["note"] == "content 为截断摘要, 全文见 url"
+        r0, r1 = d["data"]["rows"]
+        assert r0["truncated"] is True and len(r0["content"]) == 801  # 800 + …
+        assert r1["truncated"] is False and r1["content"] == "短"
+        assert r0["url"] == "https://u"  # url 恒保留 (全文兜底)
+
+    def test_announcement_single_row_flat(self) -> None:
+        ann = Announcement(
+            symbol="600519.SH",
+            title="T",
+            date_ms=date_to_ms("2026-08-15"),
+            content="字" * 2000,
+            url="https://u",
+            source="Wind",
+            tier="quota",
+        )
+        d = render_envelope(Envelope(data=[ann], ts_ms=date_to_ms("2026-08-15")))
+        assert isinstance(d["data"], list)  # 单行平铺
+        assert d["data"][0]["truncated"] is True
+
+    def test_announcement_cap_zero_disables(self, monkeypatch) -> None:
+        import servers.mcp_data as md
+
+        monkeypatch.setattr(md, "_RENDER_CFG", {"announcements": {"content_cap_chars": 0}})
+        ann = Announcement(
+            symbol="600519.SH",
+            title="T",
+            date_ms=date_to_ms("2026-08-15"),
+            content="字" * 2000,
+            url="https://u",
+            source="Wind",
+            tier="quota",
+        )
+        d = render_envelope(Envelope(data=[ann], ts_ms=date_to_ms("2026-08-15")))
+        assert "truncated" not in d["data"][0]  # cap=0 → 旧行为: 无标记
+        assert len(d["data"][0]["content"]) == 2000
+
+    def test_empty_list_stays_flat(self) -> None:
+        d = render_envelope(Envelope(data=[], ts_ms=date_to_ms("2026-08-15")))
+        assert d["data"] == []
 
 
 class TestToolLogic:
@@ -264,6 +370,28 @@ class TestServer:
         assert "AKShare" in router._adapters or "akshare" in router._adapters
         assert any("THS_API_KEY" in w for w in warnings)
         assert any("WIND_API_KEY" in w for w in warnings)
+
+    def test_schema_titles_stripped(self) -> None:
+        """B1 (DESIGN_CONTEXT_BUDGET.md): inputSchema 无 pydantic 冗余 title.
+
+        参数名/类型/required/默认值必须原样保留 (schema 冻结红线: 只减冗余).
+        """
+        app = mcp_data.create_app()
+        tools = {t.name: t for t in app._tool_manager.list_tools()}
+        for name, tool in tools.items():
+            assert '"title"' not in json.dumps(tool.parameters), name
+        params = tools["fin_data__search_symbols"].parameters
+        assert params["properties"]["query"] == {"type": "string"}
+        assert params["properties"]["limit"] == {"default": 10, "type": "integer"}
+        assert params["required"] == ["query"]
+
+    def test_descriptions_carry_budget_guidance(self) -> None:
+        """C (DESIGN_CONTEXT_BUDGET.md): 描述引导调用预算 (窗口/top_k/observation)."""
+        app = mcp_data.create_app()
+        tools = {t.name: t for t in app._tool_manager.list_tools()}
+        assert "窗口 ≤1 年" in tools["fin_data__get_klines"].description
+        assert "top_k ≤5" in tools["fin_data__get_announcements"].description
+        assert "observation 默认 10" in tools["fin_data__get_edb"].description
 
     def test_load_ths_key_env_first(self, monkeypatch) -> None:
         monkeypatch.setenv("THS_API_KEY", "sk-test-123")

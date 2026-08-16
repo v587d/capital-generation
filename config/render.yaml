@@ -1,0 +1,7 @@
+# 渲染层参数 (docs/DESIGN_CONTEXT_BUDGET.md A1/A3) — 外置可配, 不写死在代码里
+# 与 chains.yaml / error_map.yaml / reconcile.yaml 同款惯例 (core/config.py load_yaml)
+
+announcements:
+  # fin_data__get_announcements content 截断阈值 (字符); 0 = 不截断 (回退旧行为)
+  # 实测: 600519 top_k=10 全文 ≈ 137K tokens → 800 字符/条约 6.7K tokens (-95%)
+  content_cap_chars: 800

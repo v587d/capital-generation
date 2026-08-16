@@ -22,15 +22,36 @@ from typing import Any
 
 from core.adapters.akshare_adapter import AKShareAdapter
 from core.adapters.ths import THSAdapter
+from core.config import load_yaml
 from core.domain.errors import ParamError
-from core.domain.models import Envelope, Instrument
+from core.domain.models import Announcement, Envelope, Instrument
 from core.domain.routing import Router
 from core.domain.symbols import Resolution, SymbolResolver, default_resolver
 from core.domain.units import date_to_ms, now_ms, utc_iso
 
 # ──────────────────────────────────────────────────────────────────────
 # 渲染 (协议层; 信封 → JSON 可序列化 dict, provenance 永不剥离)
+# docs/DESIGN_CONTEXT_BUDGET.md A1/A3: 表头外提 (meta+rows) + 公告截断 (配置化)
 # ──────────────────────────────────────────────────────────────────────
+
+_RENDER_CFG: dict[str, Any] | None = None
+
+
+def _render_config() -> dict[str, Any]:
+    """config/render.yaml (外置可配, 缺失/损坏时回退默认, 不阻断启动)."""
+    global _RENDER_CFG
+    if _RENDER_CFG is None:
+        try:
+            _RENDER_CFG = load_yaml("render.yaml")
+        except FileNotFoundError:
+            _RENDER_CFG = {}
+    return _RENDER_CFG
+
+
+def announcement_cap_chars() -> int:
+    """公告 content 截断阈值 (字符); 0/缺失 = 不截断."""
+    v = _render_config().get("announcements", {}).get("content_cap_chars", 800)
+    return v if isinstance(v, int) and v > 0 else 0
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
@@ -39,19 +60,65 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
     return row  # SpecialData.items / FinancialStatement.rows 透传 (L3)
 
 
-def render_envelope(env: Envelope) -> dict[str, Any]:
-    data = env.data
+def _truncate_announcement_row(d: dict[str, Any], cap: int) -> dict[str, Any]:
+    """A3: content 截断 + truncated 显式标注 (降级可观测; url 恒保留).
+
+    cap<=0 (配置关闭) → 原样透传, 不加截断标记 (回退旧行为).
+    """
+    if cap <= 0:
+        return d
+    content = d.get("content", "")
+    truncated = len(content) > cap
+    d = dict(d)
+    d["content"] = content[:cap] + "…" if truncated else content
+    d["truncated"] = truncated
+    return d
+
+
+def _partition_dicts(dicts: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """A1: 表头外提 — 批内全等的字段 → meta, 差异字段留行内.
+
+    混合源等场景自动回退: 任一字段在行间不一致 → 留在行内, 绝不静默丢字段.
+    """
+    if not dicts:
+        return [], {}
+    keys = list(dicts[0].keys())
+    meta: dict[str, Any] = {}
+    for k in keys:
+        first = dicts[0][k]
+        if all(d[k] == first for d in dicts[1:]):
+            meta[k] = first
+    rows = [{k: v for k, v in d.items() if k not in meta} for d in dicts]
+    return rows, meta
+
+
+def _rows_to_payload(data: Any) -> tuple[Any, dict[str, Any]]:
+    """数据 → (payload, meta); meta 供信封 source/tier 溯源 (provenance 永不剥离)."""
     if isinstance(data, list) and data and is_dataclass(data[0]):
-        rows = [_row_to_dict(r) for r in data]
-        meta = _row_to_dict(data[0])
-    elif is_dataclass(data):
-        rows = _row_to_dict(data)
-        meta = rows
-    else:
-        rows = data
-        meta = {}
+        if isinstance(data[0], Announcement):
+            cap = announcement_cap_chars()
+            dicts = [_truncate_announcement_row(_row_to_dict(a), cap) for a in data]
+        else:
+            dicts = [_row_to_dict(r) for r in data]
+        if len(dicts) > 1:  # 批内多行才做表头外提; 单行平铺 (rows 空壳无意义)
+            rows, meta = _partition_dicts(dicts)
+            if rows and any(rows):
+                if any(r.get("truncated") for r in rows):
+                    meta["note"] = "content 为截断摘要, 全文见 url"
+                return {"meta": meta, "rows": rows}, meta
+        # 无外提空间 (单行/批内全等) → 平铺, 信封溯源取首行
+        env_meta = {k: v for k, v in dicts[0].items() if k in ("source", "tier")} if dicts else {}
+        return dicts, env_meta
+    if is_dataclass(data):
+        d = _row_to_dict(data)
+        return d, {k: d[k] for k in ("source", "tier") if k in d}
+    return data, {}  # L3 透传 (FinancialStatement.rows 内层 / SpecialData.items)
+
+
+def render_envelope(env: Envelope) -> dict[str, Any]:
+    payload, meta = _rows_to_payload(env.data)
     return {
-        "data": rows,
+        "data": payload,
         "source": meta.get("source", ""),  # 规范名: 同花顺/Wind/AKShare
         "tier": meta.get("tier", ""),
         "ts": utc_iso(env.ts_ms),  # 查询时点 (数据时点见 data.as_of_ms/date_ms)
@@ -570,13 +637,17 @@ def create_app() -> Any:
     async def fin_data__search_symbols(
         query: str, market: str | None = None, limit: int = 10
     ) -> dict:
-        """标的消歧检索 (同花顺 meta → AKShare 兜底)。名称/代码 → 唯一 thscode。"""
+        """名称/代码消歧检索 → 唯一 canonical code (同花顺 meta → AKShare 兜底)。
+
+        歧义时返回候选列表: 用 market 参数 (A股/基金/指数) 限定后重查。"""
         env = await router.call("search", query=query, market=market, limit=limit)
         return render_envelope(env)
 
     @mcp.tool()
     async def fin_data__get_quote(symbols: str, market: str | None = None) -> dict:
-        """A股最新行情快照 (≤50 只, 逗号分隔)。不含中文名 — 名称请先 search。"""
+        """A股行情快照 (最新价/涨跌幅/量额), 批量 ≤50 只逗号分隔。
+
+        先 search 消歧再调用; 结果不含中文名。单次调用体积小, 可放心批量。"""
         return await tool_get_quote(router, resolver, symbols, market)
 
     @mcp.tool()
@@ -587,8 +658,10 @@ def create_app() -> Any:
         end: str = "",
         adjust: str = "none",
     ) -> dict:
-        """K线: period=1d 日线 (≤10年, THS 主干); 分钟线 1m/5m/15m/30m/60m
-        仅单交易日 (start==end, Wind 独家无降级源)。adjust: none/forward/backward (仅日线)。"""
+        """K线: 1d 日线优先 (THS 主干), 分钟线 1m/5m/15m/30m/60m 仅单交易日 (Wind 独家)。
+
+        窗口 ≤1 年 (长窗口单次结果可达 3 万+ tokens, 需要更久历史时切片多次);
+        adjust: none/forward/backward 仅日线; 分钟线要求 start==end。"""
         return await tool_get_klines(router, resolver, symbol, period, start, end, adjust)
 
     @mcp.tool()
@@ -598,13 +671,14 @@ def create_app() -> Any:
         period: str = "annual",
         limit: int = 4,
     ) -> dict:
-        """A股财务: statement=income/balance/cashflow/indicators;
-        period=annual/quarterly; limit 1-20。"""
+        """A股财务三表与指标: statement=income/balance/cashflow/indicators。
+
+        period=annual/quarterly, limit 1-20 (默认 4 期足够趋势判断, 勿取 20)。"""
         return await tool_get_financials(router, resolver, symbol, statement, period, limit)
 
     @mcp.tool()
     async def fin_data__get_calendar() -> dict:
-        """A股近一年交易日历。"""
+        """A股近一年交易日历 (~240 行, 一次调用即可, 勿重复取)。"""
         return await tool_get_calendar(router, resolver)
 
     @mcp.tool()
@@ -614,8 +688,9 @@ def create_app() -> Any:
         page: int = 1,
         size: int = 50,
     ) -> dict:
-        """特色数据: kind=limit-up(涨停池)/limit-up-ladder(连板天梯)/hot(热股榜)/
-        hot-history(历史热榜,date)/dragon-tiger(龙虎榜,date)/anomaly-stock(异动)。"""
+        """特色数据: kind=limit-up/limit-up-ladder/hot/hot-history/dragon-tiger/anomaly-stock。
+
+        涨停池支持分页 (page/size); 只看头部时调小 size (默认 50)。"""
         return await tool_get_special_data(router, resolver, kind, date, page, size)
 
     @mcp.tool()
@@ -625,7 +700,9 @@ def create_app() -> Any:
         end: str = "",
         top_k: int = 10,
     ) -> dict:
-        """上市公司公告检索 (Wind 独家 RAG, 无降级源)。start/end 必填 (YYYY-MM-DD)。"""
+        """上市公司公告检索 (Wind 独家 RAG, 无降级源)。start/end 必填 (YYYY-MM-DD)。
+
+        top_k ≤5 (长公告全文可达 2 万+ tokens; 结果 content 已截断, 全文见 url)。"""
         return await tool_get_announcements(router, resolver, symbol, start, end, top_k)
 
     @mcp.tool()
@@ -635,7 +712,9 @@ def create_app() -> Any:
         end: str = "",
         observation: int = 10,
     ) -> dict:
-        """EDB 宏观/行业指标 (Wind 搜索并提数, 指标简称如 中国GDP; AKShare 仅白名单兜底)。"""
+        """EDB 宏观/行业指标 (Wind 主干; AKShare 仅白名单兜底)。
+
+        用指标简称 (如 中国GDP); observation 默认 10 已够趋势判断, 勿取 100。"""
         return await tool_get_edb(router, resolver, indicator, start, end, observation)
 
     @mcp.tool()
@@ -646,8 +725,9 @@ def create_app() -> Any:
         end: str = "",
         tolerance_pct: float | None = None,
     ) -> dict:
-        """双源对账 (THS×AKShare, 未复权, 只比数据时点): domain=quote/klines;
-        分歧不自动修复 — 交 LLM 裁决 (报告含双源值 + 数据时点 + diff)。"""
+        """双源对账 (THS×AKShare, 未复权, 只比数据时点): domain=quote/klines。
+
+        分歧不自动修复 — 报告交 LLM 裁决 (含双源值 + 数据时点 + diff)。"""
         return await tool_reconcile(router, resolver, domain, symbols, start, end, tolerance_pct)
 
     @mcp.tool()
@@ -658,9 +738,10 @@ def create_app() -> Any:
         end: str = "",
         limit: int = 10,
     ) -> dict:
-        """基金数据 (THS 免费主干, Wind 补缺): kind=quote(场内快照,仅ETF;Wind兜底=当日分钟行情)/
-        nav(净值)/kline(日K,需start/end;THS仅ETF≤5年无复权)/holdings(重仓股,定期披露)/
-        holders(持有人结构)/performance(区间收益)/info(基本信息)。资产 gate: fund。"""
+        """基金数据 (THS 免费主干, Wind 补缺): kind=quote/nav/kline/holdings/holders/
+        performance/info。
+
+        kline 需 start/end; 其余 kind 用 limit (默认 10)。资产 gate: fund。"""
         return await tool_get_fund_data(router, resolver, symbol, kind, start, end, limit)
 
     @mcp.tool()
@@ -671,16 +752,37 @@ def create_app() -> Any:
         end: str = "",
         limit: int = 10,
     ) -> dict:
-        """指数数据 (行情 THS 主干, 无复权语义): kind=quote(快照)/kline(日K,需start/end)/
-        constituents(成分,仅当前无历史)/fundamentals(Wind独家,市盈率市净率)/basicinfo(Wind独家)。"""
+        """指数数据 (行情 THS 主干, 无复权语义): kind=quote/kline/fundamentals/
+        constituents/basicinfo。
+
+        kline 需 start/end; constituents 仅当前成分 (无历史)。资产 gate: index。"""
         return await tool_get_index_data(router, resolver, symbol, kind, start, end, limit)
+
+    # B1 (DESIGN_CONTEXT_BUDGET.md): 去除 pydantic 自动 title (与参数名重复的注解)。
+    # 参数名/类型/required/默认值/语义零改动 — 一次性结构精简, 之后前缀重新稳定
+    for _tool in mcp._tool_manager._tools.values():
+        _tool.parameters = _strip_schema_titles(_tool.parameters)
 
     return mcp
 
 
+def _strip_schema_titles(node: Any) -> Any:
+    """递归删除 JSON Schema 中的 "title" 键 (FastMCP/pydantic 自动生成, 纯冗余)."""
+    if isinstance(node, dict):
+        return {k: _strip_schema_titles(v) for k, v in node.items() if k != "title"}
+    if isinstance(node, list):
+        return [_strip_schema_titles(v) for v in node]
+    return node
+
+
 def main() -> None:
     app = create_app()
-    app.run(transport="stdio")
+    try:
+        app.run(transport="stdio")
+    except KeyboardInterrupt:
+        # 父进程 (dsh web) Ctrl+C 时 SIGINT 同发前台进程组 → anyio 事件循环
+        # 以 KeyboardInterrupt 结束 (正常清理路径)。静默退出, 不刷 traceback。
+        pass
 
 
 if __name__ == "__main__":

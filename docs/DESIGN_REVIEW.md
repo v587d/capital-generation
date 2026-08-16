@@ -50,6 +50,19 @@
       (100 行评级表) — 触及 LESSONS §1「研报/评级/目标价不覆盖」裁定, 不接线 (决策门 B, 2026-08-15)
     - `Instrument` L1 模型加 `subtype` 字段 (vendor 叶类别, 供 THS fund_type 细分) — 非工具面变更
     - v0.1.0/v0.2.0 九工具名与 schema 一字不动 (冻结契约保持)
+14. **v0.3.1 上下文优化评审记录 (2026-08-16 用户批准, docs/DESIGN_CONTEXT_BUDGET.md)**
+    - **工具面零结构改动**: 11 个 `fin_data__*` 工具名与参数 schema 一字不动
+      (参数名/类型/required/默认值, 单测断言); 变更仅为:
+      ① 渲染层 A1 表头外提 (meta+rows, 批内全等字段外提, 混合源/单行/空列表自动回退平铺);
+      ② A3 公告 content 截断 (默认 800 字符, `config/render.yaml` 外置, cap=0 关闭,
+      显式 `truncated` 标记 + url 兜底 — 降级可观测);
+      ③ B1 inputSchema 去除 pydantic 自动 title 键 (纯冗余注解, 语义不变);
+      ④ B2/C 工具描述行动指令化 + 调用预算引导 (窗口/top_k/observation, 语义不变)
+    - **实测 (真实 KEY, 模型侧 wire, cl100k_base)**: 结果侧合计 -72.2% (227,932 →
+      63,306 tokens; announcements -95%、klines 1年 -43.4%)、工具面 -9.2%/轮 —
+      正式数据 `docs/CONTEXT_BUDGET_RESULTS.md`
+    - 用户裁定: A2 紧凑键/紧凑序列化/精度 暂缓 (49 vs 43 差异小); D 统一预算记录在案
+    - KV-cache 纪律: 描述/schema 为一次性变更, 合入后前缀重新稳定, 后续冻结
 
 ## 结构(为什么不再 refactor)
 
