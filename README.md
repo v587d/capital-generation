@@ -1,6 +1,17 @@
 # Capital Generation
 
-> [!IMPORTANT] 愿大家的财富数字就像“text generation”一样，不断增长，永不停止。
+[![DSH Plugin](https://img.shields.io/badge/DeepSeek_Harness-plugin-blue)](https://github.com/deepseek-ai)
+[![DSH Web](https://img.shields.io/badge/DeepSeek_Harness-web-orange)](https://github.com/deepseek-ai)
+[![Agent](https://img.shields.io/badge/Capital_Generation-Agent-red)](https://github.com/v587d/capital-generation)
+
+[![Python](https://img.shields.io/badge/Python-3.12%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![uv](https://img.shields.io/badge/uv-managed-black?logo=astral&logoColor=white)](https://docs.astral.sh/uv/)
+[![MCP](https://img.shields.io/badge/MCP-1.29-purple)](https://modelcontextprotocol.io/)
+[![License](https://img.shields.io/badge/License-Apache--2.0-green)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.3.1-9cf)](https://github.com/v587d/capital-generation/releases)
+
+> [!IMPORTANT]
+> 愿大家的财富数字就像“text generation”一样，不断增长，永不停止。
 
 ## Slogan
 Next-Gen AI-Driven Capital Generation.
