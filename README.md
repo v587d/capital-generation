@@ -1,6 +1,6 @@
 # Capital Generation
 
->[!IMPORTANT] 愿大家的财富数字就像“text generation”一样，不断增长，永不停止。
+> [!IMPORTANT] 愿大家的财富数字就像“text generation”一样，不断增长，永不停止。
 
 ## Slogan
 Next-Gen AI-Driven Capital Generation.
