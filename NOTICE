@@ -1,0 +1,25 @@
+capital-generation
+Copyright 2026 Shawn (v587d)
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+--------------------------------------------------------------------
+
+Third-party notices:
+
+- 同花顺 (THS) fuyao API / 万得 (Wind) MCP API: 本仓库仅作为客户端集成
+  第三方商业服务; 服务本身的条款、费率与可用性以其官方文档与授权协议为准,
+  与本仓库 LICENSE 相互独立。API Key 由使用者自备 (BYOK)。
+- scripts/lake.py 薄封装同花顺官方 marketdb CLI (HiThink-Tech/Financial-API,
+  MIT): 官方 CLI 为独立软件, 遵循其自身许可证。
+- AKShare (MIT): 免费数据兜底, 遵循其自身许可证。
