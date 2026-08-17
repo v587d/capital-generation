@@ -1,14 +1,27 @@
-# Capital Generation
+<p align="center">
+  <img src="assets/cg-logo.png" alt="Capital Generation Logo" width="120">
+</p>
 
-[![DSH Plugin](https://img.shields.io/badge/DeepSeek_Harness-plugin-blue)](https://github.com/deepseek-ai)
-[![DSH Web](https://img.shields.io/badge/DeepSeek_Harness-web-orange)](https://github.com/deepseek-ai)
-[![Agent](https://img.shields.io/badge/Capital_Generation-Agent-red)](https://github.com/v587d/capital-generation)
+<h1 align="center">Capital Generation</h1>
 
-[![Python](https://img.shields.io/badge/Python-3.12%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
-[![uv](https://img.shields.io/badge/uv-managed-black?logo=astral&logoColor=white)](https://docs.astral.sh/uv/)
-[![MCP](https://img.shields.io/badge/MCP-1.29-purple)](https://modelcontextprotocol.io/)
-[![License](https://img.shields.io/badge/License-Apache--2.0-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.3.1-9cf)](https://github.com/v587d/capital-generation/releases)
+<p align="center">
+  <img src="assets/banner.jpg" alt="Capital Generation Banner" width="100%">
+</p>
+
+<p align="center">
+  <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DeepSeek_Harness-plugin-blue" alt="DSH Plugin"></a>
+  <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DeepSeek_Harness-web-orange" alt="DSH Web"></a>
+  <a href="https://github.com/v587d/capital-generation"><img src="https://img.shields.io/badge/Capital_Generation-Agent-red" alt="Agent"></a>
+  <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
+</p>
+
+<p align="center">
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.12%2B-blue?logo=python&logoColor=white" alt="Python"></a>
+  <a href="https://docs.astral.sh/uv/"><img src="https://img.shields.io/badge/uv-managed-black?logo=astral&logoColor=white" alt="uv"></a>
+  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-1.29-purple" alt="MCP"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-green" alt="License"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-0.3.1-9cf" alt="Version"></a>
+</p>
 
 > [!IMPORTANT]
 > 愿大家的财富数字就像“text generation”一样，不断增长，永不停止。
@@ -25,6 +38,40 @@ Next-Gen AI-Driven Capital Generation.
 - coding agent的设计思路对financial Agent并非有效。
 - financial agent != model + harness + skills/MCP/tools/prompt...
 - 因为financial agent更强调有机结合。恰逢 DeepSeek Harness 问世，我们一起做一些新鲜的尝试。
+
+## BYOK
+
+> [!WARNING]
+> 本项目不提供第三方 API Key，需你自行申请。仓库内不保存任何密钥。
+
+### 申请 Key
+
+- **Wind**：免费获取 API Key，每天送 1000 积分（有效期 1 天），初始 2000 积分。[→ 访问官网申请](https://aifinmarket.wind.com.cn/#/home)
+- **同花顺**：免费获取 API Key，免费使用，对高频请求有限制。[→ 访问官网申请](https://fuyao.aicubes.cn/)
+- **AKShare**：无需 Key，作为免费兜底源直接可用。
+
+### 配置方法
+
+拿到 Key 后，任选以下一种方式配置，推荐使用 credentials 文件：
+
+1. 将 Key 写入 `~/.dsh/.credentials.yaml`（权限建议 `0600`）：
+
+   ```yaml
+   ths_api_key: "你的同花顺 API Key"
+   wind_api_key: "你的 Wind API Key"
+   ```
+
+2. 或者通过环境变量注入：
+
+   ```bash
+   export THS_API_KEY="你的同花顺 API Key"
+   export WIND_API_KEY="你的 Wind API Key"
+   ```
+
+3. 重启 DSH / 重新启动 MCP server 后生效。未配置的源会给出 warning 并自动降级到可用兜底源，不会阻断启动。
+
+> [!TIP]
+> 如果你通过 DSH 接入，且选择环境变量方式，请确认 `cordis.patch.yml` 的 `env` 中显式透传了 `THS_API_KEY` / `WIND_API_KEY`；否则 DSH 的 MCP 子进程可能拿不到 Key。
 
 ## 能力一览（v0.3.1）
 
