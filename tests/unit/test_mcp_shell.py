@@ -264,6 +264,33 @@ class TestToolLogic:
         assert kw["kind"] == "limit-up"
         assert kw["date"] == "2026-08-14"
 
+    @pytest.mark.asyncio
+    async def test_special_data_anomaly_requires_thscodes(self) -> None:
+        router = FakeRouter(result=[])
+        with pytest.raises(ParamError, match="thscodes"):
+            await tool_get_special_data(
+                router, RESOLVER, "anomaly-stock", date="2026-08-14", size=20
+            )
+        assert router.calls == []
+
+    @pytest.mark.asyncio
+    async def test_special_data_anomaly_passes_thscodes(self) -> None:
+        router = FakeRouter(result=[])
+        await tool_get_special_data(
+            router,
+            RESOLVER,
+            "anomaly-stock",
+            date="2026-08-14",
+            size=20,
+            thscodes="600519.SH, 000001.SZ",
+        )
+        domain, kw = router.calls[0]
+        assert domain == "special"
+        assert kw["kind"] == "anomaly-stock"
+        assert kw["thscodes"] == "600519.SH,000001.SZ"
+        assert "date" not in kw
+        assert "size" not in kw
+
 
 class TestToolLogicV02:
     """v0.2.0 新工具与 period 扩展 (PLAN-0.2.0.md §2.3)."""
@@ -384,6 +411,14 @@ class TestServer:
         assert params["properties"]["query"] == {"type": "string"}
         assert params["properties"]["limit"] == {"default": 10, "type": "integer"}
         assert params["required"] == ["query"]
+
+    def test_special_data_schema_exposes_thscodes(self) -> None:
+        """anomaly-stock 需要 thscodes; MCP schema 必须透出该可选参数."""
+        app = mcp_data.create_app()
+        tools = {t.name: t for t in app._tool_manager.list_tools()}
+        params = tools["fin_data__get_special_data"].parameters
+        assert "thscodes" in params["properties"]
+        assert "thscodes" not in params["required"]
 
     def test_descriptions_carry_budget_guidance(self) -> None:
         """C (DESIGN_CONTEXT_BUDGET.md): 描述引导调用预算 (窗口/top_k/observation)."""

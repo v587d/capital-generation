@@ -64,6 +64,13 @@
     - 用户裁定: A2 紧凑键/紧凑序列化/精度 暂缓 (49 vs 43 差异小); D 统一预算记录在案
     - KV-cache 纪律: 描述/schema 为一次性变更, 合入后前缀重新稳定, 后续冻结
 
+15. **v0.3.1 热修复: `fin_data__get_special_data` 增加可选 `thscodes` (2026-08-17 用户报告)**
+    - 背景: `kind="anomaly-stock"` 时 THS 后端强制要求 `thscodes`，但 MCP schema 未暴露该参数，
+      导致模型调用报 `Missing required parameter: thscodes`。
+    - 变更: 工具新增可选 `thscodes`；当 `kind="anomaly-stock"` 时必填，并忽略 `date/page/size`。
+    - 语义: `anomaly-stock` 是按指定标的查询“当日个股异动原因”，不是全市场异动列表。
+    - 影响: 向后兼容，其他 kind 不受影响；schema 从冻结态做必要修正后重新稳定。
+
 ## 结构(为什么不再 refactor)
 
 ```

@@ -297,13 +297,25 @@ async def tool_get_special_data(
     date: str | None = None,
     page: int = 1,
     size: int = 50,
+    thscodes: str | None = None,
 ) -> dict[str, Any]:
     params: dict[str, Any] = {}
-    if date:
-        params["date"] = date
-    if kind == "limit-up":  # 仅涨停池支持分页; hot 榜用 period=day 默认值
-        params["page"] = page
-        params["size"] = size
+    if kind == "anomaly-stock":
+        # THS anomaly-analysis-stock 不是全市场异动列表: 必须按 thscodes 查指定标的当日异动。
+        codes = [c.strip() for c in (thscodes or "").split(",") if c.strip()]
+        if not codes:
+            raise ParamError(
+                "kind='anomaly-stock' 必须提供 thscodes（逗号分隔的同花顺代码，"
+                "如 '600519.SH,000001.SZ'）"
+            )
+        params["thscodes"] = ",".join(codes)
+        # 该接口只支持“当日 + 指定代码”，date/page/size 不适用，避免把无意义参数透传后端。
+    else:
+        if date:
+            params["date"] = date
+        if kind == "limit-up":  # 仅涨停池支持分页; hot 榜用 period=day 默认值
+            params["page"] = page
+            params["size"] = size
     env = await router.call("special", kind=kind, **params)
     return render_envelope(env)
 
@@ -687,11 +699,14 @@ def create_app() -> Any:
         date: str | None = None,
         page: int = 1,
         size: int = 50,
+        thscodes: str | None = None,
     ) -> dict:
         """特色数据: kind=limit-up/limit-up-ladder/hot/hot-history/dragon-tiger/anomaly-stock。
 
-        涨停池支持分页 (page/size); 只看头部时调小 size (默认 50)。"""
-        return await tool_get_special_data(router, resolver, kind, date, page, size)
+        - 涨停池支持分页 (page/size); 只看头部时调小 size (默认 50)。
+        - anomaly-stock 不是全市场异动列表: 必须传 thscodes（逗号分隔的同花顺代码，
+          如 '600519.SH,000001.SZ'），按指定标的查当日异动原因; date/page/size 不适用。"""
+        return await tool_get_special_data(router, resolver, kind, date, page, size, thscodes)
 
     @mcp.tool()
     async def fin_data__get_announcements(

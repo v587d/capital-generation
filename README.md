@@ -84,7 +84,7 @@ Next-Gen AI-Driven Capital Generation.
 | `fin_data__get_klines` | 日K（≤1 年窗口引导）+ 分钟线（仅单交易日，Wind 独家） | 同花顺 → AKShare / Wind |
 | `fin_data__get_financials` | 三表 + 财务指标 | **Wind** → 同花顺 → AKShare |
 | `fin_data__get_calendar` | A股近一年交易日历 | 同花顺 → AKShare |
-| `fin_data__get_special_data` | 涨停池/连板/热榜/龙虎榜/异动 | 同花顺 → AKShare |
+| `fin_data__get_special_data` | 涨停池/连板/热榜/龙虎榜/异动（`anomaly-stock` 需 `thscodes`） | 同花顺 → AKShare |
 | `fin_data__get_announcements` | 公告检索（Wind 独家 RAG，无降级源，content 已截断 + url 兜底） | Wind |
 | `fin_data__get_edb` | EDB 宏观/行业指标（Wind 主干，AKShare 白名单兜底） | Wind → AKShare |
 | `fin_data__reconcile` | 双源对账（未复权，只比数据时点，分歧交 LLM 裁决） | THS × AKShare |
