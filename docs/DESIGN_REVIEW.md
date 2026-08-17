@@ -71,6 +71,19 @@
     - 语义: `anomaly-stock` 是按指定标的查询“当日个股异动原因”，不是全市场异动列表。
     - 影响: 向后兼容，其他 kind 不受影响；schema 从冻结态做必要修正后重新稳定。
 
+16. **v0.4.0 范围重定义: 接口覆盖 + 异常统一 (2026-08-17)**
+    - 背景: 用户要求将未覆盖的 THS/Wind 接口分步骤接入 MCP, 并统一 MCP 异常报错格式。
+    - 变更: v0.4.0 从"编排层"调整为"接口覆盖补全 + 异常统一设计"; 编排层 `fin_agent__ask` 移至 v0.5.0。
+    - 异常设计: 新增 `docs/EXCEPTION-DESIGN.md`, 定义 MCP 工具统一错误响应格式
+      (`isError` + `kind` + `message` + `reason` + `action` 三要素), 消除 FastMCP `ToolError` 原始异常透传。
+    - 接口接入: T1 `skyrocket-list` / T2 `hot-stock-rank-trend` / T3 `anomaly-analysis-list` / T4 `valuations-snapshot`;
+      W1 `fund_nav` Wind capabilities 修复。
+    - 影响: 11 个 `fin_data__*` 工具名/schema 冻结不变; 新增 kind 是枚举扩展; 新增 `fin_data__get_valuation` 工具需单独评审。
+
+17. **v0.5.0 编排层 `fin_agent__ask` (plan-only, TS DSH 插件) — 待 M0 决策门**
+    - 承接原 v0.4.0 编排层内容, 独立为 v0.5.0。
+    - 详见 `PLAN-0.5.0.md`; schema 评审记录落本文件决策 17。
+
 ## 结构(为什么不再 refactor)
 
 ```

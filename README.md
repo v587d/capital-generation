@@ -156,7 +156,8 @@ assets/     # 效果图
 |---|---|
 | v0.1.0 → v0.3.0 | 数据层：三源架构、对账引擎、数据湖、基金/指数域、CI |
 | **v0.3.1**（当前） | 上下文 token 优化（结果侧 -72.2%）、LLM-first 错误消息 |
-| v0.4.0 | 编排层 `fin_agent__ask`（plan-only，TS DSH 插件，数据层零改动） |
+| v0.4.0 | 接口覆盖补全（THS 4 端点 + Wind fund_nav 修复）+ MCP 异常报错统一 |
+| v0.5.0 | 编排层 `fin_agent__ask`（plan-only，TS DSH 插件，数据层零改动） |
 
 ## License
 
