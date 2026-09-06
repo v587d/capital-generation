@@ -1,0 +1,110 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/PerryLink/dsh-permission-rules/main/docs/rules-format.schema.json
+# 安全命令自动 allow 规则（用户规则优先于内置高危基线）
+# 第一匹配即生效，所以把 allow 写在前面
+
+rules:
+  # ============================================================
+  # 1. 纯只读工具 —— 直接放行
+  # ============================================================
+  - match:
+      tools: [read, search, grep, glob, list_dir, list, ls, find_files]
+    action: allow
+    reason: "只读工具，安全放行"
+    tags: [safe, readonly]
+
+  # ============================================================
+  # 2. 安全 shell 命令（用 argv 精确匹配命令字）
+  # ============================================================
+
+  # 查看目录 / 文件内容（只读）
+  - match:
+      tools: [bash, pwsh]
+      argv:
+        command: [ls, dir, cat, head, tail, less, more, bat, tree, file, wc, du, df]
+    action: allow
+    reason: "只读查看命令，安全放行"
+    tags: [safe, shell, readonly]
+
+  # 环境信息 / 基础查询
+  - match:
+      tools: [bash, pwsh]
+      argv:
+        command: [pwd, whoami, id, date, uname, hostname, which, type, command, echo, printf, true, false, test]
+    action: allow
+    reason: "环境信息与基础查询命令，安全放行"
+    tags: [safe, shell, info]
+
+  # Git 只读操作
+  - match:
+      tools: [bash, pwsh]
+      argv:
+        command: "git"
+        args: [status, log, show, diff, branch, tag, remote, rev-parse, describe, blame, shortlog, ls-files, ls-tree]
+    action: allow
+    reason: "Git 只读命令，安全放行"
+    tags: [safe, git, readonly]
+
+  # 再补几条常见的 git 只读子命令（无 args 时也能匹配）
+  - match:
+      tools: [bash, pwsh]
+      argv:
+        command: "git"
+        anyArg: ["--help", "help", "version"]
+    action: allow
+    reason: "Git 帮助/版本查询，安全放行"
+    tags: [safe, git]
+
+  # 包管理器只读 / 信息查询
+  - match:
+      tools: [bash, pwsh]
+      argv:
+        command: [npm, pnpm, yarn, bun]
+        args: [list, ls, outdated, view, info, show, why, explain, pack, dry-run]
+    action: allow
+    reason: "包管理器只读查询，安全放行"
+    tags: [safe, package, readonly]
+
+  - match:
+      tools: [bash, pwsh]
+      argv:
+        command: [npm, pnpm, yarn, bun]
+        anyArg: ["--version", "-v", "version", "help", "--help"]
+    action: allow
+    reason: "包管理器版本/帮助，安全放行"
+    tags: [safe, package]
+
+  # Python / Node 只读探测
+  - match:
+      tools: [bash, pwsh]
+      argv:
+        command: [python, python3, node, nodejs]
+        anyArg: ["--version", "-V", "-v", "--help", "-h"]
+    action: allow
+    reason: "解释器版本查询，安全放行"
+    tags: [safe, runtime]
+
+  # ============================================================
+  # 3. 可选：明确允许一些常用无害命令（按需开启）
+  # ============================================================
+
+  # mkdir / touch / cp / mv 只在工作区内操作时较安全，但这里先不默认 allow
+  # 如果你确定工作区信任，可以取消下面注释：
+  #
+  # - match:
+  #     tools: [bash, pwsh]
+  #     argv:
+  #       command: [mkdir, touch, cp, mv]
+  #   action: allow
+  #   reason: "工作区内常见文件操作，自动放行"
+  #   tags: [safe, filesystem]
+
+  # ============================================================
+  # 4. 兜底说明（不写规则时会透传给内置高危基线）
+  # ============================================================
+  # 内置基线已经处理了：
+  #   - rm -rf /、rm -rf /*
+  #   - curl|sh / wget|bash
+  #   - git push --force
+  #   - 敏感路径（.env / .ssh / *.pem 等）
+  #   - chmod -R 777、chown -R 等
+  # 所以危险命令即使你这里没写，也会被内置规则拦截或要求确认。

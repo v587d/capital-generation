@@ -1,0 +1,14 @@
+# Capital Generation is a distributable DSH profile bundle.
+#
+# The web profile already provides the single agent-presets roster row. Patch
+# that row rather than registering a second roster (which would collide on the
+# agentPresets service), and add this package's bundled preset directory as a
+# read-only system root. `baseUrl` is the profile root at evaluation time, so
+# resolve this package through the Loader's own Node module resolution first.
+- id: agent-presets
+  name: '@deepseek-ai/dsh-agent-presets'
+  config:
+    default: standard
+    roots:
+      - path: !!js "process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:path').dirname(process.getBuiltinModule('node:path').dirname(process.getBuiltinModule('node:module').createRequire(baseUrl).resolve('@v587d/capital-generation'))), 'preset')"
+        trust: system
