@@ -97,6 +97,11 @@ dsh plugin --profile web add link:/absolute/path/to/capital-generation
   （`request_data`）经 data_collector 统一入口，保证单一数据执行点与缓存纪律。
 - 子 Agent 完成 → 官方结算通知/send_message 自动唤醒主 Agent（新 turn）；
   主 Agent 逐条核对委托清单后综合回复用户，不提前断言子 Agent 已完成。
+- 启动流程对齐官方：「创建」= 直接调用 `subagent_data_collector`（背景默认），
+  返回 durable `subagentId` 由主 Agent 记住；**不要求创建前先查 `list_agents`**。
+  `list_agents` 是回忆工具（官方描述：recall, not poll），会话恢复后不确定时
+  才用；`running/idle/ready` 三态中 `ready` 目标 send_message 会自动冷恢复，
+  因此恢复会话首查可能非空，「必返回为空」不是可依赖的断言。
 - 数据源契约：DSH credentials 或环境变量注入 `FUYAO_API_KEY`（credentials 优先），未配置时
   数据源不注册（`dc_status` 可查：凭据解析、已注册源、最近注册错误）。
 

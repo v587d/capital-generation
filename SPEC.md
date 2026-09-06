@@ -238,10 +238,18 @@ interface SchemaDescriptor {
 > request_id 仅作回传引用与状态查询，**不构成对账状态机**：唤醒由官方结算
 > 通知 / Inbox 保证，request_id 不是投递凭证。
 
-### 5.4 发现
+### 5.4 发现与生命周期（官方语义，M3 对齐）
 
-其他 Agent 使用官方 `list_agents` 确认 `data_collector` 是否存在及状态（running / idle / ready）。
-空列表是正常的（会话尚未创建子 Agent），直接创建即可。
+- `data_collector` 由主 Agent 经 `subagent_data_collector` 工具**直接创建**
+  （背景默认，continuable），创建时记住官方返回的 durable `subagentId`；
+  官方在子 Agent 结算时自动给主 Agent 推送结算通知，**不需要创建前检查，
+  也不需要轮询**。
+- 官方 `list_agents` 是**回忆工具**（工具描述原文：*"Use it to recall which
+  ones you started, not to poll for completion"*），只在会话恢复后不确定时
+  使用；返回 `running / idle / ready` 三态，`ready` 表示子 Agent 仅存在于
+  持久化存储——`send_message` 到 `ready` 目标会自动冷恢复。
+- 因此恢复的会话**首查 `list_agents` 可能非空**：「必返回为空」不是可依赖的
+  断言；有则 send_message 复用（冷恢复自动发生），无则创建。
 
 ---
 

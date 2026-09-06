@@ -60,6 +60,18 @@ test('主 persona：预热与回合纪律——每会话一个 dc、首个任务
   assert.match(MAIN_PERSONA, /抽样核对/)
 })
 
+test('主 persona：启动子 Agent 采用官方语义——直接创建 + 记住 subagentId + 结算通知，list_agents 仅用于回忆', () => {
+  assert.match(MAIN_PERSONA, /立即用\n\s+subagent_data_collector 工具创建|立即用.*subagent_data_collector 工具创建/)
+  assert.match(MAIN_PERSONA, /记住官方返回的 durable subagentId/)
+  assert.match(MAIN_PERSONA, /结算通知/)
+  assert.match(MAIN_PERSONA, /不要求创建前先调用 list_agents/)
+  assert.match(MAIN_PERSONA, /running \/ idle \/ ready/)
+  assert.match(MAIN_PERSONA, /首查非空是正常情况/)
+  assert.match(MAIN_PERSONA, /自动冷恢复/)
+  // 「首次必查 list_agents 且必返回为空」是走偏断言：恢复的会话可能非空
+  assert.doesNotMatch(MAIN_PERSONA, /空列表是正常的/)
+})
+
 test('subagent_data_collector 行：continuable、persona 覆盖、toolFilter 收敛工具集', () => {
   assert.equal(collectorRow.name, '@deepseek-ai/dsh-tool-subagent')
   assert.equal(collectorRow.config.provider, 'spawn')
