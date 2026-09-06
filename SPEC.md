@@ -2,7 +2,7 @@
 
 > Capital Generation（Capital 模式）第一个子 Agent。  
 > 本文档是实现契约，供后续 coding agent 直接按此落地。  
-> 版本：Phase 1（2026-09，M1+M2 重构后）
+> 版本：Phase 1（2026-09）
 
 ---
 
@@ -59,11 +59,11 @@ Agent plane（每会话）
 - **消息层不重复造轮子**：Hub 不持有 Agent 引用、不维护通知发送者、不做任何投递。
   回传由 `data_collector` 模型自己调用官方 `send_message` 完成。
 
-### 2.1 拓扑决策记录（方案 A，2026-09 与用户确认，M1 修订）
+### 2.1 拓扑决策记录（2026-09）
 
 - **消息图 = Agent 树**：官方 `sendMessage` 只允许相邻两层通信（直接父 / 直接 continuable 子），跨层必须沿树逐层中继。
 - **单一父约束**：每个 continuable 子 Agent 有且只有一个直接 parent，不存在「多父共享同一个 child」的官方形态。
-- **因此采用方案 A（树形执行器）**：`data_collector` 挂主 Agent 之下，未来的数据消费/分析子 Agent 均创建为 `data_collector` 的直接子（1 父 → N 子，官方允许）；需上报的结果沿树逐层上送。主 Agent 只做用户级最终调度，不做数据搬移。
+- **采用树形执行器拓扑**：`data_collector` 挂主 Agent 之下，未来的数据消费/分析子 Agent 均创建为 `data_collector` 的直接子（1 父 → N 子，官方允许）；需上报的结果沿树逐层上送。主 Agent 只做用户级最终调度，不做数据搬移。
 - **多点消费不依赖血缘**：数据与缓存登记在共享 Hub（data_key + 参数变体），任何 Agent 都能用只读工具读共享缓存；写路径经 data_collector 统一入口（职责分工，非运行时强制——请求归属恒为调用者自身）。血缘只决定消息投递路径（相邻直发，不相邻经公共祖先转发），**不存在订阅与广播**：新需求 = 新消息，回传即唤醒。
 - **工具层无邻接权限逻辑**：`request_data` 等工具的请求归属由官方 `exec.agent` 注入（恒为调用者），不接收 `requester_agent_id` / `target_agent_id` 参数，也没有「代理请求」概念。工具可见性不是权限隔离；真正的边界是官方原语本身（`send_message` 的 exact live sender + 相邻校验 + cold resume）。
 
@@ -134,9 +134,9 @@ interface SchemaDescriptor {
 }
 ```
 
-> M1 删除项：`subscribe` / `unsubscribe` / 通知回调（Hub 不再做任何 Agent 投递）、
-> `cancel`（取消走官方 `interrupt_agent`）、`cleanupAgent` / collector 身份登记
-> （Agent 生命周期归官方 registry，不再由 Hub 维护）。
+> **Hub 的非职责（曾走过的弯路，见 §12 避坑清单）**：不提供 `subscribe`/
+> `unsubscribe`/通知回调（不做任何 Agent 投递）、不提供 `cancel`（取消走官方
+> `interrupt_agent`）、不维护 Agent 生命周期与身份（归官方 `ctx.agents`）。
 
 ### 3.2 执行策略（Phase 1）
 
@@ -161,7 +161,7 @@ interface SchemaDescriptor {
 
 ## 4. `data_key` 约定
 
-逻辑键，用于缓存与订阅，建议格式：
+逻辑键，用于缓存与请求路由，建议格式：
 
 ```
 <universe>.<category>.<identity>[.<qualifier>]
@@ -179,13 +179,15 @@ interface SchemaDescriptor {
 
 调用方应尽量稳定、可复用。Hub 不强制校验格式，只做字符串键。
 
+> **稳定性要求**：`data_key` 必须使用稳定逻辑键，**不要为每次请求追加
+> `.latest` 等变体后缀**（变体键 = 新缓存槽，缓存永远命中不了）；需要最新
+> 值时用 `force_refresh: true` 即可。这是真实会话中观察到的模型行为教训。
+
 ---
 
 ## 5. 官方通信（只用 DSH 原语，不自研协议）
 
 ### 5.1 请求进入方式
-
-优先顺序：
 
 1. **`send_message`** 到 `data_collector` 的 agent_id，消息体为结构化 JSON 文本（见 §5.3）。
 2. 模型可见 tool：`request_data`（内部调用 `hub.enqueue`）——请求归属恒为
@@ -238,7 +240,7 @@ interface SchemaDescriptor {
 > request_id 仅作回传引用与状态查询，**不构成对账状态机**：唤醒由官方结算
 > 通知 / Inbox 保证，request_id 不是投递凭证。
 
-### 5.4 发现与生命周期（官方语义，M3 对齐）
+### 5.4 发现与生命周期（官方语义）
 
 - `data_collector` 由主 Agent 经 `subagent_data_collector` 工具**直接创建**
   （背景默认，continuable），创建时记住官方返回的 durable `subagentId`；
@@ -310,18 +312,16 @@ MCP 与 REST 语义一致；优先走 MCP 工具挂载（官方 `@deepseek-ai/ds
 
 所有 tool 的 `input_schema` 必须完整、自描述，便于其他 Agent 直接调用。
 
-> **挂载边界（当前实现）**：DSH 当前版本将本节工具注册在 Capital 会话组作用域，
-> 主 Agent 也可能看见；数据请求经 data_collector 委派是职责分工（单一数据执行点、
-> 统一缓存纪律），不是运行时强制。工具层不做任何 Agent 邻接校验——工具本就是
-> 共享会话内的通用能力，边界由官方原语（send_message 的 exact live sender + 相邻
-> 校验）与 persona 委派纪律共同构成。子 Agent 侧的可见集已由 preset 的
-> `subagent_data_collector` 行 `toolFilter.allow` 收敛（send_message + 数据工具）；
-> 主 Agent 侧的可见范围如需进一步收紧，留给 per-agent `agent.ctx` 注册（官方
-> dsh-tools 支持的 per-agent 变体路径），不作为本 SPEC Phase 1 强制项。
+> **挂载边界（当前实现）**：本节工具注册在 Capital 会话组作用域，主 Agent
+> 也可能看见；数据请求经 data_collector 委派是职责分工（单一数据执行点、
+> 统一缓存纪律），不是运行时强制。工具层不做任何 Agent 邻接校验——工具本就
+> 是共享会话内的通用能力，边界由官方原语（send_message 的 exact live sender +
+> 相邻校验）与 persona 委派纪律共同构成。子 Agent 侧的可见集已由 preset 的
+> `subagent_data_collector` 行 `toolFilter.allow` 收敛（send_message + 数据工具）。
 
 ---
 
-## 8. Persona 承载与要点（M2 后的官方装配）
+## 8. Persona 承载与要点（官方装配）
 
 提示文本**不在插件代码中**，全部由 preset 承载：
 
@@ -385,13 +385,38 @@ data_collector 人设必须包含的要点：
 - Phase 2：可选接入官方 `@deepseek-ai/dsh-storage-sqlite` 做缓存/队列快照。
 - Phase 2：按数据源有限并发、更完善的请求合并。
 - Phase 3：社区数据源（东财、万得等）通过 schema 接入；官方 MCP client 接入
-  同花顺 MCP；分析型子 Agent 模板（数据消费端）沉淀；数据工具在主 Agent 侧
-  的 per-agent `agent.ctx` 可见性收紧（官方 per-agent 注册路径）。
+  同花顺 MCP（替换自研 `sources/fuyao-rest.ts`）；分析型子 Agent 模板（数据
+  消费端）沉淀；数据工具在主 Agent 侧的 per-agent `agent.ctx` 可见性收紧
+  （官方 per-agent 注册路径，见 §12 第 3/7 条）。
 
 ---
 
-## 12. 参考
+## 12. 失败经验与禁入区（给未来自己与 AI 的避坑清单）
 
+> 下面是本项目真实走过的弯路。**禁止**回到这些做法；每条给出「当时做法 →
+> 为什么错 → 官方正确姿势」。
+
+| # | 曾经的做法（已删除）| 为什么错 | 官方正确姿势 |
+|---|---|---|---|
+| 1 | 自研「消息总线」：Hub 持订阅表、按 data_key 自动向"请求方+订阅者"广播 `data_updated`；notifier 维护私有 Agent 注册表 + "代理请求"启发式识别发送者 | 与官方 Inbox/sendMessage/结算通知重复；运行期踩 exact-live-sender 边界，只能靠"由主 Agent 协调转发"等 plan-B 文案兜底；约 700 行代码最终全删 | 通信只用官方原语；回传 = 子 Agent 模型的一次 `send_message`；唤醒 = 官方结算通知 |
+| 2 | 工具层自研「邻接权限」：`requester_agent_id`/`target_agent_id` 参数 + `isAuthorizedTarget` 依赖非官方字段 `parentId`/`directAgentIds` | 权限在真实运行时对子 Agent 方向静默失效（字段不存在）；测试用自己拼的 fake exec，**测的是假契约** | 请求归属只用官方 `exec.agent.id`（模型伪造不了）；权限校验归官方服务层（exact live sender + 相邻校验 + cold resume）|
+| 3 | 用 persona 纪律冒充权限：要求主 Agent"必须遵守委派纪律、不直接调用数据工具"，工具层却人人可见 | Prompt 约束不是权限；工具可见性不等于权限隔离（SPEC 自己都写了这句话）| 边界 = 官方原语 + `toolFilter.allow`（子 Agent 白名单）+ 职责分工；如需主 Agent 不可见，走 per-agent `agent.ctx` 注册 |
+| 4 | 人设写进插件代码，并占用官方 `deployment:persona` 节名 | 与官方 `@deepseek-ai/dsh-persona` 行重复注册冲突（README 只能写"别加 persona 行"的告警——这是症状不是设计）| 人设进 preset 声明式行；自定义/附加文本用独立节名（如 `capital:user-customization`）|
+| 5 | 让主 Agent 模型把 DATA_COLLECTOR_PERSONA **长模板复制进 prompt** 创建子 Agent | 模型可能截断/改写，子 Agent 人设漂移 | 官方 `config.persona` 在子 Agent 作用域注入（descriptor 持久化，冷恢复一致）|
+| 6 | "首次必查 `list_agents` 且**必返回为空**，再创建" | 官方无此要求；恢复的会话首查可能返回 `ready`（仅存于持久化）——必空断言是假的 | 直接创建 + 记住官方返回的 `subagentId`；`list_agents` 只用于回忆（官方：recall, not poll），有则 send_message 复用（自动冷恢复）|
+| 7 | 用**猜测的 Agent 结构**写实现与测试（`parentId`/`directAgentIds`、fake `ctx.subagents`）| 测试绿 ≠ 运行时真；官方契约变了就静默失效 | 以官方类型/服务为唯一真相：`exec.agent`、`ctx.agents`、`session.header.parentSession`、`ctx.subagents.sendMessage` 签名 |
+| 8 | 兼容 facade 层堆积（`src/` 根目录放 2 行转发文件）| 增加理解成本、误导读者 | 直接改引用，不留转发层 |
+| 9 | 仓库卫生缺失：`lib/`、`node_modules/`、`SPEC.md:Zone.Identifier` 与源码混放、无 git | 无法追溯、打包污染 | `git init` + `.gitignore`（`lib/`、`node_modules/`、`*.tgz`、`*.log`、`*.Zone.Identifier`）|
+| 10 | （行为教训，非代码）模型为"最新"请求使用 `force_refresh` + **每次新 `data_key` 变体**（`.latest`）| 变体键 = 新缓存槽，缓存永远不命中，Hub 缓存价值归零 | persona / 协议要求稳定 `data_key`；要最新值用 `force_refresh: true`（见 §4）|
+
+**总原则**：官方已有原语的地方不重造（消息、权限、生命周期、persona 注入、
+工具注册）；自研只保留领域价值（缓存/去重/路由/输出契约）与数据源接入层。
+
+---
+
+## 13. 参考
+
+- `ARCHITECTURE.md`（仓库根目录）：官方 vs 自研完整划分、源码出处行号、Mermaid 图
 - Capital Generation README（仓库根目录）
 - DSH subagent：`ctx.subagents`、`send_message`、`list_agents`、`interrupt_agent`、
   `startContinuable`（官方实现见 `@deepseek-ai/dsh-subagent/lib/index.js`）

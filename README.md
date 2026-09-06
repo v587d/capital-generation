@@ -2,6 +2,9 @@
 
 Capital Generation（Capital 模式）是面向中国股市散户的投资助手，包括 Agent Preset 、专用 subagent 、 可插拔 subagent 和 可插拔 Tools。
 
+> **架构文档**：官方 vs 自研的完整划分、源码出处与 Mermaid 图见
+> [`ARCHITECTURE.md`](./ARCHITECTURE.md)；实现契约与避坑清单见 [`SPEC.md`](./SPEC.md)。
+
 当前仓库已按 DSH `0.1.2-rc.1` 拆分为两层：
 
 - `src/`：普通 Cordis 插件包，提供共享数据 Hub（`dataCollectorHub`）、数据工具与
@@ -45,7 +48,7 @@ cordis.patch.yml
 dsh plugin --profile web add @v587d/capital-generation
 ```
 
-开发模式也可以直接安装本地目录：
+开发模式也可以直接安装本地目录（改 preset/源码后**重启 profile 进程即生效**，无需重装）：
 
 ```bash
 dsh plugin --profile web add link:/absolute/path/to/capital-generation
@@ -78,7 +81,7 @@ dsh plugin --profile web add link:/absolute/path/to/capital-generation
     与数据工具（`request_data`/`get_request_status`/`get_latest`/`list_schemas`/
     `dc_status`）。子 Agent 是叶子执行器，不委派、不问用户、不访问网页/文件。
 
-## 编排与消息机制（方案 A，详见 SPEC §2.1，按官方 dsh-subagent 语义实现）
+## 编排与消息机制（详见 SPEC 与 ARCHITECTURE.md）
 
 - 消息图 = Agent 树：DSH 官方 `sendMessage` 只允许相邻两层通信（直接父/直接
   continuable 子），跨层必须沿树逐层中继；每个 continuable 子 Agent 有且
@@ -104,6 +107,19 @@ dsh plugin --profile web add link:/absolute/path/to/capital-generation
   因此恢复会话首查可能非空，「必返回为空」不是可依赖的断言。
 - 数据源契约：DSH credentials 或环境变量注入 `FUYAO_API_KEY`（credentials 优先），未配置时
   数据源不注册（`dc_status` 可查：凭据解析、已注册源、最近注册错误）。
+
+## 避坑清单（本项目的失败经验，详见 SPEC §12）
+
+1. **别自研消息层**：官方 send_message/Inbox/结算通知已覆盖广播、订阅、唤醒；
+   自研 Hub 通知链路约 700 行代码最终全部删除。
+2. **工具层别做邻接权限**：请求归属只取官方 `exec.agent.id`；权限校验是官方
+   服务层的事，且不要依赖 `parentId`/`directAgentIds` 这类**不存在的 Agent 字段**。
+3. **persona 纪律不是权限**：工具可见性 ≠ 权限隔离；边界用官方原语 + toolFilter。
+4. **人设别写进插件代码、别占用 `deployment:persona` 节名**：放 preset 声明式行。
+5. **别让模型复制长模板创建子 Agent**：用委派工具行的 `config.persona` 注入。
+6. **list_agents 是回忆工具，不是创建前检查**：恢复会话首查可能非空（ready）。
+7. **测试要面向官方契约**，不要用自己拼的 fake exec/字段自证。
+8. **仓库卫生**：git + .gitignore（`lib/`、`node_modules/`、`*.Zone.Identifier`）。
 
 ## 当前安全边界
 
