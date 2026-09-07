@@ -23,11 +23,38 @@ export interface CacheEntry {
 export interface SchemaDescriptor {
   name: string
   source: string
+  /**
+   * 该数据源的规范 data_key（provider.kind.resource，斜杠/冒号已规范化为点，
+   * 如 fuyao.api.api.a-share.prices.snapshot）。由数据源注册代码生成
+   * （buildDataKey），模型不造句、不改写；缓存键/路由/回传引用都以它为准，
+   * 全注册表内必须唯一。
+   */
+  data_key: string
+  /** 该数据源缓存存活时长（ms）声明；缺省用 Hub 默认 TTL，不再按键名猜。 */
+  ttl_ms?: number
   input_schema: object
   output_schema?: object
-  /** Optional deterministic data_key patterns, using a trailing `*` wildcard. */
-  data_key_patterns?: string[]
   description?: string
+}
+
+/**
+ * 规范化 data_key 片段：斜杠/冒号等路径分隔符一律映射为点，其余非常规字符
+ * 也折叠为点、合并连续点、去掉首尾点，保证任何平台都能直接当文件名用。
+ */
+export function normalizeKeyToken(value: string): string {
+  return value.replace(/[\\/:]+/g, '.')
+    .replace(/[^A-Za-z0-9._-]+/g, '.')
+    .replace(/\.{2,}/g, '.')
+    .replace(/^\.+|\.+$/g, '')
+}
+
+/**
+ * 生成规范 data_key：provider.kind.resource（例如
+ * buildDataKey('fuyao', 'api', '/api/a-share/prices/snapshot')
+ * => 'fuyao.api.api.a-share.prices.snapshot'）。
+ */
+export function buildDataKey(provider: string, kind: string, resource: string): string {
+  return [provider, kind, resource].map(normalizeKeyToken).filter(Boolean).join('.')
 }
 
 export interface DataSource {
@@ -44,9 +71,9 @@ export interface DataCollectorHubOptions {
   maxCacheEntries?: number
   /** 单请求执行超时；默认 30_000 ms。超时抛错（request timed out）。 */
   requestTimeoutMs?: number
-  /** 默认 TTL 兜底；默认由 ttlFor 分类覆盖。 */
+  /** 默认 TTL 兜底；数据源可经 schema.ttl_ms 声明覆盖。 */
   defaultTtlMs?: number
-  /** 按 data_key 返回 TTL；默认：快照/估值类 60_000，其余 300_000。 */
+  /** 按 data_key 返回 TTL 的兜底分类（仅当数据源未声明 ttl_ms 时生效）；默认 defaultTtlMs。 */
   ttlFor?: (dataKey: string) => number
   /** 时钟注入（测试用）；默认 Date.now。 */
   now?: () => number
@@ -77,19 +104,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function isSnapshotKey(dataKey: string): boolean {
-  return dataKey.includes('snapshot') || dataKey.includes('valuations')
-}
-
-function matchesDataKeyPattern(dataKey: string, pattern: string): boolean {
-  if (pattern.endsWith('*')) return dataKey.startsWith(pattern.slice(0, -1))
-  return dataKey === pattern
-}
-
-function sourceMatchesDataKey(source: DataSource, dataKey: string): boolean {
-  return (source.schema.data_key_patterns ?? []).some((pattern) => matchesDataKeyPattern(dataKey, pattern))
-}
-
 export class DataCollectorHub {
   private readonly queue: QueueItem[] = []
   /** 正在执行的队列项（执行期间不留在 queue 中，但仍参与合并与容量判断）。 */
@@ -109,13 +123,16 @@ export class DataCollectorHub {
     this.maxCacheEntries = options.maxCacheEntries ?? 500
     this.requestTimeoutMs = options.requestTimeoutMs ?? 30_000
     this.defaultTtlMs = options.defaultTtlMs ?? 300_000
-    this.ttlFor = options.ttlFor ?? ((dataKey: string) => (isSnapshotKey(dataKey) ? 60_000 : this.defaultTtlMs))
+    this.ttlFor = options.ttlFor ?? (() => this.defaultTtlMs)
     this.now = options.now ?? (() => Date.now())
   }
 
   registerSource(source: DataSource): () => void {
     const name = source.schema.name
     if (this.sources.has(name)) throw new Error(`data source already registered: ${name}`)
+    for (const other of this.sources.values()) {
+      if (other.schema.data_key === source.schema.data_key) throw new Error(`data source data_key already registered: ${source.schema.data_key}`)
+    }
     this.sources.set(name, source)
     return () => { if (this.sources.get(name) === source) this.sources.delete(name) }
   }
@@ -217,6 +234,7 @@ export class DataCollectorHub {
           throw new Error(`data source ${source.schema.name} returned data incompatible with its output contract`)
         }
         const finishedAt = this.now()
+        const ttl = source.schema.ttl_ms ?? this.ttlFor(item.request.data_key)
         const entry: CacheEntry = {
           data_key: item.request.data_key,
           data: output.data,
@@ -224,7 +242,7 @@ export class DataCollectorHub {
           source: source.schema.name,
           from_cache: false,
           updated_at: finishedAt,
-          expires_at: finishedAt + this.ttlFor(item.request.data_key),
+          expires_at: finishedAt + ttl,
         }
         this.cache.set(item.cacheKey, entry)
         this.evictIfNeeded()
@@ -242,6 +260,12 @@ export class DataCollectorHub {
     }
   }
 
+  /**
+   * 路由：data_key 与数据源声明的规范身份证精确匹配；source_preference 只做
+   * 过滤（具体 capability 名最优先，其次 provider 令牌如 fuyao.api/ths，'any'
+   * 表示仅按 data_key 匹配）。匹配不到或候选不唯一（理论上不可能，注册时
+   * 身份证唯一）直接失败，不静默选第一个。
+   */
   private chooseSource(request: DataRequest): DataSource | undefined {
     const preferences = request.source_preference ?? []
     const orderedPreferences = preferences.length > 0 ? preferences : ['any']
@@ -250,29 +274,27 @@ export class DataCollectorHub {
       // A concrete capability name is the strongest and most deterministic hint.
       const exact = this.sources.get(preference)
       if (exact) return exact
-      if (preference === 'any') {
-        const allSources = [...this.sources.values()]
-        const candidates = allSources.filter((source) => sourceMatchesDataKey(source, request.data_key))
-        if (candidates.length === 1) return candidates[0]
-        if (candidates.length > 1) throw new Error(`ambiguous data source for ${request.data_key}; specify source name`)
-        // Legacy/custom sources may not declare patterns. Preserve the safe
-        // single-source case, but never fall back by registration order when
-        // multiple capabilities are available.
-        if (allSources.length === 1 && allSources[0].schema.data_key_patterns === undefined) return allSources[0]
-        continue
-      }
 
-      // Provider preferences filter candidates; they do not select the first
-      // registered capability from that provider.
-      const providerCandidates = [...this.sources.values()].filter((source) => preference === 'ths'
-        ? source.schema.source === 'api:fuyao'
-        : source.schema.source === preference)
-      const candidates = providerCandidates.filter((source) => sourceMatchesDataKey(source, request.data_key))
+      const providerToken = this.providerTokenOf(preference)
+      const candidates = [...this.sources.values()].filter((source) => {
+        if (source.schema.data_key !== request.data_key) return false
+        return providerToken === undefined || this.providerTokenOf(source.schema.data_key) === providerToken
+      })
       if (candidates.length === 1) return candidates[0]
       if (candidates.length > 1) throw new Error(`ambiguous data source for ${request.data_key} and preference ${preference}; specify source name`)
-      if (providerCandidates.length === 1 && providerCandidates[0].schema.data_key_patterns === undefined) return providerCandidates[0]
     }
     return undefined
+  }
+
+  /**
+   * 数据源身份证的 provider 令牌 = 前两段（如 fuyao.api.api.a-share... => fuyao.api）。
+   * 'ths' 为 fuyao.api 的兼容别名；'any' 不限定 provider。
+   */
+  private providerTokenOf(value: string): string | undefined {
+    if (value === 'any') return undefined
+    const normalized = value === 'ths' ? 'fuyao.api' : normalizeKeyToken(value)
+    const parts = normalized.split('.')
+    return parts.length >= 2 ? parts.slice(0, 2).join('.') : undefined
   }
 
   private cleanExpired(): void {

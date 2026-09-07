@@ -44,12 +44,17 @@ test('主 persona：数据调度纪律——通过 list_agents + send_message �
   assert.match(MAIN_PERSONA, /data_updated \/ data_failed/)
   assert.match(MAIN_PERSONA, /指示 data_collector/)
   assert.match(MAIN_PERSONA, /exec\.agent/)
-  assert.match(MAIN_PERSONA, /api:fuyao/)
+  assert.match(MAIN_PERSONA, /fuyao\.api|api:fuyao/)
+  // 方案 C：主 Agent 不造句 data_key——委派消息不带 data_key，回传记录规范身份证
+  assert.match(MAIN_PERSONA, /不传 data_key|不带 data_key/)
+  assert.match(MAIN_PERSONA, /规范身份证/)
+  assert.match(MAIN_PERSONA, /登记|委派清单/)
   // 走偏产物必须消失：无 requester_agent_id 传参（协议字段）、无订阅机制、无 request_id 对账协议
   assert.doesNotMatch(MAIN_PERSONA, /"requester_agent_id"/)
   assert.doesNotMatch(MAIN_PERSONA, /subscribe_data|unsubscribe_data/)
   assert.doesNotMatch(MAIN_PERSONA, /按 request_id 对账/)
   assert.doesNotMatch(MAIN_PERSONA, /get_request_status/, '主 persona 不应再引用已删除的 get_request_status')
+  assert.doesNotMatch(MAIN_PERSONA, /data_key_patterns/, '主 persona 不应再引用 data_key_patterns')
 })
 
 test('主 persona：预热与回合纪律——每会话一个 dc、首个任务创建、等待期有限收集', () => {
@@ -109,13 +114,18 @@ test('data_collector persona：覆盖 SPEC §8 全部必须要点', () => {
   ]
   for (const pattern of required) assert.match(COLLECTOR_PERSONA, pattern, `缺少要点: ${pattern}`)
   assert.match(COLLECTOR_PERSONA, /data_collector_ready/)
-  assert.match(COLLECTOR_PERSONA, /api:fuyao/)
+  assert.match(COLLECTOR_PERSONA, /fuyao\.api|api:fuyao/)
   assert.match(COLLECTOR_PERSONA, /重试纪律/, 'dc 需含重试纪律')
   assert.match(COLLECTOR_PERSONA, /重试 2 次/, '重试上限需显式')
   // 方案 B：不存在 request_id 与状态查询工具，阻塞式 request_data 直接返回结果
   assert.doesNotMatch(COLLECTOR_PERSONA, /get_request_status/, 'dc persona 不应再引用已删除的 get_request_status')
   assert.match(COLLECTOR_PERSONA, /阻塞/, 'dc persona 应说明 request_data 阻塞等待执行')
   assert.match(COLLECTOR_PERSONA, /30 秒|超时/, 'dc persona 应说明执行超时报错')
+  // 方案 C：dc 选端点（≤3 引导 / ≤5 硬性），data_key 抄写自 list_schemas 不造句
+  assert.match(COLLECTOR_PERSONA, /最多 3 个/, 'dc persona 需含端点用量引导（最多 3 个）')
+  assert.match(COLLECTOR_PERSONA, /不超过 5 个/, 'dc persona 需含端点用量硬性上限（不超过 5 个）')
+  assert.match(COLLECTOR_PERSONA, /抄写|以 list_schemas 返回为准/, 'dc persona 需要求 data_key 抄写自 list_schemas')
+  assert.doesNotMatch(COLLECTOR_PERSONA, /data_key_patterns/, 'dc persona 不应再引用 data_key_patterns')
   // 走偏产物必须消失
   assert.doesNotMatch(COLLECTOR_PERSONA, /"requester_agent_id"/)
   assert.doesNotMatch(COLLECTOR_PERSONA, /subscribe_data|unsubscribe_data|订阅/)

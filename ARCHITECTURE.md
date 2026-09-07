@@ -172,16 +172,19 @@ Inbox/结算通知完成，不存在自定义消息协议。**
 
 功能语义（不讲实现细节）：
 
-- **共享缓存**：`data_key + 参数` 为键，带 TTL（快照 60s，其余 300s）、容量上限、
-  懒清理。任何 Agent 都能只读查询（`get_latest`）。
+- **共享缓存**：`data_key + 参数` 为键，带 TTL（数据源声明 `ttl_ms`，fuyao
+  四源：快照/检索 60s，历史/日历 300s）、容量上限、懒清理。任何 Agent 都能
+  只读查询（`get_latest`）。
 - **去重合并**：同一个请求同时来了 3 份，**只真正拉一次源**，三份都拿到结果。
 - **FIFO 串行执行器**：同一时刻只打一个数据源请求（保护上游），带超时
   （30s，超时抛错 request timed out 并释放执行位）、队列上限（50）。
 - **阻塞式消费**：`request_data` 入队后等待执行完成（同键去重合并共享同一
   次执行），结果或错误直接一次性返回——没有 request_id、没有状态表、没有
   轮询；调用者（data_collector）的回合占用时长 = 排队 + 执行。
-- **确定性路由**：按 data_key 与数据源声明的 `data_key_patterns` 匹配；候选
-  不唯一时**宁可失败**也不偷偷选第一个（防歧义）。
+- **确定性路由**：data_key 与数据源声明的**规范身份证精确匹配**（注册时
+  身份证唯一，撞键即失败）；`source_preference` 只做过滤（capability 名 >
+  provider 令牌如 fuyao.api/ths > any）。无匹配或不唯一时**宁可失败**也
+  不偷偷选第一个（防歧义、防灰色地带）。
 - **输出契约**：数据源可声明 `validateOutput`，返回不合规的结果不入缓存。
 - **它不做的事（M1 删干净的）**：不订阅、不广播、不维护 Agent 表、不发消息。
   回传是子 Agent 模型用官方 `send_message` 做的；唤醒是官方结算通知做的。
@@ -200,7 +203,9 @@ Inbox/结算通知完成，不存在自定义消息协议。**
 ### 4.5 `src/sources/fuyao-rest.ts` — Fuyao REST 封装（4 个数据源）
 
 标的检索 / A 股快照 / 日 K / 交易日历；每个源自带独立 `input_schema`、
-`data_key_patterns`、输出字段契约和 `validateOutput`。**设计上刻意不建统一适配层**
+**规范 `data_key`（`buildDataKey('fuyao','api',path)` 生成，如
+`fuyao.api.api.a-share.prices.snapshot`，斜杠/冒号已规范化）**、`ttl_ms` 声明、
+输出字段契约和 `validateOutput`。**设计上刻意不建统一适配层**
 （每个源一份契约）；后续换官方 `@deepseek-ai/dsh-mcp-client` 时只换这一层。
 
 ### 4.6 `cordis.patch.yml` — 安装期机制（我们写的配置，不是运行时逻辑）
@@ -218,11 +223,14 @@ Inbox/结算通知完成，不存在自定义消息协议。**
 2. **首个数据需求**：主 Agent **直接**调 `subagent_data_collector`（不先 list_agents）
    → 官方创建常驻子 Agent：持久化 descriptor（人设+白名单）→ 注入父 id 引导 →
    初始任务入 inbox → dc 启动（idle 待命）。
-3. **委派**：主 Agent `send_message(dc, {data_key, source_preference, params, force_refresh})`
-   → 官方校验相邻 → 消息入 dc inbox → dc 被唤醒。
-4. **取数**：dc 按 persona：`list_schemas` 确认契约 → `get_latest` 查缓存 →
-   未命中则 `request_data` 入队并等待 Hub FIFO 执行完成（缓存命中即返回；
-   执行超时/失败直接抛错）→ 结果/错误直接拿到，回传载荷按原样填写。
+3. **委派**：主 Agent `send_message(dc, {description, params, force_refresh})`
+   ——**不带 data_key**（主 Agent 不造句）→ 官方校验相邻 → 消息入 dc inbox →
+   dc 被唤醒。
+4. **取数**：dc 按 persona：`list_schemas` 确认端点与规范 data_key（按需求
+   选 1~3 个端点，硬性 ≤5，无关端点不碰）→ `get_latest` 查缓存 → 未命中则
+   `request_data(规范 data_key, params)` 入队并等待 Hub FIFO 执行完成（缓存
+   命中即返回；执行超时/失败直接抛错）→ 结果/错误直接拿到，回传载荷按原样
+   填写（含规范 data_key）。
 5. **回传**：dc `send_message(父, data_updated/data_failed)`；官方同时注入
    结算通知；主 Agent 汇总（必须披露 source/时间戳/缓存命中/待核实项）。
 6. **复用**：后续需求 = 又一条 `send_message`（running 时 steering、idle 时
@@ -287,17 +295,17 @@ sequenceDiagram
   S->>D: 创建+持久化 descriptor+注入父id引导+初始任务入inbox
   Note over D: 官方自动：persona 节覆盖、工具白名单、审批钉死 never
   D->>M: send_message：data_collector_ready（就绪登记）
-  M->>D: send_message：data_request 载荷（data_key/params）
-  D->>H: list_schemas → get_latest（缓存优先）
+  M->>D: send_message：data_request 载荷（description/params，不带 data_key）
+  D->>H: list_schemas（选端点，抄写规范 data_key）
   alt 缓存未命中
-    D->>H: request_data（阻塞等待：入队 FIFO，同键合并，执行≤30s）
+    D->>H: request_data（阻塞等待：规范 data_key + params，同键合并，执行≤30s）
     H->>F: GET /api/a-share/prices/snapshot（X-api-key）
     F-->>H: 行情数据（validateOutput 校验）
-    H-->>D: CacheEntry（写入缓存，TTL 60s；超时/失败直接抛错）
+    H-->>D: CacheEntry（data_key=规范身份证，写入缓存，TTL 声明；超时/失败直接抛错）
   else 缓存命中
     H-->>D: from_cache=true（不拉源，立即返回）
   end
-  D->>M: send_message：data_updated（source/from_cache/时间戳/数据）
+  D->>M: send_message：data_updated（data_key 规范身份证/source/from_cache/时间戳/数据）
   Note over M: 官方结算通知自动注入：subagent-settled
   M->>U: 汇总表格+溯源披露+风险提示（不承诺收益）
   U->>M: 再看一眼（或新需求）

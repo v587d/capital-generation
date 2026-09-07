@@ -97,10 +97,19 @@ dsh plugin --profile web add link:/absolute/path/to/capital-generation
   cold resume。**没有自定义广播协议、没有 request_id、没有订阅、没有状态轮询。**
 - `data_collector` 是主 Agent 的 continuable 子 Agent、数据执行器：主 Agent 用
   `subagent_data_collector` 工具创建（persona/工具集由 preset 配置注入，见上）；
-  数据请求经 `send_message` 委派给它；它自己调用 `request_data`（阻塞等待执行
-  完成：缓存命中立即返回、执行超时或失败报错），用 `send_message` 把结构化
-  回传发给主 Agent。请求归属恒为调用者自身（官方 `exec.agent` 注入），工具层没有
+  数据请求经 `send_message` 委派——**委派消息不带 data_key**（主 Agent 只描述
+  需求 + params）；dc 用 `list_schemas` 选端点（抄写规范 data_key，不造句），
+  调用 `request_data`（阻塞等待执行完成：缓存命中立即返回、执行超时或失败
+  报错），用 `send_message` 把结构化回传（含规范 data_key）发给主 Agent。
+  请求归属恒为调用者自身（官方 `exec.agent` 注入），工具层没有
   requester_agent_id 概念。
+- **data_key = 数据源端点的规范身份证**（`<provider>.<kind>.<resource>`，斜杠/
+  冒号已规范化为点，如 `fuyao.api.api.a-share.prices.snapshot`）：由数据源注册
+  代码生成、`list_schemas` 展示、任何模型不许造句；对象维度（代码/日期/周期）
+  进 `params`。唯一性由注册校验保证，路由精确匹配，TTL 由数据源 `ttl_ms`
+  声明——不再按键名猜任何东西。
+- **端点用量纪律**：dc 一条委派请求按需求选端点，通常 1 个、最多 3 个（引导），
+  硬性不超过 5 个；与需求无关的端点一律不调用，禁止无脑遍历全部 API。
 - 多点消费不依赖血缘：数据和缓存都在共享 Hub（dataCollectorHub），任何
   Agent 都能用只读的 `get_latest`/`list_schemas` 读共享缓存；写路径
   （`request_data`）经 data_collector 统一入口，保证单一数据执行点与缓存纪律。
@@ -125,6 +134,8 @@ dsh plugin --profile web add link:/absolute/path/to/capital-generation
 5. **别让模型复制长模板创建子 Agent**：用委派工具行的 `config.persona` 注入。
 6. **list_agents 是回忆工具，不是创建前检查**：恢复会话首查可能非空（ready）。
 7. **测试要面向官方契约**，不要用自己拼的 fake exec/字段自证。
+8. **别让主 Agent 造句 data_key**（真实会话产物如 `guide_needle_realtime_20260907`）：
+   键由数据源注册代码生成（规范身份证），dc 抄写、Hub 精确匹配；模型只消费不创造。
 8. **仓库卫生**：git + .gitignore（`lib/`、`node_modules/`、`*.Zone.Identifier`）。
 
 ## 当前安全边界

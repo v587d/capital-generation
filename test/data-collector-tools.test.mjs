@@ -24,6 +24,10 @@ function fakeCtx(toolRuntime) {
   }
 }
 
+function source(name, dataKey = `test.${name}`) {
+  return { schema: { name, source: 'api:test', data_key: dataKey, input_schema: {} }, execute: async () => ({ data: { ok: 1 } }) }
+}
+
 function makeHubAndTools(options = {}) {
   const hub = new DataCollectorHub(options)
   const toolRuntime = fakeToolRuntime()
@@ -65,9 +69,8 @@ test('render 回归：渲染的是返回值而非入参（此前 bug 恒为 {}�
 
 test('request_data：阻塞返回 CacheEntry，请求归属恒为调用者，schema 无 request_id/requester_agent_id', async () => {
   const { hub, toolRuntime } = makeHubAndTools()
-  const source = { schema: { name: 's', source: 'api:test', input_schema: {} }, execute: async () => ({ data: { ok: 1 } }) }
-  hub.registerSource(source)
-  const result = await runTool(toolRuntime, 'request_data', { data_key: 'k.1', params: {} }, exec('main-agent'))
+  hub.registerSource(source('s', 'test.k'))
+  const result = await runTool(toolRuntime, 'request_data', { data_key: 'test.k', params: {} }, exec('main-agent'))
   assert.equal(result.data.ok, 1)
   assert.equal(result.from_cache, false)
   assert.equal(result.source, 's')
@@ -81,10 +84,9 @@ test('request_data：阻塞返回 CacheEntry，请求归属恒为调用者，sch
 
 test('request_data：缓存命中立即返回 from_cache=true', async () => {
   const { hub, toolRuntime } = makeHubAndTools()
-  const source = { schema: { name: 's', source: 'api:test', input_schema: {} }, execute: async () => ({ data: { ok: 1 } }) }
-  hub.registerSource(source)
-  await runTool(toolRuntime, 'request_data', { data_key: 'k.1', params: {} }, exec('main'))
-  const second = await runTool(toolRuntime, 'request_data', { data_key: 'k.1', params: {} }, exec('main'))
+  hub.registerSource(source('s', 'test.k'))
+  await runTool(toolRuntime, 'request_data', { data_key: 'test.k', params: {} }, exec('main'))
+  const second = await runTool(toolRuntime, 'request_data', { data_key: 'test.k', params: {} }, exec('main'))
   assert.equal(second.from_cache, true)
 })
 
@@ -103,37 +105,37 @@ test('request_data：缺字段时错误明确（工具层校验，不吞成字�
 
 test('request_data：执行失败/超时直接抛错（error 文本，供如实回传）', async () => {
   const { hub, toolRuntime } = makeHubAndTools({ requestTimeoutMs: 20 })
-  const source = {
-    schema: { name: 'mixed', source: 'api:test', data_key_patterns: ['x.*'], input_schema: {} },
+  hub.registerSource({
+    schema: { name: 'mixed', source: 'api:test', data_key: 'test.mixed', input_schema: {} },
     execute: async (req) => {
-      if (req.data_key === 'x.fail') throw new Error('boom')
+      if (req.params.mode === 'fail') throw new Error('boom')
       return new Promise(() => {})
     },
-  }
-  hub.registerSource(source)
-  await assert.rejects(() => runTool(toolRuntime, 'request_data', { data_key: 'x.fail', params: {} }, exec('main')), /boom/)
-  await assert.rejects(() => runTool(toolRuntime, 'request_data', { data_key: 'x.hang', params: {} }, exec('main')), /request timed out/)
+  })
+  await assert.rejects(() => runTool(toolRuntime, 'request_data', { data_key: 'test.mixed', params: { mode: 'fail' } }, exec('main')), /boom/)
+  await assert.rejects(() => runTool(toolRuntime, 'request_data', { data_key: 'test.mixed', params: { mode: 'hang' } }, exec('main')), /request timed out/)
 })
 
 test('get_latest：缓存读取与缺失', async () => {
   const { hub, toolRuntime } = makeHubAndTools()
-  const source = { schema: { name: 's', source: 'api:test', input_schema: {} }, execute: async () => ({ data: { ok: 1 } }) }
-  hub.registerSource(source)
-  await runTool(toolRuntime, 'request_data', { data_key: 'k.1', params: {} }, exec('main'))
-  const latest = await runTool(toolRuntime, 'get_latest', { data_key: 'k.1' }, exec('main'))
+  hub.registerSource(source('s', 'test.k'))
+  await runTool(toolRuntime, 'request_data', { data_key: 'test.k', params: {} }, exec('main'))
+  const latest = await runTool(toolRuntime, 'get_latest', { data_key: 'test.k' }, exec('main'))
   assert.ok(latest)
   assert.equal(latest.from_cache, true)
   const missing = await runTool(toolRuntime, 'get_latest', { data_key: 'nope' }, exec('main'))
   assert.equal(missing, null)
 })
 
-test('list_schemas：反映当前挂载集合', async () => {
+test('list_schemas：反映当前挂载集合（含规范 data_key 与 ttl_ms）', async () => {
   const { hub, toolRuntime } = makeHubAndTools()
-  hub.registerSource({ schema: { name: 'get_meta_tickers_search', source: 'api:fuyao', input_schema: { type: 'object' } }, execute: async () => ({ data: {} }) })
+  hub.registerSource({ schema: { name: 'get_a_share_prices_snapshot', source: 'api:fuyao', data_key: 'fuyao.api.api.a-share.prices.snapshot', ttl_ms: 60000, input_schema: { type: 'object' } }, execute: async () => ({ data: {} }) })
   const schemas = await runTool(toolRuntime, 'list_schemas', {}, exec('main'))
   assert.equal(schemas.length, 1)
-  assert.equal(schemas[0].name, 'get_meta_tickers_search')
+  assert.equal(schemas[0].name, 'get_a_share_prices_snapshot')
   assert.equal(schemas[0].source, 'api:fuyao')
+  assert.equal(schemas[0].data_key, 'fuyao.api.api.a-share.prices.snapshot')
+  assert.equal(schemas[0].ttl_ms, 60000)
 })
 
 test('tools 缺失：ctx.get(tools) 为空时不注册也不抛', () => {

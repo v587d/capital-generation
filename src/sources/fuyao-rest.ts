@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { DataRequest, DataSource, SchemaDescriptor } from '../data-collector/hub.js'
+import { buildDataKey } from '../data-collector/hub.js'
 
 const DEFAULT_BASE_URL = 'https://fuyao.aicubes.cn'
 type ApiEnvelope = { code?: number; message?: string; request_id?: string; data?: unknown }
@@ -57,14 +58,18 @@ async function callFuyao(baseUrl: string, apiKey: string, path: string, params: 
   return { data: envelope.data ?? null, schema: outputSchema }
 }
 
-function source(name: string, description: string, input_schema: object, output_schema: object, path: string, allowed: string[], baseUrl: string, resolveApiKey: FuyaoApiKeyResolver): DataSource {
+function source(name: string, description: string, input_schema: object, output_schema: object, path: string, allowed: string[], baseUrl: string, resolveApiKey: FuyaoApiKeyResolver, ttlMs?: number): DataSource {
   const schema: SchemaDescriptor = {
     name,
     source: 'api:fuyao',
+    // 规范身份证：provider.kind.resource（fuyao.api + 规范化端点路径），
+    // 全注册表唯一，模型不造句；缓存键/路由/回传引用都以它为准。
+    data_key: buildDataKey('fuyao', 'api', path),
+    // TTL 声明式分类：快照/检索类 60s，历史/日历类 300s；不再按键名猜。
+    ...(ttlMs !== undefined ? { ttl_ms: ttlMs } : {}),
     description,
     input_schema,
     output_schema,
-    data_key_patterns: DATA_KEY_PATTERNS[name] ?? [],
   }
   return {
     schema,
@@ -84,11 +89,11 @@ const snapshotOutput = envelopeData({ type: 'array', items: { type: 'object', pr
 const klineOutput = envelopeData({ type: 'array', items: { type: 'object', properties: { date_ms: { type: 'integer' }, open_price: { type: 'number' }, high_price: { type: 'number' }, low_price: { type: 'number' }, close_price: { type: 'number' }, volume: { type: 'number' }, turnover: { type: 'number' } }, additionalProperties: true } })
 const calendarOutput = envelopeData({ type: 'array', items: { type: 'object', properties: { date_ms: { type: 'integer' }, date: { type: 'string' } }, additionalProperties: true } })
 
-const DATA_KEY_PATTERNS: Record<string, string[]> = {
-  get_meta_tickers_search: ['meta.tickers.search.*', 'a-share.tickers.search.*'],
-  get_a_share_prices_snapshot: ['a-share.prices.snapshot.*'],
-  get_a_share_prices_historical: ['a-share.prices.historical.*'],
-  get_a_share_calendar_trading_days: ['a-share.calendar.trading_days', 'a-share.calendar.trading-days'],
+const DATA_KEY_TTL_MS: Record<string, number> = {
+  get_meta_tickers_search: 60_000,
+  get_a_share_prices_snapshot: 60_000,
+  get_a_share_prices_historical: 300_000,
+  get_a_share_calendar_trading_days: 300_000,
 }
 
 const REQUIRED_OUTPUT_FIELDS: Record<string, string[]> = {
@@ -121,7 +126,7 @@ export function createFuyaoRestSources(resolveApiKey: FuyaoApiKeyResolver, baseU
         asset_type: { type: 'string', description: '资产类型过滤（逗号分隔）：a-share、a-share-index、forex、fund-otc、fund-etf、fund-lof、fund-reits' },
         limit: { type: 'integer', description: '返回条数上限，默认 10，最大 50' },
       }, ['q']),
-      searchOutput, '/api/meta/tickers/search', ['q', 'exchange', 'asset_type', 'limit'], cleanBaseUrl, resolveApiKey,
+      searchOutput, '/api/meta/tickers/search', ['q', 'exchange', 'asset_type', 'limit'], cleanBaseUrl, resolveApiKey, DATA_KEY_TTL_MS['get_meta_tickers_search'],
     ),
     source(
       'get_a_share_prices_snapshot',
@@ -131,7 +136,7 @@ export function createFuyaoRestSources(resolveApiKey: FuyaoApiKeyResolver, baseU
         limit: { type: 'integer', description: '全市场模式分页大小，默认 100' },
         offset: { type: 'integer', description: '全市场模式分页游标，默认 0' },
       }),
-      snapshotOutput, '/api/a-share/prices/snapshot', ['thscodes', 'limit', 'offset'], cleanBaseUrl, resolveApiKey,
+      snapshotOutput, '/api/a-share/prices/snapshot', ['thscodes', 'limit', 'offset'], cleanBaseUrl, resolveApiKey, DATA_KEY_TTL_MS['get_a_share_prices_snapshot'],
     ),
     source(
       'get_a_share_prices_historical',
@@ -144,13 +149,13 @@ export function createFuyaoRestSources(resolveApiKey: FuyaoApiKeyResolver, baseU
         adjust: { type: 'string', enum: ['none', 'forward', 'backward'], description: '复权模式：none 不复权 / forward 前复权（默认）/ backward 后复权' },
         offset: { type: 'integer', description: '分页偏移，默认 0' },
       }, ['thscode', 'interval', 'start', 'end']),
-      klineOutput, '/api/a-share/prices/historical', ['thscode', 'interval', 'start', 'end', 'adjust', 'offset'], cleanBaseUrl, resolveApiKey,
+      klineOutput, '/api/a-share/prices/historical', ['thscode', 'interval', 'start', 'end', 'adjust', 'offset'], cleanBaseUrl, resolveApiKey, DATA_KEY_TTL_MS['get_a_share_prices_historical'],
     ),
     source(
       'get_a_share_calendar_trading_days',
       '获取近一年（365 天）A 股交易日历；无需任何参数。返回 item[]：date_ms 为交易日零点毫秒戳，date 为 YYYYMMDD 字符串。',
       objectSchema({}),
-      calendarOutput, '/api/a-share/calendar/trading-days', [], cleanBaseUrl, resolveApiKey,
+      calendarOutput, '/api/a-share/calendar/trading-days', [], cleanBaseUrl, resolveApiKey, DATA_KEY_TTL_MS['get_a_share_calendar_trading_days'],
     ),
   ]
 }

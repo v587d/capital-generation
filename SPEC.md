@@ -94,9 +94,9 @@ interface DataCollectorHub {
 }
 
 interface DataRequest {
-  data_key: string            // 逻辑键，见 §4
-  source_preference?: string[] // 优先具体 schema.name，如 ["get_a_share_prices_snapshot", "any"]；默认按 data_key 路由
-  params: Record<string, unknown>  // 透传给具体数据源 tool 的参数
+  data_key: string            // 规范身份证键，见 §4（必须来自 list_schemas，模型不造句）
+  source_preference?: string[] // 可选过滤：具体 schema.name 最优先；provider 令牌（如 "fuyao.api"、"ths" 兼容别名）；"any" = 仅按 data_key 匹配
+  params: Record<string, unknown>  // 透传给具体数据源 tool 的参数（对象维度：代码/日期/周期等）
   force_refresh?: boolean     // 默认 false
   requester_agent_id: string  // 请求归属；由工具层以官方 exec.agent.id 注入，不接受模型传参
   schema_hint?: object        // 可选，期望结构提示
@@ -114,10 +114,11 @@ interface CacheEntry {
 
 interface SchemaDescriptor {
   name: string                // tool / mcp tool 名
-  source: string              // "ths" | "mcp:..." | "skill:..." | "api:..."
+  source: string              // "api:fuyao" | "mcp:..." | "skill:..." | "api:..."
+  data_key: string            // 规范身份证：provider.kind.resource（斜杠/冒号→点），注册时由 buildDataKey 生成，全注册表唯一
+  ttl_ms?: number             // 该源缓存存活时长声明；缺省用 Hub 默认 TTL
   input_schema: object
   output_schema?: object
-  data_key_patterns?: string[] // 末尾 * 表示前缀匹配
   description?: string
 }
 ```
@@ -136,11 +137,11 @@ interface SchemaDescriptor {
 ### 3.3 缓存与回收（简单方案）
 
 - 结构：`Map<string, CacheEntry>`，key = `data_key + ":" + stableHash(params)`。
-- **TTL**：写入时设置 `expires_at = now + ttl_ms`。  
-  默认 TTL：
-  - 行情快照类：`60_000` ms
-  - 历史 K 线 / 财务等：`300_000` ms
-  - 可通过配置覆盖。
+- **TTL（声明式）**：写入时设置 `expires_at = now + ttl`，取值为
+  `source.schema.ttl_ms`（数据源注册时声明）→ 未声明则 `options.ttlFor(dataKey)`
+  → 兜底 `defaultTtlMs`（默认 `300_000`）。**不再按 data_key 字符串里的
+  snapshot/valuations 子串猜分类**（编造键下必然失效的教训）。
+  fuyao 四源声明：快照/检索 `60_000`，历史 K / 交易日历 `300_000`。
 - **最大条目数**：默认 `500`。超过时删除 `updated_at` 最旧的条目。
 - **懒清理**：在 `getLatest` / 写入时顺带删除已过期条目。不强制后台定时器。
 - **无请求状态表**：阻塞式 `request()` 直接用 Promise 结算，不存在请求记录表，
@@ -148,29 +149,49 @@ interface SchemaDescriptor {
 
 ---
 
-## 4. `data_key` 约定
+## 4. `data_key` 约定（规范身份证键）
 
-逻辑键，用于缓存与请求路由，建议格式：
+`data_key` 是**数据源端点的规范身份证**，不是模型造句的逻辑键。它由数据源注册
+代码生成（`buildDataKey(provider, kind, resource)`，见 §3.1），任何 Agent 从
+`list_schemas` 抄写使用，**不自行拼接/编造**。
+
+格式：
 
 ```
-<universe>.<category>.<identity>[.<qualifier>]
+<provider>.<kind>.<resource>
 ```
 
-示例：
+- `<provider>`：数据提供方，如 `fuyao`、`alice`；
+- `<kind>`：接入方式，如 `api` / `mcp` / `skill`；
+- `<resource>`：端点路径（REST）或 MCP 工具名。**斜杠 `/` 与冒号 `:` 一律
+  规范化映射为 `.`**（连续分隔符合并、去首尾点），保证任何平台都能直接当
+  文件名/路径段使用。
 
-| data_key | 含义 |
-|----------|------|
-| `a-share.prices.snapshot.600519.SH` | 贵州茅台快照 |
-| `a-share.prices.historical.600519.SH.day` | 茅台日 K |
-| `a-share.financials.income.600519.SH` | 茅台利润表 |
-| `a-share.special.limit-up-pool.20260905` | 某日涨停池 |
-| `meta.tickers.search.茅台` | 标的检索 |
+Phase 1 已注册身份证（fuyao REST）：
 
-调用方应尽量稳定、可复用。Hub 不强制校验格式，只做字符串键。
+| 规范 data_key | 端点（原始路径）| 含义 | ttl_ms |
+|---|---|---|---|
+| `fuyao.api.api.meta.tickers.search` | `/api/meta/tickers/search` | 标的检索消歧 | （未挂载，挂载后生成） |
+| `fuyao.api.api.a-share.prices.snapshot` | `/api/a-share/prices/snapshot` | A 股行情快照 | （未挂载，挂载后生成） |
+| `fuyao.api.api.a-share.prices.historical` | `/api/a-share/prices/historical` | 历史日 K | （未挂载，挂载后生成） |
+| `fuyao.api.api.a-share.calendar.trading-days` | `/api/a-share/calendar/trading-days` | 交易日历 | （未挂载，挂载后生成） |
 
-> **稳定性要求**：`data_key` 必须使用稳定逻辑键，**不要为每次请求追加
-> `.latest` 等变体后缀**（变体键 = 新缓存槽，缓存永远命中不了）；需要最新
-> 值时用 `force_refresh: true` 即可。这是真实会话中观察到的模型行为教训。
+说明：
+
+- **对象维度（标的代码、日期、周期等）进 `params`，不进 data_key**——data_key
+  只标识"哪个端点"，同一端点的不同标的共享同一把钥匙，缓存按
+  `data_key + stableHash(params)` 命中。
+- 主 Agent 的委派消息**不带 data_key**（只带需求描述与 params）；由
+  data_collector 用 `list_schemas` 选端点并抄写规范键，回传时把 data_key
+  原样带回，主 Agent 记录后可用于 `get_latest` 复用或转派其他 Agent 复核。
+- **路由**：`request_data` 的 data_key 与已注册身份证**精确相等**匹配；
+  匹配不到立即报错（"no data source for ..."），不存在静默不命中的灰色状态。
+  `registerSource` 校验身份证全注册表唯一（撞键即注册失败）。
+- **稳定性要求**：data_key 是固定的注册表常量，**不要追加 `.latest` 等变体
+  后缀**（变体键 = 新缓存槽，缓存永远命中不了）；需要最新值用
+  `force_refresh: true` 即可。
+- **每条委派请求的端点上限**（引导/硬性）：data_collector 按需求选端点，
+  通常 1 个、最多 3 个（引导），硬性不超过 5 个；与需求无关的端点一律不调用。
 
 ---
 
@@ -197,24 +218,24 @@ interface SchemaDescriptor {
 
 ### 5.3 消息载荷（send_message 载荷建议；这是数据请求/回传格式约定，不是消息路由协议）
 
-**请求（主 Agent → data_collector）**
+**请求（主 Agent → data_collector，不带 data_key；data_key 由 dc 选端点后从 list_schemas 抄写）**
 
 ```json
 {
   "type": "data_request",
-  "data_key": "a-share.prices.snapshot.600519.SH",
+  "description": "贵州茅台最新行情快照",
   "source_preference": ["get_a_share_prices_snapshot", "any"],
   "params": { "thscodes": "600519.SH" },
   "force_refresh": false
 }
 ```
 
-**完成回传（data_collector → 主 Agent）**
+**完成回传（data_collector → 主 Agent；data_key 为 request_data 返回的规范身份证）**
 
 ```json
 {
   "type": "data_updated",
-  "data_key": "a-share.prices.snapshot.600519.SH",
+  "data_key": "fuyao.api.api.a-share.prices.snapshot",
   "status": "completed",
   "source": "get_a_share_prices_snapshot",
   "from_cache": false,
@@ -229,7 +250,9 @@ interface SchemaDescriptor {
 
 > **不存在 request_id**：请求与回传以 `data_key`（+params）标识与对应，载荷里的
 > data/schema/source/from_cache/updated_at/expires_at 取自 `request_data` 的返回
-> （按原样填入，不改写）；唤醒由官方结算通知 / Inbox 保证，回传即结果。
+> （按原样填入，不改写）；data_key 必须与 `list_schemas` 返回的规范键一致，
+> 主 Agent 记录后可据其 `get_latest` 复用或转派复核；唤醒由官方结算通知 /
+> Inbox 保证，回传即结果。
 
 ### 5.4 发现与生命周期（官方语义）
 
@@ -251,35 +274,38 @@ interface SchemaDescriptor {
 ### 6.1 原则
 
 - 每个数据源能力使用**自己的 `input_schema`**，不做统一字段适配。
-- Hub 默认按 `data_key` 与 source schema 的 `data_key_patterns` 做确定性路由；`source_preference` 中的具体 `schema.name` 优先级最高，provider（如 `api:fuyao`，`ths` 为兼容别名）只用于过滤候选。候选不唯一或无匹配时必须失败，不能静默调用第一个注册源。
+- Hub 按 `data_key` 与源声明的规范身份证**精确匹配**路由（注册时身份证唯一，
+  见 §4）；`source_preference` 只做过滤：具体 `schema.name` 优先级最高，
+  provider 令牌（如 `fuyao.api`，`ths` 为兼容别名）次之，`any` 表示仅按
+  data_key 匹配。无匹配或候选不唯一时必须失败，不能静默调用任何源。
 - 鉴权：Fuyao API Key 仅通过命名凭据 `FUYAO_API_KEY` 或 DSH credentials 注入，**禁止**使用泛化的 `API_KEY`，也禁止在对话中索取或回显完整 Key。
 
 ### 6.2 官方同花顺能力映射（Phase 1 优先挂载）
 
 来源：[同花顺金融数据 API](https://fuyao.aicubes.cn/docs/)（REST + MCP 同源）。
 
-| 类别 | 代表 MCP Tool / 能力 | 典型 params | 建议 data_key 模式 |
+| 类别 | 代表 MCP Tool / 能力 | 典型 params | 规范 data_key（挂载后按 §4 规则生成） |
 |------|----------------------|-------------|-------------------|
-| 行情快照 | `get_a_share_prices_snapshot` | `thscodes` | `a-share.prices.snapshot.<code>` |
-| 历史 K 线 | `get_a_share_prices_historical` | `thscode`, 周期等 | `a-share.prices.historical.<code>.<period>` |
-| 交易日历 | `get_a_share_calendar_trading_days` | （无或少参） | `a-share.calendar.trading_days` |
-| 除复权 | `get_a_share_corporate_actions_adjustment_factors` | `thscode` | `a-share.corporate_actions.<code>` |
-| 利润表 | `get_a_share_financials_income_statements` | `thscode` + 期数/区间 | `a-share.financials.income.<code>` |
-| 资产负债表 | `get_a_share_financials_balance_sheets` | 同上 | `a-share.financials.balance.<code>` |
-| 现金流量表 | `get_a_share_financials_cash_flow_statements` | 同上 | `a-share.financials.cashflow.<code>` |
-| 财务指标 | `get_a_share_financials_indicators` | `thscode` + 报告期 | `a-share.financials.indicators.<code>` |
-| 指数快照 | `get_a_share_index_prices_snapshot` | `thscodes` | `a-share.index.snapshot.<code>` |
-| 指数历史 K | `get_a_share_index_prices_historical` | `thscode` 等 | `a-share.index.historical.<code>.<period>` |
-| 指数目录 | `get_a_share_index_catalog_ths_index_list` | `tag` | `a-share.index.catalog.<tag>` |
-| 指数成分 | `get_a_share_index_constituents_ths_stock_list` | `thscode` | `a-share.index.constituents.<code>` |
-| 涨停池 | `get_a_share_special_data_limit_up_pool` | 交易日 | `a-share.special.limit_up_pool.<date>` |
-| 跌停池 | `get_a_share_special_data_limit_down_pool` | 交易日 | `a-share.special.limit_down_pool.<date>` |
-| 炸板池 | `get_a_share_special_data_limit_break_pool` | 交易日 | `a-share.special.limit_break_pool.<date>` |
-| 连板天梯 | `get_a_share_special_data_limit_up_ladder` | — | `a-share.special.limit_up_ladder` |
-| 热股榜 | `get_a_share_special_data_hot_stock_list` | — | `a-share.special.hot_stock_list` |
-| 龙虎榜 | `get_a_share_special_data_dragon_tiger_list` | 交易日等 | `a-share.special.dragon_tiger.<date>` |
-| 标的检索 | `get_meta_tickers_search` | 名称/代码片段 | `meta.tickers.search.<query>` |
-| 估值快照 | `get_a_share_valuations_snapshot` | `thscodes` | `a-share.valuations.snapshot.<codes>` |
+| 行情快照 | `get_a_share_prices_snapshot` | `thscodes` | fuyao.api.api.a-share.prices.snapshot |
+| 历史 K 线 | `get_a_share_prices_historical` | `thscode`, 周期等 | fuyao.api.api.a-share.prices.historical |
+| 交易日历 | `get_a_share_calendar_trading_days` | （无或少参） | fuyao.api.api.a-share.calendar.trading-days |
+| 除复权 | `get_a_share_corporate_actions_adjustment_factors` | `thscode` | （未挂载，挂载后生成） |
+| 利润表 | `get_a_share_financials_income_statements` | `thscode` + 期数/区间 | （未挂载，挂载后生成） |
+| 资产负债表 | `get_a_share_financials_balance_sheets` | 同上 | （未挂载，挂载后生成） |
+| 现金流量表 | `get_a_share_financials_cash_flow_statements` | 同上 | （未挂载，挂载后生成） |
+| 财务指标 | `get_a_share_financials_indicators` | `thscode` + 报告期 | （未挂载，挂载后生成） |
+| 指数快照 | `get_a_share_index_prices_snapshot` | `thscodes` | （未挂载，挂载后生成） |
+| 指数历史 K | `get_a_share_index_prices_historical` | `thscode` 等 | （未挂载，挂载后生成） |
+| 指数目录 | `get_a_share_index_catalog_ths_index_list` | `tag` | （未挂载，挂载后生成） |
+| 指数成分 | `get_a_share_index_constituents_ths_stock_list` | `thscode` | （未挂载，挂载后生成） |
+| 涨停池 | `get_a_share_special_data_limit_up_pool` | 交易日 | （未挂载，挂载后生成） |
+| 跌停池 | `get_a_share_special_data_limit_down_pool` | 交易日 | （未挂载，挂载后生成） |
+| 炸板池 | `get_a_share_special_data_limit_break_pool` | 交易日 | （未挂载，挂载后生成） |
+| 连板天梯 | `get_a_share_special_data_limit_up_ladder` | — | （未挂载，挂载后生成） |
+| 热股榜 | `get_a_share_special_data_hot_stock_list` | — | （未挂载，挂载后生成） |
+| 龙虎榜 | `get_a_share_special_data_dragon_tiger_list` | 交易日等 | （未挂载，挂载后生成） |
+| 标的检索 | `get_meta_tickers_search` | 名称/代码片段 | fuyao.api.api.meta.tickers.search |
+| 估值快照 | `get_a_share_valuations_snapshot` | `thscodes` | （未挂载，挂载后生成） |
 
 Phase 1 实现时可先挂载 **行情快照 + 历史 K 线 + 标的检索 + 交易日历** 四类，其余按需扩展。  
 MCP 与 REST 语义一致；优先走 MCP 工具挂载（官方 `@deepseek-ai/dsh-mcp-client`），若环境仅有 REST 则封装为 Cordis tool，`input_schema` 与官方文档对齐。
@@ -295,9 +321,9 @@ MCP 与 REST 语义一致；优先走 MCP 工具挂载（官方 `@deepseek-ai/ds
 
 | Tool 名 | 作用 | 备注 |
 |---------|------|------|
-| `request_data` | 请求数据并阻塞等待执行完成（缓存命中立即返回） | 内部 → `hub.request`，返回 CacheEntry，失败抛错（error 文本）；**请求归属恒为调用者（官方 exec.agent），不接受 requester_agent_id**；不存在 request_id 与状态查询 |
-| `get_latest` | 查缓存最新数据 | → `hub.getLatest`；可传 params 精确匹配缓存变体；只读，任何 Agent 可用 |
-| `list_schemas` | 列出可用数据源 schema | → `hub.listSchemas`；只读，任何 Agent 可用 |
+| `request_data` | 请求数据并阻塞等待执行完成（缓存命中立即返回） | 内部 → `hub.request`，返回 CacheEntry，失败抛错（error 文本）；**data_key 必须取自 `list_schemas` 的规范身份证，不自行造句**；**请求归属恒为调用者（官方 exec.agent），不接受 requester_agent_id**；不存在 request_id 与状态查询 |
+| `get_latest` | 查缓存最新数据 | → `hub.getLatest`；data_key 为规范身份证，可传 params 精确匹配缓存变体；只读，任何 Agent 可用 |
+| `list_schemas` | 列出可用数据源 schema（含规范 data_key、可选 ttl_ms） | → `hub.listSchemas`；只读，任何 Agent 可用 |
 | `dc_status` | 诊断（凭据 present/source、已注册源、最近注册错误） | 注入 diagnostics 时注册；不泄露密钥值 |
 
 所有 tool 的 `input_schema` 必须完整、自描述，便于其他 Agent 直接调用。
@@ -332,11 +358,14 @@ MCP 与 REST 语义一致；优先走 MCP 工具挂载（官方 `@deepseek-ai/ds
 data_collector 人设必须包含的要点：
 
 - 你是 Capital 模式的 **数据收集执行器** 子 Agent，不是分析师或下单员。
-- 职责：接收数据请求 → 排队串行提取 → 缓存 → 用官方 `send_message` 回传结果。
-- 只使用已挂载的 API / MCP / Skill，不编造数据；失败时明确返回错误。
+- 职责：接收数据请求 → 按需求挑选相关端点（通常 1 个、最多 3 个，硬性
+  不超过 5 个）→ 串行提取 → 缓存 → 用官方 `send_message` 回传结果。
+- 只使用已挂载的 API / MCP / Skill **及其规范的 data_key**（抄写自
+  `list_schemas`，不编造键名），不编造数据；失败时明确返回错误。
 - 不索取凭据，不输出收益承诺，不自动下单。
 - 优先使用缓存；`force_refresh` 时才强制拉源。
-- 与主 Agent 通信使用结构化 JSON 载荷（见 §5.3）；没有订阅、没有 requester_agent_id
+- 与主 Agent 通信使用结构化 JSON 载荷（见 §5.3）；主 Agent 的委派消息不带
+  data_key（由你选端点并带回规范 data_key）；没有订阅、没有 requester_agent_id
   ——请求归属恒为调用者自身。
 
 自定义用户 persona（`customPersona`）只能影响表达风格与呈现，不能覆盖上述安全、
@@ -362,7 +391,8 @@ data_collector 人设必须包含的要点：
 3. 缓存命中时不调用外部数据源，并正确设置 `from_cache: true`。
 4. 回传通过官方 `send_message` 送达：data_collector 完成提取后向直接父级发送
    结构化载荷；Hub 自身不做任何 Agent 投递。
-5. TTL + 最大条目数回收生效，无内存无界增长。
+5. TTL + 最大条目数回收生效，无内存无界增长；TTL 取自数据源 `ttl_ms` 声明，
+   不依赖 data_key 字符串猜测。
 6. 至少打通同花顺「行情快照」与「标的检索」两条路径（MCP 或 REST tool）。
 7. 失败路径返回明确 `error`，不幻觉填充数据；执行超时（默认 30s）抛错
    `request timed out`。
@@ -371,6 +401,12 @@ data_collector 人设必须包含的要点：
    Agent 字段（如 `parentId` / `directAgentIds`）；请求归属只来自 `exec.agent`。
 10. 不存在 `request_id`：`request_data` 不接受、不返回任何请求 id，也没有状态
     查询工具/状态表——结果要么直接返回，要么抛错。
+11. data_key 为规范身份证：`request_data` 的 data_key 必须与 `list_schemas`
+    返回的某个已注册键精确相等（伪造键报 "no data source"），注册表内
+    身份证唯一（重复注册报错）；TTL 与路由都不再依赖键名猜测。
+12. 委派消息不带 data_key：主 Agent 只传描述 + params；data_collector 按需求
+    选端点，一条委派请求的端点用量通常 1 个、最多 3 个（引导）、硬性不超过
+    5 个（人设纪律，Hub 不计数）。
 
 ---
 
@@ -402,6 +438,7 @@ data_collector 人设必须包含的要点：
 | 8 | 兼容 facade 层堆积（`src/` 根目录放 2 行转发文件）| 增加理解成本、误导读者 | 直接改引用，不留转发层 |
 | 9 | 仓库卫生缺失：`lib/`、`node_modules/`、`SPEC.md:Zone.Identifier` 与源码混放、无 git | 无法追溯、打包污染 | `git init` + `.gitignore`（`lib/`、`node_modules/`、`*.tgz`、`*.log`、`*.Zone.Identifier`）|
 | 10 | （行为教训，非代码）模型为"最新"请求使用 `force_refresh` + **每次新 `data_key` 变体**（`.latest`）| 变体键 = 新缓存槽，缓存永远不命中，Hub 缓存价值归零 | persona / 协议要求稳定 `data_key`；要最新值用 `force_refresh: true`（见 §4）|
+| 11 | （行为教训，非代码）让**主 Agent 造句 data_key**（真实会话产物如 `guide_needle_realtime_20260907`，还为此在主↔子之间反复 send_message 对键） | 主 Agent 无数据领域知识 → 编造键 → 路由匹配不到、缓存键与任何端点无关、按键名猜的 TTL 分类全部失效 | data_key 由数据源注册代码生成（规范身份证，provider.kind.resource），`list_schemas` 展示、dc 抄写；主 Agent 委派只传描述 + params，回传再记录身份证（见 §4/§5.3）|
 
 **总原则**：官方已有原语的地方不重造（消息、权限、生命周期、persona 注入、
 工具注册）；自研只保留领域价值（缓存/去重/路由/输出契约）与数据源接入层。

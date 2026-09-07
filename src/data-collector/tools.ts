@@ -78,7 +78,7 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
   const registrations = [
     tool(
       'request_data',
-      '向共享数据 Hub 请求数据：入队并阻塞等待执行完成（缓存命中立即返回；单请求执行超时默认 30 秒，超时报错）。成功返回 CacheEntry；失败抛错（error 文本，由调用方如实回传）。不存在 request_id 与状态查询：结果要么直接返回，要么报错。请求归属自动记为当前调用 Agent，不接收 requester_agent_id 参数。优先使用缓存；force_refresh=true 才强制拉取数据源。',
+      '向共享数据 Hub 请求数据：入队并阻塞等待执行完成（缓存命中立即返回；单请求执行超时默认 30 秒，超时报错）。成功返回 CacheEntry；失败抛错（error 文本，由调用方如实回传）。data_key 必须是 list_schemas 中某个已注册数据源的规范 data_key（如 fuyao.api.api.a-share.prices.snapshot），不要自行编造键名；source_preference 可选（具体 capability 名、provider 令牌如 fuyao.api/ths、或 any）。不存在 request_id 与状态查询：结果要么直接返回，要么报错。请求归属自动记为当前调用 Agent，不接收 requester_agent_id 参数。优先使用缓存；force_refresh=true 才强制拉取数据源。',
       jsonObject({ data_key: { type: 'string' }, source_preference: { type: 'array', items: { type: 'string' } }, params: freeObject, force_refresh: { type: 'boolean' }, schema_hint: freeObject }, ['data_key', 'params']),
       cacheEntrySchema(),
       async (args, exec) => hub.request({
@@ -93,7 +93,7 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
       }, { signal: exec.signal }),
     ),
     tool('get_latest', '查询缓存中某个 data_key 的最新数据；传入 params 时只匹配该参数组合，否则返回该 data_key 的最新变体。返回 CacheEntry 或 null。', jsonObject({ data_key: { type: 'string' }, params: freeObject }, ['data_key']), { oneOf: [cacheEntrySchema(), { type: 'null' }] }, async (args) => hub.getLatest(String(args.data_key), args.params && typeof args.params === 'object' ? args.params as Record<string, unknown> : undefined)),
-    tool('list_schemas', '列出当前已挂载的数据源及其独立 input/output schema；每个数据源自带契约，不做统一适配。', jsonObject(), { type: 'array', items: jsonObject({ name: { type: 'string' }, source: { type: 'string' }, input_schema: freeObject, output_schema: freeObject, data_key_patterns: { type: 'array', items: { type: 'string' } }, description: { type: 'string' } }, ['name', 'source', 'input_schema']) }, async () => hub.listSchemas()),
+    tool('list_schemas', '列出当前已挂载的数据源及其独立 input/output schema；每个数据源自带规范 data_key（provider.kind.resource，斜杠/冒号已规范化，如 fuyao.api.api.a-share.prices.snapshot）、可选 ttl_ms 缓存存活时长与独立契约。data_key 必须以本工具返回的为准，不要自行编造。', jsonObject(), { type: 'array', items: jsonObject({ name: { type: 'string' }, source: { type: 'string' }, data_key: { type: 'string' }, ttl_ms: { oneOf: [{ type: 'integer' }, { type: 'null' }] }, input_schema: freeObject, output_schema: freeObject, description: { type: 'string' } }, ['name', 'source', 'data_key', 'input_schema']) }, async () => hub.listSchemas()),
     ...(diagnostics ? [
       tool('dc_status', '诊断工具：返回数据收集 Hub 的运行状态 —— at/call 为本次真实执行的时间戳与计数（防伪）、api_key 解析结果（present/source，不含密钥值）、当前已注册数据源列表、最近一次数据源注册错误（若有）。排障时优先调用。', jsonObject(),
         jsonObject({ at: { type: 'integer' }, call: { type: 'integer' }, api_key: jsonObject({ present: { type: 'boolean' }, source: { oneOf: [{ type: 'string' }, { type: 'null' }] }, error: { oneOf: [{ type: 'string' }, { type: 'null' }] } }, ['present']), registered_sources: { type: 'array', items: { type: 'string' } }, registration_error: { oneOf: [{ type: 'string' }, { type: 'null' }] } }, ['at', 'call', 'api_key', 'registered_sources']),
