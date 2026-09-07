@@ -10,14 +10,16 @@ Capital Generation（Capital 模式）是面向中国股市散户的投资助手
 - `src/`：普通 Cordis 插件包，提供共享数据 Hub（`dataCollectorHub`）、数据工具与
   可选附加人设节（`customPersona`，独立 section 名 `capital:user-customization`，
   不占用官方 `deployment:persona`）。
+> DSH 系统提示词由多节（section）组成 = 官方基础节（preset已覆盖） + 自定义人设节 + 其他节
+
 - `preset/capital-generation/`：DSH Agent Preset，承载全部提示文本与工具行——
   Capital 主控人设（`@deepseek-ai/dsh-persona` 行）、data_collector 专用委派行
   （`subagent_data_collector`，由 `config.persona`/`config.toolFilter` 注入子
   Agent 组成）、澄清、任务规划、子代理和网页检索工具行。
 
-`financial` 和 `rules` 工具暂未实现，避免在工具契约和数据边界未确定前暴露虚假能力。
+当前 `dataCollectorHub` 已接入 Fuyao REST 数据源的 Phase 1 能力：标的检索、行情快照、历史日 K 线和交易日历；并已注册 `request_data`（阻塞等待执行完成）、`get_latest`、`list_schemas`（另有诊断工具 `dc_status`）。配置 `FUYAO_API_KEY`（优先使用 DSH credentials，环境变量作为回退）后才会注册这些数据源。
 
-当前 `dataCollectorHub` 已接入 Fuyao REST 数据源的 Phase 1 能力：标的检索、行情快照、历史日 K 线和交易日历；并已注册 `request_data`、`get_request_status`、`get_latest`、`list_schemas`（另有诊断工具 `dc_status`）。配置 `FUYAO_API_KEY`（优先使用 DSH credentials，环境变量作为回退）后才会注册这些数据源。
+时间能力（主 Agent 与所有子 Agent 共享）仅来自自研工具 `get_local_datetime`（本地时区/当前日期时间权威读数，支持 `timezone` 参数跨区换算）；不使用官方 per-step `time-context` 自动注入（每个 step 注入一行时钟读数，信息冗余，已从 preset 移除）。主/子人设均已强调「模型知识截止日期不是当前时间，用户未指定日期时间时优先调用 `get_local_datetime`」。
 
 数据源 Tool 必须保持在 Capital 会话/preset 的作用域内，不要把 Fuyao MCP Tools 直接注册到 Host 全局 ToolRuntime；否则可能与 `subagent`、`send_message` 等官方 subagent Tools 发生名称冲突或改变其他 Agent 的可见 Tool 集合。后续 MCP 接入应使用会话范围的 scoped registration，并为 MCP 公共名称保留明确的命名空间。
 
@@ -58,6 +60,7 @@ dsh plugin --profile web add link:/absolute/path/to/capital-generation
 `cordis.patch.yml` 会将包内的 `preset/` 目录作为只读 system root 注册到现有
 `agent-presets` roster。因此不再需要手动 `mkdir`、`cp`，也不需要修改
 `~/.dsh/.agent-presets`。
+> roster = 花名册 / 注册表 / 名单，管理所有 preset 的目录服务。DSH 中默认roster 已有四种（minimal / standard等）。本项目新增 `capital-generation`
 
 安装后重启 Web profile，在 GUI 新建会话并在 Agent Preset 选择器中选择
 `Capital 模式`。安装包默认不覆盖用户已经设置的默认 preset；若希望新会话
@@ -77,9 +80,12 @@ dsh plugin --profile web add link:/absolute/path/to/capital-generation
   - `config.persona` 承载 data_collector 人设模板——官方 dsh-subagent 创建子
     Agent 时以 `deployment:persona` 节注册到子 Agent 作用域（最近 scope 胜出），
     主 Agent 创建时**不需要复制任何模板**，prompt 只写委托上下文。
+> 子 Agent 看不到主 Agent 的人设（最近scope胜出），主 Agent 委派子 Agent任务时，无需告诉对方的人设。
+
   - `config.toolFilter.allow` 把子 Agent 的可见工具收敛为：官方 `send_message`
-    与数据工具（`request_data`/`get_request_status`/`get_latest`/`list_schemas`/
+    与数据工具（`request_data`/`get_latest`/`list_schemas`/
     `dc_status`）。子 Agent 是叶子执行器，不委派、不问用户、不访问网页/文件。
+> `tools.ts` -> `ctx.get('tools')` 获取当前作用域的工具注册服务。这里`ctx`是`capitail-generation-scope`这个被隔离的作用域内的上下文。
 
 ## 编排与消息机制（详见 SPEC 与 ARCHITECTURE.md）
 
@@ -88,12 +94,12 @@ dsh plugin --profile web add link:/absolute/path/to/capital-generation
   只有一个直接 parent。
 - 通信原语只有官方 `send_message`：请求 = 父 → 子的一条消息，回传 = 子 →
   父的一条消息；官方 Inbox 负责持久化、唤醒（结算通知自动唤醒父 Agent）与
-  cold resume。**没有自定义广播协议、没有 request_id 对账状态机、没有订阅机制。**
+  cold resume。**没有自定义广播协议、没有 request_id、没有订阅、没有状态轮询。**
 - `data_collector` 是主 Agent 的 continuable 子 Agent、数据执行器：主 Agent 用
   `subagent_data_collector` 工具创建（persona/工具集由 preset 配置注入，见上）；
-  数据请求经 `send_message` 委派给它；它自己调用 `request_data`/
-  `get_request_status`/`get_latest`，用 `send_message` 把结构化回传发给主 Agent。
-  请求归属恒为调用者自身（官方 `exec.agent` 注入），工具层没有
+  数据请求经 `send_message` 委派给它；它自己调用 `request_data`（阻塞等待执行
+  完成：缓存命中立即返回、执行超时或失败报错），用 `send_message` 把结构化
+  回传发给主 Agent。请求归属恒为调用者自身（官方 `exec.agent` 注入），工具层没有
   requester_agent_id 概念。
 - 多点消费不依赖血缘：数据和缓存都在共享 Hub（dataCollectorHub），任何
   Agent 都能用只读的 `get_latest`/`list_schemas` 读共享缓存；写路径

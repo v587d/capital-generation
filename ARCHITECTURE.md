@@ -176,19 +176,21 @@ Inbox/结算通知完成，不存在自定义消息协议。**
   懒清理。任何 Agent 都能只读查询（`get_latest`）。
 - **去重合并**：同一个请求同时来了 3 份，**只真正拉一次源**，三份都拿到结果。
 - **FIFO 串行执行器**：同一时刻只打一个数据源请求（保护上游），带超时
-  （30s，超时标记 failed 并释放执行位）、队列上限（50）。
+  （30s，超时抛错 request timed out 并释放执行位）、队列上限（50）。
+- **阻塞式消费**：`request_data` 入队后等待执行完成（同键去重合并共享同一
+  次执行），结果或错误直接一次性返回——没有 request_id、没有状态表、没有
+  轮询；调用者（data_collector）的回合占用时长 = 排队 + 执行。
 - **确定性路由**：按 data_key 与数据源声明的 `data_key_patterns` 匹配；候选
   不唯一时**宁可失败**也不偷偷选第一个（防歧义）。
 - **输出契约**：数据源可声明 `validateOutput`，返回不合规的结果不入缓存。
 - **它不做的事（M1 删干净的）**：不订阅、不广播、不维护 Agent 表、不发消息。
   回传是子 Agent 模型用官方 `send_message` 做的；唤醒是官方结算通知做的。
 
-### 4.4 `src/data-collector/tools.ts` — 5 个数据工具（薄适配层）
+### 4.4 `src/data-collector/tools.ts` — 4 个数据工具（薄适配层）
 
 | 工具 | 语义 |
 |---|---|
-| `request_data` | 入队一个取数请求；**请求归属自动取 `exec.agent.id`**，不接受模型传 requester |
-| `get_request_status` | 查请求状态（enqueued/running/completed/failed）|
+| `request_data` | 入队并**阻塞等待执行完成**（缓存命中立即返回；执行超时/失败抛错）；**请求归属自动取 `exec.agent.id`**，不接受模型传 requester；不存在 request_id 与状态查询 |
 | `get_latest` | 读共享缓存（只读，任何 Agent 可用）|
 | `list_schemas` | 列出已挂载数据源及其独立 input/output schema |
 | `dc_status` | 诊断：key 是否存在（不含值）、已注册源、最近注册错误 |
@@ -219,8 +221,8 @@ Inbox/结算通知完成，不存在自定义消息协议。**
 3. **委派**：主 Agent `send_message(dc, {data_key, source_preference, params, force_refresh})`
    → 官方校验相邻 → 消息入 dc inbox → dc 被唤醒。
 4. **取数**：dc 按 persona：`list_schemas` 确认契约 → `get_latest` 查缓存 →
-   未命中则 `request_data` 入队 Hub → Hub FIFO 执行 → `get_request_status` 跟踪 →
-   `get_latest` 取结果。
+   未命中则 `request_data` 入队并等待 Hub FIFO 执行完成（缓存命中即返回；
+   执行超时/失败直接抛错）→ 结果/错误直接拿到，回传载荷按原样填写。
 5. **回传**：dc `send_message(父, data_updated/data_failed)`；官方同时注入
    结算通知；主 Agent 汇总（必须披露 source/时间戳/缓存命中/待核实项）。
 6. **复用**：后续需求 = 又一条 `send_message`（running 时 steering、idle 时
@@ -288,12 +290,12 @@ sequenceDiagram
   M->>D: send_message：data_request 载荷（data_key/params）
   D->>H: list_schemas → get_latest（缓存优先）
   alt 缓存未命中
-    D->>H: request_data（入队 FIFO，同键合并）
+    D->>H: request_data（阻塞等待：入队 FIFO，同键合并，执行≤30s）
     H->>F: GET /api/a-share/prices/snapshot（X-api-key）
     F-->>H: 行情数据（validateOutput 校验）
-    H-->>D: completed（写入缓存，TTL 60s）
+    H-->>D: CacheEntry（写入缓存，TTL 60s；超时/失败直接抛错）
   else 缓存命中
-    H-->>D: from_cache=true（不拉源）
+    H-->>D: from_cache=true（不拉源，立即返回）
   end
   D->>M: send_message：data_updated（source/from_cache/时间戳/数据）
   Note over M: 官方结算通知自动注入：subagent-settled

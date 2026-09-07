@@ -25,7 +25,7 @@ function fakeCtx(toolRuntime) {
 }
 
 function makeHubAndTools(options = {}) {
-  const hub = new DataCollectorHub()
+  const hub = new DataCollectorHub(options)
   const toolRuntime = fakeToolRuntime()
   const ctx = fakeCtx(toolRuntime)
   registerDataCollectorTools(ctx, hub, options.diagnostics)
@@ -40,10 +40,10 @@ function runTool(toolRuntime, name, args, execution) {
   return definition.execute(args, execution)
 }
 
-test('工具注册：四个数据工具 + 注入 diagnostics 时的 dc_status', () => {
+test('工具注册：三个数据工具 + 注入 diagnostics 时的 dc_status', () => {
   const { toolRuntime } = makeHubAndTools()
   assert.deepEqual(toolRuntime.definitions.map((d) => d.name), [
-    'request_data', 'get_request_status', 'get_latest', 'list_schemas',
+    'request_data', 'get_latest', 'list_schemas',
   ])
   for (const definition of toolRuntime.definitions) {
     assert.equal(typeof definition.description, 'string')
@@ -63,47 +63,67 @@ test('render 回归：渲染的是返回值而非入参（此前 bug 恒为 {}�
   assert.equal(blocks[0].text, JSON.stringify(['get_a_share_prices_snapshot']), '必须渲染 value 而不是 args')
 })
 
-test('request_data：请求归属恒为调用者（requester=exec.agent.id），不接受 requester_agent_id 参数', async () => {
+test('request_data：阻塞返回 CacheEntry，请求归属恒为调用者，schema 无 request_id/requester_agent_id', async () => {
   const { hub, toolRuntime } = makeHubAndTools()
   const source = { schema: { name: 's', source: 'api:test', input_schema: {} }, execute: async () => ({ data: { ok: 1 } }) }
   hub.registerSource(source)
-  await runTool(toolRuntime, 'request_data', { request_id: 'r1', data_key: 'k.1', params: {} }, exec('main-agent'))
-  await new Promise((resolve) => setTimeout(resolve, 10))
-  const status = hub.getStatus('r1')
-  assert.equal(status.status, 'completed')
-  assert.equal(status.result.request_id, 'r1')
-  // schema 不允许模型传 requester_agent_id/target_agent_id（additionalProperties:false）
-  const schema = toolRuntime.definitions.find((d) => d.name === 'request_data').parameters
-  assert.ok(!('requester_agent_id' in schema.properties), 'request_data 不应接受 requester_agent_id')
+  const result = await runTool(toolRuntime, 'request_data', { data_key: 'k.1', params: {} }, exec('main-agent'))
+  assert.equal(result.data.ok, 1)
+  assert.equal(result.from_cache, false)
+  assert.equal(result.source, 's')
+  // schema 不允许模型传 requester_agent_id/request_id（additionalProperties:false）
+  const parameters = toolRuntime.definitions.find((d) => d.name === 'request_data').parameters
+  assert.ok(!('requester_agent_id' in parameters.properties), 'request_data 不应接受 requester_agent_id')
+  assert.ok(!('request_id' in parameters.properties), 'request_data 不应接受 request_id')
+  const output = toolRuntime.definitions.find((d) => d.name === 'request_data').output.schema
+  assert.ok(!('request_id' in output.properties), 'request_data 输出不应包含 request_id')
+})
+
+test('request_data：缓存命中立即返回 from_cache=true', async () => {
+  const { hub, toolRuntime } = makeHubAndTools()
+  const source = { schema: { name: 's', source: 'api:test', input_schema: {} }, execute: async () => ({ data: { ok: 1 } }) }
+  hub.registerSource(source)
+  await runTool(toolRuntime, 'request_data', { data_key: 'k.1', params: {} }, exec('main'))
+  const second = await runTool(toolRuntime, 'request_data', { data_key: 'k.1', params: {} }, exec('main'))
+  assert.equal(second.from_cache, true)
 })
 
 test('request_data：无调用 Agent 身份时拒绝（官方 exec.agent 注入，不可伪造）', async () => {
   const { toolRuntime } = makeHubAndTools()
   await assert.rejects(
-    () => runTool(toolRuntime, 'request_data', { request_id: 'r', data_key: 'k', params: {} }, exec(undefined)),
+    () => runTool(toolRuntime, 'request_data', { data_key: 'k', params: {} }, exec(undefined)),
     /calling agent/,
   )
 })
 
 test('request_data：缺字段时错误明确（工具层校验，不吞成字符串）', async () => {
   const { toolRuntime } = makeHubAndTools()
-  await assert.rejects(() => runTool(toolRuntime, 'request_data', { data_key: 'k.1', params: {} }, exec('a')), /request_id is required/)
-  await assert.rejects(() => runTool(toolRuntime, 'request_data', { request_id: 'r', params: {} }, exec('a')), /data_key is required/)
+  await assert.rejects(() => runTool(toolRuntime, 'request_data', { params: {} }, exec('a')), /data_key is required/)
 })
 
-test('get_request_status / get_latest：枚举状态与缓存读取', async () => {
+test('request_data：执行失败/超时直接抛错（error 文本，供如实回传）', async () => {
+  const { hub, toolRuntime } = makeHubAndTools({ requestTimeoutMs: 20 })
+  const source = {
+    schema: { name: 'mixed', source: 'api:test', data_key_patterns: ['x.*'], input_schema: {} },
+    execute: async (req) => {
+      if (req.data_key === 'x.fail') throw new Error('boom')
+      return new Promise(() => {})
+    },
+  }
+  hub.registerSource(source)
+  await assert.rejects(() => runTool(toolRuntime, 'request_data', { data_key: 'x.fail', params: {} }, exec('main')), /boom/)
+  await assert.rejects(() => runTool(toolRuntime, 'request_data', { data_key: 'x.hang', params: {} }, exec('main')), /request timed out/)
+})
+
+test('get_latest：缓存读取与缺失', async () => {
   const { hub, toolRuntime } = makeHubAndTools()
   const source = { schema: { name: 's', source: 'api:test', input_schema: {} }, execute: async () => ({ data: { ok: 1 } }) }
   hub.registerSource(source)
-  await runTool(toolRuntime, 'request_data', { request_id: 'r1', data_key: 'k.1', params: {} }, exec('main'))
-  await new Promise((resolve) => setTimeout(resolve, 10))
-  const status = await runTool(toolRuntime, 'get_request_status', { request_id: 'r1' }, exec('main'))
-  assert.equal(status.status, 'completed')
-  assert.equal(status.result.from_cache, false)
+  await runTool(toolRuntime, 'request_data', { data_key: 'k.1', params: {} }, exec('main'))
   const latest = await runTool(toolRuntime, 'get_latest', { data_key: 'k.1' }, exec('main'))
   assert.ok(latest)
   assert.equal(latest.from_cache, true)
-  const missing = await runTool(toolRuntime, 'get_request_status', { request_id: 'nope' }, exec('main'))
+  const missing = await runTool(toolRuntime, 'get_latest', { data_key: 'nope' }, exec('main'))
   assert.equal(missing, null)
 })
 
@@ -120,18 +140,6 @@ test('tools 缺失：ctx.get(tools) 为空时不注册也不抛', () => {
   const ctx = fakeCtx(undefined)
   registerDataCollectorTools(ctx, new DataCollectorHub())
   assert.equal(ctx.effects, undefined)
-})
-
-test('get_request_status 输出结构：completed/failed 形状符合契约', async () => {
-  const { hub, toolRuntime } = makeHubAndTools()
-  const failing = { schema: { name: 'bad', source: 'api:test', input_schema: {} }, execute: async () => { throw new Error('boom') } }
-  hub.registerSource(failing)
-  await runTool(toolRuntime, 'request_data', { request_id: 'r-f', data_key: 'k.fail', params: {} }, exec('main'))
-  await new Promise((resolve) => setTimeout(resolve, 10))
-  const status = await runTool(toolRuntime, 'get_request_status', { request_id: 'r-f' }, exec('main'))
-  assert.equal(status.status, 'failed')
-  assert.equal(status.error, 'boom')
-  assert.equal(typeof status.duration_ms, 'number')
 })
 
 test('dc_status：注入 diagnostics 时注册且返回凭据/数据源/注册错误', async () => {

@@ -1,7 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 
 export interface DataRequest {
-  request_id: string
   data_key: string
   source_preference?: string[]
   params: Record<string, unknown>
@@ -11,12 +10,6 @@ export interface DataRequest {
   schema_hint?: object
 }
 
-export type RequestStatus =
-  | { status: 'enqueued'; position: number }
-  | { status: 'running'; started_at: number }
-  | { status: 'completed'; result: CacheEntry; duration_ms: number }
-  | { status: 'failed'; error: string; duration_ms?: number }
-
 export interface CacheEntry {
   data_key: string
   data: unknown
@@ -25,7 +18,6 @@ export interface CacheEntry {
   from_cache: boolean
   updated_at: number
   expires_at: number
-  request_id?: string
 }
 
 export interface SchemaDescriptor {
@@ -36,12 +28,6 @@ export interface SchemaDescriptor {
   /** Optional deterministic data_key patterns, using a trailing `*` wildcard. */
   data_key_patterns?: string[]
   description?: string
-}
-
-export interface EnqueueResult {
-  request_id: string
-  status: 'enqueued'
-  position: number
 }
 
 export interface DataSource {
@@ -56,9 +42,7 @@ export interface DataCollectorHubOptions {
   maxQueueLength?: number
   /** 缓存最大条目数；默认 500。 */
   maxCacheEntries?: number
-  /** 请求状态记录最大条数（防止 requests 表无界增长）；默认 1000。 */
-  maxRequestRecords?: number
-  /** 单请求超时；默认 30_000 ms。 */
+  /** 单请求执行超时；默认 30_000 ms。超时抛错（request timed out）。 */
   requestTimeoutMs?: number
   /** 默认 TTL 兜底；默认由 ttlFor 分类覆盖。 */
   defaultTtlMs?: number
@@ -68,8 +52,15 @@ export interface DataCollectorHubOptions {
   now?: () => number
 }
 
-type QueueItem = { request: DataRequest; cacheKey: string; waiters: Set<string> }
-type RequestRecord = { request: DataRequest; status: RequestStatus; cacheKey: string; settledAt?: number }
+/** 一个等待者：阻塞式 request() 的结算承诺。 */
+type Waiter = {
+  resolve: (entry: CacheEntry) => void
+  reject: (error: Error) => void
+  signal?: AbortSignal
+  onAbort?: () => void
+}
+
+type QueueItem = { request: DataRequest; cacheKey: string; waiters: Set<Waiter> }
 
 function stableSerialize(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
@@ -103,13 +94,11 @@ export class DataCollectorHub {
   private readonly queue: QueueItem[] = []
   /** 正在执行的队列项（执行期间不留在 queue 中，但仍参与合并与容量判断）。 */
   private active: QueueItem | null = null
-  private readonly requests = new Map<string, RequestRecord>()
   private readonly cache = new Map<string, CacheEntry>()
   private readonly sources = new Map<string, DataSource>()
   private running = false
   private readonly maxQueueLength: number
   private readonly maxCacheEntries: number
-  private readonly maxRequestRecords: number
   private readonly requestTimeoutMs: number
   private readonly defaultTtlMs: number
   private readonly ttlFor: (dataKey: string) => number
@@ -118,7 +107,6 @@ export class DataCollectorHub {
   constructor(options: DataCollectorHubOptions = {}) {
     this.maxQueueLength = options.maxQueueLength ?? 50
     this.maxCacheEntries = options.maxCacheEntries ?? 500
-    this.maxRequestRecords = options.maxRequestRecords ?? 1000
     this.requestTimeoutMs = options.requestTimeoutMs ?? 30_000
     this.defaultTtlMs = options.defaultTtlMs ?? 300_000
     this.ttlFor = options.ttlFor ?? ((dataKey: string) => (isSnapshotKey(dataKey) ? 60_000 : this.defaultTtlMs))
@@ -133,55 +121,53 @@ export class DataCollectorHub {
   }
 
   /**
-   * 入队。立即返回，不阻塞执行。
-   * 缓存命中时同步返回 completed 状态（结果已就绪）。
+   * 入队并阻塞等待执行完成。缓存命中立即返回；相同 data_key + params 的
+   * 并发请求合并为同一次执行，所有等待者共享同一结果。失败（无数据源/
+   * 执行超时/数据源错误/输出不合规）时抛出 Error，由调用方如实回传。
+   * 不存在 request_id 与状态查询：结果要么直接返回，要么报错。
    */
-  enqueue(request: DataRequest): EnqueueResult {
-    if (!request.request_id || !request.data_key || !request.requester_agent_id) {
-      throw new Error('request_id, data_key and requester_agent_id are required')
+  async request(request: DataRequest, options: { signal?: AbortSignal } = {}): Promise<CacheEntry> {
+    if (!request.data_key || !request.requester_agent_id) {
+      throw new Error('data_key and requester_agent_id are required')
     }
-    if (this.requests.has(request.request_id)) throw new Error(`request already exists: ${request.request_id}`)
+    if (options.signal?.aborted) throw new Error('request aborted')
     this.cleanExpired()
     const key = cacheKey(request)
     if (!request.force_refresh) {
       const cached = this.cache.get(key)
-      if (cached) {
-        const result = { ...cached, from_cache: true, request_id: request.request_id }
-        const finishedAt = this.now()
-        this.requests.set(request.request_id, {
-          request,
-          cacheKey: key,
-          status: { status: 'completed', result, duration_ms: 0 },
-          settledAt: finishedAt,
-        })
-        this.evictRequestsIfNeeded()
-        return { request_id: request.request_id, status: 'enqueued', position: 0 }
-      }
-      const existing = this.queue.find((item) => item.cacheKey === key) ?? (this.active && this.active.cacheKey === key ? this.active : undefined)
-      if (existing) {
-        existing.waiters.add(request.request_id)
-        const position = this.active === existing ? 0 : this.queue.indexOf(existing)
-        this.requests.set(request.request_id, { request, cacheKey: key, status: { status: 'enqueued', position } })
-        return { request_id: request.request_id, status: 'enqueued', position }
-      }
+      if (cached) return { ...cached, from_cache: true }
     }
+    const existing = this.queue.find((item) => item.cacheKey === key) ?? (this.active && this.active.cacheKey === key ? this.active : undefined)
+    if (existing) return this.awaitSettlement(existing, options.signal)
     if (this.queue.length + (this.active ? 1 : 0) >= this.maxQueueLength) throw new Error(`data request queue is full (max ${this.maxQueueLength})`)
-    const item: QueueItem = { request, cacheKey: key, waiters: new Set([request.request_id]) }
+    const item: QueueItem = { request, cacheKey: key, waiters: new Set() }
     this.queue.push(item)
-    this.requests.set(request.request_id, { request, cacheKey: key, status: { status: 'enqueued', position: this.queue.length - 1 } })
+    const pending = this.awaitSettlement(item, options.signal)
     void this.processNext()
-    return { request_id: request.request_id, status: 'enqueued', position: this.queue.length - 1 }
+    return pending
   }
 
-  /** 查询单个请求状态。 */
-  getStatus(requestId: string): RequestStatus | null {
-    const record = this.requests.get(requestId)
-    if (!record) return null
-    if (record.status.status !== 'enqueued') return record.status
-    const position = this.queue.findIndex((item) => item.waiters.has(requestId))
-    if (position >= 0) return { status: 'enqueued', position }
-    if (this.active && this.active.waiters.has(requestId)) return { status: 'enqueued', position: 0 }
-    return record.status
+  /** 挂一个等待者并返回其结算承诺；signal 触发时摘除等待者并拒绝（不影响共享执行）。 */
+  private awaitSettlement(item: QueueItem, signal?: AbortSignal): Promise<CacheEntry> {
+    return new Promise<CacheEntry>((resolve, reject) => {
+      const waiter: Waiter = { resolve, reject, signal }
+      if (signal && !signal.aborted) {
+        waiter.onAbort = () => {
+          item.waiters.delete(waiter)
+          reject(new Error('request aborted'))
+        }
+        signal.addEventListener('abort', waiter.onAbort, { once: true })
+      }
+      item.waiters.add(waiter)
+    })
+  }
+
+  /** 结算一个等待者：无论成败都摘除监听，防止重复结算。 */
+  private settleWaiter(item: QueueItem, waiter: Waiter, outcome: { kind: 'ok'; entry: CacheEntry } | { kind: 'error'; error: Error }): void {
+    item.waiters.delete(waiter)
+    if (waiter.onAbort && waiter.signal) waiter.signal.removeEventListener('abort', waiter.onAbort)
+    if (outcome.kind === 'ok') waiter.resolve(outcome.entry)
+    else waiter.reject(outcome.error)
   }
 
   /** 查询缓存中的最新数据；提供 params 时只返回该参数组合的缓存。 */
@@ -206,34 +192,30 @@ export class DataCollectorHub {
     this.running = true
     this.active = item
     const startedAt = this.now()
-    for (const id of item.waiters) {
-      const record = this.requests.get(id)
-      if (record && record.status.status === 'enqueued') record.status = { status: 'running', started_at: startedAt }
-    }
     let timedOut = false
     try {
       const source = this.chooseSource(item.request)
       if (!source) throw new Error('no data source is available for this request')
       const controller = new AbortController()
       let timeout: ReturnType<typeof setTimeout> | undefined
-       const operation = source.execute(item.request, controller.signal)
-       // Abort cooperative sources and also release the FIFO worker if a source
-       // ignores the signal. Observe the underlying promise to avoid an
-       // unhandled rejection after the timeout race has settled.
-       void operation.catch(() => {})
-       const timeoutPromise = new Promise<never>((_, reject) => {
-         timeout = setTimeout(() => {
-           timedOut = true
-           controller.abort()
-           reject(new Error('request timed out'))
-         }, this.requestTimeoutMs)
-       })
+      const operation = source.execute(item.request, controller.signal)
+      // Abort cooperative sources and also release the FIFO worker if a source
+      // ignores the signal. Observe the underlying promise to avoid an
+      // unhandled rejection after the timeout race has settled.
+      void operation.catch(() => {})
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+          timedOut = true
+          controller.abort()
+          reject(new Error('request timed out'))
+        }, this.requestTimeoutMs)
+      })
       try {
         const output = await Promise.race([operation, timeoutPromise])
         if (timedOut) throw new Error('request timed out')
-         if (source.validateOutput && !source.validateOutput(output.data)) {
-           throw new Error(`data source ${source.schema.name} returned data incompatible with its output contract`)
-         }
+        if (source.validateOutput && !source.validateOutput(output.data)) {
+          throw new Error(`data source ${source.schema.name} returned data incompatible with its output contract`)
+        }
         const finishedAt = this.now()
         const entry: CacheEntry = {
           data_key: item.request.data_key,
@@ -243,32 +225,16 @@ export class DataCollectorHub {
           from_cache: false,
           updated_at: finishedAt,
           expires_at: finishedAt + this.ttlFor(item.request.data_key),
-          request_id: item.request.request_id,
         }
         this.cache.set(item.cacheKey, entry)
         this.evictIfNeeded()
-        for (const id of item.waiters) {
-          const record = this.requests.get(id)
-          if (record) {
-            record.status = { status: 'completed', result: { ...entry, request_id: id }, duration_ms: finishedAt - startedAt }
-            record.settledAt = finishedAt
-          }
-        }
-        this.evictRequestsIfNeeded()
+        for (const waiter of [...item.waiters]) this.settleWaiter(item, waiter, { kind: 'ok', entry })
       } finally {
         if (timeout) clearTimeout(timeout)
       }
     } catch (error) {
-      const failedAt = this.now()
       const message = timedOut ? 'request timed out' : errorMessage(error)
-      for (const id of item.waiters) {
-        const record = this.requests.get(id)
-        if (record) {
-          record.status = { status: 'failed', error: message, duration_ms: failedAt - startedAt }
-          record.settledAt = failedAt
-        }
-      }
-      this.evictRequestsIfNeeded()
+      for (const waiter of [...item.waiters]) this.settleWaiter(item, waiter, { kind: 'error', error: new Error(message) })
     } finally {
       this.running = false
       this.active = null
@@ -319,17 +285,6 @@ export class DataCollectorHub {
       const oldest = [...this.cache.entries()].sort((a, b) => a[1].updated_at - b[1].updated_at)[0]
       if (!oldest) return
       this.cache.delete(oldest[0])
-    }
-  }
-
-  private evictRequestsIfNeeded(): void {
-    if (this.requests.size <= this.maxRequestRecords) return
-    const settled = [...this.requests.entries()]
-      .filter(([_, record]) => record.status.status !== 'enqueued' && record.status.status !== 'running')
-      .sort((a, b) => (a[1].settledAt ?? 0) - (b[1].settledAt ?? 0))
-    while (this.requests.size > this.maxRequestRecords && settled.length > 0) {
-      const [requestId] = settled.shift()!
-      this.requests.delete(requestId)
     }
   }
 }

@@ -39,7 +39,7 @@ function boundedParams(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 
-/** CacheEntry 输出结构（get_latest / completed 结果共用）。 */
+/** CacheEntry 输出结构（request_data / get_latest 共用）。 */
 const cacheEntrySchema = (): object => jsonObject({
   data_key: { type: 'string' },
   data: {},
@@ -48,18 +48,7 @@ const cacheEntrySchema = (): object => jsonObject({
   from_cache: { type: 'boolean' },
   updated_at: { type: 'integer' },
   expires_at: { type: 'integer' },
-  request_id: { type: 'string' },
 }, ['data_key', 'data', 'schema', 'source', 'from_cache', 'updated_at', 'expires_at'])
-
-/** RequestStatus 输出结构（get_request_status）。 */
-const requestStatusSchema = (): object => ({
-  oneOf: [
-    jsonObject({ status: { type: 'string', const: 'enqueued' }, position: { type: 'integer' } }, ['status', 'position']),
-    jsonObject({ status: { type: 'string', const: 'running' }, started_at: { type: 'integer' } }, ['status', 'started_at']),
-    jsonObject({ status: { type: 'string', const: 'completed' }, result: cacheEntrySchema(), duration_ms: { type: 'integer' } }, ['status', 'result', 'duration_ms']),
-    jsonObject({ status: { type: 'string', const: 'failed' }, error: { type: 'string' }, duration_ms: { type: 'integer' } }, ['status', 'error']),
-  ],
-})
 
 function render(_args: unknown, value: unknown): Array<{ type: 'text'; text: string }> {
   // ToolOutputDefinition.render(args, value)：第一参是入参、第二参才是返回值。
@@ -89,27 +78,20 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
   const registrations = [
     tool(
       'request_data',
-      '向共享数据 Hub 入队一个数据提取请求，立即返回入队结果；之后用 get_request_status 查询状态（completed 后可用 get_latest 取数据）。请求归属自动记为当前调用 Agent，不接收 requester_agent_id 参数。优先使用缓存；force_refresh=true 才强制拉取数据源。',
-      jsonObject({ request_id: { type: 'string' }, data_key: { type: 'string' }, source_preference: { type: 'array', items: { type: 'string' } }, params: freeObject, force_refresh: { type: 'boolean' }, schema_hint: freeObject }, ['request_id', 'data_key', 'params']),
-      jsonObject({ request_id: { type: 'string' }, status: { type: 'string', const: 'enqueued' }, position: { type: 'integer' } }, ['request_id', 'status', 'position']),
-      async (args, exec) => {
-        const rawRequestId = boundedString(args.request_id, 'request_id', MAX_ID_LENGTH)
-        const rawDataKey = boundedString(args.data_key, 'data_key', MAX_DATA_KEY_LENGTH)
-        const sourcePreference = Array.isArray(args.source_preference)
+      '向共享数据 Hub 请求数据：入队并阻塞等待执行完成（缓存命中立即返回；单请求执行超时默认 30 秒，超时报错）。成功返回 CacheEntry；失败抛错（error 文本，由调用方如实回传）。不存在 request_id 与状态查询：结果要么直接返回，要么报错。请求归属自动记为当前调用 Agent，不接收 requester_agent_id 参数。优先使用缓存；force_refresh=true 才强制拉取数据源。',
+      jsonObject({ data_key: { type: 'string' }, source_preference: { type: 'array', items: { type: 'string' } }, params: freeObject, force_refresh: { type: 'boolean' }, schema_hint: freeObject }, ['data_key', 'params']),
+      cacheEntrySchema(),
+      async (args, exec) => hub.request({
+        data_key: boundedString(args.data_key, 'data_key', MAX_DATA_KEY_LENGTH),
+        source_preference: Array.isArray(args.source_preference)
           ? args.source_preference.map((value) => boundedString(value, 'source_preference item', MAX_ID_LENGTH)).slice(0, 16)
-          : undefined
-        return hub.enqueue({
-          request_id: rawRequestId,
-          data_key: rawDataKey,
-          source_preference: sourcePreference,
-          params: boundedParams(args.params),
-          force_refresh: args.force_refresh === true,
-          requester_agent_id: callerId(exec),
-          schema_hint: args.schema_hint && typeof args.schema_hint === 'object' ? args.schema_hint as object : undefined,
-        })
-      },
+          : undefined,
+        params: boundedParams(args.params),
+        force_refresh: args.force_refresh === true,
+        requester_agent_id: callerId(exec),
+        schema_hint: args.schema_hint && typeof args.schema_hint === 'object' ? args.schema_hint as object : undefined,
+      }, { signal: exec.signal }),
     ),
-    tool('get_request_status', '按 request_id 查询数据请求状态（enqueued/running/completed/failed）。completed 时 result 为 CacheEntry。', jsonObject({ request_id: { type: 'string' } }, ['request_id']), { oneOf: [requestStatusSchema(), { type: 'null' }] }, async (args) => hub.getStatus(boundedString(args.request_id, 'request_id', MAX_ID_LENGTH))),
     tool('get_latest', '查询缓存中某个 data_key 的最新数据；传入 params 时只匹配该参数组合，否则返回该 data_key 的最新变体。返回 CacheEntry 或 null。', jsonObject({ data_key: { type: 'string' }, params: freeObject }, ['data_key']), { oneOf: [cacheEntrySchema(), { type: 'null' }] }, async (args) => hub.getLatest(String(args.data_key), args.params && typeof args.params === 'object' ? args.params as Record<string, unknown> : undefined)),
     tool('list_schemas', '列出当前已挂载的数据源及其独立 input/output schema；每个数据源自带契约，不做统一适配。', jsonObject(), { type: 'array', items: jsonObject({ name: { type: 'string' }, source: { type: 'string' }, input_schema: freeObject, output_schema: freeObject, data_key_patterns: { type: 'array', items: { type: 'string' } }, description: { type: 'string' } }, ['name', 'source', 'input_schema']) }, async () => hub.listSchemas()),
     ...(diagnostics ? [

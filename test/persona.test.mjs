@@ -49,6 +49,7 @@ test('主 persona：数据调度纪律——通过 list_agents + send_message �
   assert.doesNotMatch(MAIN_PERSONA, /"requester_agent_id"/)
   assert.doesNotMatch(MAIN_PERSONA, /subscribe_data|unsubscribe_data/)
   assert.doesNotMatch(MAIN_PERSONA, /按 request_id 对账/)
+  assert.doesNotMatch(MAIN_PERSONA, /get_request_status/, '主 persona 不应再引用已删除的 get_request_status')
 })
 
 test('主 persona：预热与回合纪律——每会话一个 dc、首个任务创建、等待期有限收集', () => {
@@ -79,13 +80,15 @@ test('subagent_data_collector 行：continuable、persona 覆盖、toolFilter �
   assert.equal(collectorRow.config.backgroundMode, 'continuable')
   const allow = collectorRow.config.toolFilter?.allow
   assert.ok(Array.isArray(allow), 'toolFilter.allow 必须存在')
-  for (const requiredTool of ['send_message', 'request_data', 'get_request_status', 'get_latest', 'list_schemas', 'dc_status']) {
+  for (const requiredTool of ['send_message', 'request_data', 'get_latest', 'list_schemas', 'dc_status']) {
     assert.ok(allow.includes(requiredTool), `toolFilter.allow 必须包含 ${requiredTool}`)
   }
   // 叶子执行器：不应被允许委派/提问/网页/文件操作
   for (const forbiddenTool of ['subagent', 'subagent_data_collector', 'ask_user_question', 'todo_write', 'web_search', 'web_fetch', 'bash']) {
     assert.ok(!allow.includes(forbiddenTool), `toolFilter.allow 不应包含 ${forbiddenTool}`)
   }
+  // 方案 B：get_request_status 已删除（阻塞式 request_data，无状态查询）
+  assert.ok(!allow.includes('get_request_status'), 'toolFilter.allow 不应包含已删除的 get_request_status')
 })
 
 test('data_collector persona：覆盖 SPEC §8 全部必须要点', () => {
@@ -93,7 +96,6 @@ test('data_collector persona：覆盖 SPEC §8 全部必须要点', () => {
     /数据收集执行器/,
     /不是分析师|不是下单员|不负责投资建议/,
     /request_data/,
-    /get_request_status/,
     /get_latest/,
     /send_message/,
     /list_schemas/,
@@ -110,6 +112,10 @@ test('data_collector persona：覆盖 SPEC §8 全部必须要点', () => {
   assert.match(COLLECTOR_PERSONA, /api:fuyao/)
   assert.match(COLLECTOR_PERSONA, /重试纪律/, 'dc 需含重试纪律')
   assert.match(COLLECTOR_PERSONA, /重试 2 次/, '重试上限需显式')
+  // 方案 B：不存在 request_id 与状态查询工具，阻塞式 request_data 直接返回结果
+  assert.doesNotMatch(COLLECTOR_PERSONA, /get_request_status/, 'dc persona 不应再引用已删除的 get_request_status')
+  assert.match(COLLECTOR_PERSONA, /阻塞/, 'dc persona 应说明 request_data 阻塞等待执行')
+  assert.match(COLLECTOR_PERSONA, /30 秒|超时/, 'dc persona 应说明执行超时报错')
   // 走偏产物必须消失
   assert.doesNotMatch(COLLECTOR_PERSONA, /"requester_agent_id"/)
   assert.doesNotMatch(COLLECTOR_PERSONA, /subscribe_data|unsubscribe_data|订阅/)

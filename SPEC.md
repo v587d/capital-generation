@@ -4,6 +4,8 @@
 > 本文档是实现契约，供后续 coding agent 直接按此落地。  
 > 版本：Phase 1（2026-09）
 
+> [!NOTICE]
+> 1. 官方指的是 DSH 官方框架能力
 ---
 
 ## 1. 目标与非目标
@@ -29,7 +31,9 @@
 - 不输出未经模型或回测支持的胜率、概率或收益承诺。
 - 不提供自动下单能力。
 - 不实现多并发执行（仅串行）。
-- **不自研消息协议**：不做自定义广播、不做订阅表、不做 request_id 对账状态机。
+- **不自研消息协议**：不做自定义广播、不做订阅表、没有 request_id（请求/回传以
+  data_key + params 标识与对应，结果由 `request_data` 阻塞式直接返回）——
+  不存在对账状态机。
   通信只依赖官方 dsh-subagent 原语（Inbox、`send_message`、结算通知、`agent/disposed`）。
 
 ---
@@ -48,7 +52,7 @@ Agent plane（每会话）
 └── data_collector（continuable 子 Agent，经 preset 的 subagent_data_collector
     专用委派行创建；persona/toolFilter 由该行 config 注入，主 Agent 不复制模板）
         ├── 持有 / 驱动 dataCollectorHub
-        ├── 暴露模型可见 tools（request_data / get_request_status / get_latest / list_schemas）
+        ├── 暴露模型可见 tools（request_data / get_latest / list_schemas）
         └── 通过官方 send_message 与主 Agent 通信
 ```
 
@@ -63,9 +67,10 @@ Agent plane（每会话）
 
 - **消息图 = Agent 树**：官方 `sendMessage` 只允许相邻两层通信（直接父 / 直接 continuable 子），跨层必须沿树逐层中继。
 - **单一父约束**：每个 continuable 子 Agent 有且只有一个直接 parent，不存在「多父共享同一个 child」的官方形态。
-- **采用树形执行器拓扑**：`data_collector` 挂主 Agent 之下，未来的数据消费/分析子 Agent 均创建为 `data_collector` 的直接子（1 父 → N 子，官方允许）；需上报的结果沿树逐层上送。主 Agent 只做用户级最终调度，不做数据搬移。
+- **支持混合拓扑**：子 Agent 可按职责和依赖关系灵活挂载。数据消费类子 Agent（依赖 Hub 数据）建议创建为 `data_collector` 的直接子（1 父 → N 子，官方允许），结果沿树逐层上送；独立子 Agent（如网页研究、新闻监控、量化分析）可直接挂在主 Agent 之下。主 Agent 负责用户级最终调度与跨子 Agent 的任务编排。
 - **多点消费不依赖血缘**：数据与缓存登记在共享 Hub（data_key + 参数变体），任何 Agent 都能用只读工具读共享缓存；写路径经 data_collector 统一入口（职责分工，非运行时强制——请求归属恒为调用者自身）。血缘只决定消息投递路径（相邻直发，不相邻经公共祖先转发），**不存在订阅与广播**：新需求 = 新消息，回传即唤醒。
 - **工具层无邻接权限逻辑**：`request_data` 等工具的请求归属由官方 `exec.agent` 注入（恒为调用者），不接收 `requester_agent_id` / `target_agent_id` 参数，也没有「代理请求」概念。工具可见性不是权限隔离；真正的边界是官方原语本身（`send_message` 的 exact live sender + 相邻校验 + cold resume）。
+> 工具层不负责校验调用者身份，只做事。消息层由官方负责，校验身份和相邻关系（拒绝跨级请求）。权限层由官方负责，由`toolFilter`控制工具可见性。
 
 ---
 
@@ -75,11 +80,8 @@ Agent plane（每会话）
 
 ```ts
 interface DataCollectorHub {
-  /** 入队。立即返回，不阻塞执行。 */
-  enqueue(req: DataRequest): EnqueueResult
-
-  /** 查询单个请求状态 */
-  getStatus(requestId: string): RequestStatus | null
+  /** 入队并阻塞等待执行完成；成功返回 CacheEntry，失败抛错。 */
+  request(req: DataRequest, options?: { signal?: AbortSignal }): Promise<CacheEntry>
 
   /** 查询缓存中的最新数据；params 存在时精确匹配参数组合 */
   getLatest(dataKey: string, params?: Record<string, unknown>): CacheEntry | null
@@ -92,7 +94,6 @@ interface DataCollectorHub {
 }
 
 interface DataRequest {
-  request_id: string          // 调用方生成，建议 uuid
   data_key: string            // 逻辑键，见 §4
   source_preference?: string[] // 优先具体 schema.name，如 ["get_a_share_prices_snapshot", "any"]；默认按 data_key 路由
   params: Record<string, unknown>  // 透传给具体数据源 tool 的参数
@@ -100,18 +101,6 @@ interface DataRequest {
   requester_agent_id: string  // 请求归属；由工具层以官方 exec.agent.id 注入，不接受模型传参
   schema_hint?: object        // 可选，期望结构提示
 }
-
-interface EnqueueResult {
-  request_id: string
-  status: "enqueued"
-  position: number            // 当前队列中的位置（0 = 下一个执行）
-}
-
-type RequestStatus =
-  | { status: "enqueued"; position: number }
-  | { status: "running"; started_at: number }
-  | { status: "completed"; result: CacheEntry; duration_ms: number }
-  | { status: "failed"; error: string; duration_ms?: number }
 
 interface CacheEntry {
   data_key: string
@@ -121,7 +110,6 @@ interface CacheEntry {
   from_cache: boolean
   updated_at: number          // ms
   expires_at: number          // ms
-  request_id?: string
 }
 
 interface SchemaDescriptor {
@@ -141,9 +129,9 @@ interface SchemaDescriptor {
 ### 3.2 执行策略（Phase 1）
 
 - **严格串行 FIFO**：同一时刻只执行一个请求。
-- 相同 `data_key` + 相同 `params`（深比较或稳定 hash）的并发请求可合并：只执行一次，结果状态回传给所有等待的 `request_id`。
-- 队列最大长度：默认 `50`。超过时 `enqueue` 直接返回失败（不入队）。
-- 单请求超时：默认 `30_000` ms。超时标记 `failed`（状态可经 `get_request_status` 查询）。
+- 相同 `data_key` + 相同 `params`（深比较或稳定 hash）的并发请求可合并：只执行一次，结果回传给所有等待者（每个等待者各自拿到自己的 Promise 结算）。
+- 队列最大长度：默认 `50`。超过时 `request()` 直接抛错（不入队）。
+- 单请求执行超时：默认 `30_000` ms。超时抛错（错误文本 `request timed out`），由调用方（data_collector）如实回传 `failed`。
 
 ### 3.3 缓存与回收（简单方案）
 
@@ -155,7 +143,8 @@ interface SchemaDescriptor {
   - 可通过配置覆盖。
 - **最大条目数**：默认 `500`。超过时删除 `updated_at` 最旧的条目。
 - **懒清理**：在 `getLatest` / 写入时顺带删除已过期条目。不强制后台定时器。
-- 请求状态表带 `maxRequestRecords` 上限（默认 1000），只淘汰已结算记录，防无界增长。
+- **无请求状态表**：阻塞式 `request()` 直接用 Promise 结算，不存在请求记录表，
+  也就没有无界增长问题（队列本身有 `maxQueueLength` 上限）。
 
 ---
 
@@ -190,9 +179,10 @@ interface SchemaDescriptor {
 ### 5.1 请求进入方式
 
 1. **`send_message`** 到 `data_collector` 的 agent_id，消息体为结构化 JSON 文本（见 §5.3）。
-2. 模型可见 tool：`request_data`（内部调用 `hub.enqueue`）——请求归属恒为
-   当前调用 Agent，由官方 `exec.agent` 注入；`data_collector` 处理委派时用它，
-   其他 Agent 未经委派纪律不应直接用它。
+2. 模型可见 tool：`request_data`（内部调用 `hub.request`，**阻塞等待执行完成**：
+   缓存命中立即返回，执行超时/失败抛错）——请求归属恒为当前调用 Agent，由官方
+   `exec.agent` 注入；`data_collector` 处理委派时用它，其他 Agent 未经委派纪律
+   不应直接用它。
 
 ### 5.2 回传
 
@@ -201,8 +191,9 @@ interface SchemaDescriptor {
   在下一个 step/turn 边界收到消息；continuable 子 Agent 结束还有官方结算通知
   自动唤醒父 Agent。
 - **不存在 Hub 自动投递**：Hub 不持有 Agent 引用，也不发送任何消息。
-- 失败同样通过 `send_message` 回传 `status: "failed"` 载荷；`get_request_status`
-  可查询原始执行状态（含 error）。
+- 失败同样通过 `send_message` 回传 `status: "failed"` 载荷；`error` 直接来自
+  `request_data` 的报错（执行超时 / 无可用数据源 / 数据源错误 / 参数错误等），
+  没有独立的状态查询通道——回传即结果。
 
 ### 5.3 消息载荷（send_message 载荷建议；这是数据请求/回传格式约定，不是消息路由协议）
 
@@ -223,7 +214,6 @@ interface SchemaDescriptor {
 ```json
 {
   "type": "data_updated",
-  "request_id": "uuid（collector 入队时保存的 request_id，便于引用）",
   "data_key": "a-share.prices.snapshot.600519.SH",
   "status": "completed",
   "source": "get_a_share_prices_snapshot",
@@ -237,8 +227,9 @@ interface SchemaDescriptor {
 
 失败时 `status: "failed"`，带 `error` 字段，无 `data`。
 
-> request_id 仅作回传引用与状态查询，**不构成对账状态机**：唤醒由官方结算
-> 通知 / Inbox 保证，request_id 不是投递凭证。
+> **不存在 request_id**：请求与回传以 `data_key`（+params）标识与对应，载荷里的
+> data/schema/source/from_cache/updated_at/expires_at 取自 `request_data` 的返回
+> （按原样填入，不改写）；唤醒由官方结算通知 / Inbox 保证，回传即结果。
 
 ### 5.4 发现与生命周期（官方语义）
 
@@ -304,8 +295,7 @@ MCP 与 REST 语义一致；优先走 MCP 工具挂载（官方 `@deepseek-ai/ds
 
 | Tool 名 | 作用 | 备注 |
 |---------|------|------|
-| `request_data` | 入队提取请求 | 内部 → `hub.enqueue`，返回 `EnqueueResult`；**请求归属恒为调用者（官方 exec.agent），不接受 requester_agent_id** |
-| `get_request_status` | 查请求状态 | → `hub.getStatus` |
+| `request_data` | 请求数据并阻塞等待执行完成（缓存命中立即返回） | 内部 → `hub.request`，返回 CacheEntry，失败抛错（error 文本）；**请求归属恒为调用者（官方 exec.agent），不接受 requester_agent_id**；不存在 request_id 与状态查询 |
 | `get_latest` | 查缓存最新数据 | → `hub.getLatest`；可传 params 精确匹配缓存变体；只读，任何 Agent 可用 |
 | `list_schemas` | 列出可用数据源 schema | → `hub.listSchemas`；只读，任何 Agent 可用 |
 | `dc_status` | 诊断（凭据 present/source、已注册源、最近注册错误） | 注入 diagnostics 时注册；不泄露密钥值 |
@@ -336,8 +326,8 @@ MCP 与 REST 语义一致；优先走 MCP 工具挂载（官方 `@deepseek-ai/ds
   （最近 scope 胜出，覆盖主 Agent 人设），并把父 Agent id 注入初始 prompt；
   主 Agent 创建时**不复制模板**，prompt 只写委托上下文。
 - **data_collector 工具边界**：`config.toolFilter.allow` 与继承的 preset 工具集
-  求交集，收敛为 `send_message` + `request_data`/`get_request_status`/
-  `get_latest`/`list_schemas`/`dc_status`。子 Agent 是叶子执行器。
+  求交集，收敛为 `send_message` + `request_data`/`get_latest`/
+  `list_schemas`/`dc_status`。子 Agent 是叶子执行器。
 
 data_collector 人设必须包含的要点：
 
@@ -367,16 +357,20 @@ data_collector 人设必须包含的要点：
 ## 10. Phase 1 验收标准
 
 1. `ctx.dataCollectorHub` 已注册，in-process 多 Agent 共享同一实例。
-2. 请求经 `request_data` 或 `send_message` 进入后，严格 FIFO 串行执行。
+2. 请求经 `request_data`（阻塞式）或 `send_message` 委派后，严格 FIFO 串行执行；
+   `request_data` 等待执行完成，缓存命中立即返回。
 3. 缓存命中时不调用外部数据源，并正确设置 `from_cache: true`。
 4. 回传通过官方 `send_message` 送达：data_collector 完成提取后向直接父级发送
    结构化载荷；Hub 自身不做任何 Agent 投递。
 5. TTL + 最大条目数回收生效，无内存无界增长。
 6. 至少打通同花顺「行情快照」与「标的检索」两条路径（MCP 或 REST tool）。
-7. 失败路径返回明确 `error`，不幻觉填充数据。
+7. 失败路径返回明确 `error`，不幻觉填充数据；执行超时（默认 30s）抛错
+   `request timed out`。
 8. 不引入 SQLite 或任何磁盘持久化。
 9. 工具层不接收 `requester_agent_id` / `target_agent_id`，不依赖任何非官方
    Agent 字段（如 `parentId` / `directAgentIds`）；请求归属只来自 `exec.agent`。
+10. 不存在 `request_id`：`request_data` 不接受、不返回任何请求 id，也没有状态
+    查询工具/状态表——结果要么直接返回，要么抛错。
 
 ---
 

@@ -28,7 +28,6 @@ function testSource(name, delayMs = 0, failWith) {
 
 function request(overrides = {}) {
   return {
-    request_id: `req-${Math.random().toString(36).slice(2)}`,
     data_key: 'a-share.prices.snapshot.test',
     params: {},
     requester_agent_id: 'main-agent',
@@ -58,53 +57,34 @@ test('FIFO 严格串行执行：同一时刻只有一个请求在跑，按入队
     },
   }
   hub.registerSource(source)
-  const ids = ['a', 'b', 'c'].map((key) => {
-    const req = request({ data_key: `k.${key}`, params: { key } })
-    hub.enqueue(req)
-    return req.request_id
-  })
-  await sleep(60)
+  // 并发发出三个不同 key 的请求：全部入队，阻塞式 request() 等各自完成
+  const results = await Promise.all(['a', 'b', 'c'].map((key) => hub.request(request({ data_key: `k.${key}`, params: { key } }))))
   assert.equal(maxActive, 1, '同一时刻必须只有一个请求在执行')
   assert.deepEqual(order, ['a', 'b', 'c'])
-  for (const id of ids) {
-    const status = hub.getStatus(id)
-    assert.equal(status.status, 'completed')
-  }
+  assert.deepEqual(results.map((r) => r.data), ['a', 'b', 'c'])
 })
 
-test('缓存命中：第二次同键请求不调用数据源，from_cache=true 且同步返回', async () => {
+test('缓存命中：第二次同键请求不调用数据源，from_cache=true 且立即返回', async () => {
   const { hub } = makeHub()
   const source = testSource('get_meta_tickers_search')
   hub.registerSource(source)
-  const first = request({ data_key: 'meta.tickers.search.茅台', params: { q: '茅台' } })
-  hub.enqueue(first)
-  await sleep(10)
+  const first = await hub.request(request({ data_key: 'meta.tickers.search.茅台', params: { q: '茅台' } }))
   assert.equal(source.calls(), 1)
-  const second = request({ data_key: 'meta.tickers.search.茅台', params: { q: '茅台' } })
-  const result = hub.enqueue(second)
-  assert.equal(result.status, 'enqueued')
-  assert.equal(result.position, 0)
-  const status = hub.getStatus(second.request_id)
-  assert.equal(status.status, 'completed')
-  assert.equal(status.result.from_cache, true)
+  assert.equal(first.from_cache, false)
+  const second = await hub.request(request({ data_key: 'meta.tickers.search.茅台', params: { q: '茅台' } }))
+  assert.equal(second.from_cache, true)
   assert.equal(source.calls(), 1, '缓存命中不得调用数据源')
 })
 
-test('同键并发合并：多个相同请求只执行一次，各自拿到 completed', async () => {
+test('同键并发合并：多个相同请求只执行一次，各自拿到同一结果', async () => {
   const { hub } = makeHub()
   const source = testSource('merged', 10)
   hub.registerSource(source)
-  const ids = [1, 2, 3].map(() => {
-    const req = request({ data_key: 'same.key', params: { n: 42 } })
-    hub.enqueue(req)
-    return req.request_id
-  })
-  await sleep(40)
+  const results = await Promise.all([1, 2, 3].map(() => hub.request(request({ data_key: 'same.key', params: { n: 42 } }))))
   assert.equal(source.calls(), 1, '合并请求只应执行一次')
-  for (const id of ids) {
-    const status = hub.getStatus(id)
-    assert.equal(status.status, 'completed')
-    assert.equal(status.result.request_id, id, '每个请求状态里的结果应指向自己的 request_id')
+  for (const result of results) {
+    assert.equal(result.data.name, 'merged')
+    assert.equal(result.from_cache, false)
   }
 })
 
@@ -112,8 +92,7 @@ test('TTL 过期：getLatest 对过期条目返回 null', async () => {
   let clock = 0
   const { hub } = makeHub({ now: () => clock, ttlFor: () => 100 })
   hub.registerSource(testSource('ttl'))
-  hub.enqueue(request({ data_key: 'k.v', requester_agent_id: 'a' }))
-  await sleep(5) // 让微任务把缓存写入完成（写入时刻 clock 仍为 0）
+  await hub.request(request({ data_key: 'k.v', requester_agent_id: 'a' }))
   assert.ok(hub.getLatest('k.v'))
   clock = 200
   assert.equal(hub.getLatest('k.v'), null)
@@ -122,84 +101,46 @@ test('TTL 过期：getLatest 对过期条目返回 null', async () => {
 test('容量淘汰：超过 maxCacheEntries 时读取不到最旧条目', async () => {
   const { hub } = makeHub({ maxCacheEntries: 2 })
   hub.registerSource(testSource('evict'))
-  hub.enqueue(request({ data_key: 'k.0' }))
-  await sleep(5)
-  hub.enqueue(request({ data_key: 'k.1' }))
-  await sleep(5)
-  hub.enqueue(request({ data_key: 'k.2' }))
-  await sleep(20)
+  await hub.request(request({ data_key: 'k.0' }))
+  await hub.request(request({ data_key: 'k.1' }))
+  await hub.request(request({ data_key: 'k.2' }))
   assert.ok(hub.getLatest('k.2'))
   assert.equal(hub.getLatest('k.0'), null, '最旧条目应被淘汰')
 })
 
-test('超时：超过 requestTimeoutMs 标记 failed 且错误为 request timed out', async () => {
+test('超时：超过 requestTimeoutMs 抛错 request timed out', async () => {
   const { hub } = makeHub({ requestTimeoutMs: 20 })
   hub.registerSource(testSource('hang', 5000))
-  const req = request({ data_key: 'hang.key' })
-  hub.enqueue(req)
-  await sleep(80)
-  const status = hub.getStatus(req.request_id)
-  assert.equal(status.status, 'failed')
-  assert.equal(status.error, 'request timed out')
+  await assert.rejects(() => hub.request(request({ data_key: 'hang.key' })), /request timed out/)
 })
 
-test('失败：数据源抛错时状态携带明确 error', async () => {
+test('失败：数据源抛错时错误文本明确', async () => {
   const { hub } = makeHub()
   hub.registerSource(testSource('bad', 0, 'Fuyao API error 401: unauthorized'))
-  const req = request({ data_key: 'bad.key' })
-  hub.enqueue(req)
-  await sleep(20)
-  const status = hub.getStatus(req.request_id)
-  assert.equal(status.status, 'failed')
-  assert.match(status.error, /Fuyao API error/)
+  await assert.rejects(() => hub.request(request({ data_key: 'bad.key' })), /Fuyao API error/)
 })
 
 test('队列满：超过 maxQueueLength 直接抛错不入队', async () => {
   const { hub } = makeHub({ maxQueueLength: 1 })
   hub.registerSource(testSource('full', 50))
-  hub.enqueue(request({ data_key: 'full.1' }))
-  assert.throws(() => hub.enqueue(request({ data_key: 'full.2' })), /queue is full/)
-  await sleep(80)
+  const first = hub.request(request({ data_key: 'full.1' }))
+  await assert.rejects(() => hub.request(request({ data_key: 'full.2' })), /queue is full/)
+  assert.ok(await first, '第一个请求仍正常完成')
 })
 
 test('force_refresh：缓存存在时仍强制拉取并覆盖', async () => {
   const { hub } = makeHub()
   const source = testSource('fresh')
   hub.registerSource(source)
-  hub.enqueue(request({ data_key: 'fresh.key' }))
-  await sleep(20)
-  const ref = request({ data_key: 'fresh.key', force_refresh: true })
-  hub.enqueue(ref)
-  await sleep(20)
+  await hub.request(request({ data_key: 'fresh.key' }))
+  const refreshed = await hub.request(request({ data_key: 'fresh.key', force_refresh: true }))
   assert.equal(source.calls(), 2)
-  const status = hub.getStatus(ref.request_id)
-  assert.equal(status.status, 'completed')
-  assert.equal(status.result.from_cache, false)
+  assert.equal(refreshed.from_cache, false)
 })
 
-test('maxRequestRecords：completed 记录超限时淘汰最旧', async () => {
-  const { hub } = makeHub({ maxRequestRecords: 3 })
-  hub.registerSource(testSource('records'))
-  const ids = []
-  for (let i = 0; i < 5; i += 1) {
-    const req = request({ data_key: `records.${i}`, params: {} })
-    hub.enqueue(req)
-    ids.push(req.request_id)
-    await sleep(5)
-  }
-  await sleep(20)
-  assert.equal(hub.getStatus(ids[0]), null, '最旧记录被淘汰')
-  assert.ok(hub.getStatus(ids[4]))
-})
-
-test('no data source：无数据源时 failed 且错误明确', async () => {
+test('no data source：无数据源时报错且错误明确', async () => {
   const { hub } = makeHub()
-  const req = request({ data_key: 'none.key' })
-  hub.enqueue(req)
-  await sleep(20)
-  const status = hub.getStatus(req.request_id)
-  assert.equal(status.status, 'failed')
-  assert.match(status.error, /no data source/)
+  await assert.rejects(() => hub.request(request({ data_key: 'none.key' })), /no data source/)
 })
 
 test('source_preference 不匹配时失败，不静默调用第一个数据源', async () => {
@@ -209,11 +150,8 @@ test('source_preference 不匹配时失败，不静默调用第一个数据源',
     schema: { name: 'search', source: 'api:search', input_schema: {} },
     execute: async () => { calls += 1; return { data: { wrong: true } } },
   })
-  const req = request({ source_preference: ['api:missing'] })
-  hub.enqueue(req)
-  await sleep(20)
+  await assert.rejects(() => hub.request(request({ source_preference: ['api:missing'] })), /no data source/)
   assert.equal(calls, 0)
-  assert.equal(hub.getStatus(req.request_id).status, 'failed')
 })
 
 test('同一 provider 下按 data_key 路由到正确 capability，不取第一个注册源', async () => {
@@ -227,12 +165,9 @@ test('同一 provider 下按 data_key 路由到正确 capability，不取第一�
     schema: { name: 'get_a_share_prices_snapshot', source: 'api:fuyao', data_key_patterns: ['a-share.prices.snapshot.*'], input_schema: {} },
     execute: async () => { calls.push('snapshot'); return { data: { item: [{ last_price: 1 }] } } },
   })
-  const req = request({ data_key: 'a-share.prices.snapshot.300803.SZ', source_preference: ['api:fuyao', 'any'], params: { thscodes: '300803.SZ' } })
-  hub.enqueue(req)
-  await sleep(20)
+  const result = await hub.request(request({ data_key: 'a-share.prices.snapshot.300803.SZ', source_preference: ['api:fuyao', 'any'], params: { thscodes: '300803.SZ' } }))
   assert.deepEqual(calls, ['snapshot'])
-  assert.equal(hub.getStatus(req.request_id).status, 'completed')
-  assert.equal(hub.getStatus(req.request_id).result.source, 'get_a_share_prices_snapshot')
+  assert.equal(result.source, 'get_a_share_prices_snapshot')
 })
 
 test('真实 Fuyao 四源按 data_key 分别路由且使用各自 schema', async () => {
@@ -251,21 +186,18 @@ test('真实 Fuyao 四源按 data_key 分别路由且使用各自 schema', async
   try {
     const hub = new DataCollectorHub()
     for (const source of createFuyaoRestSources(async () => 'key')) hub.registerSource(source)
-    const requests = [
-      request({ request_id: 'route-search', data_key: 'meta.tickers.search.指南针', params: { q: '指南针' } }),
-      request({ request_id: 'route-snapshot', data_key: 'a-share.prices.snapshot.300803.SZ', params: { thscodes: '300803.SZ' } }),
-      request({ request_id: 'route-history', data_key: 'a-share.prices.historical.300803.SZ.day', params: { thscode: '300803.SZ', interval: '1d', start: 1, end: 2 } }),
-      request({ request_id: 'route-calendar', data_key: 'a-share.calendar.trading_days', params: {} }),
-    ]
-    for (const req of requests) hub.enqueue(req)
-    await sleep(80)
-    assert.equal(hub.getStatus('route-search').status, 'completed')
-    assert.equal(hub.getStatus('route-snapshot').status, 'completed')
-    assert.equal(hub.getStatus('route-history').status, 'completed')
-    assert.equal(hub.getStatus('route-calendar').status, 'completed')
-    assert.equal(hub.getStatus('route-snapshot').result.source, 'get_a_share_prices_snapshot')
-    assert.equal(hub.getStatus('route-history').result.source, 'get_a_share_prices_historical')
-    assert.equal(hub.getStatus('route-calendar').result.source, 'get_a_share_calendar_trading_days')
+    const results = await Promise.all([
+      hub.request(request({ data_key: 'meta.tickers.search.指南针', params: { q: '指南针' } })),
+      hub.request(request({ data_key: 'a-share.prices.snapshot.300803.SZ', params: { thscodes: '300803.SZ' } })),
+      hub.request(request({ data_key: 'a-share.prices.historical.300803.SZ.day', params: { thscode: '300803.SZ', interval: '1d', start: 1, end: 2 } })),
+      hub.request(request({ data_key: 'a-share.calendar.trading_days', params: {} })),
+    ])
+    assert.deepEqual(results.map((r) => r.source), [
+      'get_meta_tickers_search',
+      'get_a_share_prices_snapshot',
+      'get_a_share_prices_historical',
+      'get_a_share_calendar_trading_days',
+    ])
   } finally {
     globalThis.fetch = originalFetch
   }
@@ -278,12 +210,8 @@ test('未知 data_key 不会在 any 下静默使用第一个 source', async () =
     schema: { name: 'search', source: 'api:fuyao', data_key_patterns: ['meta.tickers.search.*'], input_schema: {} },
     execute: async () => { calls += 1; return { data: { item: [] } } },
   })
-  const req = request({ data_key: 'a-share.unknown.value' })
-  hub.enqueue(req)
-  await sleep(20)
+  await assert.rejects(() => hub.request(request({ data_key: 'a-share.unknown.value' })), /no data source/)
   assert.equal(calls, 0)
-  assert.equal(hub.getStatus(req.request_id).status, 'failed')
-  assert.match(hub.getStatus(req.request_id).error, /no data source/)
 })
 
 test('source output guard 失败时不写入缓存', async () => {
@@ -293,22 +221,15 @@ test('source output guard 失败时不写入缓存', async () => {
     validateOutput: () => false,
     execute: async () => ({ data: { wrong: true } }),
   })
-  const req = request({ data_key: 'guarded.value' })
-  hub.enqueue(req)
-  await sleep(20)
-  assert.equal(hub.getStatus(req.request_id).status, 'failed')
-  assert.equal(hub.getLatest(req.data_key), null)
+  await assert.rejects(() => hub.request(request({ data_key: 'guarded.value' })), /incompatible with its output contract/)
+  assert.equal(hub.getLatest('guarded.value'), null)
 })
 
 test('getLatest 传入 params 时只返回精确参数组合', async () => {
   const { hub } = makeHub()
   hub.registerSource(testSource('params'))
-  const first = request({ data_key: 'same.key', params: { range: 'old' } })
-  const second = request({ data_key: 'same.key', params: { range: 'new' } })
-  hub.enqueue(first)
-  await sleep(10)
-  hub.enqueue(second)
-  await sleep(10)
+  await hub.request(request({ data_key: 'same.key', params: { range: 'old' } }))
+  await hub.request(request({ data_key: 'same.key', params: { range: 'new' } }))
   assert.equal(hub.getLatest('same.key', { range: 'old' }).data.echo.range, 'old')
   assert.equal(hub.getLatest('same.key', { range: 'missing' }), null)
 })
@@ -319,11 +240,35 @@ test('超时会释放 FIFO worker，即使数据源不响应 AbortSignal', async
     schema: { name: 'mixed', source: 'api:test', input_schema: {} },
     execute: async (req) => req.data_key === 'hang.forever' ? new Promise(() => {}) : { data: { ok: true } },
   })
-  const hanging = request({ data_key: 'hang.forever' })
-  const next = request({ data_key: 'next.key' })
-  hub.enqueue(hanging)
-  hub.enqueue(next)
-  await sleep(35)
-  assert.equal(hub.getStatus(hanging.request_id).status, 'failed')
-  assert.equal(hub.getStatus(next.request_id).status, 'completed')
+  const hanging = hub.request(request({ data_key: 'hang.forever' }))
+  const next = hub.request(request({ data_key: 'next.key' }))
+  await assert.rejects(() => hanging, /request timed out/)
+  assert.equal((await next).data.ok, true)
+})
+
+test('调用方 signal 中止：等待者被摘除并报错，共享执行不受影响（缓存照常写入）', async () => {
+  const { hub } = makeHub()
+  const source = testSource('sig', 30)
+  hub.registerSource(source)
+  const controller = new AbortController()
+  const pending = hub.request(request({ data_key: 'sig.key' }), { signal: controller.signal })
+  controller.abort()
+  await assert.rejects(() => pending, /aborted/)
+  await sleep(50)
+  const cached = await hub.request(request({ data_key: 'sig.key' }))
+  assert.equal(cached.from_cache, true, '被中止的执行仍应写完缓存')
+})
+
+test('已中止的 signal：请求直接报错不入队', async () => {
+  const { hub } = makeHub()
+  hub.registerSource(testSource('x'))
+  const controller = new AbortController()
+  controller.abort()
+  await assert.rejects(() => hub.request(request({ data_key: 'x.y' }), { signal: controller.signal }), /aborted/)
+})
+
+test('缺字段：data_key 或 requester_agent_id 缺失时报错明确', async () => {
+  const { hub } = makeHub()
+  await assert.rejects(() => hub.request(request({ data_key: '' })), /data_key and requester_agent_id are required/)
+  await assert.rejects(() => hub.request(request({ requester_agent_id: '' })), /data_key and requester_agent_id are required/)
 })
