@@ -6,6 +6,7 @@ import z from '@deepseek-ai/schemastery'
 import { provideDataCollectorHub } from './data-collector/hub.js'
 import { resolveFuyaoApiKey, createFuyaoRestSources } from './sources/fuyao-rest.js'
 import { registerDataCollectorTools, type DataCollectorDiagnostics } from './data-collector/tools.js'
+import { registerTimeTool } from './time/tools.js'
 
 /** Internal plugin name used by the Capital mode preset. */
 export const name = 'capital-generation'
@@ -99,6 +100,9 @@ export function apply(ctx: Context, config: Config) {
   // subagent_data_collector 行 toolFilter 收敛。调用边界由工具层以官方
   // exec.agent 身份归属保证（请求方恒为调用者），不再需要工具层邻接校验。
   registerDataCollectorTools(ctx, hub, diagnostics)
+  // 时间工具：主 Agent 与所有子 Agent（含 data_collector）共享的本地时区/
+  // 当前时刻权威读数，注册在 Capital 会话组作用域（与数据工具同通道）。
+  registerTimeTool(ctx)
   ctx.effect(async () => {
     try {
       const apiKey = await resolveFuyaoApiKey(ctx)
