@@ -43,12 +43,17 @@ test('主 persona：数据调度纪律——通过 list_agents + send_message �
   assert.match(MAIN_PERSONA, /data_request/)
   assert.match(MAIN_PERSONA, /data_updated \/ data_failed/)
   assert.match(MAIN_PERSONA, /指示 data_collector/)
-  assert.match(MAIN_PERSONA, /exec\.agent/)
+  assert.match(MAIN_PERSONA, /请求归属恒为调用者自身/)
   assert.match(MAIN_PERSONA, /fuyao\.api|api:fuyao/)
   // 方案 C：主 Agent 不造句 data_key——委派消息不带 data_key，回传记录规范身份证
   assert.match(MAIN_PERSONA, /不传 data_key|不带 data_key/)
   assert.match(MAIN_PERSONA, /规范身份证/)
   assert.match(MAIN_PERSONA, /登记|委派清单/)
+  // 实测教训：回传结构化数据按原样引用（防转写错位）、被唤醒后不重复输出
+  assert.match(MAIN_PERSONA, /按原样引用/, '主 persona 应要求回传数据按原样引用')
+  assert.match(MAIN_PERSONA, /不再重复输出/, '主 persona 应禁止已答复后的重复输出')
+  // 人设是纯指令：不出现框架内部机制词（官方 / DSH / exec.agent）
+  assert.doesNotMatch(MAIN_PERSONA, /官方|DSH|exec\.agent/, '主 persona 不应出现框架术语')
   // 走偏产物必须消失：无 requester_agent_id 传参（协议字段）、无订阅机制、无 request_id 对账协议
   assert.doesNotMatch(MAIN_PERSONA, /"requester_agent_id"/)
   assert.doesNotMatch(MAIN_PERSONA, /subscribe_data|unsubscribe_data/)
@@ -66,11 +71,11 @@ test('主 persona：预热与回合纪律——每会话一个 dc、首个任务
   assert.match(MAIN_PERSONA, /抽样核对/)
 })
 
-test('主 persona：启动子 Agent 采用官方语义——直接创建 + 记住 subagentId + 结算通知，list_agents 仅用于回忆', () => {
+test('主 persona：启动子 Agent 采用直接创建语义——记住 subagentId + 结算通知，list_agents 仅用于回忆', () => {
   assert.match(MAIN_PERSONA, /立即用\n\s+subagent_data_collector 工具创建|立即用.*subagent_data_collector 工具创建/)
-  assert.match(MAIN_PERSONA, /记住官方返回的 durable subagentId/)
+  assert.match(MAIN_PERSONA, /记住.*durable subagentId/)
   assert.match(MAIN_PERSONA, /结算通知/)
-  assert.match(MAIN_PERSONA, /不要求创建前先调用 list_agents/)
+  assert.match(MAIN_PERSONA, /创建前不需要先查 list_agents/)
   assert.match(MAIN_PERSONA, /running \/ idle \/ ready/)
   assert.match(MAIN_PERSONA, /首查非空是正常情况/)
   assert.match(MAIN_PERSONA, /自动冷恢复/)
@@ -126,6 +131,13 @@ test('data_collector persona：覆盖 SPEC §8 全部必须要点', () => {
   assert.match(COLLECTOR_PERSONA, /不超过 5 个/, 'dc persona 需含端点用量硬性上限（不超过 5 个）')
   assert.match(COLLECTOR_PERSONA, /抄写|以 list_schemas 返回为准/, 'dc persona 需要求 data_key 抄写自 list_schemas')
   assert.doesNotMatch(COLLECTOR_PERSONA, /data_key_patterns/, 'dc persona 不应再引用 data_key_patterns')
+  // 实测教训：多端点一次性回传、只许结构化载荷（禁止只回传 markdown）、载荷字段原样不改写
+  assert.match(COLLECTOR_PERSONA, /一次性/, 'dc persona 应要求多端点一次性回传')
+  assert.match(COLLECTOR_PERSONA, /禁止只回传/, 'dc persona 应禁止只回传 markdown 汇总')
+  assert.match(COLLECTOR_PERSONA, /原样填入/, 'dc persona 应要求载荷字段按原样填入')
+  assert.match(COLLECTOR_PERSONA, /串行推进|不存在并行/, 'dc persona 应说明 request_data 串行推进')
+  // 人设是纯指令：不出现框架内部机制词（官方 / DSH / exec.agent）
+  assert.doesNotMatch(COLLECTOR_PERSONA, /官方|DSH|exec\.agent/, 'dc persona 不应出现框架术语')
   // 走偏产物必须消失
   assert.doesNotMatch(COLLECTOR_PERSONA, /"requester_agent_id"/)
   assert.doesNotMatch(COLLECTOR_PERSONA, /subscribe_data|unsubscribe_data|订阅/)
