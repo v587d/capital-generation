@@ -398,8 +398,7 @@
 
 # ── data_analyst 预留行（Phase 3；disabled，不参与激活）───────────────────────
 # 只登记角色、协议与未来工具边界。Python runtime 与第三方依赖不在本阶段实现，
-# 其设计以 DATA_PIPELINE_REDESIGN.md 第 8 节为准（本行不对它做任何改动）；
-# 启用前必须先在宿主实现 Dataset/coding 工具与 Python runner。
+# 启用前必须先在宿主实现 Dataset/coding 工具与 Python runner（本行不对它做任何改动）。
 - id: tool-subagent-data-analyst
   name: '@deepseek-ai/dsh-tool-subagent'
   disabled: true
@@ -450,7 +449,7 @@
         - read_profile
         - get_local_datetime
       # Phase 3 启用时再加入 python / coding tools 与 write_analysis_artifact；
-      # Python 环境、依赖与 preflight 以 DATA_PIPELINE_REDESIGN.md 第 8 节为准。
+      # Python 环境、依赖与 preflight 留待 Phase 3 实现时再定义。
 
 # ── web_retriever 专用委派行 ─────────────────────────────────────────────────
 # 只保留两个核心工具：单查询 web_retriever_search 与单 URL web_retriever_fetch。

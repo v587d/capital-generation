@@ -9,10 +9,5 @@ node_modules/
 
 # ── 本地研发文档，不随仓库发布 ──
 .dsh/
-SPEC.md
 ths_api.md
-web-retriever-design.md
-ARCHITECTURE.md
-dataCollectorHub.md
 AGENTS.md
-DATA_PIPELINE_REDESIGN.md

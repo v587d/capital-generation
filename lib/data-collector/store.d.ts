@@ -1,5 +1,5 @@
 /**
- * Phase 1/2 workspace-local Dataset store（依据 DATA_PIPELINE_REDESIGN.md 第 5/6/7 节）。
+ * Phase 1/2 workspace-local Dataset store（设计约定见 AGENTS.md「数据布局」）。
  *
  * 原始 Dataset 只由宿主写入，Dataset/Profile 都通过 createIfAbsent 发布。
  * Agent 只能使用 dataset_id 和 opaque artifact_ref，不能传入真实路径。
