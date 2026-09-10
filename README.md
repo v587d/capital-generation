@@ -51,16 +51,19 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
 > [!NOTE]
 > 请务必前往 [同花顺（fuyao）](https://fuyao.aicubes.cn/docs/) 和 [AnySearch](https://www.anysearch.com/docs) **免费**获取 API 密钥。
 
-打开本地`~/.dsh/credentials.yaml`,按照以下示例添加进去，**注意密钥名称与下方示例保持一致！！！**。
+打开本地 `~/.dsh/.credentials.yaml`，按照以下示例添加进去，**注意密钥名称与下方示例保持一致！！！**。
 ```yaml
 ANYSEARCH_API_KEY: as_sk_8c......
 FUYAO_API_KEY: sk-fuyao-......
 ```
 
-接着，安装插件。
+接着，从 GitHub 安装插件（构建产物 `lib/` 已随仓库提交，**无需**克隆本项目或自行构建）：
 ```bash
-dsh plugin --profile web add @v587d/capital-generation
+dsh plugin --profile web add github:v587d/capital-generation
 ```
+
+> 发布到 npm 之后，也可用 `dsh plugin --profile web add @v587d/capital-generation` 安装。
+
 安装或修改 preset/插件后，重启 Web profile 使装配生效。新会话在 Agent Preset 选择器中选择 Capital 模式。
 ![mode_selector](assets/mode_selector.png)
 
