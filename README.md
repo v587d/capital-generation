@@ -23,7 +23,7 @@
 > [!IMPORTANT]
 > 愿大家的财富数字就像"text generation"一样，不断增长，永不停止。
 
-> [!NOTICE]
+> [!NOTE]
 > 已适配 Deepseek Harness@0.1.5-rc.1 
 
 # Slogan
@@ -48,7 +48,7 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
  
 
 ## 安装到 DSH Web Profile
-> [!NOTICE]
+> [!NOTE]
 > 请务必前往 [同花顺（fuyao）](https://fuyao.aicubes.cn/docs/) 和 [AnySearch](https://www.anysearch.com/docs) **免费**获取 API 密钥。
 
 打开本地`~/.dsh/credentials.yaml`,按照以下示例添加进去，**注意密钥名称与下方示例保持一致！！！**。
