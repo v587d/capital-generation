@@ -6,31 +6,42 @@ function fakeCtx(credentials) {
   return { get: (name) => (name === 'credentials' ? credentials : undefined) }
 }
 
-function request(params) {
+function request(params, overrides = {}) {
   return {
-    request_id: 'r1',
-    data_key: 'a-share.prices.snapshot.600519.SH',
+    capability: 'quote',
     params: params ?? {},
-    requester_agent_id: 'main',
+    session: { id: 'session-1', header: { cwd: '/workspace/proj' } },
+    ...overrides,
   }
 }
 
-test('createFuyaoRestSources：Phase 1 四个数据源，各带独立完整 schema', () => {
+test('createFuyaoRestSources：Phase 1 四个数据源映射短 capability，各带独立完整 schema', () => {
   const originalFetch = globalThis.fetch
   globalThis.fetch = async () => { throw new Error('unexpected fetch') }
   try {
     const sources = createFuyaoRestSources(async () => 'key-1')
+    assert.deepEqual(sources.map((s) => s.schema.capability), [
+      'ticker_search',
+      'quote',
+      'history',
+      'trading_calendar',
+    ])
     assert.deepEqual(sources.map((s) => s.schema.name), [
       'get_meta_tickers_search',
       'get_a_share_prices_snapshot',
       'get_a_share_prices_historical',
       'get_a_share_calendar_trading_days',
     ])
+    assert.deepEqual(sources.map((s) => s.schema.paginated), [false, true, true, false], 'quote/history 支持分页')
     for (const source of sources) {
       assert.ok(source.schema.input_schema, '每个数据源必须有 input_schema')
       assert.ok(source.schema.output_schema, '每个数据源必须有 output_schema')
       assert.equal(source.schema.source, 'api:fuyao')
+      assert.equal(source.schema.source_label, 'fuyao')
+      assert.equal(typeof source.schema.data_key, 'string', '内部 data_key 仅宿主保留')
+      assert.ok(!('ttl_ms' in source.schema), '旧 TTL 缓存语义已删除')
     }
+    assert.equal(sources[0].schema.data_key, 'fuyao.api.api.meta.tickers.search')
     assert.equal(sources[1].schema.input_schema.required.length, 0, '快照按代码查询才需 thscodes，未强制 required')
     assert.deepEqual(sources[2].schema.input_schema.required, ['thscode', 'interval', 'start', 'end'])
   } finally {

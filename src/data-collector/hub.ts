@@ -1,45 +1,10 @@
 import type { Context } from '@deepseek-ai/cordis'
-
-export interface DataRequest {
-  data_key: string
-  source_preference?: string[]
-  params: Record<string, unknown>
-  force_refresh?: boolean
-  /** 请求归属的 Agent id；由工具层以 exec.agent.id 注入，不接受模型传参。 */
-  requester_agent_id: string
-  schema_hint?: object
-}
-
-export interface CacheEntry {
-  data_key: string
-  data: unknown
-  schema: object | null
-  source: string
-  from_cache: boolean
-  updated_at: number
-  expires_at: number
-}
-
-export interface SchemaDescriptor {
-  name: string
-  source: string
-  /**
-   * 该数据源的规范 data_key（provider.kind.resource，斜杠/冒号已规范化为点，
-   * 如 fuyao.api.api.a-share.prices.snapshot）。由数据源注册代码生成
-   * （buildDataKey），模型不造句、不改写；缓存键/路由/回传引用都以它为准，
-   * 全注册表内必须唯一。
-   */
-  data_key: string
-  /** 该数据源缓存存活时长（ms）声明；缺省用 Hub 默认 TTL，不再按键名猜。 */
-  ttl_ms?: number
-  input_schema: object
-  output_schema?: object
-  description?: string
-}
+import type { DatasetRef, SaveDatasetInput, SessionLike } from './store.js'
 
 /**
- * 规范化 data_key 片段：斜杠/冒号等路径分隔符一律映射为点，其余非常规字符
- * 也折叠为点、合并连续点、去掉首尾点，保证任何平台都能直接当文件名用。
+ * 规范化内部 data_key 片段：斜杠/冒号等路径分隔符一律映射为点，其余非常规
+ * 字符折叠为点、合并连续点、去掉首尾点。data_key 只是宿主内部路由/审计身份，
+ * 不出现在模型可见协议、人设或工具输出中。
  */
 export function normalizeKeyToken(value: string): string {
   return value.replace(/[\\/:]+/g, '.')
@@ -49,7 +14,7 @@ export function normalizeKeyToken(value: string): string {
 }
 
 /**
- * 生成规范 data_key：provider.kind.resource（例如
+ * 生成内部 data_key：provider.kind.resource（例如
  * buildDataKey('fuyao', 'api', '/api/a-share/prices/snapshot')
  * => 'fuyao.api.api.a-share.prices.snapshot'）。
  */
@@ -57,37 +22,70 @@ export function buildDataKey(provider: string, kind: string, resource: string): 
   return [provider, kind, resource].map(normalizeKeyToken).filter(Boolean).join('.')
 }
 
+/**
+ * 数据请求：capability 是模型可见的短能力名（全局唯一），session 由工具层以
+ * exec.agent.session 注入，不接受模型传参。内部 data_key 不出现在请求协议里。
+ */
+export interface DataRequest {
+  capability: string
+  params: Record<string, unknown>
+  /** force_refresh=true 绕过已验证 manifest 并生成新的不可变 Dataset。 */
+  force_refresh?: boolean
+  /** 本次用户任务关联 id（可复用）；只用于追溯，不要求模型理解。 */
+  task_id?: string
+  session: SessionLike
+}
+
+/**
+ * 数据源契约：capability 为唯一注册键与模型可见名；name/source/data_key
+ * 均为宿主内部字段（日志、路由、审计），不得进入工具 schema、输出或人设。
+ */
+export interface SchemaDescriptor {
+  capability: string
+  name: string
+  source: string
+  data_key: string
+  source_label?: string
+  paginated?: boolean
+  description?: string
+  input_schema: object
+  output_schema?: object
+}
+
 export interface DataSource {
   schema: SchemaDescriptor
   execute(request: DataRequest, signal: AbortSignal): Promise<{ data: unknown; schema?: object | null }>
-  /** Optional source-specific output guard; false rejects the result before caching. */
+  /** Optional source-specific output guard; false rejects the result before persistence. */
   validateOutput?: (data: unknown) => boolean
 }
 
+/** Dataset 落盘器（Hub 的唯一成功出口）。 */
+export interface DatasetStoreLike {
+  save(input: SaveDatasetInput): Promise<DatasetRef>
+  /** Optional for compatibility with lightweight test stores; production store implements manifest lookup. */
+  findLatest?(input: { session: SessionLike; capability: string; params_digest: string; signal?: AbortSignal }): Promise<DatasetRef | undefined>
+}
+
 export interface DataCollectorHubOptions {
+  /** 必需：宿主侧 Dataset store；缺失时 request 直接失败。 */
+  store: DatasetStoreLike
   /** 队列最大长度；默认 50。 */
   maxQueueLength?: number
-  /** 缓存最大条目数；默认 500。 */
-  maxCacheEntries?: number
-  /** 单请求执行超时；默认 30_000 ms。超时抛错（request timed out）。 */
+  /** 传输层执行超时；默认 30_000 ms。只是请求超时，不是数据生命周期。 */
   requestTimeoutMs?: number
-  /** 默认 TTL 兜底；数据源可经 schema.ttl_ms 声明覆盖。 */
-  defaultTtlMs?: number
-  /** 按 data_key 返回 TTL 的兜底分类（仅当数据源未声明 ttl_ms 时生效）；默认 defaultTtlMs。 */
-  ttlFor?: (dataKey: string) => number
   /** 时钟注入（测试用）；默认 Date.now。 */
   now?: () => number
 }
 
 /** 一个等待者：阻塞式 request() 的结算承诺。 */
 type Waiter = {
-  resolve: (entry: CacheEntry) => void
+  resolve: (ref: DatasetRef) => void
   reject: (error: Error) => void
   signal?: AbortSignal
   onAbort?: () => void
 }
 
-type QueueItem = { request: DataRequest; cacheKey: string; waiters: Set<Waiter> }
+type QueueItem = { request: DataRequest; mergeKey: string; waiters: Set<Waiter> }
 
 function stableSerialize(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
@@ -96,68 +94,105 @@ function stableSerialize(value: unknown): string {
   return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableSerialize(record[key])}`).join(',')}}`
 }
 
-function cacheKey(request: DataRequest): string {
-  return `${request.data_key}:${stableSerialize(request.params)}`
+type HashLike = { update(value: string): HashLike; digest(encoding: string): string }
+
+function paramsDigest(request: DataRequest): string {
+  const serialized = stableSerialize(request.params)
+  const processLike = (globalThis as { process?: { getBuiltinModule?: (name: string) => { createHash?: (algorithm: string) => HashLike } } }).process
+  const createHash = processLike?.getBuiltinModule?.('node:crypto')?.createHash
+  if (createHash) return createHash('sha256').update(serialized).digest('hex')
+
+  // DSH runs on Node, but keep a deterministic opaque fallback for minimal hosts/tests.
+  let hash = 0xcbf29ce484222325n
+  for (const character of serialized) {
+    hash ^= BigInt(character.codePointAt(0) ?? 0)
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n)
+  }
+  return hash.toString(16).padStart(16, '0').repeat(4)
+}
+
+/** in-flight 合并键：同一 capability+params+task 的并发请求共享同一次执行。 */
+function mergeKey(request: DataRequest): string {
+  return `${request.capability}:${request.task_id ?? ''}:${stableSerialize(request.params)}`
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+/**
+ * Phase 1 数据执行器：FIFO 串行执行外部数据源，成功后由宿主 store 立即
+ * 原子落盘为不可变 Dataset，只回传 DatasetRef。
+ *
+ * 明确不做：长期 raw data 内存缓存、按 data_key 的查询、source_preference 路由。
+ * 已验证 DatasetRef 的复用由 workspace manifest 提供，内存只保留 in-flight 队列。
+ */
 export class DataCollectorHub {
   private readonly queue: QueueItem[] = []
-  /** 正在执行的队列项（执行期间不留在 queue 中，但仍参与合并与容量判断）。 */
+  /** 正在执行的队列项（执行期间不在 queue 中，但仍参与合并与容量判断）。 */
   private active: QueueItem | null = null
-  private readonly cache = new Map<string, CacheEntry>()
   private readonly sources = new Map<string, DataSource>()
+  private readonly cacheLookups = new Map<string, Promise<DatasetRef | undefined>>()
+  private readonly store: DatasetStoreLike
   private running = false
   private readonly maxQueueLength: number
-  private readonly maxCacheEntries: number
   private readonly requestTimeoutMs: number
-  private readonly defaultTtlMs: number
-  private readonly ttlFor: (dataKey: string) => number
   private readonly now: () => number
 
-  constructor(options: DataCollectorHubOptions = {}) {
+  constructor(options: DataCollectorHubOptions) {
+    if (!options.store) throw new Error('DataCollectorHub requires a dataset store')
+    this.store = options.store
     this.maxQueueLength = options.maxQueueLength ?? 50
-    this.maxCacheEntries = options.maxCacheEntries ?? 500
     this.requestTimeoutMs = options.requestTimeoutMs ?? 30_000
-    this.defaultTtlMs = options.defaultTtlMs ?? 300_000
-    this.ttlFor = options.ttlFor ?? (() => this.defaultTtlMs)
     this.now = options.now ?? (() => Date.now())
   }
 
   registerSource(source: DataSource): () => void {
-    const name = source.schema.name
-    if (this.sources.has(name)) throw new Error(`data source already registered: ${name}`)
+    const capability = source.schema.capability
+    if (!capability) throw new Error('data source requires a capability')
+    if (this.sources.has(capability)) throw new Error(`data source capability already registered: ${capability}`)
     for (const other of this.sources.values()) {
       if (other.schema.data_key === source.schema.data_key) throw new Error(`data source data_key already registered: ${source.schema.data_key}`)
     }
-    this.sources.set(name, source)
-    return () => { if (this.sources.get(name) === source) this.sources.delete(name) }
+    this.sources.set(capability, source)
+    return () => { if (this.sources.get(capability) === source) this.sources.delete(capability) }
   }
 
   /**
-   * 入队并阻塞等待执行完成。缓存命中立即返回；相同 data_key + params 的
-   * 并发请求合并为同一次执行，所有等待者共享同一结果。失败（无数据源/
-   * 执行超时/数据源错误/输出不合规）时抛出 Error，由调用方如实回传。
-   * 不存在 request_id 与状态查询：结果要么直接返回，要么报错。
+   * 入队并阻塞等待完成：先按 capability+params_digest 查找当前 session 下仍有效的
+   * manifest；force_refresh=true 或没有可复用 Dataset 时才进入数据源队列。相同的
+   * in-flight 请求仍共享一次执行，成功后立即由宿主 store 原子落盘。
    */
-  async request(request: DataRequest, options: { signal?: AbortSignal } = {}): Promise<CacheEntry> {
-    if (!request.data_key || !request.requester_agent_id) {
-      throw new Error('data_key and requester_agent_id are required')
-    }
+  async request(request: DataRequest, options: { signal?: AbortSignal } = {}): Promise<DatasetRef> {
+    if (!request.capability) throw new Error('capability is required')
+    if (!request.session) throw new Error('a calling agent session is required')
     if (options.signal?.aborted) throw new Error('request aborted')
-    this.cleanExpired()
-    const key = cacheKey(request)
-    if (!request.force_refresh) {
-      const cached = this.cache.get(key)
-      if (cached) return { ...cached, from_cache: true }
-    }
-    const existing = this.queue.find((item) => item.cacheKey === key) ?? (this.active && this.active.cacheKey === key ? this.active : undefined)
+    const key = mergeKey(request)
+    const existing = this.queue.find((item) => item.mergeKey === key) ?? (this.active && this.active.mergeKey === key ? this.active : undefined)
     if (existing) return this.awaitSettlement(existing, options.signal)
+
+    if (request.force_refresh !== true && this.store.findLatest) {
+      let lookup = this.cacheLookups.get(key)
+      if (!lookup) {
+        lookup = this.store.findLatest({
+          session: request.session,
+          capability: request.capability,
+          params_digest: paramsDigest(request),
+          signal: options.signal,
+        })
+        this.cacheLookups.set(key, lookup)
+        void lookup.finally(() => {
+          if (this.cacheLookups.get(key) === lookup) this.cacheLookups.delete(key)
+        }).catch(() => {})
+      }
+      const reusable = await lookup
+      if (reusable) return reusable
+      const afterLookup = this.queue.find((item) => item.mergeKey === key) ?? (this.active && this.active.mergeKey === key ? this.active : undefined)
+      if (afterLookup) return this.awaitSettlement(afterLookup, options.signal)
+    }
+
     if (this.queue.length + (this.active ? 1 : 0) >= this.maxQueueLength) throw new Error(`data request queue is full (max ${this.maxQueueLength})`)
-    const item: QueueItem = { request, cacheKey: key, waiters: new Set() }
+    const item: QueueItem = { request, mergeKey: key, waiters: new Set() }
     this.queue.push(item)
     const pending = this.awaitSettlement(item, options.signal)
     void this.processNext()
@@ -165,10 +200,14 @@ export class DataCollectorHub {
   }
 
   /** 挂一个等待者并返回其结算承诺；signal 触发时摘除等待者并拒绝（不影响共享执行）。 */
-  private awaitSettlement(item: QueueItem, signal?: AbortSignal): Promise<CacheEntry> {
-    return new Promise<CacheEntry>((resolve, reject) => {
+  private awaitSettlement(item: QueueItem, signal?: AbortSignal): Promise<DatasetRef> {
+    return new Promise<DatasetRef>((resolve, reject) => {
       const waiter: Waiter = { resolve, reject, signal }
-      if (signal && !signal.aborted) {
+      if (signal?.aborted) {
+        reject(new Error('request aborted'))
+        return
+      }
+      if (signal) {
         waiter.onAbort = () => {
           item.waiters.delete(waiter)
           reject(new Error('request aborted'))
@@ -180,27 +219,26 @@ export class DataCollectorHub {
   }
 
   /** 结算一个等待者：无论成败都摘除监听，防止重复结算。 */
-  private settleWaiter(item: QueueItem, waiter: Waiter, outcome: { kind: 'ok'; entry: CacheEntry } | { kind: 'error'; error: Error }): void {
+  private settleWaiter(item: QueueItem, waiter: Waiter, outcome: { kind: 'ok'; ref: DatasetRef } | { kind: 'error'; error: Error }): void {
     item.waiters.delete(waiter)
     if (waiter.onAbort && waiter.signal) waiter.signal.removeEventListener('abort', waiter.onAbort)
-    if (outcome.kind === 'ok') waiter.resolve(outcome.entry)
+    if (outcome.kind === 'ok') waiter.resolve(outcome.ref)
     else waiter.reject(outcome.error)
   }
 
-  /** 查询缓存中的最新数据；提供 params 时只返回该参数组合的缓存。 */
-  getLatest(dataKey: string, params?: Record<string, unknown>): CacheEntry | null {
-    this.cleanExpired()
-    if (params) {
-      const exact = this.cache.get(`${dataKey}:${stableSerialize(params)}`)
-      return exact ? { ...exact, from_cache: true } : null
-    }
-    let latest: CacheEntry | null = null
-    for (const entry of this.cache.values()) if (entry.data_key === dataKey && (!latest || entry.updated_at > latest.updated_at)) latest = entry
-    return latest ? { ...latest, from_cache: true } : null
+  /**
+   * 列出模型可见的能力目录：只含 capability、描述、参数/输出结构与分页能力，
+   * 不含任何内部路由字段（name/source/data_key/source_label）。
+   */
+  listCapabilities(): Array<{ capability: string; description: string; input_schema: object; output_schema: object | null; paginated: boolean }> {
+    return [...this.sources.values()].map((source) => ({
+      capability: source.schema.capability,
+      description: source.schema.description ?? '',
+      input_schema: source.schema.input_schema,
+      output_schema: source.schema.output_schema ?? null,
+      paginated: source.schema.paginated === true,
+    }))
   }
-
-  /** 列出当前可用数据源 schema（来自已挂载的 API/MCP/Skill）。 */
-  listSchemas(): SchemaDescriptor[] { return [...this.sources.values()].map((source) => ({ ...source.schema })) }
 
   private async processNext(): Promise<void> {
     if (this.running) return
@@ -208,11 +246,10 @@ export class DataCollectorHub {
     if (!item) return
     this.running = true
     this.active = item
-    const startedAt = this.now()
     let timedOut = false
     try {
-      const source = this.chooseSource(item.request)
-      if (!source) throw new Error('no data source is available for this request')
+      const source = this.sources.get(item.request.capability)
+      if (!source) throw new Error(`no data source is registered for capability ${item.request.capability}`)
       const controller = new AbortController()
       let timeout: ReturnType<typeof setTimeout> | undefined
       const operation = source.execute(item.request, controller.signal)
@@ -233,20 +270,19 @@ export class DataCollectorHub {
         if (source.validateOutput && !source.validateOutput(output.data)) {
           throw new Error(`data source ${source.schema.name} returned data incompatible with its output contract`)
         }
-        const finishedAt = this.now()
-        const ttl = source.schema.ttl_ms ?? this.ttlFor(item.request.data_key)
-        const entry: CacheEntry = {
-          data_key: item.request.data_key,
+        const { format, rowCount } = shapeOf(output.data)
+        const ref = await this.store.save({
+          session: item.request.session,
+          capability: item.request.capability,
+          task_id: item.request.task_id,
+          params_digest: paramsDigest(item.request),
+          source_label: source.schema.source_label ?? source.schema.source,
+          format,
+          schema: output.schema ?? source.schema.output_schema ?? null,
+          row_count: rowCount,
           data: output.data,
-          schema: output.schema ?? item.request.schema_hint ?? source.schema.output_schema ?? null,
-          source: source.schema.name,
-          from_cache: false,
-          updated_at: finishedAt,
-          expires_at: finishedAt + ttl,
-        }
-        this.cache.set(item.cacheKey, entry)
-        this.evictIfNeeded()
-        for (const waiter of [...item.waiters]) this.settleWaiter(item, waiter, { kind: 'ok', entry })
+        })
+        for (const waiter of [...item.waiters]) this.settleWaiter(item, waiter, { kind: 'ok', ref })
       } finally {
         if (timeout) clearTimeout(timeout)
       }
@@ -259,59 +295,18 @@ export class DataCollectorHub {
       void this.processNext()
     }
   }
-
-  /**
-   * 路由：data_key 与数据源声明的规范身份证精确匹配；source_preference 只做
-   * 过滤（具体 capability 名最优先，其次 provider 令牌如 fuyao.api/ths，'any'
-   * 表示仅按 data_key 匹配）。匹配不到或候选不唯一（理论上不可能，注册时
-   * 身份证唯一）直接失败，不静默选第一个。
-   */
-  private chooseSource(request: DataRequest): DataSource | undefined {
-    const preferences = request.source_preference ?? []
-    const orderedPreferences = preferences.length > 0 ? preferences : ['any']
-
-    for (const preference of orderedPreferences) {
-      // A concrete capability name is the strongest and most deterministic hint.
-      const exact = this.sources.get(preference)
-      if (exact) return exact
-
-      const providerToken = this.providerTokenOf(preference)
-      const candidates = [...this.sources.values()].filter((source) => {
-        if (source.schema.data_key !== request.data_key) return false
-        return providerToken === undefined || this.providerTokenOf(source.schema.data_key) === providerToken
-      })
-      if (candidates.length === 1) return candidates[0]
-      if (candidates.length > 1) throw new Error(`ambiguous data source for ${request.data_key} and preference ${preference}; specify source name`)
-    }
-    return undefined
-  }
-
-  /**
-   * 数据源身份证的 provider 令牌 = 前两段（如 fuyao.api.api.a-share... => fuyao.api）。
-   * 'ths' 为 fuyao.api 的兼容别名；'any' 不限定 provider。
-   */
-  private providerTokenOf(value: string): string | undefined {
-    if (value === 'any') return undefined
-    const normalized = value === 'ths' ? 'fuyao.api' : normalizeKeyToken(value)
-    const parts = normalized.split('.')
-    return parts.length >= 2 ? parts.slice(0, 2).join('.') : undefined
-  }
-
-  private cleanExpired(): void {
-    const now = this.now()
-    for (const [key, entry] of this.cache) if (entry.expires_at <= now) this.cache.delete(key)
-  }
-
-  private evictIfNeeded(): void {
-    while (this.cache.size > this.maxCacheEntries) {
-      const oldest = [...this.cache.entries()].sort((a, b) => a[1].updated_at - b[1].updated_at)[0]
-      if (!oldest) return
-      this.cache.delete(oldest[0])
-    }
-  }
 }
 
-export function provideDataCollectorHub(ctx: Context, options?: DataCollectorHubOptions): DataCollectorHub {
+/** 从 Fuyao 类 envelope 推导存储 format 与行数；其余结构按通用 JSON 处理。 */
+function shapeOf(data: unknown): { format: 'json' | 'json_rows'; rowCount: number | null } {
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    const item = (data as { item?: unknown }).item
+    if (Array.isArray(item)) return { format: 'json_rows', rowCount: item.length }
+  }
+  return { format: 'json', rowCount: null }
+}
+
+export function provideDataCollectorHub(ctx: Context, options: DataCollectorHubOptions): DataCollectorHub {
   const hub = new DataCollectorHub(options)
   ctx.provide('dataCollectorHub', hub)
   return hub

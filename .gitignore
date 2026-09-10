@@ -1,5 +1,18 @@
+# ── runtime ──
 node_modules/
-lib/
 *.tgz
 *.log
 *.Zone.Identifier
+
+# ── build output（本仓库对外提供 lib/，不忽略）──
+# lib/
+
+# ── 本地研发文档，不随仓库发布 ──
+.dsh/
+SPEC.md
+ths_api.md
+web-retriever-design.md
+ARCHITECTURE.md
+dataCollectorHub.md
+AGENTS.md
+DATA_PIPELINE_REDESIGN.md

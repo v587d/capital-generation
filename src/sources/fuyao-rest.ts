@@ -58,15 +58,15 @@ async function callFuyao(baseUrl: string, apiKey: string, path: string, params: 
   return { data: envelope.data ?? null, schema: outputSchema }
 }
 
-function source(name: string, description: string, input_schema: object, output_schema: object, path: string, allowed: string[], baseUrl: string, resolveApiKey: FuyaoApiKeyResolver, ttlMs?: number): DataSource {
+function source(name: string, capability: string, description: string, input_schema: object, output_schema: object, path: string, allowed: string[], baseUrl: string, resolveApiKey: FuyaoApiKeyResolver, paginated = false): DataSource {
   const schema: SchemaDescriptor = {
+    capability,
     name,
     source: 'api:fuyao',
-    // 规范身份证：provider.kind.resource（fuyao.api + 规范化端点路径），
-    // 全注册表唯一，模型不造句；缓存键/路由/回传引用都以它为准。
+    // 内部数据源身份证（provider.kind.resource）：宿主路由/审计用，不进入模型协议。
     data_key: buildDataKey('fuyao', 'api', path),
-    // TTL 声明式分类：快照/检索类 60s，历史/日历类 300s；不再按键名猜。
-    ...(ttlMs !== undefined ? { ttl_ms: ttlMs } : {}),
+    source_label: 'fuyao',
+    paginated,
     description,
     input_schema,
     output_schema,
@@ -88,13 +88,6 @@ const searchOutput = envelopeData({ type: 'array', items: { type: 'object', prop
 const snapshotOutput = envelopeData({ type: 'array', items: { type: 'object', properties: { thscode: { type: 'string' }, ticker: { type: 'string' }, last_price: { type: 'number' }, price_change: { type: 'number' }, price_change_ratio_pct: { type: 'number' }, open_price: { type: 'number' }, high_price: { type: 'number' }, low_price: { type: 'number' }, prev_price: { type: 'number' }, volume: { type: 'number' }, turnover: { type: 'number' } }, additionalProperties: true } })
 const klineOutput = envelopeData({ type: 'array', items: { type: 'object', properties: { date_ms: { type: 'integer' }, open_price: { type: 'number' }, high_price: { type: 'number' }, low_price: { type: 'number' }, close_price: { type: 'number' }, volume: { type: 'number' }, turnover: { type: 'number' } }, additionalProperties: true } })
 const calendarOutput = envelopeData({ type: 'array', items: { type: 'object', properties: { date_ms: { type: 'integer' }, date: { type: 'string' } }, additionalProperties: true } })
-
-const DATA_KEY_TTL_MS: Record<string, number> = {
-  get_meta_tickers_search: 60_000,
-  get_a_share_prices_snapshot: 60_000,
-  get_a_share_prices_historical: 300_000,
-  get_a_share_calendar_trading_days: 300_000,
-}
 
 const REQUIRED_OUTPUT_FIELDS: Record<string, string[]> = {
   get_meta_tickers_search: ['thscode', 'name'],
@@ -118,7 +111,7 @@ export function createFuyaoRestSources(resolveApiKey: FuyaoApiKeyResolver, baseU
   const cleanBaseUrl = baseUrl.replace(/\/$/, '')
   return [
     source(
-      'get_meta_tickers_search',
+      'get_meta_tickers_search', 'ticker_search',
       '按名称、代码或简称检索并消歧为完整 thscode（禁止自行拼接交易所后缀，先消歧再请求业务数据）。q 必填；exchange 取值 SH/SZ/BJ；asset_type 逗号分隔。',
       objectSchema({
         q: { type: 'string', description: '检索关键字：中文名、纯 ticker 或完整 thscode（如 贵州茅台 / 600519 / 600519.SH）' },
@@ -126,20 +119,20 @@ export function createFuyaoRestSources(resolveApiKey: FuyaoApiKeyResolver, baseU
         asset_type: { type: 'string', description: '资产类型过滤（逗号分隔）：a-share、a-share-index、forex、fund-otc、fund-etf、fund-lof、fund-reits' },
         limit: { type: 'integer', description: '返回条数上限，默认 10，最大 50' },
       }, ['q']),
-      searchOutput, '/api/meta/tickers/search', ['q', 'exchange', 'asset_type', 'limit'], cleanBaseUrl, resolveApiKey, DATA_KEY_TTL_MS['get_meta_tickers_search'],
+      searchOutput, '/api/meta/tickers/search', ['q', 'exchange', 'asset_type', 'limit'], cleanBaseUrl, resolveApiKey,
     ),
     source(
-      'get_a_share_prices_snapshot',
+      'get_a_share_prices_snapshot', 'quote',
       '获取 A 股行情快照。两种模式：①指定标的：thscodes 传逗号分隔的完整代码（如 600519.SH,000001.SZ），忽略分页；②全市场遍历：省略 thscodes，用 limit/offset。快照不含股票名称。',
       objectSchema({
-        thscodes: { type: 'string', description: '逗号分隔的完整交易所代码（如 600519.SH,000001.SZ），需先经 get_meta_tickers_search 消歧' },
+        thscodes: { type: 'string', description: '逗号分隔的完整交易所代码（如 600519.SH,000001.SZ），需先经 ticker_search 消歧' },
         limit: { type: 'integer', description: '全市场模式分页大小，默认 100' },
         offset: { type: 'integer', description: '全市场模式分页游标，默认 0' },
       }),
-      snapshotOutput, '/api/a-share/prices/snapshot', ['thscodes', 'limit', 'offset'], cleanBaseUrl, resolveApiKey, DATA_KEY_TTL_MS['get_a_share_prices_snapshot'],
+      snapshotOutput, '/api/a-share/prices/snapshot', ['thscodes', 'limit', 'offset'], cleanBaseUrl, resolveApiKey, true,
     ),
     source(
-      'get_a_share_prices_historical',
+      'get_a_share_prices_historical', 'history',
       '获取单只标的历史日 K 线。thscode 必须是单只（不可逗号）；interval 当前固定支持 1d（日线）；start/end 为毫秒级 Unix 时间戳（Asia/Shanghai），end >= start，跨度不超过 10 年；adjust 默认 forward（前复权）。',
       objectSchema({
         thscode: { type: 'string', description: '单只标的完整代码（如 600519.SH），不可多只/逗号' },
@@ -149,13 +142,13 @@ export function createFuyaoRestSources(resolveApiKey: FuyaoApiKeyResolver, baseU
         adjust: { type: 'string', enum: ['none', 'forward', 'backward'], description: '复权模式：none 不复权 / forward 前复权（默认）/ backward 后复权' },
         offset: { type: 'integer', description: '分页偏移，默认 0' },
       }, ['thscode', 'interval', 'start', 'end']),
-      klineOutput, '/api/a-share/prices/historical', ['thscode', 'interval', 'start', 'end', 'adjust', 'offset'], cleanBaseUrl, resolveApiKey, DATA_KEY_TTL_MS['get_a_share_prices_historical'],
+      klineOutput, '/api/a-share/prices/historical', ['thscode', 'interval', 'start', 'end', 'adjust', 'offset'], cleanBaseUrl, resolveApiKey, true,
     ),
     source(
-      'get_a_share_calendar_trading_days',
+      'get_a_share_calendar_trading_days', 'trading_calendar',
       '获取近一年（365 天）A 股交易日历；无需任何参数。返回 item[]：date_ms 为交易日零点毫秒戳，date 为 YYYYMMDD 字符串。',
       objectSchema({}),
-      calendarOutput, '/api/a-share/calendar/trading-days', [], cleanBaseUrl, resolveApiKey, DATA_KEY_TTL_MS['get_a_share_calendar_trading_days'],
+      calendarOutput, '/api/a-share/calendar/trading-days', [], cleanBaseUrl, resolveApiKey,
     ),
   ]
 }

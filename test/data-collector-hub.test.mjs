@@ -1,16 +1,25 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { DataCollectorHub, buildDataKey, normalizeKeyToken } from '../lib/data-collector/hub.js'
+import { DatasetStoreError } from '../lib/data-collector/store.js'
 import { createFuyaoRestSources } from '../lib/sources/fuyao-rest.js'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+const SESSION = { id: 'session-1', header: { cwd: '/workspace/proj' } }
 
-/** 可统计调用次数的假数据源；delayMs>0 时可挂起/被 abort 唤醒。dataKey 为该源规范身份证。 */
-function testSource(name, { delayMs = 0, failWith, dataKey = `test.${name}` } = {}) {
+/** 可统计调用次数的假数据源；delayMs>0 时可挂起/被 abort 唤醒。 */
+function testSource(capability, { delayMs = 0, failWith, dataKey = `test.${capability}`, data } = {}) {
   let calls = 0
   return {
     calls: () => calls,
-    schema: { name, source: 'api:test', data_key: dataKey, input_schema: { type: 'object' } },
+    schema: {
+      capability,
+      name: `src_${capability}`,
+      source: 'api:test',
+      data_key: dataKey,
+      input_schema: { type: 'object' },
+      description: `test capability ${capability}`,
+    },
     execute: async (request, signal) => {
       calls += 1
       if (delayMs > 0) {
@@ -21,37 +30,70 @@ function testSource(name, { delayMs = 0, failWith, dataKey = `test.${name}` } = 
         })
       }
       if (failWith) throw new Error(failWith)
-      return { data: { name, echo: request.params }, schema: { type: 'object' } }
+      return { data: data ?? { capability, echo: request.params }, schema: { type: 'object' } }
     },
   }
 }
 
 function request(overrides = {}) {
   return {
-    data_key: 'test.sample',
+    capability: 'sample',
     params: {},
-    requester_agent_id: 'main-agent',
+    session: SESSION,
     ...overrides,
   }
 }
 
+/** 计数式假 store：模拟宿主落盘成功并返回自增 dataset_id 的 DatasetRef。 */
+function fakeStore({ failWith } = {}) {
+  let saves = 0
+  const refs = []
+  return {
+    refs,
+    saves: () => saves,
+    async save(input) {
+      if (failWith) throw failWith
+      saves += 1
+      const ref = {
+        dataset_id: `ds_${saves}`,
+        task_id: input.task_id ?? null,
+        session_id: input.session.id,
+        artifact_ref: `workspace://capital-data/datasets/ds_${saves}`,
+        format: input.format,
+        capability: input.capability,
+        source_label: input.source_label,
+        schema: input.schema,
+        row_count: input.row_count,
+        captured_at: 1_700_000_000_000 + saves,
+        retention_until: 1_700_000_000_000 + saves + 604_800_000,
+        params_digest: input.params_digest,
+      }
+      refs.push(ref)
+      return ref
+    },
+    async findLatest(input) {
+      return [...refs].reverse().find((ref) => ref.capability === input.capability && ref.params_digest === input.params_digest)
+    },
+  }
+}
+
 function makeHub(options = {}) {
-  const hub = new DataCollectorHub(options)
-  return { hub }
+  const store = options.store ?? fakeStore()
+  const hub = new DataCollectorHub({ store, ...options })
+  return { hub, store }
 }
 
 test('buildDataKey：provider.kind.resource，斜杠/冒号规范化为点（文件名安全）', () => {
   assert.equal(buildDataKey('fuyao', 'api', '/api/a-share/prices/snapshot'), 'fuyao.api.api.a-share.prices.snapshot')
   assert.equal(buildDataKey('fuyao', 'api', '/api/meta/tickers/search'), 'fuyao.api.api.meta.tickers.search')
-  assert.equal(buildDataKey('fuyao', 'api', '/api/a-share/calendar/trading-days'), 'fuyao.api.api.a-share.calendar.trading-days')
-  assert.equal(buildDataKey('alice', 'mcp', 'get_financial_data'), 'alice.mcp.get_financial_data')
   assert.equal(normalizeKeyToken('/a//b:'), 'a.b')
 })
 
-test('身份证唯一：重复 data_key 注册即失败（防撞键）', () => {
+test('注册校验：重复 capability 与重复内部 data_key 均失败', () => {
   const { hub } = makeHub()
-  hub.registerSource(testSource('a', { dataKey: 'dup.key' }))
-  assert.throws(() => hub.registerSource(testSource('b', { dataKey: 'dup.key' })), /data_key already registered/)
+  hub.registerSource(testSource('quote', { dataKey: 'dup.key' }))
+  assert.throws(() => hub.registerSource(testSource('quote', { dataKey: 'other.key' })), /capability already registered/)
+  assert.throws(() => hub.registerSource(testSource('history', { dataKey: 'dup.key' })), /data_key already registered/)
 })
 
 test('FIFO 严格串行执行：同一时刻只有一个请求在跑，按入队顺序完成', async () => {
@@ -59,152 +101,177 @@ test('FIFO 严格串行执行：同一时刻只有一个请求在跑，按入队
   let active = 0
   let maxActive = 0
   const order = []
-  const source = {
-    schema: { name: 's', source: 'api:test', data_key: 'test.s', input_schema: {} },
+  hub.registerSource({
+    schema: { capability: 'seq', name: 's', source: 'api:test', data_key: 'test.s', input_schema: {} },
     execute: async (req) => {
       active += 1
       maxActive = Math.max(maxActive, active)
       order.push(req.params.key)
       await sleep(10)
       active -= 1
-      return { data: req.params.key }
+      return { data: { item: [] } }
     },
-  }
-  hub.registerSource(source)
-  // 并发发出三个同端点不同 params 的请求：全部入队，阻塞式 request() 等各自完成
-  const results = await Promise.all(['a', 'b', 'c'].map((key) => hub.request(request({ data_key: 'test.s', params: { key } }))))
+  })
+  const results = await Promise.all(['a', 'b', 'c'].map((key) => hub.request(request({ capability: 'seq', params: { key } }))))
   assert.equal(maxActive, 1, '同一时刻必须只有一个请求在执行')
   assert.deepEqual(order, ['a', 'b', 'c'])
-  assert.deepEqual(results.map((r) => r.data), ['a', 'b', 'c'])
+  assert.deepEqual(results.map((r) => r.dataset_id), ['ds_1', 'ds_2', 'ds_3'])
 })
 
-test('缓存命中：第二次同键请求不调用数据源，from_cache=true 且立即返回', async () => {
+test('in-flight 合并：相同 capability+params+task 的并发请求只执行一次，共享同一个 DatasetRef', async () => {
   const { hub } = makeHub()
-  const source = testSource('search', { dataKey: 'fuyao.api.api.meta.tickers.search' })
+  const source = testSource('merged', { delayMs: 10 })
   hub.registerSource(source)
-  const first = await hub.request(request({ data_key: 'fuyao.api.api.meta.tickers.search', params: { q: '茅台' } }))
-  assert.equal(source.calls(), 1)
-  assert.equal(first.from_cache, false)
-  const second = await hub.request(request({ data_key: 'fuyao.api.api.meta.tickers.search', params: { q: '茅台' } }))
-  assert.equal(second.from_cache, true)
-  assert.equal(source.calls(), 1, '缓存命中不得调用数据源')
-})
-
-test('同键并发合并：多个相同请求只执行一次，各自拿到同一结果', async () => {
-  const { hub } = makeHub()
-  const source = testSource('merged', { delayMs: 10, dataKey: 'test.merged' })
-  hub.registerSource(source)
-  const results = await Promise.all([1, 2, 3].map(() => hub.request(request({ data_key: 'test.merged', params: { n: 42 } }))))
+  const results = await Promise.all([1, 2, 3].map(() => hub.request(request({ capability: 'merged', params: { n: 42 } }))))
   assert.equal(source.calls(), 1, '合并请求只应执行一次')
-  for (const result of results) {
-    assert.equal(result.data.name, 'merged')
-    assert.equal(result.from_cache, false)
-  }
+  assert.equal(new Set(results.map((r) => r.dataset_id)).size, 1, '合并请求共享同一个 Dataset')
 })
 
-test('TTL 声明：数据源 ttl_ms 决定过期，getLatest 对过期条目返回 null', async () => {
-  let clock = 0
-  const { hub } = makeHub({ now: () => clock })
-  const source = testSource('ttl', { dataKey: 'test.ttl' })
-  source.schema.ttl_ms = 100
-  hub.registerSource(source)
-  await hub.request(request({ data_key: 'test.ttl', requester_agent_id: 'a' }))
-  assert.ok(hub.getLatest('test.ttl'))
-  clock = 200
-  assert.equal(hub.getLatest('test.ttl'), null)
-})
-
-test('TTL 兜底：未声明 ttl_ms 时用 defaultTtlMs', async () => {
-  let clock = 0
-  const { hub } = makeHub({ now: () => clock, defaultTtlMs: 100 })
-  hub.registerSource(testSource('plain', { dataKey: 'test.plain' }))
-  await hub.request(request({ data_key: 'test.plain' }))
-  assert.ok(hub.getLatest('test.plain'))
-  clock = 200
-  assert.equal(hub.getLatest('test.plain'), null)
-})
-
-test('容量淘汰：超过 maxCacheEntries 时读取不到最旧条目', async () => {
-  const { hub } = makeHub({ maxCacheEntries: 2 })
-  hub.registerSource(testSource('evict', { dataKey: 'test.evict' }))
-  await hub.request(request({ data_key: 'test.evict', params: { i: 0 } }))
-  await hub.request(request({ data_key: 'test.evict', params: { i: 1 } }))
-  await hub.request(request({ data_key: 'test.evict', params: { i: 2 } }))
-  assert.ok(hub.getLatest('test.evict', { i: 2 }))
-  assert.equal(hub.getLatest('test.evict', { i: 0 }), null, '最旧条目应被淘汰')
-})
-
-test('超时：超过 requestTimeoutMs 抛错 request timed out', async () => {
-  const { hub } = makeHub({ requestTimeoutMs: 20 })
-  hub.registerSource(testSource('hang', { delayMs: 5000, dataKey: 'test.hang' }))
-  await assert.rejects(() => hub.request(request({ data_key: 'test.hang' })), /request timed out/)
-})
-
-test('失败：数据源抛错时错误文本明确', async () => {
+test('manifest 复用：相同 capability+params 的顺序请求复用已有 Dataset，不重复取数', async () => {
   const { hub } = makeHub()
-  hub.registerSource(testSource('bad', { failWith: 'Fuyao API error 401: unauthorized', dataKey: 'test.bad' }))
-  await assert.rejects(() => hub.request(request({ data_key: 'test.bad' })), /Fuyao API error/)
+  const source = testSource('reuse')
+  hub.registerSource(source)
+  const first = await hub.request(request({ capability: 'reuse', params: { n: 1 } }))
+  const second = await hub.request(request({ capability: 'reuse', params: { n: 1 } }))
+  assert.equal(source.calls(), 1, 'manifest 命中后不得再次访问数据源')
+  assert.equal(first.dataset_id, second.dataset_id, '普通请求应返回已有 DatasetRef')
+})
+
+test('params_digest：DatasetRef 只携带不可逆摘要，不暴露原始请求参数', async () => {
+  const { hub, store } = makeHub()
+  hub.registerSource(testSource('digest'))
+  const ref = await hub.request(request({ capability: 'digest', params: { thscode: '600519.SH', secret: 'should-not-appear' } }))
+  assert.match(ref.params_digest, /^[a-f0-9]{64}$/)
+  assert.doesNotMatch(ref.params_digest, /600519|secret|should-not-appear/)
+  assert.match(store.refs[0].params_digest, /^[a-f0-9]{64}$/)
+})
+
+test('force_refresh：绕过 manifest 复用并生成新 Dataset，旧结果不被覆盖', async () => {
+  const { hub, store } = makeHub()
+  hub.registerSource(testSource('fresh'))
+  await hub.request(request({ capability: 'fresh' }))
+  const refreshed = await hub.request(request({ capability: 'fresh', force_refresh: true }))
+  assert.equal(store.refs.length, 2)
+  assert.equal(refreshed.dataset_id, 'ds_2')
+})
+
+test('capability 路由：请求 A 绝不会执行 source B；未知 capability 报错', async () => {
+  const { hub } = makeHub()
+  const calls = []
+  hub.registerSource({
+    schema: { capability: 'search', name: 's', source: 'api:test', data_key: 'k1', input_schema: {} },
+    execute: async () => { calls.push('search'); return { data: { item: [] } } },
+  })
+  hub.registerSource({
+    schema: { capability: 'history', name: 'h', source: 'api:test', data_key: 'k2', input_schema: {} },
+    execute: async () => { calls.push('history'); return { data: { item: [] } } },
+  })
+  const ref = await hub.request(request({ capability: 'history', params: {} }))
+  assert.equal(ref.capability, 'history')
+  assert.deepEqual(calls, ['history'], '只能执行请求的 capability')
+  await assert.rejects(() => hub.request(request({ capability: 'nope' })), /no data source is registered for capability nope/)
+  assert.deepEqual(calls, ['history'], '未知 capability 不得 fallback 到其他 source')
+})
+
+test('超时：超过 requestTimeoutMs 抛错 request timed out（传输超时，非数据生命周期）', async () => {
+  const { hub } = makeHub({ requestTimeoutMs: 20 })
+  hub.registerSource(testSource('hang', { delayMs: 5000 }))
+  await assert.rejects(() => hub.request(request({ capability: 'hang' })), /request timed out/)
+})
+
+test('失败：数据源抛错时错误文本明确，store 不被调用', async () => {
+  const { hub, store } = makeHub()
+  hub.registerSource(testSource('bad', { failWith: 'Fuyao API error 401: unauthorized' }))
+  await assert.rejects(() => hub.request(request({ capability: 'bad' })), /Fuyao API error/)
+  assert.equal(store.saves(), 0)
+})
+
+test('落盘失败：store 拒绝时请求失败并如实传播（workspace_not_writable 不吞掉）', async () => {
+  const { hub } = makeHub({ store: fakeStore({ failWith: new DatasetStoreError('workspace_not_writable', 'read-only workspace') }) })
+  hub.registerSource(testSource('writable'))
+  await assert.rejects(() => hub.request(request({ capability: 'writable' })), /workspace_not_writable: read-only workspace/)
 })
 
 test('队列满：超过 maxQueueLength 直接抛错不入队', async () => {
   const { hub } = makeHub({ maxQueueLength: 1 })
-  hub.registerSource(testSource('full', { delayMs: 50, dataKey: 'test.full' }))
-  const first = hub.request(request({ data_key: 'test.full', params: { i: 1 } }))
-  await assert.rejects(() => hub.request(request({ data_key: 'test.full', params: { i: 2 } })), /queue is full/)
+  hub.registerSource(testSource('full', { delayMs: 50 }))
+  const first = hub.request(request({ capability: 'full', params: { i: 1 } }))
+  await assert.rejects(() => hub.request(request({ capability: 'full', params: { i: 2 } })), /queue is full/)
   assert.ok(await first, '第一个请求仍正常完成')
 })
 
-test('force_refresh：缓存存在时仍强制拉取并覆盖', async () => {
-  const { hub } = makeHub()
-  const source = testSource('fresh', { dataKey: 'test.fresh' })
-  hub.registerSource(source)
-  await hub.request(request({ data_key: 'test.fresh' }))
-  const refreshed = await hub.request(request({ data_key: 'test.fresh', force_refresh: true }))
-  assert.equal(source.calls(), 2)
-  assert.equal(refreshed.from_cache, false)
-})
-
-test('伪造 data_key：与任何注册身份证不匹配时报错（不静默不命中）', async () => {
-  const { hub } = makeHub()
-  hub.registerSource(testSource('search', { dataKey: 'fuyao.api.api.meta.tickers.search' }))
-  await assert.rejects(
-    () => hub.request(request({ data_key: 'guide_needle_realtime_20260907' })),
-    /no data source/,
-    '编造键必须报错而不是静默',
-  )
-})
-
-test('source_preference provider 不匹配时失败，不静默调用注册源', async () => {
-  const { hub } = makeHub()
-  let calls = 0
+test('source output guard 失败时不落盘', async () => {
+  const { hub, store } = makeHub()
   hub.registerSource({
-    schema: { name: 'other_search', source: 'api:other', data_key: 'other.api.meta.tickers.search', input_schema: {} },
-    execute: async () => { calls += 1; return { data: { wrong: true } } },
+    schema: { capability: 'guarded', name: 'g', source: 'api:test', data_key: 'test.guarded', input_schema: {} },
+    validateOutput: () => false,
+    execute: async () => ({ data: { wrong: true } }),
   })
-  await assert.rejects(
-    () => hub.request(request({ data_key: 'other.api.meta.tickers.search', source_preference: ['fuyao.api'] })),
-    /no data source/,
-  )
-  assert.equal(calls, 0)
+  await assert.rejects(() => hub.request(request({ capability: 'guarded' })), /incompatible with its output contract/)
+  assert.equal(store.saves(), 0)
 })
 
-test('同一 provider 下按 data_key 路由到正确 capability，不取第一个注册源', async () => {
+test('超时会释放 FIFO worker，即使数据源不响应 AbortSignal', async () => {
+  const { hub } = makeHub({ requestTimeoutMs: 10 })
+  hub.registerSource({
+    schema: { capability: 'mixed', name: 'm', source: 'api:test', data_key: 'test.mixed', input_schema: {} },
+    execute: async (req) => req.params.mode === 'hang' ? new Promise(() => {}) : { data: { item: [] } },
+  })
+  const hanging = hub.request(request({ capability: 'mixed', params: { mode: 'hang' } }))
+  const next = hub.request(request({ capability: 'mixed', params: { mode: 'ok' } }))
+  await assert.rejects(() => hanging, /request timed out/)
+  assert.equal((await next).dataset_id, 'ds_1')
+})
+
+test('调用方 signal 中止：等待者被摘除并报错，共享执行照常落盘', async () => {
+  const { hub, store } = makeHub()
+  hub.registerSource(testSource('sig', { delayMs: 30 }))
+  const controller = new AbortController()
+  const pending = hub.request(request({ capability: 'sig' }), { signal: controller.signal })
+  controller.abort()
+  await assert.rejects(() => pending, /aborted/)
+  await sleep(60)
+  assert.equal(store.saves(), 1, '被中止的执行仍应完成落盘')
+})
+
+test('已中止的 signal：请求直接报错不入队', async () => {
   const { hub } = makeHub()
-  const calls = []
-  hub.registerSource({
-    schema: { name: 'get_meta_tickers_search', source: 'api:fuyao', data_key: 'fuyao.api.api.meta.tickers.search', input_schema: {} },
-    execute: async () => { calls.push('search'); return { data: { item: [{ thscode: 'x', name: 'x' }] } } },
-  })
-  hub.registerSource({
-    schema: { name: 'get_a_share_prices_snapshot', source: 'api:fuyao', data_key: 'fuyao.api.api.a-share.prices.snapshot', input_schema: {} },
-    execute: async () => { calls.push('snapshot'); return { data: { item: [{ last_price: 1 }] } } },
-  })
-  const result = await hub.request(request({ data_key: 'fuyao.api.api.a-share.prices.snapshot', source_preference: ['fuyao.api', 'any'], params: { thscodes: '600519.SH' } }))
-  assert.deepEqual(calls, ['snapshot'])
-  assert.equal(result.source, 'get_a_share_prices_snapshot')
+  hub.registerSource(testSource('x'))
+  const controller = new AbortController()
+  controller.abort()
+  await assert.rejects(() => hub.request(request({ capability: 'x' }), { signal: controller.signal }), /aborted/)
 })
 
-test('真实 Fuyao 四源按规范 data_key 路由，且各带声明 TTL', async () => {
+test('缺字段：capability 或 session 缺失时报错明确', async () => {
+  const { hub } = makeHub()
+  await assert.rejects(() => hub.request(request({ capability: '' })), /capability is required/)
+  await assert.rejects(() => hub.request(request({ session: undefined })), /calling agent session is required/)
+})
+
+test('listCapabilities：只暴露模型可见字段，不含内部 name/source/data_key/source_label', async () => {
+  const { hub } = makeHub()
+  hub.registerSource({
+    schema: {
+      capability: 'quote',
+      name: 'get_a_share_prices_snapshot',
+      source: 'api:fuyao',
+      data_key: 'fuyao.api.api.a-share.prices.snapshot',
+      source_label: 'fuyao',
+      paginated: true,
+      description: '行情快照',
+      input_schema: { type: 'object' },
+      output_schema: { type: 'object' },
+    },
+    execute: async () => ({ data: {} }),
+  })
+  const capabilities = hub.listCapabilities()
+  assert.equal(capabilities.length, 1)
+  assert.deepEqual(Object.keys(capabilities[0]).sort(), ['capability', 'description', 'input_schema', 'output_schema', 'paginated'])
+  assert.equal(capabilities[0].capability, 'quote')
+  assert.equal(capabilities[0].paginated, true)
+})
+
+test('真实 Fuyao 四源：capability 短名映射正确，data_key 仅内部保留', async () => {
   const originalFetch = globalThis.fetch
   globalThis.fetch = async (url) => {
     const path = new URL(url).pathname
@@ -218,98 +285,25 @@ test('真实 Fuyao 四源按规范 data_key 路由，且各带声明 TTL', async
     return { ok: true, json: async () => ({ code: 0, data: { item: [item] } }) }
   }
   try {
-    const hub = new DataCollectorHub()
+    const { hub, store } = makeHub()
     for (const source of createFuyaoRestSources(async () => 'key')) hub.registerSource(source)
-    assert.deepEqual(hub.listSchemas().map((s) => s.data_key), [
-      'fuyao.api.api.meta.tickers.search',
-      'fuyao.api.api.a-share.prices.snapshot',
-      'fuyao.api.api.a-share.prices.historical',
-      'fuyao.api.api.a-share.calendar.trading-days',
+    assert.deepEqual(hub.listCapabilities().map((c) => c.capability), [
+      'ticker_search', 'quote', 'history', 'trading_calendar',
     ])
-    assert.equal(hub.listSchemas().find((s) => s.name === 'get_a_share_prices_snapshot').ttl_ms, 60_000)
     const results = await Promise.all([
-      hub.request(request({ data_key: 'fuyao.api.api.meta.tickers.search', params: { q: '指南针' } })),
-      hub.request(request({ data_key: 'fuyao.api.api.a-share.prices.snapshot', params: { thscodes: '300803.SZ' } })),
-      hub.request(request({ data_key: 'fuyao.api.api.a-share.prices.historical', params: { thscode: '300803.SZ', interval: '1d', start: 1, end: 2 } })),
-      hub.request(request({ data_key: 'fuyao.api.api.a-share.calendar.trading-days', params: {} })),
+      hub.request(request({ capability: 'ticker_search', params: { q: '指南针' } })),
+      hub.request(request({ capability: 'quote', params: { thscodes: '300803.SZ' } })),
+      hub.request(request({ capability: 'history', params: { thscode: '300803.SZ', interval: '1d', start: 1, end: 2 } })),
+      hub.request(request({ capability: 'trading_calendar', params: {} })),
     ])
-    assert.deepEqual(results.map((r) => r.source), [
-      'get_meta_tickers_search',
-      'get_a_share_prices_snapshot',
-      'get_a_share_prices_historical',
-      'get_a_share_calendar_trading_days',
+    assert.deepEqual(results.map((r) => [r.capability, r.source_label, r.format, r.row_count]), [
+      ['ticker_search', 'fuyao', 'json_rows', 1],
+      ['quote', 'fuyao', 'json_rows', 1],
+      ['history', 'fuyao', 'json_rows', 1],
+      ['trading_calendar', 'fuyao', 'json_rows', 1],
     ])
+    assert.equal(store.saves(), 4)
   } finally {
     globalThis.fetch = originalFetch
   }
-})
-
-test('未知 data_key 不会在 any 下静默使用第一个 source', async () => {
-  const { hub } = makeHub()
-  let calls = 0
-  hub.registerSource({
-    schema: { name: 'search', source: 'api:fuyao', data_key: 'fuyao.api.api.meta.tickers.search', input_schema: {} },
-    execute: async () => { calls += 1; return { data: { item: [] } } },
-  })
-  await assert.rejects(() => hub.request(request({ data_key: 'fuyao.api.api.a-share.unknown' })), /no data source/)
-  assert.equal(calls, 0)
-})
-
-test('source output guard 失败时不写入缓存', async () => {
-  const { hub } = makeHub()
-  hub.registerSource({
-    schema: { name: 'guarded', source: 'api:test', data_key: 'test.guarded', input_schema: {} },
-    validateOutput: () => false,
-    execute: async () => ({ data: { wrong: true } }),
-  })
-  await assert.rejects(() => hub.request(request({ data_key: 'test.guarded' })), /incompatible with its output contract/)
-  assert.equal(hub.getLatest('test.guarded'), null)
-})
-
-test('getLatest 传入 params 时只返回精确参数组合', async () => {
-  const { hub } = makeHub()
-  hub.registerSource(testSource('params', { dataKey: 'test.params' }))
-  await hub.request(request({ data_key: 'test.params', params: { range: 'old' } }))
-  await hub.request(request({ data_key: 'test.params', params: { range: 'new' } }))
-  assert.equal(hub.getLatest('test.params', { range: 'old' }).data.echo.range, 'old')
-  assert.equal(hub.getLatest('test.params', { range: 'missing' }), null)
-})
-
-test('超时会释放 FIFO worker，即使数据源不响应 AbortSignal', async () => {
-  const { hub } = makeHub({ requestTimeoutMs: 10 })
-  hub.registerSource({
-    schema: { name: 'mixed', source: 'api:test', data_key: 'test.mixed', input_schema: {} },
-    execute: async (req) => req.params.mode === 'hang' ? new Promise(() => {}) : { data: { ok: true } },
-  })
-  const hanging = hub.request(request({ data_key: 'test.mixed', params: { mode: 'hang' } }))
-  const next = hub.request(request({ data_key: 'test.mixed', params: { mode: 'ok' } }))
-  await assert.rejects(() => hanging, /request timed out/)
-  assert.equal((await next).data.ok, true)
-})
-
-test('调用方 signal 中止：等待者被摘除并报错，共享执行不受影响（缓存照常写入）', async () => {
-  const { hub } = makeHub()
-  const source = testSource('sig', { delayMs: 30, dataKey: 'test.sig' })
-  hub.registerSource(source)
-  const controller = new AbortController()
-  const pending = hub.request(request({ data_key: 'test.sig' }), { signal: controller.signal })
-  controller.abort()
-  await assert.rejects(() => pending, /aborted/)
-  await sleep(50)
-  const cached = await hub.request(request({ data_key: 'test.sig' }))
-  assert.equal(cached.from_cache, true, '被中止的执行仍应写完缓存')
-})
-
-test('已中止的 signal：请求直接报错不入队', async () => {
-  const { hub } = makeHub()
-  hub.registerSource(testSource('x', { dataKey: 'test.x' }))
-  const controller = new AbortController()
-  controller.abort()
-  await assert.rejects(() => hub.request(request({ data_key: 'test.x' }), { signal: controller.signal }), /aborted/)
-})
-
-test('缺字段：data_key 或 requester_agent_id 缺失时报错明确', async () => {
-  const { hub } = makeHub()
-  await assert.rejects(() => hub.request(request({ data_key: '' })), /data_key and requester_agent_id are required/)
-  await assert.rejects(() => hub.request(request({ requester_agent_id: '' })), /data_key and requester_agent_id are required/)
 })
