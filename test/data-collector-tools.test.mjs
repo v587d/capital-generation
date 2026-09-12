@@ -81,9 +81,9 @@ function runTool(toolRuntime, name, args, execution) {
   return definition.execute(args, execution)
 }
 
-test('工具注册：request_data + list_capabilities；get_latest/list_schemas 已删除', () => {
+test('工具注册：request_data + list_capabilities + describe_capability；get_latest/list_schemas 已删除', () => {
   const { toolRuntime } = makeHubAndTools()
-  assert.deepEqual(toolRuntime.definitions.map((d) => d.name), ['request_data', 'list_capabilities'])
+  assert.deepEqual(toolRuntime.definitions.map((d) => d.name), ['request_data', 'list_capabilities', 'describe_capability'])
   assert.ok(!toolRuntime.definitions.some((d) => d.name === 'get_latest'), 'get_latest 不应注册')
   assert.ok(!toolRuntime.definitions.some((d) => d.name === 'list_schemas'), 'list_schemas 不应注册')
   for (const definition of toolRuntime.definitions) {
@@ -173,7 +173,7 @@ test('render 回归：渲染的是返回值而非入参（此前 bug 恒为 {}�
   assert.equal(blocks[0].text, JSON.stringify([{ capability: 'quote' }]), '必须渲染 value 而不是 args')
 })
 
-test('list_capabilities：只返回 capability/description/input_schema/output_schema/paginated', async () => {
+test('list_capabilities：只返回 capability/summary/paginated 的精简目录', async () => {
   const { hub, toolRuntime } = makeHubAndTools()
   hub.registerSource({
     schema: {
@@ -183,7 +183,8 @@ test('list_capabilities：只返回 capability/description/input_schema/output_s
       data_key: 'fuyao.api.api.a-share.prices.snapshot',
       source_label: 'fuyao',
       paginated: true,
-      description: '行情快照',
+      summary: '行情快照',
+      description: '行情快照的完整说明：单位、null 语义与分页口径。',
       input_schema: { type: 'object' },
       output_schema: { type: 'object' },
     },
@@ -191,8 +192,92 @@ test('list_capabilities：只返回 capability/description/input_schema/output_s
   })
   const capabilities = await runTool(toolRuntime, 'list_capabilities', {}, exec(delegatedSession()))
   assert.equal(capabilities.length, 1)
-  assert.deepEqual(Object.keys(capabilities[0]).sort(), ['capability', 'description', 'input_schema', 'output_schema', 'paginated'])
+  assert.deepEqual(Object.keys(capabilities[0]).sort(), ['capability', 'paginated', 'summary'])
   assert.equal(capabilities[0].capability, 'quote')
+  assert.equal(capabilities[0].summary, '行情快照')
+  // 目录刻意不带 schema：带上的话 18 个端点约 23KB，会被剪枝器截断中间部分。
+  const definition = toolRuntime.definitions.find((d) => d.name === 'list_capabilities')
+  assert.deepEqual(Object.keys(definition.output.schema.items.properties).sort(), ['capability', 'paginated', 'summary'])
+})
+
+test('list_capabilities：无 summary 时退回描述首句（第三方数据源兜底）', async () => {
+  const { hub, toolRuntime } = makeHubAndTools()
+  hub.registerSource({
+    schema: {
+      capability: 'legacy',
+      name: 'src_legacy',
+      source: 'api:test',
+      data_key: 'test.legacy',
+      description: '第一句用途。第二句是细节。',
+      input_schema: { type: 'object' },
+    },
+    execute: async () => ({ data: {} }),
+  })
+  const capabilities = await runTool(toolRuntime, 'list_capabilities', {}, exec(delegatedSession()))
+  assert.equal(capabilities[0].summary, '第一句用途')
+})
+
+test('describe_capability：返回单个能力的完整契约，一次一个', async () => {
+  const { hub, toolRuntime } = makeHubAndTools()
+  hub.registerSource(source('quote'))
+  const detail = await runTool(toolRuntime, 'describe_capability', { capability: 'quote' }, exec(delegatedSession()))
+  assert.deepEqual(Object.keys(detail).sort(), ['capability', 'description', 'input_schema', 'output_schema', 'paginated', 'summary'])
+  assert.equal(detail.capability, 'quote')
+  assert.ok(detail.input_schema, '详情必须带 input_schema（params 填写依据）')
+})
+
+test('describe_capability：四类错误都有稳定 code 与恢复指引', async () => {
+  const { hub, toolRuntime } = makeHubAndTools()
+  hub.registerSource(source('quote'))
+  const run = (args) => runTool(toolRuntime, 'describe_capability', args, exec(delegatedSession()))
+
+  await assert.rejects(() => run({}), /capability_required/)
+  await assert.rejects(() => run({ capability: '   ' }), /capability_required/)
+  await assert.rejects(() => run({ capability: 42 }), /capability_invalid/)
+  await assert.rejects(() => run({ capability: 'a'.repeat(300) }), /capability_invalid/)
+  await assert.rejects(() => run({ capability: 'quote,history' }), /capability_invalid/)
+
+  // 未知名字：错误里必须列出全部可用能力名，让模型能自我纠正而不是猜。
+  await assert.rejects(() => run({ capability: 'kline' }), (error) => {
+    assert.match(error.message, /capability_unknown/)
+    assert.match(error.message, /quote/, '未知名字的错误必须列出可用能力')
+    assert.match(error.message, /原样复制|不要自行编造/)
+    return true
+  })
+
+  // 目录为空（数据源未注册）：必须明确"别重试"，而不是含糊的 not found。
+  const empty = makeHubAndTools()
+  await assert.rejects(
+    () => runTool(empty.toolRuntime, 'describe_capability', { capability: 'quote' }, exec(delegatedSession())),
+    (error) => {
+      assert.match(error.message, /capability_catalog_empty/)
+      assert.match(error.message, /不要反复重试|不要重试/)
+      assert.match(error.message, /dc_status/)
+      return true
+    },
+  )
+})
+
+test('describe_capability：与 list_capabilities 一致地只暴露模型可见字段', async () => {
+  const { hub, toolRuntime } = makeHubAndTools()
+  hub.registerSource({
+    schema: {
+      capability: 'quote',
+      name: 'get_a_share_prices_snapshot',
+      source: 'api:fuyao',
+      data_key: 'fuyao.api.api.a-share.prices.snapshot',
+      source_label: 'fuyao',
+      description: '完整说明',
+      input_schema: { type: 'object' },
+      output_schema: { type: 'object' },
+    },
+    execute: async () => ({ data: {} }),
+  })
+  const detail = await runTool(toolRuntime, 'describe_capability', { capability: 'quote' }, exec(delegatedSession()))
+  const serialized = JSON.stringify(detail)
+  for (const forbidden of ['data_key', 'source_label', 'api:fuyao', 'get_a_share_prices_snapshot']) {
+    assert.ok(!serialized.includes(forbidden), `详情不应泄露内部字段 ${forbidden}`)
+  }
 })
 
 test('dc_status：上报 registered_capabilities 而非内部 source 名，不泄露密钥值', async () => {

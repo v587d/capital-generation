@@ -17,8 +17,32 @@ const rowByName = (name) => rows.find((row) => row?.name === name)
 
 const personaRow = rowByName('@deepseek-ai/dsh-persona')
 assert.ok(personaRow, 'preset 必须有 dsh-persona 行')
-// dsh-persona 的配置字段是 `prefix`（0.1.5-rc.1 起没有 `text`）。
-const MAIN_PERSONA_TEXT = personaRow.config.prefix
+
+/**
+ * 人设文本字段的读取器（带诊断）。
+ *
+ * dsh-persona 0.1.5-rc.1 的配置字段是 `prefix`（另有可选 `suffix` / `complete` /
+ * `includeRuntimeContext`，从来没有 `text`）。历史教训：harness 一旦换字段名，旧写法
+ * 只会表现为一堆互不相关的"未匹配"，很难定位到底是字段没了还是正文改了。所以这里把
+ * "取人设文本"收敛成一个读取器：找不到字段时立刻报出实际 config 字段名，而不是让
+ * 下游断言集体失配。
+ */
+const PERSONA_TEXT_FIELDS = ['prefix', 'text']
+function readPersonaText(row) {
+  const config = row?.config
+  if (!config || typeof config !== 'object') throw new Error('dsh-persona 行缺少 config')
+  for (const field of PERSONA_TEXT_FIELDS) {
+    if (typeof config[field] === 'string' && config[field].length > 0) return { field, text: config[field] }
+  }
+  throw new Error(
+    `dsh-persona 行的 config 里找不到人设文本字段（候选：${PERSONA_TEXT_FIELDS.join(' / ')}）；`
+    + `当前 config 字段为：[${Object.keys(config).join(', ')}]。`
+    + '若本机 harness 改了字段名，请同步 test/persona.test.mjs 的 PERSONA_TEXT_FIELDS。',
+  )
+}
+
+const personaText = readPersonaText(personaRow)
+const MAIN_PERSONA_TEXT = personaText.text
 assert.equal(typeof MAIN_PERSONA_TEXT, 'string', 'dsh-persona 行必须用 config.prefix 承载人设文本')
 
 // 断言辅助：模式里的空格按"任意空白"匹配（文件结构类断言用）。
@@ -34,7 +58,37 @@ const assertRule = (text, pattern, message) =>
   assert.ok(new RegExp(compact(pattern.source), pattern.flags).test(compact(text)), message ?? `未匹配：${pattern}`)
 const assertNoRule = (text, pattern, message) =>
   assert.ok(!new RegExp(compact(pattern.source), pattern.flags).test(compact(text)), message ?? `不应匹配：${pattern}`)
+
+/**
+ * 规则断言：断"这条硬规则存在"，不锁具体措辞。
+ *
+ * persona 是会反复重写给人读的长文本，同一规则常有多种等价说法；锁死某一句会让每次
+ * 改写都掉一片测试，而真正危险的相反情况——规则被整段删掉——反而淹没在噪声里。
+ * 因此每条规则给出若干等价说法，任一命中即通过；全部落空时应当**补人设**，而不是删断言。
+ */
+const assertRuleAny = (text, patterns, message) => {
+  const matched = patterns.some((pattern) => new RegExp(compact(pattern.source), pattern.flags).test(compact(text)))
+  assert.ok(matched, message ?? `规则缺失（任一等价说法都未命中）：${patterns.map(String).join(' | ')}`)
+}
 const MAIN_PERSONA = MAIN_PERSONA_TEXT
+
+/**
+ * 定位本机已安装的 dsh-persona 类型声明，用于核对人设字段名仍然存在。
+ * 找不到时返回 undefined（测试降级为诊断输出，不误判为失败）。
+ */
+function locatePersonaTypes() {
+  const candidates = [
+    fileURLToPath(new URL('../node_modules/@deepseek-ai/dsh-persona/lib/types/index.d.ts', import.meta.url)),
+  ]
+  for (const dir of (process.env.PATH ?? '').split(':').filter(Boolean)) {
+    candidates.push(`${dir}/../lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-persona/lib/types/index.d.ts`)
+    candidates.push(`${dir}/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-persona/lib/types/index.d.ts`)
+  }
+  for (const file of candidates) {
+    if (existsSync(file)) return { file, text: readFileSync(file, 'utf8') }
+  }
+  return undefined
+}
 
 const collectorRow = rowById('tool-subagent-data-collector')
 assert.ok(collectorRow, 'preset 必须有 subagent_data_collector 专用委派行')
@@ -57,7 +111,7 @@ const childRows = [collectorRow, juniorRow, retrieverRow]
 // 插件真实注册 + preset 真实挂载的工具名。toolFilter.allow 里出现未知名字会在
 // 创建子 Agent 时被 tools.restrict() 拒绝，所以它必须与这份清单求交集。
 const PLUGIN_TOOLS = [
-  'request_data', 'list_capabilities', 'dc_status',
+  'request_data', 'list_capabilities', 'describe_capability', 'dc_status',
   'inspect_dataset', 'read_dataset_slice', 'profile_dataset', 'write_profile',
   'get_local_datetime',
   'web_retriever_search', 'web_retriever_fetch',
@@ -81,6 +135,17 @@ test('preset 结构：persona 行为声明式行，插件不再占用 deployment
   // 插件代码不得再注册 DEPLOYMENT_PERSONA 节（只允许注释里解释该设计）
   assertNotMatches(INDEX_SOURCE, /name:\s*['"]deployment:persona['"]/, 'src/index.ts 不应以 deployment:persona 为节名注册 section')
   assertNotMatches(INDEX_SOURCE, /PERSONA_SECTION/, 'src/index.ts 不应保留 PERSONA_SECTION 常量')
+})
+
+test('persona 行字段：跟随本机 harness 版本，用 prefix 承载人设文本', (t) => {
+  assert.equal(personaText.field, 'prefix', 'dsh-persona 的人设文本字段是 prefix，不是 text')
+  const types = locatePersonaTypes()
+  if (!types) {
+    t.diagnostic('未定位到本机 @deepseek-ai/dsh-persona 类型声明，跳过字段名核对（preset 侧已按 prefix 读取）')
+    return
+  }
+  // 本机安装的契约仍是唯一事实来源：字段名对不上时，这里先失败并点名文件。
+  assertMatches(types.text, /prefix\s*:\s*string/, `${types.file} 中不再存在 prefix 字段：人设字段契约已变，请同步 preset 与 persona 测试`)
 })
 
 test('skills：两行组合式注册（skill-filesystem + tool-skill），不靠插件代码注册 provider', () => {
@@ -159,7 +224,7 @@ test('主 persona：包含委派编排段，创建 data_collector 走专用工�
   assertRule(MAIN_PERSONA, /# ROLE & IDENTITY/)
   assertRule(MAIN_PERSONA, /# SUBAGENT ORCHESTRATION/)
   assertRule(MAIN_PERSONA, /subagent_data_collector/)
-  assertRule(MAIN_PERSONA, /不需要复制任何模板/)
+  assertRuleAny(MAIN_PERSONA, [/不需要复制任何模板/, /无需复制任何模板/], '主 persona 应说明创建子 Agent 时不复制模板')
   assertNoRule(MAIN_PERSONA, /prompt = 文末|原样作为初始 prompt|原样复制为初始 prompt/, '主 persona 不应再包含复制模板指令')
 })
 
@@ -167,34 +232,34 @@ test('主 persona：数据调度纪律——通过 list_agents + send_message �
   assertRule(MAIN_PERSONA, /# DATA COORDINATION/)
   assertRule(MAIN_PERSONA, /list_agents/)
   assertRule(MAIN_PERSONA, /send_message/)
-  assertRule(MAIN_PERSONA, /工具可见性不是权限隔离/)
-  assertRule(MAIN_PERSONA, /data_request \/ profile_request/)
-  assertRule(MAIN_PERSONA, /dataset_ready \/ data_failed/)
-  assertRule(MAIN_PERSONA, /dataset_profile_completed \/\s*profile_failed/)
-  assertRule(MAIN_PERSONA, /指示 data_collector/)
-  assertRule(MAIN_PERSONA, /请求归属恒为调用者自身/)
+  // 实测教训：工具"可见"不等于可直调——工具层只放行 delegated child。
+  assertRuleAny(MAIN_PERSONA, [/工具可见性不是权限隔离/, /工具层会拒绝非 delegated child/], '主 persona 需说明数据工具虽可见但只有 delegated child 能调用')
+  // 载荷契约（data_request / profile_request / dataset_ready / profile_failed 等）住在
+  // skill capital-data-protocol，主 persona 只需指向它——载荷名本身在 junior persona 与 skill 里断言。
+  assertRuleAny(MAIN_PERSONA, [/capital-data-protocol/], '主 persona 必须指向数据载荷契约（skill capital-data-protocol）')
+  assertRuleAny(MAIN_PERSONA, [/指示 data_collector/, /统一经 data_collector/], '主 persona 需说明数据请求统一经 data_collector')
   assertRule(MAIN_PERSONA, /source_label/)
   assertRule(MAIN_PERSONA, /capability/)
   assertRule(MAIN_PERSONA, /captured_at/)
   // 主 Agent 协议只描述需求：委派消息不带内部数据源键名，回传只收 DatasetRef
-  assertRule(MAIN_PERSONA, /不带任何内部数据源键名/)
+  assertRule(MAIN_PERSONA, /不带.*内部.*键名/)
   assertRule(MAIN_PERSONA, /DatasetRef/)
   assertRule(MAIN_PERSONA, /记入委派清单/)
   assertRule(MAIN_PERSONA, /list_capabilities/)
   // 实测教训（2026-09 复盘会话）：主 Agent 直调 read_dataset_slice 被工具层拒绝后，
   // 用网页行情数字补位。DatasetRef 用法与行情数值纪律必须写成显式硬规则。
-  assertRule(MAIN_PERSONA, /要查看数据内容或基础统计[\s\S]*?data_junior/)
-  assertRule(MAIN_PERSONA, /绝不直接调用 Dataset 系列工具/)
-  assertRule(MAIN_PERSONA, /data_analyst 尚未/)
+  assertRule(MAIN_PERSONA, /看内容或基础统计.*data_junior/)
+  assertRuleAny(MAIN_PERSONA, [/绝不直接调用 Dataset 系列工具/, /禁止直调 Dataset 工具/], '主 persona 必须禁止直调 Dataset 系列工具')
+  assertRuleAny(MAIN_PERSONA, [/data_analyst 尚未/, /data_analyst 未启用/], '主 persona 需说明 data_analyst 不可用')
   assertRule(MAIN_PERSONA, /dataset_session_mismatch/)
-  assertRule(MAIN_PERSONA, /被拒后不要重试直读/)
+  assertRule(MAIN_PERSONA, /不要重试直读/)
   assertRule(MAIN_PERSONA, /媒体转述旁证/)
   assertRule(MAIN_PERSONA, /不得冒充行情证据/)
-  assertRule(MAIN_PERSONA, /不得用网页数字/)
+  assertRuleAny(MAIN_PERSONA, [/不得用网页数字/, /网页数字只能标/], '主 persona 需限制网页数字的使用方式')
   // 实测教训：回传结构化数据按原样引用（防转写错位）、被唤醒后不重复输出
   assertRule(MAIN_PERSONA, /按原样引用/, '主 persona 应要求回传数据按原样引用')
-  assertRule(MAIN_PERSONA, /不再重复输出/, '主 persona 应禁止已答复后的重复输出')
-  assertRule(MAIN_PERSONA, /所有 Agent 消息一律\s*禁止携带完整原始 rows/, '主 persona 应禁止原始 rows 进消息')
+  assertRule(MAIN_PERSONA, /不(再)?重复输出/, '主 persona 应禁止已答复后的重复输出')
+  assertRuleAny(MAIN_PERSONA, [/所有 Agent 消息一律禁止携带完整原始 rows/, /禁止任何消息携带完整原始 rows/], '主 persona 应禁止原始 rows 进消息')
   // 人设是纯指令：不出现框架内部机制词（官方 / DSH / exec.agent）
   assertNoRule(MAIN_PERSONA, /官方|DSH|exec\.agent/, '主 persona 不应出现框架术语')
   // 走偏产物必须消失：无 requester_agent_id 传参（协议字段）、无订阅机制、无 request_id 对账协议
@@ -207,23 +272,23 @@ test('主 persona：数据调度纪律——通过 list_agents + send_message �
 })
 
 test('主 persona：预热与回合纪律——每会话一个 dc、等待期不做外部检索、失败按重试纪律', () => {
-  assertRule(MAIN_PERSONA, /每会话只需一个 data_collector、一个 data_junior、一个 web_retriever/)
-  assertRule(MAIN_PERSONA, /不要反复创建|全程复用/)
-  assertRule(MAIN_PERSONA, /回合纪律/)
-  assertRule(MAIN_PERSONA, /不做任何外部检索\/抓取/, '主 persona 应禁止等待期自行检索（收敛到 web_retriever）')
-  assertRule(MAIN_PERSONA, /重试纪律/)
-  assertRule(MAIN_PERSONA, /抽样核对/)
+  assertRuleAny(MAIN_PERSONA, [/每会话各角色只需一个/, /每会话只需一个/], '主 persona 应限定每会话每角色只需一个子 Agent')
+  assertRuleAny(MAIN_PERSONA, [/不要?反复创建/, /全程复用/], '主 persona 应禁止反复创建同角色子 Agent')
+  assertRule(MAIN_PERSONA, /回合/)
+  assertRuleAny(MAIN_PERSONA, [/不做任何外部检索/, /不做外部检索/], '主 persona 应禁止等待期自行检索（收敛到 web_retriever）')
+  assertRuleAny(MAIN_PERSONA, [/重试纪律/, /指示重试/], '主 persona 应说明失败重试纪律')
+  assertRuleAny(MAIN_PERSONA, [/抽样核对/, /异常抽样/], '主 persona 应把网页比对限定为抽样核对')
 })
 
 test('主 persona：web_retriever 编排与检索路由', () => {
   assertRule(MAIN_PERSONA, /subagent_web_retriever/)
   assertRule(MAIN_PERSONA, /web_retriever/)
   assertRule(MAIN_PERSONA, /send_message/)
-  assertRule(MAIN_PERSONA, /不再自行调用任何网络检索\/抓取\/搜索类工具/)
-  assertRule(MAIN_PERSONA, /wind_docs 系列/, '主 persona 禁直连清单应点名 wind_docs 系列工具')
-  assertRule(MAIN_PERSONA, /已消歧的标的与完整代码/, '主 persona 委派 web_retriever 应带上标的与代码（Wind 查询要素依赖）')
-  assertRule(MAIN_PERSONA, /一律委派/)
-  assertRule(MAIN_PERSONA, /并行委派/)
+  assertRuleAny(MAIN_PERSONA, [/不再自行调用任何网络检索/, /禁止自行调用任何网络检索/], '主 persona 应禁止主 Agent 自行检索')
+  assertRule(MAIN_PERSONA, /wind_docs/, '主 persona 禁直连清单应点名 wind_docs 系列工具')
+  assertRuleAny(MAIN_PERSONA, [/已消歧的标的与完整代码/, /已消歧标的与完整代码/], '主 persona 委派 web_retriever 应带上标的与代码（Wind 查询要素依赖）')
+  assertRuleAny(MAIN_PERSONA, [/一律委派/, /外部检索只经/], '主 persona 应把外部检索收敛到委派')
+  assertRuleAny(MAIN_PERSONA, [/并行委派/, /多需求可并行/, /可并行/], '主 persona 应说明多需求可并行委派')
 })
 
 test('subagent_web_retriever 行：只允许核心网页工具并包含官方域名核验规则', () => {
@@ -241,27 +306,30 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
 })
 
 test('主 persona：每轮先查 direct children，按角色标签复用，确认无匹配才创建', () => {
-  assertRule(MAIN_PERSONA, /每次新的用户请求或新一轮任务都必须先做一次委派预检/)
-  assertRule(MAIN_PERSONA, /调用任何创建工具/)
-  assertRule(MAIN_PERSONA, /subagent_data_collector、subagent_data_junior、\s*subagent_web_retriever、subagent/)
+  assertRuleAny(MAIN_PERSONA, [/每次新的用户请求或新一轮任务都必须先做一次委派预检/, /每轮预检/], '主 persona 必须写明每轮委派预检')
+  assertRule(MAIN_PERSONA, /调用任何创建类?工具/)
+  // 委派工具清单：三个专用角色工具 + 通用 subagent 都必须点名，否则模型会拿通用工具兜底。
+  for (const tool of ['subagent_data_collector', 'subagent_data_junior', 'subagent_web_retriever', 'subagent']) {
+    assertRule(MAIN_PERSONA, new RegExp(tool), `主 persona 应点名委派工具 ${tool}`)
+  }
   assertRule(MAIN_PERSONA, /list_agents\(scope="children"\)/)
-  assertRule(MAIN_PERSONA, /上一轮的空列表不能代替本轮查询/)
+  assertRule(MAIN_PERSONA, /上一轮空?的?列表不能代替本轮/)
   assertRule(MAIN_PERSONA, /data_collector、data_junior、web_retriever/)
   // 实测教训：长上下文里凭记忆复述 agent_id 会抄错甚至错投。官方 durable 注册表的
   // 正确用法是——id 只从新鲜的 list_agents 输出复制，用前 freshly 查一次。
-  assertRule(MAIN_PERSONA, /agent_id 一律从最近一次 list_agents 的返回中复制/)
-  assertRule(MAIN_PERSONA, /发送前核对 id、label 与本次任务三者对应/)
-  assertRule(MAIN_PERSONA, /description 必须原样使用对应角色标签/)
-  assertRule(MAIN_PERSONA, /历史 child 的 label 即使仍是旧任务标题/)
-  assertRule(MAIN_PERSONA, /必须沿用该 id/)
-  assertRule(MAIN_PERSONA, /不得因为 label 非标准而新建/)
-  assertRule(MAIN_PERSONA, /running、idle 或 ready 任一状态/)
-  assertRule(MAIN_PERSONA, /立即用该 id 调用 send_message/)
-  assertRule(MAIN_PERSONA, /不得因为空闲、上一任务已完成、任务标题变化或\s*需要并行而创建第二个/)
-  assertRule(MAIN_PERSONA, /只有本轮 list_agents 明确没有该角色标签时/)
+  assertRule(MAIN_PERSONA, /agent_id.*从最近一次 list_agents.*复制/)
+  assertRule(MAIN_PERSONA, /发送前核对 id、label.*三者对应/)
+  assertRuleAny(MAIN_PERSONA, [/description 必须原样使用对应角色标签/, /description 必须等于角色标签/], '主 persona 应要求 description 用角色标签')
+  assertRuleAny(MAIN_PERSONA, [/历史 child 的 label 即使仍?是旧(任务)?标题/], '主 persona 应说明历史 child 的 label 可沿用')
+  assertRule(MAIN_PERSONA, /必须沿用/)
+  assertRule(MAIN_PERSONA, /不得因(为)? ?label 非标准而新建/)
+  assertRule(MAIN_PERSONA, /running.*idle.*ready.*任一状态/)
+  assertRule(MAIN_PERSONA, /立即.*send_message/)
+  assertRuleAny(MAIN_PERSONA, [/禁止因空闲.*(再建一个|创建第二个)/, /不得因为空闲.*创建第二个/], '主 persona 应禁止同角色重复创建')
+  assertRuleAny(MAIN_PERSONA, [/(只有|仅当)本轮 list_agents 明确(没有|无)该角色/], '主 persona 应把创建限定为"本轮查无该角色"')
   assertRule(MAIN_PERSONA, /subagent_data_collector \/ subagent_data_junior \/ subagent_web_retriever/)
-  assertRule(MAIN_PERSONA, /禁止使用通用 subagent 创建替代实例/)
-  assertRule(MAIN_PERSONA, /durable subagentId/)
+  assertRule(MAIN_PERSONA, /禁止(使用)?(用)?通用 subagent/)
+  assertRule(MAIN_PERSONA, /durable (id|subagentId)/)
   assertRule(MAIN_PERSONA, /结算通知/)
   assertNoRule(MAIN_PERSONA, /创建前不需要先查 list_agents/)
   assertNoRule(MAIN_PERSONA, /首查非空是正常情况/)
@@ -288,10 +356,10 @@ test('子 Agent 委派行：continuable、persona 覆盖、toolFilter 收敛工�
 
 test('subagent_data_collector 行：叶子执行器工具边界', () => {
   const allow = collectorRow.config.toolFilter.allow
-  for (const requiredTool of ['send_message', 'request_data', 'list_capabilities', 'dc_status']) {
+  for (const requiredTool of ['send_message', 'request_data', 'list_capabilities', 'describe_capability', 'dc_status']) {
     assert.ok(allow.includes(requiredTool), `toolFilter.allow 必须包含 ${requiredTool}`)
   }
-  for (const removedTool of ['get_latest', 'list_schemas', 'get_request_status']) {
+  for (const removedTool of ['get_latest', 'list_schemas', 'get_request_status', 'capability_detail', 'list_schemas_full']) {
     assert.ok(!allow.includes(removedTool), `toolFilter.allow 不应包含已删除的 ${removedTool}`)
   }
   // 叶子执行器：不应被允许委派/提问/网页/文件操作
@@ -333,7 +401,17 @@ test('data_collector persona：覆盖 Phase 1 数据集协议全部必须要点'
   // capability 用量引导（≤3 引导 / ≤5 硬性），capability 以 list_capabilities 返回为准
   assertRule(COLLECTOR_PERSONA, /最多 3 个/, 'dc persona 需含能力用量引导（最多 3 个）')
   assertRule(COLLECTOR_PERSONA, /不超过 5 个/, 'dc persona 需含能力用量硬性上限（不超过 5 个）')
-  assertRule(COLLECTOR_PERSONA, /list_capabilities 返回为准/, 'dc persona 应要求 capability 以 list_capabilities 返回为准')
+  assertRule(COLLECTOR_PERSONA, /list_capabilities 返回为准|目录为准/, 'dc persona 应要求 capability 以 list_capabilities 返回为准')
+  // 能力发现是两步且各只做一次：目录与详情都会留在 session 历史里，重复调用只白占上下文。
+  assertRule(COLLECTOR_PERSONA, /describe_capability/, 'dc persona 必须写明用 describe_capability 取单个能力的完整 schema')
+  assertRuleAny(COLLECTOR_PERSONA, [/一个任务只调一次/, /只调一次/], 'dc persona 必须限定 list_capabilities 一个任务只调一次')
+  assertRuleAny(COLLECTOR_PERSONA, [/一个能力描述一次/, /不要重复描述/, /重复描述同一个能力/], 'dc persona 必须限定同一个能力只描述一次')
+  assertRuleAny(COLLECTOR_PERSONA, [/禁止把多个名字用逗号/, /一次只传一个 capability/, /不要用逗号/], 'dc persona 必须限定 describe_capability 一次一个名字')
+  // 分类错误必须按 code 处置，而不是盲目重试
+  for (const code of ['capability_required', 'capability_invalid', 'capability_unknown', 'capability_catalog_empty']) {
+    assertRule(COLLECTOR_PERSONA, new RegExp(code), `dc persona 必须给出 ${code} 的处置指引`)
+  }
+  assertRuleAny(COLLECTOR_PERSONA, [/不要重试/, /不要反复重试/], 'catalog_empty 必须明确不要重试')
   // 实测教训：多端点一次性回传、只许结构化载荷（禁止只回传 markdown）、载荷字段原样不改写
   assertRule(COLLECTOR_PERSONA, /一次性/, 'dc persona 应要求多端点一次性回传')
   assertRule(COLLECTOR_PERSONA, /禁止只回传/, 'dc persona 应禁止只回传 markdown 汇总')
@@ -420,25 +498,30 @@ test('subagent_data_analyst 行：仍在开发中——disabled，且预留工�
     assertRule(ANALYST_PERSONA, pattern, `data_analyst persona 缺少要点: ${pattern}`)
   }
   assertNoRule(ANALYST_PERSONA, /data_key|官方|DSH|exec\.agent/, 'analyst persona 不应包含内部键名/框架术语')
-  // 主 persona 必须写明该角色尚未启用
-  assertRule(MAIN_PERSONA, /data_analyst 仍在开发中/)
-  assertRule(MAIN_PERSONA, /当前会话不创建、不使用/)
+  // 主 persona 必须写明该角色尚未启用（措辞可改，规则不可消失）
+  assertRuleAny(MAIN_PERSONA, [/data_analyst 仍在开发中/, /data_analyst 未启用/], '主 persona 必须写明 data_analyst 未启用')
+  assertRuleAny(MAIN_PERSONA, [/当前会话不创建、不使用/, /data_analyst 未启用：不创建/], '主 persona 必须写明当前会话不创建 data_analyst')
 })
 
 test('主 persona：data_junior 是直接子 Agent，dc 不得创建它', () => {
   assertRule(MAIN_PERSONA, /subagent_data_junior/)
-  assertRule(MAIN_PERSONA, /data_junior 是你的直接子 Agent，与 data_collector 是兄弟/)
-  assertRule(MAIN_PERSONA, /data_collector\s*不得也不应创建它/)
-  assertRule(MAIN_PERSONA, /质检 Agent 一律由你直接创建/)
-  assertRule(MAIN_PERSONA, /profile_request/)
-  assertRule(MAIN_PERSONA, /dataset_profile_completed \/\s*profile_failed/)
+  assertRuleAny(MAIN_PERSONA, [/data_junior 是你的直接子 Agent，与 data_collector 是兄弟/, /data_junior 一律由你直接创建/], '主 persona 必须写明 data_junior 由主 Agent 直接创建')
+  assertRule(MAIN_PERSONA, /兄弟子 Agent/)
+  assertRuleAny(MAIN_PERSONA, [/data_collector\s*不得也不应创建它/, /data_collector 不得创建或指挥它/], '主 persona 必须写明 data_collector 不得创建/指挥 data_junior')
+  assertRuleAny(MAIN_PERSONA, [/质检 Agent 一律由你直接创建/, /data_junior 一律由你直接创建/], '主 persona 必须写明质检 Agent 由主 Agent 直接创建')
   assertRule(MAIN_PERSONA, /profile_ref/)
-  assertRule(MAIN_PERSONA, /data_junior 不归 dc 创建\s*或指挥/)
+  assertRule(MAIN_PERSONA, /data_junior 不归 dc 创建\s*或指挥|data_collector 不得创建或指挥它/)
+  // 载荷名（profile_request / dataset_profile_completed / profile_failed）住在 skill 与
+  // data_junior persona：主 persona 只指向契约出处，不在正文里内联 JSON 示例。
+  assertRuleAny(MAIN_PERSONA, [/capital-data-protocol/], '主 persona 必须指向数据载荷契约')
 })
 
 test('data_collector persona：叶子边界——不得创建/指挥 data_junior 等下游子 Agent', () => {
   assertRule(COLLECTOR_PERSONA, /不创建、不委派、不指挥任何下游子 Agent/)
   assertRule(COLLECTOR_PERSONA, /data_junior 由主\s*Agent 直接创建/)
+  // 请求归属规则在 dc 侧承载（主 persona 只描述"统一经 data_collector"）：
+  // 归属恒为调用者自身，不接受 requester_agent_id 之类的代理请求概念。
+  assertRule(COLLECTOR_PERSONA, /请求归属恒为调用者自身/)
   assertNoRule(COLLECTOR_PERSONA, /subagent_data_junior|subagent_data_analyst/, 'dc persona 不应包含创建下游 Agent 的委派工具名')
 })
 

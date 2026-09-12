@@ -30,7 +30,9 @@
     "build": "npm run clean && tsc",
     "dev": "tsc -w",
     "test": "npm run build && node --test test/*.test.mjs",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "smoke:fuyao": "node scripts/smoke-fuyao.mjs",
+    "docs:capabilities": "npm run build && node scripts/gen-capability-table.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2"

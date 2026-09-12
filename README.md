@@ -52,6 +52,11 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
   - **工具注册**：通过官方 `tools` 服务向会话注册模型工具，由宿主统一管理工具的生命周期与权限控制。
   - **用户交互**：复用官方 `ask_user_question`、`todo_write`、`send_message`、`list_agents` 等工具，不重复造轮子。
  
+## data_collector 能力总表
+
+[data_collector 能力总表](docs/data-collector-capabilities.md) 列出全部 **61 个**数据 capability（元数据 / A股行情与财务 / 估值竞价 / 盘面特色 / 指数 / 基金），含端点路径、主要参数（必填以 `*` 标注）、是否分页与用途，并说明**不覆盖**的模块及原因。
+
+
 ## 样例
 [2026-09-11测试样例](docs/sample/指南针软件（300803.SZ）复盘分析报告.md)
 

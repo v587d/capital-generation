@@ -26,15 +26,35 @@ description: Use when composing or reading a Capital data message — the exact 
 | `type` | 固定 `data_request` |
 | `task_id` | 同一任务复用同一个值，便于回传对账 |
 | `description` | 用自然语言写清要什么数据；也可含标的、区间、频率 |
-| `capability` | 可选。明确知道能力名时才指定；省略时由 `data_collector` 按 `list_capabilities` 挑选 |
+| `capability` | 可选。明确知道能力名时才指定；省略时由 `data_collector` 走下面 §1.1 的两步发现 |
 | `params` | 按该 capability 的 `input_schema` 填写；标的使用完整代码（如 `600519.SH`），不自行拼接交易所后缀 |
 | `force_refresh` | `false`/省略：宿主可复用当前 session 内未过期的 Dataset；`true`：强制重新取数并生成新的不可变 Dataset |
 
 硬规则：
 
 - 委派消息只带需求与参数，**不带任何内部数据源键名**，也不携带原始数据行。
-- 能力名一律以 `list_capabilities` 返回为准，不要编造。
+- 能力名一律以 `list_capabilities` 返回的目录为准，不要编造。
 - 一次请求一个能力、串行推进；单回合通常 1 个、最多 3 个、硬性不超过 5 个能力。
+
+## 1.1 能力发现（data_collector 侧：两步，且各只做一次）
+
+| 步 | 工具 | 得到什么 | 调用纪律 |
+|----|------|----------|----------|
+| ① | `list_capabilities()` | 能力目录：`capability` + 一行 `summary` + `paginated` | **一个任务只调一次**；目录已在本 session 历史里，重复调用只会白占上下文 |
+| ② | `describe_capability({ capability })` | 该能力的完整 `description` / `input_schema` / `output_schema` | 一次只传**一个**名字、**不传逗号**；同一个能力描述一次即可；要几个能力就分别调用几次 |
+
+- 目录刻意不含参数与输出结构：18 个端点的完整 schema 约 23KB，会被工具结果剪枝器截断中间部分，
+  导致排在中间的能力在发现阶段不可见。目录只负责"选哪个"，详情负责"怎么填"。
+- 不查 `input_schema` 就填 `params` 属于违规；`params` 的取值与约束一律以 `describe_capability` 为准。
+
+`describe_capability` 的错误按 code 处置，不要盲目重试：
+
+| code | 含义 | 正确动作 |
+|------|------|----------|
+| `capability_required` | 没给名字（缺失或空白） | 先调一次 `list_capabilities`，把目录里的名字原样传入 |
+| `capability_invalid` | 不是字符串 / 超长 / 含逗号 | 改成单个字符串名字后重试一次；多个能力分多次调用 |
+| `capability_unknown` | 名字不在目录里（错误信息会列出全部可用名字） | 从列出的名字里原文复制重来；不编造、不缩写、不改写 |
+| `capability_catalog_empty` | 当前没有任何已注册能力（数据源未注册，常见原因是凭据未配置） | **不要重试**（此刻任何名字都会失败）；用 `dc_status` 读注册错误并如实回告主 Agent |
 
 ## 2. 数据回传（data_collector → 主 Agent）
 

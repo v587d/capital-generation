@@ -7,6 +7,30 @@ import { createFuyaoRestSources } from '../lib/sources/fuyao-rest.js'
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const SESSION = { id: 'session-1', header: { cwd: '/workspace/proj' } }
 
+/** 已注册的 Fuyao capability（Phase 1 四个 + Phase 2 十四个）。 */
+const PHASE2_CAPABILITIES = [
+  'ticker_list', 'corporate_actions', 'income_statement', 'balance_sheet', 'cash_flow',
+  'financial_indicators', 'valuation', 'auction', 'limit_up_pool', 'limit_up_ladder',
+  'index_catalog', 'index_constituents', 'index_quote', 'index_history',
+]
+const PHASE3_CAPABILITIES = [
+  'limit_down_pool', 'limit_break_pool', 'skyrocket_list', 'hot_stock_list', 'hot_stock_history',
+  'hot_stock_rank_trend', 'anomaly_list', 'anomaly_stock', 'dragon_tiger', 'auction_benchmark',
+]
+const PHASE3B_CAPABILITIES = [
+  'fund_profile', 'fund_quote', 'fund_history', 'fund_nav', 'fund_returns', 'fund_drawdowns',
+  'fund_holdings', 'fund_asset_allocation', 'fund_industry_allocation', 'fund_stock_history',
+  'fund_holders', 'fund_top_holders', 'fund_manager', 'fund_company',
+]
+const PHASE3C_CAPABILITIES = [
+  'fund_performance_history', 'fund_bond_history', 'fund_stock_report_dates', 'fund_bond_report_dates',
+  'fund_manager_experience', 'fund_manager_style', 'fund_manager_performance',
+  'fund_income', 'fund_balance', 'fund_financial_indicators',
+  'fund_indicator_line', 'fund_indicator_table', 'fund_dividends', 'fund_offerings',
+  'fund_quota_list', 'fund_quota_summary', 'fund_diagnostics', 'fund_backtest', 'fund_backtest_indicators',
+]
+const FUYAO_CAPABILITIES = ['ticker_search', 'quote', 'history', 'trading_calendar', ...PHASE2_CAPABILITIES, ...PHASE3_CAPABILITIES, ...PHASE3B_CAPABILITIES, ...PHASE3C_CAPABILITIES]
+
 /** 可统计调用次数的假数据源；delayMs>0 时可挂起/被 abort 唤醒。 */
 function testSource(capability, { delayMs = 0, failWith, dataKey = `test.${capability}`, data } = {}) {
   let calls = 0
@@ -248,7 +272,7 @@ test('缺字段：capability 或 session 缺失时报错明确', async () => {
   await assert.rejects(() => hub.request(request({ session: undefined })), /calling agent session is required/)
 })
 
-test('listCapabilities：只暴露模型可见字段，不含内部 name/source/data_key/source_label', async () => {
+test('listCapabilities：只暴露 capability/summary/paginated，不含内部字段与 schema', async () => {
   const { hub } = makeHub()
   hub.registerSource({
     schema: {
@@ -258,7 +282,8 @@ test('listCapabilities：只暴露模型可见字段，不含内部 name/source/
       data_key: 'fuyao.api.api.a-share.prices.snapshot',
       source_label: 'fuyao',
       paginated: true,
-      description: '行情快照',
+      summary: '行情快照',
+      description: '行情快照的完整说明。',
       input_schema: { type: 'object' },
       output_schema: { type: 'object' },
     },
@@ -266,12 +291,67 @@ test('listCapabilities：只暴露模型可见字段，不含内部 name/source/
   })
   const capabilities = hub.listCapabilities()
   assert.equal(capabilities.length, 1)
-  assert.deepEqual(Object.keys(capabilities[0]).sort(), ['capability', 'description', 'input_schema', 'output_schema', 'paginated'])
+  assert.deepEqual(Object.keys(capabilities[0]).sort(), ['capability', 'paginated', 'summary'])
   assert.equal(capabilities[0].capability, 'quote')
   assert.equal(capabilities[0].paginated, true)
+  assert.equal(capabilities[0].summary, '行情快照')
+  assert.deepEqual(hub.capabilityNames(), ['quote'])
 })
 
-test('真实 Fuyao 四源：capability 短名映射正确，data_key 仅内部保留', async () => {
+test('describeCapability：返回单个能力详情，未知名字返回 undefined（由工具层分类）', () => {
+  const { hub } = makeHub()
+  hub.registerSource({
+    schema: {
+      capability: 'quote',
+      name: 'get_a_share_prices_snapshot',
+      source: 'api:fuyao',
+      data_key: 'fuyao.api.api.a-share.prices.snapshot',
+      source_label: 'fuyao',
+      paginated: true,
+      summary: '行情快照',
+      description: '完整说明',
+      input_schema: { type: 'object' },
+      output_schema: { type: 'object' },
+    },
+    execute: async () => ({ data: {} }),
+  })
+  const detail = hub.describeCapability('quote')
+  assert.ok(detail)
+  assert.deepEqual(Object.keys(detail).sort(), ['capability', 'description', 'input_schema', 'output_schema', 'paginated', 'summary'])
+  assert.equal(detail.description, '完整说明')
+  assert.equal(hub.describeCapability('nope'), undefined)
+  const serialized = JSON.stringify(detail)
+  for (const forbidden of ['data_key', 'api:fuyao', 'get_a_share_prices_snapshot']) {
+    assert.ok(!serialized.includes(forbidden), `详情不应泄露内部字段 ${forbidden}`)
+  }
+})
+
+test('能力目录体积预算：必须留在 DSH 剪枝阈值（8192）以内，否则中间能力会被截断', async () => {
+  const { hub } = makeHub()
+  for (const dataSource of createFuyaoRestSources(async () => 'key')) hub.registerSource(dataSource)
+  const directory = JSON.stringify(hub.listCapabilities())
+  assert.ok(hub.capabilityNames().length >= 61, '端点数量回归：目录预算断言必须覆盖全部已注册能力')
+
+  // 预算的来源（实测本机 dsh 0.1.5-rc.1，不是拍脑袋的数字）：
+  // - 真实上限是 dsh-compaction-tool-result-pruner 的 `thresholdChars`（preset 里配 8192）。
+  //   它**不可按 Agent 区分**：全仓只有这一个包持有该配置，且主 Agent 与子 Agent 共用
+  //   同一份 standing composition（同一个 pruner 实例），所以"只给 data_collector 提高预算"
+  //   在 DSH 里没有配置路径。
+  // - 超过 8192 的后果：保留 head 4096 + tail 1024、中间替换为 PRUNE_MARKER，
+  //   即目录**中间段的能力会在发现阶段消失**。
+  // - 因此这里取 8192 的 75%（6144），留 2048 字符余量：逼近真实上限时先让测试失败，
+  //   而不是运行时静默截断。按当前每端点约 79 字符计，可容纳约 78 个能力。
+  const DIRECTORY_BUDGET = 6144
+  assert.ok(directory.length < DIRECTORY_BUDGET, `能力目录 JSON 已达 ${directory.length} 字符（预算 ${DIRECTORY_BUDGET}，剪枝阈值 8192）：请精简 summary、改紧凑编码，或与用户确认是否上调 preset 的剪枝阈值`)
+  assert.ok(directory.length < 8192, '目录绝不允许越过剪枝阈值')
+
+  // 单能力详情不随端点数增长（最大约 2.3KB），用更紧的 4096 做回归护栏。
+  const details = hub.capabilityNames().map((capability) => JSON.stringify(hub.describeCapability(capability)))
+  const largest = Math.max(...details.map((detail) => detail.length))
+  assert.ok(largest < 4096, `最大的能力详情已达 ${largest} 字符：会被剪枝截断，需要精简或拆分`)
+})
+
+test('真实 Fuyao 源：capability 短名映射正确，data_key 仅内部保留', async () => {
   const originalFetch = globalThis.fetch
   globalThis.fetch = async (url) => {
     const path = new URL(url).pathname
@@ -287,9 +367,7 @@ test('真实 Fuyao 四源：capability 短名映射正确，data_key 仅内部�
   try {
     const { hub, store } = makeHub()
     for (const source of createFuyaoRestSources(async () => 'key')) hub.registerSource(source)
-    assert.deepEqual(hub.listCapabilities().map((c) => c.capability), [
-      'ticker_search', 'quote', 'history', 'trading_calendar',
-    ])
+    assert.deepEqual(hub.listCapabilities().map((c) => c.capability), FUYAO_CAPABILITIES)
     const results = await Promise.all([
       hub.request(request({ capability: 'ticker_search', params: { q: '指南针' } })),
       hub.request(request({ capability: 'quote', params: { thscodes: '300803.SZ' } })),
@@ -306,4 +384,167 @@ test('真实 Fuyao 四源：capability 短名映射正确，data_key 仅内部�
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test('真实 Fuyao 源：Phase 2 首批 14 个端点全部注册且可路由', async () => {
+  const { hub } = makeHub()
+  const capabilities = createFuyaoRestSources(async () => 'key').map((source) => source.schema.capability)
+  for (const source of createFuyaoRestSources(async () => 'key')) hub.registerSource(source)
+  assert.deepEqual(capabilities, FUYAO_CAPABILITIES)
+  assert.equal(hub.listCapabilities().length, FUYAO_CAPABILITIES.length)
+  const registered = hub.listCapabilities().map((entry) => entry.capability)
+  for (const capability of [...PHASE2_CAPABILITIES, ...PHASE3_CAPABILITIES, ...PHASE3B_CAPABILITIES, ...PHASE3C_CAPABILITIES]) {
+    assert.ok(registered.includes(capability), `${capability} 必须已注册`)
+  }
+})
+
+test('能力目录：每个端点都必须有非空 summary（目录只靠它选能力）', () => {
+  const { hub } = makeHub()
+  for (const dataSource of createFuyaoRestSources(async () => 'key')) hub.registerSource(dataSource)
+  for (const entry of hub.listCapabilities()) {
+    assert.ok(typeof entry.summary === 'string' && entry.summary.length > 0, `${entry.capability} 缺 summary`)
+    assert.ok(entry.summary.length <= 60, `${entry.capability} 的 summary 过长（${entry.summary.length}）：目录是发现入口，要短`)
+  }
+})
+
+test('Phase 2 端到端：涨停池落成 json_rows，嵌套财务指标落成 json', async () => {
+  const { hub } = makeHub()
+  for (const source of createFuyaoRestSources(async () => 'key')) hub.registerSource(source)
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url) => {
+    const path = new URL(url).pathname
+    if (path.endsWith('limit-up-pool')) {
+      return { ok: true, json: async () => ({ code: 0, data: { timestamp: 1, pagination: { total: 2, pages: 1, size: 50, page: 1 }, item: [{ thscode: '603986.SH' }, { thscode: '000001.SZ' }] } }) }
+    }
+    return { ok: true, json: async () => ({ code: 0, data: { thscode: '300033.SZ', report: '2025-1', abilities: [{ ability: 'growth', indicators: [{ index_id: 'total_assets_growth_ratio', value: '-16.0031' }] }] } }) }
+  }
+  try {
+    const pool = await hub.request(request({ capability: 'limit_up_pool', params: { page: 1, size: 50 } }))
+    assert.equal(pool.format, 'json_rows')
+    assert.equal(pool.row_count, 2, 'Dataset 行数只反映本页，不冒充上游 pagination.total')
+    const indicators = await hub.request(request({ capability: 'financial_indicators', params: { thscode: '300033.SZ', report: '2025-1' } }))
+    assert.equal(indicators.format, 'json', '嵌套响应没有 item[]，按通用 JSON 落盘')
+    assert.equal(indicators.row_count, null)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('normalizeParams：Hub 在 digest 与执行前规范化参数，语义相同的请求复用同一 Dataset', async () => {
+  const { hub, store } = makeHub()
+  const seen = []
+  hub.registerSource({
+    schema: { capability: 'norm', name: 'n', source: 'api:test', data_key: 'test.norm', input_schema: {} },
+    normalizeParams: (params) => ({ key: String(params.key ?? '').trim().toLowerCase() }),
+    execute: async (req) => { seen.push(req.params); return { data: { item: [] } } },
+  })
+  const first = await hub.request(request({ capability: 'norm', params: { key: ' ABC ' } }))
+  const second = await hub.request(request({ capability: 'norm', params: { key: 'abc' } }))
+  assert.equal(first.dataset_id, second.dataset_id, '书写不同、语义相同必须命中同一 Dataset')
+  assert.deepEqual(seen, [{ key: 'abc' }], '数据源必须收到规范化后的参数')
+  assert.equal(store.saves(), 1)
+})
+
+test('normalizeParams：抛错时请求在入队前失败，数据源与 store 都不被触碰', async () => {
+  const { hub, store } = makeHub()
+  let executed = 0
+  hub.registerSource({
+    schema: { capability: 'reject', name: 'r', source: 'api:test', data_key: 'test.reject', input_schema: {} },
+    normalizeParams: () => { throw new Error('bad params') },
+    execute: async () => { executed += 1; return { data: { item: [] } } },
+  })
+  await assert.rejects(() => hub.request(request({ capability: 'reject' })), /bad params/)
+  assert.equal(executed, 0)
+  assert.equal(store.saves(), 0)
+})
+
+test('Fuyao 参数规范化端到端：大小写/空白/重复代码差异只取数一次并复用同一 Dataset', async () => {
+  const originalFetch = globalThis.fetch
+  let fetches = 0
+  globalThis.fetch = async () => {
+    fetches += 1
+    return { ok: true, json: async () => ({ code: 0, data: { item: [{ thscode: '600519.SH', last_price: 1 }] } }) }
+  }
+  try {
+    const { hub, store } = makeHub()
+    for (const source of createFuyaoRestSources(async () => 'key')) hub.registerSource(source)
+    const first = await hub.request(request({ capability: 'quote', params: { thscodes: '600519.sh' } }))
+    const second = await hub.request(request({ capability: 'quote', params: { thscodes: ' 600519.SH , 600519.SH' } }))
+    assert.equal(first.dataset_id, second.dataset_id)
+    assert.equal(fetches, 1, '规范化后只应访问上游一次')
+    assert.equal(store.saves(), 1)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('Fuyao 参数校验端到端：Hub 在入队前拒绝裸代码，store 不被调用', async () => {
+  const { hub, store } = makeHub()
+  for (const source of createFuyaoRestSources(async () => 'key')) hub.registerSource(source)
+  await assert.rejects(
+    () => hub.request(request({ capability: 'history', params: { thscode: '600519', interval: '1d', start: 1, end: 2 } })),
+    /full thscode/,
+  )
+  assert.equal(store.saves(), 0)
+})
+
+// ── 复核修正（2026-09 独立测试报告）──────────────────────────────────────────
+
+test('修正②：共享的 manifest lookup 不绑定首个调用者的取消信号', async () => {
+  // 这个 store 的 findLatest 遵守 AbortSignal —— 正是问题场景
+  let saves = 0
+  const store = {
+    async save(input) {
+      saves += 1
+      return {
+        dataset_id: `ds_${saves}`, task_id: null, session_id: input.session.id,
+        artifact_ref: `workspace://capital-data/datasets/ds_${saves}`, format: input.format,
+        capability: input.capability, source_label: input.source_label, schema: input.schema,
+        row_count: input.row_count, captured_at: 1, retention_until: 2, params_digest: input.params_digest,
+      }
+    },
+    async findLatest({ signal }) {
+      await sleep(20)
+      if (signal?.aborted) throw new Error('lookup aborted')
+      return undefined
+    },
+  }
+  const hub = new DataCollectorHub({ store })
+  hub.registerSource(testSource('shared'))
+
+  const first = new AbortController()
+  const cancelled = hub.request(request({ capability: 'shared', params: { n: 1 } }), { signal: first.signal })
+  first.abort()
+  const survivor = hub.request(request({ capability: 'shared', params: { n: 1 } }))
+
+  await assert.rejects(() => cancelled, /aborted/)
+  const ref = await survivor
+  assert.equal(ref.capability, 'shared', '首调用者取消后，其余调用者必须仍能独立完成')
+  assert.equal(saves, 1)
+})
+
+test('修正③：数据集错误码穿过 Hub 后仍是结构化 error.code', async () => {
+  const { hub } = makeHub({ store: fakeStore({ failWith: new DatasetStoreError('workspace_not_writable', 'read-only workspace') }) })
+  hub.registerSource(testSource('coded'))
+  await assert.rejects(
+    () => hub.request(request({ capability: 'coded' })),
+    (error) => {
+      assert.equal(error.code, 'workspace_not_writable', '错误码必须保留，而不是只剩消息前缀')
+      assert.match(error.message, /workspace_not_writable/)
+      return true
+    },
+  )
+})
+
+test('修正③：无 code 的普通错误不应被伪造出 code', async () => {
+  const { hub } = makeHub()
+  hub.registerSource(testSource('plain', { failWith: 'Fuyao API error 4001: rate limited' }))
+  await assert.rejects(
+    () => hub.request(request({ capability: 'plain' })),
+    (error) => {
+      assert.equal(error.code, undefined)
+      assert.match(error.message, /Fuyao API error 4001/)
+      return true
+    },
+  )
 })
