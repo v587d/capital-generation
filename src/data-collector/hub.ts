@@ -47,6 +47,12 @@ export interface SchemaDescriptor {
   data_key: string
   source_label?: string
   paginated?: boolean
+  /**
+   * 行数组位置的显式声明。龙虎榜这类响应的行数组不在 `item` 下（`stock_items`），
+   * 只靠形状推断会把整份数据判成「不可读的文档」。谁产出数据谁声明行在哪里，
+   * 存储层不再猜。
+   */
+  rowShape?: RowShapeHint
   /** 一行摘要：只用于能力目录（选能力够用），控制在 ~50 字以内。 */
   summary?: string
   /** 完整说明：只在 describe_capability 详情里返回（单位、null 语义、时间口径、分页口径）。 */
@@ -99,6 +105,16 @@ export interface DatasetStoreLike {
   save(input: SaveDatasetInput): Promise<DatasetRef>
   /** Optional for compatibility with lightweight test stores; production store implements manifest lookup. */
   findLatest?(input: { session: SessionLike; capability: string; params_digest: string; signal?: AbortSignal }): Promise<DatasetRef | undefined>
+}
+
+/** 数据源声明的行数组位置；缺省按 `item` 推断。 */
+export interface RowShapeHint {
+  /** 行数组所在的顶层键名（默认 `item`）。 */
+  rowKey?: string
+  /** 可选的多个行数组路径，支持 `[]` 展开并合并为一组 rows。 */
+  rowKeys?: string[]
+  /** 顶层本身就是行数组。 */
+  rootArray?: boolean
 }
 
 export interface DataCollectorHubOptions {
@@ -358,7 +374,7 @@ export class DataCollectorHub {
         if (source.validateOutput && !source.validateOutput(output.data)) {
           throw new Error(`data source ${source.schema.name} returned data incompatible with its output contract`)
         }
-        const { format, rowCount } = shapeOf(output.data)
+        const { format, rowCount, rowKey } = shapeOf(output.data, source.schema.rowShape)
         const ref = await this.store.save({
           session: item.request.session,
           capability: item.request.capability,
@@ -369,6 +385,7 @@ export class DataCollectorHub {
           schema: output.schema ?? source.schema.output_schema ?? null,
           row_count: rowCount,
           data: output.data,
+          row_key: rowKey,
         })
         for (const waiter of [...item.waiters]) this.settleWaiter(item, waiter, { kind: 'ok', ref })
       } finally {
@@ -386,13 +403,47 @@ export class DataCollectorHub {
   }
 }
 
-/** 从 Fuyao 类 envelope 推导存储 format 与行数；其余结构按通用 JSON 处理。 */
-function shapeOf(data: unknown): { format: 'json' | 'json_rows'; rowCount: number | null } {
-  if (data && typeof data === 'object' && !Array.isArray(data)) {
-    const item = (data as { item?: unknown }).item
-    if (Array.isArray(item)) return { format: 'json_rows', rowCount: item.length }
+/**
+ * 从数据源声明的行形状推导存储 format 与行数；未声明时退化为形状推断。
+ *
+ * 之前只认 `data.item`，于是龙虎榜（行数组在 `stock_items`）被整份判成
+ * `format: 'json'`，data_junior 连 inspect 都说不可读。行在哪里是数据源的
+ * 契约知识，不该由存储层猜。
+ */
+function shapeOf(data: unknown, hint?: RowShapeHint): { format: 'json' | 'json_rows'; rowCount: number | null; rowKey?: string } {
+  if (Array.isArray(data)) return { format: 'json_rows', rowCount: data.length }
+  const keys = hint?.rowKeys ?? [hint?.rowKey ?? 'item']
+  let emptyKey: string | undefined
+  for (const key of keys) {
+    const candidate = rowsAtPath(data, key)
+    if (candidate === undefined) continue
+    if (candidate.length > 0) return { format: 'json_rows', rowCount: candidate.length, rowKey: key }
+    emptyKey ??= key
   }
+  if (emptyKey !== undefined) return { format: 'json_rows', rowCount: 0, rowKey: emptyKey }
   return { format: 'json', rowCount: null }
+}
+
+function rowsAtPath(value: unknown, path: string): unknown[] | undefined {
+  const segments = path.split('.').filter(Boolean)
+  const visit = (current: unknown, index: number): unknown[] | undefined => {
+    if (index === segments.length) return Array.isArray(current) ? current : undefined
+    if (!current || typeof current !== 'object' || Array.isArray(current)) return undefined
+    const segment = segments[index]
+    if (segment.endsWith('[]')) {
+      const child = (current as Record<string, unknown>)[segment.slice(0, -2)]
+      if (!Array.isArray(child)) return undefined
+      const merged: unknown[] = []
+      for (const item of child) {
+        const rows = visit(item, index + 1)
+        if (rows === undefined) return undefined
+        merged.push(...rows)
+      }
+      return merged
+    }
+    return visit((current as Record<string, unknown>)[segment], index + 1)
+  }
+  return visit(value, 0)
 }
 
 export function provideDataCollectorHub(ctx: Context, options: DataCollectorHubOptions): DataCollectorHub {

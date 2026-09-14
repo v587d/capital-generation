@@ -1,10 +1,21 @@
 import type { Context } from '@deepseek-ai/cordis'
+
 import {
-  DatasetStoreError,
-  DEFAULT_SLICE_ROWS,
-  MAX_SLICE_ROWS,
+  MAX_QUERY_AGGREGATES,
+  MAX_QUERY_FILTERS,
+  MAX_QUERY_GROUP_BY,
+  MAX_QUERY_LIMIT,
+  MAX_QUERY_ORDER_BY,
+  MAX_QUERY_OUTPUT_BYTES,
+  MAX_QUERY_SELECT,
+  DatasetQueryError,
+  type QuerySpec,
+} from './query.js'
+
+import {
   type ProfilePayload,
   type SessionLike,
+  DatasetStoreError,
   WorkspaceDatasetStore,
 } from './store.js'
 
@@ -21,8 +32,10 @@ const jsonObject = (properties: Record<string, unknown> = {}, required: string[]
   additionalProperties: false,
 })
 
-const datasetIdSchema = { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' }
+const datasetIdSchema = { type: 'string' }
 const profileStatisticSchema = jsonObject({
+  count: { type: 'integer' },
+  sum: { oneOf: [{ type: 'number' }, { type: 'null' }] },
   min: { oneOf: [{ type: 'number' }, { type: 'null' }] },
   max: { oneOf: [{ type: 'number' }, { type: 'null' }] },
   mean: { oneOf: [{ type: 'number' }, { type: 'null' }] },
@@ -30,6 +43,59 @@ const profileStatisticSchema = jsonObject({
   p50: { oneOf: [{ type: 'number' }, { type: 'null' }] },
   p75: { oneOf: [{ type: 'number' }, { type: 'null' }] },
 })
+const profileCategorySchema = jsonObject({
+  distinct_count: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+  top_values: { type: 'array', items: jsonObject({ value: { type: 'string' }, count: { type: 'integer' } }, ['value', 'count']) },
+  truncated: { type: 'boolean' },
+}, ['distinct_count', 'top_values', 'truncated'])
+const profileTimeFactsSchema = jsonObject({
+  time_column: { type: 'string' },
+  ordered_ascending: { oneOf: [{ type: 'boolean' }, { type: 'null' }] },
+  covered_from: {},
+  covered_to: {},
+  first: { type: 'object', additionalProperties: true },
+  last: { type: 'object', additionalProperties: true },
+}, ['time_column', 'ordered_ascending', 'covered_from', 'covered_to', 'first', 'last'])
+const profileDocumentSchema = jsonObject({
+  content: {},
+  truncated: { type: 'boolean' },
+  omitted: { type: 'array', items: jsonObject({ path: { type: 'string' }, kept: { type: 'integer' }, omitted: { type: 'integer' } }, ['path', 'kept', 'omitted']) },
+}, ['content', 'truncated', 'omitted'])
+const profileStructureSchema = jsonObject({
+  type: { type: 'string', enum: ['array', 'object'] },
+  occurrences: { type: 'integer' },
+  total_elements: { type: 'integer' },
+  sampled_elements: { type: 'integer' },
+  empty_count: { type: 'integer' },
+  min_length: { type: 'integer' },
+  max_length: { type: 'integer' },
+  fields: { type: 'array', items: jsonObject({ name: { type: 'string' }, type: { type: 'string' } }, ['name', 'type']) },
+}, ['type', 'occurrences', 'empty_count', 'min_length', 'max_length', 'fields'])
+const profileColumnSchema = jsonObject({
+  contract_type: { oneOf: [{ type: 'string', enum: ['string', 'number', 'integer', 'boolean', 'object', 'array', 'json'] }, { type: 'null' }] },
+  inferred_type: { type: 'string', enum: ['missing', 'null', 'boolean', 'integer', 'number', 'string', 'object', 'array', 'mixed'] },
+  observed_types: { type: 'object', additionalProperties: { type: 'integer' } },
+  missing_count: { type: 'integer' },
+  null_count: { type: 'integer' },
+  non_null_count: { type: 'integer' },
+  invalid_count: { type: 'integer' },
+  nullable: { type: 'boolean' },
+  contract_nullable: { type: 'boolean' },
+  required: { type: 'boolean' },
+  allow_numeric_string: { type: 'boolean' },
+  numeric_string_count: { type: 'integer' },
+}, ['contract_type', 'inferred_type', 'observed_types', 'missing_count', 'null_count', 'non_null_count', 'invalid_count', 'nullable'])
+const profileValidationSchema = jsonObject({
+  status: { type: 'string', enum: ['pass', 'fail'] },
+  violations: { type: 'array', items: jsonObject({
+    column: { type: 'string' },
+    rule: { type: 'string', enum: ['required', 'nullable', 'type'] },
+    expected: { oneOf: [{ type: 'string' }, { type: 'boolean' }] },
+    observed: { type: 'string' },
+    invalid_count: { type: 'integer' },
+    severity: { type: 'string', enum: ['error', 'warning'] },
+  }, ['column', 'rule', 'expected', 'observed', 'invalid_count', 'severity']) },
+}, ['status', 'violations'])
 
 function render(_args: unknown, value: unknown): Array<{ type: 'text'; text: string }> {
   return [{ type: 'text', text: JSON.stringify(value) }]
@@ -72,6 +138,86 @@ function optionalTaskId(value: unknown): string | undefined {
   return value
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+/**
+ * 模型经常把数组/对象参数序列化成 JSON 字符串再传（实测：`"select": "[\"date_ms\"]"`、
+ * `"group_by": "[]"`、`"aggregates": "[{...}]"`、`"limit": "1"`），于是参数其实是对的，
+ * 却报 `query_spec_invalid: select must contain 1-32 column names`，模型只能反复试错。
+ *
+ * 这里在**工具边界**做一次宽容解析，查询引擎本身保持严格：能解析成正确类型就放行，
+ * 解析不了就原样交给校验器报错（错误信息仍指向真实问题）。
+ */
+const QUERY_NAME_LIST_FIELDS = ['select', 'group_by'] as const
+const QUERY_OBJECT_LIST_FIELDS = ['filters', 'aggregates', 'order_by'] as const
+/** envelope 自身的元数据字段，不属于 QuerySpec；模型按协议原样传 envelope 时忽略它们。 */
+const QUERY_ENVELOPE_FIELDS = ['type', 'task_id'] as const
+
+function parseJsonContainer(value: unknown): unknown {
+  if (typeof value !== 'string') return undefined
+  const text = value.trim()
+  if (text.length === 0 || (text[0] !== '[' && text[0] !== '{')) return undefined
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
+}
+
+/** 列名数组：接受真数组、JSON 数组字符串，或单个列名字符串。 */
+function coerceNameList(value: unknown): unknown {
+  if (Array.isArray(value)) return value
+  const parsed = parseJsonContainer(value)
+  if (Array.isArray(parsed)) return parsed
+  if (typeof value === 'string' && parsed === undefined) {
+    const text = value.trim()
+    if (text.length > 0 && !text.startsWith('[') && !text.startsWith('{')) return [value]
+  }
+  return value
+}
+
+/** 对象数组：接受真数组、JSON 数组字符串，或单个对象（对象本身或其 JSON 字符串）。 */
+function coerceObjectList(value: unknown): unknown {
+  if (Array.isArray(value)) return value
+  const parsed = parseJsonContainer(value)
+  if (Array.isArray(parsed)) return parsed
+  if (isRecord(parsed)) return [parsed]
+  if (isRecord(value)) return [value]
+  return value
+}
+
+function coerceLimit(value: unknown): unknown {
+  if (typeof value !== 'string') return value
+  const text = value.trim()
+  return /^\d+$/.test(text) ? Number(text) : value
+}
+
+function coerceQueryShape(input: Record<string, unknown>): Record<string, unknown> {
+  const shape: Record<string, unknown> = { ...input }
+  for (const field of QUERY_NAME_LIST_FIELDS) if (field in shape) shape[field] = coerceNameList(shape[field])
+  for (const field of QUERY_OBJECT_LIST_FIELDS) if (field in shape) shape[field] = coerceObjectList(shape[field])
+  if ('limit' in shape) shape.limit = coerceLimit(shape.limit)
+  return shape
+}
+
+function normalizeQueryArgs(args: Record<string, unknown>): { dataset_id: string; query: QuerySpec } {
+  const outerDatasetId = datasetId(args.dataset_id)
+  const envelope = isRecord(args.query) ? args.query : parseJsonContainer(args.query)
+  if (isRecord(envelope)) {
+    const query = coerceQueryShape(envelope)
+    if (query.dataset_id === undefined) query.dataset_id = outerDatasetId
+    return { dataset_id: outerDatasetId, query: query as unknown as QuerySpec }
+  }
+  if (args.query !== undefined) {
+    throw new DatasetQueryError('query_spec_invalid', 'query must be an object (a JSON object string is also accepted)')
+  }
+  const flat = coerceQueryShape(args)
+  for (const field of QUERY_ENVELOPE_FIELDS) delete flat[field]
+  return { dataset_id: outerDatasetId, query: flat as unknown as QuerySpec }
+}
+
 const datasetRefProperties = {
   dataset_id: { type: 'string' },
   task_id: { oneOf: [{ type: 'string' }, { type: 'null' }] },
@@ -89,27 +235,16 @@ const datasetRefProperties = {
 
 const datasetRefWithAccessSchema = jsonObject({
   ...datasetRefProperties,
-  row_access: jsonObject({
+  query_access: jsonObject({
     readable: { type: 'boolean' },
-    shape: { type: 'string', enum: ['array', 'envelope_item', 'none'] },
-    max_slice_rows: { type: 'integer' },
+    shape: { type: 'string', enum: ['array', 'envelope_item', 'document', 'none'] },
     reason: { type: 'string' },
-  }, ['readable', 'shape', 'max_slice_rows']),
+  }, ['readable', 'shape']),
 }, [
   'dataset_id', 'task_id', 'session_id', 'artifact_ref', 'format', 'capability',
   'source_label', 'schema', 'row_count', 'captured_at', 'retention_until',
-  'params_digest', 'row_access',
+  'params_digest', 'query_access',
 ])
-
-const sliceSchema = jsonObject({
-  dataset_id: { type: 'string' },
-  offset: { type: 'integer' },
-  limit: { type: 'integer' },
-  returned_count: { type: 'integer' },
-  total_count: { type: 'integer' },
-  has_more: { type: 'boolean' },
-  rows: { type: 'array', items: {} },
-}, ['dataset_id', 'offset', 'limit', 'returned_count', 'total_count', 'has_more', 'rows'])
 
 const profileRefSchema = jsonObject({
   profile_id: { type: 'string' },
@@ -137,8 +272,94 @@ const profileDatasetResultSchema = jsonObject({
     time_ordered: { oneOf: [{ type: 'boolean' }, { type: 'null' }] },
   }, ['missing_values', 'duplicate_rows', 'time_ordered']),
   statistics: { type: 'object', additionalProperties: true },
+  categories: { type: 'object', additionalProperties: true },
+  time_facts: profileTimeFactsSchema,
+  structure: { type: 'object', additionalProperties: true },
+  document: profileDocumentSchema,
+  schema: { type: 'object', additionalProperties: true },
+  validation: profileValidationSchema,
   warnings: { type: 'array', items: { type: 'string' } },
 }, ['profile_id', 'dataset_id', 'task_id', 'session_id', 'artifact_ref', 'created_at', 'retention_until', 'row_count', 'columns', 'quality', 'warnings'])
+
+const queryNameSchema = { type: 'string', minLength: 1, maxLength: 128 }
+const queryFilterSchema = {
+  oneOf: [
+    jsonObject({
+      column: queryNameSchema,
+      operator: { type: 'string', enum: ['is_null', 'not_null'] },
+    }, ['column', 'operator']),
+    jsonObject({
+      column: queryNameSchema,
+      operator: { type: 'string', enum: ['=', '!=', '>', '>=', '<', '<=', 'in'] },
+      value: {},
+    }, ['column', 'operator', 'value']),
+  ],
+}
+const queryAggregateSchema = {
+  oneOf: [
+    jsonObject({
+      function: { type: 'string', enum: ['count'] },
+      column: queryNameSchema,
+      as: queryNameSchema,
+    }, ['function', 'as']),
+    jsonObject({
+      function: { type: 'string', enum: ['min', 'max', 'avg', 'sum'] },
+      column: queryNameSchema,
+      as: queryNameSchema,
+    }, ['function', 'column', 'as']),
+  ],
+}
+const queryOrderSchema = jsonObject({
+  column: queryNameSchema,
+  direction: { type: 'string', enum: ['asc', 'desc'] },
+}, ['column', 'direction'])
+const querySpecProperties = {
+  dataset_id: datasetIdSchema,
+  select: { type: 'array', items: queryNameSchema, minItems: 1, maxItems: MAX_QUERY_SELECT },
+  filters: { type: 'array', items: queryFilterSchema, maxItems: MAX_QUERY_FILTERS },
+  group_by: { type: 'array', items: queryNameSchema, maxItems: MAX_QUERY_GROUP_BY },
+  aggregates: { type: 'array', items: queryAggregateSchema, maxItems: MAX_QUERY_AGGREGATES },
+  order_by: { type: 'array', items: queryOrderSchema, maxItems: MAX_QUERY_ORDER_BY },
+  limit: { type: 'integer', minimum: 1, maximum: MAX_QUERY_LIMIT },
+  error_policy: { type: 'string', enum: ['strict', 'skip_with_warning'] },
+}
+const querySpecSchema = jsonObject(querySpecProperties)
+/** envelope 形态独有的三个字段；flat 形态把它们视为 QuerySpec 之外的元数据。 */
+const queryEnvelopeProperties = {
+  type: { type: 'string', enum: ['query_request'], description: '可选：声明使用 query_request envelope 形态' },
+  task_id: { type: 'string' },
+  query: querySpecSchema,
+}
+/**
+ * 工具参数 schema 的根**只能**是 `{ type: 'object', properties, required }`。
+ *
+ * 事故（2026-09-14）：这里原本是根级 `{ oneOf: [flat, envelope] }`，没有 `type`。
+ * 模型供应商在请求进入时就整体校验 `tools[].function.parameters`，直接返回
+ * `Invalid schema for function 'query_dataset': schema must be a JSON Schema of
+ * 'type: "object"', got 'type: null'`（HTTP 400）。这一步发生在模型生成第一个
+ * token 之前，而这套工具表在会话组作用域里**主 Agent 也带着**，于是每个 Capital
+ * 会话都在第 1 轮第 1 步整体失败，与用户问什么无关。
+ *
+ * flat 与 envelope 的判定本来就在工具边界由 normalizeQueryArgs 完成（query 存在即
+ * envelope），所以 schema 用「一个对象 + 两边字段都列出（都非必需，dataset_id 除外）」
+ * 描述即可——这比根级 oneOf 更准确：oneOf 的两个分支都带 additionalProperties:false，
+ * 混合传参（如 query + limit）在任何分支下都不合法，而宿主其实接受。
+ * 回归测试：test/apply-integration.test.mjs（所有注册工具的 parameters 根必须是 object）。
+ */
+const queryParametersSchema = jsonObject({
+  ...querySpecProperties,
+  ...queryEnvelopeProperties,
+}, ['dataset_id'])
+const queryResultSchema = jsonObject({
+  dataset_id: { type: 'string' },
+  columns: { type: 'array', items: { type: 'string' } },
+  rows: { type: 'array', items: { type: 'object', additionalProperties: true } },
+  matched_row_count: { type: 'integer' },
+  group_count: { type: 'integer' },
+  returned_count: { type: 'integer' },
+  limit: { type: 'integer' },
+  warnings: { type: 'array', items: { type: 'string' } },
+}, ['dataset_id', 'columns', 'rows', 'matched_row_count', 'group_count', 'returned_count', 'limit', 'warnings'])
 
 export function registerDatasetTools(ctx: Context, store: WorkspaceDatasetStore): void {
   const tools = ctx.get('tools') as ToolRuntimeLike | undefined
@@ -147,40 +368,19 @@ export function registerDatasetTools(ctx: Context, store: WorkspaceDatasetStore)
   const registrations = [
     tool(
       'inspect_dataset',
-      '读取当前 session 已授权 Dataset 的元数据和切片能力。只返回 DatasetRef 与可读性信息，不返回原始 rows，也不接受任何文件路径。',
+      '读取当前 session 已授权 Dataset 的元数据和可读性。只返回 DatasetRef 与可读性信息，不返回原始 rows，也不接受任何文件路径。query_access.shape 取值：array / envelope_item = 行集合，可 profile 也可 query；document = 顶层是文档对象（财务指标、回测结果这类），可 profile（宿主给结构摘要与有界内容）但不能 query；none = 不可读，reason 说明原因。',
       jsonObject({ dataset_id: datasetIdSchema }, ['dataset_id']),
       datasetRefWithAccessSchema,
       async (args, exec) => store.inspectDataset(datasetId(args.dataset_id), delegatedSession(exec, 'inspect_dataset'), exec.signal),
     ),
     tool(
-      'read_dataset_slice',
-      `按受限窗口读取当前 session 已授权 Dataset 的 rows。只支持 json_rows；默认 ${DEFAULT_SLICE_ROWS} 行，单次最多 ${MAX_SLICE_ROWS} 行。结果只供当前 data_junior 使用，禁止转发原始 rows。`,
-      jsonObject({
-        dataset_id: datasetIdSchema,
-        offset: { type: 'integer', minimum: 0 },
-        limit: { type: 'integer', minimum: 1, maximum: MAX_SLICE_ROWS },
-        columns: { type: 'array', items: { type: 'string', maxLength: 128 }, maxItems: 64 },
-      }, ['dataset_id']),
-      sliceSchema,
-      async (args, exec) => {
-        const offset = args.offset === undefined ? undefined : args.offset
-        const limit = args.limit === undefined ? undefined : args.limit
-        const columns = args.columns === undefined ? undefined : args.columns
-        return store.readDatasetSlice(datasetId(args.dataset_id), delegatedSession(exec, 'read_dataset_slice'), {
-          offset: offset as number | undefined,
-          limit: limit as number | undefined,
-          columns: columns as string[] | undefined,
-        }, exec.signal)
-      },
-    ),
-    tool(
       'profile_dataset',
-      '对当前 session 已授权的 json_rows Dataset 执行宿主侧基础质量检查和统计；原始 rows 不进入模型上下文。返回不可变 profile_ref、行数、列、缺失值、重复项、时间顺序和数值分位数。可选指定 time_column 和 primary_key；不接受任何文件路径或脚本内容。',
+      `由宿主读取 Dataset 并返回基础质量检查与四类事实；原始 rows 不进入模型上下文。行集合返回：① schema/quality——字段 observed/contract 类型、missing/null/invalid 计数、重复行、时间顺序；② statistics——数值字段的 count/sum/min/max/mean/分位数；③ categories——字符串字段的 distinct_count 与最多 5 个高频取值（truncated=true 表示未列全）；④ time_facts——时间列覆盖范围与首行/末行的数值取值（回答"最新值、区间涨跌"必须用它，不要用 min/max 代替首末值）；⑤ structure——行内数组/对象的路径摘要（对象字段用 .name、数组元素用 []；未抽样时用 total_elements，超过 50 项时用 sampled_elements，后者明确表示只是抽样，不能据此回答完整数量）。文档型 Dataset（顶层是文档对象，没有行数组）返回 structure 结构摘要 + document 有界内容，不返回行列统计。time_column 可显式指定，省略时按列名候选并只在取值全为数字或日期样式时采用。不接受任何文件路径、脚本内容或额外 schema。`,
       jsonObject({
         dataset_id: datasetIdSchema,
-        task_id: { type: 'string', maxLength: 256 },
-        time_column: { type: 'string', maxLength: 128 },
-        primary_key: { type: 'string', maxLength: 128 },
+        task_id: { type: 'string' },
+        time_column: { type: 'string' },
+        primary_key: { type: 'string' },
       }, ['dataset_id']),
       profileDatasetResultSchema,
       async (args, exec) => store.profileDataset({
@@ -193,21 +393,38 @@ export function registerDatasetTools(ctx: Context, store: WorkspaceDatasetStore)
       }),
     ),
     tool(
+      'query_dataset',
+      `对当前 session 已授权的 json_rows Dataset 执行固定 QuerySpec：参数是一个 JSON 对象，QuerySpec 字段既可平铺在根上（flat），也可整体放进 query（query_request envelope，宿主自动展开）；两种形态同时给出时以 query 为准。支持受限 filter、group_by、count/min/max/avg/sum、asc/desc 和 limit。必须返回聚合或分组结果，禁止原始行投影；select 可省略，默认返回分组列和聚合别名。默认 error_policy=skip_with_warning，脏值会被排除并在 warnings 披露；需要全量类型一致性时显式使用 strict。最多 ${MAX_QUERY_FILTERS} 个条件、${MAX_QUERY_GROUP_BY} 个分组列、${MAX_QUERY_AGGREGATES} 个聚合、${MAX_QUERY_LIMIT} 行，结果最多 ${MAX_QUERY_OUTPUT_BYTES} 字节。数值字符串只在 Dataset schema 明确为 number/integer 时兼容。query_dataset 是受控分组/聚合工具，不是通用 raw.json 读取或自定义分析工具：select 只能引用 group_by 列或聚合别名，取不到原始行（首末/最新值请用 profile 的 time_facts）。select/group_by/aggregates/order_by 请传真正的 JSON 数组（宿主也兼容 JSON 字符串，但不要依赖）。`,
+      queryParametersSchema,
+      queryResultSchema,
+      async (args, exec) => {
+        const normalized = normalizeQueryArgs(args)
+        return store.queryDataset({
+          session: delegatedSession(exec, 'query_dataset'),
+          dataset_id: normalized.dataset_id,
+          query: normalized.query,
+          signal: exec.signal,
+        })
+      },
+    ),
+    tool(
       'write_profile',
       '将当前 session 对已授权 Dataset 生成的基础质量 profile 持久化到 workspace。宿主生成不可变 profile_ref；profile 不得包含原始 rows、文件路径、凭据或未定义字段。',
       jsonObject({
         dataset_id: datasetIdSchema,
-        task_id: { type: 'string', maxLength: 256 },
+        task_id: { type: 'string' },
         profile: jsonObject({
-          row_count: { type: 'integer', minimum: 0 },
-          columns: { type: 'array', items: { type: 'string', maxLength: 128 }, maxItems: 64 },
+          row_count: { type: 'integer' },
+          columns: { type: 'array', items: { type: 'string' } },
           quality: jsonObject({
-            missing_values: { type: 'integer', minimum: 0 },
-            duplicate_rows: { type: 'integer', minimum: 0 },
+            missing_values: { type: 'integer' },
+            duplicate_rows: { type: 'integer' },
             time_ordered: { oneOf: [{ type: 'boolean' }, { type: 'null' }] },
           }, ['missing_values', 'duplicate_rows', 'time_ordered']),
           statistics: { type: 'object', additionalProperties: true },
-          warnings: { type: 'array', items: { type: 'string', maxLength: 512 }, maxItems: 32 },
+          schema: { type: 'object', additionalProperties: true },
+          validation: profileValidationSchema,
+          warnings: { type: 'array', items: { type: 'string' } },
         }, ['row_count', 'columns', 'quality', 'warnings']),
       }, ['dataset_id', 'profile']),
       profileRefSchema,

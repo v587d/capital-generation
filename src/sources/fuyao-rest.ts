@@ -356,6 +356,8 @@ interface GuardSpec {
   item?: Record<string, FieldSpec>
   /** 行数组的键名，默认 `item`（龙虎榜用 `stock_items`）。 */
   itemKey?: string
+  /** 可选的多个行数组路径，按响应中实际存在且非空的路径选择。 */
+  rowKeys?: string[]
   /**
    * `data` **本身**就是数组时的行契约（quota/list、quota/summary、backtest/indicators）。
    * 这类响应没有 `{timestamp, item[]}` 信封，因此不适用 data/item 两级校验。
@@ -1468,6 +1470,7 @@ function endpointDefinitions(): EndpointDefinition[] {
       guard: {
         data: { board_type: 'text?', trade_date: 'text', stock_items: 'array', hot_money_items: 'array' },
         itemKey: 'stock_items',
+        rowKeys: ["stock_items", "hot_money_items[].rows"],
         item: dragonTigerStockFields,
       },
     },
@@ -2070,6 +2073,9 @@ function createSource(definition: EndpointDefinition, baseUrl: string, resolveAp
     data_key: buildDataKey('fuyao', 'api', path),
     source_label: 'fuyao',
     paginated: definition.paginated === true,
+    // 行数组位置由端点自己声明（护栏里的 itemKey 就是同一份知识）：龙虎榜的行
+    // 在 `stock_items` 下，不声明就会被存储层按 `item` 猜成「非行集合」。
+    rowShape: { rowKey: definition.guard.itemKey ?? 'item', ...(definition.guard.rowKeys === undefined ? {} : { rowKeys: definition.guard.rowKeys }) },
     summary,
     description,
     input_schema: inputSchema,

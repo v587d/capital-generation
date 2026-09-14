@@ -1,6 +1,6 @@
 ---
 name: capital-data-protocol
-description: Use when composing or reading a Capital data message — the exact data_request, dataset_ready, data_failed, profile_request, dataset_profile_completed and profile_failed payloads, field-by-field rules, force_refresh semantics, capability selection, retry discipline, and the disclosure fields an answer must carry.
+description: Use when composing or reading a Capital data message — the exact data_request, dataset_ready, data_failed, profile_request, dataset_profile_completed, profile_failed, query_request, dataset_query_completed and query_failed payloads, field-by-field rules, force_refresh semantics, capability selection, retry discipline, and the disclosure fields an answer must carry.
 ---
 
 # Capital 数据协议（完整版）
@@ -121,17 +121,134 @@ description: Use when composing or reading a Capital data message — the exact 
   "profile_ref": "workspace://capital-data/profiles/p_01J...",
   "row_count": 240,
   "columns": ["date", "open", "high", "low", "close", "volume"],
+  "schema": {
+    "close": { "contract_type": "number", "inferred_type": "number", "missing_count": 0, "null_count": 0, "invalid_count": 0 }
+  },
+  "validation": { "status": "pass", "violations": [] },
   "quality": { "missing_values": 0, "duplicate_rows": 0, "time_ordered": true },
   "warnings": []
 }
 ```
 
+- `schema` 是字段类型和计数的有限摘要；完整 profile 以 `profile_ref` 为准，不把完整 profile 或 raw rows 放进消息。
+- `validation.status=fail` 表示 profile 发现结构化 violations，不表示原始 Dataset 被删除或不可用。
+
 失败：`{ "type": "profile_failed", "task_id": "task_01J...", "error": "...", "code": "..." }`
+
+`profile_dataset` 的四类事实（回传时按需引用，不要把整份 profile 抄进消息）：
+
+| 事实块 | 回答什么问题 |
+|--------|--------------|
+| `statistics`（count/sum/min/max/mean/分位数） | 合计多少、覆盖多少条、区间与集中度 |
+| `categories`（distinct_count + 最多 5 个高频取值） | 有哪些类别、分布如何；`truncated=true` 表示未列全 |
+| `time_facts`（覆盖范围 + 首行/末行取值） | 最新值、区间涨跌。**必须**用 `first`/`last`；`min`/`max` 只是区间极值，把它讲成走势就是编造 |
+| `structure`（路径 + total_elements 或 sampled_elements） | 嵌套里一共有多少条。对象字段用 `.name`、数组元素用 `[]`，未抽样时例如 `sub_tab[].fund_list` 的 `total_elements=40` 就是 40 只基金；若出现 `sampled_elements=50`，只能说明实际检查了 50 项，不是完整数量 |
+
+文档型 Dataset（顶层是文档对象、没有行数组，如财务指标、回测结果）：`profile_dataset` 返回
+`structure` 结构摘要 + `document` 有界内容（`$` 是文档根），**没有**行列统计，也不包含行数据专用的 `schema`/`validation`；`query_dataset`
+对它无效。`document.truncated=true` 时必须按 `omitted` 逐条说明省略了哪个路径、保留多少、
+省略多少，不得只说「已截断」。
 
 硬规则：字段按工具返回原样填入；统计项只报告可计算的部分，数据不足如实说明；
 profile 失败不影响原始 Dataset，可按指示重试。
 
-## 4. 重试纪律
+## 3.1 数据缺口（data_junior → 主 Agent，中途主动发起）
+
+data_junior 发现「问题需要的那份数据还没取」时（不是「数据里没有」），不等回合结束，
+直接用 `send_message` 发一次：
+
+```json
+{
+  "type": "data_gap",
+  "task_id": "task_01J...",
+  "dataset_id": "ds_01J...",
+  "need": "该指数在 2025-06-30 的成分股权重明细",
+  "reason": "现有 Dataset 只有指数点位，没有成分字段",
+  "suggested_capability": "index_constituents",
+  "blocking": true
+}
+```
+
+| 字段 | 规则 |
+|------|------|
+| `type` | 固定 `data_gap` |
+| `task_id` / `dataset_id` | 必须带：主 Agent 可能同时在等多个回传，靠这两个字段对上号 |
+| `need` | 用自然语言写清缺什么数据（标的、区间、口径） |
+| `reason` | 说明为什么现有 Dataset 不够，避免主 Agent 重复取已有的数据 |
+| `suggested_capability` | 可选。只能转述手上 DatasetRef 的 `capability` 或需求本身，**不得编造能力名** |
+| `blocking` | `true` = 不补齐无法继续，可以停在本轮等回信；`false` = 还有别的能先做 |
+
+硬规则：
+
+- `data_gap` 是请求不是结论。发出后不得把「无法确认」当终局；同一条缺口只发一次。
+- 子 Agent **不得自行取数**，也不得直接找 `data_collector`：取数一律由主 Agent 中继。
+- 主 Agent 处置：按委派清单复用对应角色取数 → 把新 DatasetRef 用 `send_message` 发回
+  **同一个**子 Agent（禁止新建同角色）→ 它接着做完。同参数的重新取数会命中宿主复用，
+  不会重复访问上游，所以该重取就重取。
+- 取数失败时主 Agent 必须回一条失败消息（`data_failed` 或说明性文本）给它，
+  不能让它一直等：框架没有超时与订阅机制。
+- **结束本轮 ≠ 任务完成。** 等数据的子 Agent 会先结束回合，结算通知里那句
+  「finished and will do no further work unless you send it more」在此时是误导；
+  清单里标为「等数据」的子 Agent，收到结算通知后不要认定完成、也不要新建。
+- 只有确认「数据里确实没有该字段」时才回传能力边界，并写明是数据没有、不是没拿到数据。
+
+## 4. 受控查询（主 Agent ↔ data_junior）
+
+请求：
+
+```json
+{
+  "type": "query_request",
+  "task_id": "task_01J...",
+  "dataset_id": "ds_01J...",
+  "query": {
+    "dataset_id": "ds_01J...",
+    "select": ["symbol", "rows", "avg_close"],
+    "filters": [{ "column": "close_price", "operator": ">", "value": 100 }],
+    "group_by": ["symbol"],
+    "aggregates": [
+      { "function": "count", "as": "rows" },
+      { "function": "avg", "column": "close_price", "as": "avg_close" }
+    ],
+    "order_by": [{ "column": "avg_close", "direction": "desc" }],
+    "limit": 100
+  }
+}
+```
+
+- `query` 是固定 JSON QuerySpec，不是 SQL、表达式或脚本；`query_request` 消息可以原样作为 `query_dataset` 工具参数传入，宿主会展开其中的 `query`；也可直接传扁平 QuerySpec。`type` / `task_id` 只属于消息 envelope，不进入实际执行 QuerySpec。
+- 只支持 `=`、`!=`、`>`、`>=`、`<`、`<=`、`in`、`is_null`、`not_null`，以及 `count`、`min`、`max`、`avg`、`sum`。
+- 必须有 `group_by` 或聚合；`select` 可省略，省略时默认返回分组列与聚合别名；显式 `select` 只能引用分组列或聚合别名。禁止 join、window、having、自定义函数和 raw rows 投影。
+- 默认 `error_policy=skip_with_warning`：过滤或数值聚合遇到不兼容脏值时排除该值并在 `warnings` 披露；需要类型全量一致时显式使用 `error_policy=strict`。
+- 数组/对象字段（`select`、`group_by`、`aggregates`、`order_by`、`filters`）传**真正的 JSON 数组**，不要序列化成字符串再传；`limit` 传数字。宿主对字符串化的 JSON 做了宽容解析（实测模型很常这么传），但不要依赖它。
+- `query_dataset` 取不到原始行：`select` 只能引用分组列或聚合别名，所以「首末/最新值」要用 profile 的 `time_facts`，不要用 query 取行。
+- `query_dataset` 是受控分组/聚合透视查询，不是通用 raw.json 读取器，也不替代基础描述性 profile。对市场指数、指数组成、基金重仓股等不适合当前 QuerySpec 的数据，不要强行改写查询；不足以回答时如实回传能力边界。自定义查询脚本和自定义执行脚本属于后续 `data_analyst`，不得转移给 data_junior。
+
+完成回传：
+
+```json
+{
+  "type": "dataset_query_completed",
+  "task_id": "task_01J...",
+  "dataset_id": "ds_01J...",
+  "query_result": {
+    "columns": ["symbol", "rows", "avg_close"],
+    "rows": [{ "symbol": "600519.SH", "rows": 20, "avg_close": 1680.5 }],
+    "matched_row_count": 20,
+    "group_count": 1,
+    "returned_count": 1,
+    "limit": 100,
+    "warnings": []
+  }
+}
+```
+
+失败：`{ "type": "query_failed", "task_id": "task_01J...", "dataset_id": "ds_01J...", "error": "...", "code": "query_type_conflict" }`
+
+- `query_result.rows` 只能是有限分组键与聚合结果，不得出现未聚合 Dataset row、文件路径、内部路由键或凭据。
+
+## 5. 重试纪律
+
 
 | 错误类型 | 例子 | 处理 |
 |----------|------|------|

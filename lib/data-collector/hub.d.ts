@@ -36,6 +36,12 @@ export interface SchemaDescriptor {
     data_key: string;
     source_label?: string;
     paginated?: boolean;
+    /**
+     * 行数组位置的显式声明。龙虎榜这类响应的行数组不在 `item` 下（`stock_items`），
+     * 只靠形状推断会把整份数据判成「不可读的文档」。谁产出数据谁声明行在哪里，
+     * 存储层不再猜。
+     */
+    rowShape?: RowShapeHint;
     /** 一行摘要：只用于能力目录（选能力够用），控制在 ~50 字以内。 */
     summary?: string;
     /** 完整说明：只在 describe_capability 详情里返回（单位、null 语义、时间口径、分页口径）。 */
@@ -83,6 +89,15 @@ export interface DatasetStoreLike {
         params_digest: string;
         signal?: AbortSignal;
     }): Promise<DatasetRef | undefined>;
+}
+/** 数据源声明的行数组位置；缺省按 `item` 推断。 */
+export interface RowShapeHint {
+    /** 行数组所在的顶层键名（默认 `item`）。 */
+    rowKey?: string;
+    /** 可选的多个行数组路径，支持 `[]` 展开并合并为一组 rows。 */
+    rowKeys?: string[];
+    /** 顶层本身就是行数组。 */
+    rootArray?: boolean;
 }
 export interface DataCollectorHubOptions {
     /** 必需：宿主侧 Dataset store；缺失时 request 直接失败。 */

@@ -1,3 +1,5 @@
+import { DatasetQueryError, executeJsonRowsQuery, type QueryResult, type QuerySpec } from './query.js'
+
 /**
  * Phase 1/2 workspace-local Dataset store（设计约定见 AGENTS.md「数据布局」）。
  *
@@ -13,10 +15,33 @@ export const MANIFEST_FILE = 'manifest.json'
 export const PROFILE_FILE = 'profile.json'
 export const DEFAULT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
 export const MAX_RAW_READ_BYTES = 16 * 1024 * 1024
-export const MAX_SLICE_ROWS = 200
-export const DEFAULT_SLICE_ROWS = 100
-export const MAX_SLICE_OUTPUT_BYTES = 256 * 1024
 export const MAX_PROFILE_BYTES = 64 * 1024
+/** 类别事实：最多跟踪多少个不同取值；超过则 distinct_count 记 null 并标记 truncated。 */
+export const MAX_CATEGORY_DISTINCT = 2_000
+/** `top_values` 只展示前 N 个高频取值，其余由 truncated 显式披露。 */
+export const MAX_CATEGORY_TOP_VALUES = 5
+const MAX_CATEGORY_VALUE_LENGTH = 64
+/** 结构摘要：路径条目上限与递归深度上限，保证 profile 体积有界。 */
+export const MAX_STRUCTURE_ENTRIES = 24
+/**
+ * 递归深度上限。行集合里 depth 0 就是列本身，文档里 depth 0 是 `$` 根，
+ * 因此文档需要多一层才够到 `abilities[].indicators[]` 这种叶子。
+ * 条目上限（24）才是真正的体积闸门，深度只是防止病态深嵌套。
+ */
+const MAX_STRUCTURE_DEPTH = 4
+const MAX_STRUCTURE_FIELDS = 8
+const MAX_STRUCTURE_SAMPLED_ELEMENTS = 50
+
+/**
+ * 文档型 Dataset（顶层对象、没有行数组，如财务指标 / 回测结果）交给 data_junior 的
+ * 内容预算（Unicode 码点数）。取值必须留在 preset 的工具结果剪枝阈值（8192）以内：
+ * 超过就会被剪掉中间段，而不是被完整读到。长数组按下面的档位逐级截断，截断了什么
+ * 一律写进 `omitted`，不做静默省略。
+ */
+export const MAX_DOCUMENT_CHARS = 6_000
+const DOCUMENT_ARRAY_KEEP_STEPS = [8, 3, 1, 0]
+const DOCUMENT_MAX_DEPTH = 6
+const DOCUMENT_MAX_OMISSIONS = 8
 
 export const ARTIFACT_SCHEME = 'workspace://'
 
@@ -38,27 +63,19 @@ export interface DatasetRef {
 type StoredDatasetManifest = DatasetRef & {
   /** Host-only authorization scope; never returned as part of DatasetRef. */
   session_scope_id: string
+  /** Host-only row array key; old manifests default to `item`. */
+  row_key?: string
 }
 
-export type DatasetShape = 'array' | 'envelope_item' | 'none'
+export type DatasetShape = 'array' | 'envelope_item' | 'document' | 'none'
 
 export interface DatasetInspection extends DatasetRef {
-  row_access: {
+  query_access: {
+    /** true = 宿主可读取并产出事实（rows 可 query，document 只能 profile）。 */
     readable: boolean
     shape: DatasetShape
-    max_slice_rows: number
     reason?: string
   }
-}
-
-export interface DatasetSlice {
-  dataset_id: string
-  offset: number
-  limit: number
-  returned_count: number
-  total_count: number
-  has_more: boolean
-  rows: unknown[]
 }
 
 export interface ProfileRef {
@@ -71,6 +88,107 @@ export interface ProfileRef {
   retention_until: number
 }
 
+export type ProfileObservedType = 'missing' | 'null' | 'boolean' | 'integer' | 'number' | 'string' | 'object' | 'array' | 'mixed'
+export type ProfileContractType = 'string' | 'number' | 'integer' | 'boolean' | 'object' | 'array' | 'json'
+
+export interface ProfileColumn {
+  contract_type: ProfileContractType | null
+  inferred_type: ProfileObservedType
+  observed_types: Partial<Record<ProfileObservedType, number>>
+  missing_count: number
+  null_count: number
+  non_null_count: number
+  invalid_count: number
+  nullable: boolean
+  contract_nullable?: boolean
+  required?: boolean
+  allow_numeric_string?: boolean
+  numeric_string_count?: number
+}
+
+export interface ProfileValidationViolation {
+  column: string
+  rule: 'required' | 'nullable' | 'type'
+  expected: string | boolean
+  observed: string
+  invalid_count: number
+  severity: 'error' | 'warning'
+}
+
+export interface ProfileValidation {
+  status: 'pass' | 'fail'
+  violations: ProfileValidationViolation[]
+}
+
+/**
+ * Profile 的职责：把「原始行」翻译成模型可以安全引用的事实。
+ *
+ * 除了逐列的类型与缺失统计（Phase 1），Phase 2 起补齐四类事实，它们对应
+ * Fuyao 数据里最常见的四类问题：
+ * - `statistics` 加 `count` / `sum`：回答「合计多少、覆盖多少条」；
+ * - `categories`：字符串列的 distinct 与高频取值，回答「有哪些类别、分布如何」；
+ * - `time_facts`：时间列的覆盖范围 + 首行/末行的数值，回答「最新值、区间涨跌」——
+ *   只报 min/max 会被模型讲成「先涨到最高再回落」，这是实测过的失真来源；
+ * - `structure`：单元格里的数组/对象展开成有界路径摘要，回答「里面有几层、
+ *   多少个叶子」，避免只报一句「这一格是 object」。
+ */
+export interface ProfileStatistic {
+  count?: number
+  sum?: number | null
+  min?: number | null
+  max?: number | null
+  mean?: number | null
+  p25?: number | null
+  p50?: number | null
+  p75?: number | null
+}
+
+export interface ProfileCategoryValue {
+  value: string
+  count: number
+}
+
+export interface ProfileCategory {
+  /** 精确去重数；超过枚举上限时为 null（此时 truncated=true）。 */
+  distinct_count: number | null
+  top_values: ProfileCategoryValue[]
+  /** true = 还有未展示的取值，`top_values` 不是全部。 */
+  truncated: boolean
+}
+
+export interface ProfileTimeFacts {
+  time_column: string
+  /** 文件顺序是否随时间递增；null = 时间列有缺失，无法判断。 */
+  ordered_ascending: boolean | null
+  /** 时间列的最小/最大值（覆盖范围），原值不改写。 */
+  covered_from: unknown
+  covered_to: unknown
+  /** 首行与末行的「时间列 + 数值列」取值（文件顺序），用于首末值与区间变化。 */
+  first: Record<string, unknown>
+  last: Record<string, unknown>
+}
+
+export interface ProfileStructureField {
+  name: string
+  type: string
+}
+
+export interface ProfileStructure {
+  type: 'array' | 'object'
+  /** 该路径在数据中出现的次数（行内多次出现会累加）。 */
+  occurrences: number
+  /** 未抽样时，所有出现位置的元素总数；对象路径不返回该字段。 */
+  total_elements?: number
+  /** 该路径受上限影响时，实际检查到的元素/对象数量；存在时不代表完整数量。 */
+  sampled_elements?: number
+  /** 数组：空数组的出现次数与长度极值。 */
+  empty_count: number
+  min_length: number
+  max_length: number
+  /** 对象：直接字段名与观察到的类型（有界）。 */
+  fields: ProfileStructureField[]
+}
+
 export interface ProfilePayload {
   row_count: number
   columns: string[]
@@ -79,14 +197,12 @@ export interface ProfilePayload {
     duplicate_rows: number
     time_ordered: boolean | null
   }
-  statistics?: Record<string, {
-    min?: number | null
-    max?: number | null
-    mean?: number | null
-    p25?: number | null
-    p50?: number | null
-    p75?: number | null
-  }>
+  statistics?: Record<string, ProfileStatistic>
+  categories?: Record<string, ProfileCategory>
+  time_facts?: ProfileTimeFacts
+  structure?: Record<string, ProfileStructure>
+  schema?: Record<string, ProfileColumn>
+  validation?: ProfileValidation
   warnings: string[]
 }
 
@@ -104,9 +220,7 @@ export type DatasetStoreErrorCode =
   | 'dataset_manifest_invalid'
   | 'dataset_format_unsupported'
   | 'dataset_not_row_readable'
-  | 'dataset_column_not_found'
-  | 'dataset_too_large_for_slice'
-  | 'dataset_slice_out_of_range'
+  | 'dataset_too_large'
   | 'profile_invalid'
   | 'profile_too_large'
   | 'profile_dataset_mismatch'
@@ -164,13 +278,39 @@ export interface ProfileDatasetInput {
   signal?: AbortSignal
 }
 
+export interface QueryDatasetInput {
+  session: SessionLike
+  dataset_id: string
+  query: QuerySpec
+  signal?: AbortSignal
+}
+
 export interface ProfileDatasetResult extends ProfileRef {
   row_count: number
   columns: string[]
   quality: ProfilePayload['quality']
   statistics?: ProfilePayload['statistics']
+  categories?: ProfilePayload['categories']
+  time_facts?: ProfilePayload['time_facts']
+  structure?: ProfilePayload['structure']
+  schema?: ProfilePayload['schema']
+  validation?: ProfilePayload['validation']
   warnings: string[]
+  /** 仅文档型 Dataset：有界内容，不随 profile 持久化。 */
+  document?: ProfileDocument
 }
+
+export interface ProfileDocument {
+  /** 有界后的文档内容；连最小档位都放不下时为 null。 */
+  content: unknown
+  truncated: boolean
+  /** 被截断的数组路径与省略条数，逐个披露，不做静默省略。 */
+  omitted: Array<{ path: string; kept: number; omitted: number }>
+}
+
+type RawDataset =
+  | { kind: 'rows'; rows: unknown[]; shape: 'array' | 'envelope_item' }
+  | { kind: 'document'; value: Record<string, unknown> }
 
 export interface FindDatasetInput {
   session: SessionLike
@@ -189,6 +329,8 @@ export interface SaveDatasetInput {
   schema: object | null
   row_count: number | null
   data: unknown
+  /** Host-only row array key for envelope-shaped json_rows data. */
+  row_key?: string
   signal?: AbortSignal
 }
 
@@ -296,6 +438,7 @@ export class WorkspaceDatasetStore {
     const storedManifest: StoredDatasetManifest = {
       ...manifest,
       session_scope_id: sessionScopeFor(session),
+      ...(input.row_key === undefined ? {} : { row_key: input.row_key }),
     }
 
     let rawContent: string | undefined
@@ -356,63 +499,36 @@ export class WorkspaceDatasetStore {
   }
 
   async inspectDataset(datasetId: string, session: SessionLike, signal?: AbortSignal): Promise<DatasetInspection> {
-    const ref = await this.requireRef(datasetId, session, signal)
-    if (ref.format !== 'json_rows') {
-      return { ...ref, row_access: { readable: false, shape: 'none', max_slice_rows: MAX_SLICE_ROWS, reason: 'dataset_format_unsupported' } }
-    }
+    const stored = await this.requireStoredRef(datasetId, session, signal)
+    const { session_scope_id: _scope, row_key: rowKey, ...ref } = stored
     try {
-      const raw = await this.readRaw(ref, session, signal)
-      return { ...ref, row_access: { readable: true, shape: raw.shape, max_slice_rows: MAX_SLICE_ROWS } }
+      const raw = await this.readRaw(ref, session, signal, rowKey)
+      return { ...ref, query_access: { readable: true, shape: raw.kind === 'document' ? 'document' : raw.shape } }
     } catch (error) {
-      if (error instanceof DatasetStoreError && ['dataset_too_large_for_slice', 'dataset_not_row_readable'].includes(error.code)) {
-        return { ...ref, row_access: { readable: false, shape: 'none', max_slice_rows: MAX_SLICE_ROWS, reason: error.code } }
+      if (error instanceof DatasetStoreError && ['dataset_too_large', 'dataset_not_row_readable'].includes(error.code)) {
+        return { ...ref, query_access: { readable: false, shape: 'none', reason: error.code } }
       }
       throw error
     }
   }
 
-  async readDatasetSlice(datasetId: string, session: SessionLike, input: { offset?: number; limit?: number; columns?: string[] } = {}, signal?: AbortSignal): Promise<DatasetSlice> {
-    const ref = await this.requireRef(datasetId, session, signal)
-    if (ref.format !== 'json_rows') throw new DatasetStoreError('dataset_format_unsupported', `Dataset format ${ref.format} cannot be sliced`)
-    const offset = input.offset ?? 0
-    const limit = input.limit ?? DEFAULT_SLICE_ROWS
-    if (!validNonNegativeInteger(offset)) throw new DatasetStoreError('dataset_slice_out_of_range', 'offset must be a non-negative integer')
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_SLICE_ROWS) throw new DatasetStoreError('dataset_slice_out_of_range', `limit must be between 1 and ${MAX_SLICE_ROWS}`)
-    const raw = await this.readRaw(ref, session, signal)
-    if (offset > raw.rows.length) throw new DatasetStoreError('dataset_slice_out_of_range', `offset ${offset} exceeds total row count ${raw.rows.length}`)
-
-    let rows = raw.rows.slice(offset, offset + limit)
-    if (input.columns !== undefined) {
-      const columns = validateColumns(input.columns)
-      const available = new Set<string>()
-      for (const row of raw.rows) if (isRecord(row)) for (const key of Object.keys(row)) available.add(key)
-      for (const column of columns) if (!available.has(column)) throw new DatasetStoreError('dataset_column_not_found', `column ${column} is not present in Dataset`)
-      rows = rows.map((row) => {
-        if (!isRecord(row)) throw new DatasetStoreError('dataset_column_not_found', 'columns projection requires object rows')
-        const projected: Record<string, unknown> = {}
-        for (const column of columns) if (column in row) projected[column] = row[column]
-        return projected
-      })
-    }
-
-    const encoded = JSON.stringify(rows)
-    if (byteLength(encoded) > MAX_SLICE_OUTPUT_BYTES) throw new DatasetStoreError('dataset_too_large_for_slice', `slice output exceeds ${MAX_SLICE_OUTPUT_BYTES} bytes`)
-    return {
-      dataset_id: datasetId,
-      offset,
-      limit,
-      returned_count: rows.length,
-      total_count: raw.rows.length,
-      has_more: offset + rows.length < raw.rows.length,
-      rows,
-    }
-  }
-
   async profileDataset(input: ProfileDatasetInput): Promise<ProfileDatasetResult> {
-    const ref = await this.requireRef(input.dataset_id, input.session, input.signal)
-    if (ref.format !== 'json_rows') throw new DatasetStoreError('dataset_format_unsupported', `Dataset format ${ref.format} cannot be profiled`)
-    const raw = await this.readRaw(ref, input.session, input.signal)
-    const profile = buildProfile(raw.rows, input.time_column, input.primary_key)
+    const stored = await this.requireStoredRef(input.dataset_id, input.session, input.signal)
+    const { session_scope_id: _scope, row_key: rowKey, ...ref } = stored
+    const raw = await this.readRaw(ref, input.session, input.signal, rowKey)
+    if (raw.kind === 'document') {
+      const profile = buildDocumentProfile(raw.value)
+      const profileRef = await this.writeProfile({
+        session: input.session,
+        dataset_id: ref.dataset_id,
+        task_id: input.task_id,
+        profile,
+        signal: input.signal,
+      })
+      // 结构摘要随 profile 持久化；有界内容只随本次工具结果返回，不进入 profile 产物。
+      return { ...profileRef, ...profile, document: boundDocument(raw.value) }
+    }
+    const profile = buildProfile(raw.rows, input.time_column, input.primary_key, extractRowContracts(ref.schema))
     const profileRef = await this.writeProfile({
       session: input.session,
       dataset_id: ref.dataset_id,
@@ -421,6 +537,17 @@ export class WorkspaceDatasetStore {
       signal: input.signal,
     })
     return { ...profileRef, ...profile }
+  }
+
+  async queryDataset(input: QueryDatasetInput): Promise<QueryResult> {
+    const stored = await this.requireStoredRef(input.dataset_id, input.session, input.signal)
+    const { session_scope_id: _scope, row_key: rowKey, ...ref } = stored
+    const raw = await this.readRaw(ref, input.session, input.signal, rowKey)
+    if (raw.kind !== 'rows') throw new DatasetStoreError('dataset_format_unsupported', 'a document Dataset has no rows to query; profile it instead')
+    if (input.query.dataset_id !== ref.dataset_id) {
+      throw new DatasetQueryError('query_spec_invalid', 'query.dataset_id must match the requested Dataset')
+    }
+    return executeJsonRowsQuery(raw.rows, ref.schema, input.query)
   }
 
   async writeProfile(input: WriteProfileInput): Promise<ProfileRef> {
@@ -453,6 +580,12 @@ export class WorkspaceDatasetStore {
   }
 
   private async requireRef(datasetId: string, session: SessionLike, signal?: AbortSignal): Promise<DatasetRef> {
+    const stored = await this.requireStoredRef(datasetId, session, signal)
+    const { session_scope_id: _scope, row_key: _rowKey, ...ref } = stored
+    return ref
+  }
+
+  private async requireStoredRef(datasetId: string, session: SessionLike, signal?: AbortSignal): Promise<StoredDatasetManifest> {
     if (!DATASET_ID_PATTERN.test(datasetId)) throw new DatasetStoreError('dataset_id_invalid', 'dataset_id is invalid')
     if (!session || typeof session.id !== 'string' || session.id.length === 0) throw new DatasetStoreError('session_unavailable', 'the calling agent session has no id')
     const root = this.readRoot(session)
@@ -476,33 +609,44 @@ export class WorkspaceDatasetStore {
     if (!stored) throw new DatasetStoreError('dataset_manifest_invalid', 'Dataset manifest fields are invalid')
     if (stored.session_scope_id !== sessionScopeFor(session)) throw new DatasetStoreError('dataset_session_mismatch', 'Dataset belongs to another session scope')
     if (stored.retention_until <= this.now()) throw new DatasetStoreError('dataset_expired', `Dataset ${datasetId} has expired`)
-    const { session_scope_id: _scope, ...ref } = stored
-    return ref
+    return stored
   }
 
-  private async readRaw(ref: DatasetRef, session: SessionLike, signal?: AbortSignal): Promise<{ rows: unknown[]; shape: DatasetShape }> {
+  /**
+   * 读取原始 Dataset。返回两种形状之一：
+   * - `rows`：顶层数组或 manifest 声明的行数组键，可 profile、可 query；
+   * - `document`：顶层对象且没有行数组（财务指标、回测结果这类），可 profile
+   *   （宿主算结构摘要 + 有界内容），不可 query。
+   * 判定放在读取时而不是复用 manifest 的 `format`：`format` 只记录写入时的粗略
+   * 形状，真正的形状以文件内容为准。
+   */
+  private async readRaw(ref: DatasetRef, session: SessionLike, signal?: AbortSignal, rowKey?: string): Promise<RawDataset> {
     const root = this.readRoot(session)
     if (!root || !this.fs) throw new DatasetStoreError('filesystem_unavailable', 'workspace filesystem is unavailable')
     const target = await this.resolveContained(`${DATASETS_SUBDIR}/${ref.dataset_id}/${RAW_FILE}`, root, signal)
     const info = this.fs.stat ? await this.fs.stat(target, signal) : undefined
     if (info && info.type !== 'file') throw new DatasetStoreError('dataset_not_row_readable', 'raw Dataset object is not a regular file')
-    if (typeof info?.size === 'number' && info.size > MAX_RAW_READ_BYTES) throw new DatasetStoreError('dataset_too_large_for_slice', `raw Dataset exceeds ${MAX_RAW_READ_BYTES} bytes`)
+    if (typeof info?.size === 'number' && info.size > MAX_RAW_READ_BYTES) throw new DatasetStoreError('dataset_too_large', `raw Dataset exceeds ${MAX_RAW_READ_BYTES} bytes`)
     let text: string
     try {
       text = await this.fs.readText(target, signal)
     } catch {
       throw new DatasetStoreError('dataset_not_row_readable', 'raw Dataset could not be read')
     }
-    if (byteLength(text) > MAX_RAW_READ_BYTES) throw new DatasetStoreError('dataset_too_large_for_slice', `raw Dataset exceeds ${MAX_RAW_READ_BYTES} bytes`)
+    if (byteLength(text) > MAX_RAW_READ_BYTES) throw new DatasetStoreError('dataset_too_large', `raw Dataset exceeds ${MAX_RAW_READ_BYTES} bytes`)
     let value: unknown
     try {
       value = JSON.parse(text)
     } catch {
       throw new DatasetStoreError('dataset_not_row_readable', 'raw Dataset is not valid JSON')
     }
-    if (Array.isArray(value)) return { rows: value, shape: 'array' }
-    if (isRecord(value) && Array.isArray(value.item)) return { rows: value.item, shape: 'envelope_item' }
-    throw new DatasetStoreError('dataset_not_row_readable', 'raw Dataset does not contain a supported row array')
+    if (Array.isArray(value)) return { kind: 'rows', rows: value, shape: 'array' }
+    if (isRecord(value)) {
+      const rows = rowsAtPath(value, rowKey ?? 'item')
+      if (rows !== undefined) return { kind: 'rows', rows, shape: 'envelope_item' }
+    }
+    if (isRecord(value)) return { kind: 'document', value }
+    throw new DatasetStoreError('dataset_not_row_readable', 'raw Dataset does not contain a supported row array or document object')
   }
 
   private async resolveContained(relativePath: string, root: string, signal?: AbortSignal): Promise<FsTargetLike> {
@@ -551,17 +695,51 @@ export class WorkspaceDatasetStore {
     throw new DatasetStoreError('dataset_write_failed', `${action} failed${code ? ` (${code})` : ''}`)
   }
 }
+function rowsAtPath(value: unknown, path: string): unknown[] | undefined {
+  const segments = path.split('.').filter(Boolean)
+  const visit = (current: unknown, index: number): unknown[] | undefined => {
+    if (index === segments.length) return Array.isArray(current) ? current : undefined
+    if (!current || typeof current !== 'object' || Array.isArray(current)) return undefined
+    const segment = segments[index]
+    if (segment.endsWith('[]')) {
+      const child = (current as Record<string, unknown>)[segment.slice(0, -2)]
+      if (!Array.isArray(child)) return undefined
+      const merged: unknown[] = []
+      for (const item of child) {
+        const rows = visit(item, index + 1)
+        if (rows === undefined) return undefined
+        merged.push(...rows)
+      }
+      return merged
+    }
+    return visit((current as Record<string, unknown>)[segment], index + 1)
+  }
+  return visit(value, 0)
+}
 
 function sessionScopeFor(session: SessionLike): string {
   const parentSession = session.header?.parentSession
   return typeof parentSession === 'string' && parentSession.length > 0 ? parentSession : session.id
 }
 
-function buildProfile(rows: unknown[], requestedTimeColumn?: string, primaryKey?: string): ProfilePayload {
+type ProfileContract = {
+  type: ProfileContractType
+  nullable?: boolean
+  required?: boolean
+  allowNumericString?: boolean
+}
+
+function buildProfile(
+  rows: unknown[],
+  requestedTimeColumn?: string,
+  primaryKey?: string,
+  contracts: Record<string, ProfileContract> = {},
+): ProfilePayload {
   const objectRows = rows.filter(isRecord)
-  const columns = objectRows.length > 0
-    ? [...new Set(objectRows.flatMap((row) => Object.keys(row)))].slice(0, 64)
+  const observedColumns = objectRows.length > 0
+    ? [...new Set(objectRows.flatMap((row) => Object.keys(row)))]
     : rows.length > 0 ? ['value'] : []
+  const columns = [...new Set([...observedColumns, ...Object.keys(contracts)])]
   const warnings: string[] = []
   if (objectRows.length !== rows.length) warnings.push('some rows are not objects; object-column checks are partial')
 
@@ -571,7 +749,7 @@ function buildProfile(rows: unknown[], requestedTimeColumn?: string, primaryKey?
       if (columns.includes('value') && row === null) missingValues += 1
       continue
     }
-    for (const column of columns) if (!(column in row) || row[column] === null || row[column] === undefined) missingValues += 1
+    for (const column of observedColumns) if (!(column in row) || row[column] === null || row[column] === undefined) missingValues += 1
   }
 
   const seen = new Set<string>()
@@ -584,7 +762,7 @@ function buildProfile(rows: unknown[], requestedTimeColumn?: string, primaryKey?
     else seen.add(key)
   }
 
-  const timeColumn = requestedTimeColumn ?? columns.find((column) => /date|time|timestamp/i.test(column))
+  const timeColumn = pickTimeColumn(rows, columns, requestedTimeColumn)
   let timeOrdered: boolean | null = null
   if (timeColumn) {
     const values = rows.map((row) => isRecord(row) ? row[timeColumn] : undefined)
@@ -602,29 +780,449 @@ function buildProfile(rows: unknown[], requestedTimeColumn?: string, primaryKey?
   }
 
   const statistics: NonNullable<ProfilePayload['statistics']> = {}
+  const categories: NonNullable<ProfilePayload['categories']> = {}
+  const structure: NonNullable<ProfilePayload['structure']> = {}
+  const categoryTally = new Map<string, CategoryTally>()
+  const structureEntries = new Map<string, StructureAccumulator>()
+  let structureTruncated = false
+  const schema: Record<string, ProfileColumn> = {}
+  const violations: ProfileValidationViolation[] = []
   for (const column of columns) {
+    const contract = contracts[column]
+    const observedTypes: Partial<Record<ProfileObservedType, number>> = {}
+    let missingCount = 0
+    let nullCount = 0
+    let nonNullCount = 0
+    let invalidCount = 0
+    let numericStringCount = 0
+
+    for (const row of rows) {
+      const cell = profileCell(row, column)
+      if (!cell.present || cell.value === undefined) {
+        missingCount += 1
+        incrementTypeCount(observedTypes, 'missing')
+        continue
+      }
+      const type = profileObservedType(cell.value)
+      incrementTypeCount(observedTypes, type)
+      if (cell.value === null) {
+        nullCount += 1
+        continue
+      }
+      nonNullCount += 1
+      if (contract && isNumericContract(contract.type) && typeof cell.value === 'string' && isFiniteNumericString(cell.value)) {
+        numericStringCount += 1
+      }
+      if (contract && !matchesProfileContract(cell.value, contract)) invalidCount += 1
+      if (typeof cell.value === 'string') tallyCategoryValue(categoryTally, column, cell.value)
+      if (Array.isArray(cell.value) || isRecord(cell.value)) {
+        if (!structureEntries.has(column) && structureEntries.size >= MAX_STRUCTURE_ENTRIES) structureTruncated = true
+        else collectStructure(cell.value, column, 0, structureEntries)
+      }
+    }
+
+    const inferredType = inferProfileType(observedTypes)
+    const columnProfile: ProfileColumn = {
+      contract_type: contract?.type ?? null,
+      inferred_type: inferredType,
+      observed_types: observedTypes,
+      missing_count: missingCount,
+      null_count: nullCount,
+      non_null_count: nonNullCount,
+      invalid_count: invalidCount,
+      nullable: nullCount > 0,
+      ...(contract?.nullable === undefined ? {} : { contract_nullable: contract.nullable }),
+      ...(contract?.required === undefined ? {} : { required: contract.required }),
+      ...(contract?.allowNumericString === undefined ? {} : { allow_numeric_string: contract.allowNumericString }),
+      ...(numericStringCount > 0 ? { numeric_string_count: numericStringCount } : {}),
+    }
+    schema[column] = columnProfile
+
+    if (contract?.required && missingCount > 0) {
+      violations.push({ column, rule: 'required', expected: true, observed: 'missing', invalid_count: missingCount, severity: 'error' })
+    }
+    if (contract?.nullable === false && nullCount > 0) {
+      violations.push({ column, rule: 'nullable', expected: false, observed: 'null', invalid_count: nullCount, severity: 'error' })
+    }
+    if (invalidCount > 0) {
+      violations.push({ column, rule: 'type', expected: contract?.type ?? 'unknown', observed: inferredType, invalid_count: invalidCount, severity: 'error' })
+    }
+
     const values = rows
-      .map((row) => isRecord(row) ? row[column] : column === 'value' ? row : undefined)
-      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
-    if (values.length === 0) continue
-    const sorted = [...values].sort((a, b) => a - b)
-    statistics[column] = {
-      min: sorted[0],
-      max: sorted[sorted.length - 1],
-      mean: values.reduce((sum, value) => sum + value, 0) / values.length,
-      p25: profileQuantile(sorted, 0.25),
-      p50: profileQuantile(sorted, 0.5),
-      p75: profileQuantile(sorted, 0.75),
+      .map((row) => profileCell(row, column))
+      .filter((cell): cell is { present: true; value: number } => cell.present && typeof cell.value === 'number' && Number.isFinite(cell.value))
+      .map((cell) => cell.value)
+    if (values.length > 0) {
+      const sorted = [...values].sort((a, b) => a - b)
+      const total = values.reduce((sum, value) => sum + value, 0)
+      statistics[column] = {
+        count: values.length,
+        sum: Number.isFinite(total) ? total : null,
+        min: sorted[0],
+        max: sorted[sorted.length - 1],
+        mean: total / values.length,
+        p25: profileQuantile(sorted, 0.25),
+        p50: profileQuantile(sorted, 0.5),
+        p75: profileQuantile(sorted, 0.75),
+      }
+    }
+
+    if (inferredType === 'string') {
+      const tally = categoryTally.get(column)
+      const distinctCount = tally === undefined || tally.overflowed ? null : tally.counts.size
+      const top = [...(tally?.counts ?? new Map<string, number>()).entries()]
+        .sort((left, right) => right[1] - left[1] || (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0))
+        .slice(0, MAX_CATEGORY_TOP_VALUES)
+        .map(([value, count]) => ({ value, count }))
+      categories[column] = {
+        distinct_count: distinctCount,
+        top_values: top,
+        truncated: distinctCount === null || distinctCount > top.length,
+      }
     }
   }
+
+  for (const [path, accumulator] of structureEntries) structure[path] = finishStructure(accumulator)
+  if (structureTruncated) warnings.push(`structure digest truncated at ${MAX_STRUCTURE_ENTRIES} paths`)
+  if ([...structureEntries.values()].some((accumulator) => accumulator.sampled)) warnings.push(`structure digest sampled after ${MAX_STRUCTURE_SAMPLED_ELEMENTS} elements; sampled_elements is incomplete`)
+
+  const timeFacts = timeColumn === undefined
+    ? undefined
+    : buildTimeFacts(rows, timeColumn, timeOrdered, new Set(Object.keys(statistics)))
 
   return {
     row_count: rows.length,
     columns,
     quality: { missing_values: missingValues, duplicate_rows: duplicateRows, time_ordered: timeOrdered },
     ...(Object.keys(statistics).length > 0 ? { statistics } : {}),
+    ...(Object.keys(categories).length > 0 ? { categories } : {}),
+    ...(timeFacts === undefined ? {} : { time_facts: timeFacts }),
+    ...(Object.keys(structure).length > 0 ? { structure } : {}),
+    schema,
+    validation: { status: violations.length > 0 ? 'fail' : 'pass', violations },
     warnings,
   }
+}
+
+/**
+ * 挑时间列：显式指定优先；否则按列名候选，并要求该列的非空值全是数字或日期样式
+ * 字符串。只按列名取第一个匹配列会把 `report_type`（季度枚举）误当时间轴，
+ * 于是首末值与覆盖范围全是错的口径。
+ */
+function pickTimeColumn(rows: unknown[], columns: string[], requested?: string): string | undefined {
+  if (requested !== undefined) return columns.includes(requested) ? requested : requested
+  for (const column of columns) {
+    if (!/date|time|timestamp|_dt$|report$/i.test(column)) continue
+    const values = rows
+      .map((row) => profileCell(row, column))
+      .filter((cell) => cell.present && cell.value !== null && cell.value !== undefined)
+      .map((cell) => cell.value)
+    if (values.length === 0) continue
+    if (values.every((value) => typeof value === 'number' && Number.isFinite(value))) return column
+    if (values.every((value) => typeof value === 'string' && DATE_LIKE_PATTERN.test(value.trim()))) return column
+  }
+  return undefined
+}
+
+const DATE_LIKE_PATTERN = /^\d{4}(-\d{1,2}(-\d{1,2})?)?$/
+
+/**
+ * 时间事实：覆盖范围 + 首行/末行的「时间列与数值列」取值（文件顺序）。
+ *
+ * 只报 min/max 时，模型会把区间极值讲成走势（实测样本里出现过「从 74 涨到 105
+ * 以上随后可能回落」这种没有依据的叙述）。首末行给出的是真实首末取值，
+ * 区间变化因此可追溯；`ordered_ascending` 说明文件顺序，避免把末行当成最新。
+ */
+function buildTimeFacts(
+  rows: unknown[],
+  timeColumn: string,
+  orderedAscending: boolean | null,
+  numericColumns: Set<string>,
+): ProfileTimeFacts {
+  const project = (row: unknown): Record<string, unknown> => {
+    const projected: Record<string, unknown> = {}
+    if (!isRecord(row)) return projected
+    for (const column of [timeColumn, ...numericColumns]) {
+      if (column in projected) continue
+      const cell = profileCell(row, column)
+      if (cell.present && cell.value !== undefined) projected[column] = cell.value
+    }
+    return projected
+  }
+  const timeValues = rows.map((row) => profileCell(row, timeColumn).value).filter((value) => value !== null && value !== undefined)
+  let coveredFrom: unknown = null
+  let coveredTo: unknown = null
+  for (const value of timeValues) {
+    if (coveredFrom === null || compareProfileValues(value, coveredFrom) < 0) coveredFrom = value
+    if (coveredTo === null || compareProfileValues(value, coveredTo) > 0) coveredTo = value
+  }
+  return {
+    time_column: timeColumn,
+    ordered_ascending: orderedAscending,
+    covered_from: coveredFrom,
+    covered_to: coveredTo,
+    first: project(rows[0]),
+    last: project(rows[rows.length - 1]),
+  }
+}
+
+type StructureAccumulator = {
+  type: 'array' | 'object'
+  occurrences: number
+  totalElements: number
+  sampledElements: number
+  sampled: boolean
+  emptyCount: number
+  minLength: number
+  maxLength: number
+  fields: Map<string, string>
+}
+
+type CategoryTally = { counts: Map<string, number>; overflowed: boolean }
+
+function structureAccumulator(entries: Map<string, StructureAccumulator>, path: string, type: 'array' | 'object'): StructureAccumulator | undefined {
+  const existing = entries.get(path)
+  if (existing !== undefined) return existing
+  if (entries.size >= MAX_STRUCTURE_ENTRIES) return undefined
+  const created: StructureAccumulator = { type, occurrences: 0, totalElements: 0, emptyCount: 0, minLength: 0, maxLength: 0, sampledElements: 0, sampled: false, fields: new Map() }
+  entries.set(path, created)
+  return created
+}
+
+/**
+ * 把单元格里的数组/对象展开成有界路径摘要（深度 ≤3、条目 ≤24）。
+ *
+ * 路径约定：对象字段用 `.name`，数组元素用 `[]`，例如 QDII 额度的三层嵌套会得到
+ * `sub_tab`（数组，共 3 项）→ `sub_tab[].fund_list`（数组，共 40 项）。
+ * 未抽样时用 `total_elements` 表示完整数量；超过 50 项时改用 `sampled_elements`，明确只统计了实际检查到的部分，
+ * 而不是让模型面对一句「sub_tab 的类型是 object」。
+ */
+function collectStructure(value: unknown, path: string, depth: number, entries: Map<string, StructureAccumulator>, sampled = false): void {
+  if (depth > MAX_STRUCTURE_DEPTH) return
+  if (Array.isArray(value)) {
+    const accumulator = structureAccumulator(entries, path, 'array')
+    if (accumulator === undefined) return
+    accumulator.occurrences += 1
+    if (sampled || value.length > MAX_STRUCTURE_SAMPLED_ELEMENTS) {
+      accumulator.sampled = true
+      accumulator.sampledElements += Math.min(value.length, MAX_STRUCTURE_SAMPLED_ELEMENTS)
+    } else {
+      accumulator.totalElements += value.length
+    }
+    if (value.length === 0) accumulator.emptyCount += 1
+    if (accumulator.occurrences === 1) {
+      accumulator.minLength = value.length
+      accumulator.maxLength = value.length
+    } else {
+      accumulator.minLength = Math.min(accumulator.minLength, value.length)
+      accumulator.maxLength = Math.max(accumulator.maxLength, value.length)
+    }
+    const sampledChildren = sampled || value.length > MAX_STRUCTURE_SAMPLED_ELEMENTS
+    for (const element of value.slice(0, MAX_STRUCTURE_SAMPLED_ELEMENTS)) {
+      if (Array.isArray(element) || isRecord(element)) collectStructure(element, `${path}[]`, depth + 1, entries, sampledChildren)
+    }
+    return
+  }
+  if (!isRecord(value)) return
+  const accumulator = structureAccumulator(entries, path, 'object')
+  if (accumulator === undefined) return
+  accumulator.occurrences += 1
+  if (sampled) {
+    accumulator.sampled = true
+    accumulator.sampledElements += 1
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (accumulator.fields.size < MAX_STRUCTURE_FIELDS) {
+      const type = child === null || child === undefined ? 'null' : Array.isArray(child) ? 'array' : isRecord(child) ? 'object' : typeof child
+      if (!accumulator.fields.has(key)) accumulator.fields.set(key, type)
+    }
+    if (Array.isArray(child) || isRecord(child)) collectStructure(child, `${path}.${key}`, depth + 1, entries, sampled)
+  }
+}
+
+function finishStructure(accumulator: StructureAccumulator): ProfileStructure {
+  return {
+    type: accumulator.type,
+    occurrences: accumulator.occurrences,
+    ...(accumulator.sampled ? { sampled_elements: accumulator.sampledElements } : { total_elements: accumulator.totalElements }),
+    empty_count: accumulator.emptyCount,
+    min_length: accumulator.minLength,
+    max_length: accumulator.maxLength,
+    fields: [...accumulator.fields.entries()].map(([name, type]) => ({ name, type })),
+  }
+}
+
+function tallyCategoryValue(tally: Map<string, CategoryTally>, column: string, value: string): void {
+  let columnTally = tally.get(column)
+  if (columnTally === undefined) {
+    columnTally = { counts: new Map<string, number>(), overflowed: false }
+    tally.set(column, columnTally)
+  }
+  const key = value.length > MAX_CATEGORY_VALUE_LENGTH ? `${value.slice(0, MAX_CATEGORY_VALUE_LENGTH)}…` : value
+  const existing = columnTally.counts.get(key)
+  if (existing !== undefined) {
+    columnTally.counts.set(key, existing + 1)
+    return
+  }
+  if (columnTally.counts.size >= MAX_CATEGORY_DISTINCT) {
+    columnTally.overflowed = true
+    return
+  }
+  columnTally.counts.set(key, 1)
+}
+
+/**
+ * 文档型 Dataset 的 profile：没有行，所以不给行列统计，只给结构摘要。
+ *
+ * `$` 表示文档根，其余路径沿用 structure 的约定（对象字段用 `.name`、数组元素用 `[]`），
+ * 例如财务指标会得到 `abilities`（共 5 项）与 `abilities[].indicators`（共 40 项）。
+ */
+function buildDocumentProfile(value: Record<string, unknown>): ProfilePayload {
+  const entries = new Map<string, StructureAccumulator>()
+  collectStructure(value, '$', 0, entries)
+  const structure: NonNullable<ProfilePayload['structure']> = {}
+  for (const [path, accumulator] of entries) structure[path] = finishStructure(accumulator)
+  const warnings: string[] = ['dataset is a document (no row array); profile describes structure only']
+  if (entries.size >= MAX_STRUCTURE_ENTRIES) warnings.push(`structure digest truncated at ${MAX_STRUCTURE_ENTRIES} paths`)
+  if ([...entries.values()].some((accumulator) => accumulator.sampled)) warnings.push(`structure digest sampled after ${MAX_STRUCTURE_SAMPLED_ELEMENTS} elements; sampled_elements is incomplete`)
+  return {
+    row_count: 0,
+    columns: [],
+    quality: { missing_values: 0, duplicate_rows: 0, time_ordered: null },
+    structure,
+    warnings,
+  }
+}
+
+/**
+ * 把文档内容裁到预算内：长数组按档位逐级截断（保留前 N 项），每次尝试都重新
+ * 量体积，直到放得下。返回实际采用的档位与被省略的路径，供模型如实披露
+ * 「完整共 N 项，本次只给了前 K 项」。
+ */
+function boundDocument(value: unknown): ProfileDocument {
+  const measure = (candidate: unknown): number | undefined => {
+    try {
+      const text = JSON.stringify(candidate)
+      return typeof text === 'string' ? [...text].length : undefined
+    } catch {
+      return undefined
+    }
+  }
+  const full = measure(value)
+  if (full !== undefined && full <= MAX_DOCUMENT_CHARS) return { content: value, truncated: false, omitted: [] }
+  for (const keep of DOCUMENT_ARRAY_KEEP_STEPS) {
+    const omitted: ProfileDocument['omitted'] = []
+    const bounded = shrinkArrays(value, keep, '$', omitted, 0)
+    const size = measure(bounded)
+    if (size !== undefined && size <= MAX_DOCUMENT_CHARS) return { content: bounded, truncated: omitted.length > 0, omitted }
+  }
+  return {
+    content: null,
+    truncated: true,
+    omitted: [{ path: '$', kept: 0, omitted: 1 }],
+  }
+}
+
+function shrinkArrays(value: unknown, keep: number, path: string, omitted: ProfileDocument['omitted'], depth: number): unknown {
+  if (depth > DOCUMENT_MAX_DEPTH) return value
+  if (Array.isArray(value)) {
+    const head = value.slice(0, keep)
+    if (value.length > keep && omitted.length < DOCUMENT_MAX_OMISSIONS) {
+      omitted.push({ path, kept: keep, omitted: value.length - keep })
+    }
+    return head.map((element) => shrinkArrays(element, keep, `${path}[]`, omitted, depth + 1))
+  }
+  if (!isRecord(value)) return value
+  const result: Record<string, unknown> = {}
+  for (const [key, child] of Object.entries(value)) {
+    result[key] = Array.isArray(child) || isRecord(child) ? shrinkArrays(child, keep, `${path}.${key}`, omitted, depth + 1) : child
+  }
+  return result
+}
+
+function profileCell(row: unknown, column: string): { present: boolean; value: unknown } {
+  if (isRecord(row)) return { present: Object.prototype.hasOwnProperty.call(row, column), value: row[column] }
+  return column === 'value' ? { present: true, value: row } : { present: false, value: undefined }
+}
+
+function profileObservedType(value: unknown): Exclude<ProfileObservedType, 'missing' | 'mixed'> {
+  if (value === null) return 'null'
+  if (typeof value === 'boolean') return 'boolean'
+  if (typeof value === 'number') return Number.isInteger(value) ? 'integer' : 'number'
+  if (typeof value === 'string') return 'string'
+  if (Array.isArray(value)) return 'array'
+  return 'object'
+}
+
+function incrementTypeCount(counts: Partial<Record<ProfileObservedType, number>>, type: ProfileObservedType): void {
+  counts[type] = (counts[type] ?? 0) + 1
+}
+
+function inferProfileType(observedTypes: Partial<Record<ProfileObservedType, number>>): ProfileObservedType {
+  const nonNullTypes = Object.keys(observedTypes).filter((type) => !['missing', 'null'].includes(type) && (observedTypes[type as ProfileObservedType] ?? 0) > 0)
+  if (nonNullTypes.length === 1) return nonNullTypes[0] as ProfileObservedType
+  if (nonNullTypes.length > 1) return 'mixed'
+  if ((observedTypes.null ?? 0) > 0) return 'null'
+  return 'missing'
+}
+
+function isNumericContract(type: ProfileContractType): boolean {
+  return type === 'number' || type === 'integer'
+}
+
+function isFiniteNumericString(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().length > 0 && Number.isFinite(Number(value))
+}
+
+function matchesProfileContract(value: unknown, contract: ProfileContract): boolean {
+  if (value === null) return true
+  switch (contract.type) {
+    case 'string': return typeof value === 'string'
+    case 'number': return (typeof value === 'number' && Number.isFinite(value)) || (contract.allowNumericString === true && isFiniteNumericString(value))
+    case 'integer': return (typeof value === 'number' && Number.isSafeInteger(value)) || (contract.allowNumericString === true && isFiniteNumericString(value) && Number.isSafeInteger(Number(value)))
+    case 'boolean': return typeof value === 'boolean'
+    case 'object': return isRecord(value)
+    case 'array': return Array.isArray(value)
+    case 'json': return true
+  }
+}
+
+function extractRowContracts(schema: object | null): Record<string, ProfileContract> {
+  if (!isRecord(schema)) return {}
+  let rowSchema: unknown = schema
+  const rootProperties = isRecord(schema.properties) ? schema.properties : undefined
+  const itemSchema = rootProperties && isRecord(rootProperties.item) ? rootProperties.item : undefined
+  if (itemSchema) rowSchema = itemSchema
+  if (isRecord(rowSchema) && rowSchema.type === 'array' && rowSchema.items !== undefined) rowSchema = rowSchema.items
+  const properties = isRecord(rowSchema) && isRecord(rowSchema.properties) ? rowSchema.properties : undefined
+  if (!properties) return {}
+
+  const contracts: Record<string, ProfileContract> = {}
+  for (const [column, property] of Object.entries(properties)) {
+    const type = profileContractType(property)
+    if (!type) continue
+    contracts[column] = { type, allowNumericString: type === 'number' || type === 'integer' }
+  }
+  return contracts
+}
+
+function profileContractType(schema: unknown): ProfileContractType | undefined {
+  if (!isRecord(schema)) return undefined
+  if (typeof schema.type === 'string') {
+    if (schema.type === 'string') return 'string'
+    if (schema.type === 'number') return 'number'
+    if (schema.type === 'integer') return 'integer'
+    if (schema.type === 'boolean') return 'boolean'
+    if (schema.type === 'object') return 'object'
+    if (schema.type === 'array') return 'array'
+  }
+  if (Array.isArray(schema.oneOf)) {
+    for (const option of schema.oneOf) {
+      const type = profileContractType(option)
+      if (type) return type
+    }
+  }
+  return 'json'
 }
 
 function stableProfileValue(value: unknown): string {
@@ -663,6 +1261,7 @@ function validateStoredDatasetManifest(value: unknown, datasetId: string): Store
   if (!(value.row_count === null || validNonNegativeInteger(value.row_count))) return undefined
   if (!Number.isSafeInteger(value.captured_at) || !Number.isSafeInteger(value.retention_until)) return undefined
   if (typeof value.params_digest !== 'string' || value.params_digest.length === 0) return undefined
+  if (value.row_key !== undefined && (typeof value.row_key !== 'string' || value.row_key.length === 0 || value.row_key.length > 128)) return undefined
   const ref: DatasetRef = {
     dataset_id: value.dataset_id as string,
     task_id: value.task_id as string | null,
@@ -683,11 +1282,12 @@ function validateStoredDatasetManifest(value: unknown, datasetId: string): Store
     session_scope_id: typeof value.session_scope_id === 'string' && value.session_scope_id.length > 0
       ? value.session_scope_id
       : ref.session_id,
+    ...(value.row_key === undefined ? {} : { row_key: value.row_key as string }),
   }
 }
 
-function validateColumns(value: unknown, errorCode: 'dataset_column_not_found' | 'profile_invalid' = 'dataset_column_not_found'): string[] {
-  if (!Array.isArray(value) || value.length > 64) throw new DatasetStoreError(errorCode, 'columns must contain at most 64 names')
+function validateColumns(value: unknown, errorCode: 'profile_invalid' = 'profile_invalid', maxColumns = 64): string[] {
+  if (!Array.isArray(value) || value.length > maxColumns) throw new DatasetStoreError(errorCode, `columns must contain at most ${maxColumns} names`)
   const columns = value.map((column) => {
     if (typeof column !== 'string' || column.length === 0 || column.length > 128) throw new DatasetStoreError(errorCode, 'column name is invalid')
     return column
@@ -698,10 +1298,10 @@ function validateColumns(value: unknown, errorCode: 'dataset_column_not_found' |
 
 function validateProfile(value: unknown): ProfilePayload {
   if (!isRecord(value)) throw new DatasetStoreError('profile_invalid', 'profile must be an object')
-  const allowed = new Set(['row_count', 'columns', 'quality', 'statistics', 'warnings'])
+  const allowed = new Set(['row_count', 'columns', 'quality', 'statistics', 'categories', 'time_facts', 'structure', 'schema', 'validation', 'warnings'])
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new DatasetStoreError('profile_invalid', 'profile contains unsupported fields')
   if (!validNonNegativeInteger(value.row_count)) throw new DatasetStoreError('profile_invalid', 'profile.row_count must be a non-negative integer')
-  const columns = validateColumns(value.columns, 'profile_invalid')
+  const columns = validateColumns(value.columns, 'profile_invalid', Number.MAX_SAFE_INTEGER)
   if (!isRecord(value.quality)) throw new DatasetStoreError('profile_invalid', 'profile.quality is required')
   const qualityKeys = new Set(['missing_values', 'duplicate_rows', 'time_ordered'])
   if (Object.keys(value.quality).some((key) => !qualityKeys.has(key))) throw new DatasetStoreError('profile_invalid', 'profile.quality contains unsupported fields')
@@ -711,16 +1311,150 @@ function validateProfile(value: unknown): ProfilePayload {
 
   let statistics: ProfilePayload['statistics']
   if (value.statistics !== undefined) {
-    if (!isRecord(value.statistics) || Object.keys(value.statistics).length > 64) throw new DatasetStoreError('profile_invalid', 'statistics must contain at most 64 columns')
+    if (!isRecord(value.statistics)) throw new DatasetStoreError('profile_invalid', 'statistics must be an object')
     statistics = {}
-    const metricKeys = new Set(['min', 'max', 'mean', 'p25', 'p50', 'p75'])
+    const metricKeys = new Set(['count', 'sum', 'min', 'max', 'mean', 'p25', 'p50', 'p75'])
     for (const [column, metric] of Object.entries(value.statistics)) {
       if (column.length === 0 || column.length > 128 || !isRecord(metric) || Object.keys(metric).some((key) => !metricKeys.has(key))) throw new DatasetStoreError('profile_invalid', 'statistics contains an invalid column or metric')
-      for (const [key, item] of Object.entries(metric)) if (!(item === null || (typeof item === 'number' && Number.isFinite(item)))) throw new DatasetStoreError('profile_invalid', `statistics.${column}.${key} must be a finite number or null`)
+      if (metric.count !== undefined && !validNonNegativeInteger(metric.count)) throw new DatasetStoreError('profile_invalid', `statistics.${column}.count must be a non-negative integer`)
+      for (const [key, item] of Object.entries(metric)) {
+        if (key === 'count') continue
+        if (!(item === null || (typeof item === 'number' && Number.isFinite(item)))) throw new DatasetStoreError('profile_invalid', `statistics.${column}.${key} must be a finite number or null`)
+      }
       statistics[column] = metric as NonNullable<ProfilePayload['statistics']>[string]
     }
   }
-  return { row_count: value.row_count, columns, quality: { missing_values: value.quality.missing_values, duplicate_rows: value.quality.duplicate_rows, time_ordered: value.quality.time_ordered }, ...(statistics ? { statistics } : {}), warnings: value.warnings }
+
+  let categories: ProfilePayload['categories']
+  if (value.categories !== undefined) {
+    if (!isRecord(value.categories)) throw new DatasetStoreError('profile_invalid', 'categories must be an object')
+    categories = {}
+    for (const [column, item] of Object.entries(value.categories)) {
+      if (!columns.includes(column) || !isRecord(item)) throw new DatasetStoreError('profile_invalid', 'categories contains an invalid column')
+      if (Object.keys(item).some((key) => !['distinct_count', 'top_values', 'truncated'].includes(key))) throw new DatasetStoreError('profile_invalid', `categories.${column} contains unsupported fields`)
+      if (!(item.distinct_count === null || validNonNegativeInteger(item.distinct_count))) throw new DatasetStoreError('profile_invalid', `categories.${column}.distinct_count must be a non-negative integer or null`)
+      if (typeof item.truncated !== 'boolean') throw new DatasetStoreError('profile_invalid', `categories.${column}.truncated must be boolean`)
+      if (!Array.isArray(item.top_values) || item.top_values.length > MAX_CATEGORY_TOP_VALUES) throw new DatasetStoreError('profile_invalid', `categories.${column}.top_values must be a bounded array`)
+      for (const entry of item.top_values) {
+        if (!isRecord(entry) || typeof entry.value !== 'string' || entry.value.length > MAX_CATEGORY_VALUE_LENGTH + 1 || !validNonNegativeInteger(entry.count)) {
+          throw new DatasetStoreError('profile_invalid', `categories.${column}.top_values contains an invalid entry`)
+        }
+      }
+      categories[column] = {
+        distinct_count: item.distinct_count as number | null,
+        top_values: item.top_values as ProfileCategoryValue[],
+        truncated: item.truncated,
+      }
+    }
+  }
+
+  let timeFacts: ProfilePayload['time_facts']
+  if (value.time_facts !== undefined) {
+    const item = value.time_facts
+    if (!isRecord(item) || typeof item.time_column !== 'string' || !columns.includes(item.time_column)) throw new DatasetStoreError('profile_invalid', 'time_facts.time_column must be a profile column')
+    if (Object.keys(item).some((key) => !['time_column', 'ordered_ascending', 'covered_from', 'covered_to', 'first', 'last'].includes(key))) throw new DatasetStoreError('profile_invalid', 'time_facts contains unsupported fields')
+    if (!(item.ordered_ascending === null || typeof item.ordered_ascending === 'boolean')) throw new DatasetStoreError('profile_invalid', 'time_facts.ordered_ascending must be boolean or null')
+    if (!isRecord(item.first) || !isRecord(item.last)) throw new DatasetStoreError('profile_invalid', 'time_facts.first and time_facts.last must be objects')
+    for (const [key, entry] of [...Object.entries(item.first), ...Object.entries(item.last)]) {
+      if (!columns.includes(key)) throw new DatasetStoreError('profile_invalid', `time_facts.${key} is not a profile column`)
+      if (entry !== null && typeof entry === 'object') throw new DatasetStoreError('profile_invalid', `time_facts.${key} must be a scalar value`)
+    }
+    timeFacts = {
+      time_column: item.time_column,
+      ordered_ascending: item.ordered_ascending as boolean | null,
+      covered_from: item.covered_from ?? null,
+      covered_to: item.covered_to ?? null,
+      first: item.first as Record<string, unknown>,
+      last: item.last as Record<string, unknown>,
+    }
+  }
+
+  let structure: ProfilePayload['structure']
+  if (value.structure !== undefined) {
+    if (!isRecord(value.structure)) throw new DatasetStoreError('profile_invalid', 'structure must be an object')
+    structure = {}
+    if (Object.keys(value.structure).length > MAX_STRUCTURE_ENTRIES) throw new DatasetStoreError('profile_invalid', `structure must contain at most ${MAX_STRUCTURE_ENTRIES} paths`)
+    for (const [path, item] of Object.entries(value.structure)) {
+      if (path.length === 0 || path.length > 256 || !isRecord(item)) throw new DatasetStoreError('profile_invalid', 'structure contains an invalid path')
+      if (Object.keys(item).some((key) => !['type', 'occurrences', 'total_elements', 'sampled_elements', 'empty_count', 'min_length', 'max_length', 'fields'].includes(key))) throw new DatasetStoreError('profile_invalid', `structure.${path} contains unsupported fields`)
+      if (item.type !== 'array' && item.type !== 'object') throw new DatasetStoreError('profile_invalid', `structure.${path}.type is invalid`)
+      const hasTotal = item.total_elements !== undefined
+      const hasSampled = item.sampled_elements !== undefined
+      if (hasTotal === hasSampled) throw new DatasetStoreError("profile_invalid", "structure path must contain exactly one of total_elements or sampled_elements")
+      for (const key of ['occurrences', 'empty_count', 'min_length', 'max_length', ...(hasTotal ? ['total_elements'] : ['sampled_elements'])]) {
+        if (!validNonNegativeInteger(item[key])) throw new DatasetStoreError("profile_invalid", "structure field must be a non-negative integer")
+      }
+      if (!Array.isArray(item.fields) || item.fields.length > MAX_STRUCTURE_FIELDS) throw new DatasetStoreError('profile_invalid', `structure.${path}.fields must be a bounded array`)
+      for (const field of item.fields) {
+        if (!isRecord(field) || typeof field.name !== 'string' || field.name.length === 0 || field.name.length > 128 || typeof field.type !== 'string' || field.type.length === 0 || field.type.length > 32) {
+          throw new DatasetStoreError('profile_invalid', `structure.${path}.fields contains an invalid entry`)
+        }
+      }
+      structure[path] = item as unknown as ProfileStructure
+    }
+  }
+  let schema: ProfilePayload['schema']
+  if (value.schema !== undefined) {
+    if (!isRecord(value.schema)) throw new DatasetStoreError('profile_invalid', 'schema must be an object')
+    schema = {}
+    const observedTypes = new Set<ProfileObservedType>(['missing', 'null', 'boolean', 'integer', 'number', 'string', 'object', 'array', 'mixed'])
+    const contractTypes = new Set<ProfileContractType>(['string', 'number', 'integer', 'boolean', 'object', 'array', 'json'])
+    for (const [column, item] of Object.entries(value.schema)) {
+      if (column.length === 0 || column.length > 128 || !isRecord(item)) throw new DatasetStoreError('profile_invalid', 'schema contains an invalid column')
+      const itemKeys = new Set(['contract_type', 'inferred_type', 'observed_types', 'missing_count', 'null_count', 'non_null_count', 'invalid_count', 'nullable', 'contract_nullable', 'required', 'allow_numeric_string', 'numeric_string_count'])
+      if (Object.keys(item).some((key) => !itemKeys.has(key))) throw new DatasetStoreError('profile_invalid', `schema.${column} contains unsupported fields`)
+      if (!(item.contract_type === null || (typeof item.contract_type === 'string' && contractTypes.has(item.contract_type as ProfileContractType)))) throw new DatasetStoreError('profile_invalid', `schema.${column}.contract_type is invalid`)
+      if (typeof item.inferred_type !== 'string' || !observedTypes.has(item.inferred_type as ProfileObservedType)) throw new DatasetStoreError('profile_invalid', `schema.${column}.inferred_type is invalid`)
+      const observedTypeCounts = item.observed_types
+      if (!isRecord(observedTypeCounts) || Object.keys(observedTypeCounts).some((key) => !observedTypes.has(key as ProfileObservedType) || !validNonNegativeInteger(observedTypeCounts[key]))) throw new DatasetStoreError('profile_invalid', `schema.${column}.observed_types is invalid`)
+      const observedTotal = Object.values(observedTypeCounts).reduce((sum: number, count) => sum + (count as number), 0)
+      if (observedTotal !== value.row_count) throw new DatasetStoreError('profile_invalid', `schema.${column}.observed_types count does not equal row_count`)
+      for (const key of ['missing_count', 'null_count', 'non_null_count', 'invalid_count']) if (!validNonNegativeInteger(item[key])) throw new DatasetStoreError('profile_invalid', `schema.${column}.${key} must be a non-negative integer`)
+      const rowCount = value.row_count as number
+      const missingCount = item.missing_count as number
+      const nullCount = item.null_count as number
+      const nonNullCount = item.non_null_count as number
+      const invalidCount = item.invalid_count as number
+      if (missingCount + nullCount + nonNullCount !== rowCount) throw new DatasetStoreError('profile_invalid', `schema.${column} value counts do not equal row_count`)
+      if (invalidCount > nonNullCount) throw new DatasetStoreError('profile_invalid', `schema.${column}.invalid_count exceeds non_null_count`)
+      if (typeof item.nullable !== 'boolean') throw new DatasetStoreError('profile_invalid', `schema.${column}.nullable must be boolean`)
+      if (item.nullable !== (nullCount > 0)) throw new DatasetStoreError('profile_invalid', `schema.${column}.nullable does not match null_count`)
+      if (item.contract_nullable !== undefined && typeof item.contract_nullable !== 'boolean') throw new DatasetStoreError('profile_invalid', `schema.${column}.contract_nullable must be boolean`)
+      if (item.required !== undefined && typeof item.required !== 'boolean') throw new DatasetStoreError('profile_invalid', `schema.${column}.required must be boolean`)
+      if (item.allow_numeric_string !== undefined && typeof item.allow_numeric_string !== 'boolean') throw new DatasetStoreError('profile_invalid', `schema.${column}.allow_numeric_string must be boolean`)
+      if (item.numeric_string_count !== undefined && !validNonNegativeInteger(item.numeric_string_count)) throw new DatasetStoreError('profile_invalid', `schema.${column}.numeric_string_count must be a non-negative integer`)
+      if (item.numeric_string_count !== undefined && (item.numeric_string_count as number) > nonNullCount) throw new DatasetStoreError('profile_invalid', `schema.${column}.numeric_string_count exceeds non_null_count`)
+      schema[column] = item as unknown as ProfileColumn
+    }
+    if (Object.keys(schema).some((column) => !columns.includes(column))) throw new DatasetStoreError('profile_invalid', 'schema columns must be listed in profile.columns')
+  }
+
+  let validation: ProfilePayload['validation']
+  if (value.validation !== undefined) {
+    if (!isRecord(value.validation) || (value.validation.status !== 'pass' && value.validation.status !== 'fail') || !Array.isArray(value.validation.violations) || value.validation.violations.length > 64) {
+      throw new DatasetStoreError('profile_invalid', 'validation must contain a status and bounded violations')
+    }
+    const violations: ProfileValidationViolation[] = []
+    for (const item of value.validation.violations) {
+      if (!isRecord(item) || typeof item.column !== 'string' || item.column.length === 0 || !['required', 'nullable', 'type'].includes(String(item.rule)) || !(typeof item.expected === 'string' || typeof item.expected === 'boolean') || typeof item.observed !== 'string' || !validNonNegativeInteger(item.invalid_count) || !['error', 'warning'].includes(String(item.severity))) {
+        throw new DatasetStoreError('profile_invalid', 'validation contains an invalid violation')
+      }
+      violations.push({
+        column: item.column,
+        rule: item.rule as ProfileValidationViolation['rule'],
+        expected: item.expected as string | boolean,
+        observed: item.observed,
+        invalid_count: item.invalid_count,
+        severity: item.severity as ProfileValidationViolation['severity'],
+      })
+    }
+    if ((value.validation.status === 'pass' && violations.length > 0) || (value.validation.status === 'fail' && violations.length === 0)) {
+      throw new DatasetStoreError('profile_invalid', 'validation status does not match violations')
+    }
+    validation = { status: value.validation.status as 'pass' | 'fail', violations }
+  }
+
+  return { row_count: value.row_count, columns, quality: { missing_values: value.quality.missing_values, duplicate_rows: value.quality.duplicate_rows, time_ordered: value.quality.time_ordered }, ...(statistics ? { statistics } : {}), ...(categories ? { categories } : {}), ...(timeFacts ? { time_facts: timeFacts } : {}), ...(structure ? { structure } : {}), ...(schema ? { schema } : {}), ...(validation ? { validation } : {}), warnings: value.warnings }
 }
 
 export function provideWorkspaceDatasetStore(ctx: import('@deepseek-ai/cordis').Context, options?: WorkspaceDatasetStoreOptions): WorkspaceDatasetStore {

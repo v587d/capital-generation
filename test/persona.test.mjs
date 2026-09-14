@@ -112,7 +112,7 @@ const childRows = [collectorRow, juniorRow, retrieverRow]
 // 创建子 Agent 时被 tools.restrict() 拒绝，所以它必须与这份清单求交集。
 const PLUGIN_TOOLS = [
   'request_data', 'list_capabilities', 'describe_capability', 'dc_status',
-  'inspect_dataset', 'read_dataset_slice', 'profile_dataset', 'write_profile',
+  'inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile',
   'get_local_datetime',
   'web_retriever_search', 'web_retriever_fetch',
   'wind_docs_announcements', 'wind_docs_news',
@@ -246,8 +246,7 @@ test('主 persona：数据调度纪律——通过 list_agents + send_message �
   assertRule(MAIN_PERSONA, /DatasetRef/)
   assertRule(MAIN_PERSONA, /记入委派清单/)
   assertRule(MAIN_PERSONA, /list_capabilities/)
-  // 实测教训（2026-09 复盘会话）：主 Agent 直调 read_dataset_slice 被工具层拒绝后，
-  // 用网页行情数字补位。DatasetRef 用法与行情数值纪律必须写成显式硬规则。
+  // 实测教训：主 Agent 不能直读 Dataset；所有内容和基础统计都必须委派 data_junior 使用 query_dataset。
   assertRule(MAIN_PERSONA, /看内容或基础统计.*data_junior/)
   assertRuleAny(MAIN_PERSONA, [/绝不直接调用 Dataset 系列工具/, /禁止直调 Dataset 工具/], '主 persona 必须禁止直调 Dataset 系列工具')
   assertRuleAny(MAIN_PERSONA, [/data_analyst 尚未/, /data_analyst 未启用/], '主 persona 需说明 data_analyst 不可用')
@@ -433,16 +432,27 @@ test('subagent_data_junior 行：continuable、persona 覆盖、toolFilter 只�
   assert.equal(juniorRow.config.backgroundMode, 'continuable')
   const allow = juniorRow.config.toolFilter?.allow
   assert.ok(Array.isArray(allow), 'toolFilter.allow 必须存在')
-  assert.deepEqual([...allow].sort(), ['get_local_datetime', 'inspect_dataset', 'profile_dataset', 'send_message'])
+  assert.deepEqual([...allow].sort(), ['get_local_datetime', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'send_message'])
   // data_junior 不得访问外部行情 API、网页检索、凭据或委派能力
-  for (const forbiddenTool of ['request_data', 'list_capabilities', 'dc_status', 'subagent', 'subagent_data_collector', 'subagent_data_junior', 'subagent_data_analyst', 'ask_user_question', 'todo_write', 'web_search', 'web_fetch', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'bash', 'python', 'read_dataset_slice', 'write_profile']) {
+  for (const forbiddenTool of ['request_data', 'list_capabilities', 'dc_status', 'subagent', 'subagent_data_collector', 'subagent_data_junior', 'subagent_data_analyst', 'ask_user_question', 'todo_write', 'web_search', 'web_fetch', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'bash', 'python', 'write_profile']) {
     assert.ok(!allow.includes(forbiddenTool), `toolFilter.allow 不应包含 ${forbiddenTool}`)
   }
 })
 
+test('主 persona：子 Agent 中途请求按工单处理——取数后发回同一个子 Agent，结算通知不等于完成', () => {
+  assertRule(MAIN_PERSONA, /子 Agent 中途请求/)
+  assertRule(MAIN_PERSONA, /data_gap/)
+  assertRuleAny(MAIN_PERSONA, [/它是工单不是完成/, /不算完成/, /不等同完成/], '主 persona 必须写明中途请求是工单')
+  assertRule(MAIN_PERSONA, /同一个\*\*子 Agent|同一个子 Agent/)
+  assertRule(MAIN_PERSONA, /不必重跑本轮预检/)
+  assertRule(MAIN_PERSONA, /等数据/)
+  assertRuleAny(MAIN_PERSONA, [/取数失败必须回一条失败消息/, /必须回一条消息告诉它/], '取数失败必须回执，不能让它一直等')
+  assertRuleAny(MAIN_PERSONA, [/根本给不了/, /数据源没有该字段/], '主 persona 必须写明「能力给不了」也要回执并说明原因')
+})
+
 test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质量统计，绝不回传 rows', () => {
   for (const pattern of [
-    /数据集质检执行器/,
+    /数据质量与基础分析执行器/,
     /profile_request/,
     /dataset_profile_completed/,
     /profile_failed/,
@@ -450,7 +460,16 @@ test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质�
     /DatasetRef/,
     /inspect_dataset/,
     /profile_dataset/,
+    /query_dataset/,
+    /query_request/,
+    /dataset_query_completed/,
+    /query_failed/,
+    /QuerySpec/,
+    /group_by|聚合/,
     /get_local_datetime/,
+    /字段类型|observed.*contract/,
+    /显式 null|missing|null/,
+    /validation|violations/,
     /缺失值/,
     /重复主键/,
     /时间范围/,
@@ -460,6 +479,8 @@ test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质�
     /不是分析师/,
     /不改写原始 Dataset/,
     /data_junior_ready/,
+    /data_gap/,
+    /blocking/,
     /原样填入/,
     /字段名、数值、日期一律不改写/,
     /不得出现原始数据行|绝不把 rows 写进|不含任何数据行/,
@@ -470,6 +491,26 @@ test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质�
     /不会被\s*data_collector 创建/,
     /经主 Agent 中继/,
     /重试/,
+    // 四类事实必须点名，否则模型只会复述字段名，或把 min/max 讲成走势
+    /count 与 sum/,
+    /distinct_count/,
+    /time_facts/,
+    /first\/last/,
+    /min\/max 只是区间极值/,
+    /structure/,
+    /total_elements/,
+    /文档型 Dataset/,
+    /truncated=true/,
+    /omitted/,
+    // 数据缺口必须区分「数据里没有」与「没拿到数据」，且不得自行取数
+    /数据里确实没有/,
+    /不得自行取数/,
+    /不得直接找 data_collector/,
+    /同一条缺口只发一次/,
+    /只能是\*\*手上 DatasetRef 里出现过的 capability 原值\*\*|手上 DatasetRef 里出现过的 capability/,
+    /不要为了填空编造能力名/,
+    /取不到原始行/,
+    /time_facts 已经给了首末行取值/,
   ]) assertRule(JUNIOR_PERSONA, pattern, `data_junior persona 缺少要点: ${pattern}`)
   // 叶子质检器：不引用取数/委派工具名，不含内部路由键名与框架术语
   assertNoRule(JUNIOR_PERSONA, /request_data|list_capabilities|dc_status|subagent_data_collector|subagent_data_analyst/, 'junior persona 不应引用取数或委派工具')
@@ -484,7 +525,7 @@ test('subagent_data_analyst 行：仍在开发中——disabled，且预留工�
   assert.equal(analystRow.disabled, true, 'data_analyst 仍在开发中，委派行必须 disabled')
   const allow = analystRow.config.toolFilter?.allow ?? []
   assert.ok(Array.isArray(allow), '预留行仍需登记未来工具边界')
-  for (const requiredTool of ['send_message', 'inspect_dataset', 'read_dataset_slice', 'read_profile', 'get_local_datetime']) {
+  for (const requiredTool of ['send_message', 'inspect_dataset', 'query_dataset', 'read_profile', 'get_local_datetime']) {
     assert.ok(allow.includes(requiredTool), `预留行 toolFilter 应包含 ${requiredTool}`)
   }
   // read_profile 尚未注册：restrict() 对未知名字报错，启用该行会让"创建子 Agent"失败。
@@ -527,11 +568,11 @@ test('data_collector persona：叶子边界——不得创建/指挥 data_junior
 
 test('skill 内容：编排 skill 覆盖预检异常与清单，数据 skill 覆盖三种载荷', () => {
   const orchestration = readFileSync(`${SKILL_DIR}capital-orchestration/SKILL.md`, 'utf8')
-  for (const pattern of [/list_agents\(scope="children"\)/, /running/, /idle/, /ready/, /diagnostic/, /委派清单/, /data_collector/, /data_junior/, /web_retriever/, /capital-data-protocol/, /Wind 能力暂不可用/, /dataset_session_mismatch/, /分钟级/, /ID 纪律/, /投错对象/]) {
+  for (const pattern of [/list_agents\(scope="children"\)/, /running/, /idle/, /ready/, /diagnostic/, /委派清单/, /data_collector/, /data_junior/, /web_retriever/, /capital-data-protocol/, /Wind 能力暂不可用/, /dataset_session_mismatch/, /分钟级/, /ID 纪律/, /投错对象/, /waiting_data/, /data_gap/, /中途消息是工单/, /结算通知 ≠ 任务完成/]) {
     assertMatches(orchestration, pattern, `capital-orchestration 缺少要点: ${pattern}`)
   }
   const protocol = readFileSync(`${SKILL_DIR}capital-data-protocol/SKILL.md`, 'utf8')
-  for (const pattern of [/"type": "data_request"/, /"type": "dataset_ready"/, /"type": "data_failed"/, /"type": "profile_request"/, /"type": "dataset_profile_completed"/, /"type": "profile_failed"/, /force_refresh/, /workspace_not_writable/, /captured_at/, /artifact_ref/]) {
+  for (const pattern of [/"type": "data_request"/, /"type": "dataset_ready"/, /"type": "data_failed"/, /"type": "profile_request"/, /"type": "dataset_profile_completed"/, /"type": "profile_failed"/, /"type": "query_request"/, /"type": "dataset_query_completed"/, /"type": "query_failed"/, /"type": "data_gap"/, /suggested_capability/, /blocking/, /schema/, /validation/, /violations/, /force_refresh/, /workspace_not_writable/, /captured_at/, /artifact_ref/, /time_facts/, /distinct_count/, /total_elements/, /文档型 Dataset/, /结束本轮 ≠ 任务完成/]) {
     assertMatches(protocol, pattern, `capital-data-protocol 缺少要点: ${pattern}`)
   }
   // 内部路由键名不得出现在任何模型可见文本

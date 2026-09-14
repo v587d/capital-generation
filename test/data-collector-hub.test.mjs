@@ -430,6 +430,17 @@ test('Phase 2 端到端：涨停池落成 json_rows，嵌套财务指标落成 j
   }
 })
 
+test('Dataset shape：顶层数组落成 json_rows，后续可被 query_dataset 使用', async () => {
+  const { hub } = makeHub()
+  hub.registerSource({
+    schema: { capability: 'array_rows', name: 'array rows', source: 'test', data_key: 'test.array_rows', input_schema: {} },
+    execute: async () => ({ data: [{ value: 1 }, { value: 2 }] }),
+  })
+  const ref = await hub.request(request({ capability: 'array_rows', params: {} }))
+  assert.equal(ref.format, 'json_rows')
+  assert.equal(ref.row_count, 2)
+})
+
 test('normalizeParams：Hub 在 digest 与执行前规范化参数，语义相同的请求复用同一 Dataset', async () => {
   const { hub, store } = makeHub()
   const seen = []
@@ -547,4 +558,46 @@ test('修正③：无 code 的普通错误不应被伪造出 code', async () => 
       return true
     },
   )
+})
+
+test('Dataset shape：行数组位置由数据源声明，龙虎榜这类 stock_items 不再被判成文档', async () => {
+  const { hub } = makeHub()
+  // 实测教训：hub 只认 data.item 时，龙虎榜（行数组在 stock_items）整份落成
+  // format=json，data_junior 连 inspect 都读不到。行在哪里属于数据源的契约知识。
+  hub.registerSource({
+    schema: {
+      capability: 'keyed', name: 'keyed', source: 'api:test', data_key: 'test.keyed',
+      input_schema: { type: 'object' }, rowShape: { rowKey: 'stock_items' },
+    },
+    async execute() { return { data: { timestamp: 1, count: 2, stock_items: [{ thscode: 'a' }, { thscode: 'b' }], hot_money_items: [] } } },
+  })
+  hub.registerSource({
+    schema: {
+      capability: 'doc', name: 'doc', source: 'api:test', data_key: 'test.doc',
+      input_schema: { type: 'object' },
+    },
+    async execute() { return { data: { thscode: 'x', abilities: [{ ability: 'growth', indicators: [] }] } } },
+  })
+  const keyed = await hub.request(request({ capability: 'keyed' }))
+  assert.equal(keyed.format, 'json_rows')
+  assert.equal(keyed.row_count, 2)
+  // 没有行数组的顶层对象仍按文档存储：format=json 表示「非行集合」，读取时按文档处理
+  const doc = await hub.request(request({ capability: 'doc' }))
+  assert.equal(doc.format, 'json')
+  assert.equal(doc.row_count, null)
+})
+
+test('数据源契约：Fuyao 每个端点都声明行数组位置，且与输出护栏的 itemKey 一致', async () => {
+  const sources = createFuyaoRestSources(async () => 'key')
+  assert.equal(sources.length, 61)
+  for (const source of sources) {
+    const rowShape = source.schema.rowShape
+    assert.ok(rowShape, `${source.schema.capability} 必须声明 rowShape`)
+    assert.equal(typeof rowShape.rowKey, 'string', `${source.schema.capability} 的 rowKey 必须是字符串`)
+  }
+  const dragon = sources.find((source) => source.schema.capability === 'dragon_tiger')
+  assert.equal(dragon.schema.rowShape.rowKey, 'stock_items', '龙虎榜的行数组在 stock_items，不是 item')
+  assert.deepEqual(dragon.schema.rowShape.rowKeys, ['stock_items', 'hot_money_items[].rows'])
+  const plain = sources.find((source) => source.schema.capability === 'history')
+  assert.equal(plain.schema.rowShape.rowKey, 'item')
 })

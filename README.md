@@ -30,15 +30,15 @@
 Next-Gen AI-Driven Capital Generation.
 
 # What
-Capital Generation 是面向中国散户，适用于日常证券研究的 DSH 插件，包括：
-1. Agent preset（人设）： Capital 模式，与 DSH 默认四种模式并列。
+Capital Generation 是面向中国散户，适用于日常证券研究的 DSH 插件，简单地说：
+1. Agent preset（人设）：面向金融场景的 Capital 模式，与 DSH 默认的标准、PTC、极简、创造模式并列。
 
-2. 所有 Agent，包括主 Agent 均不能直接接触原始数据（行情、财务报表细目等，新闻、文档报告除外），需要时 Agent 可按需提取再提炼、汇总至主 Agent。
+2. 所有 Agent，包括主 Agent 均不能直接接触原始结构数据（行情、财务报表细目等），需要时 Agent 可按需提取再提炼发送消息至主 Agent。
 目前覆盖四种叶子 Subagent:
-  - data_collector: 主 Agent 直属下级，负责根据上级指令收集金融财经类结构化数据，目前支持 同花顺（fuyao） 数据 API接口。
-  - data_junior: 主 Agent 直属下级，负责根据上级指令清洗、整理出有效数据。
-  - data_analyst: 主 Agent 直属下级，负责根据上级指令，通过运用 Coding 技能编写脚本分析上游数据（**仍在开发中**，委派行 disabled，暂不启用）。
-  - web_retriever: 主 Agent 直属下级，负责根据上级指令，运用网络搜索和抓取能力，获取外部非机构化数据，目前支持 Anysearch 数据接口。
+  - data_collector: 主 Agent 直属下级，负责根据上级指令收集金融财经类结构化数据，目前支持 同花顺（fuyao）约61个数据 API接口。
+  - data_junior: 主 Agent 直属下级，负责根据上级指令清洗、整理出有效数据、基础描述性统计（提取数据背后的故事）以及数据透视。
+  - data_analyst: 主 Agent 直属下级，负责根据上级指令，通过运用编程技能分析上游数据（**仍在开发中**，委派行 disabled，暂不启用）。
+  - web_retriever: 主 Agent 直属下级，负责根据上级指令，运用网络搜索和抓取能力，获取外部非机构化数据，目前支持 Anysearch(search/fetch) API 数据接口和 Wind Alice 相关服务。
   - 未来更多，欢迎 PR 
 
 3. 沿用 DSH 官方基础设施，不自行实现底层机制：

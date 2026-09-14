@@ -47,7 +47,7 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
     assert.ok(services.get('datasetStore'), 'apply 必须提供 datasetStore 服务')
     assert.equal(hub.capabilityNames().length, 61, '装配后应注册全部 61 个 Fuyao capability')
 
-    for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status', 'inspect_dataset', 'profile_dataset', 'get_local_datetime', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news']) {
+    for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'get_local_datetime', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news']) {
       assert.ok(toolNamed(tools, name), `装配后应注册工具 ${name}`)
     }
 
@@ -111,6 +111,58 @@ test('apply()：credentials 优先于环境变量', async () => {
     const status = await toolNamed(tools, 'dc_status').execute({}, exec(delegated))
     assert.equal(status.api_key.present, true)
     assert.equal(status.api_key.source, 'file', 'credentials 解析成功时应报告其 source')
+  } finally {
+    if (SAVED_KEY === undefined) delete process.env.FUYAO_API_KEY
+    else process.env.FUYAO_API_KEY = SAVED_KEY
+  }
+})
+
+/**
+ * 事故回归（2026-09-14）：`query_dataset` 的 parameters 根曾写成 `{ oneOf: [...] }`
+ * 而没有 `type: 'object'`。模型供应商在请求进入时整体校验
+ * `tools[].function.parameters`，直接返回 400
+ * （`Invalid schema for function 'query_dataset': schema must be a JSON Schema of
+ * 'type: "object"', got 'type: null'`）。校验早于模型生成第一个 token，而这份工具表
+ * 在会话组作用域里主 Agent 也带着 —— 于是**每个** Capital 会话在第 1 轮第 1 步整体
+ * 失败，与用户问什么无关。这里把「根 schema 只能是 object + properties」钉成装配期
+ * 不变量，任何新增工具踩到同一坑都会在这里失败，而不是上线后在真实会话里 400。
+ */
+function assertObjectSchemas(node, path, toolName) {
+  if (Array.isArray(node)) {
+    node.forEach((child, index) => assertObjectSchemas(child, `${path}[${index}]`, toolName))
+    return
+  }
+  if (!node || typeof node !== 'object') return
+  if ('properties' in node) {
+    assert.equal(node.type, 'object', `${toolName}: ${path} 声明了 properties 却没有 type: 'object'`)
+  }
+  for (const [key, value] of Object.entries(node)) assertObjectSchemas(value, `${path}.${key}`, toolName)
+}
+
+test('apply()：所有注册工具的 parameters 根必须是 object 型 schema', async () => {
+  process.env.FUYAO_API_KEY = 'smoke-key'
+  try {
+    const { ctx, tools, effectResults } = fakeCtx()
+    apply(ctx, { customPersona: '', retriever: { baseURL: '', credentialRef: '', windDocs: { endpoint: '', credentialRef: '', timeoutMs: 0 } } })
+    await Promise.all(effectResults)
+
+    assert.ok(tools.length >= 12, `工具表过小（${tools.length}），回归测试会失去意义`)
+    for (const definition of tools) {
+      const parameters = definition.parameters
+      assert.ok(parameters && typeof parameters === 'object', `${definition.name} 必须有 parameters`)
+      assert.equal(parameters.type, 'object', `${definition.name}: parameters 根必须声明 type: 'object'`)
+      assert.ok(parameters.properties && typeof parameters.properties === 'object', `${definition.name}: parameters 必须给出 properties`)
+      // 根级组合子会让供应商只看到空参数表；API 侧的 object 校验也可能直接拒绝。
+      for (const combinator of ['oneOf', 'anyOf', 'allOf']) {
+        assert.equal(combinator in parameters, false, `${definition.name}: parameters 根不允许出现 ${combinator}`)
+      }
+      assertObjectSchemas(parameters, `${definition.name}.parameters`, definition.name)
+    }
+
+    // 本次事故的具体工具必须显式覆盖，避免上面的通用断言被整体绕过
+    const query = toolNamed(tools, 'query_dataset')
+    assert.equal(query.parameters.type, 'object')
+    assert.ok(query.parameters.properties.query, 'envelope 形态的 query 字段必须出现在根 properties 里')
   } finally {
     if (SAVED_KEY === undefined) delete process.env.FUYAO_API_KEY
     else process.env.FUYAO_API_KEY = SAVED_KEY
