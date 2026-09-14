@@ -18,9 +18,8 @@ export const name = 'capital-generation'
 
 /**
  * 附加人设节的注册名与顺序。主 persona 由 preset 的 `@deepseek-ai/dsh-persona`
- * 行承载（`deployment:persona`，order 0）；本插件只注册一个附加节，放在
- * persona 之后、官方 PLAN_POLICY(500) 之前的空槽位（100），绝不占用
- * deployment:persona 名。
+ * 行承载（节名 `deployment:persona-prefix`，order 0）；本插件只注册一个附加节，
+ * 放在 persona 之后、PLAN_POLICY(500) 之前的空槽位（100），绝不占用该节名。
  */
 const USER_CUSTOMIZATION_SECTION = 'capital:user-customization'
 const USER_SECTION_ORDER = 100

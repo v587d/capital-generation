@@ -132,6 +132,15 @@ test('preset 结构：persona 行为声明式行，插件不再占用 deployment
   assert.ok(MAIN_PERSONA_TEXT.length > 2000, '主 persona 文本必须完整存在')
   // 压缩上限：长协议已迁到 skills/，persona 不应再膨胀回改造前（6359 字符）。
   assert.ok(MAIN_PERSONA_TEXT.length < 5000, `主 persona 过长（${MAIN_PERSONA_TEXT.length} 字符）：协议细节应进 skills/`)
+  // 体积纪律（改造实测）：改造前 29,203 字符，目标是一半以内（14,601）。
+  // 参考材料进 skills/、设计理由进 preset README.md 之后，闸门卡在 14,600 字符。
+  assert.ok(COMPOSITION_TEXT.length < 14600, `agent.cordis.yml 过长（${COMPOSITION_TEXT.length} 字符 / 目标 <14600）：参考材料进 skills/，设计理由进 preset README.md`)
+  // 子 persona 只留硬规则骨架：协议正文在 skills/（子 Agent 通过 skill 按需加载），
+  // 与工具 description/schema 重复的事实不再抄一遍。
+  for (const [id, cap] of [['tool-subagent-data-collector', 1700], ['tool-subagent-data-junior', 2100], ['tool-subagent-web-retriever', 1300]]) {
+    const persona = rowById(id).config.persona
+    assert.ok(persona.length < cap, `${id} 的 persona 过长（${persona.length} 字符）：协议细节应进 skills/`)
+  }
   // 插件代码不得再注册 DEPLOYMENT_PERSONA 节（只允许注释里解释该设计）
   assertNotMatches(INDEX_SOURCE, /name:\s*['"]deployment:persona['"]/, 'src/index.ts 不应以 deployment:persona 为节名注册 section')
   assertNotMatches(INDEX_SOURCE, /PERSONA_SECTION/, 'src/index.ts 不应保留 PERSONA_SECTION 常量')
@@ -172,8 +181,8 @@ test('skills：两行组合式注册（skill-filesystem + tool-skill），不靠
   assert.ok(pkg.files.includes('preset'), 'package.json 的 files 必须包含 preset（skills/ 在其中）')
 })
 
-test('skills：两个 skill 文件存在且 frontmatter 合法，主 persona 指向它们', () => {
-  for (const name of ['capital-orchestration', 'capital-data-protocol']) {
+test('skills：三个 skill 文件存在且 frontmatter 合法，persona 指向它们', () => {
+  for (const name of ['capital-orchestration', 'capital-data-protocol', 'capital-web-protocol']) {
     const file = `${SKILL_DIR}${name}/SKILL.md`
     assert.ok(existsSync(file), `缺少 skill 文件：skills/${name}/SKILL.md`)
     const text = readFileSync(file, 'utf8')
@@ -182,13 +191,17 @@ test('skills：两个 skill 文件存在且 frontmatter 合法，主 persona 指
     assertMatches(front[1], new RegExp(`^name: ${name}$`, 'm'), `frontmatter 的 name 必须是 ${name}`)
     const description = front[1].match(/^description: (.+)$/m)
     assert.ok(description && description[1].length > 40, `skills/${name} 需要一句可路由的 description`)
-    assert.ok(text.includes(`skill \`capital-data-protocol\``) || name === 'capital-data-protocol' || text.includes('capital-data-protocol'))
+    assert.ok(text.length > 500, `skills/${name} 正文过短，协议细节不应留在 persona`)
   }
   assertRule(MAIN_PERSONA, /skill capital-orchestration/)
   assertRule(MAIN_PERSONA, /skill capital-data-protocol/)
   // 载荷示例与 JSON 协议必须已经迁出 persona。
   assertNoRule(MAIN_PERSONA, /"type":\s*"data_request"/, '主 persona 不应再内联 data_request JSON 示例')
   assertNoRule(MAIN_PERSONA, /"type":\s*"profile_request"/, '主 persona 不应再内联 profile_request JSON 示例')
+  // 组合文件只做接线：设计理由住在同目录 README.md（不会进 skill 目录、也不注入上下文）。
+  const presetReadme = `${SKILL_DIR}../README.md`
+  assert.ok(existsSync(presetReadme), 'preset 目录必须有 README.md 承接设计理由')
+  assertMatches(readFileSync(presetReadme, 'utf8'), /isolate|realm/, 'preset README 应说明 realm 纪律')
 })
 
 test('capital-generation-scope 行：插件提供的会话级服务必须全部进 isolate realm', () => {
@@ -296,12 +309,25 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
   assert.equal(retrieverRow.config.toolName, 'subagent_web_retriever')
   assert.equal(retrieverRow.config.backgroundMode, 'continuable')
   assert.deepEqual(retrieverRow.config.toolFilter?.allow, [
-    'send_message', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news',
+    'send_message', 'skill', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news',
   ])
-  for (const pattern of [/网页材料获取执行器/, /web_retriever_search/, /web_retriever_fetch/, /先定来源再动手/, /不要等 anysearch 空转后才想起/, /禁止把搜索结果全部 fetch/, /一次只能提交一个 URL/, /搜索收敛（经验法则，不是硬性配额）/, /search_engine_provider/, /一般\s*\n?\s*5 次以内就该\s*\n?\s*收敛/, /偶尔超过 5 次不是错误/, /Wind 查询要素/, /公司实体（股票代码或公司全称/, /无主体泛查询/, /public_document/, /wind_docs_announcements/, /wind_docs_news/, /万得 Wind 金融数据服务/, /recent_retrievals/, /provider_tally/, /不得重试 wind/, /每条证据都要有来源/, /链接只放一条最权威的/, /不得编造链接/, /无来源的信息不得作为证据/, /verified_official 只能来自/, /消耗积分/, /verified_official/, /unverified/, /not_verified/, /已核验官方白名单/, /候选\/未核验域名/, /不调用官方名称为 web_search 或 web_fetch/, /不索取或保存.*API Key/]) {
+  // persona 只留每轮硬规则；检索法则、回传格式与官方域名核验清单在 skill capital-web-protocol。
+  for (const pattern of [/网页材料获取执行器/, /web_retriever_search/, /web_retriever_fetch/, /先定来源再动手/, /不要等 anysearch 空转后才想起/, /禁止把搜索结果全部 fetch/, /一次只能提交一个 URL/, /search_engine_provider/, /Wind 查询要素/, /public_document/, /wind_docs_announcements/, /wind_docs_news/, /recent_retrievals/, /provider_tally/, /不得重试 wind/, /每条证据都要有来源/, /不得编造链接/, /无来源的信息不得作为证据/, /verified_official 只能来自/, /verified_official/, /unverified/, /not_verified/, /不调用官方名称为 web_search 或 web_fetch/, /不索取或保存.*API Key/, /skill capital-web-protocol/]) {
     assertRule(RETRIEVER_PERSONA, pattern, `web_retriever persona 缺少要点: ${pattern}`)
   }
   assertNoRule(RETRIEVER_PERSONA, /web_begin|web_latest|web_material|web_save|web_engines|wr_status|time_budget|from_cache/)
+
+  // 外迁到 skill 的要点：一条都不能丢，只是换了承载面。
+  const webProtocol = readFileSync(`${SKILL_DIR}capital-web-protocol/SKILL.md`, 'utf8')
+  for (const pattern of [
+    /搜索收敛（经验法则，不是硬性配额）/, /5 次以内就该收敛/, /偶尔超过 5 次不是错误/,
+    /公司实体（股票代码或公司全称/, /无主体泛查询/, /万得 Wind 金融数据服务/, /消耗积分/,
+    /链接只放一条最权威的/, /不得编造链接/, /每条证据都要有来源/, /无来源的信息不得作为证据/,
+    /已核验官方白名单/, /候选\/未核验域名/, /verified_official/, /unverified/, /not_verified/,
+    /不得重试 wind/, /recent_retrievals/, /provider_tally/, /public_document/,
+  ]) {
+    assertRule(webProtocol, pattern, `capital-web-protocol 缺少要点: ${pattern}`)
+  }
 })
 
 test('主 persona：每轮先查 direct children，按角色标签复用，确认无匹配才创建', () => {
@@ -335,21 +361,34 @@ test('主 persona：每轮先查 direct children，按角色标签复用，确�
   assertNoRule(MAIN_PERSONA, /第一个需要网页材料.*用 subagent_web_retriever 工具创建并全程复用/)
 })
 
-test('子 Agent 委派行：continuable、persona 覆盖、toolFilter 收敛工具集且不含 skill', () => {
+test('子 Agent 委派行：continuable、persona 覆盖、toolFilter 收敛工具集且允许按需读 skill', () => {
   for (const row of childRows) {
     assert.equal(row.name, '@deepseek-ai/dsh-tool-subagent')
     assert.equal(row.config.provider, 'spawn')
     assert.equal(row.config.backgroundMode, 'continuable', `${row.id} 必须 continuable`)
     const allow = row.config.toolFilter?.allow
     assert.ok(Array.isArray(allow), `${row.id} 的 toolFilter.allow 必须存在`)
-    // 子 Agent 读不到 skill：toolFilter 与继承工具集求交集，skill 不在 allow 里。
-    // 因此任何子 Agent 的协议都不能只写在 skills/ 里。
-    assert.ok(!allow.includes('skill'), `${row.id} 不应允许 skill（子协议必须留在子 persona）`)
+    // 子 Agent 默认读不到 skill：restriction 过滤的是**继承层**（全局 + 全部祖先 scope，
+    // 含 preset 层），只豁免"本 scope 自己注册的"工具（dsh-tools view() 的语义）。
+    // 所以要让子 Agent 按需加载协议，唯一开关就是把 skill 显式写进 allow。
+    assert.ok(allow.includes('skill'), `${row.id} 必须允许 skill，否则子 Agent 拿不到协议 skill`)
     assert.ok(allow.includes('send_message'), `${row.id} 必须能回传`)
     // 未知工具名会在创建子 Agent 时被 tools.restrict() 拒绝，必须与真实注册名一致。
     for (const name of allow) {
       assert.ok(KNOWN_TOOLS.has(name), `${row.id} 的 toolFilter 含未注册工具名：${name}`)
     }
+  }
+})
+
+test('子 Agent 按需协议：三个子 persona 都点名真实存在的 skill，写错名字会静默拿不到契约', () => {
+  for (const [row, skillName] of [
+    [collectorRow, 'capital-data-protocol'],
+    [juniorRow, 'capital-data-protocol'],
+    [retrieverRow, 'capital-web-protocol'],
+  ]) {
+    assertRule(row.config.persona, new RegExp(`skill ${skillName}`), `${row.id} 的子 persona 必须点名 skill ${skillName}`)
+    assert.ok(existsSync(`${SKILL_DIR}${skillName}/SKILL.md`), `${row.id} 点名的 skill 文件不存在：${skillName}`)
+    assert.ok(row.config.toolFilter.allow.includes('skill'), `${row.id} 未允许 skill，点名也无从加载`)
   }
 })
 
@@ -397,20 +436,22 @@ test('data_collector persona：覆盖 Phase 1 数据集协议全部必须要点'
   assertNoRule(COLLECTOR_PERSONA, /get_request_status/, 'dc persona 不应再引用已删除的 get_request_status')
   assertRule(COLLECTOR_PERSONA, /阻塞/, 'dc persona 应说明 request_data 阻塞等待执行')
   assertRule(COLLECTOR_PERSONA, /30 秒|超时/, 'dc persona 应说明执行超时报错')
-  // capability 用量引导（≤3 引导 / ≤5 硬性），capability 以 list_capabilities 返回为准
-  assertRule(COLLECTOR_PERSONA, /最多 3 个/, 'dc persona 需含能力用量引导（最多 3 个）')
-  assertRule(COLLECTOR_PERSONA, /不超过 5 个/, 'dc persona 需含能力用量硬性上限（不超过 5 个）')
-  assertRule(COLLECTOR_PERSONA, /list_capabilities 返回为准|目录为准/, 'dc persona 应要求 capability 以 list_capabilities 返回为准')
-  // 能力发现是两步且各只做一次：目录与详情都会留在 session 历史里，重复调用只白占上下文。
-  assertRule(COLLECTOR_PERSONA, /describe_capability/, 'dc persona 必须写明用 describe_capability 取单个能力的完整 schema')
-  assertRuleAny(COLLECTOR_PERSONA, [/一个任务只调一次/, /只调一次/], 'dc persona 必须限定 list_capabilities 一个任务只调一次')
-  assertRuleAny(COLLECTOR_PERSONA, [/一个能力描述一次/, /不要重复描述/, /重复描述同一个能力/], 'dc persona 必须限定同一个能力只描述一次')
-  assertRuleAny(COLLECTOR_PERSONA, [/禁止把多个名字用逗号/, /一次只传一个 capability/, /不要用逗号/], 'dc persona 必须限定 describe_capability 一次一个名字')
+  assertRule(COLLECTOR_PERSONA, /skill capital-data-protocol/, 'dc persona 必须按需加载数据协议 skill')
+  // 能力发现的步骤、用量上限与分类错误处置已外迁到 skill capital-data-protocol：
+  // 规则一条都不许丢，只是换了承载面（persona 只留每轮硬规则）。
+  const dataProtocol = readFileSync(`${SKILL_DIR}capital-data-protocol/SKILL.md`, 'utf8')
+  assertRule(dataProtocol, /最多 3 个/, 'skill 需含能力用量引导（最多 3 个）')
+  assertRule(dataProtocol, /不超过 5 个/, 'skill 需含能力用量硬性上限（不超过 5 个）')
+  assertRule(dataProtocol, /list_capabilities 返回的目录为准|目录为准/, 'skill 应要求 capability 以 list_capabilities 返回为准')
+  assertRule(dataProtocol, /describe_capability/, 'skill 必须写明用 describe_capability 取单个能力的完整 schema')
+  assertRule(dataProtocol, /一个任务只调一次/, 'skill 必须限定 list_capabilities 一个任务只调一次')
+  assertRule(dataProtocol, /只描述一次/, 'skill 必须限定同一个能力只描述一次')
+  assertRule(dataProtocol, /一次只传一个名字|不传逗号|一次只传一个 capability/, 'skill 必须限定 describe_capability 一次一个名字')
   // 分类错误必须按 code 处置，而不是盲目重试
   for (const code of ['capability_required', 'capability_invalid', 'capability_unknown', 'capability_catalog_empty']) {
-    assertRule(COLLECTOR_PERSONA, new RegExp(code), `dc persona 必须给出 ${code} 的处置指引`)
+    assertRule(dataProtocol, new RegExp(code), `skill 必须给出 ${code} 的处置指引`)
   }
-  assertRuleAny(COLLECTOR_PERSONA, [/不要重试/, /不要反复重试/], 'catalog_empty 必须明确不要重试')
+  assertRuleAny(dataProtocol, [/不要重试/, /不要反复重试/], 'catalog_empty 必须明确不要重试')
   // 实测教训：多端点一次性回传、只许结构化载荷（禁止只回传 markdown）、载荷字段原样不改写
   assertRule(COLLECTOR_PERSONA, /一次性/, 'dc persona 应要求多端点一次性回传')
   assertRule(COLLECTOR_PERSONA, /禁止只回传/, 'dc persona 应禁止只回传 markdown 汇总')
@@ -432,7 +473,7 @@ test('subagent_data_junior 行：continuable、persona 覆盖、toolFilter 只�
   assert.equal(juniorRow.config.backgroundMode, 'continuable')
   const allow = juniorRow.config.toolFilter?.allow
   assert.ok(Array.isArray(allow), 'toolFilter.allow 必须存在')
-  assert.deepEqual([...allow].sort(), ['get_local_datetime', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'send_message'])
+  assert.deepEqual([...allow].sort(), ['get_local_datetime', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'send_message', 'skill'])
   // data_junior 不得访问外部行情 API、网页检索、凭据或委派能力
   for (const forbiddenTool of ['request_data', 'list_capabilities', 'dc_status', 'subagent', 'subagent_data_collector', 'subagent_data_junior', 'subagent_data_analyst', 'ask_user_question', 'todo_write', 'web_search', 'web_fetch', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'bash', 'python', 'write_profile']) {
     assert.ok(!allow.includes(forbiddenTool), `toolFilter.allow 不应包含 ${forbiddenTool}`)
@@ -467,14 +508,6 @@ test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质�
     /QuerySpec/,
     /group_by|聚合/,
     /get_local_datetime/,
-    /字段类型|observed.*contract/,
-    /显式 null|missing|null/,
-    /validation|violations/,
-    /缺失值/,
-    /重复主键/,
-    /时间范围/,
-    /均值/,
-    /分位数/,
     /artifact_ref/,
     /不是分析师/,
     /不改写原始 Dataset/,
@@ -491,31 +524,48 @@ test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质�
     /不会被\s*data_collector 创建/,
     /经主 Agent 中继/,
     /重试/,
+    /skill capital-data-protocol/,
     // 四类事实必须点名，否则模型只会复述字段名，或把 min/max 讲成走势
-    /count 与 sum/,
-    /distinct_count/,
     /time_facts/,
-    /first\/last/,
-    /min\/max 只是区间极值/,
     /structure/,
-    /total_elements/,
-    /文档型 Dataset/,
-    /truncated=true/,
-    /omitted/,
     // 数据缺口必须区分「数据里没有」与「没拿到数据」，且不得自行取数
     /数据里确实没有/,
     /不得自行取数/,
     /不得直接找 data_collector/,
     /同一条缺口只发一次/,
-    /只能是\*\*手上 DatasetRef 里出现过的 capability 原值\*\*|手上 DatasetRef 里出现过的 capability/,
     /不要为了填空编造能力名/,
     /取不到原始行/,
-    /time_facts 已经给了首末行取值/,
   ]) assertRule(JUNIOR_PERSONA, pattern, `data_junior persona 缺少要点: ${pattern}`)
   // 叶子质检器：不引用取数/委派工具名，不含内部路由键名与框架术语
   assertNoRule(JUNIOR_PERSONA, /request_data|list_capabilities|dc_status|subagent_data_collector|subagent_data_analyst/, 'junior persona 不应引用取数或委派工具')
   assertNoRule(JUNIOR_PERSONA, /data_key|list_schemas|get_latest|from_cache/, 'junior persona 不应包含 data_key/旧缓存协议')
   assertNoRule(JUNIOR_PERSONA, /官方|DSH|exec\.agent/, 'junior persona 不应出现框架术语')
+
+  // 统计项与四类事实的读法已外迁到 skill capital-data-protocol：规则一条都不能丢。
+  const dataProtocol = readFileSync(`${SKILL_DIR}capital-data-protocol/SKILL.md`, 'utf8')
+  for (const pattern of [
+    /字段类型|observed.*contract/,
+    /显式 null|missing|null/,
+    /validation|violations/,
+    /缺失值/,
+    /重复主键/,
+    /时间范围/,
+    /均值/,
+    /分位数/,
+    /count 与 sum/,
+    /distinct_count/,
+    /time_facts/,
+    /`first`\/`last`|first\/last/,
+    /min.?\/.?max 只是区间极值/,
+    /structure/,
+    /total_elements/,
+    /文档型 Dataset/,
+    /truncated=true/,
+    /omitted/,
+    /只能是\*\*手上 DatasetRef 里出现过的 capability 原值\*\*|手上 DatasetRef 里出现过的 capability/,
+    /`?time_facts`? 已经给了首末行取值/,
+    /不得出现原始数据行|绝不把 rows 写进|不含任何数据行/,
+  ]) assertRule(dataProtocol, pattern, `capital-data-protocol 缺少要点: ${pattern}`)
 })
 
 test('subagent_data_analyst 行：仍在开发中——disabled，且预留工具名不得先行启用', () => {

@@ -59,6 +59,7 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
 
 ## 样例
 [2026-09-11测试样例](docs/sample/指南针软件（300803.SZ）复盘分析报告.md)
+[2026-09-14测试样例](docs/sample/指南针分析预测报告.md)
 
 ## 安装到 DSH Web Profile
 > [!NOTE]
