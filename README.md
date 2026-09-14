@@ -87,7 +87,7 @@ dsh plugin --profile web add github:v587d/capital-generation
 ![set_default](assets/set_default.png)
 
 # 贡献
-可自行克隆本项目，本地构建，具体方法同类似项目，再次不累赘。
+可自行克隆本项目，本地构建，具体方法同类似项目，在此不累述。
 由于本项目正在迭代中，具体贡献规则还未定，提 PR 前建议 rebase.
 欢迎提 issue 和 PR.
 

@@ -13,3 +13,4 @@ ths_api.md
 AGENTS.md
 docs/*
 !docs/sample/
+!docs/data-collector-capabilities.md
