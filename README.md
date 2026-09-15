@@ -1,5 +1,3 @@
-<h1 align="center">Capital Generation</h1>
-
 <p align="center">
   <img src="assets/banner.jpg" alt="Capital Generation Banner" width="100%">
 </p>
