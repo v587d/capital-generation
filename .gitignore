@@ -1,11 +1,20 @@
 # ── runtime ──
 node_modules/
+.omo/
+.npm-cache/
 *.tgz
 *.log
 *.Zone.Identifier
 
 # ── build output（本仓库对外提供 lib/，不忽略）──
 # lib/
+
+# 构建期临时产物：scripts/build-client.mjs 生成后在 finally 里删除，异常时可能残留
+chart-ui/client.runtime.gen.cjs
+
+# ── 运行时数据（Capital 会话在 {{cwd}} 下产出，绝不入库）──
+capital-data/
+capital-analysis/
 
 # ── 本地研发文档，不随仓库发布 ──
 .dsh/
@@ -14,3 +23,12 @@ AGENTS.md
 docs/*
 !docs/sample/
 !docs/data-collector-capabilities.md
+# 接口账本是 scripts/check-dsh-compat.mjs 的操作手册（探针报错会直接指向它），必须入库。
+# 注意：git 不允许重新包含"父目录已被排除"的文件，所以要先放行 docs/reference/ 再逐文件挑选。
+!docs/reference/
+docs/reference/*
+!docs/reference/dsh-surface-ledger.md
+
+# smoke 脚本的临时 profile（正常会自清理，异常退出时可能残留）
+.tmp-boot/
+.tmp-debug/

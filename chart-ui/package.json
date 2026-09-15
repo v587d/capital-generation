@@ -1,0 +1,28 @@
+{
+  "name": "@v587d/capital-charts",
+  "version": "0.1.0",
+  "description": "Capital 模式的图表前端组件（浏览器半边 + 序列旁路路由）：由 @v587d/capital-generation 随包携带并作为 host 平面行挂载。",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./index.js"
+    },
+    "./client": {
+      "default": "./client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
+    }
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "README.md"
+  ]
+}

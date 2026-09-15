@@ -182,8 +182,8 @@ test('skills：两行组合式注册（skill-filesystem + tool-skill），不靠
   assert.ok(pkg.files.includes('preset'), 'package.json 的 files 必须包含 preset（skills/ 在其中）')
 })
 
-test('skills：三个 skill 文件存在且 frontmatter 合法，persona 指向它们', () => {
-  for (const name of ['capital-orchestration', 'capital-data-protocol', 'capital-web-protocol']) {
+test('skills：四个 skill 文件存在且 frontmatter 合法，persona 指向它们', () => {
+  for (const name of ['capital-orchestration', 'capital-data-protocol', 'capital-chart-protocol', 'capital-web-protocol']) {
     const file = `${SKILL_DIR}${name}/SKILL.md`
     assert.ok(existsSync(file), `缺少 skill 文件：skills/${name}/SKILL.md`)
     const text = readFileSync(file, 'utf8')
@@ -282,6 +282,15 @@ test('主 persona：数据调度纪律——通过 list_agents + send_message �
   assertNoRule(MAIN_PERSONA, /get_request_status/, '主 persona 不应再引用已删除的 get_request_status')
   // data_key、旧缓存工具与旧缓存语义不得出现在任何模型可见协议
   assertNoRule(MAIN_PERSONA, /data_key|list_schemas|get_latest|from_cache/, '主 persona 不应包含 data_key/旧缓存协议')
+})
+
+test('主 persona：图表是呈现不是分析——render_chart 不算数据工具', () => {
+  assertRule(MAIN_PERSONA, /render_chart/)
+  assertRuleAny(MAIN_PERSONA, [/图表是呈现不是分析/, /呈现不是分析/], '主 persona 需说明图表是呈现不是分析')
+  assertRuleAny(MAIN_PERSONA, [/不要用图去推断数字/, /不用图推断数字/], '主 persona 需禁止用图推断数字')
+  assertRuleAny(MAIN_PERSONA, [/只回小回执/, /只回回执/], '主 persona 需说明 render_chart 只回小回执')
+  // 图表协议细节（kind、错误码、下采样口径）住在 skill capital-chart-protocol，不在 persona。
+  assertNoRule(MAIN_PERSONA, /chart_field_not_found|chart_spec_invalid|candlestick/, '图表协议细节应进 skill capital-chart-protocol')
 })
 
 test('主 persona：预热与回合纪律——每会话一个 dc、等待期不做外部检索、失败按重试纪律', () => {

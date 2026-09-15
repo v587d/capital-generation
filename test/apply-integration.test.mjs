@@ -47,7 +47,7 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
     assert.ok(services.get('datasetStore'), 'apply 必须提供 datasetStore 服务')
     assert.equal(hub.capabilityNames().length, 61, '装配后应注册全部 61 个 Fuyao capability')
 
-    for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'get_local_datetime', 'resolve_data_time_range', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news']) {
+    for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'get_local_datetime', 'resolve_data_time_range', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'render_chart']) {
       assert.ok(toolNamed(tools, name), `装配后应注册工具 ${name}`)
     }
 
@@ -163,6 +163,30 @@ test('apply()：所有注册工具的 parameters 根必须是 object 型 schema'
     const query = toolNamed(tools, 'query_dataset')
     assert.equal(query.parameters.type, 'object')
     assert.ok(query.parameters.properties.query, 'envelope 形态的 query 字段必须出现在根 properties 里')
+  } finally {
+    if (SAVED_KEY === undefined) delete process.env.FUYAO_API_KEY
+    else process.env.FUYAO_API_KEY = SAVED_KEY
+  }
+})
+
+test('apply()：render_chart 属于主 Agent（不要求委派 session）', async () => {
+  process.env.FUYAO_API_KEY = 'smoke-key'
+  try {
+    const { ctx, tools, effectResults } = fakeCtx()
+    apply(ctx, { customPersona: '', retriever: { baseURL: '', credentialRef: '', windDocs: { endpoint: '', credentialRef: '', timeoutMs: 0 } } })
+    await Promise.all(effectResults)
+
+    const renderChart = toolNamed(tools, 'render_chart')
+    assert.ok(renderChart, '主 Agent 需要有 render_chart（本地 JSON 场景下 data_junior 没有 fs 能力，只能由它来做）')
+    // 与 Dataset 系列工具的关键差别：主会话（无 parentSession）不应被 dataset_session_mismatch 挡下。
+    const mainSession = { id: 'main-1', header: { cwd: '/workspace/proj' } }
+    await assert.rejects(
+      () => renderChart.execute({ spec: { kind: 'line', series: ['close'] } }, exec(mainSession)),
+      (error) => error.code === 'chart_source_invalid',
+      '缺数据来源时应报 chart_source_invalid，而不是委派限制错误',
+    )
+    // 描述里必须写清"只回小回执"，这是它不算数据工具的判据。
+    assert.match(renderChart.description, /只回一条小回执/)
   } finally {
     if (SAVED_KEY === undefined) delete process.env.FUYAO_API_KEY
     else process.env.FUYAO_API_KEY = SAVED_KEY

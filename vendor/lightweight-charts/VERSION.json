@@ -1,0 +1,8 @@
+{
+  "name": "lightweight-charts",
+  "version": "5.2.1",
+  "license": "Apache-2.0",
+  "dist": "lightweight-charts.standalone.production.js",
+  "sha256": "e21cc5caa0226ef30bd8549c50b9ef926615f2a4ee6b4e486353477a55f598cf",
+  "attribution": "TradingView Lightweight Charts™ — attribution logo 保持开启"
+}

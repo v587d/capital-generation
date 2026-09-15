@@ -67,6 +67,13 @@
   `tokenMeter` 留在宿主平面。
 - skills 注册表在 **host 平面并按 scope 分层**：`skill-filesystem` / `tool-skill` 只注册进
   本 preset 那一层，**不需要** realm。
+- **图表前端组件（`capital-charts` 行）刻意在 host 平面、且不在任何 realm 里**：
+  客户端 bundle 必须在页面启动时就存在（boot graph 在 index.html 渲染时确定），
+  所以它不能是本 preset 的行。反过来，本插件的 `apply` 通过 `ctx.get('capitalCharts')`
+  消费它——`isolate` 只重映射**列出**的服务名（`cordis-plugin-loader/src/config/isolate.ts`：
+  `if (!label) return`），其余名字沿原型链向外解析，因此跨平面消费成立。
+  这一条与"realm 里的行不能消费外面的服务"并不矛盾：那条规则说的是**提供方**在 realm 内、
+  消费方在 realm 外的情况。
 
 ## 5. 各行的作用与坑
 

@@ -9,6 +9,7 @@ import { resolveFuyaoApiKey, createFuyaoRestSources } from './sources/fuyao-rest
 import { registerDataCollectorTools, type DataCollectorDiagnostics } from './data-collector/tools.js'
 import { registerDatasetTools } from './data-collector/dataset-tools.js'
 import { registerTimeTool } from './time/tools.js'
+import { registerChartTool } from './chart/tool.js'
 import { WebRetriever } from './web-retriever/retriever.js'
 import { registerWebRetrieverTools } from './web-retriever/tools.js'
 import { createAnySearchClient, envKey } from './web-retriever/engines.js'
@@ -148,6 +149,17 @@ export function apply(ctx: Context, config: Config) {
   registerDatasetTools(ctx, store)
   // 时间工具：主 Agent 与所有子 Agent（含 data_collector）共享。
   registerTimeTool(ctx)
+  // 呈现层图表工具：主 Agent 持有（子 Agent 的 toolFilter.allow 不含它）。
+  // 只回小回执、不回原始行；序列落在 workspace 产物里由浏览器旁路取。
+  //
+  // 取数旁路走 host 平面的 `@v587d/capital-charts`（cordis.patch.yml 的 insert 行挂载）。
+  // 该行不在本 preset 的 isolate realm 名单里，因此按 cordis 的 realm 语义正常向外解析
+  // （realm 只重映射 isolate 里列出的服务名）；没装/没起来时按可选处理，降级成"只给文件路径"。
+  // 服务**惰性解析**：每次画图时再 ctx.get 一次，不依赖 host 平面行与本 preset 行的挂载先后。
+  registerChartTool(ctx, {
+    store,
+    charts: () => ctx.get('capitalCharts') as { publish(input: { chartId: string; filePath: string }): string } | undefined,
+  })
   ctx.effect(async () => {
     try {
       const apiKey = await resolveFuyaoApiKey(ctx)

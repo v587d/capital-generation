@@ -27,6 +27,11 @@ export declare const MAX_STRUCTURE_ENTRIES = 24;
  * 一律写进 `omitted`，不做静默省略。
  */
 export declare const MAX_DOCUMENT_CHARS = 6000;
+/**
+ * 呈现层（图表）一次性读取行集的上限。超过就拒绝，而不是把几百 MB 拉进宿主内存：
+ * 图表是**有界呈现**，不是通用分析通道。
+ */
+export declare const MAX_PRESENTATION_ROWS = 200000;
 export declare const ARTIFACT_SCHEME = "workspace://";
 export interface DatasetRef {
     dataset_id: string;
@@ -167,7 +172,7 @@ export interface ProfilePayload {
     validation?: ProfileValidation;
     warnings: string[];
 }
-export type DatasetStoreErrorCode = 'workspace_not_writable' | 'session_unavailable' | 'session_cwd_unavailable' | 'sandbox_policy_unavailable' | 'filesystem_unavailable' | 'dataset_write_failed' | 'dataset_id_invalid' | 'dataset_not_found' | 'dataset_expired' | 'dataset_session_mismatch' | 'dataset_manifest_invalid' | 'dataset_format_unsupported' | 'dataset_not_row_readable' | 'dataset_too_large' | 'profile_invalid' | 'profile_too_large' | 'profile_dataset_mismatch';
+export type DatasetStoreErrorCode = 'workspace_not_writable' | 'session_unavailable' | 'session_cwd_unavailable' | 'sandbox_policy_unavailable' | 'filesystem_unavailable' | 'dataset_write_failed' | 'dataset_id_invalid' | 'dataset_not_found' | 'dataset_expired' | 'dataset_session_mismatch' | 'dataset_manifest_invalid' | 'dataset_format_unsupported' | 'dataset_not_row_readable' | 'dataset_too_large' | 'profile_invalid' | 'profile_too_large' | 'profile_dataset_mismatch' | 'workspace_path_invalid' | 'workspace_file_invalid';
 export declare class DatasetStoreError extends Error {
     readonly code: DatasetStoreErrorCode;
     constructor(code: DatasetStoreErrorCode, detail: string);
@@ -290,6 +295,14 @@ export interface WorkspaceDatasetStoreOptions {
     newId?: (prefix: string) => string;
 }
 export declare const DATASET_ID_PATTERN: RegExp;
+/**
+ * 规范化并校验 workspace **相对**路径。
+ *
+ * 拒绝：空串、绝对路径（含 Windows 盘符）、任何 `..` 段、反斜杠（本仓统一 `/`）。
+ * 这里只做形态校验；真正的沙箱归属由 `resolveContained` 证明。两道关卡都要过——
+ * 形态校验是为了给出可读错误，归属校验才是安全边界。
+ */
+export declare function normalizeWorkspaceRelativePath(value: string): string;
 export declare class WorkspaceDatasetStore {
     private readonly fs;
     private readonly sandboxPolicy;
@@ -305,6 +318,60 @@ export declare class WorkspaceDatasetStore {
     profileDataset(input: ProfileDatasetInput): Promise<ProfileDatasetResult>;
     queryDataset(input: QueryDatasetInput): Promise<QueryResult>;
     writeProfile(input: WriteProfileInput): Promise<ProfileRef>;
+    /**
+     * 宿主内部**呈现层**读取有界行集（图表用）。
+     *
+     * 契约（不可违反）：
+     *  - 返回值**不得**进入任何 Agent 消息、工具结果或模型上下文；调用方只能在宿主进程内
+     *    把它变成有界可视化载荷（见 src/chart/series.ts）。
+     *  - 这是唯一一处把原始 rows 交给 store 之外代码的入口，因此命名、文档与调用点都必须是
+     *    "呈现"语义。需要数值结论一律走 profile_dataset / query_dataset。
+     *  - session 作用域与 profile/query 同源（`sessionScopeFor` 取父会话），所以主 Agent
+     *    用自己会话即可读到自己子 Agent 采到的 Dataset。
+     */
+    readPresentationRows(input: {
+        session: SessionLike;
+        dataset_id: string;
+        signal?: AbortSignal;
+        maxRows?: number;
+    }): Promise<{
+        ref: DatasetRef;
+        rows: unknown[];
+    }>;
+    /**
+     * 宿主内部呈现层读取 workspace 内的 JSON 文件（用户本地数据直接可视化的入口）。
+     *
+     * 只接受 workspace **相对**路径：绝对路径、`..` 段与反斜杠一律拒绝，随后仍走
+     * `resolveContained` 做沙箱归属校验——两道关卡都要过。
+     */
+    readWorkspaceJson(input: {
+        session: SessionLike;
+        path: string;
+        signal?: AbortSignal;
+    }): Promise<unknown>;
+    /**
+     * 宿主内部**产物层**把一组文本文件写进 workspace 的一个子目录（图表产物用）。
+     *
+     * 走与 Dataset 落盘完全相同的沙箱策略与归属校验；`createIfAbsent` 保证不会静默覆盖
+     * 已有产物（图表 id 唯一，重复即 bug，应当响亮失败）。
+     *
+     * 返回值同时给出**相对路径**（可以进 Agent 消息、可以 present 给用户）与**绝对路径**
+     * （只供宿主内部使用，例如登记给 host 平面的取数路由）。这个区分是本仓的数据纪律：
+     * 绝对路径不出宿主进程。
+     */
+    writeWorkspaceFiles(input: {
+        session: SessionLike;
+        dir: string;
+        files: Array<{
+            name: string;
+            content: string;
+        }>;
+        signal?: AbortSignal;
+    }): Promise<Array<{
+        name: string;
+        path: string;
+        absolutePath: string;
+    }>>;
     private requireRef;
     private requireStoredRef;
     /**

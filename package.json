@@ -16,6 +16,7 @@
   },
   "files": [
     "lib",
+    "chart-ui",
     "preset",
     "cordis.patch.yml",
     "README.md"
@@ -27,8 +28,13 @@
   },
   "scripts": {
     "clean": "node -e \"import('node:fs').then(({ rmSync }) => rmSync('lib', { recursive: true, force: true }))\"",
-    "build": "npm run clean && tsc",
+    "build": "npm run clean && tsc && node scripts/copy-assets.mjs && npm run build:client",
+    "build:client": "node scripts/build-client.mjs",
     "dev": "tsc -w",
+    "vendor:charts": "node scripts/vendor-lightweight-charts.mjs",
+    "check:dsh": "node scripts/check-dsh-compat.mjs",
+    "demo:chart": "npm run build && node scripts/chart-demo.mjs",
+    "smoke:boot": "node scripts/smoke-boot.mjs",
     "test": "npm run build && node --test test/*.test.mjs",
     "prepublishOnly": "npm run build",
     "smoke:fuyao": "node scripts/smoke-fuyao.mjs",
@@ -41,7 +47,9 @@
     "@deepseek-ai/cordis": "^4.0.2",
     "@deepseek-ai/dsh-system-prompt": "^0.1.2-rc.1",
     "@deepseek-ai/schemastery": "^3.18.2",
+    "esbuild": "^0.28.2",
     "js-yaml": "^5.4.1",
+    "lightweight-charts": "^5.2.1",
     "typescript": "^5.0.0"
   },
   "dependencies": {

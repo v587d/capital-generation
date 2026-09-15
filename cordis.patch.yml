@@ -12,3 +12,30 @@
     roots:
       - path: !!js "process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:path').dirname(process.getBuiltinModule('node:path').dirname(process.getBuiltinModule('node:module').createRequire(baseUrl).resolve('@v587d/capital-generation'))), 'preset')"
         trust: system
+
+# ── 图表前端组件（host 平面行）────────────────────────────────────────────────
+#
+# 为什么这一行必须在这里、必须是 host 平面：客户端 bundle 的注入发生在
+# index.html 渲染那一刻，运行期新增 entry 没有送达浏览器的通道；挂在 preset 行上的
+# 客户端 bundle 到不了已经打开的页面。见 chart-ui/README.md。
+#
+# 为什么行名是**相对本包目录的路径**（三个坑都踩过，都不是猜的）：
+#  1. **`name` 不接受 `!!js`**：loader 只对 fiber 的 `config` 做插值
+#     （cordis-plugin-loader 的 `internal/config` 钩子），`name` 永远按字面量送进 ESM import。
+#     写过 !!js 的后果是启动期 `name.startsWith is not a function`——整个 profile 起不来。
+#  2. **`name` 也不能是 subpath 说明符**（如 `@v587d/capital-generation/chart-ui`）：
+#     dsh-client-modules 的 locatePkgJson 里
+#       `if (!pathLike && exactPackageSpecifier(loaderName) === undefined) return undefined`
+#     —— subpath 既非 path-like、打包名解析又返回 undefined，于是这颗行被**静默**当成
+#     "不是客户端包"，bundle 永不进 __DSH_BOOT__（表现是图表 UI 不出现，且不报错）。
+#  3. 解析基址是**本 patch 文件所在目录**，不是 profile 根：
+#     cordis-plugin-include 装载 patch 时会 `ctx.baseUrl = new URL('.', pathToFileURL(filename))`。
+#     所以这里的相对路径就是本包目录下的 chart-ui/index.js —— 与 profile 的 node_modules
+#     布局无关（pnpm 的 isolated 布局也照常工作）。
+#     locatePkgJson 随后按"最近的 package.json"归属，正好是 chart-ui/package.json，
+#     包身份为 @v587d/capital-charts，与主包不撞名。
+# 回归断言见 test/chart-composition.test.mjs（name 必须是字面量且 path-like，并真的解析一次）。
+- insert:
+    - id: capital-charts
+      name: './chart-ui/index.js'
+
