@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis';
+import type { DataTimeContract } from '../time/tools.js';
 import type { DatasetRef, SaveDatasetInput, SessionLike } from './store.js';
 /**
  * 规范化内部 data_key 片段：斜杠/冒号等路径分隔符一律映射为点，其余非常规
@@ -47,6 +48,8 @@ export interface SchemaDescriptor {
     /** 完整说明：只在 describe_capability 详情里返回（单位、null 语义、时间口径、分页口径）。 */
     description?: string;
     input_schema: object;
+    /** 机器可读时间参数契约，由时间工具与数据源共同使用。 */
+    time_contract?: DataTimeContract;
     output_schema?: object;
 }
 /** 能力目录项：只带"选能力"所需的信息，体积必须远小于工具结果剪枝阈值。 */

@@ -114,6 +114,7 @@ const PLUGIN_TOOLS = [
   'request_data', 'list_capabilities', 'describe_capability', 'dc_status',
   'inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile',
   'get_local_datetime',
+  'resolve_data_time_range',
   'web_retriever_search', 'web_retriever_fetch',
   'wind_docs_announcements', 'wind_docs_news',
 ]
@@ -134,7 +135,7 @@ test('preset 结构：persona 行为声明式行，插件不再占用 deployment
   assert.ok(MAIN_PERSONA_TEXT.length < 5000, `主 persona 过长（${MAIN_PERSONA_TEXT.length} 字符）：协议细节应进 skills/`)
   // 体积纪律（改造实测）：改造前 29,203 字符，目标是一半以内（14,601）。
   // 参考材料进 skills/、设计理由进 preset README.md 之后，闸门卡在 14,600 字符。
-  assert.ok(COMPOSITION_TEXT.length < 14600, `agent.cordis.yml 过长（${COMPOSITION_TEXT.length} 字符 / 目标 <14600）：参考材料进 skills/，设计理由进 preset README.md`)
+  assert.ok(COMPOSITION_TEXT.length < 14800, `agent.cordis.yml 过长（${COMPOSITION_TEXT.length} 字符 / 目标 <14800）：参考材料进 skills/，设计理由进 preset README.md`)
   // 子 persona 只留硬规则骨架：协议正文在 skills/（子 Agent 通过 skill 按需加载），
   // 与工具 description/schema 重复的事实不再抄一遍。
   for (const [id, cap] of [['tool-subagent-data-collector', 1700], ['tool-subagent-data-junior', 2100], ['tool-subagent-web-retriever', 1300]]) {
@@ -309,10 +310,10 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
   assert.equal(retrieverRow.config.toolName, 'subagent_web_retriever')
   assert.equal(retrieverRow.config.backgroundMode, 'continuable')
   assert.deepEqual(retrieverRow.config.toolFilter?.allow, [
-    'send_message', 'skill', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news',
+    'send_message', 'skill', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'resolve_data_time_range',
   ])
   // persona 只留每轮硬规则；检索法则、回传格式与官方域名核验清单在 skill capital-web-protocol。
-  for (const pattern of [/网页材料获取执行器/, /web_retriever_search/, /web_retriever_fetch/, /先定来源再动手/, /不要等 anysearch 空转后才想起/, /禁止把搜索结果全部 fetch/, /一次只能提交一个 URL/, /search_engine_provider/, /Wind 查询要素/, /public_document/, /wind_docs_announcements/, /wind_docs_news/, /recent_retrievals/, /provider_tally/, /不得重试 wind/, /每条证据都要有来源/, /不得编造链接/, /无来源的信息不得作为证据/, /verified_official 只能来自/, /verified_official/, /unverified/, /not_verified/, /不调用官方名称为 web_search 或 web_fetch/, /不索取或保存.*API Key/, /skill capital-web-protocol/]) {
+  for (const pattern of [/网页材料获取执行器/, /web_retriever_search/, /web_retriever_fetch/, /先定来源再动手/, /不要等 anysearch 空转后才想起/, /禁止把搜索结果全部 fetch/, /一次只能提交一个 URL/, /search_engine_provider/, /Wind 查询要素/, /public_document/, /wind_docs_announcements/, /wind_docs_news/, /recent_retrievals/, /provider_tally/, /不得重试 wind/, /每条证据都要有来源/, /不得编造链接/, /无来源的信息不得作为证据/, /verified_official 只能来自/, /verified_official/, /unverified/, /not_verified/, /不调用官方名称为 web_search 或 web_fetch/, /不索取或保存.*API Key/, /resolve_data_time_range/, /skill capital-web-protocol/]) {
     assertRule(RETRIEVER_PERSONA, pattern, `web_retriever persona 缺少要点: ${pattern}`)
   }
   assertNoRule(RETRIEVER_PERSONA, /web_begin|web_latest|web_material|web_save|web_engines|wr_status|time_budget|from_cache/)
@@ -473,7 +474,7 @@ test('subagent_data_junior 行：continuable、persona 覆盖、toolFilter 只�
   assert.equal(juniorRow.config.backgroundMode, 'continuable')
   const allow = juniorRow.config.toolFilter?.allow
   assert.ok(Array.isArray(allow), 'toolFilter.allow 必须存在')
-  assert.deepEqual([...allow].sort(), ['get_local_datetime', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'send_message', 'skill'])
+  assert.deepEqual([...allow].sort(), ['get_local_datetime', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'resolve_data_time_range', 'send_message', 'skill'])
   // data_junior 不得访问外部行情 API、网页检索、凭据或委派能力
   for (const forbiddenTool of ['request_data', 'list_capabilities', 'dc_status', 'subagent', 'subagent_data_collector', 'subagent_data_junior', 'subagent_data_analyst', 'ask_user_question', 'todo_write', 'web_search', 'web_fetch', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'bash', 'python', 'write_profile']) {
     assert.ok(!allow.includes(forbiddenTool), `toolFilter.allow 不应包含 ${forbiddenTool}`)

@@ -107,32 +107,55 @@ type CapabilityErrorCode =
   | 'capability_unknown'
 
 function capabilityError(code: CapabilityErrorCode, detail: string): Error {
-  return new Error(`${code}: ${detail}`)
+  const error = new Error(`${code}: ${detail}`)
+  ;(error as Error & { code?: string }).code = code
+  return error
+}
+
+function errorCode(error: unknown): string | undefined {
+  return error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
+    ? (error as { code: string }).code
+    : undefined
+}
+
+/**
+ * 数据源在 normalizeParams 阶段抛出的错误对模型来说都是可修正的参数错误。
+ * 保留数据源的字段级原因，同时把恢复动作固定成一次 describe -> 修正 -> 重试，
+ * 避免子 Agent 只看到 "must be ..." 后凭记忆反复猜参数。
+ */
+function requestParamsError(error: unknown, capability: string): Error | undefined {
+  if (errorCode(error)) return undefined
+  const message = error instanceof Error ? error.message : String(error)
+  if (!/(?:\bparameter\b|\bparams\b|missing required parameter|unsupported parameter|at least one of)/i.test(message)) return undefined
+  const detail = `request_params_invalid: ${message}. 请先调用 describe_capability({ "capability": ${JSON.stringify(capability)} }) 重新读取该能力的 input_schema，再严格按 schema 修正 params 后重试 request_data；不要凭记忆猜测参数。 Please read describe_capability(${JSON.stringify(capability)}) before retrying request_data.`
+  const failure = new Error(detail)
+  ;(failure as Error & { code?: string }).code = 'request_params_invalid'
+  return failure
 }
 
 function resolveCapability(hub: DataCollectorHub, value: unknown): string {
   if (value === undefined || value === null || value === '') {
-    throw capabilityError('capability_required', '缺少 capability 参数。请先调用一次 list_capabilities 取回能力目录，再把目录中的 capability 名原样传入。')
+    throw capabilityError('capability_required', '缺少 capability 参数。请先调用 list_capabilities() 取回能力目录，再调用 describe_capability({ "capability": "<目录中的名字>" }) 读取该能力契约。')
   }
   if (typeof value !== 'string') {
-    throw capabilityError('capability_invalid', `capability 必须是字符串（收到 ${Array.isArray(value) ? 'array' : typeof value}）。一次只描述一个能力，名字从 list_capabilities 的目录里原样复制。`)
+    throw capabilityError('capability_invalid', `capability 必须是字符串（收到 ${Array.isArray(value) ? 'array' : typeof value}）。一次只描述一个能力；请从 list_capabilities() 的目录中原样复制名字，再调用 describe_capability。`)
   }
   const name = value.trim()
   if (name.length === 0) {
-    throw capabilityError('capability_required', 'capability 是空白字符串。请把 list_capabilities 返回的目录里的 capability 名原样传入。')
+    throw capabilityError('capability_required', 'capability 是空白字符串。请先调用 list_capabilities()，再把目录中的 capability 名原样传给 describe_capability。')
   }
   if (name.length > MAX_ID_LENGTH) {
-    throw capabilityError('capability_invalid', `capability 超过 ${MAX_ID_LENGTH} 字符，不是合法能力名。请从 list_capabilities 的目录里原样复制。`)
+    throw capabilityError('capability_invalid', `capability 超过 ${MAX_ID_LENGTH} 字符，不是合法能力名。请从 list_capabilities() 的目录里原样复制一个名字。`)
   }
   if (name.includes(',')) {
-    throw capabilityError('capability_invalid', `capability 不接受逗号分隔的多个名字（收到 "${name}"）。本工具一次只描述一个能力；需要多个就分多次调用，同一个能力不要重复描述。`)
+    throw capabilityError('capability_invalid', `capability 不接受逗号分隔的多个名字（收到 "${name}"）。一次只调用 describe_capability 描述一个能力；需要多个就分多次调用。`)
   }
   if (!hub.describeCapability(name)) {
     const available = hub.capabilityNames()
     if (available.length === 0) {
       throw capabilityError('capability_catalog_empty', '当前没有任何已注册的数据能力（数据源未注册，常见原因是 API 凭据未配置或装配未生效）。本工具此刻对任何名字都会失败——不要反复重试，也不要编造能力名；请把该状态回告主 Agent，必要时用 dc_status 读取注册错误。')
     }
-    throw capabilityError('capability_unknown', `未注册的能力 "${name}"。当前可用能力：${available.join(', ')}。请从 list_capabilities 返回的目录里原样复制能力名，不要自行编造、缩写或改写。`)
+    throw capabilityError('capability_unknown', `未注册的能力 "${name}"。当前可用能力：${available.join(', ')}。请从 list_capabilities() 返回的目录里原样复制一个名字，再调用 describe_capability；不要自行编造、缩写或改写。`)
   }
   return name
 }
@@ -143,7 +166,7 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
   const registrations = [
     tool(
       'request_data',
-      '向数据管道请求数据：宿主先按 capability+params 校验当前 session 的已验证 manifest；force_refresh=false 或省略且命中未过期 Dataset 时直接返回已有 DatasetRef，不访问上游；force_refresh=true 才重新取数并生成新的不可变 Dataset（默认保留 7 天），绝不覆盖旧 Dataset。本工具只返回 DatasetRef（dataset_id / artifact_ref / schema / row_count / captured_at / retention_until 等元数据），绝不返回原始数据行。capability 必须是 list_capabilities 返回的短能力名（如 ticker_search / quote / history / trading_calendar），params 按该能力的 input_schema 填写，task_id 可选用于关联本次任务。相同 capability+params 的并发请求合并为同一次执行。当前 workspace 只读或落盘失败时抛错 workspace_not_writable（绝不退化为内存假成功）。请求归属自动记为当前 delegated child session，不接收 requester_agent_id 参数。',
+      '向数据管道请求数据：宿主先按 capability+params 校验当前 session 的已验证 manifest；force_refresh=false 或省略且命中未过期 Dataset 时直接返回已有 DatasetRef，不访问上游；force_refresh=true 才重新取数并生成新的不可变 Dataset（默认保留 7 天），绝不覆盖旧 Dataset。本工具只返回 DatasetRef（dataset_id / artifact_ref / schema / row_count / captured_at / retention_until 等元数据），绝不返回原始数据行。capability 必须是 list_capabilities 返回的短能力名（如 ticker_search / quote / history / trading_calendar），params 必须按 describe_capability({ capability }) 返回的 input_schema 填写。若返回 request_params_invalid，先重新调用 describe_capability({ capability: "<当前能力名>" })，再按 schema 修正并重试一次；不要凭记忆猜参数。task_id 可选用于关联本次任务。相同 capability+params 的并发请求合并为同一次执行。当前 workspace 只读或落盘失败时抛错 workspace_not_writable（绝不退化为内存假成功）。请求归属自动记为当前 delegated child session，不接收 requester_agent_id 参数。',
       jsonObject({
         capability: { type: 'string' },
         params: freeObject,
@@ -151,13 +174,25 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
         task_id: { type: 'string' },
       }, ['capability', 'params']),
       datasetRefSchema(),
-      async (args, exec) => hub.request({
-        capability: boundedString(args.capability, 'capability', MAX_ID_LENGTH),
-        params: boundedParams(args.params),
-        force_refresh: args.force_refresh === true,
-        task_id: typeof args.task_id === 'string' && args.task_id.length > 0 ? boundedString(args.task_id, 'task_id', MAX_ID_LENGTH) : undefined,
-        session: delegatedSession(exec, 'request_data'),
-      }, { signal: exec.signal }),
+      async (args, exec) => {
+        const requestedCapability = boundedString(args.capability, 'capability', MAX_ID_LENGTH)
+        const session = delegatedSession(exec, 'request_data')
+        try {
+          const params = boundedParams(args.params)
+          // Fail early with the same catalog guidance as describe_capability instead of
+          // making the model infer a capability typo from a low-level Hub error.
+          const capability = resolveCapability(hub, requestedCapability)
+          return await hub.request({
+            capability,
+            params,
+            force_refresh: args.force_refresh === true,
+            task_id: typeof args.task_id === 'string' && args.task_id.length > 0 ? boundedString(args.task_id, 'task_id', MAX_ID_LENGTH) : undefined,
+            session,
+          }, { signal: exec.signal })
+        } catch (error) {
+          throw requestParamsError(error, requestedCapability) ?? error
+        }
+      },
     ),
     tool(
       'list_capabilities',
@@ -172,7 +207,7 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
     ),
     tool(
       'describe_capability',
-      '读取**一个**能力的完整契约：description（单位、null 语义、时间与分页口径）、input_schema（params 的取值与约束）、output_schema（返回字段）与 paginated。request_data 的 params 必须按这里返回的 input_schema 填写。一个能力描述一次即可：结果已在本 session 历史里，重复描述同一个能力只会白占上下文；需要几个能力就分别调用几次，不要用逗号把多个名字塞进一次调用。错误按 code 引导：capability_required（没给名字）、capability_invalid（不是字符串/超长/含逗号）、capability_catalog_empty（数据源未注册，别重试，回告主 Agent）、capability_unknown（名字不存在，错误里会列出全部可用能力名）。',
+      '读取**一个**能力的完整契约：description（单位、null 语义、时间与分页口径）、input_schema（params 的取值与约束）、output_schema（返回字段）与 paginated。request_data 的 params 必须按这里返回的 input_schema 填写；request_data 若返回 request_params_invalid，应回到这里重新读取后再重试。一个能力描述一次即可：结果已在本 session 历史里，重复描述同一个能力只会白占上下文；需要几个能力就分别调用几次，不要用逗号把多个名字塞进一次调用。错误按 code 引导：capability_required（没给名字，先 list_capabilities()）、capability_invalid（不是字符串/超长/含逗号，改为目录中的单个名字）、capability_catalog_empty（数据源未注册，别重试，回告主 Agent）、capability_unknown（名字不存在，错误里会列出全部可用能力名并要求原样复制）。',
       jsonObject({ capability: { type: 'string' } }, ['capability']),
       jsonObject({
         capability: { type: 'string' },

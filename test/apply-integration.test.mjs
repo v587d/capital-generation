@@ -47,7 +47,7 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
     assert.ok(services.get('datasetStore'), 'apply 必须提供 datasetStore 服务')
     assert.equal(hub.capabilityNames().length, 61, '装配后应注册全部 61 个 Fuyao capability')
 
-    for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'get_local_datetime', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news']) {
+    for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'get_local_datetime', 'resolve_data_time_range', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news']) {
       assert.ok(toolNamed(tools, name), `装配后应注册工具 ${name}`)
     }
 

@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import type { DataTimeContract } from '../time/tools.js'
 import type { DatasetRef, SaveDatasetInput, SessionLike } from './store.js'
 
 /**
@@ -58,6 +59,8 @@ export interface SchemaDescriptor {
   /** 完整说明：只在 describe_capability 详情里返回（单位、null 语义、时间口径、分页口径）。 */
   description?: string
   input_schema: object
+  /** 机器可读时间参数契约，由时间工具与数据源共同使用。 */
+  time_contract?: DataTimeContract
   output_schema?: object
 }
 

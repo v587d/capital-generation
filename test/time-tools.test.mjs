@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { registerTimeTool, readClock, resolveTimeZone, localTimeZone } from '../lib/time/tools.js'
+import { registerTimeTool, readClock, resolveTimeZone, localTimeZone, resolveDataTimeRange } from '../lib/time/tools.js'
 
 /** 最小 Cordis ctx：只实现本工具用到的 tools + effect 通道。 */
 function fakeCtx(registerFn) {
@@ -12,15 +12,20 @@ function fakeCtx(registerFn) {
 }
 
 test('registerTimeTool：向会话组 tools 注册 get_local_datetime', () => {
-  let captured = null
-  registerTimeTool(fakeCtx((definition) => { captured = definition }))
-  assert.ok(captured, '必须注册一个工具定义')
-  assert.equal(captured.name, 'get_local_datetime')
-  assert.match(captured.description, /知识截止日期绝不是当前时间/)
-  assert.equal(captured.parameters.type, 'object')
-  assert.equal(captured.parameters.additionalProperties, false)
-  assert.ok(captured.parameters.properties.timezone, '支持可选 timezone 参数')
-  assert.equal(typeof captured.execute, 'function')
+  const captured = []
+  registerTimeTool(fakeCtx((definition) => { captured.push(definition) }))
+  const clock = captured.find((definition) => definition.name === 'get_local_datetime')
+  const range = captured.find((definition) => definition.name === 'resolve_data_time_range')
+  assert.ok(clock, '必须注册 get_local_datetime')
+  assert.ok(range, '必须注册 resolve_data_time_range')
+  assert.match(clock.description, /知识截止日期绝不是当前时间/)
+  assert.equal(clock.parameters.type, 'object')
+  assert.equal(clock.parameters.additionalProperties, false)
+  assert.ok(clock.parameters.properties.timezone, '支持可选 timezone 参数')
+  assert.equal(typeof clock.execute, 'function')
+  assert.equal(range.parameters.type, 'object')
+  assert.ok(range.parameters.properties.capability)
+  assert.ok(range.parameters.properties.period)
 })
 
 test('registerTimeTool：tools 服务缺失时静默跳过', () => {
@@ -63,4 +68,36 @@ test('resolveTimeZone：拒绝非法输入', () => {
   assert.throws(() => resolveTimeZone(42), /IANA/)
   assert.throws(() => resolveTimeZone(''), /IANA/)
   assert.equal(resolveTimeZone(undefined), undefined)
+})
+test('resolveDataTimeRange：按数据 capability 输出上海时区毫秒区间', () => {
+  const result = resolveDataTimeRange({ capability: 'history', period: 'last_3_months', anchor_date: '2025-09-07' })
+  assert.equal(result.format, 'epoch_ms')
+  assert.deepEqual(result.range, {
+    start_date: '2025-06-07', end_date: '2025-09-07',
+    start_epoch_ms: Date.UTC(2025, 5, 6, 16, 0, 0, 0),
+    end_epoch_ms: Date.UTC(2025, 8, 7, 15, 59, 59, 999),
+  })
+  assert.deepEqual(result.params, { start: result.range.start_epoch_ms, end: result.range.end_epoch_ms })
+})
+
+test('resolveDataTimeRange：日期接口返回字段名正确，不让模型自行改名', () => {
+  const result = resolveDataTimeRange({ capability: 'hot_stock_rank_trend', period: { unit: 'day', count: 7 }, anchor_date: '2025-09-07' })
+  assert.equal(result.format, 'date_string')
+  assert.deepEqual(result.params, { start_date: '2025-09-01', end_date: '2025-09-07' })
+})
+
+test('resolveDataTimeRange：固定区间接口直接返回上游枚举', () => {
+  const result = resolveDataTimeRange({ capability: 'fund_nav', period: 'last_3_months' })
+  assert.deepEqual(result.params, { range: 'tmonth' })
+  assert.equal(result.format, 'enum')
+})
+
+test('resolveDataTimeRange：保留交易日与报告期边界提示，并校验窗口上限', () => {
+  const pool = resolveDataTimeRange({ capability: 'limit_up_pool', period: 'today', anchor_date: '2025-09-07' })
+  assert.deepEqual(pool.params, { date_ms: Date.UTC(2025, 8, 6, 16) })
+  assert.match(pool.warnings[0], /交易日/)
+  const holding = resolveDataTimeRange({ capability: 'fund_stock_history', period: 'today', anchor_date: '2025-09-07' })
+  assert.deepEqual(holding.params, { end_date: '2025-09-07' })
+  assert.match(holding.warnings[0], /报告期/)
+  assert.throws(() => resolveDataTimeRange({ capability: 'fund_history', period: 'last_10_years', anchor_date: '2025-09-07' }), /interface limit/)
 })

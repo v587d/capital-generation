@@ -1,6 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { DataRequest, DataSource, SchemaDescriptor } from '../data-collector/hub.js'
 import { buildDataKey } from '../data-collector/hub.js'
+import { getDataTimeContract } from '../time/tools.js'
 
 const DEFAULT_BASE_URL = 'https://fuyao.aicubes.cn'
 type ApiEnvelope = { code?: number; message?: string; request_id?: string; data?: unknown }
@@ -2067,6 +2068,7 @@ function createSource(definition: EndpointDefinition, baseUrl: string, resolveAp
   const { name, capability, summary, description, path, inputSchema, outputSchema, allowed } = definition
   const schema: SchemaDescriptor = {
     capability,
+    time_contract: getDataTimeContract(capability),
     name,
     source: 'api:fuyao',
     // 内部数据源身份证（provider.kind.resource）：宿主路由/审计用，不进入模型协议。

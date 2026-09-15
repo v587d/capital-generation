@@ -9,9 +9,12 @@
 </p>
 
 <p align="center">
+  
+  <a href="https://github.com/v587d/capital-generation"><img src="https://img.shields.io/badge/Market-CN%20%7C%20HK%20%7C%20US-orange" alt="Market·CN+HK+US"></a>
   <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DeepSeek_Harness-plugin-blue" alt="DSH Plugin"></a>
   <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DeepSeek_Harness-web-orange" alt="DSH Web"></a>
-  <a href="https://github.com/v587d/capital-generation"><img src="https://img.shields.io/badge/Capital_Generation-Agent-red" alt="Agent"></a>
+  <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DSH%20Baseline-0.1.5--rc.1-blue" alt="DSH@0.1.5-rc.1"></a>
+  <a href="https://github.com/v587d/capital-generation"><img src="https://img.shields.io/badge/Capital_Generation-Agent-red" alt="Capital Generation"></a>
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
 </p>
 
@@ -21,10 +24,12 @@
 </p>
 
 > [!IMPORTANT]
+> 本项目长期处于探索阶段，不提供任何形式的金融服务，不承诺任何投资回报，投资需审慎。 盈亏自负，与本项目一概无关。
 > 愿大家的财富数字就像"text generation"一样，不断增长，永不停止。
 
 > [!NOTE]
-> 已适配 Deepseek Harness@0.1.5-rc.1 
+> 必须安装[Deepseek Harness](https://github.com/deepseek-ai/deepseek-harness) ，目前已适配`@0.1.5-rc.1` 。
+> LLM 建议 **Deepseek/deepseek-flash** 搭配本项目， GPT / Claude 尚未充分测试，理论亦可。
 
 # Slogan
 Next-Gen AI-Driven Capital Generation.
@@ -35,10 +40,10 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
 
 2. 所有 Agent，包括主 Agent 均不能直接接触原始结构数据（行情、财务报表细目等），需要时 Agent 可按需提取再提炼发送消息至主 Agent。
 目前覆盖四种叶子 Subagent:
-  - data_collector: 主 Agent 直属下级，负责根据上级指令收集金融财经类结构化数据，目前支持 同花顺（fuyao）约61个数据 API接口。
-  - data_junior: 主 Agent 直属下级，负责根据上级指令清洗、整理出有效数据、基础描述性统计（提取数据背后的故事）以及数据透视。
+  - data_collector: 主 Agent 直属下级（spawn），负责根据上级指令收集金融财经类结构化数据，目前支持 同花顺（fuyao）约61个数据 API接口。
+  - data_junior: 主 Agent 直属下级（spawn），负责根据上级指令清洗、整理出有效数据、基础描述性统计以及数据透视，目的是阐述数据背后的“故事”。
   - data_analyst: 主 Agent 直属下级，负责根据上级指令，通过运用编程技能分析上游数据（**仍在开发中**，委派行 disabled，暂不启用）。
-  - web_retriever: 主 Agent 直属下级，负责根据上级指令，运用网络搜索和抓取能力，获取外部非机构化数据，目前支持 Anysearch(search/fetch) API 数据接口和 Wind Alice 相关服务。
+  - web_retriever: 主 Agent 直属下级（spwan），负责根据上级指令，运用网络搜索和抓取能力，获取外部非机构化数据，目前支持 Anysearch(search/fetch) API 数据接口和 Wind Alice 相关服务。
   - 未来更多，欢迎 PR 
 
 3. 沿用 DSH 官方基础设施，不自行实现底层机制：

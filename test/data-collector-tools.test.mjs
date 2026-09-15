@@ -155,6 +155,46 @@ test('request_data：缺 capability 时错误明确（工具层校验，不吞�
   await assert.rejects(() => runTool(toolRuntime, 'request_data', { params: {} }, exec(delegatedSession())), /capability is required/)
 })
 
+test('request_data：参数校验错误保留字段原因，并引导重新读取 describe_capability', async () => {
+  const { hub, toolRuntime } = makeHubAndTools()
+  hub.registerSource({
+    schema: {
+      capability: 'history',
+      name: 'src_history',
+      source: 'api:test',
+      data_key: 'test.history',
+      input_schema: { type: 'object', properties: { start: { type: 'integer' } } },
+    },
+    normalizeParams: () => { throw new Error('parameter start must be a JSON number (integer)') },
+    execute: async () => ({ data: {} }),
+  })
+  await assert.rejects(
+    () => runTool(toolRuntime, 'request_data', { capability: 'history', params: { start: '2025-01-01' } }, exec(delegatedSession())),
+    (error) => {
+      assert.equal(error.code, 'request_params_invalid')
+      assert.match(error.message, /parameter start must be a JSON number \(integer\)/)
+      assert.match(error.message, /describe_capability\(\{ "capability": "history" \}\)/)
+      assert.match(error.message, /input_schema/)
+      return true
+    },
+  )
+})
+
+test('request_data：落盘错误不误标为参数错误', async () => {
+  const { store, hub, toolRuntime } = makeHubAndTools()
+  hub.registerSource(source('writable'))
+  store.save = async () => { throw new Error('workspace_not_writable: read-only workspace') }
+  await assert.rejects(
+    () => runTool(toolRuntime, 'request_data', { capability: 'writable', params: {} }, exec(delegatedSession())),
+    (error) => {
+      assert.equal(error.code, undefined)
+      assert.match(error.message, /^workspace_not_writable/)
+      assert.doesNotMatch(error.message, /describe_capability/)
+      return true
+    },
+  )
+})
+
 test('request_data：落盘失败（workspace_not_writable）如实抛出，不返回任何结果', async () => {
   const { store, hub, toolRuntime } = makeHubAndTools()
   hub.registerSource(source('writable'))

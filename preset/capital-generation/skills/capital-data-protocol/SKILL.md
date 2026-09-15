@@ -65,6 +65,7 @@ description: Use when composing or reading a Capital data message — the exact 
 | `capability_invalid` | 不是字符串 / 超长 / 含逗号 | 改成单个字符串名字后重试一次；多个能力分多次调用 |
 | `capability_unknown` | 名字不在目录里（错误信息会列出全部可用名字） | 从列出的名字里原文复制重来；不编造、不缩写、不改写 |
 | `capability_catalog_empty` | 当前没有任何已注册能力（数据源未注册，常见原因是凭据未配置） | **不要重试**（此刻任何名字都会失败）；用 `dc_status` 读注册错误并如实回告主 Agent |
+| `request_params_invalid` | `request_data` 的 `params` 不符合该能力契约（错误会保留具体字段原因） | 先按错误中的 capability 调 `describe_capability({"capability":"..."})`，重新读取 `input_schema`，修正后只重试一次；不要凭记忆猜参数。网络、超时、落盘错误不要走这条路径 |
 
 ## 2. 数据回传（data_collector → 主 Agent）
 

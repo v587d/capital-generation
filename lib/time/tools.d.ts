@@ -1,4 +1,14 @@
 import type { Context } from '@deepseek-ai/cordis';
+export type DataTimeContractKind = 'epoch_range' | 'date_range' | 'date' | 'date_ms' | 'enum_range' | 'nested_epoch_range';
+export interface DataTimeContract {
+    kind: DataTimeContractKind;
+    fields: string[];
+    maxDays?: number;
+    enumValues?: string[];
+    enumMap?: Record<string, string>;
+    warning?: string;
+}
+export declare function getDataTimeContract(capability: string): DataTimeContract | undefined;
 /** 校验并规范化 IANA 时区名；undefined 表示宿主本地时区。'UTC'/'GMT' 为合法特殊值。 */
 export declare function resolveTimeZone(timeZone: unknown): string | undefined;
 /** 宿主进程的本地 IANA 时区名。 */
@@ -11,3 +21,4 @@ export declare function readClock(now: number, timeZone?: string): Record<string
  * 必须先调用本工具，绝不凭记忆猜测。
  */
 export declare function registerTimeTool(ctx: Context): void;
+export declare function resolveDataTimeRange(args: Record<string, unknown>, now?: number): Record<string, unknown>;
