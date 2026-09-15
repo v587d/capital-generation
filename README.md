@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="assets/cg-logo.png" alt="Capital Generation Logo" width="120">
-</p>
-
 <h1 align="center">Capital Generation</h1>
 
 <p align="center">
@@ -9,22 +5,23 @@
 </p>
 
 <p align="center">
-  
   <a href="https://github.com/v587d/capital-generation"><img src="https://img.shields.io/badge/Market-CN%20%7C%20HK%20%7C%20US-orange" alt="Market·CN+HK+US"></a>
+  <a href="https://github.com/v587d/capital-generation"><img src="https://img.shields.io/badge/Financial-Agent-red" alt="Financial Agent"></a>
+</p>
+<p align="center">
   <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DeepSeek_Harness-plugin-blue" alt="DSH Plugin"></a>
   <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DeepSeek_Harness-web-orange" alt="DSH Web"></a>
   <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DSH%20Baseline-0.1.5--rc.1-blue" alt="DSH@0.1.5-rc.1"></a>
-  <a href="https://github.com/v587d/capital-generation"><img src="https://img.shields.io/badge/Capital_Generation-Agent-red" alt="Capital Generation"></a>
-  <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
 </p>
-
 <p align="center">
+  <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
   <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-0.1.0-9cf" alt="Version"></a>
 </p>
 
 > [!IMPORTANT]
 > 本项目长期处于探索阶段，不提供任何形式的金融服务，不承诺任何投资回报，投资需审慎。 盈亏自负，与本项目一概无关。
+>
 > 愿大家的财富数字就像"text generation"一样，不断增长，永不停止。
 
 > [!NOTE]
