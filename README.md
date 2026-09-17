@@ -73,7 +73,13 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
 
 **完整分析报告（内嵌图表）**
 
-[<img src="assets/sample-report-with-chart.png" width="520" alt="最终答复中的完整分析报告与内嵌图表">](assets/sample-report-with-chart.png)
+<p align="center">
+  <a href="assets/sample-report-with-chart.png">
+    <img src="assets/sample-report-with-chart.png" width="720" alt="最终答复中的完整分析报告与内嵌图表">
+  </a>
+  <br>
+  <em>长截图，建议点击查看原图</em>
+</p>
 
 ## 安装到 DSH Web Profile
 > [!NOTE]
