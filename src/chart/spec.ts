@@ -1,7 +1,7 @@
 /**
  * 图表 spec 的归一化与校验。
  *
- * 设计要点（见 docs/design/chart-visualization.md §3.3）：
+ * 设计要点（见内部设计文档 docs/design/chart-visualization.md §3.3）：
  *  - spec 用**自由对象**表达，协议细节写在 skill 里按需加载，常驻的只有工具 schema——
  *    这是"可视化不污染上下文"的关键：模型不需要在每轮都看一遍图表 DSL。
  *  - 但自由对象不等于放任：这里做一次严格归一化，错误必须**可自愈**（点名字段 + 给候选）。

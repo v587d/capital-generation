@@ -13,6 +13,9 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import { WorkspaceDatasetStore } from '../data-collector/store.js';
+import { type ChartSourceTokenStore } from './source-token.js';
+import { ChartArtifactRegistry } from './artifact-ref.js';
+import type { ChartEventPublisher } from './events.js';
 type AgentExecutionLike = {
     session?: {
         id?: string;
@@ -29,6 +32,7 @@ type ToolExecLike = {
 export declare const CHART_ARTIFACT_DIR = "capital-analysis/charts";
 /** 回执字段全部是可以进上下文的小元数据；序列本体永远不在这里。 */
 export interface ChartReceipt {
+    chart_ref: string;
     chart_id: string;
     kind: string;
     axis: 'time' | 'index';
@@ -52,10 +56,12 @@ export interface ChartPublisher {
     publish(input: {
         chartId: string;
         filePath: string;
-    }): string;
+    }): string | null;
 }
 export interface RenderChartInput {
     store: WorkspaceDatasetStore;
+    sourceTokens?: ChartSourceTokenStore;
+    artifacts?: ChartArtifactRegistry;
     /**
      * 惰性解析 host 平面图表服务（`@v587d/capital-charts` 提供）。
      *
@@ -65,6 +71,14 @@ export interface RenderChartInput {
      * 落盘、`html_path` 照样可 present，只是 `chart_url` 为 null。
      */
     charts?: () => ChartPublisher | undefined;
+    /**
+     * 惰性解析"图表→对话流"事件发布器（`capital/chart-rendered`）。
+     *
+     * 与 `charts` 同理每次出图解析一次：宿主平面的 `sessions` / `sessionProjections`
+     * 不可用时返回 undefined，整条链路照常降级——图仍在 workspace 里，回执照样给 html_path，
+     * 只是收尾卡片不会出现。
+     */
+    chartEvents?: () => ChartEventPublisher | undefined;
     now?: () => number;
 }
 export declare function renderChart(input: RenderChartInput, args: Record<string, unknown>, exec: ToolExecLike): Promise<ChartReceipt>;

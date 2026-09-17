@@ -281,7 +281,7 @@ const profileDatasetResultSchema = jsonObject({
   warnings: { type: 'array', items: { type: 'string' } },
 }, ['profile_id', 'dataset_id', 'task_id', 'session_id', 'artifact_ref', 'created_at', 'retention_until', 'row_count', 'columns', 'quality', 'warnings'])
 
-const queryNameSchema = { type: 'string', minLength: 1, maxLength: 128 }
+const queryNameSchema = { type: 'string' }
 const queryFilterSchema = {
   oneOf: [
     jsonObject({
@@ -315,12 +315,12 @@ const queryOrderSchema = jsonObject({
 }, ['column', 'direction'])
 const querySpecProperties = {
   dataset_id: datasetIdSchema,
-  select: { type: 'array', items: queryNameSchema, minItems: 1, maxItems: MAX_QUERY_SELECT },
-  filters: { type: 'array', items: queryFilterSchema, maxItems: MAX_QUERY_FILTERS },
-  group_by: { type: 'array', items: queryNameSchema, maxItems: MAX_QUERY_GROUP_BY },
-  aggregates: { type: 'array', items: queryAggregateSchema, maxItems: MAX_QUERY_AGGREGATES },
-  order_by: { type: 'array', items: queryOrderSchema, maxItems: MAX_QUERY_ORDER_BY },
-  limit: { type: 'integer', minimum: 1, maximum: MAX_QUERY_LIMIT },
+  select: { type: 'array', items: queryNameSchema },
+  filters: { type: 'array', items: queryFilterSchema },
+  group_by: { type: 'array', items: queryNameSchema },
+  aggregates: { type: 'array', items: queryAggregateSchema },
+  order_by: { type: 'array', items: queryOrderSchema },
+  limit: { type: 'integer' },
   error_policy: { type: 'string', enum: ['strict', 'skip_with_warning'] },
 }
 const querySpecSchema = jsonObject(querySpecProperties)

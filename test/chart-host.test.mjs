@@ -102,13 +102,63 @@ test('路由：登记的文件读不到时按 404 处理，不抛到 webServer',
   assert.equal(JSON.parse(res.body).error, 'chart_file_unreadable')
 })
 
-function fakeCtx({ webServer } = {}) {
+/**
+ * 认证围栏（2026-09 review，P0）：序列旁路以前直接挂在 webServer 上，
+ * 绕过了平台自己的 trusted-Host + 浏览器 cookie 围栏（`connection.requestRejection`），
+ * 于是知道 chart_id 的任何本机进程/页面都能读 series.json。
+ */
+test('路由：authorize 拒绝时返回 401/403，且绝不读取登记的文件', async () => {
+  let reads = 0
+  const store = createChartStore({ readFile: () => { reads += 1; return '{"series":[]}' } })
+  store.publish({ chartId: CHART_ID, filePath: '/anywhere/series.json' })
+
+  const unauthenticated = await call(createRouteHandler(store, { authorize: () => 401 }), `${ROUTE_PATH}/${CHART_ID}.json`)
+  assert.equal(unauthenticated.statusCode, 401)
+  assert.equal(unauthenticated.body, 'unauthorized')
+  assert.equal(unauthenticated.headers['cache-control'], 'no-store')
+
+  const forbidden = await call(createRouteHandler(store, { authorize: () => 403 }), `${ROUTE_PATH}/${CHART_ID}.json`)
+  assert.equal(forbidden.statusCode, 403)
+  assert.equal(forbidden.body, 'forbidden')
+
+  assert.equal(reads, 0, '被拒请求不得触碰文件系统')
+})
+
+test('路由：认证先于方法/路径判定，未认证的探测拿不到路由信息', async () => {
+  const store = makeStore()
+  store.publish({ chartId: CHART_ID, filePath: '/anywhere/series.json' })
+  const handler = createRouteHandler(store, { authorize: () => 401 })
+
+  const post = await call(handler, `${ROUTE_PATH}/${CHART_ID}.json`, 'POST')
+  assert.equal(post.statusCode, 401, '与平台 /api 一致：先认证再谈方法与路径')
+  const badPath = await call(handler, `${ROUTE_PATH}/../secret.json`)
+  assert.equal(badPath.statusCode, 401)
+})
+
+test('路由：authorize 抛错时 fail closed（401），不退化放行', async () => {
+  const store = makeStore({ readFile: () => '{"series":[]}' })
+  store.publish({ chartId: CHART_ID, filePath: '/anywhere/series.json' })
+  const res = await call(createRouteHandler(store, { authorize: () => { throw new Error('connection disposed') } }), `${ROUTE_PATH}/${CHART_ID}.json`)
+  assert.equal(res.statusCode, 401)
+  assert.equal(res.body, 'unauthorized')
+})
+
+test('路由：authorize 返回 undefined（已认证）时照常 200', async () => {
+  const store = makeStore({ readFile: () => '{"chart_id":"ch_1","series":[]}' })
+  store.publish({ chartId: CHART_ID, filePath: '/anywhere/series.json' })
+  const res = await call(createRouteHandler(store, { authorize: () => undefined }), `${ROUTE_PATH}/${CHART_ID}.json`)
+  assert.equal(res.statusCode, 200)
+  assert.equal(res.body, '{"chart_id":"ch_1","series":[]}')
+})
+
+
+function fakeCtx({ webServer, connection } = {}) {
   const provided = new Map()
   const injected = []
   const ctx = {
     // 真实 cordis 里 webServer 既是 ctx.get('webServer') 也是 ctx.webServer。
     webServer,
-    get: (name) => (name === 'webServer' ? webServer : provided.get(name)),
+    get: (name) => (name === 'webServer' ? webServer : name === 'connection' ? connection : provided.get(name)),
     provide: (name, value) => provided.set(name, value),
     effect: (callback) => { callback(); return () => {} },
     inject: (deps, callback) => { injected.push({ deps, callback }) },
@@ -116,6 +166,7 @@ function fakeCtx({ webServer } = {}) {
   }
   return { provided, injected, ctx }
 }
+
 
 test('apply()：提供 capitalCharts 服务并注册 prefix 路由', () => {
   const routes = []
@@ -127,24 +178,71 @@ test('apply()：提供 capitalCharts 服务并注册 prefix 路由', () => {
   assert.ok(service, '必须提供 capitalCharts 服务给 preset 半边登记序列')
   assert.equal(typeof service.publish, 'function')
 
-  assert.equal(routes.length, 1)
+  assert.equal(routes.length, 1, '只应注册图表序列路由（报告旁路已删除）')
   assert.equal(routes[0].kind, 'prefix')
   assert.equal(routes[0].path, ROUTE_PATH)
   assert.equal(typeof routes[0].handler, 'function')
   assert.equal(harness.injected.length, 0, 'webServer 已在时不应走 inject 等待分支')
+  assert.equal(service.publishReport, undefined, 'capitalCharts 不应再有 publishReport')
 })
 
 test('apply()：没有 webServer 的 profile 仍激活并等待（不是死行）', () => {
   const harness = fakeCtx({})
   apply(harness.ctx)
 
-  assert.ok(harness.provided.get('capitalCharts'), '无 Web 载体时服务仍要提供')
+  const service = harness.provided.get('capitalCharts')
+  assert.ok(service, '无 Web 载体时服务仍要提供')
   assert.equal(harness.injected.length, 1, '应通过 ctx.inject 等 webServer 出现')
   assert.deepEqual(harness.injected[0].deps, ['webServer'])
+  assert.equal(service.publish({ chartId: 'ch_before', filePath: '/tmp/before.json' }), null, '路由未挂载时不得返回不可访问的 URL')
 
   // webServer 出现后回调要真的把路由挂上。
   const routes = []
   harness.injected[0].callback({ effect: (callback) => callback(), webServer: { register: (route) => { routes.push(route); return () => {} } } })
   assert.equal(routes.length, 1)
   assert.equal(routes[0].path, ROUTE_PATH)
+  assert.equal(service.publish({ chartId: 'ch_after', filePath: '/tmp/after.json' }), `${ROUTE_PATH}/ch_after.json`)
+})
+
+test('apply()：路由接上 connection 的认证围栏（无 cookie → 401，已登录 → 200）', async () => {
+  const routes = []
+  const webServer = { register: (route) => { routes.push(route); return () => {} } }
+  const seen = []
+  const connection = {
+    requestRejection: (req) => {
+      seen.push(req)
+      return req.headers?.cookie === 'dsh=ok' ? undefined : 401
+    },
+  }
+  const harness = fakeCtx({ webServer, connection })
+  apply(harness.ctx)
+
+  const handler = routes[0].handler
+  const service = harness.provided.get('capitalCharts')
+  service.publish({ chartId: CHART_ID, filePath: '/tmp/x.json' })
+
+  const rejected = await call(handler, `${ROUTE_PATH}/${CHART_ID}.json`)
+  assert.equal(rejected.statusCode, 401, '未认证请求必须被 connection 围栏拦下')
+  assert.equal(rejected.body, 'unauthorized')
+  assert.equal(seen.length, 1, '每个请求都要过 requestRejection，而不是只在挂载时判一次')
+
+  const authedRes = fakeRes()
+  await handler({ url: `${ROUTE_PATH}/${CHART_ID}.json`, method: 'GET', headers: { cookie: 'dsh=ok' } }, authedRes)
+  assert.equal(seen.length, 2)
+  // 已认证请求继续走到 store.read（fake store 的默认 readFile 抛错 → 404 是数据侧的事，
+  // 这里只断言它**没有**停在 401）。
+  assert.notEqual(authedRes.statusCode, 401)
+})
+
+test('apply()：没有 connection 的组合退化成旧行为（无认证面时不拦）', async () => {
+  const routes = []
+  const webServer = { register: (route) => { routes.push(route); return () => {} } }
+  const harness = fakeCtx({ webServer })
+  apply(harness.ctx)
+  harness.provided.get('capitalCharts').publish({ chartId: CHART_ID, filePath: '/tmp/x.json' })
+
+  const res = await call(routes[0].handler, `${ROUTE_PATH}/${CHART_ID}.json`)
+  // fake store 默认 readFile 抛错，所以数据侧是 404；关键是没被打成 401。
+  assert.equal(res.statusCode, 404)
+  assert.equal(JSON.parse(res.body).error, 'chart_file_unreadable')
 })

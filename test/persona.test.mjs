@@ -98,6 +98,10 @@ const juniorRow = rowById('tool-subagent-data-junior')
 assert.ok(juniorRow, 'preset 必须有 subagent_data_junior 专用委派行')
 const JUNIOR_PERSONA = juniorRow.config.persona
 
+const visualizationRow = rowById('tool-subagent-visualization-specialist')
+assert.ok(visualizationRow, 'preset 必须有 subagent_visualization_specialist 专用委派行')
+const VISUALIZATION_PERSONA = visualizationRow.config.persona
+
 const retrieverRow = rowById('tool-subagent-web-retriever')
 assert.ok(retrieverRow, 'preset 必须有 subagent_web_retriever 专用委派行')
 const RETRIEVER_PERSONA = retrieverRow.config.persona
@@ -112,7 +116,7 @@ const childRows = [collectorRow, juniorRow, retrieverRow]
 // 创建子 Agent 时被 tools.restrict() 拒绝，所以它必须与这份清单求交集。
 const PLUGIN_TOOLS = [
   'request_data', 'list_capabilities', 'describe_capability', 'dc_status',
-  'inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile',
+  'inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile', 'prepare_chart_source', 'render_chart',
   'get_local_datetime',
   'resolve_data_time_range',
   'web_retriever_search', 'web_retriever_fetch',
@@ -120,7 +124,7 @@ const PLUGIN_TOOLS = [
 ]
 const PRESET_TOOLS = [
   'send_message', 'interrupt_agent', 'list_agents',
-  'subagent', 'subagent_data_collector', 'subagent_data_junior', 'subagent_web_retriever',
+  'subagent', 'subagent_data_collector', 'subagent_data_junior', 'subagent_web_retriever', 'subagent_visualization_specialist',
   'ask_user_question', 'todo_write', 'skill',
 ]
 const KNOWN_TOOLS = new Set([...PLUGIN_TOOLS, ...PRESET_TOOLS])
@@ -134,11 +138,18 @@ test('preset 结构：persona 行为声明式行，插件不再占用 deployment
   // 压缩上限：长协议已迁到 skills/，persona 不应再膨胀回改造前（6359 字符）。
   assert.ok(MAIN_PERSONA_TEXT.length < 5000, `主 persona 过长（${MAIN_PERSONA_TEXT.length} 字符）：协议细节应进 skills/`)
   // 体积纪律（改造实测）：改造前 29,203 字符，目标是一半以内（14,601）。
-  // 参考材料进 skills/、设计理由进 preset README.md 之后，闸门卡在 14,600 字符。
-  assert.ok(COMPOSITION_TEXT.length < 14800, `agent.cordis.yml 过长（${COMPOSITION_TEXT.length} 字符 / 目标 <14800）：参考材料进 skills/，设计理由进 preset README.md`)
+  // 参考材料进 skills/、设计理由进 preset README.md 之后，闸门曾卡在 14,600 字符。
+  // 2026-09 新增第四个角色 visualization_specialist（委派行 + persona + toolFilter），
+  // 并给 data_junior 增加可视化 gate、one-shot barrier 与 canonical task/report delivery 职责；这些是"模型还不知道本轮
+  // 要做什么之前就必须生效"的每轮硬规则，不是可外迁到 skills/ 的协议正文，所以闸门
+  // 放宽到 16,200。真正的防回涨靠下面两条：主 persona < 5000、
+  // 子 persona 骨架上限——协议细节回涨会先在那里失败。
+  assert.ok(COMPOSITION_TEXT.length < 16200, `agent.cordis.yml 过长（${COMPOSITION_TEXT.length} 字符 / 目标 <16200）：参考材料进 skills/，设计理由进 preset README.md`)
   // 子 persona 只留硬规则骨架：协议正文在 skills/（子 Agent 通过 skill 按需加载），
   // 与工具 description/schema 重复的事实不再抄一遍。
-  for (const [id, cap] of [['tool-subagent-data-collector', 1700], ['tool-subagent-data-junior', 2100], ['tool-subagent-web-retriever', 1300]]) {
+  // data_junior 的上限随"可视化 gate + one-shot barrier"两条新职责上调（实测 2168）；
+  // 它仍必须低于 2400，载荷样例与 QuerySpec 细则一律留在 skill capital-data-protocol。
+  for (const [id, cap] of [['tool-subagent-data-collector', 1700], ['tool-subagent-data-junior', 2400], ['tool-subagent-web-retriever', 1300]]) {
     const persona = rowById(id).config.persona
     assert.ok(persona.length < cap, `${id} 的 persona 过长（${persona.length} 字符）：协议细节应进 skills/`)
   }
@@ -183,7 +194,7 @@ test('skills：两行组合式注册（skill-filesystem + tool-skill），不靠
 })
 
 test('skills：四个 skill 文件存在且 frontmatter 合法，persona 指向它们', () => {
-  for (const name of ['capital-orchestration', 'capital-data-protocol', 'capital-chart-protocol', 'capital-web-protocol']) {
+  for (const name of ['capital-orchestration', 'capital-data-protocol', 'capital-chart-protocol', 'capital-visualization-protocol', 'capital-web-protocol']) {
     const file = `${SKILL_DIR}${name}/SKILL.md`
     assert.ok(existsSync(file), `缺少 skill 文件：skills/${name}/SKILL.md`)
     const text = readFileSync(file, 'utf8')
@@ -284,11 +295,20 @@ test('主 persona：数据调度纪律——通过 list_agents + send_message �
   assertNoRule(MAIN_PERSONA, /data_key|list_schemas|get_latest|from_cache/, '主 persona 不应包含 data_key/旧缓存协议')
 })
 
-test('主 persona：图表是呈现不是分析——render_chart 不算数据工具', () => {
-  assertRule(MAIN_PERSONA, /render_chart/)
+test('主 persona：图表由 data_junior 出品——主 Agent 不出图、不在正文罗列图表文件', () => {
+  // 2026-09-17 设计修订：主 Agent 不再持有 render_chart，final_report 整条链路删除。
+  // 图表改由宿主在收尾卡片呈现（capital/chart-rendered 事件）；正文与回传都不再提图表文件。
+  assertRuleAny(MAIN_PERSONA, [/图表由 data_junior 的可视化 gate 统一出品/, /图表由 data_junior/], '主 persona 必须写明图表由 data_junior 出品')
+  assertRuleAny(MAIN_PERSONA, [/你不画图/, /主 Agent 不出图/, /不直接出图/], '主 persona 必须写明主 Agent 不出图')
+  assertRuleAny(MAIN_PERSONA, [/不在正文里罗列图表文件/, /不要?在正文里罗列/, /也不要罗列图表文件/], '主 persona 必须禁止在正文罗列图表文件')
+  assertRuleAny(MAIN_PERSONA, [/图表会在本轮答复下方的卡片里自动出现/, /收尾卡片/, /本轮答复下方的卡片/], '主 persona 必须说明图表在收尾卡片呈现')
+  assertRuleAny(MAIN_PERSONA, [/正文不要提图表/, /不要在正文提图表/], '主 persona 必须禁止正文提图表本身（用户口径：不提，自己看）')
   assertRuleAny(MAIN_PERSONA, [/图表是呈现不是分析/, /呈现不是分析/], '主 persona 需说明图表是呈现不是分析')
-  assertRuleAny(MAIN_PERSONA, [/不要用图去推断数字/, /不用图推断数字/], '主 persona 需禁止用图推断数字')
-  assertRuleAny(MAIN_PERSONA, [/只回小回执/, /只回回执/], '主 persona 需说明 render_chart 只回小回执')
+  assertRuleAny(MAIN_PERSONA, [/不用图推断数字/, /不要用图去推断数字/], '主 persona 需禁止用图推断数字')
+  // 已删除的能力不得以任何形式复活
+  assertNoRule(MAIN_PERSONA, /final_report|capital-final-report-protocol/, '主 persona 不应再引用已删除的 final_report 链路')
+  assertNoRule(MAIN_PERSONA, /render_chart/, '主 persona 不应再引用 render_chart（主 Agent 已无此工具）')
+  assertNoRule(MAIN_PERSONA, /present 声明 html_path/, '主 persona 不应再要求 present 图表文件')
   // 图表协议细节（kind、错误码、下采样口径）住在 skill capital-chart-protocol，不在 persona。
   assertNoRule(MAIN_PERSONA, /chart_field_not_found|chart_spec_invalid|candlestick/, '图表协议细节应进 skill capital-chart-protocol')
 })
@@ -390,6 +410,34 @@ test('子 Agent 委派行：continuable、persona 覆盖、toolFilter 收敛工�
   }
 })
 
+test('通用 subagent 行：必须 deny Capital 数据/出图管线与专用角色创建工具', () => {
+  const genericRow = rowById('tool-subagent')
+  assert.ok(genericRow, 'preset 必须有通用 subagent 行')
+  assert.equal(genericRow.name, '@deepseek-ai/dsh-tool-subagent')
+  assert.equal(genericRow.config.toolName, 'subagent')
+
+  // 2026-09 review 复现：只带 parentSession 的通用 child 能自己 prepare_chart_source
+  // 再 render_chart，绕过 data_junior 的 gate——因为 dsh-subagent 只在配了 toolFilter 时
+  // 才 restrict（dsh-subagent/lib/index.js `if (composition.toolFilter !== void 0)`），
+  // 而 child 用 composeFrom 加入父 Agent 同一份 standing composition，会继承它的全部工具。
+  const deny = genericRow.config.toolFilter?.deny
+  assert.ok(Array.isArray(deny), '通用 subagent 必须显式 deny，否则 child 继承 standing 全部工具、可视化 gate 失效')
+  assert.equal(genericRow.config.toolFilter.allow, undefined, '通用 subagent 只能用 deny 收口，不能改成 allow 白名单（那会砍掉它的通用工具）')
+
+  // deny 也是 tools.restrict()：名字必须真实注册，否则创建通用 child 时报错。
+  for (const name of deny) {
+    assert.ok(KNOWN_TOOLS.has(name), `通用 subagent 的 toolFilter.deny 含未注册工具名：${name}`)
+  }
+  for (const name of [
+    'render_chart', 'prepare_chart_source',
+    'inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile',
+    'request_data', 'list_capabilities', 'describe_capability', 'dc_status',
+    'subagent_data_collector', 'subagent_data_junior', 'subagent_visualization_specialist', 'subagent_web_retriever',
+  ]) {
+    assert.ok(deny.includes(name), `通用 subagent 的 child 不得拿到 ${name}`)
+  }
+})
+
 test('子 Agent 按需协议：三个子 persona 都点名真实存在的 skill，写错名字会静默拿不到契约', () => {
   for (const [row, skillName] of [
     [collectorRow, 'capital-data-protocol'],
@@ -483,9 +531,9 @@ test('subagent_data_junior 行：continuable、persona 覆盖、toolFilter 只�
   assert.equal(juniorRow.config.backgroundMode, 'continuable')
   const allow = juniorRow.config.toolFilter?.allow
   assert.ok(Array.isArray(allow), 'toolFilter.allow 必须存在')
-  assert.deepEqual([...allow].sort(), ['get_local_datetime', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'resolve_data_time_range', 'send_message', 'skill'])
+  assert.deepEqual([...allow].sort(), ['get_local_datetime', 'inspect_dataset', 'prepare_chart_source', 'profile_dataset', 'query_dataset', 'resolve_data_time_range', 'send_message', 'skill', 'subagent_visualization_specialist'])
   // data_junior 不得访问外部行情 API、网页检索、凭据或委派能力
-  for (const forbiddenTool of ['request_data', 'list_capabilities', 'dc_status', 'subagent', 'subagent_data_collector', 'subagent_data_junior', 'subagent_data_analyst', 'ask_user_question', 'todo_write', 'web_search', 'web_fetch', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'bash', 'python', 'write_profile']) {
+  for (const forbiddenTool of ['request_data', 'list_capabilities', 'dc_status', 'subagent', 'subagent_data_collector', 'subagent_data_junior', 'subagent_data_analyst', 'ask_user_question', 'todo_write', 'web_search', 'web_fetch', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'bash', 'python', 'write_profile', 'render_chart']) {
     assert.ok(!allow.includes(forbiddenTool), `toolFilter.allow 不应包含 ${forbiddenTool}`)
   }
 })
@@ -503,7 +551,7 @@ test('主 persona：子 Agent 中途请求按工单处理——取数后发回�
 
 test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质量统计，绝不回传 rows', () => {
   for (const pattern of [
-    /数据质量与基础分析执行器/,
+    /数据质量与基础分析执行器|数据质量与可视化编排执行器/,
     /profile_request/,
     /dataset_profile_completed/,
     /profile_failed/,
@@ -576,6 +624,30 @@ test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质�
     /`?time_facts`? 已经给了首末行取值/,
     /不得出现原始数据行|绝不把 rows 写进|不含任何数据行/,
   ]) assertRule(dataProtocol, pattern, `capital-data-protocol 缺少要点: ${pattern}`)
+})
+
+test('visualization_specialist 行：one-shot 前台、只允许 skill + render_chart', () => {
+  assert.equal(visualizationRow.name, '@deepseek-ai/dsh-tool-subagent')
+  assert.equal(visualizationRow.config.provider, 'spawn')
+  assert.equal(visualizationRow.config.toolName, 'subagent_visualization_specialist')
+  assert.equal(visualizationRow.config.backgroundMode, 'one-shot')
+  assert.equal(visualizationRow.config.enableRunInBackground, false)
+  assert.equal(visualizationRow.config.maxDepth, 2, 'specialist 位于 main → data_junior → specialist 的绝对深度 2')
+  assert.deepEqual(visualizationRow.config.toolFilter?.allow?.sort(), ['render_chart', 'skill'])
+  for (const pattern of [/可视化专家/, /one-shot/, /capital-visualization-protocol/, /capital-chart-protocol/, /chart_source_ref/, /chart_ref/, /不向主 Agent发送消息/, /不要?调用 send_message/, /不创建下游 Agent/, /不回传原始 rows/]) {
+    assertRule(VISUALIZATION_PERSONA, pattern, `visualization_specialist persona 缺少要点: ${pattern}`)
+  }
+  for (const forbiddenTool of ['send_message', 'subagent', 'prepare_chart_source', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'bash', 'python']) {
+    assert.ok(!visualizationRow.config.toolFilter.allow.includes(forbiddenTool), `visualization_specialist 不应允许 ${forbiddenTool}`)
+  }
+  assert.ok(existsSync(`${SKILL_DIR}capital-visualization-protocol/SKILL.md`))
+})
+
+test('data_junior persona：profile 后负责可视化 gate、签发 token、等待 one-shot barrier', () => {
+  for (const pattern of [/可视化编排/, /capital-visualization-protocol/, /profile_dataset 完成后无条件加载/, /用户明确要求图表/, /时间序列/, /OHLC\+volume/, /多个可比数值序列/, /必须选择 recommended/, /prepare_chart_source/, /subagent_visualization_specialist/, /not_needed/, /recommended/, /blocked/, /failed/, /one-shot barrier/, /chart_ref/, /rendered \/ skipped \/ failed/]) {
+    assertRule(JUNIOR_PERSONA, pattern, `data_junior persona 缺少可视化编排要点: ${pattern}`)
+  }
+  assertRuleAny(MAIN_PERSONA, [/visualization_specialist/, /可视化.*data_junior/], '主 persona 必须说明 visualization_specialist 由 data_junior 管理')
 })
 
 test('subagent_data_analyst 行：仍在开发中——disabled，且预留工具名不得先行启用', () => {

@@ -492,11 +492,12 @@ test('Dataset Phase 3：inspect、profile 与 query 工具真实注册，schema 
   assert.equal(query.parameters.additionalProperties, false)
   assert.deepEqual(query.parameters.required, ['dataset_id'])
   // flat 形态：QuerySpec 字段平铺在根上
-  assert.equal(query.parameters.properties.limit.minimum, 1)
-  assert.equal(query.parameters.properties.limit.maximum, 200)
+  assert.equal(query.parameters.properties.limit.type, 'integer')
+  assert.equal('minimum' in query.parameters.properties.limit, false)
+  assert.equal('maximum' in query.parameters.properties.limit, false)
   assert.ok(query.parameters.properties.select)
   assert.ok(!query.parameters.required.includes('select'), 'select 可以省略，由执行器默认生成结果列')
-  assert.ok(query.parameters.properties.filters.maxItems)
+  assert.equal('maxItems' in query.parameters.properties.filters, false)
   // envelope 形态：query 是可选嵌套对象，且自身就是完整 QuerySpec
   assert.ok(query.parameters.properties.query)
   assert.ok(query.parameters.properties.query.properties.group_by)
@@ -643,7 +644,8 @@ test('Phase 2 query 工具：只注册受控 QuerySpec，data_junior 执行仍�
   assert.ok(query)
   assert.equal(query.parameters.type, 'object')
   assert.ok(query.parameters.properties.aggregates)
-  assert.equal(query.parameters.properties.limit.maximum, 200)
+  assert.equal(query.parameters.properties.limit.type, 'integer')
+  assert.equal('maximum' in query.parameters.properties.limit, false)
   await assert.rejects(() => query.execute({ dataset_id: 'ds_001', select: ['rows'], aggregates: [{ function: 'count', as: 'rows' }] }, { agent: { session: SESSION }, signal: new AbortController().signal }), /dataset_session_mismatch/)
 })
 

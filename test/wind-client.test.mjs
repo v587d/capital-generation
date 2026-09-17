@@ -53,7 +53,7 @@ test('callTool：先 initialize 再 tools/call，Bearer 与 MCP 线头齐全，�
     assert.deepEqual(stub.calls[1].body.params, {
       name: 'get_company_announcements',
       arguments: { query: '茅台分红', top_k: 3 },
-      _meta: { clientVersion: '0.1.0' },
+      _meta: { clientVersion: '2.0.0' },
     })
     for (const call of stub.calls) {
       assert.match(call.init.headers.authorization, /Bearer secret/)

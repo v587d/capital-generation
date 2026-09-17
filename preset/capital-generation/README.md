@@ -6,7 +6,8 @@
 
 - 本目录由 `@v587d/capital-generation` 随包分发，由 `cordis.patch.yml` 的 bundle patch
   以 `trust=system` 挂载；**不要**手抄进 `~/.dsh/.agent-presets`。
-- 长协议在 `skills/`（同目录），由本 preset 自己的 `skill-filesystem` 行发现。
+- 长协议在 `skills/`（同目录），由本 preset 自己的 `skill-filesystem` 行发现；`capital-visualization-protocol` 同时供 data_junior 的 gate 和 visualization_specialist 按需加载。
+- visualization_specialist 是 data_junior 创建的 one-shot 前台子 Agent，不进入主 Agent 的 direct-child 复用清单；它只消费 chart_source_ref 并使用受控 render_chart。
 - 验证方式与"改 preset 前后的必做检查"见仓库根 `AGENTS.md` 的「Preset 维护纪律」。
 
 ## 1. 平面纪律（plane discipline）
@@ -85,6 +86,15 @@
   **不能按 Agent 区分**（全仓只有这一个 pruner 实例），主/子 Agent 共用。
 - `toolFilter.allow` 只能写**真实注册**的全局工具名：`tools.restrict()` 对未知名字直接报错，
   且它在**子 Agent 创建窗口**执行——写错的表现是"创建子 Agent 失败"，不是挂载失败。
+- **通用 `subagent` 行必须写 `toolFilter.deny`（2026-09 review）**：`dsh-subagent` 只在
+  `composition.toolFilter !== void 0` 时才 `restrict`，而 child 用 `composeFrom(childCtx,
+  parent.ctx)` 加入父 Agent **同一份 standing composition**，因此没有 filter 的通用 child
+  会继承 standing 的全部工具——只带 `parentSession` 的 child 就能自己 `prepare_chart_source`
+  再 `render_chart`，把"出图只有一个入口"降级成 persona 建议。这里的 `deny` 与子角色的
+  `allow` 不冲突：`allow`/`deny` 都只是继承层交集过滤，专用行各自的白名单照常生效。
+  通用行只能有一个 filter，所以用 `deny` 列全敏感工具（数据管线 + Dataset 系列 + 出图 +
+  专用角色创建工具）；`deny` 里的名字同样必须真实注册。回归断言见
+  `test/persona.test.mjs` 的「通用 subagent 行」用例。
 - 不用 `dsh-time-context` 行：它每个 step 自动注入时钟读数，与自研 `get_local_datetime`
   重复；时间读数只来自后者（会话组作用域内注册，主 Agent 与全部子 Agent 共享，支持
   `timezone` 换算）。

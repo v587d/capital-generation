@@ -234,9 +234,13 @@ export function buildChartPayload(input: BuildChartPayloadInput): ChartPayload {
   // OHLC 图形（candlestick / bar）不允许降级：图表库的 OhlcData 需要真实有序时间轴，
   // 拿分类轴硬画只会得到一张错位的图。
   if (axisField !== undefined && !(OHLC_KINDS as readonly string[]).includes(spec.kind)) {
-    const sample = records.slice(0, 100)
-    const parsed = sample.filter((record) => parseTimeValue(record[axisField]) !== undefined).length
-    if (parsed / sample.length < TIME_AXIS_THRESHOLD) axis = 'index'
+    // 后续预处理本来就会逐行解析时间；这里也统计全量，避免前 100 行的脏数据把整条
+    // 后面的真实时间序列误判成分类轴。
+    const parsed = records.filter((record) => parseTimeValue(record[axisField]) !== undefined).length
+    if (parsed / records.length < TIME_AXIS_THRESHOLD) {
+      axis = 'index'
+      warnings.push(`x field "${axisField}" was treated as a category axis: only ${parsed}/${records.length} values look like time`)
+    }
   }
 
   // ── 2. 逐行预处理 ────────────────────────────────────────────────────────
@@ -285,6 +289,9 @@ export function buildChartPayload(input: BuildChartPayloadInput): ChartPayload {
 
   let filtered = unique
   if (spec.range) {
+    if (axis === 'index') {
+      throw new ChartError('chart_spec_invalid', 'spec.range requires a time axis; remove range for category data or provide a parseable time field in spec.x')
+    }
     const from = spec.range.from === undefined ? undefined : parseTimeValue(spec.range.from)?.seconds
     const to = spec.range.to === undefined ? undefined : parseTimeValue(spec.range.to)?.seconds
     if (spec.range.from !== undefined && from === undefined) throw new ChartError('chart_spec_invalid', 'spec.range.from is not a recognizable date')
@@ -396,7 +403,11 @@ export function buildChartPayload(input: BuildChartPayloadInput): ChartPayload {
       }
       targetSeconds = atIndex.time.seconds
     } else if (marker.time !== undefined) {
-      targetSeconds = parseTimeValue(marker.time)?.seconds
+      if (axis === 'index') {
+        const labelMatch = filtered.find((row) => row.indexLabel === String(marker.time))
+        targetSeconds = labelMatch?.time.seconds
+      }
+      if (targetSeconds === undefined) targetSeconds = parseTimeValue(marker.time)?.seconds
     }
     const target = targetSeconds === undefined ? undefined : nearestRow(kept, keptSeconds, targetSeconds)
     if (target === undefined) {

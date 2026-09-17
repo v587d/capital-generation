@@ -7,7 +7,12 @@
  */
 export type ChartErrorCode =
   | 'chart_source_invalid'
+  | 'chart_source_expired'
+  | 'chart_source_scope_mismatch'
   | 'chart_source_not_found'
+  | 'chart_ref_invalid'
+  | 'chart_ref_scope_mismatch'
+  | 'chart_ref_task_mismatch'
   | 'chart_spec_invalid'
   | 'chart_field_not_found'
   | 'chart_no_rows'

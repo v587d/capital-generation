@@ -183,6 +183,21 @@ test('runtime：库由调用方注入，渲染不依赖也不产生页面全局�
   assert.equal(calls.series[0].kind, 'candle', '仅靠注入的库即可完成渲染')
 })
 
+test('runtime：area 序列把 rgb 主题色转换为合法 rgba，而不是直接拼接 alpha', () => {
+  const { calls } = render({
+    chart_id: 'ch_area',
+    title: '面积图',
+    kind: 'area',
+    axis: 'time',
+    series: [{ id: 'close', label: '收盘', type: 'area', data: [{ time: '2025-01-01', value: 1 }] }],
+    markers: [],
+    meta: { points: 1, original_points: 1, downsampled: false, axis: 'time', source_kind: 'path', skipped_rows: 0, warnings: [] },
+  })
+
+  assert.equal(calls.series[0].options.topColor, 'rgba(37, 99, 235, 0.2)')
+  assert.equal(calls.series[0].options.bottomColor, 'rgba(37, 99, 235, 0.02)')
+})
+
 test('runtime：多序列使用不同颜色，第一条用主题品牌色', () => {
   const { calls } = render({
     chart_id: 'ch_3',

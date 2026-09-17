@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { apply } from '../lib/index.js'
+import { ROOT_AGENT_DENIED_TOOLS } from '../lib/agents/root-tool-policy.js'
 
 /**
  * 装配入口的集成测试。
@@ -15,6 +16,7 @@ function fakeCtx({ credentials } = {}) {
   const tools = []
   const services = new Map()
   const effectResults = []
+  const listeners = []
   const ctx = {
     get: (name) => {
       if (name === 'tools') return { register: (definition) => { tools.push(definition); return () => {} } }
@@ -23,13 +25,42 @@ function fakeCtx({ credentials } = {}) {
     },
     provide: (name, value) => { services.set(name, value) },
     effect: (callback) => { effectResults.push(callback()); return () => {} },
+    on: (event, listener) => { listeners.push({ event, listener }); return () => {} },
     logger: { info() {}, warn() {}, error() {}, debug() {} },
     systemPrompt: { section: () => () => {} },
   }
-  return { ctx, tools, services, effectResults }
+  return { ctx, tools, services, effectResults, listeners }
 }
 
 const toolNamed = (tools, name) => tools.find((definition) => definition.name === name)
+
+const SCHEMA_KEYS = new Set([
+  'type', 'oneOf', 'properties', 'required', 'additionalProperties', 'items', 'enum', 'const',
+  'description', 'title', 'default', 'examples', 'deprecated', 'readOnly', 'writeOnly',
+])
+
+function assertSupportedSchema(value, path) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return
+  for (const key of Object.keys(value)) {
+    assert.ok(SCHEMA_KEYS.has(key), `${path} 使用了 DSH 不支持的 JSON Schema 关键字 ${key}`)
+  }
+  if (value.properties && typeof value.properties === 'object') {
+    for (const [key, child] of Object.entries(value.properties)) assertSupportedSchema(child, `${path}.properties.${key}`)
+  }
+  if (value.items) assertSupportedSchema(value.items, `${path}.items`)
+  if (Array.isArray(value.oneOf)) value.oneOf.forEach((child, index) => assertSupportedSchema(child, `${path}.oneOf[${index}]`))
+  if (value.additionalProperties && typeof value.additionalProperties === 'object') {
+    assertSupportedSchema(value.additionalProperties, `${path}.additionalProperties`)
+  }
+}
+
+const assertToolSchemas = (tools) => {
+  for (const definition of tools) {
+    assertSupportedSchema(definition.parameters, `${definition.name}.parameters`)
+    assertSupportedSchema(definition.output?.schema, `${definition.name}.output`)
+  }
+}
+
 const delegated = { id: 'child-1', header: { cwd: '/workspace/proj', parentSession: 'main-1' } }
 const exec = (session) => ({ agent: { id: session.id, session }, signal: new AbortController().signal })
 
@@ -47,9 +78,12 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
     assert.ok(services.get('datasetStore'), 'apply 必须提供 datasetStore 服务')
     assert.equal(hub.capabilityNames().length, 61, '装配后应注册全部 61 个 Fuyao capability')
 
-    for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'get_local_datetime', 'resolve_data_time_range', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'render_chart']) {
+    for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'prepare_chart_source', 'get_local_datetime', 'resolve_data_time_range', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'render_chart']) {
       assert.ok(toolNamed(tools, name), `装配后应注册工具 ${name}`)
     }
+    // 2026-09-17 设计修订：final_report 整条链路删除（报告投影不再是主 Agent 的职责）。
+    assert.equal(toolNamed(tools, 'final_report'), undefined, 'final_report 不应再注册')
+    assertToolSchemas(tools)
 
     // dc_status 应报告 Key 存在且无注册错误
     const status = await toolNamed(tools, 'dc_status').execute({}, exec(delegated))
@@ -169,7 +203,34 @@ test('apply()：所有注册工具的 parameters 根必须是 object 型 schema'
   }
 })
 
-test('apply()：render_chart 属于主 Agent（不要求委派 session）', async () => {
+test('apply()：注册根 Agent 工具收敛监听（只拿掉主 Agent 的专属入口）', async () => {
+  process.env.FUYAO_API_KEY = 'smoke-key'
+  try {
+    const { ctx, listeners, effectResults } = fakeCtx()
+    apply(ctx, { customPersona: '', retriever: { baseURL: '', credentialRef: '', windDocs: { endpoint: '', credentialRef: '', timeoutMs: 0 } } })
+    await Promise.all(effectResults)
+
+    const created = listeners.filter((entry) => entry.event === 'agent/created')
+    assert.equal(created.length, 1, 'apply 必须恰好注册一个 agent/created 监听')
+
+    const restricted = []
+    const agentCtx = { tools: { restrict: (filter) => { restricted.push(filter); return () => {} } } }
+    // 根 Agent（无 parentSession）→ 收敛；子 Agent（有 parentSession）→ 原样放行。
+    created[0].listener({ agent: { session: { header: { cwd: '/w' } }, ctx: agentCtx } })
+    created[0].listener({ agent: { session: { header: { cwd: '/w', parentSession: 'main-1' } }, ctx: agentCtx } })
+    assert.equal(restricted.length, ROOT_AGENT_DENIED_TOOLS.length, '根 Agent 逐名收敛；子 Agent 一次都不碰')
+    assert.deepEqual(restricted.map((filter) => filter.deny[0]).sort(), [...ROOT_AGENT_DENIED_TOOLS].sort())
+
+    // 收敛失败（工具名未知 / ctx 缺工具）不得抛出：调用方是 agent 创建路径。
+    assert.doesNotThrow(() => created[0].listener({ agent: { session: { header: {} }, ctx: { tools: { restrict: () => { throw new Error('unknown tool') } } } } }))
+    assert.doesNotThrow(() => created[0].listener({ agent: { session: { header: {} }, ctx: {} } }))
+  } finally {
+    if (SAVED_KEY === undefined) delete process.env.FUYAO_API_KEY
+    else process.env.FUYAO_API_KEY = SAVED_KEY
+  }
+})
+
+test('apply()：render_chart 注册在 standing 层（由根 Agent 收敛决定谁能看见）', async () => {
   process.env.FUYAO_API_KEY = 'smoke-key'
   try {
     const { ctx, tools, effectResults } = fakeCtx()
@@ -177,16 +238,18 @@ test('apply()：render_chart 属于主 Agent（不要求委派 session）', asyn
     await Promise.all(effectResults)
 
     const renderChart = toolNamed(tools, 'render_chart')
-    assert.ok(renderChart, '主 Agent 需要有 render_chart（本地 JSON 场景下 data_junior 没有 fs 能力，只能由它来做）')
-    // 与 Dataset 系列工具的关键差别：主会话（无 parentSession）不应被 dataset_session_mismatch 挡下。
-    const mainSession = { id: 'main-1', header: { cwd: '/workspace/proj' } }
+    assert.ok(renderChart, 'render_chart 必须仍被注册：visualization_specialist 的 toolFilter.allow 依赖它')
+    // 委派调用者（有 parentSession）不带 chart_source_ref 时必须被拒 —— 这正是主 Agent 失去
+    // 这个工具后也不会被"顺手出图"的运行时兜底。
+    const delegatedSession = { id: 'child-1', header: { cwd: '/workspace/proj', parentSession: 'main-1' } }
     await assert.rejects(
-      () => renderChart.execute({ spec: { kind: 'line', series: ['close'] } }, exec(mainSession)),
-      (error) => error.code === 'chart_source_invalid',
-      '缺数据来源时应报 chart_source_invalid，而不是委派限制错误',
+      () => renderChart.execute({ dataset_id: 'ds_1', spec: { kind: 'line', series: ['close'] } }, exec(delegatedSession)),
+      (error) => error.code === 'chart_source_scope_mismatch',
+      '委派调用者必须用 chart_source_ref，不能用 dataset_id / path',
     )
-    // 描述里必须写清"只回小回执"，这是它不算数据工具的判据。
+    // 描述里必须写清"只回小回执"与"不要把图表文件写进正文"。
     assert.match(renderChart.description, /只回一条小回执/)
+    assert.match(renderChart.description, /不要.*罗列图表文件/)
   } finally {
     if (SAVED_KEY === undefined) delete process.env.FUYAO_API_KEY
     else process.env.FUYAO_API_KEY = SAVED_KEY

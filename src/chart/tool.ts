@@ -13,11 +13,14 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 
-import { WorkspaceDatasetStore } from '../data-collector/store.js'
+import { DatasetStoreError, WorkspaceDatasetStore } from '../data-collector/store.js'
 import { ChartError } from './errors.js'
 import { buildStandaloneHtml, loadVendoredChartLibrary } from './html.js'
 import { buildChartPayload, extractRows, MAX_CHART_POINTS } from './series.js'
 import { normalizeChartSpec } from './spec.js'
+import { chartSourceTokenForRender, type ChartSourceTokenStore } from './source-token.js'
+import { ChartArtifactRegistry, chartSessionScopeId } from './artifact-ref.js'
+import type { ChartEventPublisher } from './events.js'
 
 type ToolRuntimeLike = { register(definition: unknown): () => void }
 type AgentExecutionLike = { session?: { id?: string; header?: { cwd?: string; parentSession?: string } } }
@@ -46,7 +49,55 @@ function sessionOf(exec: ToolExecLike): { id: string; header?: { cwd?: string; p
   return session as { id: string; header?: { cwd?: string; parentSession?: string } }
 }
 
+function stripErrorCode(message: string): string {
+  const separator = message.indexOf(':')
+  return separator >= 0 ? message.slice(separator + 1).trim() : message
+}
+
+function normalizeStoreError(error: unknown): ChartError | undefined {
+  if (!(error instanceof DatasetStoreError)) return undefined
+  const detail = stripErrorCode(error.message)
+  switch (error.code) {
+    case 'dataset_not_found':
+    case 'dataset_expired':
+    case 'dataset_session_mismatch':
+      return new ChartError('chart_source_not_found', detail, { cause: error.code })
+    case 'dataset_id_invalid':
+    case 'workspace_path_invalid':
+      return new ChartError('chart_source_invalid', detail, { cause: error.code })
+    case 'dataset_too_large':
+      return new ChartError('chart_too_large', detail, { cause: error.code })
+    case 'workspace_file_invalid':
+    case 'dataset_not_row_readable':
+    case 'dataset_format_unsupported':
+      return new ChartError('chart_source_invalid', detail, { cause: error.code })
+    case 'workspace_not_writable':
+    case 'dataset_write_failed':
+      return new ChartError('chart_write_failed', detail, { cause: error.code })
+    case 'filesystem_unavailable':
+    case 'sandbox_policy_unavailable':
+    case 'session_cwd_unavailable':
+      return new ChartError('chart_runtime_unavailable', detail, { cause: error.code })
+    default:
+      return undefined
+  }
+}
+
+/**
+ * 工具框架对 throw 的错误只保留 message；把 ChartError 的 details 在这里展开成
+ * JSON 信封，模型才能拿到 array_keys / available 等一次修正所需的信息。
+ */
+function toolVisibleError(error: unknown): Error {
+  const normalized = error instanceof ChartError ? error : normalizeStoreError(error)
+  if (!normalized) return error instanceof Error ? error : new Error(String(error))
+  const visible = new Error(JSON.stringify(normalized.toEnvelope())) as Error & { code?: string }
+  visible.name = normalized.name
+  visible.code = normalized.code
+  return visible
+}
+
 const receiptSchema = jsonObject({
+  chart_ref: { type: 'string' },
   chart_id: { type: 'string' },
   kind: { type: 'string' },
   axis: { type: 'string', enum: ['time', 'index'] },
@@ -66,24 +117,26 @@ const receiptSchema = jsonObject({
   html_path: { type: 'string' },
   warnings: { type: 'array', items: { type: 'string' } },
 }, [
-  'chart_id', 'kind', 'axis', 'points', 'original_points', 'downsampled',
+  'chart_ref', 'chart_id', 'kind', 'axis', 'points', 'original_points', 'downsampled',
   'series_labels', 'has_volume', 'markers', 'dataset_id', 'source_label',
   'captured_at', 'chart_url', 'spec_path', 'series_path', 'html_path', 'warnings',
 ])
 
 const parameters = jsonObject({
-  dataset_id: { type: 'string', description: '数据来源之一：已授权的 DatasetRef 的 dataset_id（与 path 二选一）' },
-  path: { type: 'string', description: '数据来源之一：workspace 相对路径的 JSON 文件，如 capital-data/datasets/x/raw.json（与 dataset_id 二选一）' },
+  dataset_id: { type: 'string', description: '数据来源之一：已授权的 DatasetRef 的 dataset_id（与 path / chart_source_ref 三选一）' },
+  path: { type: 'string', description: '数据来源之一：workspace 相对路径的 JSON 文件，如 capital-data/datasets/x/raw.json（与 dataset_id / chart_source_ref 三选一）' },
+  chart_source_ref: { type: 'string', description: '数据来源之一：宿主签发给 visualization_specialist 的短期 opaque chart source token（与 dataset_id / path 三选一）' },
+  task_id: { type: 'string', description: '使用 chart_source_ref 时必需；必须与 token 绑定的当前任务一致' },
   spec: {
-    type: 'object',
-    additionalProperties: true,
-    description: '图表描述，至少 { kind, x?, series? | ohlc?, volume?, markers?, range?, title? }；字段语义与错误码见 skill capital-chart-protocol',
+    oneOf: [{ type: 'object', additionalProperties: true }, { type: 'string' }],
+    description: '图表描述对象或 JSON 对象字符串，至少 { kind, x?, series? | ohlc?, volume?, markers?, range?, title? }；字段语义与错误码见 skill capital-chart-protocol',
   },
   title: { type: 'string', description: '可选：覆盖 spec.title 的图表标题' },
 }, ['spec'])
 
 /** 回执字段全部是可以进上下文的小元数据；序列本体永远不在这里。 */
 export interface ChartReceipt {
+  chart_ref: string
   chart_id: string
   kind: string
   axis: 'time' | 'index'
@@ -105,11 +158,13 @@ export interface ChartReceipt {
 }
 
 export interface ChartPublisher {
-  publish(input: { chartId: string; filePath: string }): string
+  publish(input: { chartId: string; filePath: string }): string | null
 }
 
 export interface RenderChartInput {
   store: WorkspaceDatasetStore
+  sourceTokens?: ChartSourceTokenStore
+  artifacts?: ChartArtifactRegistry
   /**
    * 惰性解析 host 平面图表服务（`@v587d/capital-charts` 提供）。
    *
@@ -119,17 +174,35 @@ export interface RenderChartInput {
    * 落盘、`html_path` 照样可 present，只是 `chart_url` 为 null。
    */
   charts?: () => ChartPublisher | undefined
+  /**
+   * 惰性解析"图表→对话流"事件发布器（`capital/chart-rendered`）。
+   *
+   * 与 `charts` 同理每次出图解析一次：宿主平面的 `sessions` / `sessionProjections`
+   * 不可用时返回 undefined，整条链路照常降级——图仍在 workspace 里，回执照样给 html_path，
+   * 只是收尾卡片不会出现。
+   */
+  chartEvents?: () => ChartEventPublisher | undefined
   now?: () => number
 }
 
 export async function renderChart(input: RenderChartInput, args: Record<string, unknown>, exec: ToolExecLike): Promise<ChartReceipt> {
   const now = input.now ?? (() => Date.now())
   const session = sessionOf(exec)
-  const datasetId = typeof args.dataset_id === 'string' && args.dataset_id.trim().length > 0 ? args.dataset_id.trim() : undefined
+  const requestedDatasetId = typeof args.dataset_id === 'string' && args.dataset_id.trim().length > 0 ? args.dataset_id.trim() : undefined
   const path = typeof args.path === 'string' && args.path.trim().length > 0 ? args.path.trim() : undefined
-  if ((datasetId === undefined) === (path === undefined)) {
-    throw new ChartError('chart_source_invalid', 'provide exactly one data source: dataset_id (an authorized DatasetRef) or path (a workspace-relative JSON file)')
+  const chartSourceRef = typeof args.chart_source_ref === 'string' && args.chart_source_ref.trim().length > 0 ? args.chart_source_ref.trim() : undefined
+  const sourceCount = [requestedDatasetId, path, chartSourceRef].filter((value) => value !== undefined).length
+  if (sourceCount !== 1) {
+    throw new ChartError('chart_source_invalid', 'provide exactly one data source: dataset_id, path, or chart_source_ref')
   }
+  if (session.header?.parentSession && chartSourceRef === undefined) {
+    throw new ChartError('chart_source_scope_mismatch', 'delegated visualization callers must use chart_source_ref')
+  }
+  const tokenSource = chartSourceRef === undefined ? undefined : chartSourceTokenForRender(input.sourceTokens, {
+    chart_source_ref: chartSourceRef,
+    task_id: args.task_id,
+  }, session)
+  const datasetId = tokenSource?.dataset_id ?? requestedDatasetId
 
   const spec = normalizeChartSpec(args.spec)
   if (typeof args.title === 'string' && args.title.trim().length > 0) spec.title = args.title.trim().slice(0, 200)
@@ -138,7 +211,11 @@ export async function renderChart(input: RenderChartInput, args: Record<string, 
   let rows: readonly unknown[]
   let meta: { source_kind: 'dataset' | 'path'; dataset_id?: string; source_label?: string; captured_at?: number }
   if (datasetId !== undefined) {
-    const { ref, rows: datasetRows } = await input.store.readPresentationRows({ session, dataset_id: datasetId, signal: exec.signal })
+    // A chart_source_ref carries the direct data-agent session that already has
+    // access to the parent Dataset scope. The nested visualization child is
+    // only the caller of render_chart; it never receives raw rows.
+    const readSession = tokenSource?.sourceSession ?? session
+    const { ref, rows: datasetRows } = await input.store.readPresentationRows({ session: readSession, dataset_id: datasetId, signal: exec.signal })
     rows = datasetRows
     meta = { source_kind: 'dataset', dataset_id: ref.dataset_id, source_label: ref.source_label, captured_at: ref.captured_at }
   } else {
@@ -179,7 +256,53 @@ export async function renderChart(input: RenderChartInput, args: Record<string, 
     }
   }
 
+  const taskId = tokenSource?.task_id
+    ?? (typeof args.task_id === 'string' && args.task_id.trim().length > 0 ? args.task_id.trim() : null)
+  const artifact = input.artifacts?.issue({
+    session: tokenSource?.sourceSession ?? session,
+    chart_id: chartId,
+    task_id: taskId,
+    dataset_id: meta.dataset_id ?? null,
+    source_label: meta.source_label ?? null,
+    captured_at: meta.captured_at ?? null,
+    kind: payload.kind,
+    axis: payload.axis,
+    chart_url: chartUrl,
+    spec_path: pathOf('spec.json'),
+    series_path: pathOf('series.json'),
+    html_path: pathOf('chart.html'),
+    created_at: generatedAt,
+  })
+  // Direct unit callers that do not install the production registry still get
+  // a stable receipt; production apply() always injects the registry.
+  const chartRef = artifact?.chart_ref ?? `chart_${chartId.slice(3)}`
+
+  // 对话流呈现：把这张图登记到**用户正在看的那条会话**（owner scope 与 chart_ref 同源，
+  // 因此 specialist 出的图正好落在主会话）。事件只有元数据、不是 surface 事件，
+  // 既不会进模型消息历史，也不携带 rows / series / 绝对路径。
+  // 呈现通道是可选的：写不进去不影响图表产物与回执。
+  try {
+    input.chartEvents?.()?.publish({
+      ownerSessionId: chartSessionScopeId(tokenSource?.sourceSession ?? session),
+      chart_id: chartId,
+      chart_ref: chartRef,
+      title: payload.title,
+      kind: payload.kind,
+      axis: payload.axis,
+      points: payload.meta.points,
+      chart_url: chartUrl,
+      html_path: pathOf('chart.html'),
+      source_label: meta.source_label ?? null,
+      captured_at: meta.captured_at ?? null,
+      task_id: taskId,
+      warnings: payload.meta.warnings,
+    })
+  } catch {
+    // 事件通道是可选的呈现路径，绝不因它失败而影响出图。
+  }
+
   return {
+    chart_ref: chartRef,
     chart_id: chartId,
     kind: payload.kind,
     axis: payload.axis,
@@ -207,18 +330,23 @@ export function registerChartTool(ctx: Context, options: RenderChartInput): void
   const definition = {
     name: 'render_chart',
     description:
-      `把已经取到的数据渲染成一张可交互图，产物落在 workspace 的 ${CHART_ARTIFACT_DIR}/<chart_id>/（chart.html 可离线打开、可 present）。` +
+      `把已经取到的数据渲染成一张可交互图，产物落在 workspace 的 ${CHART_ARTIFACT_DIR}/<chart_id>/（chart.html 可离线打开）。` +
       '**只回一条小回执，不回任何原始数据行**：序列走旁路，不进入上下文。' +
-      '来源二选一：dataset_id（已授权的 DatasetRef）或 path（workspace 相对路径的 JSON，支持顶层数组或含行数组的 envelope）。' +
+      '来源三选一：dataset_id（已授权的 DatasetRef）、path（workspace 相对路径的 JSON，支持顶层数组或含行数组的 envelope），或 chart_source_ref（宿主签发给 visualization_specialist 的短期 token；使用它时还要提供 task_id）。' +
       'spec 是自由对象，至少给出 kind（line / area / column / candlestick / bar；后两者要 ohlc 四字段与真实时间列）与字段选择（series 或 ohlc），' +
       `最多保留 ${MAX_CHART_POINTS} 个点（超出由宿主下采样并如实标注）。` +
       '字段语义、可用键与错误码见 skill capital-chart-protocol —— 首次画图前先加载它。' +
-      '结果里有时间序列（行情 / 净值 / 营收等）时，除文字结论外应**主动出一张图**，不要等用户点名；' +
+      '是否出图由 data_junior 的可视化协议决定；本工具只负责安全生成图表产物和小型回执。' +
+      '出图成功后宿主会把这张图登记到当前对话的收尾卡片上，调用方**不要**在回传或正文里罗列图表文件、路径或 HTML。' +
       '图表是呈现不是分析：需要数值结论（首末值、涨跌幅、分位数等）仍走 data_junior 的 profile / query，不要用图去推断数字。',
     parameters,
     output: { schema: receiptSchema, render },
     async execute(args: Record<string, unknown>, exec: ToolExecLike): Promise<ChartReceipt> {
-      return renderChart(options, args, exec)
+      try {
+        return await renderChart(options, args, exec)
+      } catch (error) {
+        throw toolVisibleError(error)
+      }
     },
   }
   ctx.effect(() => tools.register(definition), 'capital-generation.tool(render_chart)')

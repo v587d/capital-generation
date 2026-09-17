@@ -2,7 +2,7 @@
 /**
  * 把 lightweight-charts 的浏览器 standalone 构建 vendor 进本仓库。
  *
- * 设计约束（见 docs/design/chart-visualization.md §5.5）：
+ * 设计约束（见内部设计文档 docs/design/chart-visualization.md §5.5）：
  *  - **不用 CDN**：本仓是离线本地部署，图表库必须随包发布；
  *  - **固定版本**：版本号写进 VERSION.json 并记录 SHA-256，升级是一次显式动作，
  *    不是 `npm install` 的副作用；

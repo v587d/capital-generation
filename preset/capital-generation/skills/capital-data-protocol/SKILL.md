@@ -44,6 +44,7 @@ description: Use when composing or reading a Capital data message — the exact 
 - 委派消息只带需求与参数，**不带任何内部数据源键名**，也不携带原始数据行。
 - 能力名一律以 `list_capabilities` 返回的目录为准，不要编造。
 - 一次请求一个能力、串行推进；单回合通常 1 个、最多 3 个、硬性不超过 5 个能力。
+- `task_id` 由主 Agent 在本轮首次委派前确定；同一用户任务的 data_collector、data_junior 与 visualization 必须原样复用。data_collector 不得自行生成或改写 task_id，缺失时应拒绝请求并回告主 Agent。
 
 ## 1.1 能力发现（data_collector 侧：两步，且各只做一次）
 

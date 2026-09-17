@@ -14,7 +14,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-0.1.0-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.0.0-9cf" alt="Version"></a>
 </p>
 
 > [!IMPORTANT]
@@ -23,7 +23,7 @@
 > 愿大家的财富数字就像"text generation"一样，不断增长，永不停止。
 
 > [!NOTE]
-> 必须安装[Deepseek Harness](https://github.com/deepseek-ai/deepseek-harness) ，目前已适配`@0.1.5-rc.1` 。
+> 先安装 [Deepseek Harness(DSH)](https://github.com/deepseek-ai/deepseek-harness) ，目前已适配 DSH`@0.1.5-rc.1` 。
 > LLM 建议 **Deepseek/deepseek-flash** 搭配本项目， GPT / Claude 尚未充分测试，理论亦可。
 
 # Slogan
@@ -34,11 +34,12 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
 1. Agent preset（人设）：面向金融场景的 Capital 模式，与 DSH 默认的标准、PTC、极简、创造模式并列。
 
 2. 所有 Agent，包括主 Agent 均不能直接接触原始结构数据（行情、财务报表细目等），需要时 Agent 可按需提取再提炼发送消息至主 Agent。
-目前覆盖四种叶子 Subagent:
+目前覆盖以下 Subagent（data_analyst 为预留角色，暂未启用）：
   - data_collector: 主 Agent 直属下级（spawn），负责根据上级指令收集金融财经类结构化数据，目前支持 同花顺（fuyao）约61个数据 API接口。
   - data_junior: 主 Agent 直属下级（spawn），负责根据上级指令清洗、整理出有效数据、基础描述性统计以及数据透视，目的是阐述数据背后的“故事”。
   - data_analyst: 主 Agent 直属下级，负责根据上级指令，通过运用编程技能分析上游数据（**仍在开发中**，委派行 disabled，暂不启用）。
-  - web_retriever: 主 Agent 直属下级（spwan），负责根据上级指令，运用网络搜索和抓取能力，获取外部非机构化数据，目前支持 Anysearch(search/fetch) API 数据接口和 Wind Alice 相关服务。
+  - web_retriever: 主 Agent 直属下级（spawn），负责根据上级指令，运用网络搜索和抓取能力，获取外部非结构化数据，目前支持 AnySearch(search/fetch) API 数据接口和 Wind Alice 相关服务。
+  - visualization_specialist: 主 Agent 的孙 Agent（data_junior 的 one-shot 前台子 Agent），由 data_junior 在 profile 完成后的可视化 gate 中按需创建；只接收 `profile_ref`、有限 profile 事实与短期 `chart_source_ref`，使用受控 `render_chart` 生成自包含 HTML 图表，并只向 data_junior 回传 `chart_ref` 小回执；不接触原始 rows、不向主 Agent 直接发消息，当前是唯一的 one-shot 角色。
   - 未来更多，欢迎 PR 
 
 3. 沿用 DSH 官方基础设施，不自行实现底层机制：
@@ -56,10 +57,23 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
 
 [data_collector 能力总表](docs/data-collector-capabilities.md) 列出全部 **61 个**数据 capability（元数据 / A股行情与财务 / 估值竞价 / 盘面特色 / 指数 / 基金），含端点路径、主要参数（必填以 `*` 标注）、是否分页与用途，并说明**不覆盖**的模块及原因。
 
+## 图表呈现（截图）
 
-## 样例
-[2026-09-11测试样例](docs/sample/指南针软件（300803.SZ）复盘分析报告.md)
-[2026-09-14测试样例](docs/sample/指南针分析预测报告.md)
+> 出图只有一个入口：`data_junior` 的可视化 gate → one-shot `visualization_specialist`。
+> 序列数据不进模型上下文，浏览器经宿主旁路取数；图表由宿主追加的 `capital/chart-rendered`
+> 事件渲染在**本轮答复下方的收尾卡片**里。下图为真实会话截图，点击可查看原图。
+
+| 收尾卡片：K 线 + 成交量 | 侧栏自包含 HTML：折线 | 侧栏自包含 HTML：K 线 + 量价 |
+| :---: | :---: | :---: |
+| [<img src="assets/chart-turn-tail-candlestick.png" width="260" alt="K 线 + 成交量图表内嵌在助手消息下方">](assets/chart-turn-tail-candlestick.png) | [<img src="assets/chart-line-sidebar.png" width="260" alt="成交额折线图在侧栏打开的自包含 chart.html 中">](assets/chart-line-sidebar.png) | [<img src="assets/chart-candlestick-sidebar.png" width="260" alt="日线量价 K 线在侧栏打开的自包含 chart.html 中">](assets/chart-candlestick-sidebar.png) |
+| 创业板指 30 日走势 | 指南针近一月日成交额 | 指南针近一月日线·量价 |
+
+`chart.html` 自包含（内联图表库与数据），可离线打开、零外部请求；图内保留
+`Lightweight Charts™ v5.2.1 (Apache-2.0)` 归属信息。
+
+**完整分析报告（内嵌图表）**
+
+[<img src="assets/sample-report-with-chart.png" width="520" alt="最终答复中的完整分析报告与内嵌图表">](assets/sample-report-with-chart.png)
 
 ## 安装到 DSH Web Profile
 > [!NOTE]
@@ -87,8 +101,21 @@ dsh plugin --profile web add github:v587d/capital-generation
 也可以在 Settings 中设置其为默认模式。
 ![set_default](assets/set_default.png)
 
+## 本地开发 / 构建 / 测试
+
+```bash
+npm install
+npm run build        # 生成 lib/ 与 chart-ui/client.js
+npm test             # 构建后运行全部测试
+npm run check:dsh    # 检查上游 DSH 扩展面兼容性，升级/发布前建议跑
+npm run smoke:boot   # 冒烟验证装配可正常 boot
+```
+
+构建产物 `lib/` 已随仓库提交，普通用户从 GitHub 安装时**无需**本地构建；只有需要改插件源码或
+维护子包时才需要执行以上命令。
+
 # 贡献
-可自行克隆本项目，本地构建，具体方法同类似项目，在此不累述。
+可自行克隆本项目，按上方「本地开发 / 构建 / 测试」执行。
 由于本项目正在迭代中，具体贡献规则还未定，提 PR 前建议 rebase.
 欢迎提 issue 和 PR.
 

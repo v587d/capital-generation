@@ -70,6 +70,35 @@ test('buildChartPayload：x 不是时间时自动降级为分类轴，并用 x �
   assert.deepEqual(labels, ['白酒', '银行'])
 })
 
+test('buildChartPayload：时间轴判定看全量数据，不被前置脏行误导', () => {
+  const rows = [
+    ...Array.from({ length: 21 }, (_value, index) => ({ date: `bad-${index}`, close: index })),
+    ...Array.from({ length: 100 }, (_value, index) => ({
+      date: new Date(Date.UTC(2025, 0, index + 1)).toISOString().slice(0, 10),
+      close: index + 21,
+    })),
+  ]
+  const payload = build(rows, { kind: 'line', x: 'date', series: ['close'] })
+  assert.equal(payload.axis, 'time')
+  assert.ok(payload.meta.warnings.some((warning) => /skipped/.test(warning)))
+})
+
+test('buildChartPayload：分类轴拒绝日期 range，但 marker time 可匹配原始分类标签', () => {
+  assert.throws(
+    () => build([
+      { sector: '白酒', revenue: 100 },
+      { sector: '银行', revenue: 200 },
+    ], { kind: 'column', x: 'sector', series: ['revenue'], range: { from: '2025-01-01' } }),
+    (error) => error.code === 'chart_spec_invalid' && /requires a time axis/.test(error.message),
+  )
+  const payload = build([
+    { sector: '白酒', revenue: 100 },
+    { sector: '银行', revenue: 200 },
+  ], { kind: 'column', x: 'sector', series: ['revenue'], markers: [{ time: '银行', text: '重点行业' }] })
+  assert.equal(payload.markers.length, 1)
+  assert.equal(payload.markers[0].time, payload.series[0].data[1].time)
+})
+
 test('buildChartPayload：下采样后所有子序列共用同一组时间（否则副图会错位）', () => {
   const rows = Array.from({ length: 5000 }, (_value, index) => ({
     date: new Date(Date.UTC(2000, 0, 1) + index * 86_400_000).toISOString().slice(0, 10),

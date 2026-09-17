@@ -32,3 +32,6 @@ docs/reference/*
 # smoke 脚本的临时 profile（正常会自清理，异常退出时可能残留）
 .tmp-boot/
 .tmp-debug/
+
+# ── 一次性复核/复现脚本的暂存目录（含内部安全复核内容，不随仓库发布）──
+.review/

@@ -283,14 +283,14 @@ export function createWindClient(options: WindClientOptions): WindClient {
         const initialized = await postRpc('initialize', {
           protocolVersion: '2025-03-26',
           capabilities: {},
-          clientInfo: { name: 'capital-generation', version: '0.1.0' },
+          clientInfo: { name: 'capital-generation', version: '2.0.0' },
         }, apiKey, signal)
         const initError = rpcErrorText(initialized)
         if (initError) return { ok: false, code: 'BACKEND', error: initError }
         const payload = await postRpc('tools/call', {
           name: toolName,
           arguments: args,
-          _meta: { clientVersion: '0.1.0' },
+          _meta: { clientVersion: '2.0.0' },
         }, apiKey, signal)
         return interpretResult(payload)
       } catch (error) {

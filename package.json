@@ -1,6 +1,6 @@
 {
   "name": "@v587d/capital-generation",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "description": "Capital Generation：面向中国散户的 AI 投资助手插件(Capital mode Agent Preset）",
   "author": "v587d",
   "license": "MIT",
@@ -49,7 +49,7 @@
     "@deepseek-ai/schemastery": "^3.18.2",
     "esbuild": "^0.28.2",
     "js-yaml": "^5.4.1",
-    "lightweight-charts": "^5.2.1",
+    "lightweight-charts": "5.2.1",
     "typescript": "^5.0.0"
   },
   "dependencies": {

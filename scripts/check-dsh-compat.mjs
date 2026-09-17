@@ -145,6 +145,79 @@ const probes = [
     },
   },
   {
+    id: 'L10',
+    title: 'Slot conversation.chat.turnTail + TurnTailOwnerProps',
+    why: '最终图表必须位于收尾 assistant 内容之后且不受 compact tool process 折叠；该 slot 是 DSH 的官方 turn-tail 扩展面。',
+    run() {
+      const file = join(PKG('dsh-client-ui-chat'), 'lib/types/client/contract/slots.d.ts')
+      const text = readIfPresent(file)
+      if (text === undefined) return { status: FAIL, detail: `读不到 ${file}` }
+      const checks = [
+        ['conversation.chat.turnTail', /conversation\.chat\.turnTail/],
+        ['kind chain', /'conversation\.chat\.turnTail':\s*\{\s*kind:\s*'chain'/s],
+        ['TurnTailOwnerProps.turn', /interface TurnTailOwnerProps[\s\S]*?turn:\s*TurnLocation/],
+        ['TurnTailOwnerProps.seq', /interface TurnTailOwnerProps[\s\S]*?seq:\s*number/],
+      ]
+      const missing = checks.filter(([, pattern]) => !pattern.test(text)).map(([label]) => label)
+      return missing.length === 0
+        ? { status: PASS, detail: 'turn-tail chain 与 owner props 仍可用' }
+        : { status: FAIL, detail: `turn-tail 契约变了：${missing.join(' / ')}` }
+    },
+  },
+  {
+    id: 'L11',
+    title: '会话日志自定义事件（Session.append）+ ctx.sessions.get + sessionProjections.stateOf',
+    why: '图表靠"宿主往根会话追加一条非 surface 事件、客户端折成 turn data"进对话流；append 变成 surface-only、deriveEventMessage 开始透传未知类型（污染上下文）、或 stateOf 改名，都会静默失效。',
+    run() {
+      const sessionFile = join(PKG('dsh-session'), 'lib/index.js')
+      const session = readIfPresent(sessionFile)
+      if (session === undefined) return { status: FAIL, detail: `读不到 ${sessionFile}` }
+      const projectionFile = join(PKG('dsh-session-projection'), 'lib/index.js')
+      const projection = readIfPresent(projectionFile)
+      if (projection === undefined) return { status: FAIL, detail: `读不到 ${projectionFile}` }
+
+      const checks = [
+        ['Session.append(type, data)', /append\(type, data/, session, sessionFile],
+        ['ctx.sessions 服务', /super\(ctx, "sessions"\)/, session, sessionFile],
+        ['sessions.get(id)', /get\(id\)/, session, sessionFile],
+        ['非 surface 事件不进消息历史（deriveEventMessage default: return null）', /default: return null/, session, sessionFile],
+        ['sessionProjections.stateOf(session, key)', /stateOf\(/, projection, projectionFile],
+      ]
+      const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: 'append / sessions.get / stateOf 都还在，且未知事件类型仍不进消息历史' }
+        : { status: FAIL, detail: `图表对话流通道的接口变了：${missing.join(' / ')}（见账本 L11）` }
+    },
+  },
+  {
+    id: 'L12',
+    title: 'agent/created（Scoped<Agent>）+ agent.ctx + tools.restrict 的 scoped 语义',
+    why: '根 Agent 的 render_chart / 孙 Agent 创建工具只能靠"在它自己的 agent scope 上 deny"拿掉；事件消失、agent.ctx 不可用或 restrict 变成 context-global，都会让主 Agent 重新拿到这些入口（或在 standing 层误伤 specialist）。',
+    run() {
+      const agentTypes = join(PKG('dsh-agent'), 'lib/types/runtime-types.d.ts')
+      const types = readIfPresent(agentTypes)
+      if (types === undefined) return { status: FAIL, detail: `读不到 ${agentTypes}` }
+      const toolsFile = join(PKG('dsh-tools'), 'lib/index.js')
+      const tools = readIfPresent(toolsFile)
+      if (tools === undefined) return { status: FAIL, detail: `读不到 ${toolsFile}` }
+      const presetsFile = join(PKG('dsh-agent-presets'), 'lib/index.js')
+      const presets = readIfPresent(presetsFile)
+      if (presets === undefined) return { status: FAIL, detail: `读不到 ${presetsFile}` }
+
+      const checks = [
+        ["'agent/created'(this: Scoped<Agent>, payload: { agent })", /'agent\/created'\(this: Scoped<Agent>/, types, agentTypes],
+        ['payload 带 agent（监听器据此拿 agent.ctx）', /'agent\/created'\(this: Scoped<Agent>, payload: \{[\s\S]{0,120}agent: Agent/, types, agentTypes],
+        ['tools.restrict() 要求 scoped context（agent.ctx）', /tools\.restrict\(\) requires a scoped context/, tools, toolsFile],
+        ['restrict 走 layer.restrictions.append（作用域层过滤）', /layer\.restrictions\.append\(compiled\)/, tools, toolsFile],
+        ['上游自己在 agent/created 里用 agent.ctx', /ctx\.on\("agent\/created"[\s\S]{0,240}agent\.ctx/, presets, presetsFile],
+      ]
+      const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: 'agent/created + agent.ctx + scoped restrict 仍可用（root 收敛机制成立）' }
+        : { status: FAIL, detail: `根 Agent 收敛机制的接口变了：${missing.join(' / ')}（见账本 L12）` }
+    },
+  },
+  {
     id: 'L5',
     title: 'react / react/jsx-runtime 仍是 shell 静态种子',
     why: '客户端 bundle 以 require("react") 取壳实例；种子词消失会让 bundle 在浏览器里 require 失败。',
@@ -220,6 +293,25 @@ const probes = [
       return missing.length === 0
         ? { status: PASS, detail: '行名解析的三条规则都还在（name 字面量 + path-like + patch 目录基址）' }
         : { status: FAIL, detail: `行名解析规则变了：${missing.join(' / ')}（cordis.patch.yml 的 capital-charts 行依赖它；见账本 L9 的三条规则）` }
+    },
+  },
+  {
+    id: 'L13',
+    title: 'host 侧认证围栏 connection.requestRejection(req) → 401 | 403 | undefined',
+    why: '/capital-charts 是自注册的 webServer prefix 路由，Web 载体本身不做认证（认证由 route owner 自负）；'
+      + '不接这道围栏，任何本机进程/页面凭 chart_id 就能读会话图表序列（2026-09 review 复现为 200）。',
+    run() {
+      const file = join(PKG('dsh-client-connection'), 'lib/types/rpc.d.ts')
+      const text = readIfPresent(file)
+      if (text === undefined) return { status: FAIL, detail: `读不到 ${file}` }
+      const checks = [
+        ['ConnectionRequestRejection = 401 | 403 | undefined', /ConnectionRequestRejection\s*=\s*401\s*\|\s*403\s*\|\s*undefined/],
+        ['requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection', /requestRejection\(\s*request:\s*ConnectionTrustRequest\s*\)\s*:\s*ConnectionRequestRejection/],
+      ]
+      const missing = checks.filter(([, pattern]) => !pattern.test(text)).map(([label]) => label)
+      return missing.length === 0
+        ? { status: PASS, detail: '认证围栏接口仍在（trusted-Host 403 + 浏览器 cookie 401）' }
+        : { status: FAIL, detail: `认证围栏接口变了：${missing.join(' / ')}（见账本 L13；chart-ui 序列路由依赖它，不能退回无认证端点）` }
     },
   },
 ]

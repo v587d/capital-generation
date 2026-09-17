@@ -100,7 +100,7 @@ test('request_data schema：只接受 capability/params/force_refresh/task_id，
   const { toolRuntime } = makeHubAndTools()
   const parameters = toolRuntime.definitions.find((d) => d.name === 'request_data').parameters
   assert.deepEqual(Object.keys(parameters.properties).sort(), ['capability', 'force_refresh', 'params', 'task_id'])
-  assert.deepEqual(parameters.required, ['capability', 'params'])
+  assert.deepEqual(parameters.required, ['capability', 'params', 'task_id'])
   assert.equal(parameters.additionalProperties, false)
   for (const forbidden of ['data_key', 'source_preference', 'schema_hint', 'requester_agent_id', 'request_id']) {
     assert.ok(!(forbidden in parameters.properties), `request_data 不应接受 ${forbidden}`)
@@ -132,11 +132,21 @@ test('request_data：返回 DatasetRef，宿主 store 收到 capability/params/t
   assert.deepEqual(saved.data, { ok: 1 }, 'raw data 只进入 store，不进入返回值')
 })
 
+
+test('request_data：缺 task_id 时在数据源调用前失败', async () => {
+  const { hub, toolRuntime } = makeHubAndTools()
+  hub.registerSource(source('quote'))
+  await assert.rejects(
+    () => runTool(toolRuntime, 'request_data', { capability: 'quote', params: {} }, exec(delegatedSession())),
+    /task_id is required/,
+  )
+})
+
 test('request_data：无调用 Agent session 时拒绝（官方 exec.agent 注入，不可伪造）', async () => {
   const { hub, toolRuntime } = makeHubAndTools()
   hub.registerSource(source('k'))
   await assert.rejects(
-    () => runTool(toolRuntime, 'request_data', { capability: 'k', params: {} }, exec(undefined)),
+    () => runTool(toolRuntime, 'request_data', { capability: 'k', params: {}, task_id: 'task-1' }, exec(undefined)),
     /calling agent session/,
   )
 })
@@ -145,14 +155,14 @@ test('request_data：顶层 main session 直接调用被工具层拒绝', async 
   const { hub, toolRuntime } = makeHubAndTools()
   hub.registerSource(source('k'))
   await assert.rejects(
-    () => runTool(toolRuntime, 'request_data', { capability: 'k', params: {} }, exec(session())),
+    () => runTool(toolRuntime, 'request_data', { capability: 'k', params: {}, task_id: 'task-1' }, exec(session())),
     /restricted to delegated data agents/,
   )
 })
 
 test('request_data：缺 capability 时错误明确（工具层校验，不吞成字符串）', async () => {
   const { toolRuntime } = makeHubAndTools()
-  await assert.rejects(() => runTool(toolRuntime, 'request_data', { params: {} }, exec(delegatedSession())), /capability is required/)
+  await assert.rejects(() => runTool(toolRuntime, 'request_data', { params: {}, task_id: 'task-1' }, exec(delegatedSession())), /capability is required/)
 })
 
 test('request_data：参数校验错误保留字段原因，并引导重新读取 describe_capability', async () => {
@@ -169,7 +179,7 @@ test('request_data：参数校验错误保留字段原因，并引导重新读�
     execute: async () => ({ data: {} }),
   })
   await assert.rejects(
-    () => runTool(toolRuntime, 'request_data', { capability: 'history', params: { start: '2025-01-01' } }, exec(delegatedSession())),
+    () => runTool(toolRuntime, 'request_data', { capability: 'history', params: { start: '2025-01-01' }, task_id: 'task-1' }, exec(delegatedSession())),
     (error) => {
       assert.equal(error.code, 'request_params_invalid')
       assert.match(error.message, /parameter start must be a JSON number \(integer\)/)
@@ -185,7 +195,7 @@ test('request_data：落盘错误不误标为参数错误', async () => {
   hub.registerSource(source('writable'))
   store.save = async () => { throw new Error('workspace_not_writable: read-only workspace') }
   await assert.rejects(
-    () => runTool(toolRuntime, 'request_data', { capability: 'writable', params: {} }, exec(delegatedSession())),
+    () => runTool(toolRuntime, 'request_data', { capability: 'writable', params: {}, task_id: 'task-1' }, exec(delegatedSession())),
     (error) => {
       assert.equal(error.code, undefined)
       assert.match(error.message, /^workspace_not_writable/)
@@ -200,7 +210,7 @@ test('request_data：落盘失败（workspace_not_writable）如实抛出，不�
   hub.registerSource(source('writable'))
   store.save = async () => { throw new Error('workspace_not_writable: read-only workspace') }
   await assert.rejects(
-    () => runTool(toolRuntime, 'request_data', { capability: 'writable', params: {} }, exec(delegatedSession())),
+    () => runTool(toolRuntime, 'request_data', { capability: 'writable', params: {}, task_id: 'task-1' }, exec(delegatedSession())),
     /workspace_not_writable/,
   )
 })

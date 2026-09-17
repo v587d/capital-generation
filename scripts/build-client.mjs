@@ -3,7 +3,7 @@
  * 把 `chart-ui/client.src.cjs` 打成客户端模块表 bundle：`chart-ui/client.js`。
  *
  * 为什么需要一个构建步骤（而不是手写 client.js）：
- *  - 设计（docs/design/chart-visualization.md §9）要求客户端**不产生页面全局**，
+ *  - 设计（内部设计文档 docs/design/chart-visualization.md §9）要求客户端**不产生页面全局**，
  *    所以 lightweight-charts 不能走 UMD 全局，必须是打包进来的 ESM 模块（tree-shake 后）。
  *  - 运行时（src/chart/runtime.ts）以**字符串**形式与自包含 HTML 同源；这里把它落成一个
  *    真实的临时模块（而不是在浏览器里 `eval`），既避免 CSP 风险，也保持两边同源。

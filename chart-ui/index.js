@@ -1,38 +1,18 @@
 /**
- * `@v587d/capital-charts` 的**宿主半边**。
+ * `@v587d/capital-charts` 的 host half。
  *
- * 为什么这个包存在、为什么它必须是独立包、为什么它是纯 JS：
- *  - **独立包**：`dsh-client-modules` 认定"一个包 = 一份客户端 bundle"，同一个包名出现在
- *    两个 active Loader source 上是组合错误。工具在 preset 平面（会话级），图表 UI 必须在
- *    host 平面（页面启动时就在），所以只能是两个包。
- *  - **host 平面**：boot graph 在 index.html 渲染时确定，运行期新增 entry 没有送达浏览器的
- *    通道；挂在 preset 行的客户端 bundle 到不了页面。
- *  - **纯 JS 不构建**：宿主半边只有"登记 + 路由"两件事，没有类型密集的逻辑；让它保持零构建
- *    就不必给嵌套包再搭一套 tsc 流程。行为由 test/chart-host.test.mjs 覆盖。
- *
- * 职责边界：本包**不碰文件系统里的业务数据**。图表序列由 preset 半边的 render_chart 工具
- * 写进 workspace 后，把**已解析好的绝对路径**登记到这里；路由只读它登记过的文件，
- * 因此 URL 里没有任何用户可控的路径成分。
+ * It owns only opaque chart registrations and their browser route. It never
+ * reads Dataset files itself; render_chart supplies the resolved chart series
+ * path, and the turn event published by the plugin carries the small metadata
+ * the client renders.
  */
 
-/** Loader 行的稳定身份。 */
 export const name = 'capital-charts'
-
-/** 路由前缀；客户端半边与回执共用这一个常量，避免两处漂移。 */
 export const ROUTE_PATH = '/capital-charts'
 
-/** chart_id 形态：由 render_chart 生成（`ch_<uuid>`），这里只做白名单校验。 */
 const CHART_ID_PATTERN = /^ch_[A-Za-z0-9._-]{1,80}$/
-
-/** 登记表容量上限：图表是会话内产物，超出按最旧淘汰，防止长时间运行无界增长。 */
 const MAX_ENTRIES = 500
 
-/**
- * 取 Node 内建 fs。
- *
- * 与本仓其它地方同一个惯用法（`process.getBuiltinModule`）：只依赖运行时能力，
- * 不引入 `@types/node`。
- */
 function defaultReadFile(path) {
   const processLike = globalThis.process
   const fs = processLike?.getBuiltinModule?.('node:fs')
@@ -40,20 +20,12 @@ function defaultReadFile(path) {
   return fs.readFileSync(path, 'utf8')
 }
 
-/**
- * 图表登记表：chart_id → 已解析的绝对文件路径。
- *
- * `readFile` 可注入，测试因此不必真的落盘。
- */
 export function createChartStore(options = {}) {
   const readFile = options.readFile ?? defaultReadFile
+  let routeReady = options.routeReady ?? true
   const files = new Map()
 
   return {
-    /**
-     * 登记一张图的序列文件，返回客户端可取数的 URL。
-     * @throws 当 chart_id 形态非法或路径为空——宁可响亮失败，也不要登记一条永远 404 的 URL。
-     */
     publish(input) {
       const chartId = input?.chartId
       const filePath = input?.filePath
@@ -63,11 +35,14 @@ export function createChartStore(options = {}) {
       if (typeof filePath !== 'string' || filePath.length === 0) {
         throw new Error('capital-charts: filePath is required')
       }
-      // 重新登记同一个 id 时移到最新（等价于刷新 LRU 位置）。
       files.delete(chartId)
       files.set(chartId, filePath)
       while (files.size > MAX_ENTRIES) files.delete(files.keys().next().value)
-      return `${ROUTE_PATH}/${chartId}.json`
+      return routeReady ? `${ROUTE_PATH}/${chartId}.json` : null
+    },
+
+    setRouteReady(value) {
+      routeReady = value === true
     },
 
     filePathOf(chartId) {
@@ -92,22 +67,57 @@ function send(res, status, payload) {
   res.end(body)
 }
 
+function pathnameOf(req, res) {
+  try {
+    return new URL(req.url ?? '/', 'http://localhost').pathname
+  } catch {
+    send(res, 400, { error: 'bad_request' })
+    return undefined
+  }
+}
+
 /**
- * `/capital-charts/<chart_id>.json` 的处理器。
+ * Build the series route handler.
  *
- * 只服务**登记过的**文件：URL 里没有路径成分，因此不存在目录穿越面。
+ * @param store - the opaque chart registry.
+ * @param options.authorize - optional `(req) => 401 | 403 | undefined`. When it
+ *   returns a status the handler answers with that status and never touches the
+ *   registry, so an unauthenticated caller learns nothing about `chart_id`.
+ *   `apply()` passes `connection.requestRejection` here: that is the same
+ *   trusted-Host fence + signed browser cookie every other session-scoped Web
+ *   route runs behind (`/api`, the static index), and a route that skips it is
+ *   readable by any local process or page that learns a `chart_id`
+ *   (2026-09-17 review). A composition with no `connection` service (no browser
+ *   auth plane at all) passes nothing and keeps the old behaviour.
  */
-export function createRouteHandler(store) {
+export function createRouteHandler(store, options = {}) {
+  const authorize = options.authorize
   return async function handler(req, res) {
+    if (typeof authorize === 'function') {
+      let rejection
+      try {
+        rejection = authorize(req)
+      } catch {
+        // An authorizer that cannot answer must not fall through to the data:
+        // fail closed on the same status the platform uses for a missing cookie.
+        rejection = 401
+      }
+      if (rejection !== undefined && rejection !== null) {
+        res.statusCode = rejection
+        res.setHeader('content-type', 'text/plain; charset=utf-8')
+        res.setHeader('cache-control', 'no-store')
+        res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
+        return
+      }
+    }
     if (req?.method !== 'GET') {
       send(res, 405, { error: 'method_not_allowed' })
       return
     }
-    let pathname
-    try {
-      pathname = new URL(req.url ?? '/', 'http://localhost').pathname
-    } catch {
-      send(res, 400, { error: 'bad_request' })
+    const pathname = pathnameOf(req, res)
+    if (pathname === undefined) return
+    if (pathname !== ROUTE_PATH && !pathname.startsWith(`${ROUTE_PATH}/`)) {
+      send(res, 404, { error: 'not_found' })
       return
     }
     const match = /^\/([^/]+)\.json$/.exec(pathname.slice(ROUTE_PATH.length))
@@ -145,23 +155,43 @@ export function createRouteHandler(store) {
   }
 }
 
-/**
- * 挂载宿主半边。
- *
- * `webServer` 走**可选**注入（与 dsh-client-modules 同一写法）：没有 Web 载体的
- * profile（headless 等）里本行仍然激活并正常提供 `capitalCharts` 服务，只是不注册路由，
- * 而不是变成一行永远 waiting 的死行。
- */
 export function apply(ctx) {
-  const store = createChartStore()
+  const store = createChartStore({ routeReady: false })
   ctx.provide('capitalCharts', {
-    /** @returns 客户端取数 URL；路由未挂载（无 webServer）时调用方仍可用文件路径降级。 */
     publish: (input) => store.publish(input),
   })
 
+  /**
+   * 认证围栏：优先解析 host 平面的 `connection`（web profile 由
+   * `@deepseek-ai/dsh-client-connection` 提供），把它的 `requestRejection`
+   * 原样接到本路由上——trusted-Host（403）+ 签名 cookie（401）。
+   *
+   * 惰性解析而不是 apply 时解析一次：`connection` 与本行的挂载先后不由我们决定。
+   * 服务整体缺席（Electron/file:// 这类没有浏览器认证面的载体）时返回 undefined，
+   * 退化成"没有认证面"的旧行为；但**解析抛错**（上下文已销毁）一律 401，宁可拒绝。
+   */
+  const authorize = (req) => {
+    let connection
+    try {
+      connection = ctx.get('connection')
+    } catch {
+      return 401
+    }
+    if (connection === undefined || connection === null) return undefined
+    if (typeof connection.requestRejection !== 'function') return undefined
+    return connection.requestRejection(req)
+  }
+
   const registerRoute = (webCtx) => {
     webCtx.effect(
-      () => webCtx.webServer.register({ kind: 'prefix', path: ROUTE_PATH, handler: createRouteHandler(store) }),
+      () => {
+        const chartDispose = webCtx.webServer.register({ kind: 'prefix', path: ROUTE_PATH, handler: createRouteHandler(store, { authorize }) })
+        store.setRouteReady(true)
+        return () => {
+          store.setRouteReady(false)
+          if (typeof chartDispose === 'function') chartDispose()
+        }
+      },
       'capital-charts: series route',
     )
   }

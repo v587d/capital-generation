@@ -17,7 +17,12 @@ description: Use when delegating in Capital mode — running the per-round list_
 - 不要把它当成"仅在会话恢复时才做的回忆步骤"：上一轮查到的空列表不能代替本轮查询。
 - 一次查询结果覆盖本轮所有角色，不要为每个角色重复查询；等待回传期间也不要轮询。
 
-## 2. 匹配与复用
+## 1.1 Canonical task_id（不可分叉）
+
+主 Agent 在本轮第一次委派前先确定一个唯一的 `task_id`，并把它原样写入所有 `data_collector`、`data_junior` 和需要可视化的任务 prompt。子 Agent 不得自行生成替代 task_id；收到缺失或不同值时必须回告主 Agent，不要默默创建新任务。
+
+委派清单的 `task_id` 是授权账本，不是描述性备注。`DatasetRef.task_id`、`profile_ref.task_id`、`chart_source_ref` 和 `chart_ref` 必须能沿同一个值对账。引用 chart receipt 前先核对它绑定的 task；若错误返回 `expected_task_id`，使用错误中给出的实际绑定值修正，不要猜测或反复试不同 id。
+
 
 只处理 `kind=child` 的条目。按 `label` 精确匹配三个稳定角色标签：`data_collector`、
 `data_junior`、`web_retriever`。

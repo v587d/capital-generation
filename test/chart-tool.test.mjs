@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WorkspaceDatasetStore } from '../lib/data-collector/store.js'
-import { renderChart } from '../lib/chart/tool.js'
+import { renderChart, registerChartTool } from '../lib/chart/tool.js'
 
 /**
  * render_chart 的端到端契约（假 fs + 真 store，因此沙箱归属校验是真的在跑）。
@@ -130,7 +130,7 @@ test('render_chart：dataset 来源产出三件产物，回执不含任何原始
   const serialized = JSON.stringify(receipt)
   assert.equal(serialized.includes(String(SENTINEL)), false, '回执泄漏了数据点')
   assert.deepEqual(Object.keys(receipt).sort(), [
-    'axis', 'captured_at', 'chart_id', 'chart_url', 'dataset_id', 'downsampled', 'has_volume',
+    'axis', 'captured_at', 'chart_id', 'chart_ref', 'chart_url', 'dataset_id', 'downsampled', 'has_volume',
     'html_path', 'kind', 'markers', 'original_points', 'points', 'series_labels', 'series_path',
     'source_label', 'spec_path', 'title', 'warnings',
   ])
@@ -213,6 +213,11 @@ test('render_chart：来源与路径边界都被显式拒绝', async () => {
     () => renderChart({ store }, { dataset_id: ref.dataset_id, spec: { kind: 'line', series: ['close'] } }, execAs({ id: 'other-main', header: { cwd: WORKSPACE } })),
     (error) => error.code === 'dataset_session_mismatch',
   )
+  await assert.rejects(
+    () => renderChart({ store }, { path: 'my-data.json', spec: { kind: 'line', series: ['v'] } }, execAs(COLLECTOR)),
+    (error) => error.code === 'chart_source_scope_mismatch',
+    'delegated callers must not use path as a chart source',
+  )
   assert.equal(fs.files.size > 0, true)
 })
 
@@ -222,6 +227,25 @@ test('render_chart：字段名写错时错误文本带候选字段，可一次�
   await assert.rejects(
     () => renderChart({ store }, { dataset_id: ref.dataset_id, spec: { kind: 'line', x: 'trade_date', series: ['close_price'] } }, exec()),
     (error) => error.code === 'chart_field_not_found' && /available fields:/.test(error.message) && /close/.test(error.message),
+  )
+})
+
+test('注册后的 render_chart：Dataset/文件错误转换成模型可读 JSON 信封', async () => {
+  const { store } = makeStore()
+  let definition
+  registerChartTool({
+    get: (name) => name === 'tools' ? { register: (value) => { definition = value; return () => {} } } : undefined,
+    effect: (callback) => callback(),
+  }, { store })
+
+  await assert.rejects(
+    () => definition.execute({ path: 'missing.json', spec: { kind: 'line', series: ['close'] } }, exec()),
+    (error) => {
+      const envelope = JSON.parse(error.message)
+      return error.code === 'chart_source_not_found'
+        && envelope.error === 'chart_source_not_found'
+        && envelope.cause === 'dataset_not_found'
+    },
   )
 })
 

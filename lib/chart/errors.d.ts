@@ -5,7 +5,7 @@
  * preset/capital-generation/skills/capital-chart-protocol/SKILL.md）。
  * 因此 detail 必须可操作（点名缺哪个字段、可用字段有哪些），而不是笼统的 invalid。
  */
-export type ChartErrorCode = 'chart_source_invalid' | 'chart_source_not_found' | 'chart_spec_invalid' | 'chart_field_not_found' | 'chart_no_rows' | 'chart_too_large' | 'chart_write_failed' | 'chart_runtime_unavailable';
+export type ChartErrorCode = 'chart_source_invalid' | 'chart_source_expired' | 'chart_source_scope_mismatch' | 'chart_source_not_found' | 'chart_ref_invalid' | 'chart_ref_scope_mismatch' | 'chart_ref_task_mismatch' | 'chart_spec_invalid' | 'chart_field_not_found' | 'chart_no_rows' | 'chart_too_large' | 'chart_write_failed' | 'chart_runtime_unavailable';
 export declare class ChartError extends Error {
     readonly code: ChartErrorCode;
     /** 可选的机器可读补充（如 available 字段名列表），会随错误一起序列化回模型。 */
