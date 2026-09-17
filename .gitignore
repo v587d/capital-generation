@@ -4,6 +4,7 @@ node_modules/
 .npm-cache/
 *.tgz
 *.log
+*:Zone.Identifier
 *.Zone.Identifier
 
 # ── build output（本仓库对外提供 lib/，不忽略）──
