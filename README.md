@@ -122,7 +122,9 @@ npm run smoke:boot   # 冒烟验证装配可正常 boot
 
 # 贡献
 可自行克隆本项目，按上方「本地开发 / 构建 / 测试」执行。
-由于本项目正在迭代中，具体贡献规则还未定，提 PR 前建议 rebase.
+由于本项目正在迭代中，具体贡献规则见[CONTRIBUTING](CONTRIBUTING.md)，提 PR 前建议 rebase.
 欢迎提 issue 和 PR.
 
 # MIT
+
+
