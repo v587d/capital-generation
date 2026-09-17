@@ -75,7 +75,7 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
 
 <p align="center">
   <a href="assets/sample-report-with-chart.png">
-    <img src="assets/sample-report-with-chart.png" width="720" alt="最终答复中的完整分析报告与内嵌图表">
+    <img src="assets/sample-report-with-chart2.png" width="720" alt="最终答复中的完整分析报告与内嵌图表">
   </a>
   <br>
   <em>长截图，建议点击查看原图</em>
@@ -124,6 +124,10 @@ npm run smoke:boot   # 冒烟验证装配可正常 boot
 可自行克隆本项目，按上方「本地开发 / 构建 / 测试」执行。
 由于本项目正在迭代中，具体贡献规则见[CONTRIBUTING](CONTRIBUTING.md)，提 PR 前建议 rebase.
 欢迎提 issue 和 PR.
+
+[DSH 官方社区](https://github.com/deepseek-ai/deepseek-harness/discussions/6947)
+
+[Captail Generation 项目社区](https://github.com/v587d/capital-generation/discussions)
 
 # MIT
 
