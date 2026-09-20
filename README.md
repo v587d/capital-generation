@@ -71,6 +71,9 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
 `chart.html` 自包含（内联图表库与数据），可离线打开、零外部请求；图内保留
 `Lightweight Charts™ v5.2.1 (Apache-2.0)` 归属信息。
 
+## 样例
+[报告样例（最新）](docs/sample/指南针综合研判分析完整报告.md)
+
 **完整分析报告（内嵌图表）**
 
 <p align="center">
