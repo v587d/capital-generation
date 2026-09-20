@@ -18,13 +18,13 @@
 </p>
 
 > [!IMPORTANT]
-> 本项目长期处于探索阶段，不提供任何形式的金融服务，不承诺任何投资回报，投资需审慎。 盈亏自负，与本项目一概无关。
+> 本项目长期处于探索阶段，不提供任何形式的金融服务，不承诺任何投资回报。 投资需审慎， 盈亏自负，与本项目一概无关。
 >
 > 愿大家的财富数字就像"text generation"一样，不断增长，永不停止。
 
 > [!NOTE]
 > 先安装 [Deepseek Harness(DSH)](https://github.com/deepseek-ai/deepseek-harness) ，目前已适配 DSH`@0.1.5-rc.2` 。
-> LLM 建议 **Deepseek/deepseek-flash** 搭配本项目， GPT / Claude 尚未充分测试，理论亦可。
+> 建议使用 **Deepseek/deepseek-flash**(High thinking) 搭配本项目， GPT / Claude 尚未充分测试，理论亦可。
 
 # Slogan
 Next-Gen AI-Driven Capital Generation.
@@ -66,7 +66,7 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
 | 侧栏自包含 HTML：折线 | 侧栏自包含 HTML：K 线 + 量价 |
 | :---: | :---: |
 | [<img src="assets/chart-line-sidebar.png" width="260" alt="成交额折线图在侧栏打开的自包含 chart.html 中">](assets/chart-line-sidebar.png) | [<img src="assets/chart-candlestick-sidebar.png" width="260" alt="日线量价 K 线在侧栏打开的自包含 chart.html 中">](assets/chart-candlestick-sidebar.png) |
-| 指南针近一月日成交额 | 指南针近一月日线·量价 |
+| 某股票近一月日成交额 | 某股票近一月日线·量价 |
 
 > 历史截图 `assets/chart-turn-tail-candlestick.png` 记录的是 2026-09-18 之前的内嵌「收尾卡片」形态；
 > 该通道因会让会话日志不可加载而整体移除（见 `AGENTS.md` 的「图表呈现纪律」），保留仅供对照。
