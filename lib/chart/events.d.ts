@@ -72,6 +72,13 @@ export interface ChartEventPublisher {
 /** 只读：最近一次 publish 轨迹。 */
 export declare function chartEventPublishTrace(): string;
 /**
+ * 交付通道的**诊断开关**：`CAPITAL_CHART_TRACE=1` 时才输出进度日志与落盘 trace。
+ *
+ * 默认关闭——对外发布不该往用户终端刷进度、也不该往 workspace 写调试文件。
+ * 排查"图表/交付行不出现"时打开它（见 `deliverable-trace.txt` 与 AGENTS.md 的说明）。
+ */
+export declare function chartTraceEnabled(): boolean;
+/**
  * 从 owner scope 出发向上走到根会话：用户看的是根会话的对话流，卡片必须挂在它上面。
  * 找不到（会话已回收）时返回 undefined，调用方静默跳过。
  */

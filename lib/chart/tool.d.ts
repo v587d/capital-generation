@@ -15,7 +15,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import { WorkspaceDatasetStore } from '../data-collector/store.js';
 import { type ChartSourceTokenStore } from './source-token.js';
 import { ChartArtifactRegistry } from './artifact-ref.js';
-import type { ChartEventPublisher } from './events.js';
+import { type ChartEventPublisher } from './events.js';
 type AgentExecutionLike = {
     session?: {
         id?: string;

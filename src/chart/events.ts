@@ -134,6 +134,22 @@ export function chartEventPublishTrace(): string {
   return lastPublishTrace
 }
 
+/**
+ * 交付通道的**诊断开关**：`CAPITAL_CHART_TRACE=1` 时才输出进度日志与落盘 trace。
+ *
+ * 默认关闭——对外发布不该往用户终端刷进度、也不该往 workspace 写调试文件。
+ * 排查"图表/交付行不出现"时打开它（见 `deliverable-trace.txt` 与 AGENTS.md 的说明）。
+ */
+export function chartTraceEnabled(): boolean {
+  try {
+    const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+    const value = env?.CAPITAL_CHART_TRACE
+    return value === '1' || value === 'true'
+  } catch {
+    return false
+  }
+}
+
 function isAppendableSession(value: unknown): value is AppendableSession {
   return Boolean(value)
     && typeof (value as { append?: unknown }).append === 'function'
@@ -313,13 +329,17 @@ function buildChartEventPublisher(ctx: ChartEventContext): ChartEventPublisher |
   }
 
   /**
-   * 进度日志（不节流、不算警告）。
+   * 进度日志：**只在 `CAPITAL_CHART_TRACE=1` 时输出**。
    *
-   * "交付行/卡片不出现"是本项目最容易反复踩的故障，而它的失败模式几乎都是**静默**的
-   * （2026-09-20 两轮排查都因为没有日志只能靠猜）。所以寄存与登记这两处状态迁移每次都留痕，
-   * 与失败用的 `warn` 分开：既不会被节流吞掉，也不会把正常流程标成警告。
+   * 寄存/登记这两处状态迁移是排查"交付行不出现"的关键线索，但对**普通用户是噪音**
+   * （每张图两条）。所以默认静默、按需打开：
+   *
+   *   CAPITAL_CHART_TRACE=1 dsh web
+   *
+   * 失败用的 `warn` 不受此开关影响——真出问题必须让人看见。
    */
   const note = (message: string): void => {
+    if (!chartTraceEnabled()) return
     emit(message)
   }
 

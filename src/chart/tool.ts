@@ -20,7 +20,7 @@ import { buildChartPayload, extractRows, MAX_CHART_POINTS } from './series.js'
 import { normalizeChartSpec } from './spec.js'
 import { chartSourceTokenForRender, type ChartSourceTokenStore } from './source-token.js'
 import { ChartArtifactRegistry, chartSessionScopeId } from './artifact-ref.js'
-import type { ChartEventPublisher } from './events.js'
+import { chartTraceEnabled, type ChartEventPublisher } from './events.js'
 
 type ToolRuntimeLike = { register(definition: unknown): () => void }
 type AgentExecutionLike = { session?: { id?: string; header?: { cwd?: string; parentSession?: string } } }
@@ -282,10 +282,6 @@ export async function renderChart(input: RenderChartInput, args: Record<string, 
   // 走官方 `deliverables/presented`——**不能**改回自定义事件类型：会话日志的事件词汇表
   // 是闭集，非 first-party 类型会让整份会话在冷加载时打不开（事故记录见 src/chart/events.ts）。
   // 事件不进模型消息历史。呈现通道可选：写不进去不影响图表产物与回执。
-  //
-  // 交付登记轨迹写进图表产物目录（`deliverable-trace.txt`）：交付行"静默不出现"是本项目
-  // 最难查的故障（2026-09-20 连查四轮），而宿主终端不总能拿到（cordis logger 只进内存）。
-  // 落盘之后可以直接从磁盘定位，不必依赖终端或用户转述。
   let deliverableTrace: string
   try {
     const publisher = input.chartEvents?.()
@@ -304,15 +300,21 @@ export async function renderChart(input: RenderChartInput, args: Record<string, 
   } catch (error) {
     deliverableTrace = `交付登记抛错（已吞掉，不影响出图）：${error instanceof Error ? error.message : String(error)}`
   }
-  try {
-    await input.store.writeWorkspaceFiles({
-      session,
-      dir,
-      files: [{ name: 'deliverable-trace.txt', content: `${deliverableTrace}\n` }],
-      signal: exec.signal,
-    })
-  } catch {
-    // 诊断落盘失败不影响出图。
+  // 诊断落盘**默认关闭**：交付行"静默不出现"是最难查的故障（2026-09-20 连查四轮），
+  // 而宿主终端不总能拿到（cordis logger 只进内存），所以留一条可从磁盘定位的出口；
+  // 但它属于调试产物，不该出现在对外版本的 workspace 里。
+  // 需要时用 `CAPITAL_CHART_TRACE=1` 启动宿主，图表产物目录会多出 deliverable-trace.txt。
+  if (chartTraceEnabled()) {
+    try {
+      await input.store.writeWorkspaceFiles({
+        session,
+        dir,
+        files: [{ name: 'deliverable-trace.txt', content: `${deliverableTrace}\n` }],
+        signal: exec.signal,
+      })
+    } catch {
+      // 诊断落盘失败不影响出图。
+    }
   }
 
   return {

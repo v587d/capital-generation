@@ -116,6 +116,7 @@ dsh plugin --profile web remove @v587d/capital-generation
 | 2026-09-18 | 0.1.5-rc.1 → rc.2 | 设计修订（本文件 L10/L11）：图表呈现改走**官方 `deliverables/presented`**，客户端 turn-tail 卡片通道整体移除；L11 探针新增"`deliverables/presented` 仍在闭集词汇表内"断言。`npm test`（332）与 `check:dsh`（13）覆盖新面 |
 | 2026-09-20 | 0.1.5-rc.2 | 真机复核：① 交付行点开 → 右侧 iframe 渲染自包含图表；② 重启后历史会话可正常加载。**新发现落点问题**：交付行出现在中间过程轮 —— 实测 session `38bad3f9`：三张图在 turn 4/5 之间寄存，旧规则在下一次 `turn/start` 立刻冲刷，落进过程轮 turn 5，而总结答复在 turn 6。新增 **L14**（`agent/turn-stopping`，在 `turn/end` 之前派发、轮仍打开）作为首选冲刷时机，`turn/start` 降为兜底 |
 | 2026-09-20 | 0.1.5-rc.2 | **交付呈现通道端到端打通（真机确认）**。连查四轮，最终由**落盘 trace**（`capital-analysis/charts/<id>/deliverable-trace.txt`）定位真根因：`src/index.ts` 用**对象展开**组装交付 ctx，而 cordis Context 的 `get`/`on`/`effect` 挂在**原型**上 ⇒ `ctx.get` 丢失 ⇒ `buildChartEventPublisher` 首行抛 `ctx.get is not a function` ⇒ 被 `tool.ts` 的 `catch {}` 吞掉 ⇒ **`publish()` 从未执行**（该通道自加入起就没真正跑过）。改为逐项显式转发；并修掉四个连带缺陷（owner 归档键 / turn-stopping 注册失败未回退 / 队列实例级 / 发布器非单例）。真机日志：`图表已寄存 … owner=session-bac05ffe… lastTurn=4 寄存 1 张` → `图表已登记为本轮交付 … turn=5`，卡片出现在 turn 5。复查：23 个会话**冷加载 0 失败、闭集外事件 0**。`npm test`（338）与 `check:dsh`（14）覆盖 |
+| 2026-09-20 | 0.1.5-rc.2 | 交付通道诊断**默认关闭**（`CAPITAL_CHART_TRACE=1` 才输出进度日志 + 落盘 `deliverable-trace.txt`）：调试产物不进对外版本的终端与 workspace。失败用的 `warn` 不受开关影响。新增 `npm run verify:sessions`（真实后端逐份冷加载 + 闭集词汇表核对，区分历史遗留与新回归） |
 
 ## 事故记录
 
