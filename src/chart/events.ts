@@ -114,6 +114,24 @@ export interface ChartEventPublisher {
   publish(input: ChartTurnEventInput): boolean
   /** 诊断：还没拿到回合、寄存中的图表数。 */
   pendingCount?(ownerSessionId?: string): number
+  /**
+   * 诊断：最近一次 publish 的逐步结论（给回执/落盘用）。
+   *
+   * 为什么需要它：交付行"静默不出现"是本项目最难查的故障，而宿主终端并不总能拿到
+   * （cordis logger 只进内存；stderr 也可能落在用户看不到的地方）。把结论带回
+   * `render_chart` 的回执 / 落盘产物，就能**从磁盘**定位，不必依赖终端。
+   */
+  lastTrace?(): string
+}
+
+/**
+ * 最近一次 publish 的逐步轨迹（模块级：发布器每次出图都新建，轨迹要跨实例可读）。
+ */
+let lastPublishTrace = ''
+
+/** 只读：最近一次 publish 轨迹。 */
+export function chartEventPublishTrace(): string {
+  return lastPublishTrace
 }
 
 function isAppendableSession(value: unknown): value is AppendableSession {
@@ -224,7 +242,37 @@ export function resetChartEventPending(): void {
  * 惰性构造发布器：`sessions` / `sessionProjections` 缺一不可（都是宿主平面服务，
  * 在 preset scope 里正常可解析；缺失表示宿主组合不完整，此时静默降级）。
  */
+/**
+ * 进程级单例发布器。
+ *
+ * ⚠️ 2026-09-20 真机事故的**真根因**：`src/index.ts` 的 `chartEvents: () => createChartEventPublisher(...)`
+ * 是**每次 `render_chart` 都调用一次**的。若每次都新建发布器：
+ *   1. 实例 A 出图时把图寄存进自己的队列，并注册了**绑定在 A 上**的冲刷监听；
+ *   2. 下一次出图再建实例 B（又注册一套监听）；
+ *   3. 冲刷回调里 `flush` 闭包引用的是某个实例的队列，而实例不断增多，
+ *      寄存与冲刷落在不同实例上 —— 于是"专家确实出图，但主会话一条交付事件都没有"。
+ *
+ * 所以发布器必须**进程内唯一**：队列、监听、perTurn 计数都只有一份。
+ * 缓存键用 `ctx.root ?? ctx`（cordis 的 root context 是稳定对象；`index.ts` 传进来的
+ * 是个每次新建的 spread 字面量，不能用它做身份判断）。构造失败不缓存——宿主服务
+ * 可能稍后才就绪，下次出图要能重新解析（保留原有的惰性语义）。
+ */
+let cachedPublisher: { ref: unknown; publisher: ChartEventPublisher } | undefined
+
 export function createChartEventPublisher(ctx: ChartEventContext): ChartEventPublisher | undefined {
+  const ref = ctx.root ?? ctx
+  if (cachedPublisher !== undefined && cachedPublisher.ref === ref) return cachedPublisher.publisher
+  const publisher = buildChartEventPublisher(ctx)
+  if (publisher !== undefined) cachedPublisher = { ref, publisher }
+  return publisher
+}
+
+/** 只给测试用：丢弃单例缓存（配合 resetChartEventPending 做用例隔离）。 */
+export function resetChartEventPublisher(): void {
+  cachedPublisher = undefined
+}
+
+function buildChartEventPublisher(ctx: ChartEventContext): ChartEventPublisher | undefined {
   const sessions = ctx.get('sessions') as SessionsService | undefined
   if (sessions === undefined || typeof sessions.get !== 'function') return undefined
   const projections = ctx.get('sessionProjections') as ProjectionsService | undefined
@@ -397,11 +445,14 @@ export function createChartEventPublisher(ctx: ChartEventContext): ChartEventPub
 
   return {
     publish(input) {
+      const trace: string[] = []
       const owner = resolveOwnerSession(sessions, input.ownerSessionId)
       if (owner === undefined) {
+        lastPublishTrace = `owner 未解析：ownerSessionId=${input.ownerSessionId}（sessions.get 拿不到可直接 append 的会话）`
         warn(`图表对话流事件跳过：找不到 owner 会话 ${input.ownerSessionId}（图表已落盘，走 html_path 降级）`)
         return false
       }
+      trace.push(`owner=${owner.id}`)
       const boundary = boundaryOf(owner)
       const openSeq = boundary?.openTurnStartSeq
       const lastTurn = boundary?.lastTurn
@@ -432,14 +483,18 @@ export function createChartEventPublisher(ctx: ChartEventContext): ChartEventPub
         // "已登记" 日志，就说明冲刷时机没接上（2026-09-20 的静默丢失正是死在这里，
         // 两轮排查都因为没有日志而只能猜）。只在进程内报一次，不刷屏。
         note(`图表已寄存，待 owner 回合关闭时登记（owner=${owner.id}，lastTurn=${String(lastTurn)}，寄存 ${queued.length} 张）`)
+        lastPublishTrace = `${trace.join(' ')} 回合未打开(openTurnStartSeq=${String(openSeq)} lastTurn=${String(lastTurn)}) → 已寄存 ${queued.length} 张，等 turn-stopping/turn-start 冲刷`
         return true
       }
       // turn 0 / 非法值表示该会话还没真正开过回合。
       if (typeof lastTurn !== 'number' || !Number.isSafeInteger(lastTurn) || lastTurn < 1) {
+        lastPublishTrace = `${trace.join(' ')} 回合号非法(lastTurn=${String(lastTurn)}) → 未写入`
         warn('图表对话流事件跳过：owner 会话没有打开中的 turn')
         return false
       }
-      return append(owner, lastTurn, input)
+      const written = append(owner, lastTurn, input)
+      lastPublishTrace = `${trace.join(' ')} 回合打开(turn=${lastTurn}) → ${written ? '已直接登记' : '写入失败'}`
+      return written
     },
 
     /** 诊断/测试用：当前寄存未冲刷的图表数。 */

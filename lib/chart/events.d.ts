@@ -60,7 +60,17 @@ export interface ChartEventPublisher {
     publish(input: ChartTurnEventInput): boolean;
     /** 诊断：还没拿到回合、寄存中的图表数。 */
     pendingCount?(ownerSessionId?: string): number;
+    /**
+     * 诊断：最近一次 publish 的逐步结论（给回执/落盘用）。
+     *
+     * 为什么需要它：交付行"静默不出现"是本项目最难查的故障，而宿主终端并不总能拿到
+     * （cordis logger 只进内存；stderr 也可能落在用户看不到的地方）。把结论带回
+     * `render_chart` 的回执 / 落盘产物，就能**从磁盘**定位，不必依赖终端。
+     */
+    lastTrace?(): string;
 }
+/** 只读：最近一次 publish 轨迹。 */
+export declare function chartEventPublishTrace(): string;
 /**
  * 从 owner scope 出发向上走到根会话：用户看的是根会话的对话流，卡片必须挂在它上面。
  * 找不到（会话已回收）时返回 undefined，调用方静默跳过。
@@ -95,11 +105,9 @@ export declare const MAX_PENDING_CHARTS = 64;
  * 共享它。测试之间要隔离，就在用例开始时调用一次。
  */
 export declare function resetChartEventPending(): void;
-/**
- * 惰性构造发布器：`sessions` / `sessionProjections` 缺一不可（都是宿主平面服务，
- * 在 preset scope 里正常可解析；缺失表示宿主组合不完整，此时静默降级）。
- */
 export declare function createChartEventPublisher(ctx: ChartEventContext): ChartEventPublisher | undefined;
+/** 只给测试用：丢弃单例缓存（配合 resetChartEventPending 做用例隔离）。 */
+export declare function resetChartEventPublisher(): void;
 /** 出图时的 owner scope：与 chart_ref 同源（specialist 出图时正好是主会话）。 */
 export declare function chartEventOwnerSessionId(session: SessionLike, sourceSession?: SessionLike): string;
 export {};

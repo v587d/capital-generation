@@ -169,27 +169,31 @@ export function apply(ctx: Context, config: Config) {
   // 该行不在本 preset 的 isolate realm 名单里，因此按 cordis 的 realm 语义正常向外解析
   // （realm 只重映射 isolate 里列出的服务名）；没装/没起来时按可选处理，降级成"只给文件路径"。
   // 服务**惰性解析**：每次画图时再 ctx.get 一次，不依赖 host 平面行与本 preset 行的挂载先后。
+  // 交付通道的 ctx **只组装一次**：`createChartEventPublisher` 会按 `ctx.root` 做单例缓存，
+  // 而每次 `render_chart` 都会调用 `chartEvents()`。若这里每次新建一个 spread 字面量，
+  // 发布器就每次都是"新实例"（缓存命中不了），寄存与冲刷会落在不同实例上 —— 图静默丢失。
+  const chartEventContext: ChartEventContext = {
+    ...(ctx as unknown as ChartEventContext),
+    // 冲刷时机：优先 `agent/turn-stopping`（该轮即将关闭，交付行才会落在**消费这份图的那一轮**，
+    // 而不是被下一次 turn/start 提前落进空的过程轮）。事件名按本仓惯例模糊匹配：`agent/created`
+    // 那类声明式事件名不在宿主 Context 的静态 `keyof Events` 里，注册失败时返回 undefined，
+    // `events.ts` 会据此退回 `turn/start` 兜底，不会静默丢图。
+    onTurnStopping: (listener) => {
+      try {
+        const on = (ctx as unknown as { on?: (event: string, handler: (...args: unknown[]) => unknown) => unknown }).on
+        if (typeof on !== 'function') return undefined
+        return on.call(ctx, 'agent/turn-stopping', (...args: unknown[]) => { listener(...args) })
+      } catch {
+        return undefined
+      }
+    },
+  }
   registerChartTool(ctx, {
     store,
     sourceTokens: chartSourceTokens,
     artifacts: chartArtifacts,
     charts: () => ctx.get('capitalCharts') as { publish(input: { chartId: string; filePath: string }): string | null } | undefined,
-    // 交付行的冲刷时机：优先 `agent/turn-stopping`（该轮即将关闭，交付行才会落在**消费这份图的那一轮**，
-    // 而不是被下一次 turn/start 提前落进空的过程轮）。事件名按本仓惯例模糊匹配：`agent/created` 那类
-    // 声明式事件名不在宿主 Context 的静态 `keyof Events` 里，注册失败时返回 undefined，
-    // `events.ts` 会据此退回 `turn/start` 兜底，不会静默丢图。
-    chartEvents: () => createChartEventPublisher({
-      ...(ctx as unknown as ChartEventContext),
-      onTurnStopping: (listener) => {
-        try {
-          const on = (ctx as unknown as { on?: (event: string, handler: (...args: unknown[]) => unknown) => unknown }).on
-          if (typeof on !== 'function') return undefined
-          return on.call(ctx, 'agent/turn-stopping', (...args: unknown[]) => { listener(...args) })
-        } catch {
-          return undefined
-        }
-      },
-    }),
+    chartEvents: () => createChartEventPublisher(chartEventContext),
   })
   // 根 Agent 工具收敛：`agent/created` 里对**主 Agent**（无 parentSession）在其自己的
   // scope 上 deny render_chart / subagent_visualization_specialist / prepare_chart_source。

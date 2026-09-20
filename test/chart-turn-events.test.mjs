@@ -8,6 +8,7 @@ import {
   buildChartEventPayload,
   createChartEventPublisher,
   resetChartEventPending,
+  resetChartEventPublisher,
   resolveOwnerSession,
 } from '../lib/chart/events.js'
 
@@ -341,6 +342,35 @@ test('publish：寄存必须跨发布器实例存活（出图与冲刷是两个�
   assert.equal(main.appended.length, 1, '实例 A 寄存的图必须被冲刷写入（跨实例）')
   assert.equal(main.appended[0].data.turn, 5)
   assert.equal(publisherB.pendingCount(), 0, '冲刷后队列清空')
+})
+
+/**
+ * 防复发（2026-09-20 真机事故真根因）：发布器必须是进程级单例。
+ *
+ * 生产调用形态是 `chartEvents: () => createChartEventPublisher(<每次新建的 spread ctx>)`
+ * —— **每次 `render_chart` 都重新解析一次**。若每次都新建发布器：
+ * 寄存落在实例 A，冲刷监听却绑在别的实例上，图静默丢失。
+ * 本用例直接照抄这个调用形态（每次传一个新的 ctx 字面量）。
+ */
+test('createChartEventPublisher：生产形态（每次传新 ctx）必须复用同一个单例', () => {
+  const main = fakeSession('main-1')
+  const sessions = { get: (id) => (id === 'main-1' ? main : undefined) }
+  const projections = { stateOf: () => ({ openTurnStartSeq: null, lastTurn: 4 }) }
+  const { ctx, turnStoppingListeners } = fakeEventCtx({
+    sessions,
+    projections,
+    turnStopping: true,
+  })
+
+  // 照抄 index.ts：每次调用都组装一个新的 ctx 字面量（只有 root 是稳定的）
+  const resolve = () => createChartEventPublisher({ ...ctx })
+
+  const a = resolve()
+  const b = resolve()
+  assert.ok(a && b)
+  assert.equal(a, b, '两次解析必须返回同一个实例（否则寄存与冲刷会落在不同实例上）')
+  assert.equal(turnStoppingListeners.length, 1, '冲刷监听只能注册一次，不得随实例堆积')
+  resetChartEventPublisher()
 })
 
 test('publish：agent/turn-stopping 在场时，寄存的图在该轮关闭前写入，turn/start 不得抢跑', async () => {
