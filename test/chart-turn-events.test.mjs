@@ -85,6 +85,52 @@ function fakeEventCtx({ sessions, projections, logger, turnStopping = false } = 
   return { ctx, listeners, disposed, turnStoppingListeners }
 }
 
+/**
+ * 与 cordis 同形的 ctx：`get` / `on` / `effect` 挂在**原型**上。
+ *
+ * ⚠️ 这是 2026-09-20 事故的复刻：`index.ts` 曾用 `{ ...ctx }` 组装交付 ctx，
+ * 而对象展开只复制**自有可枚举属性**，原型上的 `get` 会丢失 →
+ * `ctx.get('sessions')` 抛 `ctx.get is not a function` → 被 tool.ts 的 catch 吞掉 →
+ * **publish 从未执行**（"专家确实出图、主会话零交付事件"）。
+ * 所有用它做的测试，都能挡住"用 spread 组装 ctx"这类回归。
+ */
+class PrototypeCtx {
+  constructor({ sessions, projections, turnStopping = false }) {
+    this.listeners = []
+    this.turnStoppingListeners = []
+    const root = {
+      on: (event, listener) => { this.listeners.push({ event, listener }); return () => {} },
+    }
+    if (turnStopping) {
+      root.onTurnStopping = (listener) => { this.turnStoppingListeners.push(listener); return () => {} }
+    }
+    this._sessions = sessions
+    this._projections = projections
+    this.root = root
+  }
+
+  get(name) {
+    if (name === 'sessions') return this._sessions
+    if (name === 'sessionProjections') return this._projections
+    return undefined
+  }
+
+  on(event, listener) { this.listeners.push({ event, listener }); return () => {} }
+
+  effect(callback) { const dispose = callback(); return () => { if (typeof dispose === 'function') dispose() } }
+}
+
+/** 模拟 index.ts 的正确组装方式：逐项显式转发（原型方法不能靠展开复制）。 */
+function explicitContext(raw) {
+  return {
+    get: (name) => raw.get(name),
+    on: (event, listener) => raw.on.call(raw, event, (...args) => { listener(...args) }),
+    onTurnStopping: (listener) => raw.root.onTurnStopping((...args) => { listener(...args) }),
+    root: raw.root,
+    effect: (callback, label) => raw.effect(callback, label),
+  }
+}
+
 const baseInput = {
   ownerSessionId: 'main-1',
   chart_id: 'ch_1',
@@ -137,6 +183,42 @@ test('buildChartEventPayload：只带官方契约字段，且绝不携带 rows /
   const text = JSON.stringify(payload)
   assert.equal(/rows|series|"data"|item\[\]/.test(text), false, '事件不得携带数据行/序列')
   assert.equal(text.includes('/home/'), false, '事件不得携带绝对路径')
+})
+
+/**
+ * 防复发（2026-09-20 事故，trace 落盘才定位到）：交付 ctx 必须**显式转发**原型方法。
+ *
+ * 这条用例正面复刻事故：用一个"方法与 cordis 同形、挂在原型上"的 ctx，
+ * ① `{ ...ctx }` 组装（错误方式）→ publisher 构造必须失败，证明这才是事故形态；
+ * ② 显式转发（正确方式）→ publisher 必须可用且能真正写入。
+ */
+test('ctx 组装：对象展开会丢掉原型方法（事故形态），显式转发才可用', async () => {
+  const main = fakeSession('main-1')
+  const raw = new PrototypeCtx({
+    sessions: { get: (id) => (id === 'main-1' ? main : undefined) },
+    projections: { stateOf: () => ({ openTurnStartSeq: 100, lastTurn: 3 }) },
+    turnStopping: true,
+  })
+
+  // ① 事故形态：展开只复制自有属性，原型上的 get 丢失
+  const spread = { ...raw }
+  assert.equal(typeof spread.get, 'undefined', '展开确实拿不到原型方法（这就是事故）')
+  assert.throws(
+    () => createChartEventPublisher(spread),
+    /get is not a function/,
+    '用展开组装的 ctx 必须复现 ctx.get is not a function',
+  )
+
+  // ② 正确形态：显式转发
+  resetChartEventPublisher()
+  resetChartEventPending()
+  const publisher = createChartEventPublisher(explicitContext(raw))
+  assert.ok(publisher, '显式转发后发布器必须可用')
+  assert.equal(publisher.publish(baseInput), true, '回合打开 → 直接登记')
+  assert.equal(main.appended.length, 1, '必须真的写进会话（事故时这里是 0）')
+  assert.equal(main.appended[0].type, CHART_DELIVERABLE_EVENT)
+  resetChartEventPublisher()
+  resetChartEventPending()
 })
 
 test('createChartEventPublisher：服务缺失时返回 undefined（可选通道）', () => {
