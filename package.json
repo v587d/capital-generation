@@ -38,7 +38,8 @@
     "test": "npm run build && node --test test/*.test.mjs",
     "prepublishOnly": "npm run build",
     "smoke:fuyao": "node scripts/smoke-fuyao.mjs",
-    "docs:capabilities": "npm run build && node scripts/gen-capability-table.mjs"
+    "docs:capabilities": "npm run build && node scripts/gen-capability-table.mjs",
+    "verify:sessions": "node scripts/verify-sessions.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2"
