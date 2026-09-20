@@ -60,13 +60,16 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
 ## 图表呈现（截图）
 
 > 出图只有一个入口：`data_junior` 的可视化 gate → one-shot `visualization_specialist`。
-> 序列数据不进模型上下文，浏览器经宿主旁路取数；图表由宿主追加的 `capital/chart-rendered`
-> 事件渲染在**本轮答复下方的收尾卡片**里。下图为真实会话截图，点击可查看原图。
+> 序列数据不进模型上下文；图表由宿主以**官方** `deliverables/presented` 登记为**本轮交付物**，
+> 在收尾的「本轮文件改动 / 交付」行点开即可在右侧看到可交互图表。下图为真实会话截图，点击可查看原图。
 
-| 收尾卡片：K 线 + 成交量 | 侧栏自包含 HTML：折线 | 侧栏自包含 HTML：K 线 + 量价 |
-| :---: | :---: | :---: |
-| [<img src="assets/chart-turn-tail-candlestick.png" width="260" alt="K 线 + 成交量图表内嵌在助手消息下方">](assets/chart-turn-tail-candlestick.png) | [<img src="assets/chart-line-sidebar.png" width="260" alt="成交额折线图在侧栏打开的自包含 chart.html 中">](assets/chart-line-sidebar.png) | [<img src="assets/chart-candlestick-sidebar.png" width="260" alt="日线量价 K 线在侧栏打开的自包含 chart.html 中">](assets/chart-candlestick-sidebar.png) |
-| 创业板指 30 日走势 | 指南针近一月日成交额 | 指南针近一月日线·量价 |
+| 侧栏自包含 HTML：折线 | 侧栏自包含 HTML：K 线 + 量价 |
+| :---: | :---: |
+| [<img src="assets/chart-line-sidebar.png" width="260" alt="成交额折线图在侧栏打开的自包含 chart.html 中">](assets/chart-line-sidebar.png) | [<img src="assets/chart-candlestick-sidebar.png" width="260" alt="日线量价 K 线在侧栏打开的自包含 chart.html 中">](assets/chart-candlestick-sidebar.png) |
+| 指南针近一月日成交额 | 指南针近一月日线·量价 |
+
+> 历史截图 `assets/chart-turn-tail-candlestick.png` 记录的是 2026-09-18 之前的内嵌「收尾卡片」形态；
+> 该通道因会让会话日志不可加载而整体移除（见 `AGENTS.md` 的「图表呈现纪律」），保留仅供对照。
 
 `chart.html` 自包含（内联图表库与数据），可离线打开、零外部请求；图内保留
 `Lightweight Charts™ v5.2.1 (Apache-2.0)` 归属信息。

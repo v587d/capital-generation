@@ -25,8 +25,8 @@ dsh 处于快速迭代期，"版本升级"与"大规模破坏性更新"是常态
 | L2 | `exports["./client"]` 指向的预构建 bundle 存在且在 `files` 里 | 客户端半边代码的投递（主包与嵌套包都查） | 探针 + `test/packaging.test.mjs` 的 `npm pack` 断言 | **致命**：`ClientPackageCompositionError` 在注册表构造时抛出，web profile 起不来 | 两个 `package.json` 的 `files` |
 | L3 | `ctx.slots.inject(name, cb)` + `ctx.slots.register({name,key}, Component)` | 把图表 view 注册进对话流 | 在 shipped bundle 里搜这两个调用的形状 | 图不渲染（可能只在控制台报错） | 客户端半边的 adapter |
 | L4 | Slot key `tool.call.toolview` + `ToolCallOwnerProps.{callId,toolName,block,cwd,openFile,loadImage}` | 工具过程明细座位；`key` = 工具名，`block` 给参数与结果 | 在 shipped bundle 里搜 slot key 字符串与 props 字段名 | 图卡片静默回退成通用工具行，或仅在展开过程时可见 | 客户端半边 + `dsh-adapter` |
-| L10 | Slot `conversation.chat.turnTail`（chain）+ `TurnTailOwnerProps.{turn,seq,openFile}` | 把本轮图表放在收尾 assistant 内容之后、action row 之前；selector 返回 null 时不抢官方 deliverables | 在 `dsh-client-ui-chat/lib/types/client/contract/slots.d.ts` 断言 slot kind、owner props；`test/chart-client.test.mjs` 执行真实注册并断言"无图必须返回 null" | 上游 slot/owner props 漂移时，本轮图表退回工具过程或完全不显示 | `chart-ui/client.src.cjs` 的 turn-tail adapter |
-| L11 | `Session.append(type, data)`（非 surface 自定义事件）+ `ctx.sessions.get(id)` + `ctx.sessionProjections.stateOf(session, 'turnBoundary')` | 出图成功后由宿主往**根会话**追加 `capital/chart-rendered`，客户端 definition 折成 turn data；事件不进 `deriveMessages()`，因此不污染模型上下文 | 在 `dsh-session/lib/index.js` 断言 `append(` 与 `deriveEventMessage` 的 `default: return null`；在 `dsh-session-projection/lib/index.js` 断言 `stateOf(`；探针见 `check-dsh` L11 | 图表不出现在对话流（静默）；最坏情况是自定义事件被当成消息塞进上下文 | `src/chart/events.ts` + `chart-ui/client.src.cjs` |
+| L10 | Slot `conversation.chat.turnTail`（chain）+ `TurnTailOwnerProps.{turn,seq,openFile}` | **已不用于本仓图表呈现**（卡片通道 2026-09-18 移除）。保留此条目是因为官方「本轮文件改动 / 交付」行就在这个座位上——我们不再抢它 | 探针仅在 `dsh-client-ui-chat/lib/types/client/contract/slots.d.ts` 断言 slot kind 与 owner props 仍存在（防止上游改名时我们误判） | 与本仓无直接关联；若将来要再插自定义尾部内容，必须重新评估"抢座位"的后果 | —（本仓已无 turn-tail adapter） |
+| L11 | `Session.append(type, data)`（**必须是 first-party 事件**）+ `ctx.sessions.get(id)` + `ctx.sessionProjections.stateOf(session, 'turnBoundary')` | 出图成功后由宿主往**根会话**追加官方 `deliverables/presented`，把 `chart.html` 登记为本轮交付物；事件不进 `deriveMessages()`，因此不污染模型上下文 | 在 `dsh-session/lib/index.js` 断言 `append(`、`deriveEventMessage` 的 `default: return null`，以及 **`"deliverables/presented"` 仍在 `KNOWN_SESSION_EVENT_TYPES` 闭集内**；在 `dsh-session-projection/lib/index.js` 断言 `stateOf(`；探针见 `check-dsh` L11 | 图表不出现在交付行（静默）；**最坏情况：写了一个闭集外的事件类型 → 整份会话冷加载被 fail-closed 拒绝（2026-09-18 实测事故）** | `src/chart/events.ts` |
 | L12 | `agent/created` 事件（`this: Scoped<Agent>`，**路由键是 agent 对象本身**）+ `agent.ctx` + `tools.restrict({deny})` 的 scoped 语义 | 只在**根 Agent 自己的 scope** 上 deny `render_chart` / `subagent_visualization_specialist` / `prepare_chart_source`；子 Agent 是 standing 的兄弟 scope，不受影响。**监听必须注册在未打 scope 标签的 `ctx.root` 上**（`agentCarrier(agent) = scopeTarget(agent, agent)`，键是 agent 对象，standing-scope 的监听器按 `dsh-scope` 准入规则收不到 → 静默失效），再用 `agentPresets.composedPreset(agent.ctx)` 筛本 preset | 在 `dsh-agent/lib/types/runtime-types.d.ts` 断言 `'agent/created'`；在 `dsh-tools/lib/index.js` 断言 `tools.restrict() requires a scoped context`；在 `dsh-agent-presets/lib/index.js` 断言上游自己就在 `agent/created` 里用 `agent.ctx`；探针见 `check-dsh` L12 | 主 Agent 又能看到出图/孙 Agent 创建工具（**且不报错**，纯静默）；或在 standing 层误 deny 连 specialist 一起砍掉 | `src/agents/root-tool-policy.ts` |
 | L13 | `ctx.connection.requestRejection(req) → 401 \| 403 \| undefined`（`HostConnectionService` / `HostConnectionHandle`；401 = 缺/过期浏览器 cookie，403 = Host/Origin 不受信） | `/capital-charts` 序列旁路挂在自注册的 `webServer` prefix 路由上，必须**主动**接入这道围栏，否则绕过平台认证（2026-09 review：任何本机进程/页面凭 `chart_id` 即可读 `series.json`）。`connection` 缺席（Electron/file:// 载体）时退化成无认证面的旧行为 | 在 `dsh-client-connection/lib/types/rpc.d.ts` 断言 `requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection` 与 `ConnectionRequestRejection = 401 \| 403 \| undefined`；探针见 `check-dsh` L13。本仓回归见 `test/chart-host.test.mjs`（401/403、fail closed、认证先于方法/路径） | 序列旁路静默变成无认证端点（本机任意进程可读会话图表）；上游若把围栏拆成别的名字，探针具名失败而不是运行时才暴露 | `chart-ui/index.js` 的 `apply()` + `createRouteHandler({ authorize })` |
 | L5 | `react` / `react/jsx-runtime` 是 shell 静态种子词 | 客户端 bundle 里 `require("react")` | 在 shipped bundle 里搜 `require("react")` | 浏览器里 require 失败，bundle 整体不执行 | 构建配置（`external`） |
@@ -66,11 +66,12 @@ dsh 处于快速迭代期，"版本升级"与"大规模破坏性更新"是常态
    首轮工具表里**没有** `render_chart` / `final_report` / `subagent_visualization_specialist`
    （root 收敛生效），而 `visualization_specialist` 子会话的工具表里**有** `render_chart`；
    回执里 `chart_url` 非 null；浏览器控制台出现
-   `capital-charts: 客户端半边已挂载（turn-tail 本轮图表 + render_chart toolview）`；
-   跑一次带时间序列的任务，确认主会话日志里出现 `"type":"capital/chart-rendered"`，
-   且收尾 assistant 内容之后、action row 之前出现可交互图表。
+   `capital-charts: 客户端半边已挂载（render_chart toolview；呈现走官方交付通道）`；
+   跑一次带时间序列的任务，确认主会话日志里出现 `"type":"deliverables/presented"`（载荷含
+   `files[].path` = 该图的 `chart.html`），**且日志里不出现任何非 first-party 事件类型**
+   （出现即会让这份会话冷加载失败）；收尾的「本轮文件改动 / 交付」行点开该文件能在右侧渲染图表。
    **改了 `chart-ui/` 或 `src/` 之后，浏览器页面必须刷新**：客户端 bundle 在页面加载时确定，
-   宿主重启不会换掉已打开页面里的那份 bundle（表现：卡片不出现，且控制台无报错）。
+   宿主重启不会换掉已打开页面里的那份 bundle（表现：图表不出现，且控制台无报错）。
 
 ## 恢复手册（装坏了怎么回到可用）
 
@@ -111,6 +112,7 @@ dsh plugin --profile web remove @v587d/capital-generation
 | 2026-09-17 | 0.1.5-rc.1 | 设计修订（本文件 L11/L12）：`final_report` 整条链路删除；主 Agent 的 `render_chart` 改由 root scope 收敛拿掉；图表改走 `capital/chart-rendered` 事件 + turn-tail。`npm test` 与 `check:dsh` 覆盖新面 |
 | 2026-09-17 | 0.1.5-rc.1 | **首次真机复核发现两条 L11/L12 的落地错**：① `agent/created` 的 carrier key 是 agent 对象，注册在 standing scope 上的监听器收不到（主 Agent 工具表照旧有 `render_chart`，无任何报错）→ 改注册在 `ctx.root`；② 主 Agent 等子 Agent 时**先结束自己的回合**，出图发生在两个回合之间，`turnBoundary.lastTurn` 指向已结束的回合 → 卡片挂错回合。改为"回合没打开就寄存，等下一个 `turn/start` 再写"（`session/event` 观察者 + 微任务，避开 `Session.append` 的 reentrancy 守卫） |
 | 2026-09-15 | 0.1.5-rc.1 | **真实会话已复核**：`render_chart` 出图后对话流内嵌卡片与右栏文件都能渲染 —— 反证 `chart_url` 非空、toolview 已挂载、preset 平面能消费 host 平面 `capitalCharts`（L6 与跨平面消费成立） |
+| 2026-09-18 | 0.1.5-rc.1 → rc.2 | 设计修订（本文件 L10/L11）：图表呈现改走**官方 `deliverables/presented`**，客户端 turn-tail 卡片通道整体移除；L11 探针新增"`deliverables/presented` 仍在闭集词汇表内"断言。`npm test`（332）与 `check:dsh`（13）覆盖新面 |
 
 ## 事故记录
 
@@ -118,4 +120,5 @@ dsh plugin --profile web remove @v587d/capital-generation
 |---|---|---|---|
 | 2026-09-15 | 用户重启后 **dsh web 完全起不来**：`failed to import loader entry capital-charts ([object Object]): name.startsWith is not a function` | 把 `!!js` 表达式写进了 patch 行的 `name`；loader 只对 fiber 的 `config` 插值，`name` 原样进 ESM import | 行名改字面量；新增回归断言「任何行的 `name` 都必须是字面量字符串」 |
 | 2026-09-15 | 行名改成 subpath 后 profile 能起，但**客户端半边静默消失**（图表 UI 永远不出现，无任何报错） | `locatePkgJson` 对「非 path-like 且非精确包名」直接 `return undefined`，这颗行被当成"不是客户端包" | 行名改成相对本 patch 目录的 path-like 写法 `./chart-ui/index.js`；新增断言复刻这条守卫 |
+| 2026-09-18 | 升级到 0.1.5-rc.2 后，**凡出过图的会话 100% 打不开**：`failed to observe session … contains event type "capital/chart-rendered" (seq N) unknown to this harness and not marked ignorable; refusing to interpret the log` | 本仓自造会话事件类型 `capital/chart-rendered`。会话日志词汇表是**闭集**（`KNOWN_SESSION_EVENT_TYPES` 由 harness 仓库自己的 `SessionEventMap` 生成），读取侧 `validateStoredEvents()` fail-closed，而 `Session.append` 只转发 `sourceEventSeqs`/`surfaceOp`——**调用方无法设置 `ignorable`**。于是自定义事件"写时静默通过、冷加载时整份会话打不开"。**与版本无关**：rc.1/rc.2 的 `dsh-session-persistence` 逐字节相同（sha256 一致），只是升级必然重启，把一直存在的隐患暴露了（6 份会话中 4 份是升级前写的）。上游同类报告见 [discussion #5474](https://github.com/deepseek-ai/deepseek-harness/discussions/5474)，维护者裁定"事件名注册面"设计上被否决，正解是给 `append` 加 `{ ignorable: true }` | 图表呈现改用 **first-party `deliverables/presented`**（`dsh-tool-present` 用的同一类型，任何版本都认得），客户端不再注册任何图表专属会话投影；新增两道回归：`test/chart-turn-events.test.mjs`（append 只能使用已核验为 first-party 的常量）+ 探针 L11（该类型仍在闭集内） |
 | 2026-09-15 | 以上两条**都没被当时的验证发现** | 用 `dsh --dump-config` 当验证手段——它只打印配置，不做插值也不导入任何行 | 新增 `npm run smoke:boot`：真启动 + 复核 `__DSH_BOOT__`；写进 runbook 第 5 步，标注"不能省" |

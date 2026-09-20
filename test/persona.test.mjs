@@ -297,11 +297,13 @@ test('主 persona：数据调度纪律——通过 list_agents + send_message �
 
 test('主 persona：图表由 data_junior 出品——主 Agent 不出图、不在正文罗列图表文件', () => {
   // 2026-09-17 设计修订：主 Agent 不再持有 render_chart，final_report 整条链路删除。
-  // 图表改由宿主在收尾卡片呈现（capital/chart-rendered 事件）；正文与回传都不再提图表文件。
+  // 2026-09-18 设计修订：呈现改走官方 deliverables/presented（交付行），内嵌卡片通道移除。
   assertRuleAny(MAIN_PERSONA, [/图表由 data_junior 的可视化 gate 统一出品/, /图表由 data_junior/], '主 persona 必须写明图表由 data_junior 出品')
   assertRuleAny(MAIN_PERSONA, [/你不画图/, /主 Agent 不出图/, /不直接出图/], '主 persona 必须写明主 Agent 不出图')
   assertRuleAny(MAIN_PERSONA, [/不在正文里罗列图表文件/, /不要?在正文里罗列/, /也不要罗列图表文件/], '主 persona 必须禁止在正文罗列图表文件')
-  assertRuleAny(MAIN_PERSONA, [/图表会在本轮答复下方的卡片里自动出现/, /收尾卡片/, /本轮答复下方的卡片/], '主 persona 必须说明图表在收尾卡片呈现')
+  // 呈现位置的说法必须与当前实现一致（旧说法"收尾卡片"已随卡片通道移除，不能再出现）。
+  assertRuleAny(MAIN_PERSONA, [/图表会在本轮答复后的「交付」行里自动出现/, /「交付」行/, /交付行/], '主 persona 必须说明图表在交付行呈现')
+  assertNoRule(MAIN_PERSONA, /收尾卡片|本轮答复下方的卡片/, '卡片通道已移除，persona 不得再承诺"收尾卡片"')
   assertRuleAny(MAIN_PERSONA, [/正文不要提图表/, /不要在正文提图表/], '主 persona 必须禁止正文提图表本身（用户口径：不提，自己看）')
   assertRuleAny(MAIN_PERSONA, [/图表是呈现不是分析/, /呈现不是分析/], '主 persona 需说明图表是呈现不是分析')
   assertRuleAny(MAIN_PERSONA, [/不用图推断数字/, /不要用图去推断数字/], '主 persona 需禁止用图推断数字')

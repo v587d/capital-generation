@@ -72,11 +72,11 @@ export interface RenderChartInput {
      */
     charts?: () => ChartPublisher | undefined;
     /**
-     * 惰性解析"图表→对话流"事件发布器（`capital/chart-rendered`）。
+     * 惰性解析"图表 → 本轮交付"发布器（官方 `deliverables/presented`）。
      *
      * 与 `charts` 同理每次出图解析一次：宿主平面的 `sessions` / `sessionProjections`
      * 不可用时返回 undefined，整条链路照常降级——图仍在 workspace 里，回执照样给 html_path，
-     * 只是收尾卡片不会出现。
+     * 只是本轮交付行不会登记这张图。
      */
     chartEvents?: () => ChartEventPublisher | undefined;
     now?: () => number;

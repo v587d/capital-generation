@@ -1,13 +1,18 @@
 import type { SessionLike } from '../data-collector/store.js';
-/** 客户端 conversation definition 监听的事件名（`<domain>/<past-participle>`，与 deliverables 同风格）。 */
-export declare const CHART_RENDERED_EVENT = "capital/chart-rendered";
+/**
+ * 登记本轮交付物用的官方事件名。
+ *
+ * 必须留在 `KNOWN_SESSION_EVENT_TYPES` 内——它是 `dsh-tool-present` 追加的同一类型，
+ * 因此在**任何** harness 版本上都能被读回。改这里等于改会话日志契约，
+ * `test/chart-turn-events.test.mjs` 有一条断言把它钉在 first-party 词汇表上。
+ */
+export declare const CHART_DELIVERABLE_EVENT = "deliverables/presented";
+/** `callId` 前缀：交付事件里携带的图表句柄（官方契约只要求非空字符串）。 */
+export declare const CHART_CALL_ID_PREFIX = "capital-chart:";
 /** 同一 (session, turn) 的事件上限：防模型循环，超出只告警。 */
 export declare const MAX_CHARTS_PER_TURN = 8;
 /** 向上找根会话的最大跳数（main → data_junior → specialist 只有一跳，留余量）。 */
 export declare const MAX_OWNER_HOPS = 4;
-/** warnings 只作展示：最多 3 条、每条 200 字符。 */
-export declare const MAX_EVENT_WARNINGS = 3;
-export declare const MAX_EVENT_WARNING_CHARS = 200;
 interface AppendableSession extends SessionLike {
     append(type: string, data: unknown): unknown;
 }
@@ -30,17 +35,9 @@ export interface ChartTurnEventInput {
     /** 出图时 chart_ref 的 owner scope（与 ChartArtifactRegistry 同一套语义）。 */
     ownerSessionId: string;
     chart_id: string;
-    chart_ref: string;
     title: string;
-    kind: string;
-    axis: 'time' | 'index';
-    points: number;
-    chart_url: string | null;
+    /** 工作区相对的 chart.html 路径（官方 preview 按 session.cwd 解析它）。 */
     html_path: string;
-    source_label: string | null;
-    captured_at: number | null;
-    task_id: string | null;
-    warnings: readonly unknown[];
 }
 export interface ChartEventPublisher {
     /**
@@ -56,9 +53,18 @@ export interface ChartEventPublisher {
  * 找不到（会话已回收）时返回 undefined，调用方静默跳过。
  */
 export declare function resolveOwnerSession(sessions: SessionsService, ownerSessionId: string, maxHops?: number): AppendableSession | undefined;
-/** 展示用 warnings：只留字符串、截断、限量。 */
-export declare function sanitizeEventWarnings(warnings: readonly unknown[]): string[];
-/** 事件的 JSON 载荷：全部是基本类型，不含 rows / series / 绝对路径。 */
+/**
+ * 官方 `deliverables/presented` 载荷。
+ *
+ * 形状与 `dsh-tool-present` 逐字段对齐（那边是 `{ turn, callId, files }`，
+ * 客户端 `isPresentedData()` 要求 `turn` 是 >=1 的安全整数、`callId` 非空字符串、
+ * `files` 是数组）。`files[].path` 必须是**工作区相对**路径：官方打开动作会拿它去
+ * `workspaceFiles.stat({ sessionId, workspaceRoot: session.cwd })` 解析，绝对路径过不了
+ * 「Presented file has no verified Host path」这一关。
+ *
+ * `callId` 只是官方契约里的一个非空字符串句柄，没有配对约束（`present` 那边用来关联
+ * tool/result），这里借它携带 `chart_id`，便于在日志里把一条交付回溯到具体图表。
+ */
 export declare function buildChartEventPayload(input: ChartTurnEventInput, turn: number): Record<string, unknown>;
 /**
  * 惰性构造发布器：`sessions` / `sessionProjections` 缺一不可（都是宿主平面服务，

@@ -166,8 +166,8 @@ const probes = [
   },
   {
     id: 'L11',
-    title: '会话日志自定义事件（Session.append）+ ctx.sessions.get + sessionProjections.stateOf',
-    why: '图表靠"宿主往根会话追加一条非 surface 事件、客户端折成 turn data"进对话流；append 变成 surface-only、deriveEventMessage 开始透传未知类型（污染上下文）、或 stateOf 改名，都会静默失效。',
+    title: '会话日志 first-party 事件（Session.append）+ ctx.sessions.get + sessionProjections.stateOf',
+    why: '图表以官方 `deliverables/presented` 登记为本轮交付（2026-09-18 起不再自造事件类型）；append 变成 surface-only、`deliverables/presented` 掉出已知词汇表、deriveEventMessage 开始透传未知类型（污染上下文）、或 stateOf 改名，都会静默失效。',
     run() {
       const sessionFile = join(PKG('dsh-session'), 'lib/index.js')
       const session = readIfPresent(sessionFile)
@@ -182,11 +182,14 @@ const probes = [
         ['sessions.get(id)', /get\(id\)/, session, sessionFile],
         ['非 surface 事件不进消息历史（deriveEventMessage default: return null）', /default: return null/, session, sessionFile],
         ['sessionProjections.stateOf(session, key)', /stateOf\(/, projection, projectionFile],
+        // 关键不变量（2026-09-18 事故）：交付事件必须仍在**闭集**词汇表里。掉出去 =
+        // 写出的日志在冷加载时被 fail-closed 拒绝，整份会话打不开。
+        ['deliverables/presented 属于 KNOWN_SESSION_EVENT_TYPES', /"deliverables\/presented"/, session, sessionFile],
       ]
       const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
       return missing.length === 0
-        ? { status: PASS, detail: 'append / sessions.get / stateOf 都还在，且未知事件类型仍不进消息历史' }
-        : { status: FAIL, detail: `图表对话流通道的接口变了：${missing.join(' / ')}（见账本 L11）` }
+        ? { status: PASS, detail: 'append / sessions.get / stateOf 都还在，deliverables/presented 仍在闭集词汇表内，非 surface 事件不进消息历史' }
+        : { status: FAIL, detail: `图表交付通道的接口变了：${missing.join(' / ')}（见账本 L11）` }
     },
   },
   {

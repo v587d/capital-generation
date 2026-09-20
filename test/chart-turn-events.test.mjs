@@ -1,20 +1,22 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import {
-  CHART_RENDERED_EVENT,
+  CHART_CALL_ID_PREFIX,
+  CHART_DELIVERABLE_EVENT,
   MAX_CHARTS_PER_TURN,
   buildChartEventPayload,
   createChartEventPublisher,
   resolveOwnerSession,
-  sanitizeEventWarnings,
 } from '../lib/chart/events.js'
 
 /**
- * 「图表 → 对话流」事件通道的契约测试。
+ * 「图表 → 对话流」交付通道的契约测试。
  *
  * 这套设计的边界全在这里钉住：
+ *  - 事件必须是 **first-party** `deliverables/presented`（见下方防复发用例，2026-09-18 事故）；
  *  - 事件必须落在**根会话**（用户在看的那条），turn 取自 turnBoundary 投影；
- *  - 事件不是 surface 事件、payload 只有元数据 —— 没有 rows / series / 绝对路径；
+ *  - payload 只有官方契约字段（turn / callId / files），没有 rows / series / 绝对路径；
  *  - 通道是**可选**的：服务缺失、turn 缺失、写入抛错都只降级，绝不影响出图。
  */
 
@@ -63,17 +65,8 @@ function fakeEventCtx({ sessions, projections, logger } = {}) {
 const baseInput = {
   ownerSessionId: 'main-1',
   chart_id: 'ch_1',
-  chart_ref: 'chart_1',
   title: '趋势',
-  kind: 'line',
-  axis: 'time',
-  points: 43,
-  chart_url: '/capital-charts/ch_1.json',
   html_path: 'capital-analysis/charts/ch_1/chart.html',
-  source_label: 'fuyao',
-  captured_at: 1_789_000_000_000,
-  task_id: 'task-1',
-  warnings: ['跨数据集归一化对照被拒绝'],
 }
 
 test('resolveOwnerSession：从 owner scope 向上走到根会话', () => {
@@ -87,22 +80,40 @@ test('resolveOwnerSession：从 owner scope 向上走到根会话', () => {
   assert.equal(resolveOwnerSession(sessions, 'missing'), undefined)
 })
 
-test('buildChartEventPayload：只带元数据，且绝不携带 rows / series / 绝对路径', () => {
+/**
+ * 防复发（2026-09-18 事故）：图表呈现**只能**用 first-party 事件。
+ *
+ * 会话日志的事件词汇表是闭集，读取侧 `validateStoredEvents()` 对未知类型
+ * fail-closed 且 `Session.append` 无法设置 `ignorable`——写一个自定义类型
+ * （曾经的 `capital/chart-rendered`）会让**整份会话在冷加载时打不开**。
+ * 这条用例把"不许再发明事件名"钉在源码上，而不是靠记忆。
+ */
+test('契约：交付事件必须是 first-party `deliverables/presented`，且 append 只能用它', () => {
+  assert.equal(CHART_DELIVERABLE_EVENT, 'deliverables/presented', '必须是官方 present 用的同一事件类型')
+  assert.equal(CHART_CALL_ID_PREFIX, 'capital-chart:')
+
+  // 语义化守卫：真正写入日志的只有 `append(<事件名>, …)`。断言每一处 append 的首参都是
+  // 上面那个（已核验为 first-party 的）常量，而不是手写的自定义类型字符串——这样事故说明
+  // 可以留在注释里，而"再发明一个事件名"必然踩红。
+  const source = readFileSync(new URL('../src/chart/events.ts', import.meta.url), 'utf8')
+  const appendArgs = [...source.matchAll(/\.append\(\s*([^,]+?)\s*,/g)].map((match) => match[1].trim())
+  assert.deepEqual(appendArgs, ['CHART_DELIVERABLE_EVENT'],
+    `append 只能使用 CHART_DELIVERABLE_EVENT（实际：${appendArgs.join(', ')}）——写闭集词汇表之外的类型会让会话冷加载失败`)
+})
+
+test('buildChartEventPayload：只带官方契约字段，且绝不携带 rows / series / 绝对路径', () => {
   const payload = buildChartEventPayload(baseInput, 6)
+  // 官方客户端 isPresentedData() 的形状：turn 是 >=1 的安全整数、callId 非空、files 是数组。
   assert.equal(payload.turn, 6)
-  assert.equal(payload.chart_id, 'ch_1')
-  assert.equal(payload.chart_url, '/capital-charts/ch_1.json')
-  assert.equal(payload.html_path, 'capital-analysis/charts/ch_1/chart.html')
+  assert.equal(payload.callId, 'capital-chart:ch_1')
+  assert.equal(Array.isArray(payload.files), true)
+  assert.equal(payload.files.length, 1)
+  assert.equal(payload.files[0].path, 'capital-analysis/charts/ch_1/chart.html', 'path 必须是工作区相对路径（官方按 session.cwd 解析）')
+  assert.equal(payload.files[0].description, '趋势')
+  assert.deepEqual(Object.keys(payload).sort(), ['callId', 'files', 'turn'], '不得携带官方契约以外的字段')
   const text = JSON.stringify(payload)
   assert.equal(/rows|series|"data"|item\[\]/.test(text), false, '事件不得携带数据行/序列')
   assert.equal(text.includes('/home/'), false, '事件不得携带绝对路径')
-})
-
-test('sanitizeEventWarnings：只留字符串、截断并限量', () => {
-  const warnings = sanitizeEventWarnings([1, null, 'a', 'x'.repeat(500), 'b', 'c', 'd'])
-  assert.equal(warnings.length, 3)
-  assert.equal(warnings[0], 'a')
-  assert.equal(warnings[1].length, 200)
 })
 
 test('createChartEventPublisher：服务缺失时返回 undefined（可选通道）', () => {
@@ -127,7 +138,7 @@ test('publish：事件写进根会话的当前 turn，并被同 turn 上限拦�
   assert.equal(publisher.publish({ ...baseInput, ownerSessionId: 'junior-1' }), true)
   assert.equal(main.appended.length, 1)
   assert.equal(junior.appended.length, 0, '事件必须落在根会话，而不是发起出图的那条会话')
-  assert.equal(main.appended[0].type, CHART_RENDERED_EVENT)
+  assert.equal(main.appended[0].type, CHART_DELIVERABLE_EVENT)
   assert.equal(main.appended[0].data.turn, 6)
   assert.equal(visited.includes('main-1'), true, 'turn 必须读根会话的 turnBoundary')
 
@@ -145,7 +156,7 @@ test('publish：回合之间出图先寄存，等 owner 的下一个 turn/start 
   const main = fakeSession('main-1')
   const sessions = { get: (id) => (id === 'main-1' ? main : undefined) }
   // 关键场景（2026-09-17 实测）：主 Agent 结束回合等子 Agent，出图时 openTurnStartSeq === null，
-  // 此时 lastTurn 指向**已经结束**的回合，照抄它会把卡片挂到上一轮。
+  // 此时 lastTurn 指向**已经结束**的回合，照抄它会把交付登记到上一轮。
   let boundary = { openTurnStartSeq: null, lastTurn: 4 }
   const { ctx, listeners } = fakeEventCtx({ sessions, projections: { stateOf: () => boundary } })
   const publisher = createChartEventPublisher(ctx)

@@ -261,10 +261,10 @@ warnings / failures
 
 图表成功后，data_junior 回传 `chart_ref`；图表失败、blocked 或 not_needed 也必须回传明确的终态、warnings/failures 和 task_id，不能让主 Agent把“无图表”误解为流程未完成。
 
-**呈现由宿主完成，不需要任何 Agent 再做什么**：`render_chart` 成功时宿主会把这张图登记到
-当前对话的收尾卡片上（`capital/chart-rendered`），用户在最终答复下方就能看到可交互图形并点开
-自包含 `chart.html`。因此 data_junior 与 specialist **都不得**在回传里罗列图表文件、路径或 HTML，
-主 Agent 也不在正文里重复这些内容。
+**呈现由宿主完成，不需要任何 Agent 再做什么**：`render_chart` 成功时宿主会把这张图登记为
+**本轮交付物**（官方 `deliverables/presented`），用户在收尾的「本轮文件改动 / 交付」行点开
+`chart.html`，右侧即渲染可交互图表。因此 data_junior 与 specialist **都不得**在回传里罗列图表文件、
+路径或 HTML，主 Agent 也不在正文里重复这些内容。
 
 **图表跟着 Dataset 一对一，宁多勿叠**：一个 `chart_source_ref` 对应一张图；需要多个视图就出多张
 （各自独立的 `render_chart`）。不要试图把多个来源、多种单位或需要归一化的序列叠进一张图 ——

@@ -10,9 +10,13 @@ import { runInNewContext } from 'node:vm'
  *
  * 这个产物是构建出来的（scripts/build-client.mjs），在浏览器里跑、平时没有类型检查，
  * 所以这里把 bundle 放进一个最小 DOM 沙箱里真的执行一遍工厂函数：
- *  - 断言它导出 apply / inject / name，且 `apply` 按工具名注册 toolview，并注册 turn-tail 最终交付视图；
+ *  - 断言它导出 apply / inject / name，且 `apply` 按工具名注册 toolview；
  *  - 断言图表库是**内联**的（bundle 里没有 require("lightweight-charts")），
  *    且不依赖页面全局（设计 §9：避免与其它插件的同库不同版本互相覆盖）。
+ *
+ * ⚠️ 客户端**不再注册任何图表专属的会话投影 / turn-tail 卡片**（2026-09-18 事故）：
+ * 呈现改走官方 `deliverables/presented` + 官方 document preview，见 src/chart/events.ts。
+ * 本文件末尾有一条用例把这个边界钉住，防止卡片通道被"顺手加回来"。
  */
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const CLIENT_BUNDLE = join(ROOT, 'chart-ui', 'client.js')
@@ -58,26 +62,24 @@ function factoryRequire(name) {
   throw new Error(`客户端 bundle 不应在运行期 require("${name}")：运行期依赖必须打进 bundle，shell 种子只有 react`)
 }
 
-test('客户端 bundle：登记 id 与包名一致，导出 apply / inject / name', () => {
+test('客户端 bundle：登记 id 与包名一致，导出 apply / inject（不再需要 uiConversation）', () => {
   const entry = loadBundle()
   assert.equal(entry.id, '@v587d/capital-charts')
   assert.equal(typeof entry.factory, 'function')
   const mod = entry.factory(factoryRequire)
   assert.equal(mod.name, 'capital-charts')
-  assert.deepEqual([...mod.inject], ['slots', 'uiConversation'])
-  assert.equal(typeof mod.TurnChartsView, 'function')
+  assert.deepEqual([...mod.inject], ['slots'], '只剩 toolview：图表呈现已交回官方交付通道')
+  assert.equal(typeof mod.ChartView, 'function')
 })
 
-test('客户端 bundle：注册 turn-tail 本轮图表，并保留 render_chart 工具明细卡片', () => {
+test('客户端 bundle：只注册 render_chart 工具明细卡片，不再有 turn-tail 卡片', () => {
   const mod = loadBundle().factory(factoryRequire)
   const registrations = []
-  const definitions = []
   const logs = []
   mod.apply({
-    uiConversation: { events: { register: (definition) => { definitions.push(definition) } } },
     slots: {
       inject: (slot, callback) => {
-        assert.ok(slot === 'conversation.chat.turnTail' || slot === 'tool.call.toolview')
+        assert.equal(slot, 'tool.call.toolview')
         return callback()
       },
       register: (declaration, component) => { registrations.push({ declaration, component }); return () => {} },
@@ -85,88 +87,29 @@ test('客户端 bundle：注册 turn-tail 本轮图表，并保留 render_chart 
     logger: { info: (message) => { logs.push(message) } },
   })
 
-  assert.equal(definitions.length, 1, '必须注册一个 turn-scoped 图表 definition')
-  assert.equal(definitions[0].kind, 'capital-turn-charts')
-  assert.equal(registrations.length, 2, '必须注册 turn-tail + render_chart toolview（报告卡已删除）')
-  assert.equal(registrations[0].declaration.name, 'conversation.chat.turnTail')
-  assert.equal(typeof registrations[0].declaration.select, 'function')
-  assert.equal(registrations[1].declaration.name, 'tool.call.toolview')
-  assert.equal(registrations[1].declaration.key, 'render_chart', 'render_chart key 必须是工具名')
+  assert.equal(registrations.length, 1, '只应注册 render_chart toolview')
+  assert.equal(registrations[0].declaration.name, 'tool.call.toolview')
+  assert.equal(registrations[0].declaration.key, 'render_chart', 'render_chart key 必须是工具名')
   assert.equal(typeof registrations[0].component, 'function')
-  assert.equal(typeof registrations[1].component, 'function')
-  assert.ok(logs.some((message) => /turn-tail/.test(message)), 'apply 应留下 turn-tail 挂载日志')
+  assert.ok(logs.length > 0, 'apply 应留下挂载日志')
   // 报告链路必须彻底消失：没有 report 视图、没有 /capital-reports 取数。
   assert.equal(typeof mod.ReportView, 'undefined', 'final_report 视图应已删除')
   assert.equal(source.includes('capital-reports'), false, '客户端不应再引用报告旁路')
   assert.equal(source.includes('final_report'), false, '客户端不应再引用 final_report')
 })
 
-test('客户端 bundle：turn-tail 只选择本轮宿主登记的图表', () => {
-  const mod = loadBundle().factory(factoryRequire)
-  const definitions = []
-  let tailRegistration
-  mod.apply({
-    uiConversation: { events: { register: (definition) => { definitions.push(definition) } } },
-    slots: {
-      inject: (_slot, callback) => callback(),
-      register: (declaration, component) => {
-        if (declaration.name === 'conversation.chat.turnTail') tailRegistration = declaration
-        return { declaration, component }
-      },
-    },
-  })
-  const definition = definitions[0]
-  const start = definition.start({}, { event: { type: 'turn/start', data: { turn: 7 } } })
-  const afterChart = definition.update({ state: start }, {
-    event: {
-      type: 'capital/chart-rendered',
-      seq: 12,
-      data: {
-        turn: 7,
-        chart_id: 'ch_1',
-        chart_ref: 'chart_1',
-        title: '趋势',
-        kind: 'line',
-        axis: 'time',
-        points: 43,
-        chart_url: '/capital-charts/ch_1.json',
-        html_path: 'capital-analysis/charts/ch_1/chart.html',
-      },
-    },
-  })
-  // 重复事件（重试）必须按 chart_id 去重
-  const afterDuplicate = definition.update({ state: afterChart }, {
-    event: {
-      type: 'capital/chart-rendered',
-      seq: 13,
-      data: { turn: 7, chart_id: 'ch_1', title: '趋势', chart_url: '/capital-charts/ch_1.json', html_path: 'capital-analysis/charts/ch_1/chart.html' },
-    },
-  })
-  assert.equal(afterDuplicate.charts.length, 1, '同一个 chart_id 只应登记一次')
-
-  const locationData = definition.buildLocationData({ state: afterDuplicate }, 'turn')
-  const turnData = (key) => (key === 'capital-turn-charts' ? locationData.value : undefined)
-  const matched = tailRegistration.select({ seq: 20, turn: { data: { get: turnData } } })
-  assert.equal(matched.charts.length, 1)
-  assert.equal(matched.charts[0].chart_id, 'ch_1')
-  assert.equal(matched.charts[0].chart_url, '/capital-charts/ch_1.json')
-
-  // 未来的 turn 不得认领：DSH 的 conversation engine 不允许一个 context 先 update 再 start
-  // （`received an update before its start Match`），宁可少一张卡片也不能让投影抛错。
-  const future = definition.match({
-    type: 'capital/chart-rendered',
-    seq: 30,
-    data: { turn: 99, chart_id: 'ch_future', title: '未来', html_path: 'x' },
-  })
-  assert.equal(future, null, '未开始的 turn 不得认领')
-
-  // 收尾 assistant 早于图表事件时不得渲染（seq 过滤），避免把后一轮的图挂到前一轮。
-  assert.equal(tailRegistration.select({ seq: 11, turn: { data: { get: turnData } } }), null)
-  // 没有图表的 turn 必须返回 null，否则会顶掉官方 deliverables 行（chain 是"第一个非 null 胜出"）。
-  assert.equal(tailRegistration.select({ seq: 20, turn: { data: { get: () => undefined } } }), null)
-  const empty = definition.start({}, { event: { type: 'turn/start', data: { turn: 8 } } })
-  const emptyData = definition.buildLocationData({ state: empty }, 'turn')
-  assert.equal(tailRegistration.select({ seq: 21, turn: { data: { get: (key) => (key === 'capital-turn-charts' ? emptyData.value : undefined) } } }), null)
+/**
+ * 防复发（2026-09-18 事故）：客户端不得再持有任何图表会话事件的投影 / turn-tail 抢占。
+ *
+ * 内嵌卡片要求宿主把非 first-party 事件写进会话日志，而那会让整份会话冷加载失败。
+ * 呈现现在是"官方交付行 + 官方 document preview"，客户端这一侧必须保持零图表投影。
+ */
+test('客户端 bundle：不得再出现图表专属会话投影或 turn-tail 抢占', () => {
+  assert.equal(source.includes('capital/chart-rendered'), false, '不得再引用已废弃的自定义事件类型')
+  assert.equal(source.includes('conversation.chat.turnTail'), false, '不得再抢占 turn-tail 座位（那是官方交付行的座位）')
+  assert.equal(source.includes('uiConversation'), false, '不得再注册任何 conversation 投影')
+  assert.equal(source.includes('capital-turn-charts'), false, '旧的 turn 图表数据键不得残留')
+  assert.equal(/turnChartsDefinition|selectTurnCharts|TurnChartsView|ChartCard/.test(source), false, '卡片通道的代码不得残留')
 })
 
 test('客户端 bundle：图表库内联、react external、不依赖页面全局', () => {

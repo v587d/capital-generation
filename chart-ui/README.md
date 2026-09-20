@@ -37,7 +37,7 @@ baseUrl 设为本 patch 文件所在目录）；`locatePkgJson` 随后按"最近
 | 文件 | 说明 |
 |---|---|
 | `index.js` | 宿主半边：`capitalCharts` 服务 + `/capital-charts/<chart_id>.json` 序列路由。纯 JS、零构建 |
-| `client.src.cjs` | 浏览器半边源码：在 `conversation.chat.turnTail` 渲染**本轮图表**（数据来自宿主追加的 `capital/chart-rendered` 事件）；同时保留 `tool.call.toolview['render_chart']` 作为过程明细，取数 → 渲染 → “打开”自包含 HTML |
+| `client.src.cjs` | 浏览器半边源码：只注册 `tool.call.toolview['render_chart']` 过程明细卡片（取数 → 渲染 → “打开”自包含 HTML）。**不再有 turn-tail 卡片**——呈现改走官方交付通道，见下 |
 | `client.js` | 浏览器半边**构建产物**：`npm run build:client` 用 esbuild 打包生成。`lightweight-charts` 内联（无页面全局）、`react` external |
 | `package.json` | `dsh.client` 声明（`platform: web`）+ `exports["./client"]` |
 
@@ -59,9 +59,8 @@ npm run build:client   # 生成 chart-ui/client.js（`npm run build` / `npm test
 HTML 逐字节同源）以字符串形式在构建期落成真实模块，**不在浏览器里 eval**（避开 CSP）。
 
 浏览器半边的契约测试在 `test/chart-client.test.mjs`：把 bundle 放进最小 DOM 沙箱真的执行
-工厂函数，断言它按工具名注册 toolview、turn-tail selector 在"本轮无图"时返回 null
-（chain 是"第一个非 null 胜出"，不返回 null 会顶掉官方 deliverables 行）、库已内联、
-react 保持 external、不依赖页面全局。
+工厂函数，断言它只按工具名注册 toolview、**不再持有任何图表专属会话投影或 turn-tail 抢占**、
+库已内联、react 保持 external、不依赖页面全局。
 
 ## 数据通道
 
@@ -89,20 +88,24 @@ route owner 自己负责，平台自己的 `/api` 与首页分别走 `connection
 修法（按 owner 分区 / 给条目加过期并同步撤销）尚未实施，记录在案。
 
 
-## 最终 turn 呈现（本轮图表）
+## 本轮呈现（官方交付通道）
 
 出图成功后，**宿主**（`@v587d/capital-generation` 的 `render_chart`）会往"用户正在看的根会话"
-追加一条小型非 surface 事件 `capital/chart-rendered`（只有 `chart_id` / 标题 / `chart_url` /
-相对 `html_path` / 点数，绝不含 rows、series、HTML 或绝对路径）。客户端 conversation
-definition 把它按 turn 折成 `capital-turn-charts`，尾部 selector 只在收尾 assistant message
-**之前**已登记过图表时命中：
+追加一条**官方** `deliverables/presented` 事件，把 `capital-analysis/charts/<chart_id>/chart.html`
+登记为**本轮交付物**：
 
-- 主呈现挂在 DSH 的 `conversation.chat.turnTail`，位于收尾 assistant 内容之后、action row 之前，
-  因此不会被 compact transcript 的工具过程折叠 —— 用户读完结论就能看到支持它的图，并可点开自包含 HTML；
-- 非 surface 事件不进 `deriveMessages()`，所以**不污染模型上下文**（与官方 `deliverables/presented` 同形）；
-- 无图表的 turn 必须返回 `null`：`turnTail` 是 chain，第一个非 null 的 selector 胜出，
-  不返回 null 会把官方的「本轮文件改动 / 交付」行顶掉；
+- 载荷只有官方契约字段：`turn` / `callId`（`capital-chart:<chart_id>` 句柄）/ `files[]`
+  （工作区相对 `html_path` + 标题）——绝不含 rows、series、HTML 或绝对路径；
+- 用户在收尾的官方「本轮文件改动 / 交付」行点开该文件，右侧由官方
+  `dsh-client-ui-sidebar-documentpreview` 的 script-enabled iframe 渲染自包含图表；
+- 非 surface 事件不进 `deriveMessages()`，所以**不污染模型上下文**；
 - 图表跟着 Dataset 一对一：需要多个视图就出多张，不做多源叠图。
 
-`tool.call.toolview['render_chart']` 保留为工具过程明细，不再承担唯一入口。
-客户端只折叠 `chart_id`、URL 和相对路径等小回执，不读取或传输 rows / series。
+**为什么不再自建卡片（2026-09-18 事故）**：卡片需要一条自定义会话事件承载，而会话日志的事件
+词汇表是**闭集**、读取侧 fail-closed，且 `Session.append` 无法设置 `ignorable`——自定义事件写进日志后
+会让**整份会话在冷加载时打不开**（实测 6 份会话 `failed to observe session`）。所以客户端不再持有
+任何图表专属会话投影，**turn-tail 卡片通道已整体移除**；回归断言在 `test/chart-client.test.mjs`。
+详见 `src/chart/events.ts` 头部与 `AGENTS.md` 的「图表呈现纪律」。
+
+`tool.call.toolview['render_chart']` 保留为工具过程明细（子会话与展开视图可见），
+经 `/capital-charts/<chart_id>.json` 旁路取数渲染，**不经**会话事件。

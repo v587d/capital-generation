@@ -175,11 +175,11 @@ export interface RenderChartInput {
    */
   charts?: () => ChartPublisher | undefined
   /**
-   * 惰性解析"图表→对话流"事件发布器（`capital/chart-rendered`）。
+   * 惰性解析"图表 → 本轮交付"发布器（官方 `deliverables/presented`）。
    *
    * 与 `charts` 同理每次出图解析一次：宿主平面的 `sessions` / `sessionProjections`
    * 不可用时返回 undefined，整条链路照常降级——图仍在 workspace 里，回执照样给 html_path，
-   * 只是收尾卡片不会出现。
+   * 只是本轮交付行不会登记这张图。
    */
   chartEvents?: () => ChartEventPublisher | undefined
   now?: () => number
@@ -277,25 +277,17 @@ export async function renderChart(input: RenderChartInput, args: Record<string, 
   // a stable receipt; production apply() always injects the registry.
   const chartRef = artifact?.chart_ref ?? `chart_${chartId.slice(3)}`
 
-  // 对话流呈现：把这张图登记到**用户正在看的那条会话**（owner scope 与 chart_ref 同源，
-  // 因此 specialist 出的图正好落在主会话）。事件只有元数据、不是 surface 事件，
-  // 既不会进模型消息历史，也不携带 rows / series / 绝对路径。
-  // 呈现通道是可选的：写不进去不影响图表产物与回执。
+  // 对话流呈现：把这张图登记为**用户正在看的那条会话**的本轮交付物
+  // （owner scope 与 chart_ref 同源，因此 specialist 出的图正好落在主会话）。
+  // 走官方 `deliverables/presented`——**不能**改回自定义事件类型：会话日志的事件词汇表
+  // 是闭集，非 first-party 类型会让整份会话在冷加载时打不开（事故记录见 src/chart/events.ts）。
+  // 事件不进模型消息历史。呈现通道可选：写不进去不影响图表产物与回执。
   try {
     input.chartEvents?.()?.publish({
       ownerSessionId: chartSessionScopeId(tokenSource?.sourceSession ?? session),
       chart_id: chartId,
-      chart_ref: chartRef,
       title: payload.title,
-      kind: payload.kind,
-      axis: payload.axis,
-      points: payload.meta.points,
-      chart_url: chartUrl,
       html_path: pathOf('chart.html'),
-      source_label: meta.source_label ?? null,
-      captured_at: meta.captured_at ?? null,
-      task_id: taskId,
-      warnings: payload.meta.warnings,
     })
   } catch {
     // 事件通道是可选的呈现路径，绝不因它失败而影响出图。
@@ -337,7 +329,7 @@ export function registerChartTool(ctx: Context, options: RenderChartInput): void
       `最多保留 ${MAX_CHART_POINTS} 个点（超出由宿主下采样并如实标注）。` +
       '字段语义、可用键与错误码见 skill capital-chart-protocol —— 首次画图前先加载它。' +
       '是否出图由 data_junior 的可视化协议决定；本工具只负责安全生成图表产物和小型回执。' +
-      '出图成功后宿主会把这张图登记到当前对话的收尾卡片上，调用方**不要**在回传或正文里罗列图表文件、路径或 HTML。' +
+      '出图成功后宿主会把这张图登记为当前对话的**本轮交付物**（官方 deliverables/presented），用户可从收尾的交付行点开自包含图表；调用方**不要**在回传或正文里罗列图表文件、路径或 HTML。' +
       '图表是呈现不是分析：需要数值结论（首末值、涨跌幅、分位数等）仍走 data_junior 的 profile / query，不要用图去推断数字。',
     parameters,
     output: { schema: receiptSchema, render },
