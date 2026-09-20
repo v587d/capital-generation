@@ -14,7 +14,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.0.0-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.1.0-9cf" alt="Version"></a>
 </p>
 
 > [!IMPORTANT]
@@ -77,16 +77,6 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
 ## 样例
 [报告样例（最新）](docs/sample/指南针综合研判分析完整报告.md)
 
-**完整分析报告（内嵌图表）**
-
-<p align="center">
-  <a href="assets/sample-report-with-chart.png">
-    <img src="assets/sample-report-with-chart2.png" width="1000" alt="最终答复中的完整分析报告与内嵌图表">
-  </a>
-  <br>
-  <em>长截图，建议点击查看原图</em>
-</p>
-
 ## 安装到 DSH Web Profile
 > [!NOTE]
 > 请务必前往 [同花顺（fuyao）](https://fuyao.aicubes.cn/docs/) 和 [AnySearch](https://www.anysearch.com/docs) **免费**获取 API 密钥。
@@ -125,6 +115,25 @@ npm run smoke:boot   # 冒烟验证装配可正常 boot
 
 构建产物 `lib/` 已随仓库提交，普通用户从 GitHub 安装时**无需**本地构建；只有需要改插件源码或
 维护子包时才需要执行以上命令。
+
+## Changelog
+
+### 2.1.0 — 2026-09-20
+
+本版是**图表呈现通道的定点重做**：修掉「打开历史会话失败」的根因，并把图表交付
+交回 DSH 官方机制。**没有工具/接口层面的破坏性变更**，但呈现行为与 2.0.0 不同。
+
+#### ⚠️ 行为变更：图表不再内嵌在答复里
+
+| | 2.0.0 | 2.1.0 |
+|---|---|---|
+| 呈现位置 | 主 Agent 答复下方的**内嵌图表卡片** | 收尾的**「本轮文件改动 / 交付」行** |
+| 查看方式 | 页面内直接渲染 | 点开该行的 `chart.html`，右侧面板渲染可交互图表 |
+| 承载机制 | 自定义会话事件 `capital/chart-rendered` + 客户端卡片 | 官方 `deliverables/presented` + 官方文档预览 |
+
+降级路径不变：`chart.html` 自包含（内联图表库与数据），可离线打开、零外部请求。
+
+#### 🐞 修复：升级到 dsh 0.1.5-rc.2 后，出过图的会话 100% 打不开
 
 # 贡献
 可自行克隆本项目，按上方「本地开发 / 构建 / 测试」执行。

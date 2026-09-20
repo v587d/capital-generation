@@ -25,6 +25,14 @@ export interface WindCallResult {
     error?: string;
     code?: WindErrorCode;
 }
+/**
+ * 报给 Wind 的客户端版本（`initialize.clientInfo.version` 与 `tools/call._meta.clientVersion`）。
+ *
+ * ⚠️ 必须与 `package.json` 的 `version` 一致：嵌套包 `chart-ui/package.json` 的版本由
+ * `test/chart-composition.test.mjs` 守着（会因漂移而失败），这里原本是写死的第二处，
+ * 一次发版就得记得改两遍。所以本常量由测试一并核对（见 `test/wind-client.test.mjs`）。
+ */
+export declare const WIND_CLIENT_VERSION = "2.1.0";
 export interface WindClient {
     callTool(toolName: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<WindCallResult>;
 }

@@ -29,6 +29,15 @@ export interface WindCallResult {
   code?: WindErrorCode
 }
 
+/**
+ * 报给 Wind 的客户端版本（`initialize.clientInfo.version` 与 `tools/call._meta.clientVersion`）。
+ *
+ * ⚠️ 必须与 `package.json` 的 `version` 一致：嵌套包 `chart-ui/package.json` 的版本由
+ * `test/chart-composition.test.mjs` 守着（会因漂移而失败），这里原本是写死的第二处，
+ * 一次发版就得记得改两遍。所以本常量由测试一并核对（见 `test/wind-client.test.mjs`）。
+ */
+export const WIND_CLIENT_VERSION = '2.1.0'
+
 export interface WindClient {
   callTool(toolName: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<WindCallResult>
 }
@@ -283,14 +292,14 @@ export function createWindClient(options: WindClientOptions): WindClient {
         const initialized = await postRpc('initialize', {
           protocolVersion: '2025-03-26',
           capabilities: {},
-          clientInfo: { name: 'capital-generation', version: '2.0.0' },
+          clientInfo: { name: 'capital-generation', version: WIND_CLIENT_VERSION },
         }, apiKey, signal)
         const initError = rpcErrorText(initialized)
         if (initError) return { ok: false, code: 'BACKEND', error: initError }
         const payload = await postRpc('tools/call', {
           name: toolName,
           arguments: args,
-          _meta: { clientVersion: '2.0.0' },
+          _meta: { clientVersion: WIND_CLIENT_VERSION },
         }, apiKey, signal)
         return interpretResult(payload)
       } catch (error) {

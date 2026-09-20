@@ -1,10 +1,27 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   createWindClient,
   DEFAULT_WIND_ENDPOINT,
+  WIND_CLIENT_VERSION,
   WIND_MAX_CONTENT_CHARS,
 } from '../lib/web-retriever/wind-client.js'
+
+const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
+
+/**
+ * 报给 Wind 的客户端版本必须跟 `package.json` 同步。
+ *
+ * 发版时版本号有**两处**要改（主包 + 嵌套包 `chart-ui/`），这里原本是写死的第三处；
+ * 改成常量 + 本断言后，漂移会**具名失败**而不是悄悄发出一个错版本号。
+ */
+test('WIND_CLIENT_VERSION 必须与 package.json 的 version 一致', () => {
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
+  assert.equal(WIND_CLIENT_VERSION, pkg.version, '发版时忘了同步 WIND_CLIENT_VERSION（src/web-retriever/wind-client.ts）')
+})
 
 const okKey = async () => 'secret'
 
@@ -53,7 +70,7 @@ test('callTool：先 initialize 再 tools/call，Bearer 与 MCP 线头齐全，�
     assert.deepEqual(stub.calls[1].body.params, {
       name: 'get_company_announcements',
       arguments: { query: '茅台分红', top_k: 3 },
-      _meta: { clientVersion: '2.0.0' },
+      _meta: { clientVersion: WIND_CLIENT_VERSION },
     })
     for (const call of stub.calls) {
       assert.match(call.init.headers.authorization, /Bearer secret/)
