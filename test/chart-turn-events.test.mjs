@@ -7,8 +7,14 @@ import {
   MAX_CHARTS_PER_TURN,
   buildChartEventPayload,
   createChartEventPublisher,
+  resetChartEventPending,
   resolveOwnerSession,
 } from '../lib/chart/events.js'
+
+// `pending` 是模块级的（必须跨发布器实例存活），进程内所有用例共享它。
+// 本用例集内各测试的 owner id 会复用（main-1 / session-root），所以先清一次底。
+// 文件之间天然隔离：node --test 每个测试文件一个进程。
+resetChartEventPending()
 
 /**
  * 「图表 → 对话流」交付通道的契约测试。
@@ -294,6 +300,47 @@ test('publish：turn-stopping 注册失败（适配器返回 undefined）时必�
   assert.equal(main.appended.length, 1, '注册失败时 turn/start 必须兜底写入（否则卡片永不出现）')
   assert.equal(main.appended[0].data.turn, 5)
   assert.equal(publisher.pendingCount(), 0)
+})
+
+/**
+ * 防复发（2026-09-20 真机事故主因）：寄存队列必须**跨发布器实例**存活。
+ *
+ * 生产里 `createChartEventPublisher()` 是**每次 `render_chart`** 惰性调用的
+ * （`src/index.ts` 的 `chartEvents: () => …`），所以"出图时寄存"与"轮关闭时冲刷"
+ * 跑在**两个不同的实例**上。若 pending 是实例级：
+ *   实例 A 寄存 → 实例 B 冲刷时自己的 pending 是空的 → 图永久丢失，且零报错。
+ * 症状：可视化专家确实出图（render_chart isError=false），但主会话日志里
+ * 一条 `deliverables/presented` 都没有。
+ */
+test('publish：寄存必须跨发布器实例存活（出图与冲刷是两个实例）', async () => {
+  const main = fakeSession('main-1')
+  const sessions = { get: (id) => (id === 'main-1' ? main : undefined) }
+  let boundary = { openTurnStartSeq: null, lastTurn: 4 }
+  const { ctx, turnStoppingListeners } = fakeEventCtx({
+    sessions,
+    projections: { stateOf: () => boundary },
+    turnStopping: true,
+  })
+
+  // 实例 A：出图（回合关着）→ 寄存
+  const publisherA = createChartEventPublisher(ctx)
+  assert.ok(publisherA)
+  assert.equal(publisherA.publish(baseInput), true, '寄存')
+  assert.equal(publisherA.pendingCount('main-1'), 1)
+
+  // 实例 B：另一次惰性解析（生产里每次 render_chart 都会新建一个）
+  const publisherB = createChartEventPublisher(ctx)
+  assert.ok(publisherB)
+  assert.equal(publisherB.pendingCount('main-1'), 1, '新实例必须看到同一个队列（否则冲刷会扑空）')
+
+  boundary = { openTurnStartSeq: 200, lastTurn: 5 }
+  turnStoppingListeners[0]({ agent: { session: { id: 'main-1' } }, turn: 5 })
+  await new Promise((resolve) => { queueMicrotask(resolve) })
+  await new Promise((resolve) => { queueMicrotask(resolve) })
+
+  assert.equal(main.appended.length, 1, '实例 A 寄存的图必须被冲刷写入（跨实例）')
+  assert.equal(main.appended[0].data.turn, 5)
+  assert.equal(publisherB.pendingCount(), 0, '冲刷后队列清空')
 })
 
 test('publish：agent/turn-stopping 在场时，寄存的图在该轮关闭前写入，turn/start 不得抢跑', async () => {

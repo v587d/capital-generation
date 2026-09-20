@@ -80,6 +80,22 @@ export declare function resolveOwnerSession(sessions: SessionsService, ownerSess
  */
 export declare function buildChartEventPayload(input: ChartTurnEventInput, turn: number): Record<string, unknown>;
 /**
+ * 进程内待登记条目的总量上限（安全阀）。
+ *
+ * 正常流程下条目会在 owner 那一轮关闭时被冲刷清空；但如果冲刷时机始终没接上
+ * （上游事件名消失、监听注册失败且 turn/start 也没来），模块级 Map 会一直攒着。
+ * 这是纯内存元数据（只有 chart_id / 标题 / 相对路径），上限只为防无界增长，
+ * 与 `MAX_CHARTS_PER_TURN` 的"防模型循环"是两件事。
+ */
+export declare const MAX_PENDING_CHARTS = 64;
+/**
+ * 只给测试用：清空待登记队列。
+ *
+ * `pending` 是模块级的（必须跨发布器实例存活，见下方说明），因此进程内所有测试
+ * 共享它。测试之间要隔离，就在用例开始时调用一次。
+ */
+export declare function resetChartEventPending(): void;
+/**
  * 惰性构造发布器：`sessions` / `sessionProjections` 缺一不可（都是宿主平面服务，
  * 在 preset scope 里正常可解析；缺失表示宿主组合不完整，此时静默降级）。
  */
