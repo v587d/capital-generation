@@ -42,11 +42,19 @@ function fakeCtx({ sessions, projections, logger } = {}) {
 }
 
 /** 带事件监听能力的 ctx：root 监听器由测试手动触发（模拟 owner 的 turn/start）。 */
-function fakeEventCtx({ sessions, projections, logger } = {}) {
+function fakeEventCtx({ sessions, projections, logger, turnStopping = false } = {}) {
   const listeners = []
   const disposed = []
+  const turnStoppingListeners = []
   const root = {
     on: (event, listener) => { listeners.push({ event, listener }); return () => { disposed.push(event) } },
+  }
+  if (turnStopping) {
+    // 首选钩子在场：模拟宿主平面把 `agent/turn-stopping` 接进来。
+    root.onTurnStopping = (listener) => {
+      turnStoppingListeners.push(listener)
+      return () => { disposed.push('agent/turn-stopping') }
+    }
   }
   const ctx = {
     get: (name) => {
@@ -59,7 +67,7 @@ function fakeEventCtx({ sessions, projections, logger } = {}) {
     root,
     logger,
   }
-  return { ctx, listeners, disposed }
+  return { ctx, listeners, disposed, turnStoppingListeners }
 }
 
 const baseInput = {
@@ -152,7 +160,7 @@ test('publish：事件写进根会话的当前 turn，并被同 turn 上限拦�
   assert.equal(main.appended.length, MAX_CHARTS_PER_TURN)
 })
 
-test('publish：回合之间出图先寄存，等 owner 的下一个 turn/start 才写入', async () => {
+test('publish：回合之间出图先寄存；拿不到 agent/turn-stopping 时退回 turn/start 兜底', async () => {
   const main = fakeSession('main-1')
   const sessions = { get: (id) => (id === 'main-1' ? main : undefined) }
   // 关键场景（2026-09-17 实测）：主 Agent 结束回合等子 Agent，出图时 openTurnStartSeq === null，
@@ -199,6 +207,54 @@ test('publish：回合之间出图先寄存，等 owner 的下一个 turn/start 
   assert.equal(main.appended.length, 2)
   assert.equal(main.appended[1].data.turn, 6)
   assert.equal(publisher.pendingCount(), 0)
+})
+
+/**
+ * 首选时机（2026-09-20 真机教训）：寄存的图必须在**该轮即将关闭**时写入，
+ * 不能被下一次 `turn/start` 抢跑——那一轮往往是空的过程轮（实测 session 38bad3f9：
+ * 交付行落进中间的 turn 5，而总结答复在 turn 6）。
+ */
+test('publish：agent/turn-stopping 在场时，寄存的图在该轮关闭前写入，turn/start 不得抢跑', async () => {
+  const main = fakeSession('main-1')
+  const sessions = { get: (id) => (id === 'main-1' ? main : undefined) }
+  let boundary = { openTurnStartSeq: null, lastTurn: 4 }
+  const { ctx, listeners, turnStoppingListeners } = fakeEventCtx({
+    sessions,
+    projections: { stateOf: () => boundary },
+    turnStopping: true,
+  })
+  const publisher = createChartEventPublisher(ctx)
+  assert.ok(publisher)
+  assert.equal(turnStoppingListeners.length, 1, '首选钩子必须在场')
+
+  assert.equal(publisher.publish(baseInput), true, '回合之间出图 → 寄存')
+  assert.equal(publisher.pendingCount('main-1'), 1)
+
+  // turn 5 开始：首选在场时**不得**在这里冲刷（这正是旧行为的病灶）。
+  boundary = { openTurnStartSeq: 200, lastTurn: 5 }
+  listeners.find((entry) => entry.event === 'session/event')
+    .listener({ id: 'main-1' }, { type: 'turn/start', data: { turn: 5 } })
+  await new Promise((resolve) => { queueMicrotask(resolve) })
+  await new Promise((resolve) => { queueMicrotask(resolve) })
+  assert.equal(main.appended.length, 0, 'turn/start 不得抢跑（否则交付行落进过程轮）')
+  assert.equal(publisher.pendingCount('main-1'), 1, '仍处寄存')
+
+  // turn 5 即将关闭 → 此时写入，交付行落进 turn 5。
+  turnStoppingListeners[0]({ agent: { session: { id: 'main-1' } }, turn: 5 })
+  await new Promise((resolve) => { queueMicrotask(resolve) })
+  await new Promise((resolve) => { queueMicrotask(resolve) })
+  assert.equal(main.appended.length, 1, '必须在该轮关闭前写入')
+  assert.equal(main.appended[0].type, CHART_DELIVERABLE_EVENT)
+  assert.equal(main.appended[0].data.turn, 5)
+  assert.equal(publisher.pendingCount(), 0)
+
+  // 子 Agent 的 turn-stopping 不得误触发：它的 session 不是 owner（也不是 owner 的后代）。
+  boundary = { openTurnStartSeq: null, lastTurn: 5 }
+  assert.equal(publisher.publish({ ...baseInput, chart_id: 'ch_other' }), true)
+  turnStoppingListeners[0]({ agent: { session: { id: 'unrelated-session' } }, turn: 9 })
+  await new Promise((resolve) => { queueMicrotask(resolve) })
+  assert.equal(publisher.pendingCount('main-1'), 1, '非 owner 会话的 turn-stopping 不得冲刷')
+  assert.equal(main.appended.length, 1)
 })
 
 test('publish：回合打开时立即写入，turn 缺失 / append 抛错都只降级，不抛出', () => {

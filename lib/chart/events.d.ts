@@ -22,8 +22,21 @@ interface SessionsService {
 /** 宿主 ctx 里本模块用到的部分；focused 结构类型便于单测注入假实现。 */
 export interface ChartEventContext {
     get(name: string): unknown;
-    /** 监听会话事件（`turn/start` 冲刷寄存的图表）。必须注册在未打 scope 标签的 root context 上。 */
+    /** 监听会话事件（`turn/start`，仅作**兜底**冲刷）。必须注册在未打 scope 标签的 root context 上。 */
     on?(event: string, listener: (...args: unknown[]) => void): unknown;
+    /**
+     * 监听 `agent/turn-stopping`：**首选的冲刷时机**。
+     *
+     * 为什么必须是它而不是 `turn/start`：一轮是否"最终"在事件发生的那一刻不可知——子 Agent 的
+     * 结算随时会再触发新一轮。实测（2026-09-20 真机 session `38bad3f9`）：图表在 turn 4 与 5 之间
+     * 寄存，旧规则在下一次 `turn/start` 立刻冲刷，于是交付行落进了**空的过程轮** turn 5，而主 Agent
+     * 写下总结答复的是 turn 6——卡片出现在中间步骤。`agent/turn-stopping` 是官方"该轮即将关闭"的
+     * 钩子（`@mode serial`，轮仍打开、可安全 append），在它上面冲刷，交付行就落进**消费这份图的那一轮**。
+     *
+     * 必须注册在未打 scope 标签的 root context 上：`dsh-scope` 的准入规则会让 standing-scope 的
+     * 监听器收不到子 Agent 的事件，而我们要的正是 owner 自己那轮关闭的事实。
+     */
+    onTurnStopping?(listener: (...args: unknown[]) => void): unknown;
     effect?(callback: () => unknown, label?: string): unknown;
     /** Root context（未打标签）；拿不到时退回自身（宿主平面行即未打标签）。 */
     readonly root?: ChartEventContext;

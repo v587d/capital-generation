@@ -174,7 +174,22 @@ export function apply(ctx: Context, config: Config) {
     sourceTokens: chartSourceTokens,
     artifacts: chartArtifacts,
     charts: () => ctx.get('capitalCharts') as { publish(input: { chartId: string; filePath: string }): string | null } | undefined,
-    chartEvents: () => createChartEventPublisher(ctx as unknown as ChartEventContext),
+    // 交付行的冲刷时机：优先 `agent/turn-stopping`（该轮即将关闭，交付行才会落在**消费这份图的那一轮**，
+    // 而不是被下一次 turn/start 提前落进空的过程轮）。事件名按本仓惯例模糊匹配：`agent/created` 那类
+    // 声明式事件名不在宿主 Context 的静态 `keyof Events` 里，注册失败时返回 undefined，
+    // `events.ts` 会据此退回 `turn/start` 兜底，不会静默丢图。
+    chartEvents: () => createChartEventPublisher({
+      ...(ctx as unknown as ChartEventContext),
+      onTurnStopping: (listener) => {
+        try {
+          const on = (ctx as unknown as { on?: (event: string, handler: (...args: unknown[]) => unknown) => unknown }).on
+          if (typeof on !== 'function') return undefined
+          return on.call(ctx, 'agent/turn-stopping', (...args: unknown[]) => { listener(...args) })
+        } catch {
+          return undefined
+        }
+      },
+    }),
   })
   // 根 Agent 工具收敛：`agent/created` 里对**主 Agent**（无 parentSession）在其自己的
   // scope 上 deny render_chart / subagent_visualization_specialist / prepare_chart_source。

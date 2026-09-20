@@ -76,8 +76,21 @@ interface ProjectionsService {
 /** 宿主 ctx 里本模块用到的部分；focused 结构类型便于单测注入假实现。 */
 export interface ChartEventContext {
   get(name: string): unknown
-  /** 监听会话事件（`turn/start` 冲刷寄存的图表）。必须注册在未打 scope 标签的 root context 上。 */
+  /** 监听会话事件（`turn/start`，仅作**兜底**冲刷）。必须注册在未打 scope 标签的 root context 上。 */
   on?(event: string, listener: (...args: unknown[]) => void): unknown
+  /**
+   * 监听 `agent/turn-stopping`：**首选的冲刷时机**。
+   *
+   * 为什么必须是它而不是 `turn/start`：一轮是否"最终"在事件发生的那一刻不可知——子 Agent 的
+   * 结算随时会再触发新一轮。实测（2026-09-20 真机 session `38bad3f9`）：图表在 turn 4 与 5 之间
+   * 寄存，旧规则在下一次 `turn/start` 立刻冲刷，于是交付行落进了**空的过程轮** turn 5，而主 Agent
+   * 写下总结答复的是 turn 6——卡片出现在中间步骤。`agent/turn-stopping` 是官方"该轮即将关闭"的
+   * 钩子（`@mode serial`，轮仍打开、可安全 append），在它上面冲刷，交付行就落进**消费这份图的那一轮**。
+   *
+   * 必须注册在未打 scope 标签的 root context 上：`dsh-scope` 的准入规则会让 standing-scope 的
+   * 监听器收不到子 Agent 的事件，而我们要的正是 owner 自己那轮关闭的事实。
+   */
+  onTurnStopping?(listener: (...args: unknown[]) => void): unknown
   effect?(callback: () => unknown, label?: string): unknown
   /** Root context（未打标签）；拿不到时退回自身（宿主平面行即未打标签）。 */
   readonly root?: ChartEventContext
@@ -217,7 +230,12 @@ export function createChartEventPublisher(ctx: ChartEventContext): ChartEventPub
     return true
   }
 
-  /** 把寄存的图表写进刚打开的回合。 */
+  /**
+   * 把寄存的图表写进某一轮。
+   *
+   * 冲刷时机决定交付行的落点：首选 `agent/turn-stopping`（该轮即将关闭），
+   * 只有在拿不到这个钩子时才退回 `turn/start`。
+   */
   const flush = (ownerSessionId: string, turn: number): void => {
     const queued = pending.get(ownerSessionId)
     if (queued === undefined || queued.length === 0) return
@@ -230,34 +248,71 @@ export function createChartEventPublisher(ctx: ChartEventContext): ChartEventPub
     for (const item of queued) append(owner, turn, item)
   }
 
+  /**
+   * 首选时机是否可用。
+   *
+   * 关键：`turn-stopping` 缺席时**必须**退回 `turn/start`，否则寄存的图会永远不写（静默丢失）。
+   * 安装成功才置 true；effect 卸载时复位，避免失效后仍以为首选可用。
+   */
+  let turnStoppingActive = false
+
+  /** 不能在任何 appending 窗口内重入 append，统一延到微任务。 */
+  const flushSoon = (ownerSessionId: string, turn: number): void => {
+    queueMicrotask(() => {
+      try {
+        flush(ownerSessionId, turn)
+      } catch (error) {
+        warn(`图表对话流事件冲刷失败：${error instanceof Error ? error.message : String(error)}`)
+      }
+    })
+  }
+
   const listenCtx = ctx.root ?? ctx
   if (typeof listenCtx.on === 'function') {
-    const install = () => listenCtx.on?.('session/event', (...args: unknown[]) => {
+    const sessionEventDispose = listenCtx.on('session/event', (...args: unknown[]) => {
       try {
         const session = args[0] as { id?: unknown } | undefined
         const event = args[1] as { type?: unknown; data?: { turn?: unknown } } | undefined
         if (event?.type !== 'turn/start') return
+        // 首选钩子在场时，`turn/start` 不得抢跑：那一轮往往还是过程轮（2026-09-20 真机教训），
+        // 交付行会被落到空轮里。只有拿不到 `agent/turn-stopping` 时才用它兜底。
+        if (turnStoppingActive) return
         const sessionId = typeof session?.id === 'string' ? session.id : undefined
         const turn = event.data?.turn
         if (sessionId === undefined || !pending.has(sessionId)) return
         if (typeof turn !== 'number' || !Number.isSafeInteger(turn) || turn < 1) return
-        // 不能在 appending 窗口内重入 append，延到微任务。
-        queueMicrotask(() => {
-          try {
-            flush(sessionId, turn)
-          } catch (error) {
-            warn(`图表对话流事件冲刷失败：${error instanceof Error ? error.message : String(error)}`)
-          }
-        })
+        flushSoon(sessionId, turn)
       } catch {
         // 事件观察者永不抛出。
       }
     })
-    const disposeListener = install()
     if (typeof ctx.effect === 'function') {
       ctx.effect(() => () => {
-        if (typeof disposeListener === 'function') disposeListener()
+        if (typeof sessionEventDispose === 'function') sessionEventDispose()
       }, 'capital-generation.chart-turn-events()')
+    }
+  }
+
+  if (typeof listenCtx.onTurnStopping === 'function') {
+    const disposeTurnStopping = listenCtx.onTurnStopping((...args: unknown[]) => {
+      try {
+        const payload = args[0] as { agent?: { session?: { id?: unknown } }; turn?: unknown } | undefined
+        const sessionId = payload?.agent?.session?.id
+        const turn = payload?.turn
+        if (typeof sessionId !== 'string' || !pending.has(sessionId)) return
+        if (typeof turn !== 'number' || !Number.isSafeInteger(turn) || turn < 1) return
+        flushSoon(sessionId, turn)
+      } catch {
+        // 事件观察者永不抛出。
+      }
+    })
+    turnStoppingActive = true
+    if (typeof ctx.effect === 'function') {
+      ctx.effect(() => () => {
+        // 卸载即视为"首选不可用"，让 `turn/start` 兜底重新接上，避免图静默丢失。
+        turnStoppingActive = false
+        if (typeof disposeTurnStopping === 'function') disposeTurnStopping()
+      }, 'capital-generation.chart-turn-stopping()')
     }
   }
 
@@ -272,7 +327,8 @@ export function createChartEventPublisher(ctx: ChartEventContext): ChartEventPub
       const openSeq = boundary?.openTurnStartSeq
       const lastTurn = boundary?.lastTurn
       if (typeof openSeq !== 'number') {
-        // 回合之间出图：寄存，等 owner 的下一个 turn/start（那才是写最终答复的回合）。
+        // 回合之间出图（主 Agent 等子 Agent 时会先关轮）：寄存，等 owner 那一轮
+        // **即将关闭**（`agent/turn-stopping`）时再写——那才是消费这份图、写下答复的回合。
         const queued = pending.get(input.ownerSessionId) ?? []
         if (queued.length >= MAX_CHARTS_PER_TURN) {
           warn(`图表对话流事件跳过：${input.ownerSessionId} 已寄存 ${MAX_CHARTS_PER_TURN} 张，等不到新回合`)

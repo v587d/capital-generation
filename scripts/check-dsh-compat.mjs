@@ -299,6 +299,34 @@ const probes = [
     },
   },
   {
+    id: 'L14',
+    title: "agent/turn-stopping（该轮即将关闭，轮仍打开）→ 决定交付行落在哪一轮",
+    why: '图表在回合之间产生时要寄存，等 owner 那一轮**即将关闭**再写；若退回"下一次 turn/start 就写"，'
+      + '交付行会落进空的过程轮（2026-09-20 实测 session 38bad3f9：落进 turn 5，总结答复在 turn 6）。'
+      + '事件名消失，或派发点被挪到 turn/end 之后（此时轮已关闭、append 会挂到下一轮），本仓都不再有正确落点。',
+    run() {
+      const typesFile = join(PKG('dsh-agent'), 'lib/types/runtime-types.d.ts')
+      const types = readIfPresent(typesFile)
+      if (types === undefined) return { status: FAIL, detail: `读不到 ${typesFile}` }
+      const loopFile = join(PKG('dsh-agent-loop'), 'lib/index.js')
+      const loop = readIfPresent(loopFile)
+      if (loop === undefined) return { status: FAIL, detail: `读不到 ${loopFile}` }
+
+      const checks = [
+        ["声明 'agent/turn-stopping'", /'agent\/turn-stopping'\(/, types, typesFile],
+        ['payload 带 turn（交付行归属轮号）', /'agent\/turn-stopping'\(this: Scoped<Agent>, payload: \{[\s\S]{0,160}turn: number/, types, typesFile],
+        ['@mode serial（轮仍打开时同步派发）', /@mode serial[\s\S]{0,600}'agent\/turn-stopping'\(/, types, typesFile],
+        ['agent loop 真的派发它', /dispatch\.serial\("agent\/turn-stopping"/, loop, loopFile],
+        // 顺序是关键：必须在 append("turn/end") 之前，否则轮已关闭（实测间距约 560 字符）。
+        ['派发在 turn/end 之前', /dispatch\.serial\("agent\/turn-stopping"[\s\S]{0,1200}session\.append\("turn\/end"/, loop, loopFile],
+      ]
+      const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: 'agent/turn-stopping 仍在 turn/end 之前派发，交付行有正确落点' }
+        : { status: FAIL, detail: `交付行的落点钩子变了：${missing.join(' / ')}（见账本 L14；不要把冲刷退回 turn/start，那会落进过程轮）` }
+    },
+  },
+  {
     id: 'L13',
     title: 'host 侧认证围栏 connection.requestRejection(req) → 401 | 403 | undefined',
     why: '/capital-charts 是自注册的 webServer prefix 路由，Web 载体本身不做认证（认证由 route owner 自负）；'
