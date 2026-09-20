@@ -214,6 +214,45 @@ test('publish：回合之间出图先寄存；拿不到 agent/turn-stopping 时�
  * 不能被下一次 `turn/start` 抢跑——那一轮往往是空的过程轮（实测 session 38bad3f9：
  * 交付行落进中间的 turn 5，而总结答复在 turn 6）。
  */
+/**
+ * 防复发（2026-09-20 真机事故）：出图会话 ≠ owner 会话时，寄存队列必须按 **owner** 归档。
+ *
+ * 真实拓扑是 root ← data_junior ← visualization_specialist（孙会话发起出图），
+ * 而冲刷时机（`turn/start` / `agent/turn-stopping`）拿到的都是 **owner** 的 session id。
+ * 曾经按 `input.ownerSessionId`（= specialist）归档，于是 `flush()` 永远查不到，
+ * 图**永久滞留 pending、静默不登记**——实测三个 specialist 会话 `render_chart=2` 而
+ * `deliverables/presented=0`，且没有任何报错。
+ */
+test('publish：ownerSessionId 是孙会话时，寄存的图仍能被 owner 的 turn-stopping 冲刷（键必须按 owner 归档）', async () => {
+  const main = fakeSession('session-root')
+  const junior = fakeSession('jnr', 'session-root')
+  const specialist = fakeSession('spec', 'jnr')
+  const byId = { 'session-root': main, jnr: junior, spec: specialist }
+  let boundary = { openTurnStartSeq: null, lastTurn: 4 }
+  const { ctx, turnStoppingListeners } = fakeEventCtx({
+    sessions: { get: (id) => byId[id] },
+    projections: { stateOf: () => boundary },
+    turnStopping: true,
+  })
+  const publisher = createChartEventPublisher(ctx)
+  assert.ok(publisher)
+
+  // specialist（depth 2）出图：owner 解析为根会话，队列必须归档在根会话上。
+  assert.equal(publisher.publish({ ...baseInput, ownerSessionId: 'spec' }), true, '寄存也算受理')
+  assert.equal(publisher.pendingCount(), 1, '寄存计数必须能查到（曾因键不一致而查不到）')
+  assert.equal(main.appended.length, 0)
+
+  boundary = { openTurnStartSeq: 200, lastTurn: 5 }
+  turnStoppingListeners[0]({ agent: { session: { id: 'session-root' } }, turn: 5 })
+  await new Promise((resolve) => { queueMicrotask(resolve) })
+  await new Promise((resolve) => { queueMicrotask(resolve) })
+
+  assert.equal(main.appended.length, 1, '必须写进根会话，而不是发起出图的那条会话')
+  assert.equal(main.appended[0].data.turn, 5)
+  assert.equal(junior.appended.length + specialist.appended.length, 0, '子会话不得被写入')
+  assert.equal(publisher.pendingCount(), 0, '冲刷后队列必须清空')
+})
+
 test('publish：agent/turn-stopping 在场时，寄存的图在该轮关闭前写入，turn/start 不得抢跑', async () => {
   const main = fakeSession('main-1')
   const sessions = { get: (id) => (id === 'main-1' ? main : undefined) }
