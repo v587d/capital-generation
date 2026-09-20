@@ -42,6 +42,11 @@ function fakeCtx({ sessions, projections, logger } = {}) {
 }
 
 /** 带事件监听能力的 ctx：root 监听器由测试手动触发（模拟 owner 的 turn/start）。 */
+/**
+ * @param turnStopping - `false` 不给钩子；`true` 给一个注册成功的钩子；
+ *   `'reject'` 给一个**注册失败**的钩子（模拟 `ctx.on('agent/turn-stopping')` 抛错，
+ *   适配器 catch 后返回 undefined）——此时必须退回 `turn/start` 兜底。
+ */
 function fakeEventCtx({ sessions, projections, logger, turnStopping = false } = {}) {
   const listeners = []
   const disposed = []
@@ -49,12 +54,15 @@ function fakeEventCtx({ sessions, projections, logger, turnStopping = false } = 
   const root = {
     on: (event, listener) => { listeners.push({ event, listener }); return () => { disposed.push(event) } },
   }
-  if (turnStopping) {
-    // 首选钩子在场：模拟宿主平面把 `agent/turn-stopping` 接进来。
+  if (turnStopping === true) {
+    // 首选钩子在场且注册成功：模拟宿主平面把 `agent/turn-stopping` 正常接进来。
     root.onTurnStopping = (listener) => {
       turnStoppingListeners.push(listener)
       return () => { disposed.push('agent/turn-stopping') }
     }
+  } else if (turnStopping === 'reject') {
+    // 注册失败：与 src/index.ts 适配器的 catch 分支一致——返回 undefined。
+    root.onTurnStopping = () => undefined
   }
   const ctx = {
     get: (name) => {
@@ -251,6 +259,41 @@ test('publish：ownerSessionId 是孙会话时，寄存的图仍能被 owner 的
   assert.equal(main.appended[0].data.turn, 5)
   assert.equal(junior.appended.length + specialist.appended.length, 0, '子会话不得被写入')
   assert.equal(publisher.pendingCount(), 0, '冲刷后队列必须清空')
+})
+
+/**
+ * 防复发（2026-09-20 真机事故）：`agent/turn-stopping` **注册失败**时必须退回 `turn/start`。
+ *
+ * 早先的实现无条件把 `turnStoppingActive` 置 true，哪怕适配器注册失败、返回 undefined。
+ * 结果：闸门被打开、`turn/start` 兜底被永久关掉，而首选钩子其实并不存在 ⇒ 图永久滞留
+ * pending ⇒ **交付卡片从头到尾不出现**，且零报错（用户实测）。
+ */
+test('publish：turn-stopping 注册失败（适配器返回 undefined）时必须退回 turn/start 兜底', async () => {
+  const main = fakeSession('main-1')
+  const sessions = { get: (id) => (id === 'main-1' ? main : undefined) }
+  let boundary = { openTurnStartSeq: null, lastTurn: 4 }
+  const { ctx, listeners, turnStoppingListeners } = fakeEventCtx({
+    sessions,
+    projections: { stateOf: () => boundary },
+    turnStopping: 'reject',
+  })
+  const publisher = createChartEventPublisher(ctx)
+  assert.ok(publisher)
+  assert.equal(turnStoppingListeners.length, 0, '注册失败时不应有首选监听器')
+
+  assert.equal(publisher.publish(baseInput), true, '寄存')
+  assert.equal(publisher.pendingCount('main-1'), 1)
+
+  // 首选不可用 ⇒ turn/start 必须接上兜底，否则图永远不写。
+  boundary = { openTurnStartSeq: 200, lastTurn: 5 }
+  listeners.find((entry) => entry.event === 'session/event')
+    .listener({ id: 'main-1' }, { type: 'turn/start', data: { turn: 5 } })
+  await new Promise((resolve) => { queueMicrotask(resolve) })
+  await new Promise((resolve) => { queueMicrotask(resolve) })
+
+  assert.equal(main.appended.length, 1, '注册失败时 turn/start 必须兜底写入（否则卡片永不出现）')
+  assert.equal(main.appended[0].data.turn, 5)
+  assert.equal(publisher.pendingCount(), 0)
 })
 
 test('publish：agent/turn-stopping 在场时，寄存的图在该轮关闭前写入，turn/start 不得抢跑', async () => {
