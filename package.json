@@ -17,6 +17,7 @@
   "files": [
     "lib",
     "chart-ui",
+    "capital-config",
     "preset",
     "cordis.patch.yml",
     "README.md"
@@ -28,8 +29,9 @@
   },
   "scripts": {
     "clean": "node -e \"import('node:fs').then(({ rmSync }) => rmSync('lib', { recursive: true, force: true }))\"",
-    "build": "npm run clean && tsc && node scripts/copy-assets.mjs && npm run build:client",
+    "build": "npm run clean && tsc && node scripts/copy-assets.mjs && npm run build:client && npm run build:config-client",
     "build:client": "node scripts/build-client.mjs",
+    "build:config-client": "node scripts/build-capital-config-client.mjs",
     "dev": "tsc -w",
     "vendor:charts": "node scripts/vendor-lightweight-charts.mjs",
     "check:dsh": "node scripts/check-dsh-compat.mjs",

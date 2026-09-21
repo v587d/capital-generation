@@ -68,6 +68,8 @@ const RetrieverSchema = z.object({
 export interface Config {
   /** Optional additive persona override; core safety guidance is preserved. */
   customPersona?: string
+  /** Fuyao credentials 引用名；空值回退到 FUYAO_API_KEY。 */
+  fuyaoCredentialRef?: string
   /** web_retriever 配置（可选；缺省使用 AnySearch 默认地址与凭据名）。 */
   retriever?: RetrieverConfig
 }
@@ -77,7 +79,10 @@ export const Config = z.object({
   customPersona: z.string()
     .default('')
     .description('Capital 模式 的附加人设文本（独立 section，非 deployment:persona）；核心安全约束始终保留'),
-  retriever: RetrieverSchema.default({ baseURL: '', credentialRef: '', windDocs: { endpoint: '', credentialRef: '', timeoutMs: 0 } })
+  fuyaoCredentialRef: z.string()
+    .default('FUYAO_API_KEY')
+    .description('Fuyao credentials 引用名，空 = FUYAO_API_KEY'),
+  retriever: RetrieverSchema.default({ baseURL: '', credentialRef: 'ANYSEARCH_API_KEY', windDocs: { endpoint: '', credentialRef: 'WIND_API_KEY', timeoutMs: 60000 } })
     .description('web_retriever 配置（可选；缺省使用 AnySearch 默认地址与凭据名）'),
 })
 
@@ -115,6 +120,19 @@ export const inject = ['systemPrompt']
  *  - 各自的模型工具；时间工具。
  */
 export function apply(ctx: Context, config: Config) {
+  // Settings 属于 Host 平面；Capital 仍可在无 settings provider 的测试/载体中运行。
+  const settings = ctx.get('settings') as { get?: (namespace: string) => unknown } | undefined
+  let effectiveConfig = config
+  try {
+    const resolved = settings?.get?.('capital-generation')
+    // 命名空间由随包的 `capital-config` 行注册（它同时是 settings 卡片的座位）。
+    // 这里再用本插件的 Config 过一遍：既补默认值，也把 schema 漂移变成可查的错误，
+    // 而不是把 capital-config schema 里的未知/缺失字段静默带进运行期配置。
+    if (resolved && typeof resolved === 'object') effectiveConfig = Config(resolved)
+  } catch {
+    // 未注册命名空间或解析失败时沿用 preset 配置。
+  }
+
   // ── data_collector 域：宿主侧 Dataset 落盘 + 取数执行器 ─────────────────────
   // 落盘通过 DSH 官方 fs/sandbox 服务完成，根目录恒为调用方 session 的
   // workspace cwd（exec.agent.session.header.cwd），服从当前 permission。
@@ -133,13 +151,14 @@ export function apply(ctx: Context, config: Config) {
       try {
         const credentials = ctx.get('credentials') as { resolve?: (ref: string) => Promise<{ value: string; source?: string } | undefined> } | undefined
         if (credentials?.resolve) {
-          for (const ref of ['FUYAO_API_KEY']) {
+          for (const ref of [effectiveConfig.fuyaoCredentialRef || 'FUYAO_API_KEY']) {
             const resolved = await credentials.resolve(ref)
             if (resolved?.value) return { present: true, source: resolved.source ?? `credentials(${ref})` }
           }
         }
         const processLike = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
-        if (processLike?.env?.FUYAO_API_KEY) return { present: true, source: 'env(FUYAO_API_KEY)' }
+        const fuyaoCredentialRef = effectiveConfig.fuyaoCredentialRef || 'FUYAO_API_KEY'
+        if (processLike?.env?.[fuyaoCredentialRef]) return { present: true, source: `env(${fuyaoCredentialRef})` }
         return { present: false, source: null }
       } catch (error) {
         return { present: false, source: null, error: error instanceof Error ? error.message : String(error) }
@@ -229,13 +248,13 @@ export function apply(ctx: Context, config: Config) {
   registerRootToolPolicy(ctx as unknown as Parameters<typeof registerRootToolPolicy>[0])
   ctx.effect(async () => {
     try {
-      const apiKey = await resolveFuyaoApiKey(ctx)
+      const apiKey = await resolveFuyaoApiKey(ctx, effectiveConfig.fuyaoCredentialRef || 'FUYAO_API_KEY')
       if (!apiKey) {
-        fuyaoRegistrationError = 'FUYAO_API_KEY 未配置（DSH credentials 优先，环境变量回退），同花顺数据源未注册'
+        fuyaoRegistrationError = `${effectiveConfig.fuyaoCredentialRef || 'FUYAO_API_KEY'} 未配置（DSH credentials 优先，环境变量回退），同花顺数据源未注册`
         ctx.logger.warn(`capital-generation: ${fuyaoRegistrationError}`)
         return () => {}
       }
-      const sources = createFuyaoRestSources(() => resolveFuyaoApiKey(ctx))
+      const sources = createFuyaoRestSources(() => resolveFuyaoApiKey(ctx, effectiveConfig.fuyaoCredentialRef || 'FUYAO_API_KEY'))
       const disposers = sources.map((dataSource) => hub.registerSource(dataSource))
       fuyaoRegistrationError = undefined
       ctx.logger.info(`capital-generation: 已注册 ${disposers.length} 个同花顺数据源`)
@@ -249,7 +268,7 @@ export function apply(ctx: Context, config: Config) {
   }, 'capital-generation.fuyao-sources()')
 
   // ── web_retriever 域：anysearch（广度）+ wind_docs（public_document 精准）──────
-  const retriever = config.retriever ?? {}
+  const retriever = effectiveConfig.retriever ?? {}
   const credentialRef = retriever.credentialRef || 'ANYSEARCH_API_KEY'
   const client = createAnySearchClient(
     retriever.baseURL || undefined,
@@ -285,7 +304,7 @@ export function apply(ctx: Context, config: Config) {
   registerWebRetrieverTools(ctx, new WebRetriever(client), windClient)
 
   ctx.effect(() => {
-    const section = resolveUserCustomizationSection(config.customPersona)
+    const section = resolveUserCustomizationSection(effectiveConfig.customPersona)
     if (!section) return () => {}
     return ctx.systemPrompt.section(section)
   }, 'capital-generation.user-customization()')

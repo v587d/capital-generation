@@ -60,13 +60,17 @@ async function fetchIndex(url) {
   return fetch(new URL(location, url).href, { headers: cookie.length > 0 ? { cookie } : {}, signal })
 }
 
-async function bootGraphHasChartBundle(url) {
+async function bootGraphHasCapitalBundles(url) {
   try {
     const response = await fetchIndex(url)
     const html = await response.text()
-    return { fetched: true, hasBundle: html.includes('capital-charts'), status: response.status, bytes: html.length }
+    const hasBundles = {
+      'capital-config': html.includes('capital-config'),
+      'capital-charts': html.includes('capital-charts'),
+    }
+    return { fetched: true, hasBundles, status: response.status, bytes: html.length }
   } catch (error) {
-    return { fetched: false, hasBundle: false, error: error instanceof Error ? error.message : String(error) }
+    return { fetched: false, hasBundles: {}, error: error instanceof Error ? error.message : String(error) }
   }
 }
 
@@ -119,7 +123,7 @@ function run() {
         clearTimeout(timer)
         console.log(`smoke-boot: 已监听 ${urlMatch[0].replace(/\?.*$/, '')}，复核 boot graph…`)
         // 复核是尽力而为：无论结果如何都要收尾，绝不能让冒烟挂死。
-        bootGraphHasChartBundle(urlMatch[0]).then((probe) => {
+        bootGraphHasCapitalBundles(urlMatch[0]).then((probe) => {
           finish({ ok: true, reason: '已监听并打印访问 URL', probe })
         })
         setTimeout(() => {
@@ -147,11 +151,12 @@ if (result.ok) {
   console.log(tail)
   const probe = result.probe
   if (probe?.fetched) {
-    console.log(`smoke-boot: ${probe.hasBundle ? '✅' : '⚠️ '} boot graph 中的图表客户端 bundle：${probe.hasBundle ? '存在' : '未找到'}（HTTP ${probe.status}，${probe.bytes} 字节）`)
+    console.log(`smoke-boot: ${probe.hasBundles?.['capital-config'] ? '✅' : '⚠️ '} boot graph 中的 Capital settings bundle：${probe.hasBundles?.['capital-config'] ? '存在' : '未找到'}`)
+    console.log(`smoke-boot: ${probe.hasBundles?.['capital-charts'] ? '✅' : '⚠️ '} boot graph 中的图表客户端 bundle：${probe.hasBundles?.['capital-charts'] ? '存在' : '未找到'}（HTTP ${probe.status}，${probe.bytes} 字节）`)
   } else {
     console.log(`smoke-boot: ⚠️  未能拉取 index.html 复核 boot graph：${probe?.error ?? 'unknown'}`)
   }
-  process.exit(probe?.fetched === true && probe.hasBundle === false ? 1 : 0)
+  process.exit(probe?.fetched === true && (!probe.hasBundles?.['capital-charts'] || !probe.hasBundles?.['capital-config']) ? 1 : 0)
 }
 
 console.error(`smoke-boot: ❌ ${result.reason}`)

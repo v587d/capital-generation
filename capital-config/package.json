@@ -1,0 +1,28 @@
+{
+  "name": "@v587d/capital-config",
+  "version": "2.1.0",
+  "description": "Capital 模式的 DSH settings 配置卡片（Fuyao / AnySearch / Wind Alice credentials）",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": { "default": "./index.js" },
+    "./client": { "default": "./client.js" },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-settings-plugins",
+        "@deepseek-ai/dsh-api-remotes"
+      ]
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.2"
+  },
+  "files": ["index.js", "client.js", "package.json"]
+}

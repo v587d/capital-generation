@@ -416,6 +416,7 @@
     - id: capital-generation
       name: '@v587d/capital-generation'
       config:
+        fuyaoCredentialRef: FUYAO_API_KEY
         retriever:
           baseURL: ''
           credentialRef: ANYSEARCH_API_KEY

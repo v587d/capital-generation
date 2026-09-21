@@ -18,12 +18,15 @@ export interface RetrieverConfig {
 export interface Config {
     /** Optional additive persona override; core safety guidance is preserved. */
     customPersona?: string;
+    /** Fuyao credentials 引用名；空值回退到 FUYAO_API_KEY。 */
+    fuyaoCredentialRef?: string;
     /** web_retriever 配置（可选；缺省使用 AnySearch 默认地址与凭据名）。 */
     retriever?: RetrieverConfig;
 }
 /** DSH 0.1.2-rc.1 configuration schema. */
 export declare const Config: z<Schemastery.ObjectS<{
     customPersona: z<string, string>;
+    fuyaoCredentialRef: z<string, string>;
     retriever: z<Schemastery.ObjectS<{
         baseURL: z<string, string>;
         credentialRef: z<string, string>;
@@ -51,6 +54,7 @@ export declare const Config: z<Schemastery.ObjectS<{
     }>>;
 }>, Schemastery.ObjectT<{
     customPersona: z<string, string>;
+    fuyaoCredentialRef: z<string, string>;
     retriever: z<Schemastery.ObjectS<{
         baseURL: z<string, string>;
         credentialRef: z<string, string>;

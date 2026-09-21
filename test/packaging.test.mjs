@@ -43,6 +43,9 @@ test('打包闸门：vendored 图表库与构建产物都在发布清单里', (t
     'chart-ui/package.json',
     'chart-ui/index.js',
     'chart-ui/client.js',
+    'capital-config/package.json',
+    'capital-config/index.js',
+    'capital-config/client.js',
     'preset/capital-generation/agent.cordis.yml',
     'preset/capital-generation/skills/capital-chart-protocol/SKILL.md',
     'cordis.patch.yml',
@@ -63,7 +66,7 @@ test('打包闸门：vendored 图表库与构建产物都在发布清单里', (t
 
 test('打包闸门：声明 dsh.client 的包，其客户端 bundle 必须真的在包里', () => {
   // 主包与随包携带的嵌套包都要查：漏发 chart-ui/client.js 会让整个 web profile 起不来。
-  const manifests = ['package.json', 'chart-ui/package.json']
+  const manifests = ['package.json', 'chart-ui/package.json', 'capital-config/package.json']
   const paths = packedFilePaths()
   let checked = 0
 

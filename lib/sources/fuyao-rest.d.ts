@@ -10,5 +10,5 @@ declare const MAX_BATCH_CODES = 100;
  */
 declare const MAX_HISTORY_WINDOW_MS: number;
 export declare function createFuyaoRestSources(resolveApiKey: FuyaoApiKeyResolver, baseUrl?: string): DataSource[];
-export declare function resolveFuyaoApiKey(ctx: Context): Promise<string | undefined>;
+export declare function resolveFuyaoApiKey(ctx: Context, credentialRef?: string): Promise<string | undefined>;
 export { MAX_HISTORY_WINDOW_MS, MAX_BATCH_CODES };

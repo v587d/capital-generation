@@ -87,7 +87,7 @@ const probes = [
     title: '声明 dsh.client 的包（主包与随包携带的嵌套包），exports["./client"] 必须真实存在且在 files 里',
     why: 'bundle 缺失会让 ClientPackageCompositionError 在注册表构造时抛出——整个 web profile 起不来，不是图表坏掉。',
     run() {
-      const manifests = ['package.json', 'chart-ui/package.json']
+      const manifests = ['package.json', 'chart-ui/package.json', 'capital-config/package.json']
       const declared = []
       for (const relativeManifest of manifests) {
         const manifestPath = join(process.cwd(), relativeManifest)
@@ -343,6 +343,53 @@ const probes = [
       return missing.length === 0
         ? { status: PASS, detail: '认证围栏接口仍在（trusted-Host 403 + 浏览器 cookie 401）' }
         : { status: FAIL, detail: `认证围栏接口变了：${missing.join(' / ')}（见账本 L13；chart-ui 序列路由依赖它，不能退回无认证端点）` }
+    },
+  },
+  {
+    id: 'L15',
+    title: 'settings / credentials 扩展面：settings.register(ns, schema, {base, applies}) + settingsScope.bind + settings.plugin.item(keyed) + credentials remote',
+    why: 'capital-config 是 host 平面 settings 卡片：host 靠 settings.register 注册命名空间（这个命名空间同时是 settings.plugin.item 的派发键），'
+      + '浏览器半边靠 settingsScope.bind({namespace}) 读命名空间、靠 remote.credentials.describe/set 写密钥。任一处改名都不报错——'
+      + '卡片会静默消失或密钥写不进去，用户只会以为"设置里根本没有这个插件"。',
+    run() {
+      const settingsFile = join(PKG('dsh-settings'), 'lib/types/index.d.ts')
+      const settings = readIfPresent(settingsFile)
+      if (settings === undefined) return { status: FAIL, detail: `读不到 ${settingsFile}` }
+      const contractFile = join(PKG('dsh-client-ui-settings'), 'lib/types/client/settings-contract.d.ts')
+      const contract = readIfPresent(contractFile)
+      if (contract === undefined) return { status: FAIL, detail: `读不到 ${contractFile}` }
+      const scopeFile = join(PKG('dsh-client-ui-settings'), 'lib/types/client/settings-scope.d.ts')
+      const scope = readIfPresent(scopeFile)
+      if (scope === undefined) return { status: FAIL, detail: `读不到 ${scopeFile}` }
+      const slotFile = join(PKG('dsh-client-ui-settings-plugins'), 'lib/types/client/slot-contract.d.ts')
+      const slot = readIfPresent(slotFile)
+      if (slot === undefined) return { status: FAIL, detail: `读不到 ${slotFile}` }
+      const eventsFile = join(PKG('dsh-api-remotes'), 'lib/types/remote-events.d.ts')
+      const events = readIfPresent(eventsFile)
+      if (events === undefined) return { status: FAIL, detail: `读不到 ${eventsFile}` }
+      const remoteFile = join(PKG('dsh-api-remotes'), 'lib/client.js')
+      const remote = readIfPresent(remoteFile)
+      if (remote === undefined) return { status: FAIL, detail: `读不到 ${remoteFile}` }
+
+      const checks = [
+        ['ctx.settings 服务声明', /settings:\s*SettingsProvider/, settings, settingsFile],
+        ['settings.register(ns, schema, options) 签名', /register<[\s\S]{0,120}schema:\s*z<T>[\s\S]{0,80}SettingsRegisterOptions<T>/, settings, settingsFile],
+        ["SettingsApplies = 'live' | 'restart'", /SettingsApplies\s*=\s*'live'\s*\|\s*'restart'/, settings, settingsFile],
+        ['SettingsRegisterOptions.base', /base\?:\s*Partial<T>/, settings, settingsFile],
+        ['SettingsRegisterOptions.applies', /applies\?:\s*SettingsApplies/, settings, settingsFile],
+        ['SettingsScopeSpec.namespace', /namespace:\s*string/, contract, contractFile],
+        ['settingsScope.bind(spec)', /bind<T>\(spec:\s*SettingsScopeSpec<T>\):\s*SettingsScope<T>/, scope, scopeFile],
+        ['ctx.settingsScope 服务', /settingsScope:\s*SettingsScopeBinder/, scope, scopeFile],
+        ["slot settings.plugin.item 是 keyed", /'settings\.plugin\.item':\s*\{\s*kind:\s*'keyed'/, slot, slotFile],
+        ['credential 变更事件被转发到客户端', /"credentials\/reference-updated"/, events, eventsFile],
+        ['settings 文档更新事件被转发到客户端', /"settings\/document-updated"/, events, eventsFile],
+        ['credentials/describe remote', /credentials\/describe/, remote, remoteFile],
+        ['credentials/set remote', /credentials\/set/, remote, remoteFile],
+      ]
+      const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: 'settings 命名空间注册 / 客户端 scope / keyed 卡片槽 / credentials remote 都仍在' }
+        : { status: FAIL, detail: `settings 卡片链路的接口变了：${missing.join(' / ')}（见账本 L15；改本仓 adapter，不要改探针）` }
     },
   },
 ]

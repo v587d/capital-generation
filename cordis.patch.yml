@@ -36,6 +36,20 @@
 #     包身份为 @v587d/capital-charts，与主包不撞名。
 # 回归断言见 test/chart-composition.test.mjs（name 必须是字面量且 path-like，并真的解析一次）。
 - insert:
+    - id: capital-config
+      name: './capital-config/index.js'
+      config:
+        customPersona: ''
+        fuyaoCredentialRef: FUYAO_API_KEY
+        retriever:
+          baseURL: ''
+          credentialRef: ANYSEARCH_API_KEY
+          windDocs:
+            endpoint: 'https://mcp.wind.com.cn/vserver_financial_docs/mcp/'
+            credentialRef: WIND_API_KEY
+            timeoutMs: 60000
+
+- insert:
     - id: capital-charts
       name: './chart-ui/index.js'
 

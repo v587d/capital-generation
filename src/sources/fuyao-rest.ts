@@ -2107,16 +2107,14 @@ export function createFuyaoRestSources(resolveApiKey: FuyaoApiKeyResolver, baseU
   return endpointDefinitions().map((definition) => createSource(definition, cleanBaseUrl, resolveApiKey))
 }
 
-export async function resolveFuyaoApiKey(ctx: Context): Promise<string | undefined> {
+export async function resolveFuyaoApiKey(ctx: Context, credentialRef = 'FUYAO_API_KEY'): Promise<string | undefined> {
   const credentials = ctx.get('credentials') as CredentialLike | undefined
   if (credentials) {
-    for (const ref of ['FUYAO_API_KEY']) {
-      const resolved = await credentials.resolve(ref)
-      if (resolved?.value) return resolved.value
-    }
+    const resolved = await credentials.resolve(credentialRef)
+    if (resolved?.value) return resolved.value
   }
   const processLike = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
-  return processLike?.env?.FUYAO_API_KEY
+  return processLike?.env?.[credentialRef]
 }
 
 export { MAX_HISTORY_WINDOW_MS, MAX_BATCH_CODES }

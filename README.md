@@ -29,6 +29,38 @@
 # Slogan
 Next-Gen AI-Driven Capital Generation.
 
+## 样例
+[报告样例（最新）](docs/sample/指南针综合研判分析完整报告.md)
+
+## 安装到 DSH Web Profile
+
+从 GitHub 安装插件（构建产物 `lib/` 已随仓库提交，**无需**克隆本项目或自行构建）：
+```bash
+dsh plugin --profile web add github:v587d/capital-generation
+```
+安装后，重启 Web profile 使装配生效。
+然后在 设置 → 插件 → 插件配置 → Capital 模式 里填入 API Key：
+
+| 配置 API Key |
+| :---: |
+| [<img src="assets/settings-plugins.png" width="420" alt="设置 → 插件 → 插件配置 → Capital 模式：填入 Fuyao / AnySearch / Wind 密钥">](assets/settings-plugins.png) |
+
+> [!NOTE]
+> 密钥都是免费申请的：必填 [同花顺（fuyao）](https://fuyao.aicubes.cn/docs/)（行情、财务等结构化数据）；
+> 必填 [AnySearch](https://www.anysearch.com/docs)（实时网络搜索）；
+> 推荐 [Wind Alice](https://market.windalice.com/#/home)（公告与信披文档，每天送 300 积分，日常够用）。
+>
+> 在设置里粘贴保存即可，重启后新开的 Capital 会话就能用。
+> 不想用设置界面的话，也可以直接把密钥写进 `~/.dsh/.credentials.yaml`，名字用
+> `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`，插件会自动读取。
+
+### 简单用法
+
+| 选择 Capital 模式 | 设为默认模式 |
+| :---: | :---: |
+| [<img src="assets/mode_selector.png" width="360" alt="新会话在 Agent Preset 选择器中选择 Capital 模式">](assets/mode_selector.png) | [<img src="assets/set_default.png" width="360" alt="在 Settings 中把 Capital 模式设为默认">](assets/set_default.png) |
+| 新会话在 Agent Preset 选择器中选择 Capital 模式 | 也可以在 Settings 中设为默认模式 |
+
 # What
 Capital Generation 是面向中国散户，适用于日常证券研究的 DSH 插件，简单地说：
 1. Agent preset（人设）：面向金融场景的 Capital 模式，与 DSH 默认的标准、PTC、极简、创造模式并列。
@@ -65,49 +97,20 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
 
 | 侧栏自包含 HTML：折线 | 侧栏自包含 HTML：K 线 + 量价 |
 | :---: | :---: |
-| [<img src="assets/chart-line-sidebar.png" width="260" alt="成交额折线图在侧栏打开的自包含 chart.html 中">](assets/chart-line-sidebar.png) | [<img src="assets/chart-candlestick-sidebar.png" width="260" alt="日线量价 K 线在侧栏打开的自包含 chart.html 中">](assets/chart-candlestick-sidebar.png) |
+| [<img src="assets/chart-line-sidebar.png" width="400" alt="成交额折线图在侧栏打开的自包含 chart.html 中">](assets/chart-line-sidebar.png) | [<img src="assets/chart-candlestick-sidebar.png" width="400" alt="日线量价 K 线在侧栏打开的自包含 chart.html 中">](assets/chart-candlestick-sidebar.png) |
 | 某股票近一月日成交额 | 某股票近一月日线·量价 |
 
-> 历史截图 `assets/chart-turn-tail-candlestick.png` 记录的是 2026-09-18 之前的内嵌「收尾卡片」形态；
+> 历史截图 `assets/chart-turn-tail-candlestick.png` 记录的是 2026-09-18 之前"图表内嵌在答复末尾"的形态；
 > 该通道因会让会话日志不可加载而整体移除（见 `AGENTS.md` 的「图表呈现纪律」），保留仅供对照。
 
 `chart.html` 自包含（内联图表库与数据），可离线打开、零外部请求；图内保留
 `Lightweight Charts™ v5.2.1 (Apache-2.0)` 归属信息。
 
-## 样例
-[报告样例（最新）](docs/sample/指南针综合研判分析完整报告.md)
-
-## 安装到 DSH Web Profile
-> [!NOTE]
-> 请务必前往 [同花顺（fuyao）](https://fuyao.aicubes.cn/docs/) 和 [AnySearch](https://www.anysearch.com/docs) **免费**获取 API 密钥。
-> 推荐 **免费** 获取 [Wind Alice](https://market.windalice.com/#/home) API 密钥，每日300积分重置，一般够日常使用。
-> 同花顺(fuyao)提供结构化数据、 AnySearch 提供实时网络搜索、 Wind Alice 提供公告、信披类文档。
-
-打开本地 `~/.dsh/.credentials.yaml`，按照以下示例添加进去，**注意密钥名称与下方示例保持一致！！！**。
-```yaml
-ANYSEARCH_API_KEY: as_sk_......
-FUYAO_API_KEY: sk-fuyao-......
-
-# 推荐
-WIND_API_KEY: ak_......
-```
-
-接着，从 GitHub 安装插件（构建产物 `lib/` 已随仓库提交，**无需**克隆本项目或自行构建）：
-```bash
-dsh plugin --profile web add github:v587d/capital-generation
-```
-
-安装后，重启 Web profile 使装配生效。新会话在 Agent Preset 选择器中选择 Capital 模式。
-![mode_selector](assets/mode_selector.png)
-
-也可以在 Settings 中设置其为默认模式。
-![set_default](assets/set_default.png)
-
 ## 本地开发 / 构建 / 测试
 
 ```bash
 npm install
-npm run build        # 生成 lib/ 与 chart-ui/client.js
+npm run build        # 生成 lib/ 与两个浏览器端产物（chart-ui、capital-config）
 npm test             # 构建后运行全部测试
 npm run check:dsh    # 检查上游 DSH 扩展面兼容性，升级/发布前建议跑
 npm run smoke:boot   # 冒烟验证装配可正常 boot
@@ -127,9 +130,9 @@ npm run smoke:boot   # 冒烟验证装配可正常 boot
 
 | | 2.0.0 | 2.1.0 |
 |---|---|---|
-| 呈现位置 | 主 Agent 答复下方的**内嵌图表卡片** | 收尾的**「本轮文件改动 / 交付」行** |
+| 呈现位置 | 主 Agent 答复里**直接内嵌的图表** | 收尾的**「本轮文件改动 / 交付」行** |
 | 查看方式 | 页面内直接渲染 | 点开该行的 `chart.html`，右侧面板渲染可交互图表 |
-| 承载机制 | 自定义会话事件 `capital/chart-rendered` + 客户端卡片 | 官方 `deliverables/presented` + 官方文档预览 |
+| 承载机制 | 自定义会话事件 `capital/chart-rendered` + 客户端内嵌渲染 | 官方 `deliverables/presented` + 官方文档预览 |
 
 降级路径不变：`chart.html` 自包含（内联图表库与数据），可离线打开、零外部请求。
 
