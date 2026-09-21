@@ -56,6 +56,8 @@
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "@deepseek-ai/schemastery": "^3.18.2"
+    "@deepseek-ai/schemastery": "^3.18.2",
+    "@joplin/turndown-plugin-gfm": "^1.0.68",
+    "turndown": "^7.2.4"
   }
 }
