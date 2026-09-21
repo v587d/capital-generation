@@ -1,0 +1,10 @@
+# web_retriever 本地直连回退 —— 用户实测 AnySearch 读不到的网址（回归语料）
+# 一行一条；空行与 # 开头为注释。用户 2026-09 反馈，去重后 7 条。
+# 验收口径：只要能读到即可（不要求像 AnySearch 那样干净）；读不到不算脚本失败，但要如实分类。
+https://www.cac.gov.cn/hdfw/jrxxfw/A093810index_1.htm
+https://www.csrc.gov.cn/csrc/c100028/c7628276/content.shtml
+https://www.sac.net.cn/sjb/zlgl/zlgz/202609/t20260901_82233.html
+https://www.cls.cn/detail/2188659
+http://www.scio.gov.cn/zdgz/jj/202511/t20251110_938367.html
+http://big5.www.gov.cn/gate/big5/www.gov.cn/gongbao/2025/issue_12406/202511/content_7048922.html
+https://www.thecardiologyadvisor.com/news/fda-pdufa-dates-september-2026/

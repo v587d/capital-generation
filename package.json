@@ -40,6 +40,7 @@
     "test": "npm run build && node --test test/*.test.mjs",
     "prepublishOnly": "npm run build",
     "smoke:fuyao": "node scripts/smoke-fuyao.mjs",
+    "smoke:local-fetch": "node scripts/smoke-local-fetch.mjs",
     "docs:capabilities": "npm run build && node scripts/gen-capability-table.mjs",
     "verify:sessions": "node scripts/verify-sessions.mjs"
   },
