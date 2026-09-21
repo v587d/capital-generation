@@ -46,6 +46,19 @@ dsh 处于快速迭代期，"版本升级"与"大规模破坏性更新"是常态
   HMR 的 `graph` 帧被显式忽略且那条链路 dev-only。所以客户端行必须挂在 **host 平面**
   （页面启动时就存在），不能挂在 preset/session 行上。这条约束一旦被上游修改（即真能运行期
   投递），我们只是**多了一个选择**，不会因此损坏。
+- **DSH 的 web 抓取包（`ctx.web` / `dsh-web-fetch-http` / `dsh-tool-web`）**：`web_retriever_fetch`
+  在 AnySearch 明确失败后的本机直连回退是**自研**实现，刻意不引这三个包，三条理由：
+  ① `ctx.web` 是**单通道选择器**——只在 `WebRuntimeConfig.fetchProvider` 指定时用它，否则要求
+  "恰好一个可用 provider"，**没有 per-call 选择**；而本机 profile 里 AnySearch 插件已把
+  `fetchProvider` 钉成 `anysearch`，用它做回退等于把同一条失败的路再走一遍。
+  ② 本包**运行期解析不到** DSH 的包：Node 从 `<repo>/lib` 逐级向上找 `node_modules`，而 DSH 的包在
+  `~/.dsh/profiles/*/node_modules`，不在这条链上；要真用必须把 `dsh-web-fetch-http` 连同
+  `dsh-web` / `dsh-timeout` / `dsh-http-proxy` / `ipaddr.js` / `undici` 写进本包依赖并与宿主版本对齐
+  （版本漂移＝静默行为改变）。
+  ③ 官方 provider **只回原始 HTML**（`WebFetchBody = { kind: 'html' | 'text' }`），转 markdown
+  仍要自己做，并不省一半工作量。
+  因此本方案**不新增任何 DSH 接口面**：`check:dsh` 的探针条数保持不变（15 条），无需新增探针。
+  本地回退的取舍、安全边界与已知局限见 `docs/design/web-retriever-local-fetch.md`。
 
 ## 升级 runbook
 
@@ -74,6 +87,11 @@ dsh 处于快速迭代期，"版本升级"与"大规模破坏性更新"是常态
    （出现即会让这份会话冷加载失败）；收尾的「本轮文件改动 / 交付」行点开该文件能在右侧渲染图表。
    **改了 `chart-ui/` 或 `src/` 之后，浏览器页面必须刷新**：客户端 bundle 在页面加载时确定，
    宿主重启不会换掉已打开页面里的那份 bundle（表现：图表不出现，且控制台无报错）。
+8. **运行期依赖（本地直连回退引入）**：本插件现在有真正的运行期依赖（`turndown` /
+   `@joplin/turndown-plugin-gfm`，均为纯 JS），升级/安装必须让它们一起装进去 ——
+   `dsh plugin --profile web update @v587d/capital-generation`（或 `add`）之后**重启进程**
+   （ESM 缓存 + profile 行在启动时确定）。若 `web_retriever_fetch` 报"找不到模块"，
+   按「恢复手册」重装插件，**不要**手动往 profile 里塞包。
 
 ## 恢复手册（装坏了怎么回到可用）
 
@@ -90,6 +108,10 @@ dsh plugin --profile web remove @v587d/capital-generation
 要**只**停用图表 UI 而保留 Capital 模式其余能力：注释掉 `cordis.patch.yml` 里的
 `- insert:` 块（那一行就是唯一的挂载点），`render_chart` 仍可用，只是回执里
 `chart_url` 变成 `null`、只剩文件路径——这正是"旁路可选"的设计意图。
+
+本地直连回退是**可选增强**：依赖缺失（或配置 `retriever.localFetch.enabled: false`）时的表现是
+"回退不可用、AnySearch 失败仍如实回传"，**不是**整个插件或会话起不来——这一点必须与图表
+bundle 缺失的**致命失败**区分开。
 
 ## 打包与恢复演练（Step 5：2026-09-15，dsh 0.1.5-rc.1）
 
@@ -119,6 +141,7 @@ dsh plugin --profile web remove @v587d/capital-generation
 | 2026-09-20 | 0.1.5-rc.2 | **交付呈现通道端到端打通（真机确认）**。连查四轮，最终由**落盘 trace**（`capital-analysis/charts/<id>/deliverable-trace.txt`）定位真根因：`src/index.ts` 用**对象展开**组装交付 ctx，而 cordis Context 的 `get`/`on`/`effect` 挂在**原型**上 ⇒ `ctx.get` 丢失 ⇒ `buildChartEventPublisher` 首行抛 `ctx.get is not a function` ⇒ 被 `tool.ts` 的 `catch {}` 吞掉 ⇒ **`publish()` 从未执行**（该通道自加入起就没真正跑过）。改为逐项显式转发；并修掉四个连带缺陷（owner 归档键 / turn-stopping 注册失败未回退 / 队列实例级 / 发布器非单例）。真机日志：`图表已寄存 … owner=session-bac05ffe… lastTurn=4 寄存 1 张` → `图表已登记为本轮交付 … turn=5`，卡片出现在 turn 5。复查：23 个会话**冷加载 0 失败、闭集外事件 0**。`npm test`（338）与 `check:dsh`（14）覆盖 |
 | 2026-09-20 | 0.1.5-rc.2 | 交付通道诊断**默认关闭**（`CAPITAL_CHART_TRACE=1` 才输出进度日志 + 落盘 `deliverable-trace.txt`）：调试产物不进对外版本的终端与 workspace。失败用的 `warn` 不受开关影响。新增 `npm run verify:sessions`（真实后端逐份冷加载 + 闭集词汇表核对，区分历史遗留与新回归） |
 | 2026-09-21 | 0.1.5-rc.2 | 新增 **L15**：`capital-config` settings 卡片的整条扩展面（host `settings.register` / 客户端 `settingsScope.bind` / `settings.plugin.item` keyed 槽 / credentials remote + 转发事件）纳入账本与 `check:dsh`（14 → 15 条）。本仓回归：`test/capital-config.test.mjs` 断言 host 命名空间 ≡ 客户端键、两处 schema 默认值一致；`smoke:boot` 同时复核 `capital-config` 与 `capital-charts` 两个 bundle 进 boot graph |
+| 2026-09-21 | 0.1.5-rc.2 | 本地直连回退（Task 1–11）：`web_retriever_fetch` 在 AnySearch 明确失败后**自动**本机直连抓取，回执新增 `via` / `fallback` / `truncated` / `local_error`。**不新增 DSH 接口面**（刻意不引 `ctx.web` / `dsh-web-fetch-http` / `dsh-tool-web`），`check:dsh` 仍为 15 条全绿；新增两个纯 JS 运行期依赖（`turndown` / `@joplin/turndown-plugin-gfm`）；两处 schema 的 `retriever.localFetch` 默认值一致由 `test/capital-config.test.mjs` 守着；SSRF 闸门/取消语义/回退矩阵由 `test/web-retriever-*.test.mjs` 覆盖 |
 
 ## 事故记录
 
