@@ -5,7 +5,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runInNewContext } from 'node:vm'
 import { apply, Config as CapitalConfig, SETTINGS_NAMESPACE } from '../capital-config/index.js'
-import { Config as MainConfig } from '../lib/index.js'
+import { Config as MainConfig, LOCAL_FETCH_DEFAULTS, resolveLocalFetchConfig } from '../lib/index.js'
+import { LOCAL_FETCH_CLIENT_VERSION } from '../lib/web-retriever/local-fetch.js'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const CLIENT = join(ROOT, 'capital-config', 'client.js')
@@ -154,6 +155,37 @@ test('capital-config Host：schema 默认值必须与主插件 Config 完全一�
   // 主插件用 settings 解析值覆盖自身配置，再用自己的 Config 校验。两处 schema 一旦
   // 漂移，字段会在 settings→主插件 边界被静默改写/丢弃。默认值是最低限度的同步契约。
   assert.deepEqual(CapitalConfig({}), MainConfig({}))
+})
+
+test('capital-config Host：localFetch 默认值两处一致且消费点独立生效', () => {
+  const capital = CapitalConfig({}).retriever.localFetch
+  const main = MainConfig({}).retriever.localFetch
+  // 主插件 schema 与消费点共用同一个导出常量，对照用例不靠重复字面量。
+  assert.deepEqual(main, LOCAL_FETCH_DEFAULTS, '主插件 schema 默认值必须引用 LOCAL_FETCH_DEFAULTS')
+  assert.deepEqual(capital, main, '两处 schema 的 localFetch 默认值必须逐字一致')
+  assert.equal(main.enabled, true, '本地回退默认开启')
+  assert.equal(capital.enabled, true, '本地回退默认开启')
+  assert.equal(main.userAgent, '', 'schema 里的 UA 默认值是空串（版本号真值只有一处）')
+  assert.equal(capital.userAgent, '', 'schema 里的 UA 默认值是空串')
+  assert.equal(main.timeoutMs, 15000)
+  assert.equal(main.maxBytes, 524288)
+  assert.equal(main.maxContentChars, 20000)
+  assert.equal(main.maxRedirects, 5)
+
+  // 消费点（apply 装配段）在 localFetch 为 undefined 时独立补齐同样的默认值；
+  // 只有 userAgent 例外：空串在消费点解析成插件版本号（唯一版本真值来源）。
+  const consumed = resolveLocalFetchConfig(undefined)
+  assert.equal(consumed.enabled, main.enabled)
+  assert.equal(consumed.timeoutMs, main.timeoutMs)
+  assert.equal(consumed.maxBytes, main.maxBytes)
+  assert.equal(consumed.maxContentChars, main.maxContentChars)
+  assert.equal(consumed.maxRedirects, main.maxRedirects)
+  assert.equal(consumed.userAgent, LOCAL_FETCH_CLIENT_VERSION)
+  assert.ok(consumed.userAgent.length > 0, '消费点的 UA 必须非空')
+
+  assert.equal(resolveLocalFetchConfig({ enabled: false }).enabled, false, 'enabled:false 必须能关掉回退')
+  assert.equal(resolveLocalFetchConfig({ timeoutMs: 1000 }).timeoutMs, 1000, '显式配置覆盖默认值')
+  assert.equal(resolveLocalFetchConfig({ userAgent: 'custom/1' }).userAgent, 'custom/1', '显式 UA 覆盖版本号')
 })
 
 test('capital-config 包清单：声明运行期 schemastery 依赖，且客户端 bundle 会随包发布', () => {

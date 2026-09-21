@@ -8,12 +8,36 @@ export interface WindDocsConfig {
     credentialRef?: string;
     timeoutMs?: number;
 }
+/** 本地直连回退配置（AnySearch 明确失败后改由本机直连抓取公开文本页面）。 */
+export interface LocalFetchConfig {
+    enabled?: boolean;
+    timeoutMs?: number;
+    maxBytes?: number;
+    maxContentChars?: number;
+    maxRedirects?: number;
+    userAgent?: string;
+}
 /** web_retriever 会话配置：anysearch（广度）+ wind_docs（public_document 精准）。 */
 export interface RetrieverConfig {
     baseURL?: string;
     credentialRef?: string;
     windDocs?: WindDocsConfig;
+    localFetch?: LocalFetchConfig;
 }
+/**
+ * 本地直连回退的默认值（唯一真值来源）：schema 的 `.default()` 与消费点
+ * `resolveLocalFetchConfig()` 都引用它，两处不再各写一份字面量。
+ *
+ * `userAgent` 默认是空串而非版本号：版本号只能有一处真值来源
+ * （`LOCAL_FETCH_CLIENT_VERSION`，由测试守着等于 `package.json` 的 version）；
+ * 空串 = 消费点改用 `LOCAL_FETCH_CLIENT_VERSION`。
+ */
+export declare const LOCAL_FETCH_DEFAULTS: Required<LocalFetchConfig>;
+/**
+ * 消费点独立补齐默认值。`apply()` 在无 settings 的宿主/测试里拿到的是**未过 schema**
+ * 的原始对象，`retriever.localFetch` 可能是 `undefined`，因此消费点不能依赖 schema 补默认值。
+ */
+export declare function resolveLocalFetchConfig(config?: LocalFetchConfig): Required<LocalFetchConfig>;
 /** Configuration accepted by the Capital Generation plugin. */
 export interface Config {
     /** Optional additive persona override; core safety guidance is preserved. */
@@ -39,6 +63,21 @@ export declare const Config: z<Schemastery.ObjectS<{
             credentialRef: z<string, string>;
             timeoutMs: z<number, number>;
         }>>;
+        localFetch: z<Schemastery.ObjectS<{
+            enabled: z<boolean, boolean>;
+            timeoutMs: z<number, number>;
+            maxBytes: z<number, number>;
+            maxContentChars: z<number, number>;
+            maxRedirects: z<number, number>;
+            userAgent: z<string, string>;
+        }>, Schemastery.ObjectT<{
+            enabled: z<boolean, boolean>;
+            timeoutMs: z<number, number>;
+            maxBytes: z<number, number>;
+            maxContentChars: z<number, number>;
+            maxRedirects: z<number, number>;
+            userAgent: z<string, string>;
+        }>>;
     }>, Schemastery.ObjectT<{
         baseURL: z<string, string>;
         credentialRef: z<string, string>;
@@ -50,6 +89,21 @@ export declare const Config: z<Schemastery.ObjectS<{
             endpoint: z<string, string>;
             credentialRef: z<string, string>;
             timeoutMs: z<number, number>;
+        }>>;
+        localFetch: z<Schemastery.ObjectS<{
+            enabled: z<boolean, boolean>;
+            timeoutMs: z<number, number>;
+            maxBytes: z<number, number>;
+            maxContentChars: z<number, number>;
+            maxRedirects: z<number, number>;
+            userAgent: z<string, string>;
+        }>, Schemastery.ObjectT<{
+            enabled: z<boolean, boolean>;
+            timeoutMs: z<number, number>;
+            maxBytes: z<number, number>;
+            maxContentChars: z<number, number>;
+            maxRedirects: z<number, number>;
+            userAgent: z<string, string>;
         }>>;
     }>>;
 }>, Schemastery.ObjectT<{
@@ -67,6 +121,21 @@ export declare const Config: z<Schemastery.ObjectS<{
             credentialRef: z<string, string>;
             timeoutMs: z<number, number>;
         }>>;
+        localFetch: z<Schemastery.ObjectS<{
+            enabled: z<boolean, boolean>;
+            timeoutMs: z<number, number>;
+            maxBytes: z<number, number>;
+            maxContentChars: z<number, number>;
+            maxRedirects: z<number, number>;
+            userAgent: z<string, string>;
+        }>, Schemastery.ObjectT<{
+            enabled: z<boolean, boolean>;
+            timeoutMs: z<number, number>;
+            maxBytes: z<number, number>;
+            maxContentChars: z<number, number>;
+            maxRedirects: z<number, number>;
+            userAgent: z<string, string>;
+        }>>;
     }>, Schemastery.ObjectT<{
         baseURL: z<string, string>;
         credentialRef: z<string, string>;
@@ -78,6 +147,21 @@ export declare const Config: z<Schemastery.ObjectS<{
             endpoint: z<string, string>;
             credentialRef: z<string, string>;
             timeoutMs: z<number, number>;
+        }>>;
+        localFetch: z<Schemastery.ObjectS<{
+            enabled: z<boolean, boolean>;
+            timeoutMs: z<number, number>;
+            maxBytes: z<number, number>;
+            maxContentChars: z<number, number>;
+            maxRedirects: z<number, number>;
+            userAgent: z<string, string>;
+        }>, Schemastery.ObjectT<{
+            enabled: z<boolean, boolean>;
+            timeoutMs: z<number, number>;
+            maxBytes: z<number, number>;
+            maxContentChars: z<number, number>;
+            maxRedirects: z<number, number>;
+            userAgent: z<string, string>;
         }>>;
     }>>;
 }>>;

@@ -30,6 +30,29 @@ const WindDocsSchema = z.object({
   timeoutMs: z.number().default(60000).description('Wind 请求超时毫秒'),
 })
 
+/**
+ * 本地直连回退默认值。必须与主插件 `src/index.ts` 的 `LOCAL_FETCH_DEFAULTS` 逐字一致
+ * （两处 schema 漂移会被 `test/capital-config.test.mjs` 的 deepEqual 用例抓住）。
+ * `userAgent` 空串 = 消费点改用插件版本号。
+ */
+const LOCAL_FETCH_DEFAULTS = {
+  enabled: true,
+  timeoutMs: 15000,
+  maxBytes: 524288,
+  maxContentChars: 20000,
+  maxRedirects: 5,
+  userAgent: '',
+}
+
+const LocalFetchSchema = z.object({
+  enabled: z.boolean().default(LOCAL_FETCH_DEFAULTS.enabled).description('AnySearch 失败后是否允许本机直连回退（默认开启）'),
+  timeoutMs: z.number().default(LOCAL_FETCH_DEFAULTS.timeoutMs).description('本机直连单次请求超时毫秒'),
+  maxBytes: z.number().default(LOCAL_FETCH_DEFAULTS.maxBytes).description('本机直连响应体字节上限'),
+  maxContentChars: z.number().default(LOCAL_FETCH_DEFAULTS.maxContentChars).description('本机直连正文码点上限'),
+  maxRedirects: z.number().default(LOCAL_FETCH_DEFAULTS.maxRedirects).description('本机直连最大重定向跳数'),
+  userAgent: z.string().default(LOCAL_FETCH_DEFAULTS.userAgent).description('本机直连 User-Agent；空 = 用插件版本号'),
+})
+
 export const Config = z.object({
   customPersona: z.string().default('').description('Capital 模式附加人设文本'),
   fuyaoCredentialRef: z.string().default('FUYAO_API_KEY').description('Fuyao credentials 引用名'),
@@ -41,10 +64,12 @@ export const Config = z.object({
       credentialRef: 'WIND_API_KEY',
       timeoutMs: 60000,
     }),
+    localFetch: LocalFetchSchema.default({ ...LOCAL_FETCH_DEFAULTS }),
   }).default({
     baseURL: '',
     credentialRef: 'ANYSEARCH_API_KEY',
     windDocs: { endpoint: '', credentialRef: 'WIND_API_KEY', timeoutMs: 60000 },
+    localFetch: { ...LOCAL_FETCH_DEFAULTS },
   }),
 })
 

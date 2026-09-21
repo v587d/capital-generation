@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { apply } from '../lib/index.js'
 import { ROOT_AGENT_DENIED_TOOLS } from '../lib/agents/root-tool-policy.js'
+import { LOCAL_FETCH_CLIENT_VERSION } from '../lib/web-retriever/local-fetch.js'
 
 /**
  * 装配入口的集成测试。
@@ -265,4 +266,68 @@ test('apply()：customPersona 注册为独立 system-prompt 节', () => {
   assert.equal(sections[0].name, 'capital:user-customization')
   assert.match(sections[0].text, /NON-OVERRIDABLE SAFETY REMINDER/)
   assert.ok(effectResults.length > 0)
+})
+
+/** AnySearch 401/403 → AUTH（可回退失败）；本机直连用 IP 字面量，不触发 DNS。 */
+const authFailureResponse = () => ({
+  status: 403,
+  ok: false,
+  headers: { get: () => 'application/json' },
+  text: async () => JSON.stringify({ code: 1, message: 'forbidden' }),
+})
+const htmlResponse = (body) => ({
+  status: 200,
+  ok: true,
+  headers: { get: (name) => (name.toLowerCase() === 'content-type' ? 'text/html; charset=utf-8' : null) },
+  body: null,
+  text: async () => body,
+})
+
+test('apply()：本地回退默认启用并把 UA 落到本机直连请求；enabled:false 时不再发第二次请求', async () => {
+  process.env.FUYAO_API_KEY = 'smoke-key'
+  const originalFetch = globalThis.fetch
+  try {
+    // 1) 缺省配置（retriever 未给 localFetch）：AnySearch 403 → 自动本机直连，UA 非空。
+    {
+      const { ctx, tools, effectResults } = fakeCtx()
+      const requests = []
+      globalThis.fetch = async (url, init) => {
+        requests.push({ url: String(url), init })
+        if (String(url).includes('anysearch.test')) return authFailureResponse()
+        return htmlResponse('<p>local body</p>')
+      }
+      apply(ctx, { customPersona: '', retriever: { baseURL: 'https://anysearch.test', credentialRef: '', windDocs: {} } })
+      await Promise.all(effectResults)
+
+      const result = await toolNamed(tools, 'web_retriever_fetch')
+        .execute({ url: 'http://93.184.216.34/page' }, exec(delegated))
+      assert.equal(result.ok, true)
+      assert.equal(result.via, 'local-http')
+      assert.equal(result.fallback.code, 'AUTH')
+      assert.equal(requests.length, 2, '缺省配置必须启用本地回退（消费点默认值独立生效）')
+      assert.equal(requests[1].init.headers['user-agent'], LOCAL_FETCH_CLIENT_VERSION)
+      assert.ok(LOCAL_FETCH_CLIENT_VERSION.length > 0)
+    }
+
+    // 2) enabled:false：AnySearch 403 → 失败信封，只有一次请求。
+    {
+      const { ctx, tools, effectResults } = fakeCtx()
+      let calls = 0
+      globalThis.fetch = async () => { calls += 1; return authFailureResponse() }
+      apply(ctx, { customPersona: '', retriever: { baseURL: 'https://anysearch.test', credentialRef: '', windDocs: {}, localFetch: { enabled: false } } })
+      await Promise.all(effectResults)
+
+      const result = await toolNamed(tools, 'web_retriever_fetch')
+        .execute({ url: 'http://93.184.216.34/page' }, exec(delegated))
+      assert.equal(result.ok, false)
+      assert.equal(result.via, 'anysearch')
+      assert.equal(result.code, 'AUTH')
+      assert.equal(result.fallback, undefined)
+      assert.equal(calls, 1, '回退被禁用时不得发起第二次网络请求')
+    }
+  } finally {
+    globalThis.fetch = originalFetch
+    if (SAVED_KEY === undefined) delete process.env.FUYAO_API_KEY
+    else process.env.FUYAO_API_KEY = SAVED_KEY
+  }
 })
