@@ -1,6 +1,6 @@
 ---
 name: capital-web-protocol
-description: Use in Capital mode when retrieving or presenting external material — the anysearch / wind_docs source boundary and the rule to pick a source before searching, the search-convergence heuristic and how to read provider_tally / recent_retrievals, the three mandatory Wind query elements, the wind-to-anysearch fallback, the numbered evidence reply format, and the official-domain verification checklist for securities sources. Required reading for the web_retriever child before its first retrieval.
+description: Use in Capital mode when retrieving or presenting external material — the anysearch / wind_docs source boundary and the rule to pick a source before searching, the search-convergence heuristic and how to read provider_tally / recent_retrievals, the three mandatory Wind query elements, the wind-to-anysearch fallback, the automatic local-fetch fallback and its via / local-http provenance labeling, the numbered evidence reply format, and the official-domain verification checklist for securities sources. Required reading for the web_retriever child before its first retrieval.
 ---
 
 # Capital 检索协议（完整版）
@@ -72,6 +72,8 @@ persona 只保留硬规则（先定来源再动手、只用四个工具、一次
 - 失败项与未核验项同样编号列出并注明原因，不与已证实证据混排；同一来源服务多条情报时逐条
   重复标注，不要用"同上"。
 - 主 Agent 向用户呈现时保留这些来源标注；网页数字只能标"媒体转述旁证"。
+- `via: 'local-http'`（本机直连抓取）取得的正文，来源标注用「官网直抓」措辞
+  （例如「AnySearch 受限，来源为本机直抓官网页面」），链接仍只放一条最权威的。
 
 ## 6. 官方证券来源域名核验
 
@@ -94,10 +96,23 @@ persona 只保留硬规则（先定来源再动手、只用四个工具、一次
   完整性补全域名。
 - 域名属于官方机构，不等于该域名下所有数据都适合作为最终证券研究证据；实际使用不得超出已
   核验的业务范围。
+- 本机直抓**不改变** `verified_official` 的授予条件（仍只属于官方域名核验路径）；但核验记录里
+  要写明该页面是经 AnySearch 清洗还是本机直抓取得的（看回执 `via` 字段）。
 
 ## 7. 抓取与失败处置
 
 - 网页抓取成功后回传 URL、标题、正文和抓取结果；正文过长时按工具返回内容为准，不自行补全。
+- **自动本机回退（不是你的第二次调用）**：`web_retriever_fetch` 在 AnySearch 明确失败且"值得换路"时，
+  会**自动**改由本机直连抓取该页面；你不需要、也不应该为此再调用一次工具。回执里的 `via` 标明正文来源：
+  `via: 'anysearch'` = AnySearch 清洗正文；`via: 'local-http'` = 本机直连抓取。
+- **来源标注义务**：`local-http` ⇒ 来源标注用「官网直抓」措辞（必须写明
+  「AnySearch 受限，来源为本机直抓官网页面」），并保留 `fallback.code` 作为 AnySearch 失败原因；
+  `via: 'anysearch'` 时按第 5 节现状标注。
+- **本机直抓的能力边界**（不要以为它万能）：只处理公开可访问的文本页面（HTML / 文本 / JSON / XML）；
+  PDF 与二进制、需登录页面、内网地址仍会失败。正文超长时是**截断**（回执 `truncated: true`），不是失败。
+- **与"最多重试一次"的关系**：自动回退**不算**你的第二次重试。模型层面的"重试一次"只适用于两条路
+  都失败之后的显式重试——此时回执 `ok: false`，`error` 同时含 AnySearch 与本地两条原因，
+  `local_error.code` 是本机失败码。
 - 网络或服务错误**最多重试一次**，仍失败则如实回传，并与其他已证实证据分开编号。
 - 搜索摘要只能用于发现候选来源，不能作为证券事实证据；报告中区分候选来源、已获取正文、
   未核验内容和失败原因，不编造缺失信息。

@@ -357,6 +357,8 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
     /链接只放一条最权威的/, /不得编造链接/, /每条证据都要有来源/, /无来源的信息不得作为证据/,
     /已核验官方白名单/, /候选\/未核验域名/, /verified_official/, /unverified/, /not_verified/,
     /不得重试 wind/, /recent_retrievals/, /provider_tally/, /public_document/,
+    // 本地直连回退：来源标注、能力边界与"不算重试"三条硬约束（Task 8）。
+    /local-http/, /`via`/, /truncated/, /本机直连/, /官网直抓/, /PDF/, /不算.*重试/,
   ]) {
     assertRule(webProtocol, pattern, `capital-web-protocol 缺少要点: ${pattern}`)
   }
