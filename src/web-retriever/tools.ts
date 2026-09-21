@@ -15,7 +15,7 @@ const MAX_RESULTS = 20
 const RECENT_TRACE_LIMIT = 8
 const TRACE_TEXT_CLIP = 200
 
-interface RetrievalTrace { provider: string; tool: string; query: string; at: number }
+interface RetrievalTrace { provider: string; tool: string; query: string; at: number; via?: string }
 
 const jsonObject = (properties: Record<string, unknown> = {}, required: string[] = []): object => ({
   type: 'object',
@@ -61,13 +61,23 @@ function integer(value: unknown, name: string, min: number, max: number): number
  *    的经验法则变成看得见的计数器。
  * 两者都是纯提醒不拦截；内存态、不落盘，随会话消亡。WebRetriever / WindClient 保持无状态。
  */
+interface RetrievalEcho {
+  recent: RetrievalTrace[]
+  tally: Record<string, number>
+  /** 刚写入的流水条目（存储态引用），供调用方回填 fetch 的 `via`。 */
+  entry: RetrievalTrace
+  /** 重新快照当前流水；回填 `entry.via` 后用它取最新的 recent_retrievals。 */
+  snapshot: () => RetrievalTrace[]
+}
+
 function createRetrievalEcho() {
   const traces = new Map<string, RetrievalTrace[]>()
   const tallies = new Map<string, Map<string, number>>()
-  return (exec: ToolExecLike, entry: RetrievalTrace): { recent: RetrievalTrace[]; tally: Record<string, number> } => {
+  return (exec: ToolExecLike, entry: RetrievalTrace): RetrievalEcho => {
     const key = exec.agent?.session?.id ?? 'default'
     const list = traces.get(key) ?? []
-    list.push({ ...entry, query: entry.query.slice(0, TRACE_TEXT_CLIP) })
+    const stored: RetrievalTrace = { ...entry, query: entry.query.slice(0, TRACE_TEXT_CLIP) }
+    list.push(stored)
     while (list.length > RECENT_TRACE_LIMIT) list.shift()
     traces.set(key, list)
     const counts = tallies.get(key) ?? new Map<string, number>()
@@ -75,7 +85,8 @@ function createRetrievalEcho() {
     tallies.set(key, counts)
     const tally: Record<string, number> = {}
     for (const provider of [...counts.keys()].sort()) tally[provider] = counts.get(provider) as number
-    return { recent: list.map((item) => ({ ...item })), tally }
+    const snapshot = (): RetrievalTrace[] => list.map((item) => ({ ...item }))
+    return { recent: snapshot(), tally, entry: stored, snapshot }
   }
 }
 
@@ -96,8 +107,13 @@ function fetchOutput(result: Awaited<ReturnType<WebRetriever['fetch']>>, recent:
     provider: 'anysearch',
     url: result.url,
     ok: result.ok,
+    via: result.via,
     ...(result.title ? { title: result.title } : {}),
     ...(result.content ? { content: result.content, content_chars: result.content.length } : {}),
+    ...(result.truncated ? { truncated: true } : {}),
+    ...(result.code ? { code: result.code } : {}),
+    ...(result.fallback ? { fallback: result.fallback } : {}),
+    ...(result.local_error ? { local_error: result.local_error } : {}),
     ...(result.error ? { error: result.error } : {}),
     recent_retrievals: recent,
     provider_tally: tally,
@@ -155,15 +171,17 @@ export function registerWebRetrieverTools(ctx: Context, retriever: WebRetriever,
     },
     {
       name: 'web_retriever_fetch',
-      description: '使用 anysearch 抓取一个网页正文（一次只能提交一个 http(s) URL）。证券任务的 verified_official 核验只能经本工具完成：只允许抓取已由官方页面直接证明归属和用途的官方来源域名，不得 fetch 全部搜索结果。',
+      description: '使用 anysearch 抓取一个网页正文（一次只能提交一个 http(s) URL）。AnySearch 失败且值得换路时会自动改由本机直连抓取该页面，不需要再次调用；回执里的 via 标明正文来源：anysearch = AnySearch 清洗正文，local-http = 本机直连抓取。本机直连只处理公开可访问的文本页面（HTML/文本/JSON/XML），PDF、二进制与需登录页面仍会失败；正文超长时是截断（truncated: true），不是失败。证券任务的 verified_official 核验只能经本工具完成：只允许抓取已由官方页面直接证明归属和用途的官方来源域名，不得 fetch 全部搜索结果。',
       parameters: jsonObject({
         url: { type: 'string', description: '单个 http(s) URL；证券任务必须是已核验的官方来源 URL' },
       }, ['url']),
       output: { schema: { type: 'object', additionalProperties: true }, render },
       async execute(args: Record<string, unknown>, exec: ToolExecLike) {
         const url = validHttpUrl(args.url)
-        const { recent, tally } = trace(exec, 'anysearch', 'web_retriever_fetch', url)
-        return fetchOutput(await retriever.fetch(url, exec.signal), recent, tally)
+        const { entry, snapshot, tally } = trace(exec, 'anysearch', 'web_retriever_fetch', url)
+        const result = await retriever.fetch(url, exec.signal)
+        entry.via = result.via
+        return fetchOutput(result, snapshot(), tally)
       },
     },
     {

@@ -2,6 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { registerWebRetrieverTools } from '../lib/web-retriever/tools.js'
 import { WebRetriever } from '../lib/web-retriever/retriever.js'
+import { AnySearchError } from '../lib/web-retriever/engines.js'
+import { LocalFetchError } from '../lib/web-retriever/local-fetch.js'
 
 function fakeToolRuntime() {
   const definitions = []
@@ -22,19 +24,32 @@ function fakeCtx(toolRuntime) {
   }
 }
 
-function fakeRetriever() {
+function fakeRetriever(options = {}) {
   const calls = { search: [], fetch: [] }
   const retriever = new WebRetriever({
     search: async (request) => {
       calls.search.push(request)
-      return { results: [{ url: 'https://example.test/result', title: 'Title', snippet: 'Snippet' }] }
+      return options.search?.(request) ?? { results: [{ url: 'https://example.test/result', title: 'Title', snippet: 'Snippet' }] }
     },
     extract: async (request) => {
       calls.fetch.push(request)
+      if (options.extract) return options.extract(request)
       return { title: 'Page', content: 'Body' }
     },
-  })
+  }, options.localFetch)
   return { retriever, calls }
+}
+
+function fakeLocalFetcher(result) {
+  let calls = 0
+  return {
+    calls: () => calls,
+    fetch: async (url) => {
+      calls += 1
+      if (result instanceof Error) throw result
+      return result ?? { url, status: 200, title: 'Local page', markdown: 'local body', truncated: false }
+    },
+  }
 }
 
 function fakeWindClient(overrides = {}) {
@@ -90,7 +105,7 @@ test('web_retriever_fetch：严格单 URL，信封带 provider 与回声', async
   const result = await runTool(runtime, 'web_retriever_fetch', { url: 'https://example.test/notice' }, 's1')
   const { recent_retrievals, provider_tally, ...rest } = result
   assert.deepEqual(rest, {
-    provider: 'anysearch', url: 'https://example.test/notice', ok: true, title: 'Page', content: 'Body', content_chars: 4,
+    provider: 'anysearch', url: 'https://example.test/notice', ok: true, via: 'anysearch', title: 'Page', content: 'Body', content_chars: 4,
   })
   assert.equal(recent_retrievals.length, 1)
   assert.equal(recent_retrievals[0].tool, 'web_retriever_fetch')
@@ -160,4 +175,66 @@ test('wind_docs：失败返回结构化错误信封而非抛错；参数校验�
   await assert.rejects(() => runTool(runtime, 'wind_docs_announcements', { query: '' }), /query is required/)
   await assert.rejects(() => runTool(runtime, 'wind_docs_announcements', { query: 'x', top_k: 0 }), /between 1 and 10/)
   await assert.rejects(() => runTool(runtime, 'wind_docs_news', { query: 'x', top_k: 11 }), /between 1 and 10/)
+})
+
+test('web_retriever_fetch：成功回执透出 via 且无 fallback/truncated，provider_tally 只计 anysearch', async () => {
+  const { retriever } = fakeRetriever()
+  const runtime = registerAll(retriever, fakeWindClient().client)
+  const result = await runTool(runtime, 'web_retriever_fetch', { url: 'https://example.test/notice' }, 's1')
+  assert.equal(result.via, 'anysearch')
+  assert.equal(result.fallback, undefined)
+  assert.equal(result.local_error, undefined)
+  assert.equal(result.truncated, undefined)
+  assert.equal(result.code, undefined)
+  assert.deepEqual(result.provider_tally, { anysearch: 1 })
+  assert.equal(result.recent_retrievals.at(-1).via, 'anysearch')
+})
+
+test('web_retriever_fetch：本地回退成功回执透出 via/fallback，recent_retrievals 记录 via', async () => {
+  const local = fakeLocalFetcher()
+  const { retriever } = fakeRetriever({
+    extract: async () => { throw new AnySearchError('TARGET_BLOCKED', '/v1/extract', 'blocked by target') },
+    localFetch: local,
+  })
+  const runtime = registerAll(retriever, fakeWindClient().client)
+  const result = await runTool(runtime, 'web_retriever_fetch', { url: 'https://example.test/blocked' }, 's1')
+  assert.equal(result.ok, true)
+  assert.equal(result.via, 'local-http')
+  assert.equal(result.content, 'local body')
+  assert.equal(result.fallback.from, 'anysearch')
+  assert.equal(result.fallback.code, 'TARGET_BLOCKED')
+  assert.equal(local.calls(), 1)
+  assert.equal(result.recent_retrievals.at(-1).via, 'local-http')
+})
+
+test('web_retriever_fetch：两边都失败回执含 code 与 local_error 且不抛错', async () => {
+  const local = fakeLocalFetcher(new LocalFetchError('TIMEOUT', 'local fetch timed out'))
+  const { retriever } = fakeRetriever({
+    extract: async () => { throw new AnySearchError('TARGET_BLOCKED', '/v1/extract', 'blocked by target') },
+    localFetch: local,
+  })
+  const runtime = registerAll(retriever, fakeWindClient().client)
+  const result = await runTool(runtime, 'web_retriever_fetch', { url: 'https://example.test/blocked' }, 's1')
+  assert.equal(result.ok, false)
+  assert.equal(result.via, 'anysearch')
+  assert.equal(result.code, 'TARGET_BLOCKED')
+  assert.equal(result.local_error.code, 'TIMEOUT')
+  assert.match(result.error, /blocked by target/)
+  assert.match(result.error, /local fetch timed out/)
+})
+
+test('web_retriever_fetch：截断回执透出 truncated', async () => {
+  const { retriever } = fakeRetriever({
+    extract: async () => ({ title: 'Long', content: 'x'.repeat(30_000) }),
+  })
+  const runtime = registerAll(retriever, fakeWindClient().client)
+  const result = await runTool(runtime, 'web_retriever_fetch', { url: 'https://example.test/long' }, 's1')
+  assert.equal(result.truncated, true)
+})
+
+test('web_retriever_fetch 描述声明自动回退与 via 来源标注', () => {
+  const runtime = registerAll(fakeRetriever().retriever, fakeWindClient().client)
+  const definition = runtime.definitions.find((item) => item.name === 'web_retriever_fetch')
+  assert.match(definition.description, /via/u)
+  assert.match(definition.description, /本机直连/u)
 })
