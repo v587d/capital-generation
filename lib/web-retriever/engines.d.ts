@@ -21,8 +21,26 @@ export interface FetchResult {
     ok: boolean;
     title?: string;
     content?: string;
+    truncated?: boolean;
     error?: string;
 }
+/** AnySearch 失败的结构化错误码。取值与拼写是下游回退判据的契约，勿随意改动。 */
+export type AnySearchErrorCode = 'ABORTED' | 'TIMEOUT' | 'NETWORK' | 'AUTH' | 'RATE_LIMIT' | 'HTTP' | 'INVALID_RESPONSE' | 'INVALID_URL' | 'TARGET_BLOCKED' | 'CONTENT_TOO_LARGE' | 'UNSUPPORTED_CONTENT' | 'UPSTREAM';
+/** 带结构化错误码的 AnySearch 失败；message 沿用既有拼法，保证既有断言仍通过。 */
+export declare class AnySearchError extends Error {
+    readonly code: AnySearchErrorCode;
+    readonly upstreamCode?: string;
+    readonly status?: number;
+    constructor(code: AnySearchErrorCode, path: string, detail: string, extra?: {
+        upstreamCode?: string;
+        status?: number;
+    });
+}
+/**
+ * AnySearch 失败后是否值得改走本机直连回退。
+ * 只有调用方取消、URL 非法与内容类型不受支持三类不回退；其余都回退。
+ */
+export declare function shouldFallbackToLocalFetch(code: AnySearchErrorCode): boolean;
 export interface AnySearchClient {
     search(request: {
         query: string;
