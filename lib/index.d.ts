@@ -28,9 +28,16 @@ export interface RetrieverConfig {
  * 本地直连回退的默认值（唯一真值来源）：schema 的 `.default()` 与消费点
  * `resolveLocalFetchConfig()` 都引用它，两处不再各写一份字面量。
  *
- * `userAgent` 默认是空串而非版本号：版本号只能有一处真值来源
- * （`LOCAL_FETCH_CLIENT_VERSION`，由测试守着等于 `package.json` 的 version）；
- * 空串 = 消费点改用 `LOCAL_FETCH_CLIENT_VERSION`。
+ * 数值口径对齐官方 `dsh-web-fetch-http`（DSH 自己的同类本机抓取器）：
+ * - `timeoutMs` = 30000（官方默认）。2026-09 实测：环境代理的故障转移慢路径约
+ *   15.2–15.4s，15s 预算会把证券业协会官网这类站点误判成 TIMEOUT。
+ * - `maxContentChars` = 100000（官方 `maxBodyChars` 默认值）。注意它切的是**转换前的
+ *   原始 HTML**（见 `html-markdown.ts`），而 markdown 输出只有 HTML 的 12–33%，
+ *   所以这个数必须按 HTML 体积给足；20,000 会把 109KB 的页面腰斩到 18%。
+ *
+ * `userAgent` 默认是产品标识（`@v587d/capital-generation`）：裸版本号（`2.1.1`）是
+ * WAF 眼里的典型爬虫特征。显式配成空串时消费点回落到 `LOCAL_FETCH_CLIENT_VERSION`
+ * （版本号真值仍只有一处，由测试守着等于 `package.json` 的 version）。
  */
 export declare const LOCAL_FETCH_DEFAULTS: Required<LocalFetchConfig>;
 /**

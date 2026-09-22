@@ -207,20 +207,33 @@ test('web_retriever_fetch：本地回退成功回执透出 via/fallback，recent
   assert.equal(result.recent_retrievals.at(-1).via, 'local-http')
 })
 
-test('web_retriever_fetch：两边都失败回执含 code 与 local_error 且不抛错', async () => {
+test('web_retriever_fetch：两边都失败必须抛错（isError），结构化回执不丢', async () => {
   const local = fakeLocalFetcher(new LocalFetchError('TIMEOUT', 'local fetch timed out'))
   const { retriever } = fakeRetriever({
     extract: async () => { throw new AnySearchError('TARGET_BLOCKED', '/v1/extract', 'blocked by target') },
     localFetch: local,
   })
   const runtime = registerAll(retriever, fakeWindClient().client)
-  const result = await runTool(runtime, 'web_retriever_fetch', { url: 'https://example.test/blocked' }, 's1')
-  assert.equal(result.ok, false)
-  assert.equal(result.via, 'anysearch')
-  assert.equal(result.code, 'TARGET_BLOCKED')
-  assert.equal(result.local_error.code, 'TIMEOUT')
-  assert.match(result.error, /blocked by target/)
-  assert.match(result.error, /local fetch timed out/)
+  // 回归（2026-09 实测缺陷）：失败此前被做成 ok:false 信封**正常返回**，于是子 Agent
+  // 会话日志里 7 次实际失败的抓取全部记成 isError:false，UI 与模型都当成成功。
+  // DSH 的 createSuccessResult 硬编码 isError:false ⇒ 唯一通道是从 execute 抛出。
+  let payload
+  await assert.rejects(
+    () => runTool(runtime, 'web_retriever_fetch', { url: 'https://example.test/blocked' }, 's1'),
+    (error) => {
+      assert.ok(error instanceof Error, '必须抛 Error 才能让宿主置 isError')
+      payload = JSON.parse(error.message)
+      return true
+    },
+  )
+  assert.equal(payload.ok, false)
+  assert.equal(payload.via, 'anysearch')
+  assert.equal(payload.code, 'TARGET_BLOCKED')
+  assert.equal(payload.local_error.code, 'TIMEOUT')
+  assert.match(payload.error, /blocked by target/)
+  assert.match(payload.error, /local fetch timed out/)
+  assert.equal(payload.recent_retrievals.at(-1).tool, 'web_retriever_fetch', '抛错路径仍保留检索回声')
+  assert.deepEqual(payload.provider_tally, { anysearch: 1 })
 })
 
 test('web_retriever_fetch：截断回执透出 truncated', async () => {

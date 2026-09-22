@@ -10,6 +10,7 @@ import { LOCAL_FETCH_CLIENT_VERSION } from '../lib/web-retriever/local-fetch.js'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const CLIENT = join(ROOT, 'capital-config', 'client.js')
+const CLIENT_SRC = join(ROOT, 'capital-config', 'client.src.cjs')
 
 function hostCtx(settings) {
   const injected = []
@@ -143,6 +144,7 @@ test('capital-config Client：bundle 注册到 settings.plugin.item 且使用 sh
       fuyao: { ref: 'FUYAO_API_KEY', configured: false, draft: '' },
       anysearch: { ref: 'ANYSEARCH_API_KEY', configured: false, draft: '' },
        wind: { ref: 'WIND_API_KEY', configured: false, draft: '' },
+      localFetch: { on: true, writing: false },
     }),
     edit() {},
     save() {},
@@ -165,22 +167,24 @@ test('capital-config Host：localFetch 默认值两处一致且消费点独立�
   assert.deepEqual(capital, main, '两处 schema 的 localFetch 默认值必须逐字一致')
   assert.equal(main.enabled, true, '本地回退默认开启')
   assert.equal(capital.enabled, true, '本地回退默认开启')
-  assert.equal(main.userAgent, '', 'schema 里的 UA 默认值是空串（版本号真值只有一处）')
-  assert.equal(capital.userAgent, '', 'schema 里的 UA 默认值是空串')
-  assert.equal(main.timeoutMs, 15000)
+  assert.equal(main.userAgent, '@v587d/capital-generation', 'schema 里的 UA 默认值是产品标识（裸版本号是 WAF 眼里的爬虫特征）')
+  assert.equal(capital.userAgent, '@v587d/capital-generation')
+  assert.equal(main.timeoutMs, 30000, '对齐官方 dsh-web-fetch-http 的 timeoutMs（15s 会误杀慢站点）')
   assert.equal(main.maxBytes, 524288)
-  assert.equal(main.maxContentChars, 20000)
+  assert.equal(main.maxContentChars, 100000, '对齐官方 dsh-web-fetch-http 的 maxBodyChars；切在原始 HTML 上，必须按 HTML 体积给足')
   assert.equal(main.maxRedirects, 5)
 
   // 消费点（apply 装配段）在 localFetch 为 undefined 时独立补齐同样的默认值；
-  // 只有 userAgent 例外：空串在消费点解析成插件版本号（唯一版本真值来源）。
+  // 只有 userAgent 例外：显式空串在消费点解析成插件版本号（唯一版本真值来源）。
   const consumed = resolveLocalFetchConfig(undefined)
   assert.equal(consumed.enabled, main.enabled)
   assert.equal(consumed.timeoutMs, main.timeoutMs)
   assert.equal(consumed.maxBytes, main.maxBytes)
   assert.equal(consumed.maxContentChars, main.maxContentChars)
   assert.equal(consumed.maxRedirects, main.maxRedirects)
-  assert.equal(consumed.userAgent, LOCAL_FETCH_CLIENT_VERSION)
+  assert.equal(consumed.userAgent, main.userAgent)
+  assert.equal(resolveLocalFetchConfig({ userAgent: '' }).userAgent, LOCAL_FETCH_CLIENT_VERSION,
+    '显式空串才回落到插件版本号（版本真值仍只有一处）')
   assert.ok(consumed.userAgent.length > 0, '消费点的 UA 必须非空')
 
   assert.equal(resolveLocalFetchConfig({ enabled: false }).enabled, false, 'enabled:false 必须能关掉回退')
@@ -197,4 +201,77 @@ test('capital-config 包清单：声明运行期 schemastery 依赖，且客户�
   assert.ok(manifest.files.includes('client.js'), 'client.js 必须随包发布，否则 web profile 起不来')
   assert.ok(manifest.files.includes('index.js'))
   assert.equal(manifest.dsh?.client?.platform, 'web')
+})
+
+test('capital-config Client：本机回退开关渲染在 AnySearch Key 下方，zh/en 文案齐全', () => {
+  const source = readFileSync(CLIENT_SRC, 'utf8')
+  // 布局：开关必须紧跟在 AnySearch API Key 输入框与 Wind Key 之间（需求指定的位置）。
+  const anysearchAt = source.indexOf('capital-config-anysearch-key')
+  const switchAt = source.indexOf('capital-config-local-fetch')
+  const windAt = source.indexOf('capital-config-wind-key')
+  assert.ok(anysearchAt > 0, '源码必须渲染 AnySearch Key 字段')
+  assert.ok(switchAt > anysearchAt && windAt > switchAt, '开关必须渲染在 AnySearch Key 下方、Wind Key 上方')
+  // 控件是真正的 switch（role/aria），默认开（`!== false` 与消费点 resolveLocalFetchConfig 同语义）。
+  assert.match(source, /role: 'switch'/)
+  assert.match(source, /'aria-checked'/)
+  assert.match(source, /enabled !== false/)
+  // 即时保存：写路径必须是 scope.mutate 的嵌套字段（set() 只支持顶层字段）。
+  assert.match(source, /\{ op: 'set', path: \['retriever', 'localFetch', 'enabled'\], value \}/)
+  // 需求给定的 label 原文，中英各一份。
+  assert.match(source, /localFetchLabel: '允许启动本地提取网页内容'/)
+  assert.match(source, /localFetchLabel: 'Allow local web page extraction'/)
+})
+
+test('capital-config Client：toggle 即时写 settings（精确路径），写失败时开关不翻转且置 failed', async () => {
+  const mod = loadClient()
+  const writes = []
+  const doc = { value: {} } // 段缺省 ⇒ 开关按 schema 默认呈现为「开」
+  let writable = true
+  let mutateImpl = (ops) => { doc.value = { retriever: { localFetch: { enabled: ops[0].value } } } }
+  const scope = {
+    getSnapshot: () => ({ status: 'ready', writable, value: doc.value, user: {}, base: {}, revision: 0 }),
+    subscribe: () => () => {},
+    mutate: async (ops) => { writes.push(ops); mutateImpl(ops) },
+  }
+  const registrations = []
+  const ctx = {
+    locale: { bind: () => (key) => key, register: () => () => {} },
+    settingsScope: { bind: () => scope },
+    remote: {
+      credentials: { describe: async () => ({ ok: true, value: {} }), set: async () => {} },
+      $on: () => () => {},
+    },
+    effect(callback) { return callback() || (() => {}) },
+    slots: {
+      inject(name, callback) { callback() },
+      register(declaration, component) { registrations.push({ declaration, component }); return () => {} },
+    },
+    logger: { info() {} },
+  }
+  mod.apply(ctx)
+  const injected = registrations[0].declaration.inject()
+  const store = injected.hooks.capitalCard
+
+  // 缺省段 ⇒ 开关呈现为开（默认开启，与两处 schema 的 enabled:true 一致）。
+  assert.equal(store.getSnapshot().localFetch.on, true)
+
+  // 关：写入路径必须逐字是 retriever.localFetch.enabled，即时生效于快照。
+  await injected.toggleLocalFetch(false)
+  // ops 在 VM sandbox realm 里创建，原型不同会骗过 deepStrictEqual ⇒ 先 JSON 归一再比结构。
+  assert.equal(JSON.stringify(writes), JSON.stringify([[{ op: 'set', path: ['retriever', 'localFetch', 'enabled'], value: false }]]))
+  assert.equal(store.getSnapshot().localFetch.on, false)
+  assert.equal(store.getSnapshot().failed, false)
+  assert.equal(store.getSnapshot().dirty, false, '即时保存的开关不进草稿流（不影响密钥的保存/放弃）')
+
+  // 写失败（mutate 被受理但值没落上）：开关严格由快照渲染 ⇒ 不翻转，并置 failed 提示。
+  mutateImpl = () => {}
+  await injected.toggleLocalFetch(true)
+  assert.equal(store.getSnapshot().localFetch.on, false, '写失败时开关不得显示成已切换')
+  assert.equal(store.getSnapshot().failed, true)
+
+  // 只读存储：不发写请求。
+  mutateImpl = (ops) => { doc.value = { retriever: { localFetch: { enabled: ops[0].value } } } }
+  writable = false
+  await injected.toggleLocalFetch(true)
+  assert.equal(writes.length, 2, 'settings 只读时不得发起 mutate（前两次成功/失败尝试之外不应有第三次写入）')
 })

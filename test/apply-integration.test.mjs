@@ -1,8 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { apply } from '../lib/index.js'
+import { apply, LOCAL_FETCH_DEFAULTS } from '../lib/index.js'
 import { ROOT_AGENT_DENIED_TOOLS } from '../lib/agents/root-tool-policy.js'
-import { LOCAL_FETCH_CLIENT_VERSION } from '../lib/web-retriever/local-fetch.js'
 
 /**
  * 装配入口的集成测试。
@@ -305,11 +304,11 @@ test('apply()：本地回退默认启用并把 UA 落到本机直连请求；ena
       assert.equal(result.via, 'local-http')
       assert.equal(result.fallback.code, 'AUTH')
       assert.equal(requests.length, 2, '缺省配置必须启用本地回退（消费点默认值独立生效）')
-      assert.equal(requests[1].init.headers['user-agent'], LOCAL_FETCH_CLIENT_VERSION)
-      assert.ok(LOCAL_FETCH_CLIENT_VERSION.length > 0)
+      assert.equal(requests[1].init.headers['user-agent'], LOCAL_FETCH_DEFAULTS.userAgent)
+      assert.equal(LOCAL_FETCH_DEFAULTS.userAgent, '@v587d/capital-generation')
     }
 
-    // 2) enabled:false：AnySearch 403 → 失败信封，只有一次请求。
+    // 2) enabled:false：AnySearch 403 → 工具错误（抛错，isError:true），只有一次请求。
     {
       const { ctx, tools, effectResults } = fakeCtx()
       let calls = 0
@@ -317,12 +316,16 @@ test('apply()：本地回退默认启用并把 UA 落到本机直连请求；ena
       apply(ctx, { customPersona: '', retriever: { baseURL: 'https://anysearch.test', credentialRef: '', windDocs: {}, localFetch: { enabled: false } } })
       await Promise.all(effectResults)
 
-      const result = await toolNamed(tools, 'web_retriever_fetch')
-        .execute({ url: 'http://93.184.216.34/page' }, exec(delegated))
-      assert.equal(result.ok, false)
-      assert.equal(result.via, 'anysearch')
-      assert.equal(result.code, 'AUTH')
-      assert.equal(result.fallback, undefined)
+      let payload
+      await assert.rejects(
+        () => toolNamed(tools, 'web_retriever_fetch')
+          .execute({ url: 'http://93.184.216.34/page' }, exec(delegated)),
+        (error) => { payload = JSON.parse(error.message); return true },
+      )
+      assert.equal(payload.ok, false)
+      assert.equal(payload.via, 'anysearch')
+      assert.equal(payload.code, 'AUTH')
+      assert.equal(payload.fallback, undefined)
       assert.equal(calls, 1, '回退被禁用时不得发起第二次网络请求')
     }
   } finally {

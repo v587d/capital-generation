@@ -45,9 +45,9 @@ function loadUrls() {
 }
 
 const fetcher = createLocalFetcher({
-  timeoutMs: 15_000,
+  timeoutMs: 30_000,
   maxBytes: 524_288,
-  maxContentChars: 20_000,
+  maxContentChars: 100_000,
   maxRedirects: 5,
   userAgent: `capital-generation-local-fetch-smoke/${LOCAL_FETCH_CLIENT_VERSION}`,
 })

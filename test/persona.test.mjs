@@ -216,6 +216,19 @@ test('skills：四个 skill 文件存在且 frontmatter 合法，persona 指向�
   assertMatches(readFileSync(presetReadme, 'utf8'), /isolate|realm/, 'preset README 应说明 realm 纪律')
 })
 
+test('capital-web-protocol：WAF 挑战型站点如实报错并改走 Wind（2026-09 实测教训）', () => {
+  const text = readFileSync(`${SKILL_DIR}capital-web-protocol/SKILL.md`, 'utf8')
+  // scio.gov.cn 实测：HTTP 521 + X-Via-Jsl + __jsluid_h，正文是裸 <script> 挑战，
+  // 第二阶段是 24KB 混淆脚本（需要 window/document）。规则落在 skill，不占 persona。
+  assertRuleAny(text, [/X-Via-Jsl/, /加速乐/], 'skill 必须给出 WAF 挑战型站点的识别特征')
+  assertRuleAny(text, [/__jsluid_h/, /__jsl_clearance/], 'skill 必须给出加速乐挑战的 cookie/脚本特征')
+  assertRuleAny(text, [/不重试、不尝试绕过/, /重试无用/], 'skill 必须禁止对 WAF 挑战重试或绕过')
+  assertRuleAny(text, [/改走 Wind/, /wind_docs_announcements/], 'skill 必须把 WAF 站点导向 Wind 取官方文件')
+  // 2026-09 实测缺陷：7 次失败的抓取在会话日志里全是 isError:false，UI/模型都当成成功。
+  assertRuleAny(text, [/工具错误/, /isError/], 'skill 必须写明抓取失败以工具错误（isError）返回')
+  assertRuleAny(text, [/不要把它当成抓取成功/, /不得编造标题或正文/], 'skill 必须禁止把失败当成功')
+})
+
 test('capital-generation-scope 行：插件提供的会话级服务必须全部进 isolate realm', () => {
   const scopeRow = rowById('capital-generation-scope')
   assert.ok(scopeRow, 'preset 必须有 capital-generation-scope 组行')

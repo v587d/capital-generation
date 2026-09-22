@@ -1,6 +1,6 @@
 {
   "name": "@v587d/capital-generation",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Capital Generation：面向中国散户的 AI 投资助手插件(Capital mode Agent Preset）",
   "author": "v587d",
   "license": "MIT",
@@ -20,7 +20,8 @@
     "capital-config",
     "preset",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "dsh": {
     "bundle": {
@@ -42,7 +43,8 @@
     "smoke:fuyao": "node scripts/smoke-fuyao.mjs",
     "smoke:local-fetch": "node scripts/smoke-local-fetch.mjs",
     "docs:capabilities": "npm run build && node scripts/gen-capability-table.mjs",
-    "verify:sessions": "node scripts/verify-sessions.mjs"
+    "verify:sessions": "node scripts/verify-sessions.mjs",
+    "audit:tool-errors": "node scripts/audit-tool-errors.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2"

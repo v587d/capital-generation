@@ -14,10 +14,14 @@ export const name = 'capital-config'
  *     resolved section to know which credential references to address. The main
  *     plugin (`@v587d/capital-generation`) reads the same section to resolve the keys.
  *
- * The card deliberately does **not** write this namespace: API keys live in the
- * credentials domain (`remote.credentials.set`), and the section holds only the
- * reference *names*. So the namespace is a seat + ref source, not a value store —
- * `applies: 'restart'` still tells the tab the namespace is composition-backed.
+ * The card deliberately does **not** write credentials into this namespace: API keys
+ * live in the credentials domain (`remote.credentials.set`), and the section holds
+ * the reference *names* the card reads to know which keys to address. There is exactly
+ * ONE stored preference the card does write: `retriever.localFetch.enabled` (the
+ * local-fetch fallback switch under the AnySearch key), saved immediately via
+ * `scope.mutate` with the nested path `['retriever', 'localFetch', 'enabled']` —
+ * it lands in the Host settings document (`~/.dsh/settings.yaml`), survives restarts,
+ * and `applies: 'restart'` makes it take effect in new Capital sessions.
  *
  * The browser half mirrors this namespace name in `client.src.cjs` (`NS`); the two
  * must stay equal (guarded by `test/capital-config.test.mjs`).
@@ -33,24 +37,26 @@ const WindDocsSchema = z.object({
 /**
  * 本地直连回退默认值。必须与主插件 `src/index.ts` 的 `LOCAL_FETCH_DEFAULTS` 逐字一致
  * （两处 schema 漂移会被 `test/capital-config.test.mjs` 的 deepEqual 用例抓住）。
- * `userAgent` 空串 = 消费点改用插件版本号。
+ * 数值口径对齐官方 `dsh-web-fetch-http`（timeoutMs=30000 / maxBodyChars=100000）；
+ * `maxContentChars` 切在转换前的原始 HTML 上，所以按 HTML 体积给足。
+ * `userAgent` 默认是产品标识；显式配成空串时消费点回落到插件版本号。
  */
 const LOCAL_FETCH_DEFAULTS = {
   enabled: true,
-  timeoutMs: 15000,
+  timeoutMs: 30000,
   maxBytes: 524288,
-  maxContentChars: 20000,
+  maxContentChars: 100000,
   maxRedirects: 5,
-  userAgent: '',
+  userAgent: '@v587d/capital-generation',
 }
 
 const LocalFetchSchema = z.object({
   enabled: z.boolean().default(LOCAL_FETCH_DEFAULTS.enabled).description('AnySearch 失败后是否允许本机直连回退（默认开启）'),
   timeoutMs: z.number().default(LOCAL_FETCH_DEFAULTS.timeoutMs).description('本机直连单次请求超时毫秒'),
   maxBytes: z.number().default(LOCAL_FETCH_DEFAULTS.maxBytes).description('本机直连响应体字节上限'),
-  maxContentChars: z.number().default(LOCAL_FETCH_DEFAULTS.maxContentChars).description('本机直连正文码点上限'),
+  maxContentChars: z.number().default(LOCAL_FETCH_DEFAULTS.maxContentChars).description('本机直连正文码点上限（切在转换前的原始 HTML 上，不是 markdown 输出）'),
   maxRedirects: z.number().default(LOCAL_FETCH_DEFAULTS.maxRedirects).description('本机直连最大重定向跳数'),
-  userAgent: z.string().default(LOCAL_FETCH_DEFAULTS.userAgent).description('本机直连 User-Agent；空 = 用插件版本号'),
+  userAgent: z.string().default(LOCAL_FETCH_DEFAULTS.userAgent).description('本机直连 User-Agent；空 = 回落到插件版本号'),
 })
 
 export const Config = z.object({

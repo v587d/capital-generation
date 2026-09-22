@@ -250,6 +250,52 @@ test('状态码与 Content-Type 闸门拒绝错误页和 PDF', async () => {
   }
 })
 
+test('缺 Content-Type 时按正文保守嗅探：HTML 放行（cls.cn 回归）', async () => {
+  // 实测 https://www.cls.cn/detail/2188659 的 GET 响应不带任何 Content-Type，
+  // 而同一 URL 的 HEAD 带 text/html；正文是完好的 SSR HTML。原实现"缺头即拒"
+  // 把它误判成 UNSUPPORTED_CONTENT_TYPE。
+  const restore = installFetch(async () => makeResponse(200, {}, '<!DOCTYPE html><html><head><title>财联社</title></head><body><p>正文</p></body></html>'))
+  try {
+    const result = await makeFetcher().fetch('https://example.test/detail')
+    assert.equal(result.status, 200)
+    assert.equal(result.title, '财联社')
+    assert.match(result.markdown, /正文/)
+  } finally {
+    restore()
+  }
+})
+
+test('缺 Content-Type 时按正文保守嗅探：JSON 与裸标签放行', async () => {
+  for (const body of ['{"ok":true}', '<div>x</div>', '<?xml version="1.0"?><r/>']) {
+    const restore = installFetch(async () => makeResponse(200, {}, body))
+    try {
+      const result = await makeFetcher().fetch('https://example.test/x')
+      assert.equal(result.status, 200, `正文 ${JSON.stringify(body.slice(0, 12))} 应被嗅探放行`)
+    } finally {
+      restore()
+    }
+  }
+})
+
+test('缺 Content-Type 且正文认不出类型时仍拒绝（嗅探不放宽闸门）', async () => {
+  const restore = installFetch(async () => makeResponse(200, {}, '%PDF-1.7 binary-ish payload'))
+  try {
+    await expectCode(makeFetcher().fetch('https://example.test/x'), 'UNSUPPORTED_CONTENT_TYPE')
+  } finally {
+    restore()
+  }
+})
+
+test('响应头存在但不支持的类型仍然拒绝，不因嗅探放宽', async () => {
+  // 嗅探只在**缺头**时启用：显式声明为二进制的响应必须照旧拒绝。
+  const restore = installFetch(async () => makeResponse(200, { 'content-type': 'application/octet-stream' }, '<!DOCTYPE html><p>伪装成 HTML</p>'))
+  try {
+    await expectCode(makeFetcher().fetch('https://example.test/x'), 'UNSUPPORTED_CONTENT_TYPE')
+  } finally {
+    restore()
+  }
+})
+
 test('字节截断使用增量解码，不产生 U+FFFD，并披露 truncated', async () => {
   const source = '<p>中</p>'
   const bytes = new TextEncoder().encode(source)

@@ -36,7 +36,7 @@ export interface WindCallResult {
  * `test/chart-composition.test.mjs` 守着（会因漂移而失败），这里原本是写死的第二处，
  * 一次发版就得记得改两遍。所以本常量由测试一并核对（见 `test/wind-client.test.mjs`）。
  */
-export const WIND_CLIENT_VERSION = '2.1.0'
+export const WIND_CLIENT_VERSION = '2.1.1'
 
 export interface WindClient {
   callTool(toolName: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<WindCallResult>

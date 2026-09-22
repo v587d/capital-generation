@@ -14,7 +14,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.1.0-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.1.1-9cf" alt="Version"></a>
 </p>
 
 > [!IMPORTANT]
@@ -43,7 +43,7 @@ dsh plugin --profile web add github:v587d/capital-generation
 
 | 配置 API Key |
 | :---: |
-| [<img src="assets/settings-plugins.png" width="420" alt="设置 → 插件 → 插件配置 → Capital 模式：填入 Fuyao / AnySearch / Wind 密钥">](assets/settings-plugins.png) |
+| [<img src="assets/settings-plugins_1.png" width="600" alt="设置 → 插件 → 插件配置 → Capital 模式：填入 Fuyao / AnySearch / Wind 密钥">](assets/settings-plugins_1.png) |
 
 > [!NOTE]
 > 密钥都是免费申请的：必填 [同花顺（fuyao）](https://fuyao.aicubes.cn/docs/)（行情、财务等结构化数据）；
@@ -51,6 +51,10 @@ dsh plugin --profile web add github:v587d/capital-generation
 > 推荐 [Wind Alice](https://market.windalice.com/#/home)（公告与信披文档，每天送 300 积分，日常够用）。
 >
 > 在设置里粘贴保存即可，重启后新开的 Capital 会话就能用。
+> 同一卡片下方的 **「允许启动本地提取网页内容」** 开关（默认开启）控制抓取回退：
+> 开启时 AnySearch 抓取失败会自动改由本机直连抓取该页面（回执 `via` 标注 `local-http`），
+> 关闭则失败原样回传；改动即时保存，新 Capital 会话生效。
+>
 > 不想用设置界面的话，也可以直接把密钥写进 `~/.dsh/.credentials.yaml`，名字用
 > `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`，插件会自动读取。
 
@@ -58,7 +62,7 @@ dsh plugin --profile web add github:v587d/capital-generation
 
 | 选择 Capital 模式 | 设为默认模式 |
 | :---: | :---: |
-| [<img src="assets/mode_selector.png" width="360" alt="新会话在 Agent Preset 选择器中选择 Capital 模式">](assets/mode_selector.png) | [<img src="assets/set_default.png" width="360" alt="在 Settings 中把 Capital 模式设为默认">](assets/set_default.png) |
+| [<img src="assets/mode_selector.png" width="400" alt="新会话在 Agent Preset 选择器中选择 Capital 模式">](assets/mode_selector.png) | [<img src="assets/set_default.png" width="400" alt="在 Settings 中把 Capital 模式设为默认">](assets/set_default.png) |
 | 新会话在 Agent Preset 选择器中选择 Capital 模式 | 也可以在 Settings 中设为默认模式 |
 
 # What
@@ -121,22 +125,14 @@ npm run smoke:boot   # 冒烟验证装配可正常 boot
 
 ## Changelog
 
-### 2.1.0 — 2026-09-20
+### 2.1.1 — 2026-09-22
 
-本版是**图表呈现通道的定点重做**：修掉「打开历史会话失败」的根因，并把图表交付
-交回 DSH 官方机制。**没有工具/接口层面的破坏性变更**，但呈现行为与 2.0.0 不同。
+- **设置卡片**：新增 设置 → 插件 → 插件配置 → Capital 模式，可视化配置 Fuyao / AnySearch /
+  Wind API Key，并可开关「允许启动本地提取网页内容」（默认开启）。
+- **抓取回退**：AnySearch fetch 失败且开关开启时，自动改由本机直连抓取该页面并抽取正文
+  （回执 `via` 标注 `anysearch` | `local-http`），失败语义按结构化错误码归类。
 
-#### ⚠️ 行为变更：图表不再内嵌在答复里
-
-| | 2.0.0 | 2.1.0 |
-|---|---|---|
-| 呈现位置 | 主 Agent 答复里**直接内嵌的图表** | 收尾的**「本轮文件改动 / 交付」行** |
-| 查看方式 | 页面内直接渲染 | 点开该行的 `chart.html`，右侧面板渲染可交互图表 |
-| 承载机制 | 自定义会话事件 `capital/chart-rendered` + 客户端内嵌渲染 | 官方 `deliverables/presented` + 官方文档预览 |
-
-降级路径不变：`chart.html` 自包含（内联图表库与数据），可离线打开、零外部请求。
-
-#### 🐞 修复：升级到 dsh 0.1.5-rc.2 后，出过图的会话 100% 打不开
+非破坏性新增，从 2.1.0 升级无需迁移。完整变更历史见 [CHANGELOG.md](CHANGELOG.md)。
 
 # 贡献
 可自行克隆本项目，按上方「本地开发 / 构建 / 测试」执行。

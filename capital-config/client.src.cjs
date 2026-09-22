@@ -21,6 +21,8 @@ const zh = {
   fuyaoHint: '必填。同花顺 Fuyao 结构化数据接口。保存后新 Capital 会话生效。',
   anysearchLabel: 'AnySearch API Key',
   anysearchHint: '必填。AnySearch 网页搜索 / 提取接口。保存后新 Capital 会话生效。',
+  localFetchLabel: '允许启动本地提取网页内容',
+  localFetchHint: '开启后 AnySearch 抓取失败会自动改由本机直连抓取该页面（回执来源 local-http）；关闭则 AnySearch 失败即回传失败。改动即时保存，新 Capital 会话生效。',
   windLabel: 'Wind Alice API Key',
   windHint: 'Wind 金融信披类文档检索接口。保存后新 Capital 会话生效。',
   openDocs: '打开接口文档',
@@ -43,6 +45,8 @@ const en = {
   fuyaoHint: 'Tonghuashun Fuyao structured-data API. Takes effect in new Capital sessions.',
   anysearchLabel: 'AnySearch API Key',
   anysearchHint: 'AnySearch web search / extract interface. Takes effect in new Capital sessions.',
+  localFetchLabel: 'Allow local web page extraction',
+  localFetchHint: 'When on, an AnySearch fetch failure falls back to direct local fetching (receipt via: local-http); when off, failures are returned as-is. Changes save immediately and take effect in new Capital sessions.',
   windLabel: 'Wind Alice API Key',
   windHint: 'Wind financial disclosure document retrieval interface. Takes effect in new Capital sessions.',
   openDocs: 'Open API documentation',
@@ -86,6 +90,12 @@ function installStyles() {
     .capital-config-input:focus-visible { border-color: var(--dsw-alias-brand-primary); outline: none; }
     .capital-config-input:disabled { color: var(--dsw-alias-label-tertiary); cursor: default; }
     .capital-config-hint { margin: 0; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 1.5; }
+    .capital-config-switch { position: relative; flex: none; width: 36px; height: 20px; padding: 0; border: 0; border-radius: 999px; background: var(--dsw-alias-border-l4); cursor: pointer; transition: background .16s; }
+    .capital-config-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--dsw-alias-bg-layer-3); box-shadow: 0 0 0 .5px var(--dsw-alias-border-l4); transition: transform .16s; }
+    .capital-config-switch-on { background: var(--dsw-alias-brand-primary); }
+    .capital-config-switch-on::after { transform: translateX(16px); }
+    .capital-config-switch:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+    .capital-config-switch:disabled { opacity: .5; cursor: default; }
     .capital-config-card { border: .5px solid var(--dsw-alias-border-l4); border-radius: 16px; background: var(--dsw-alias-bg-layer-3); list-style: none; transition: border-color .16s, background .16s; }
     .capital-config-card:hover { border-color: var(--dsw-alias-label-dimmed); }
     .capital-config-card-open { border-color: var(--dsw-alias-label-dimmed); background: var(--dsw-alias-bg-layer-2); }
@@ -133,6 +143,7 @@ class CapitalCardController {
     }
     this.saving = false
     this.failed = false
+    this.localFetchWriting = false
     this.store = createSnapshotStore(this.snapshot())
     this.unsubscribe = this.scope.subscribe(() => {
       this.refreshRefs()
@@ -161,6 +172,12 @@ class CapitalCardController {
       fuyao: { ...fuyao, draft: this.drafts.fuyao },
       anysearch: { ...anysearch, draft: this.drafts.anysearch },
       wind: { ...wind, draft: this.drafts.wind },
+      // 本机直连回退开关：严格渲染自 settings 段（schema 解析后带默认值）。
+      // `!== false` 与主插件消费点 resolveLocalFetchConfig 的默认语义逐字一致（默认开）。
+      localFetch: {
+        on: settings.value?.retriever?.localFetch?.enabled !== false,
+        writing: this.localFetchWriting,
+      },
     }
   }
 
@@ -227,6 +244,33 @@ class CapitalCardController {
     this.publish()
   }
 
+  /**
+   * 本机直连回退开关：点即保存（不走底部的保存/放弃草稿流——那是 credentials 域的
+   * write-only 密钥才需要的仪式，settings 写入是原子的、带 revision 围栏的持久操作）。
+   *
+   * - 只能用 `scope.mutate` 嵌套路径：`set(field)` 只支持顶层字段（path: [field]）。
+   * - 开关严格由 settings 快照渲染：写失败时快照不变、开关不翻转（mutate 失败不抛错，
+   *   只做恢复读），随后按「快照值 === 目标值」校验落盘，没落上就置 failed 给出提示。
+   * - `applies: 'restart'`：本次写入对下一个新 Capital 会话生效（hint 已写明）。
+   */
+  async toggleLocalFetch(value) {
+    if (this.localFetchWriting) return
+    const snapshot = this.scope.getSnapshot()
+    if (snapshot.status !== 'ready' || !snapshot.writable) return
+    this.localFetchWriting = true
+    this.failed = false
+    this.publish()
+    try {
+      await this.scope.mutate([{ op: 'set', path: ['retriever', 'localFetch', 'enabled'], value }])
+    } catch {
+      // 写请求本身失败：交给下面的落盘校验，不打断流程。
+    }
+    this.localFetchWriting = false
+    const landed = this.scope.getSnapshot().value?.retriever?.localFetch?.enabled === value
+    if (!landed) this.failed = true
+    this.publish()
+  }
+
   async save() {
     const snapshot = this.scope.getSnapshot()
     const writes = ['fuyao', 'anysearch', 'wind'].filter((field) => this.drafts[field].trim() !== '')
@@ -258,6 +302,7 @@ class CapitalCardController {
       edit: (field, value) => this.edit(field, value),
       save: () => this.save(),
       discard: () => this.discard(),
+      toggleLocalFetch: (value) => this.toggleLocalFetch(value),
     }
   }
 }
@@ -289,6 +334,28 @@ function CredentialField({ id, label, hint, docsUrl, state, disabled, onEdit, t 
       disabled,
       onChange: (event) => onEdit(event.target.value),
     }),
+    h('p', { className: 'capital-config-hint' }, hint),
+  )
+}
+
+/** 开关行：左侧说明文案，右侧 switch 按钮（即时保存，值来自 settings 快照）。 */
+function SwitchField({ id, label, hint, checked, disabled, onToggle }) {
+  return h('div', { className: 'capital-config-field' },
+    h('div', { className: 'capital-config-head' },
+      h('span', { className: 'capital-config-label-group' },
+        h('span', { id: `${id}-label`, className: 'capital-config-label' }, label),
+      ),
+      h('button', {
+        type: 'button',
+        id,
+        role: 'switch',
+        'aria-checked': checked === true,
+        'aria-labelledby': `${id}-label`,
+        className: `capital-config-switch${checked ? ' capital-config-switch-on' : ''}`,
+        disabled,
+        onClick: () => onToggle(!checked),
+      }),
+    ),
     h('p', { className: 'capital-config-hint' }, hint),
   )
 }
@@ -329,6 +396,14 @@ function CapitalCard(props) {
       !state.writable ? h('p', { role: 'status', className: 'capital-config-read-only' }, t('readOnly')) : null,
       h(CredentialField, { id: 'capital-config-fuyao-key', label: t('fuyaoLabel'), hint: t('fuyaoHint'), docsUrl: DOC_URLS.fuyao, state: state.fuyao, disabled: disabled || state.saving || !state.fuyao.writable, onEdit: (value) => props.edit('fuyao', value), t }),
       h(CredentialField, { id: 'capital-config-anysearch-key', label: t('anysearchLabel'), hint: t('anysearchHint'), docsUrl: DOC_URLS.anysearch, state: state.anysearch, disabled: disabled || state.saving || !state.anysearch.writable, onEdit: (value) => props.edit('anysearch', value), t }),
+      h(SwitchField, {
+        id: 'capital-config-local-fetch',
+        label: t('localFetchLabel'),
+        hint: t('localFetchHint'),
+        checked: state.localFetch?.on !== false,
+        disabled: disabled || state.saving || state.localFetch?.writing === true,
+        onToggle: props.toggleLocalFetch,
+      }),
       h(CredentialField, { id: 'capital-config-wind-key', label: t('windLabel'), hint: t('windHint'), docsUrl: DOC_URLS.wind, state: state.wind, disabled: disabled || state.saving || !state.wind.writable, onEdit: (value) => props.edit('wind', value), t }),
       h('div', { className: 'capital-config-footer' },
         state.failed ? h('p', { role: 'status', className: 'capital-config-failed' }, t('saveFailed')) : null,
