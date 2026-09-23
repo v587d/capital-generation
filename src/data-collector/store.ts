@@ -1,4 +1,5 @@
 import { DatasetQueryError, executeJsonRowsQuery, type QueryResult, type QuerySpec } from './query.js'
+import { defaultAxisWindows, isoDateFromEpoch, probeTimeAxis, readAxisDates } from './time-axis.js'
 
 /**
  * Phase 1/2 workspace-local Dataset store（设计约定见 AGENTS.md「数据布局」）。
@@ -31,6 +32,13 @@ export const MAX_STRUCTURE_ENTRIES = 24
 const MAX_STRUCTURE_DEPTH = 4
 const MAX_STRUCTURE_FIELDS = 8
 const MAX_STRUCTURE_SAMPLED_ELEMENTS = 50
+/**
+ * `time_facts.windows` 的条数上限。默认只给 4 个常用窗口（近 1 月/3 月/1 年/年初至今），
+ * 上限是防回涨的闸门：窗口是"现成坐标"，不是让宿主把任意期间都算一遍。
+ */
+const MAX_TIME_WINDOWS = 8
+/** 推断时间轴时最多检查多少行：命中的列通常在前若干行就出现，不必为一次探针读全量。 */
+const MAX_AXIS_PROBE_ROWS = 500
 
 /**
  * 文档型 Dataset（顶层对象、没有行数组，如财务指标 / 回测结果）交给 data_junior 的
@@ -162,6 +170,39 @@ export interface ProfileCategory {
   truncated: boolean
 }
 
+/**
+ * 时间轴的**语义**（形态 + 该列自身观测到的时区偏移）。
+ *
+ * 存在的理由：`date_ms` 这类列的取值是 epoch 毫秒，模型既无法直接读出"这是哪一天"，
+ * 也无法把"近 1 个月"翻译回毫秒；没有这一块事实，它只能自己推算——实测单步
+ * 41,961 字符的思考里绝大部分是时间戳算术（真机会话 1e44050e）。
+ * 块内只放**观测到的**事实，不做猜测：推断不出就报 `unknown`。
+ */
+export interface ProfileTimeAxis {
+  column: string
+  value_format: 'epoch_ms' | 'date_string' | 'unknown'
+  /** 该列的取值按哪个时区解释（epoch_ms 且能推断时才有）。 */
+  time_zone?: string
+  /** 上面的时区的 `+08:00` 形态；`time_zone` 已是 `UTC+08:00` 时不重复（避免同一事实写两遍）。 */
+  utc_offset?: string
+  /** 取值对齐到当地午夜、日历日，还是无法判断。 */
+  aligned_to?: 'local_midnight' | 'calendar_day' | 'unknown'
+}
+
+/** 一个可直接使用的分析窗口：日历区间 + 该列里真正的查询边界。 */
+export interface ProfileTimeWindow {
+  name: string
+  start_date: string
+  end_date: string
+  /** `>= value_ge` 即"从这个窗口的第一天开始"（epoch 轴为当地午夜）。 */
+  value_ge: number | string
+  /** `<= value_le` 即"到这个窗口的最后一天结束"。 */
+  value_le: number | string
+  /** 该窗口在 Dataset 里**真实存在**的首末日期；起点落在非交易日时这里是下一个交易日。 */
+  data_from: string | null
+  data_to: string | null
+}
+
 export interface ProfileTimeFacts {
   time_column: string
   /** 文件顺序是否随时间递增；null = 时间列有缺失，无法判断。 */
@@ -169,6 +210,13 @@ export interface ProfileTimeFacts {
   /** 时间列的最小/最大值（覆盖范围），原值不改写。 */
   covered_from: unknown
   covered_to: unknown
+  /** 覆盖范围的人类可读日期；只对 epoch_ms 轴出现（date_string 轴本身可读）。 */
+  covered_from_iso?: string
+  covered_to_iso?: string
+  /** 时间轴语义：形态与时区偏移。 */
+  axis: ProfileTimeAxis
+  /** 常用窗口（近 1 月 / 近 3 月 / 近 1 年 / 年初至今）的现成边界。 */
+  windows?: ProfileTimeWindow[]
   /** 首行与末行的「时间列 + 数值列」取值（文件顺序），用于首末值与区间变化。 */
   first: Record<string, unknown>
   last: Record<string, unknown>
@@ -291,6 +339,21 @@ export interface QueryDatasetInput {
   dataset_id: string
   query: QuerySpec
   signal?: AbortSignal
+}
+
+/**
+ * 时间轴探针结果：形态 + 已出现的日期 + 列清单。
+ *
+ * 三条消费路径共用同一份事实，避免"谁猜时间列"出现第二套判据：
+ * ① `query_dataset` 的日期筛选归一；② `resolve_data_time_range` 的数据集模式；
+ * ③ 报错信息里列出可选列。
+ */
+export interface TimeAxisSnapshot {
+  dataset_id: string
+  columns: string[]
+  axis: ProfileTimeAxis
+  /** 探针看到的日期（升序、去重）；用于把窗口夹到真实存在的交易日。 */
+  dates: string[]
 }
 
 export interface ProfileDatasetResult extends ProfileRef {
@@ -577,6 +640,39 @@ export class WorkspaceDatasetStore {
       throw new DatasetQueryError('query_spec_invalid', 'query.dataset_id must match the requested Dataset')
     }
     return executeJsonRowsQuery(raw.rows, ref.schema, input.query)
+  }
+
+  /**
+   * 时间轴只读探针（`query_dataset` 的日期归一边界与 `resolve_data_time_range` 的数据集模式共用）。
+   *
+   * 只读前 {@link MAX_AXIS_PROBE_ROWS} 行推断形态与偏移：时间列一定在每行都出现，日线数据
+   * 的有序性也让前若干行足以定出粒度；这样这个探针**可以随查询逐次调用**，
+   * 代价与"读一份 16MB raw.json 只为一个问题"不同量级。
+   */
+  async describeTimeAxis(input: {
+    session: SessionLike
+    dataset_id: string
+    time_column?: string
+    signal?: AbortSignal
+  }): Promise<TimeAxisSnapshot | undefined> {
+    const stored = await this.requireStoredRef(input.dataset_id, input.session, input.signal)
+    const { session_scope_id: _scope, row_key: rowKey, ...ref } = stored
+    const raw = await this.readRaw(ref, input.session, input.signal, rowKey)
+    if (raw.kind !== 'rows' || raw.rows.length === 0) return undefined
+    const objectRows = raw.rows.filter(isRecord)
+    if (objectRows.length === 0) return undefined
+    const columns = [...new Set(objectRows.flatMap((row) => Object.keys(row)))]
+    const sample: unknown[] = []
+    const step = Math.max(1, Math.ceil(raw.rows.length / MAX_AXIS_PROBE_ROWS))
+    for (let index = 0; index < raw.rows.length && sample.length < MAX_AXIS_PROBE_ROWS; index += step) sample.push(raw.rows[index])
+    const column = pickTimeColumn(sample, columns, input.time_column)
+    if (column === undefined) return undefined
+    const values = sample.map((row) => profileCell(row, column).value)
+    const axis = probeTimeAxis(column, values)
+    if (axis.value_format === 'unknown') return undefined
+    const dates = readAxisDates({ axis, rows: sample })
+    if (dates.length === 0) return undefined
+    return { dataset_id: ref.dataset_id, columns, axis, dates }
   }
 
   async writeProfile(input: WriteProfileInput): Promise<ProfileRef> {
@@ -1017,7 +1113,7 @@ function buildProfile(
 
   const timeFacts = timeColumn === undefined
     ? undefined
-    : buildTimeFacts(rows, timeColumn, timeOrdered, new Set(Object.keys(statistics)))
+    : timeFactsFor(rows, timeColumn, timeOrdered, new Set(Object.keys(statistics)))
 
   return {
     row_count: rows.length,
@@ -1062,7 +1158,11 @@ const DATE_LIKE_PATTERN = /^\d{4}(-\d{1,2}(-\d{1,2})?)?$/
  * 以上随后可能回落」这种没有依据的叙述）。首末行给出的是真实首末取值，
  * 区间变化因此可追溯；`ordered_ascending` 说明文件顺序，避免把末行当成最新。
  */
-function buildTimeFacts(
+/**
+ * 时间事实的**唯一实现**（profile 与时间轴探针共用）：
+ * 覆盖范围（原值 + ISO）、时间轴语义、常用窗口、首末行取值。
+ */
+function timeFactsFor(
   rows: unknown[],
   timeColumn: string,
   orderedAscending: boolean | null,
@@ -1085,11 +1185,24 @@ function buildTimeFacts(
     if (coveredFrom === null || compareProfileValues(value, coveredFrom) < 0) coveredFrom = value
     if (coveredTo === null || compareProfileValues(value, coveredTo) > 0) coveredTo = value
   }
+  const axis = probeTimeAxis(timeColumn, timeValues)
+  const dates = readAxisDates({ axis, rows })
+  const coveredFromIso = typeof coveredFrom === 'number' && axis.value_format === 'epoch_ms'
+    ? isoDateFromEpoch(coveredFrom, axis.time_zone ?? 'UTC')
+    : undefined
+  const coveredToIso = typeof coveredTo === 'number' && axis.value_format === 'epoch_ms'
+    ? isoDateFromEpoch(coveredTo, axis.time_zone ?? 'UTC')
+    : undefined
+  const windows = axis.value_format === 'unknown' ? [] : defaultAxisWindows({ axis, dates })
   return {
     time_column: timeColumn,
     ordered_ascending: orderedAscending,
     covered_from: coveredFrom,
     covered_to: coveredTo,
+    ...(coveredFromIso === undefined ? {} : { covered_from_iso: coveredFromIso }),
+    ...(coveredToIso === undefined ? {} : { covered_to_iso: coveredToIso }),
+    axis,
+    ...(windows.length === 0 ? {} : { windows }),
     first: project(rows[0]),
     last: project(rows[rows.length - 1]),
   }
@@ -1269,7 +1382,13 @@ function shrinkArrays(value: unknown, keep: number, path: string, omitted: Profi
   return result
 }
 
-function profileCell(row: unknown, column: string): { present: boolean; value: unknown } {
+/** 行内取列值：`present=false` 表示该列在这行不存在（缺失），与显式 null 区分开。 */
+export interface ProfileCell {
+  present: boolean
+  value: unknown
+}
+
+function profileCell(row: unknown, column: string): ProfileCell {
   if (isRecord(row)) return { present: Object.prototype.hasOwnProperty.call(row, column), value: row[column] }
   return column === 'value' ? { present: true, value: row } : { present: false, value: undefined }
 }
@@ -1481,18 +1600,46 @@ function validateProfile(value: unknown): ProfilePayload {
   if (value.time_facts !== undefined) {
     const item = value.time_facts
     if (!isRecord(item) || typeof item.time_column !== 'string' || !columns.includes(item.time_column)) throw new DatasetStoreError('profile_invalid', 'time_facts.time_column must be a profile column')
-    if (Object.keys(item).some((key) => !['time_column', 'ordered_ascending', 'covered_from', 'covered_to', 'first', 'last'].includes(key))) throw new DatasetStoreError('profile_invalid', 'time_facts contains unsupported fields')
+    if (Object.keys(item).some((key) => !['time_column', 'ordered_ascending', 'covered_from', 'covered_to', 'covered_from_iso', 'covered_to_iso', 'axis', 'windows', 'first', 'last'].includes(key))) throw new DatasetStoreError('profile_invalid', 'time_facts contains unsupported fields')
     if (!(item.ordered_ascending === null || typeof item.ordered_ascending === 'boolean')) throw new DatasetStoreError('profile_invalid', 'time_facts.ordered_ascending must be boolean or null')
     if (!isRecord(item.first) || !isRecord(item.last)) throw new DatasetStoreError('profile_invalid', 'time_facts.first and time_facts.last must be objects')
     for (const [key, entry] of [...Object.entries(item.first), ...Object.entries(item.last)]) {
       if (!columns.includes(key)) throw new DatasetStoreError('profile_invalid', `time_facts.${key} is not a profile column`)
       if (entry !== null && typeof entry === 'object') throw new DatasetStoreError('profile_invalid', `time_facts.${key} must be a scalar value`)
     }
+    const axis = item.axis
+    if (!isRecord(axis) || axis.column !== item.time_column || !['epoch_ms', 'date_string', 'unknown'].includes(String(axis.value_format))) {
+      throw new DatasetStoreError('profile_invalid', 'time_facts.axis must describe the time column')
+    }
+    if (Object.keys(axis).some((key) => !['column', 'value_format', 'time_zone', 'utc_offset', 'aligned_to'].includes(key))) {
+      throw new DatasetStoreError('profile_invalid', 'time_facts.axis contains unsupported fields')
+    }
+    const windows = item.windows
+    if (windows !== undefined) {
+      if (!Array.isArray(windows) || windows.length > MAX_TIME_WINDOWS) throw new DatasetStoreError('profile_invalid', `time_facts.windows must contain at most ${MAX_TIME_WINDOWS} windows`)
+      for (const window of windows) {
+        if (!isRecord(window) || typeof window.name !== 'string' || typeof window.start_date !== 'string' || typeof window.end_date !== 'string') {
+          throw new DatasetStoreError('profile_invalid', 'time_facts.windows items must carry name/start_date/end_date')
+        }
+      }
+    }
     timeFacts = {
       time_column: item.time_column,
       ordered_ascending: item.ordered_ascending as boolean | null,
       covered_from: item.covered_from ?? null,
       covered_to: item.covered_to ?? null,
+      ...(typeof item.covered_from_iso === 'string' ? { covered_from_iso: item.covered_from_iso } : {}),
+      ...(typeof item.covered_to_iso === 'string' ? { covered_to_iso: item.covered_to_iso } : {}),
+      axis: {
+        column: item.time_column,
+        value_format: axis.value_format as ProfileTimeAxis['value_format'],
+        ...(typeof axis.time_zone === 'string' ? { time_zone: axis.time_zone } : {}),
+        ...(typeof axis.utc_offset === 'string' ? { utc_offset: axis.utc_offset } : {}),
+        ...(axis.aligned_to === 'local_midnight' || axis.aligned_to === 'calendar_day' || axis.aligned_to === 'unknown'
+          ? { aligned_to: axis.aligned_to }
+          : {}),
+      },
+      ...(windows === undefined ? {} : { windows: windows as ProfileTimeWindow[] }),
       first: item.first as Record<string, unknown>,
       last: item.last as Record<string, unknown>,
     }

@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { registerDatasetTools } from '../lib/data-collector/dataset-tools.js'
 import { DatasetStoreError, WorkspaceDatasetStore } from '../lib/data-collector/store.js'
+import { assertToolOutput, collectUndeclaredRequired } from './output-contract.mjs'
 
 const SESSION = { id: 'session-1', header: { cwd: '/workspace/proj' } }
 const OTHER_SESSION = { id: 'session-2', header: { cwd: '/workspace/proj' } }
@@ -476,7 +477,7 @@ test('Dataset Phase 3：inspect、profile 与 query 工具真实注册，schema 
     effect: (fn) => fn(),
   }
   registerDatasetTools(ctx, makeStore().store)
-  assert.deepEqual(definitions.map((definition) => definition.name), ['inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile'])
+  assert.deepEqual(definitions.map((definition) => definition.name), ['inspect_dataset', 'profile_dataset', 'query_dataset', 'describe_dataset', 'write_profile'])
   const inspect = definitions[0]
   assert.equal(inspect.parameters.additionalProperties, false)
   assert.ok(!('path' in inspect.parameters.properties))
@@ -639,7 +640,7 @@ test('Phase 2 query 工具：只注册受控 QuerySpec，data_junior 执行仍�
     effect: (fn) => fn(),
   }
   registerDatasetTools(ctx, makeStore().store)
-  assert.deepEqual(definitions.map((definition) => definition.name), ['inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile'])
+  assert.deepEqual(definitions.map((definition) => definition.name), ['inspect_dataset', 'profile_dataset', 'query_dataset', 'describe_dataset', 'write_profile'])
   const query = definitions.find((definition) => definition.name === 'query_dataset')
   assert.ok(query)
   assert.equal(query.parameters.type, 'object')
@@ -848,4 +849,243 @@ test('Phase 2 query 兼容：数组/对象参数被序列化成 JSON 字符串�
     /raw row selection is not allowed/,
     '解析成功后仍必须由引擎拒绝取原始行',
   )
+})
+
+/**
+ * 时间轴（2026-09-23 真机会话 1e44050e 的教训）：
+ * data_junior 拿到的 `date_ms` 只会是 epoch 毫秒，而它需要的是"近 1 个月/近 3 个月/年初至今"
+ * 这些日历窗口。宿主不接手换算，模型就得自己把 12+ 个日期算成毫秒——实测单步思考 41,961
+ * 字符，且它自己都写了 "Risky"。以下断言锁住"日历由宿主换算"这条边界。
+ */
+const SHANGHAI_DAY_MS = (date) => Date.UTC(...date.split('-').map((part, index) => (index === 1 ? Number(part) - 1 : Number(part)))) - 8 * 3_600_000
+
+function dailyBars(dates, prices = []) {
+  return dates.map((date, index) => ({
+    date_ms: SHANGHAI_DAY_MS(date),
+    close_price: prices[index] ?? 1000 + index,
+    volume: 1_000_000 + index,
+    high_price: (prices[index] ?? 1000 + index) + 5,
+    low_price: (prices[index] ?? 1000 + index) - 5,
+  }))
+}
+
+async function queryToolFor(store) {
+  const definitions = definitionsFor(store)
+  const query = definitions.find((definition) => definition.name === 'query_dataset')
+  const exec = { agent: { session: JUNIOR_CHILD }, signal: new AbortController().signal }
+  return { query, exec }
+}
+
+test('时间轴 query：filter 直接写 YYYY-MM-DD，宿主按列自身偏移换算（不再让模型算毫秒）', async () => {
+  let next = 0
+  const { store } = makeStore({ newId: (prefix) => `${prefix}_${++next}` })
+  const ref = await store.save(saveInput({
+    session: COLLECTOR_CHILD,
+    schema: { type: 'object', properties: { item: { type: 'array', items: { type: 'object', properties: {
+      date_ms: { type: 'integer' }, close_price: { type: 'number' }, volume: { type: 'integer' },
+    } } } } },
+    data: { item: dailyBars(['2026-09-18', '2026-09-21', '2026-09-22', '2026-09-23'], [1258, 1255, 1253.8, 1252.22]) },
+  }))
+  const { query, exec } = await queryToolFor(store)
+
+  // >= 用当地午夜；结果里自动补 *_iso 可读日期。
+  const since = await query.execute({
+    dataset_id: ref.dataset_id,
+    filters: [{ column: 'date_ms', operator: '>=', value: '2026-09-21' }],
+    group_by: ['date_ms'],
+    aggregates: [{ function: 'avg', column: 'close_price', as: 'avg_close' }],
+    order_by: [{ column: 'date_ms', direction: 'asc' }],
+  }, exec)
+  assert.deepEqual(since.rows, [
+    { date_ms: SHANGHAI_DAY_MS('2026-09-21'), avg_close: 1255, date_ms_iso: '2026-09-21' },
+    { date_ms: SHANGHAI_DAY_MS('2026-09-22'), avg_close: 1253.8, date_ms_iso: '2026-09-22' },
+    { date_ms: SHANGHAI_DAY_MS('2026-09-23'), avg_close: 1252.22, date_ms_iso: '2026-09-23' },
+  ])
+  assert.deepEqual(since.columns, ['date_ms', 'avg_close', 'date_ms_iso'])
+  // 宿主会按 output.schema 校验返回值（多了 *_iso 列也必须仍在声明范围内）。
+  assertToolOutput(query, since)
+
+  // `<= 2026-09-21` 必须包含当天（按当地日末比较），而不是把当天排掉。
+  const until = await query.execute({
+    dataset_id: ref.dataset_id,
+    filters: [{ column: 'date_ms', operator: '<=', value: '2026-09-21' }],
+    aggregates: [{ function: 'count', as: 'n' }],
+  }, exec)
+  assert.equal(until.rows[0].n, 2)
+
+  // `= 2026-09-22` 展开成当天的上下界。
+  const onDay = await query.execute({
+    dataset_id: ref.dataset_id,
+    filters: [{ column: 'date_ms', operator: '=', value: '2026-09-22' }],
+    aggregates: [{ function: 'avg', column: 'close_price', as: 'avg_close' }],
+  }, exec)
+  assert.equal(onDay.rows[0].avg_close, 1253.8)
+
+  // 月份与年份写法同样按区间处理。
+  const month = await query.execute({
+    dataset_id: ref.dataset_id,
+    filters: [{ column: 'date_ms', operator: '>=', value: '2026-09' }],
+    aggregates: [{ function: 'count', as: 'n' }],
+  }, exec)
+  assert.equal(month.rows[0].n, 4)
+})
+
+test('时间轴 query：日期写法落到数值时间列时响亮失败，绝不退回"筛选消失、返回全量"', async () => {
+  let next = 0
+  const { store } = makeStore({ newId: (prefix) => `${prefix}_${++next}` })
+  const ref = await store.save(saveInput({
+    session: COLLECTOR_CHILD,
+    schema: { type: 'object', properties: { item: { type: 'array', items: { type: 'object', properties: {
+      date_ms: { type: 'integer' }, close_price: { type: 'number' },
+    } } } } },
+    data: { item: dailyBars(['2026-09-21', '2026-09-22', '2026-09-23']) },
+  }))
+  const { query, exec } = await queryToolFor(store)
+
+  // 严格比较：日期只有整天语义，> / < 会把边界悄悄挪一天，必须报错而不是猜。
+  await assert.rejects(() => query.execute({
+    dataset_id: ref.dataset_id,
+    filters: [{ column: 'date_ms', operator: '>', value: '2026-09-21' }],
+    aggregates: [{ function: 'count', as: 'n' }],
+  }, exec), /query_type_conflict.*operator >/)
+
+  // in / != 同样拒绝：要求模型把要哪些天写成 >= / <= 的范围。
+  await assert.rejects(() => query.execute({
+    dataset_id: ref.dataset_id,
+    filters: [{ column: 'date_ms', operator: 'in', value: ['2026-09-21'] }],
+    aggregates: [{ function: 'count', as: 'n' }],
+  }, exec), /query_type_conflict.*in/)
+  await assert.rejects(() => query.execute({
+    dataset_id: ref.dataset_id,
+    filters: [{ column: 'date_ms', operator: '!=', value: '2026-09-21' }],
+    aggregates: [{ function: 'count', as: 'n' }],
+  }, exec), /query_type_conflict.*!=/)
+
+  // 对照：不用日期写法的数值筛选仍然照常工作（新闸门只针对日期串）。
+  const numeric = await query.execute({
+    dataset_id: ref.dataset_id,
+    filters: [{ column: 'close_price', operator: '>=', value: 1001 }],
+    aggregates: [{ function: 'count', as: 'n' }],
+  }, exec)
+  assert.equal(numeric.rows[0].n, 2)
+})
+
+test('时间轴 query：相对期 { period } 以 Dataset 最后一天为锚点，按宿主时间工具解析', async () => {
+  let next = 0
+  const { store } = makeStore({ newId: (prefix) => `${prefix}_${++next}` })
+  const ref = await store.save(saveInput({
+    session: COLLECTOR_CHILD,
+    schema: { type: 'object', properties: { item: { type: 'array', items: { type: 'object', properties: {
+      date_ms: { type: 'integer' }, close_price: { type: 'number' },
+    } } } } },
+    data: { item: dailyBars(['2025-09-24', '2026-08-22', '2026-08-24', '2026-09-23']) },
+  }))
+  const { query, exec } = await queryToolFor(store)
+
+  const lastMonth = await query.execute({
+    dataset_id: ref.dataset_id,
+    filters: [{ column: 'date_ms', operator: '>=', value: { period: 'last_1_month' } }],
+    aggregates: [{ function: 'count', as: 'n' }],
+  }, exec)
+  assert.equal(lastMonth.rows[0].n, 2, '锚点=最后一天 2026-09-23，近 1 个月应含 8/24 与 9/23')
+
+  const ytd = await query.execute({
+    dataset_id: ref.dataset_id,
+    filters: [{ column: 'date_ms', operator: '>=', value: { period: 'ytd' } }],
+    aggregates: [{ function: 'count', as: 'n' }],
+  }, exec)
+  assert.equal(ytd.rows[0].n, 3, 'ytd 从 2026-01-01 起算')
+
+  await assert.rejects(() => query.execute({
+    dataset_id: ref.dataset_id,
+    filters: [{ column: 'date_ms', operator: '>=', value: { period: 'last_1_century' } }],
+    aggregates: [{ function: 'count', as: 'n' }],
+  }, exec), /unsupported period/)
+})
+
+test('时间轴 describe：time_facts 自带 ISO 日期、列偏移与常用窗口，模型不必自己换算', async () => {
+  let next = 0
+  const { store } = makeStore({ newId: (prefix) => `${prefix}_${++next}` })
+  const ref = await store.save(saveInput({
+    session: COLLECTOR_CHILD,
+    schema: { type: 'object', properties: { item: { type: 'array', items: { type: 'object', properties: {
+      date_ms: { type: 'integer' }, close_price: { type: 'number' },
+    } } } } },
+    data: { item: dailyBars(['2025-09-25', '2026-08-21', '2026-09-22', '2026-09-23']) },
+  }))
+  const describe = definitionsFor(store).find((definition) => definition.name === 'describe_dataset')
+  const exec = { agent: { session: JUNIOR_CHILD }, signal: new AbortController().signal }
+  const result = await describe.execute({ dataset_id: ref.dataset_id, task_id: 'task-time', columns_of_interest: ['close_price'] }, exec)
+
+  assert.equal(result.time_facts.time_column, 'date_ms')
+  assert.equal(result.time_facts.covered_from_iso, '2025-09-25')
+  assert.equal(result.time_facts.covered_to_iso, '2026-09-23')
+  assert.deepEqual(result.time_facts.axis, {
+    column: 'date_ms',
+    value_format: 'epoch_ms',
+    time_zone: 'Asia/Shanghai',
+    utc_offset: '+08:00',
+    aligned_to: 'local_midnight',
+  })
+  const names = result.time_facts.windows.map((window) => window.name)
+  assert.deepEqual(names, ['last_1_month', 'last_3_months', 'last_1_year', 'ytd'])
+  const ytd = result.time_facts.windows.find((window) => window.name === 'ytd')
+  assert.equal(ytd.data_from, '2026-08-21')
+  assert.equal(ytd.value_ge, SHANGHAI_DAY_MS('2026-01-01'))
+  assert.equal(ytd.value_le > ytd.value_ge, true)
+  // time_facts 新增的 axis / windows 必须仍在 output.schema 声明范围内（否则真机上整次调用作废）。
+  assertToolOutput(describe, result)
+})
+
+test('输出契约：Dataset 系列工具的 output.schema 不得声明未公开的 required 字段', () => {
+  const definitions = definitionsFor(makeStore().store)
+  assert.deepEqual(definitions.map((definition) => definition.name), ['inspect_dataset', 'profile_dataset', 'query_dataset', 'describe_dataset', 'write_profile'])
+  for (const definition of definitions) {
+    assert.deepEqual(collectUndeclaredRequired(definition.output.schema), [], `${definition.name} 的 required 里有未声明属性`)
+  }
+})
+
+/**
+ * `resolve_data_time_range` 的 Dataset 形态**接线**验证（真机会话 66fa9666 事故）：
+ * 该形态最初把 session 读成 `exec.session`，而框架放在 `exec.agent.session` ⇒ 对每个调用方
+ * 都报 "requires an authorized session"，模型只能绕道。这里用**真实 store + 框架形状的 exec**
+ * 走一遍，fake reader 的单测覆盖不到"registerTimeTool 有没有拿到 store"这一段接线。
+ */
+test('时间工具接线：Dataset 形态在委派子 Agent 下可用，主 Agent 被拒（与 Dataset 系列同一道边界）', async () => {
+  const { registerTimeTool } = await import('../lib/time/tools.js')
+  let next = 0
+  const { store } = makeStore({ newId: (prefix) => `${prefix}_${++next}` })
+  const ref = await store.save(saveInput({
+    session: COLLECTOR_CHILD,
+    schema: { type: 'object', properties: { item: { type: 'array', items: { type: 'object', properties: {
+      date_ms: { type: 'integer' }, close_price: { type: 'number' },
+    } } } } },
+    data: { item: dailyBars(['2025-09-24', '2026-08-24', '2026-09-23']) },
+  }))
+  const definitions = []
+  registerTimeTool({ get: (name) => name === 'tools' ? { register: (definition) => { definitions.push(definition); return () => {} } } : undefined, effect: (fn) => fn() }, store)
+  const range = definitions.find((definition) => definition.name === 'resolve_data_time_range')
+  const signal = new AbortController().signal
+
+  const resolved = await range.execute({ dataset_id: ref.dataset_id, period: 'last_1_month', time_column: 'date_ms' }, { signal, agent: { session: JUNIOR_CHILD } })
+  assert.equal(resolved.mode, 'dataset')
+  assert.deepEqual([resolved.data.from, resolved.data.to], ['2026-08-24', '2026-09-23'])
+  assert.equal(resolved.bounds.bound_ge, SHANGHAI_DAY_MS('2026-08-23'))
+  // 边界可直接填进 filter（与 query_dataset 的日期写法等价）。
+  const viaBound = await store.queryDataset({
+    session: JUNIOR_CHILD,
+    dataset_id: ref.dataset_id,
+    query: { dataset_id: ref.dataset_id, filters: [{ column: 'date_ms', operator: '>=', value: resolved.bounds.bound_ge }], aggregates: [{ function: 'count', as: 'n' }] },
+  })
+  assert.equal(viaBound.rows[0].n, 2)
+
+  // 主 Agent（无 parentSession）不得用 Dataset 形态直连数据工具。
+  await assert.rejects(
+    () => range.execute({ dataset_id: ref.dataset_id, period: 'ytd' }, { signal, agent: { session: SESSION } }),
+    /dataset_session_mismatch/,
+  )
+  // 取数形态对所有角色开放（主 Agent 用它生成 request_data 参数）。
+  const capability = await range.execute({ capability: 'history', period: 'last_2_years' }, { signal, agent: { session: SESSION } })
+  assert.equal(capability.mode, 'capability')
+  assert.ok(capability.params.start < capability.params.end)
 })

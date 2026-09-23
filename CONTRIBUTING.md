@@ -23,7 +23,7 @@
 
 ## 开发环境准备
 
-1. 安装 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness)（当前适配 `@0.1.5-rc.1`）
+1. 安装 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness)（当前适配 `@0.1.5-rc.2`）
 2. 克隆本仓库：
    ```bash
    git clone https://github.com/v587d/capital-generation.git

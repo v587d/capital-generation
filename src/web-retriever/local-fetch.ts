@@ -9,7 +9,7 @@
 
 import { htmlToMarkdown } from './html-markdown.js'
 
-export const LOCAL_FETCH_CLIENT_VERSION = '2.1.1'
+export const LOCAL_FETCH_CLIENT_VERSION = '2.1.2'
 export const LOCAL_FETCH_MAX_URL_LENGTH = 2048
 
 export type LocalFetchErrorCode =

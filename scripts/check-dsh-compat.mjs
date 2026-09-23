@@ -392,6 +392,36 @@ const probes = [
         : { status: FAIL, detail: `settings 卡片链路的接口变了：${missing.join(' / ')}（见账本 L15；改本仓 adapter，不要改探针）` }
     },
   },
+  {
+    id: 'L16',
+    title: '工具返回值按 output.schema 校验：createSuccessResult → snapshotToolValue + validateJsonSchemaValue',
+    why: '2026-09-23 事故（会话 cf464cb6）：resolve_data_time_range 的 capability 形态返回值里没有 mode，'
+      + '而 output.schema 把 mode 列进 required —— 本地 test 直接调 execute 绕过这层校验，真机上每次调用都是 '
+      + 'ToolOutputError: missing required property "value.mode"，模型重试 3 次同一条调用后卡死。'
+      + '本仓 test/output-contract.mjs 是这条规则的镜像断言；上游若不再按 output.schema 校验返回值，镜像就该退休，'
+      + '所以这里逐条探测：漂移必须是一条具名失败。',
+    run() {
+      const toolsIndex = readIfPresent(join(PKG('dsh-tools'), 'lib/index.js'))
+      if (toolsIndex === undefined) return { status: FAIL, detail: `读不到 ${join(PKG('dsh-tools'), 'lib/index.js')}` }
+      const jsonSchema = readIfPresent(join(PKG('dsh-tools'), 'lib/types/json-schema.js'))
+      if (jsonSchema === undefined) return { status: FAIL, detail: `读不到 ${join(PKG('dsh-tools'), 'lib/types/json-schema.js')}` }
+      const errorTypes = readIfPresent(join(PKG('dsh-tools'), 'lib/types/index.js'))
+      if (errorTypes === undefined) return { status: FAIL, detail: `读不到 ${join(PKG('dsh-tools'), 'lib/types/index.js')}` }
+      const checks = [
+        ['validateJsonSchemaValue 仍是命名导出', /export function validateJsonSchemaValue\(schema, value, path/, jsonSchema, 'json-schema.js'],
+        ['返回值 snapshot 后按 output.schema 校验',
+          /snapshotToolValue\([\s\S]{0,160}validateJsonSchemaValue\(tool\.output\.schema,\s*detached,\s*"value"\)/, toolsIndex, 'index.js'],
+        ['违反声明抛 ToolOutputError（INVALID_TOOL_OUTPUT）',
+          /class ToolOutputError[\s\S]{0,400}INVALID_TOOL_OUTPUT/, errorTypes, 'types/index.js'],
+        ['required 缺失判据是"不存在或 undefined"', /missing required property/, jsonSchema, 'json-schema.js'],
+        ['additionalProperties: false 拒绝未声明字段', /additionalProperties\s*===\s*false/, toolsIndex, 'index.js'],
+      ]
+      const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: '返回值仍按 output.schema 校验（required / additionalProperties / oneOf），镜像断言成立' }
+        : { status: FAIL, detail: `工具输出校验链变了：${missing.join(' / ')}（见账本 L16 与 test/output-contract.mjs；上游若取消这层校验，先改探针再改镜像）` }
+    },
+  },
 ]
 
 const results = []

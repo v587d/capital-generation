@@ -6,7 +6,7 @@
  * between validation and connect. Closing that window would require a custom
  * dispatcher; this module keeps the same explicit trade-off as dsh-search-first.
  */
-export declare const LOCAL_FETCH_CLIENT_VERSION = "2.1.1";
+export declare const LOCAL_FETCH_CLIENT_VERSION = "2.1.2";
 export declare const LOCAL_FETCH_MAX_URL_LENGTH = 2048;
 export type LocalFetchErrorCode = 'ABORTED' | 'TIMEOUT' | 'INVALID_URL' | 'BLOCKED_URL' | 'DNS' | 'REDIRECT' | 'HTTP' | 'TOO_LARGE' | 'UNSUPPORTED_CONTENT_TYPE';
 export declare class LocalFetchError extends Error {

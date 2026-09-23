@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { apply, LOCAL_FETCH_DEFAULTS } from '../lib/index.js'
 import { ROOT_AGENT_DENIED_TOOLS } from '../lib/agents/root-tool-policy.js'
+import { collectUndeclaredRequired } from './output-contract.mjs'
 
 /**
  * 装配入口的集成测试。
@@ -78,7 +79,7 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
     assert.ok(services.get('datasetStore'), 'apply 必须提供 datasetStore 服务')
     assert.equal(hub.capabilityNames().length, 61, '装配后应注册全部 61 个 Fuyao capability')
 
-    for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'prepare_chart_source', 'get_local_datetime', 'resolve_data_time_range', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'render_chart']) {
+    for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status', 'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'prepare_chart_source', 'get_local_datetime', 'resolve_data_time_range', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'render_chart']) {
       assert.ok(toolNamed(tools, name), `装配后应注册工具 ${name}`)
     }
     // 2026-09-17 设计修订：final_report 整条链路删除（报告投影不再是主 Agent 的职责）。
@@ -197,6 +198,27 @@ test('apply()：所有注册工具的 parameters 根必须是 object 型 schema'
     const query = toolNamed(tools, 'query_dataset')
     assert.equal(query.parameters.type, 'object')
     assert.ok(query.parameters.properties.query, 'envelope 形态的 query 字段必须出现在根 properties 里')
+  } finally {
+    if (SAVED_KEY === undefined) delete process.env.FUYAO_API_KEY
+    else process.env.FUYAO_API_KEY = SAVED_KEY
+  }
+})
+
+test('apply()：所有注册工具的 output.schema 结构自洽（required 必须声明过）', async () => {
+  process.env.FUYAO_API_KEY = 'smoke-key'
+  try {
+    const { ctx, tools, effectResults } = fakeCtx()
+    apply(ctx, { customPersona: '', retriever: { baseURL: '', credentialRef: '', windDocs: { endpoint: '', credentialRef: '', timeoutMs: 0 } } })
+    await Promise.all(effectResults)
+
+    // 结构不变量：`required` 里写了一个没在 properties 里声明的键，宿主一定判"缺字段"，
+    // 而本地 test 直接调 execute 看不见（2026-09-23 事故，见 test/output-contract.mjs）。
+    // 真实返回值是否合规由各工具自己的用例断言（多形态工具必须逐形态来）。
+    for (const definition of tools) {
+      const schema = definition.output?.schema
+      if (schema === undefined) continue
+      assert.deepEqual(collectUndeclaredRequired(schema), [], `${definition.name}: output.schema 的 required 含未声明属性`)
+    }
   } finally {
     if (SAVED_KEY === undefined) delete process.env.FUYAO_API_KEY
     else process.env.FUYAO_API_KEY = SAVED_KEY

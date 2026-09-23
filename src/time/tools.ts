@@ -1,7 +1,19 @@
 import type { Context } from '@deepseek-ai/cordis'
+import { resolveDatasetTimeWindow, type PeriodInput } from '../data-collector/time-axis.js'
+import type { TimeAxisSnapshot } from '../data-collector/store.js'
+import { delegatedSession } from '../tool-exec.js'
 
 type ToolRuntimeLike = { register(definition: unknown): () => void }
-type ToolExecLike = { signal: AbortSignal }
+/** 框架把调用方 session 放在 `exec.agent.session`（见 src/tool-exec.ts）。 */
+type ToolExecLike = { signal: AbortSignal; agent?: { session?: { id?: string; header?: { cwd?: string; parentSession?: string } } } }
+
+/**
+ * 时间工具需要的 Dataset 通道。只依赖 store 的**只读探针**，
+ * 因此 time 平面不需要认识 Dataset 的写入、profile 或查询实现。
+ */
+export interface TimeAxisReader {
+  describeTimeAxis(input: { session: unknown; dataset_id: string; time_column?: string; signal?: AbortSignal }): Promise<TimeAxisSnapshot | undefined>
+}
 
 const jsonObject = (properties: Record<string, unknown> = {}, required: string[] = []): object =>
   ({ type: 'object', properties, required, additionalProperties: false })
@@ -101,7 +113,7 @@ function normalizeUtcOffset(timeZoneName: string): string | null {
 /**
  * 差值法计算某 IANA 时区在 now 时刻的 UTC 偏移毫秒数（timeZoneName 缺失时的回退）。
  */
-function zoneOffsetMsByDiff(now: number, zone: string): number {
+export function zoneOffsetMsByDiff(now: number, zone: string): number {
   const fields = {
     year: 'numeric' as const, month: '2-digit' as const, day: '2-digit' as const,
     hour: '2-digit' as const, minute: '2-digit' as const, second: '2-digit' as const,
@@ -152,7 +164,7 @@ export function readClock(now: number, timeZone?: string): Record<string, unknow
  * 注册通道）。模型知识截止日期不是当前时间；涉及"今天/现在/此刻/周几"的判断
  * 必须先调用本工具，绝不凭记忆猜测。
  */
-export function registerTimeTool(ctx: Context): void {
+export function registerTimeTool(ctx: Context, store?: TimeAxisReader): void {
   const tools = ctx.get('tools') as ToolRuntimeLike | undefined
   if (!tools) return
   const definition = {
@@ -181,12 +193,45 @@ export function registerTimeTool(ctx: Context): void {
     },
   }
   ctx.effect(() => tools.register(definition), 'capital-generation.tool(get_local_datetime)')
-  ctx.effect(() => tools.register(dataTimeRangeDefinition()), 'capital-generation.tool(resolve_data_time_range)')
+  ctx.effect(() => tools.register(dataTimeRangeDefinition(store)), 'capital-generation.tool(resolve_data_time_range)')
 }
 
 type DateParts = { year: number; month: number; day: number }
 
-function dateParts(value: string): DateParts {
+/**
+ * period 参数的**唯一归一入口**：接受字面窗口字符串、`{unit,count}`，以及被序列化成
+ * 字符串的 `{"unit":"year","count":2}`。
+ *
+ * 最后一种不是宽容癖好：真机实测模型会这么传（会话 cf464cb6 与 8002e358 各一次，
+ * 两次都掉进 `unsupported period` 白跑一轮）。宿主对 QuerySpec 的数组/对象参数早有同一套
+ * 宽容解析（`src/data-collector/args.ts`），period 没有理由更严格。
+ * 返回值 `undefined` = 调用方没给 period（取数形态按当前日期、Dataset 形态按数据最后一天）。
+ */
+export function periodInputOf(value: unknown): string | { unit: string; count: number } | undefined {
+  if (typeof value === 'string') {
+    const text = value.trim()
+    if (text.length === 0) return undefined
+    if (text.startsWith('{')) {
+      try {
+        const parsed: unknown = JSON.parse(text)
+        if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          const spec = parsed as Record<string, unknown>
+          if (typeof spec.unit === 'string' && Number.isSafeInteger(spec.count)) return { unit: spec.unit, count: Number(spec.count) }
+        }
+      } catch {
+        // 解析不了就当字面窗口交给下面的解析器报错：错误信息更具体（列出支持的写法）。
+      }
+    }
+    return text
+  }
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    const spec = value as Record<string, unknown>
+    if (typeof spec.unit === 'string' && Number.isSafeInteger(spec.count)) return { unit: spec.unit, count: Number(spec.count) }
+  }
+  return undefined
+}
+
+export function dateParts(value: string): DateParts {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
   if (!match) throw new Error('period dates must use YYYY-MM-DD')
   const parts = { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) }
@@ -198,9 +243,11 @@ function dateParts(value: string): DateParts {
 
 function dateText(parts: DateParts): string { return `${String(parts.year).padStart(4, '0')}-${two(parts.month)}-${two(parts.day)}` }
 
-function shiftDate(value: string, unit: 'day' | 'week' | 'month' | 'quarter' | 'year', amount: number): string {
+export function shiftDate(value: string, unit: 'day' | 'week' | 'month' | 'quarter' | 'year', amount: number): string {
   const source = dateParts(value)
   if (unit === 'day' || unit === 'week') {
+    // 周就是 7 天；"含锚点当天"的减一天由调用方（resolvePeriod）负责，
+    // 这样 ±1 天与 ±1 周只差一个乘数，不会在两处各减一次。
     const date = new Date(Date.UTC(source.year, source.month - 1, source.day))
     date.setUTCDate(date.getUTCDate() + amount * (unit === 'week' ? 7 : 1))
     return dateText({ year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: date.getUTCDate() })
@@ -228,13 +275,15 @@ function dayDistance(start: string, end: string): number {
   return Math.round((Date.UTC(to.year, to.month - 1, to.day) - Date.UTC(from.year, from.month - 1, from.day)) / 86_400_000)
 }
 
-function resolvePeriod(period: unknown, anchor: string): { start: string; end: string } {
+function resolvePeriod(input: unknown, anchor: string): { start: string; end: string } {
+  const period = periodInputOf(input)
   if (period && typeof period === 'object' && !Array.isArray(period)) {
     const spec = period as Record<string, unknown>
     if (!['day', 'week', 'month', 'quarter', 'year'].includes(String(spec.unit)) || typeof spec.count !== 'number' || !Number.isSafeInteger(spec.count) || spec.count < 1) throw new Error('period object must be { unit: day|week|month|quarter|year, count: positive integer }')
     const unit = spec.unit as 'day' | 'week' | 'month' | 'quarter' | 'year'
     const count = spec.count as number
-    return { start: shiftDate(anchor, unit, -(unit === 'day' || unit === 'week' ? count - 1 : count)), end: anchor }
+    // 与字符串形态同口径：含锚点当天 ⇒ 只有 day 少退一步。
+    return { start: shiftDate(anchor, unit, unit === 'day' ? -(count - 1) : -count), end: anchor }
   }
   if (typeof period !== 'string' || period.trim().length === 0) throw new Error('period is required')
   const value = period.trim().toLowerCase()
@@ -246,11 +295,38 @@ function resolvePeriod(period: unknown, anchor: string): { start: string; end: s
   const match = /^last_(\d+)_(day|days|week|weeks|month|months|year|years)$/.exec(value)
   if (!match) throw new Error('unsupported period; use today, yesterday, YYYY, current_year, previous_year, last_N_days/weeks/months/years, or {unit,count}')
   const count = Number(match[1]); const unit = match[2].replace(/s$/, '') as 'day' | 'week' | 'month' | 'year'
-  return { start: shiftDate(anchor, unit, -(unit === 'day' || unit === 'week' ? count - 1 : count)), end: anchor }
+  // "含锚点当天"的窗口要少退一步：天按 count-1 天回退，周按 count 周回退（周已在
+  // shiftDate 里乘 7，两边各减一次就会得到 last_1_week = 0 天的空窗口——实测 bug）。
+  return { start: shiftDate(anchor, unit, unit === 'day' ? -(count - 1) : -count), end: anchor }
 }
 
-function enumPeriod(contract: DataTimeContract, period: unknown): string {
-  if (typeof period !== 'string') throw new Error('this capability requires a named period such as last_3_months')
+/**
+ * 单窗口解析（**共享**入口）：`resolve_data_time_range`（能力参数那个模式）与
+ * `time-axis.ts`（Dataset 时间轴模式）都用它，避免两处对同一个 period 词表给出不同答案。
+ *
+ * `resolvePeriod` 之外再认三种字面窗口：`all`（全区间）、`ytd`（年初到锚点）、
+ * `YYYY-MM`（自然月）。它们不新增相对期语义，只是把"年内/某月"这两个最常用的
+ * 分析窗口写成模型本来就会用的词。对象形态 `{unit,count}` 原样交给 `resolvePeriod`。
+ */
+export function resolveZonedPeriod(input: unknown, anchor: string): { start: string; end: string } {
+  dateParts(anchor)
+  const period = periodInputOf(input)
+  if (period === undefined) throw new Error('period is required; use today, yesterday, YYYY, YYYY-MM, ytd, current_year, previous_year, all, last_N_days/weeks/months/years, or {unit,count}')
+  if (typeof period !== 'string') return resolvePeriod(period, anchor)
+  const value = period.toLowerCase()
+  if (value === 'all') return { start: '1990-01-01', end: anchor }
+  if (value === 'ytd') return { start: `${dateParts(anchor).year}-01-01`, end: anchor }
+  const month = /^(\d{4})-(\d{2})$/.exec(value)
+  if (month) {
+    const year = Number(month[1]); const monthIndex = Number(month[2])
+    if (monthIndex < 1 || monthIndex > 12) throw new Error(`invalid month in period: ${period}`)
+    const lastDay = new Date(Date.UTC(year, monthIndex, 0)).getUTCDate()
+    return { start: `${month[1]}-${month[2]}-01`, end: `${month[1]}-${month[2]}-${String(lastDay).padStart(2, '0')}` }
+  }
+  return resolvePeriod(period, anchor)
+}
+
+function enumPeriod(contract: DataTimeContract, period: unknown): string {  if (typeof period !== 'string') throw new Error('this capability requires a named period such as last_3_months')
   const value = contract.enumMap?.[period.toLowerCase()]
   if (!value || !contract.enumValues?.includes(value)) throw new Error(`unsupported period for this capability; allowed values: ${Object.keys(contract.enumMap ?? {}).join(', ')}`)
   return value
@@ -262,7 +338,9 @@ export function resolveDataTimeRange(args: Record<string, unknown>, now = Date.n
   const contract = getDataTimeContract(capability)
   if (!contract) throw new Error(`unsupported time capability: ${capability}`)
   const zone = resolveTimeZone(args.timezone) ?? 'Asia/Shanghai'
-  if (contract.kind === 'enum_range') return { capability, format: 'enum', timezone: zone, params: { [contract.fields[0]]: enumPeriod(contract, args.period) }, warnings: [] }
+  if (contract.kind === 'enum_range') {
+    return { mode: 'capability', capability, format: 'enum', timezone: zone, params: { [contract.fields[0]]: enumPeriod(contract, args.period) }, warnings: [] }
+  }
   const anchor = typeof args.anchor_date === 'string' ? args.anchor_date.trim() : localDateAt(now, zone)
   dateParts(anchor)
   const resolved = resolvePeriod(args.period, anchor)
@@ -278,6 +356,7 @@ export function resolveDataTimeRange(args: Record<string, unknown>, now = Date.n
   else params[contract.fields[0]] = resolved.end
   const queryHint = capability.startsWith('web_') || capability.startsWith('wind_') ? `${resolved.start} 至 ${resolved.end}` : undefined
   return {
+    mode: 'capability',
     capability,
     format: contract.kind === 'epoch_range' ? 'epoch_ms' : contract.kind === 'nested_epoch_range' ? 'epoch_ms_json' : contract.kind === 'date_ms' ? 'date_ms' : 'date_string',
     timezone: zone,
@@ -288,12 +367,65 @@ export function resolveDataTimeRange(args: Record<string, unknown>, now = Date.n
   }
 }
 
-function dataTimeRangeDefinition() {
+function dataTimeRangeDefinition(store?: TimeAxisReader) {
   return {
     name: 'resolve_data_time_range',
-    description: '把数据能力的相对时间要求直接转换为可传给 request_data 的规范时间参数。必须传 capability 与 period；不要自行计算时间戳。默认按 Asia/Shanghai 自然日边界输出。支持 today、yesterday、YYYY、current_year、previous_year、last_N_days/weeks/months/years，或 {unit,count}。交易日与基金报告期不会自动猜测，结果中的 warnings 必须遵守。',
-    parameters: jsonObject({ capability: { type: 'string', description: '数据能力名，或 web_retriever_search / wind_docs_announcements / wind_docs_news' }, period: { oneOf: [{ type: 'string' }, { type: 'object', properties: { unit: { type: 'string', enum: ['day', 'week', 'month', 'quarter', 'year'] }, count: { type: 'integer' } }, required: ['unit', 'count'], additionalProperties: false }] }, anchor_date: { type: 'string', description: '可选锚点日期 YYYY-MM-DD；省略时使用当前 Asia/Shanghai 日期' }, timezone: { type: 'string', description: '可选 IANA 时区；数据接口默认 Asia/Shanghai' } }, ['capability', 'period']),
-    output: { schema: jsonObject({ capability: { type: 'string' }, format: { type: 'string' }, timezone: { type: 'string' }, range: { oneOf: [{ type: 'object', additionalProperties: true }, { type: 'null' }] }, params: { type: 'object', additionalProperties: true }, query_hint: { type: 'string' }, warnings: { type: 'array', items: { type: 'string' } } }, ['capability', 'format', 'timezone', 'params', 'warnings']), render },
-    async execute(args: Record<string, unknown>, _exec: ToolExecLike): Promise<Record<string, unknown>> { return resolveDataTimeRange(args) },
-}
+    description: '解析时间窗，**两种形态**，绝不自行换算时间戳。① 取数形态：传 capability + period，输出可直接交给 request_data 的时间参数；② Dataset 分析形态：传 dataset_id（可选 time_column）+ period 或 anchor_date，按**该 Dataset 时间列自身的时区偏移**输出可直接用于 query_dataset filters 的边界（bounds.bound_ge/bound_le）与人类可读日期（range/data）。period 支持 today、yesterday、YYYY、YYYY-MM、ytd、current_year、previous_year、all、last_N_days/weeks/months/years，或 {unit,count}。anchor_date 省略时：取数形态用当前 Asia/Shanghai 日期，Dataset 形态用该 Dataset 的最后一天（相对期因此不会因数据陈旧而落空）。交易日与基金报告期不会自动猜测，结果中的 warnings 必须遵守。',
+    parameters: jsonObject({
+      capability: { type: 'string', description: '形态①：数据能力名，或 web_retriever_search / wind_docs_announcements / wind_docs_news' },
+      dataset_id: { type: 'string', description: '形态②：已授权的 dataset_id；给出时按该 Dataset 的时间轴解析（此时忽略 capability）。该形态只对**被委派的子 Agent**（如 data_junior）开放' },
+      time_column: { type: 'string', description: '形态②可选：显式指定时间列；省略时宿主按列名与取值形态探测' },
+      period: { oneOf: [{ type: 'string' }, { type: 'object', properties: { unit: { type: 'string', enum: ['day', 'week', 'month', 'quarter', 'year'] }, count: { type: 'integer' } }, required: ['unit', 'count'], additionalProperties: false }] },
+      anchor_date: { type: 'string', description: '可选锚点日期 YYYY-MM-DD；省略时取数形态用当前 Asia/Shanghai 日期，Dataset 形态用该 Dataset 的最后一天' },
+      timezone: { type: 'string', description: '可选 IANA 时区；数据接口默认 Asia/Shanghai' },
+    }, ['period']),
+    output: {
+      schema: jsonObject({
+        capability: { type: 'string' },
+        mode: { type: 'string' },
+        format: { type: 'string' },
+        timezone: { type: 'string' },
+        time_column: { type: 'string' },
+        period: { type: 'string' },
+        range: { oneOf: [{ type: 'object', additionalProperties: true }, { type: 'null' }] },
+        data: { oneOf: [{ type: 'object', additionalProperties: true }, { type: 'null' }] },
+        bounds: { oneOf: [{ type: 'object', additionalProperties: true }, { type: 'null' }] },
+        bounds_are_intraday: { type: 'boolean' },
+        dataset: { oneOf: [{ type: 'object', additionalProperties: true }, { type: 'null' }] },
+        params: { type: 'object', additionalProperties: true },
+        query_hint: { type: 'string' },
+        warnings: { type: 'array', items: { type: 'string' } },
+      }, ['mode', 'format', 'timezone', 'warnings']),
+      render,
+    },
+    async execute(args: Record<string, unknown>, exec: ToolExecLike): Promise<Record<string, unknown>> {
+      const datasetId = typeof args.dataset_id === 'string' ? args.dataset_id.trim() : ''
+      if (datasetId.length === 0) return resolveDataTimeRange(args)
+      if (!store) throw new Error('Dataset time-range mode is unavailable: the Dataset store is not mounted in this session')
+      // ⛔ 不要写 `exec.session`：框架把它放在 `exec.agent.session`（2026-09-23 事故，
+      // 会话 66fa9666 里该形态对每个调用方都报 "requires an authorized session"）。
+      // Dataset 形态读的是 Dataset 元数据 ⇒ 与 Dataset 系列工具同一道边界：只对**被委派的**
+      // 子 Agent 开放（主 Agent 只用取数形态，不直连数据工具）。
+      const session = delegatedSession(exec, 'resolve_data_time_range')
+      const snapshot = await store.describeTimeAxis({
+        session,
+        dataset_id: datasetId,
+        time_column: typeof args.time_column === 'string' && args.time_column.length > 0 ? args.time_column : undefined,
+        signal: exec.signal,
+      })
+      if (snapshot === undefined) {
+        throw new Error(`Dataset ${datasetId} has no detectable time column; pass time_column explicitly or inspect the Dataset first`)
+      }
+      return resolveDatasetTimeWindow({
+        dataset_id: datasetId,
+        axis: snapshot.axis,
+        dates: snapshot.dates,
+        // 对象形态不能在这里被丢掉：`{unit:"year",count:2}`（含它的字符串化写法）都必须走到
+        // 解析器，否则会静默退化成 `all`——把"近 2 年"变成"全部历史"。
+        period: periodInputOf(args.period),
+        anchorDate: typeof args.anchor_date === 'string' ? args.anchor_date.trim() : undefined,
+        zone: resolveTimeZone(args.timezone),
+      }) as unknown as Record<string, unknown>
+    },
+  }
 }

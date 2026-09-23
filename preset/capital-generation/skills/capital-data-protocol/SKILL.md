@@ -108,6 +108,36 @@ description: Use when composing or reading a Capital data message — the exact 
   不自行改写、不自行拼路径。
 - Dataset 默认保留 **7 天**（以 `retention_until` 为准），到期后需重新取数。
 
+## 3.0 读取 Dataset 的默认入口：`describe_dataset`
+
+`data_junior` 读一份 Dataset 用 **`describe_dataset`**（一次调用完成 inspect + profile + 可选 queries），
+**不要再走 `inspect_dataset → profile_dataset → query_dataset` 三步**——那三步只保留给单点复核。
+
+```json
+{
+  "dataset_id": "ds_01J...",
+  "task_id": "task_01J...",
+  "columns_of_interest": ["close_price", "volume"],
+  "queries": [
+    { "group_by": ["report_type"], "aggregates": [{ "function": "count", "as": "n" }], "limit": 20 }
+  ]
+}
+```
+
+- **一次一份**：一次调用只传一个 `dataset_id`。本轮有多份数据时，**在同一条 assistant 消息里一次发完**
+  多个调用（宿主会并发执行，结果一起返回），不要一份一份等。
+- 返回 = inspect 元数据（`artifact_ref` / `capability` / `source_label` / `captured_at` / `retention_until` /
+  `query_access.shape`）+ profile 四类事实（`statistics` / `categories` / `time_facts` / `structure`）+
+  `profile_ref` + 每条 query 的 `result`，或该条自己的 `error`（单条失败不影响其余）。
+- `shape = document` 时 queries **不执行**（宿主跳过并在 `warnings` 说明）；文档内容在 `document`。
+- `columns_of_interest` 只对这些列返回 `statistics` / `categories` / `schema`（并同样收窄 `time_facts` 的首末值投影；时间列永远保留），是收窄结果体积的唯一手段。
+- **体积闸门**：结果超过 7000 码点时返回
+  `{"status":"too_large","profile_ref":"...","columns":[...],"hint":"..."}`，而不是超长载荷。
+  按 hint 用 `columns_of_interest`（或减少 `queries`，一次最多 8 条）重发一次；文档型按 hint 直接调
+  `profile_dataset`。**看到 `too_large` 不是失败**——它带着完整列名，用来让你收窄。
+- 单点复核（只看元数据 / 只要一份完整 profile / 补一条查询）仍可用 `inspect_dataset`、`profile_dataset`、
+  `query_dataset`。
+
 ## 3. 质检请求与回传（主 Agent ↔ data_junior）
 
 请求：
@@ -154,8 +184,44 @@ description: Use when composing or reading a Capital data message — the exact 
 |--------|--------------|
 | `statistics`（count/sum/min/max/mean/分位数） | 合计多少、覆盖多少条、区间与集中度 |
 | `categories`（distinct_count + 最多 5 个高频取值） | 有哪些类别、分布如何；`truncated=true` 表示未列全 |
-| `time_facts`（覆盖范围 + 首行/末行取值） | 最新值、区间涨跌。**必须**用 `first`/`last`；min/max 只是区间极值，把它讲成走势就是编造 |
+| `time_facts`（覆盖范围 + 首行/末行取值 + `axis` + `windows`） | 最新值、区间涨跌，以及**这份数据的时间轴怎么读**（见 §3.2）。**必须**用 `first`/`last`；min/max 只是区间极值，把它讲成走势就是编造 |
 | `structure`（路径 + total_elements 或 sampled_elements） | 嵌套里一共有多少条。对象字段用 `.name`、数组元素用 `[]`，未抽样时例如 `sub_tab[].fund_list` 的 `total_elements=40` 就是 40 只基金；若出现 `sampled_elements=50`，只能说明实际检查了 50 项，不是完整数量 |
+
+### 3.2 时间轴：日历由宿主换算，不要自己算毫秒
+
+`time_facts` 除覆盖范围与首末行外，还给出**这份数据的时间轴怎么读**：
+
+| 字段 | 含义 | 怎么用 |
+|---|---|---|
+| `axis.value_format` | `epoch_ms`（毫秒整数时间列）/ `date_string`（已是 `YYYY-MM-DD`）/ `unknown`（推断不出：先 inspect 或显式传 `time_column`） | `unknown` 时不要假设粒度 |
+| `axis.time_zone` / `axis.utc_offset` | 该列**自身观测到**的时区偏移（如 `Asia/Shanghai` / `+08:00`） | 判断"某天"的边界一律按它，不要按 UTC 猜 |
+| `axis.aligned_to` | `local_midnight` = 取值是当地 00:00 的瞬间（A 股日线的 `date_ms` 就是这样） | 这种列的"当天"要用 `>= 当天午夜` 且 `<= 当天日末` 两个条件才算 |
+| `covered_from_iso` / `covered_to_iso` | 覆盖范围的可读日期 | 回答"数据到哪天"，不要再做 epoch→日期换算 |
+| `windows[]` | 近 1 月 / 近 3 月 / 近 1 年 / 年初至今的现成边界：`value_ge`、`value_le`（可直接填进 filter）与 `data_from`、`data_to`（该窗口在数据里**真实存在**的首末日期） | 命中就直接用；`data_from` 已把非交易日夹到相邻交易日 |
+
+需要 `windows` 之外的窗口（任意区间、某年某月、历年 10 月）时：
+
+1. 调 `resolve_data_time_range`，传 `dataset_id` + `period`（可选 `anchor_date`）；它按该 Dataset
+   时间列自身的偏移返回 `bounds.bound_ge` / `bounds.bound_le` 与 `range`、`data` 日期；
+2. 把 `bound_ge` / `bound_le` 原样填进 filter，**不要**自己把日期算成毫秒。
+
+`query_dataset` 的 filter 也**直接接受日历写法**（宿主按同一套偏移换算）：
+
+```jsonc
+// 三种写法都表示"从 2026-08-23 起"，选一种即可
+{ "column": "date_ms", "operator": ">=", "value": "2026-08-23" }
+{ "column": "date_ms", "operator": ">=", "value": "2026-08" }
+{ "column": "date_ms", "operator": ">=", "value": { "period": "last_1_month" } }
+```
+
+- `>=` 取该日当地午夜、`<=` 取该日当地日末、`=` 自动展开成"这一天"的上下界；省略锚点的
+  `period` 以该 Dataset 最后一天为准（数据陈旧时相对期不会落空）；
+- 结果里时间列会附一列 `*_iso` 可读日期（原值保留，不替换）；
+- `>`、`<`、`!=`、`in` 配日期串会报 `query_type_conflict`：日期只有"整天"语义，用它们等于
+  悄悄换一天；要哪几天就直接写 `>=` / `<=`。
+
+**硬规则：看到 epoch 毫秒要经过加减乘除才能得出结论时，就是走错了路。** 时间换算一律交给
+`time_facts.axis`、`windows` 与 `resolve_data_time_range`；自己心算毫秒既慢又必然算错口径。
 
 文档型 Dataset（顶层是文档对象、没有行数组，如财务指标、回测结果）：`profile_dataset` 返回
 `structure` 结构摘要 + `document` 有界内容（`$` 是文档根），**没有**行列统计，也不包含行数据专用的 `schema`/`validation`；`query_dataset`
@@ -238,6 +304,11 @@ data_junior 发现「问题需要的那份数据还没取」时（不是「数�
 - 必须有 `group_by` 或聚合；`select` 可省略，省略时默认返回分组列与聚合别名；显式 `select` 只能引用分组列或聚合别名。禁止 join、window、having、自定义函数和 raw rows 投影。
 - 默认 `error_policy=skip_with_warning`：过滤或数值聚合遇到不兼容脏值时排除该值并在 `warnings` 披露；需要类型全量一致时显式使用 `error_policy=strict`。
 - 数组/对象字段（`select`、`group_by`、`aggregates`、`order_by`、`filters`）传**真正的 JSON 数组**，不要序列化成字符串再传；`limit` 传数字。宿主对字符串化的 JSON 做了宽容解析（实测模型很常这么传），但不要依赖它。
+- **时间列筛选写日历，不写毫秒**：`date_ms` 这类 epoch 列的 filter 值可直接写 `"2026-08-23"`、
+  `"2026-08"`、`"2026"` 或 `{ "period": "last_1_month" }`，宿主按该列自身偏移换算边界并自动在结果
+  里补 `*_iso`。写法、可用的 period 词表与禁止的算子见 §3.2——**不要**自己把日期算成毫秒。
+  同一条 QuerySpec 在 **`describe_dataset` 的 `queries` 与 `query_dataset` 里完全等价**（同一份归一、
+  同样的错误码），不必因为"想确认某个入口行不行"而重复试。
 - `query_dataset` 取不到原始行：`select` 只能引用分组列或聚合别名，所以「首末/最新值」要用
   profile 的 `time_facts`——`time_facts` 已经给了首末行取值，不要用 query 去取。
 - `query_dataset` 是受控分组/聚合透视查询，不是通用 raw.json 读取器，也不替代基础描述性 profile。对市场指数、指数组成、基金重仓股等不适合当前 QuerySpec 的数据，不要强行改写查询；不足以回答时如实回传能力边界。自定义查询脚本和自定义执行脚本属于后续 `data_analyst`，不得转移给 data_junior。

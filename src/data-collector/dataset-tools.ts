@@ -19,11 +19,27 @@ import {
   WorkspaceDatasetStore,
 } from './store.js'
 
+import {
+  coerceQueryShape,
+  isRecord,
+  parseJsonContainer,
+  readDatasetId,
+  readOptionalTaskId,
+} from './args.js'
+
+import {
+  MAX_DESCRIBE_QUERIES,
+  SAFE_RESULT_CHARS,
+  describeDataset,
+  normalizeDescribeArgs,
+} from './describe.js'
+
+import { normalizeQueryDates, withIsoTimeColumns } from './query-time.js'
+import { callerSession, delegatedSession, type AgentExecutionLike } from '../tool-exec.js'
+
 type ToolRuntimeLike = { register(definition: unknown): () => void }
-type AgentExecutionLike = {
-  session?: { id?: string; header?: { cwd?: string; parentSession?: string } }
-}
-type ToolExecLike = { agent?: AgentExecutionLike; signal: AbortSignal }
+/** 调用方 session 的读取与"必须是委派子 Agent"的判据都在 src/tool-exec.ts（唯一实现）。 */
+type ToolExecLike = AgentExecutionLike
 
 const jsonObject = (properties: Record<string, unknown> = {}, required: string[] = []): object => ({
   type: 'object',
@@ -53,9 +69,30 @@ const profileTimeFactsSchema = jsonObject({
   ordered_ascending: { oneOf: [{ type: 'boolean' }, { type: 'null' }] },
   covered_from: {},
   covered_to: {},
+  covered_from_iso: { type: 'string' },
+  covered_to_iso: { type: 'string' },
+  axis: jsonObject({
+    column: { type: 'string' },
+    value_format: { type: 'string', enum: ['epoch_ms', 'date_string', 'unknown'] },
+    time_zone: { type: 'string' },
+    utc_offset: { type: 'string' },
+    aligned_to: { type: 'string', enum: ['local_midnight', 'calendar_day', 'unknown'] },
+  }, ['column', 'value_format']),
+  windows: {
+    type: 'array',
+    items: jsonObject({
+      name: { type: 'string' },
+      start_date: { type: 'string' },
+      end_date: { type: 'string' },
+      value_ge: {},
+      value_le: {},
+      data_from: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+      data_to: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    }, ['name', 'start_date', 'end_date', 'value_ge', 'value_le']),
+  },
   first: { type: 'object', additionalProperties: true },
   last: { type: 'object', additionalProperties: true },
-}, ['time_column', 'ordered_ascending', 'covered_from', 'covered_to', 'first', 'last'])
+}, ['time_column', 'ordered_ascending', 'covered_from', 'covered_to', 'axis', 'first', 'last'])
 const profileDocumentSchema = jsonObject({
   content: {},
   truncated: { type: 'boolean' },
@@ -107,39 +144,20 @@ function tool(
   parameters: object,
   schema: object,
   execute: (args: Record<string, unknown>, exec: ToolExecLike) => Promise<unknown>,
+  options: { concurrencySafe?: boolean } = {},
 ) {
-  return { name, description, parameters, output: { schema, render }, execute }
-}
-
-function callerSession(exec: ToolExecLike): SessionLike {
-  const session = exec.agent?.session
-  if (!session || typeof session.id !== 'string') {
-    throw new DatasetStoreError('session_unavailable', 'the calling agent session was not provided')
+  return {
+    name,
+    description,
+    parameters,
+    output: { schema, render },
+    execute,
+    // `isConcurrencySafe` 是框架的**现成机制**：为 true 时，同一个 assistant 步里的多个调用
+    // 会被放进有界并发池（默认上限 10），结果仍按模型顺序在**同一个下一步**一起返回。
+    // 这正是 describe_dataset 省往返的手段——多个 dataset 由模型一次发完，而不是把 N 份结果
+    // 合并成一个超长载荷（见 docs/design/describe-dataset-design.md §2.1）。
+    ...(options.concurrencySafe === true ? { isConcurrencySafe: () => true } : {}),
   }
-  return session as SessionLike
-}
-
-function delegatedSession(exec: ToolExecLike, toolName: string): SessionLike {
-  const session = callerSession(exec)
-  if (typeof session.header?.parentSession !== 'string' || session.header.parentSession.length === 0) {
-    throw new DatasetStoreError('dataset_session_mismatch', `${toolName} is restricted to delegated data agents; the main Agent must delegate this request`)
-  }
-  return session
-}
-
-function datasetId(value: unknown): string {
-  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value)) throw new DatasetStoreError('dataset_id_invalid', 'dataset_id is invalid')
-  return value
-}
-
-function optionalTaskId(value: unknown): string | undefined {
-  if (value === undefined || value === null || value === '') return undefined
-  if (typeof value !== 'string' || value.length > 256) throw new DatasetStoreError('profile_invalid', 'task_id is invalid')
-  return value
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
 /**
@@ -147,63 +165,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * `"group_by": "[]"`、`"aggregates": "[{...}]"`、`"limit": "1"`），于是参数其实是对的，
  * 却报 `query_spec_invalid: select must contain 1-32 column names`，模型只能反复试错。
  *
- * 这里在**工具边界**做一次宽容解析，查询引擎本身保持严格：能解析成正确类型就放行，
- * 解析不了就原样交给校验器报错（错误信息仍指向真实问题）。
+ * 宽容解析原语已外迁到 src/data-collector/args.ts：`query_dataset` 与 `describe_dataset`
+ * 必须共用同一套解析（两份实现漂移会让模型在换工具后重新踩同一个坑）。
  */
-const QUERY_NAME_LIST_FIELDS = ['select', 'group_by'] as const
-const QUERY_OBJECT_LIST_FIELDS = ['filters', 'aggregates', 'order_by'] as const
 /** envelope 自身的元数据字段，不属于 QuerySpec；模型按协议原样传 envelope 时忽略它们。 */
-const QUERY_ENVELOPE_FIELDS = ['type', 'task_id'] as const
-
-function parseJsonContainer(value: unknown): unknown {
-  if (typeof value !== 'string') return undefined
-  const text = value.trim()
-  if (text.length === 0 || (text[0] !== '[' && text[0] !== '{')) return undefined
-  try {
-    return JSON.parse(text)
-  } catch {
-    return undefined
-  }
-}
-
-/** 列名数组：接受真数组、JSON 数组字符串，或单个列名字符串。 */
-function coerceNameList(value: unknown): unknown {
-  if (Array.isArray(value)) return value
-  const parsed = parseJsonContainer(value)
-  if (Array.isArray(parsed)) return parsed
-  if (typeof value === 'string' && parsed === undefined) {
-    const text = value.trim()
-    if (text.length > 0 && !text.startsWith('[') && !text.startsWith('{')) return [value]
-  }
-  return value
-}
-
-/** 对象数组：接受真数组、JSON 数组字符串，或单个对象（对象本身或其 JSON 字符串）。 */
-function coerceObjectList(value: unknown): unknown {
-  if (Array.isArray(value)) return value
-  const parsed = parseJsonContainer(value)
-  if (Array.isArray(parsed)) return parsed
-  if (isRecord(parsed)) return [parsed]
-  if (isRecord(value)) return [value]
-  return value
-}
-
-function coerceLimit(value: unknown): unknown {
-  if (typeof value !== 'string') return value
-  const text = value.trim()
-  return /^\d+$/.test(text) ? Number(text) : value
-}
-
-function coerceQueryShape(input: Record<string, unknown>): Record<string, unknown> {
-  const shape: Record<string, unknown> = { ...input }
-  for (const field of QUERY_NAME_LIST_FIELDS) if (field in shape) shape[field] = coerceNameList(shape[field])
-  for (const field of QUERY_OBJECT_LIST_FIELDS) if (field in shape) shape[field] = coerceObjectList(shape[field])
-  if ('limit' in shape) shape.limit = coerceLimit(shape.limit)
-  return shape
-}
+const QUERY_ENVELOPE_FIELDS = ['type', 'task_id', 'time_column'] as const
 
 function normalizeQueryArgs(args: Record<string, unknown>): { dataset_id: string; query: QuerySpec } {
-  const outerDatasetId = datasetId(args.dataset_id)
+  const outerDatasetId = readDatasetId(args.dataset_id)
   const envelope = isRecord(args.query) ? args.query : parseJsonContainer(args.query)
   if (isRecord(envelope)) {
     const query = coerceQueryShape(envelope)
@@ -218,8 +187,7 @@ function normalizeQueryArgs(args: Record<string, unknown>): { dataset_id: string
   return { dataset_id: outerDatasetId, query: flat as unknown as QuerySpec }
 }
 
-const datasetRefProperties = {
-  dataset_id: { type: 'string' },
+const datasetRefProperties = {  dataset_id: { type: 'string' },
   task_id: { oneOf: [{ type: 'string' }, { type: 'null' }] },
   session_id: { type: 'string' },
   artifact_ref: { type: 'string' },
@@ -349,6 +317,7 @@ const queryEnvelopeProperties = {
 const queryParametersSchema = jsonObject({
   ...querySpecProperties,
   ...queryEnvelopeProperties,
+  time_column: { type: 'string' },
 }, ['dataset_id'])
 const queryResultSchema = jsonObject({
   dataset_id: { type: 'string' },
@@ -361,6 +330,75 @@ const queryResultSchema = jsonObject({
   warnings: { type: 'array', items: { type: 'string' } },
 }, ['dataset_id', 'columns', 'rows', 'matched_row_count', 'group_count', 'returned_count', 'limit', 'warnings'])
 
+/**
+ * `describe_dataset` 的参数：**一次只处理一个 dataset_id**。
+ *
+ * 多个 dataset 由模型在**同一条 assistant 消息**里发多个调用完成——本工具声明了
+ * `isConcurrencySafe`，框架会把它们放进并发池，N 份结果在同一个下一步一起返回。
+ * 因此这里刻意**不**接受 `dataset_ids` 数组：把 N 份结果合并成一个工具结果，才是
+ * 体积预算/digest 那套复杂机制的来源（见 docs/design/describe-dataset-design.md §2.1）。
+ */
+const describeParametersSchema = jsonObject({
+  dataset_id: datasetIdSchema,
+  task_id: { type: 'string' },
+  time_column: { type: 'string' },
+  primary_key: { type: 'string' },
+  columns_of_interest: { type: 'array', items: queryNameSchema },
+  queries: { type: 'array', items: querySpecSchema },
+}, ['dataset_id'])
+
+const describeQueryOutcomeSchema = jsonObject({
+  index: { type: 'integer' },
+  result: queryResultSchema,
+  error: jsonObject({ code: { type: 'string' }, detail: { type: 'string' } }, ['code', 'detail']),
+}, ['index'])
+
+/**
+ * 输出覆盖两种形态：正常结果（`status: 'ok'`）与体积闸门回执（`status: 'too_large'`）。
+ * 根必须是单一 object（根级 oneOf 会被供应商 400 拒绝，见上面 query_dataset 的事故注释），
+ * 所以两边的字段都列出来、都非必需，只有 `status` 与 `dataset_id` 恒有。
+ */
+const describeResultSchema = jsonObject({
+  status: { type: 'string', enum: ['ok', 'too_large'] },
+  dataset_id: { type: 'string' },
+  task_id: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+  session_id: { type: 'string' },
+  artifact_ref: { type: 'string' },
+  format: { type: 'string' },
+  capability: { type: 'string' },
+  source_label: { type: 'string' },
+  row_count: { type: 'integer' },
+  captured_at: { type: 'integer' },
+  retention_until: { type: 'integer' },
+  params_digest: { type: 'string' },
+  query_access: jsonObject({
+    readable: { type: 'boolean' },
+    shape: { type: 'string', enum: ['array', 'envelope_item', 'document', 'none'] },
+    reason: { type: 'string' },
+  }, ['readable', 'shape']),
+  profile_id: { type: 'string' },
+  profile_ref: { type: 'string' },
+  columns: { type: 'array', items: { type: 'string' } },
+  quality: jsonObject({
+    missing_values: { type: 'integer' },
+    duplicate_rows: { type: 'integer' },
+    time_ordered: { oneOf: [{ type: 'boolean' }, { type: 'null' }] },
+  }, ['missing_values', 'duplicate_rows', 'time_ordered']),
+  statistics: { type: 'object', additionalProperties: true },
+  categories: { type: 'object', additionalProperties: true },
+  time_facts: profileTimeFactsSchema,
+  structure: { type: 'object', additionalProperties: true },
+  document: profileDocumentSchema,
+  schema: { type: 'object', additionalProperties: true },
+  validation: profileValidationSchema,
+  warnings: { type: 'array', items: { type: 'string' } },
+  queries: { type: 'array', items: describeQueryOutcomeSchema },
+  /** 仅 too_large：被拦下的形状、字节数与重试指引。 */
+  shape: { type: 'string', enum: ['array', 'envelope_item', 'document', 'none'] },
+  bytes: { type: 'integer' },
+  hint: { type: 'string' },
+}, ['status', 'dataset_id'])
+
 export function registerDatasetTools(ctx: Context, store: WorkspaceDatasetStore): void {
   const tools = ctx.get('tools') as ToolRuntimeLike | undefined
   if (!tools) return
@@ -368,14 +406,14 @@ export function registerDatasetTools(ctx: Context, store: WorkspaceDatasetStore)
   const registrations = [
     tool(
       'inspect_dataset',
-      '读取当前 session 已授权 Dataset 的元数据和可读性。只返回 DatasetRef 与可读性信息，不返回原始 rows，也不接受任何文件路径。query_access.shape 取值：array / envelope_item = 行集合，可 profile 也可 query；document = 顶层是文档对象（财务指标、回测结果这类），可 profile（宿主给结构摘要与有界内容）但不能 query；none = 不可读，reason 说明原因。',
+      '读取当前 session 已授权 Dataset 的元数据和可读性。只返回 DatasetRef 与可读性信息，不返回原始 rows，也不接受任何文件路径。query_access.shape 取值：array / envelope_item = 行集合，可 profile 也可 query；document = 顶层是文档对象（财务指标、回测结果这类），可 profile（宿主给结构摘要与有界内容）但不能 query；none = 不可读，reason 说明原因。批量描述多份 Dataset 请用 describe_dataset（一次一份、可并发）；本工具用于单点复核。',
       jsonObject({ dataset_id: datasetIdSchema }, ['dataset_id']),
       datasetRefWithAccessSchema,
-      async (args, exec) => store.inspectDataset(datasetId(args.dataset_id), delegatedSession(exec, 'inspect_dataset'), exec.signal),
+      async (args, exec) => store.inspectDataset(readDatasetId(args.dataset_id), delegatedSession(exec, 'inspect_dataset'), exec.signal),
     ),
     tool(
       'profile_dataset',
-      `由宿主读取 Dataset 并返回基础质量检查与四类事实；原始 rows 不进入模型上下文。行集合返回：① schema/quality——字段 observed/contract 类型、missing/null/invalid 计数、重复行、时间顺序；② statistics——数值字段的 count/sum/min/max/mean/分位数；③ categories——字符串字段的 distinct_count 与最多 5 个高频取值（truncated=true 表示未列全）；④ time_facts——时间列覆盖范围与首行/末行的数值取值（回答"最新值、区间涨跌"必须用它，不要用 min/max 代替首末值）；⑤ structure——行内数组/对象的路径摘要（对象字段用 .name、数组元素用 []；未抽样时用 total_elements，超过 50 项时用 sampled_elements，后者明确表示只是抽样，不能据此回答完整数量）。文档型 Dataset（顶层是文档对象，没有行数组）返回 structure 结构摘要 + document 有界内容，不返回行列统计。time_column 可显式指定，省略时按列名候选并只在取值全为数字或日期样式时采用。不接受任何文件路径、脚本内容或额外 schema。`,
+      `由宿主读取 Dataset 并返回基础质量检查与四类事实；原始 rows 不进入模型上下文。行集合返回：① schema/quality——字段 observed/contract 类型、missing/null/invalid 计数、重复行、时间顺序；② statistics——数值字段的 count/sum/min/max/mean/分位数；③ categories——字符串字段的 distinct_count 与最多 5 个高频取值（truncated=true 表示未列全）；④ time_facts——时间列覆盖范围与首行/末行的数值取值（回答"最新值、区间涨跌"必须用它，不要用 min/max 代替首末值）；⑤ structure——行内数组/对象的路径摘要（对象字段用 .name、数组元素用 []；未抽样时用 total_elements，超过 50 项时用 sampled_elements，后者明确表示只是抽样，不能据此回答完整数量）。文档型 Dataset（顶层是文档对象，没有行数组）返回 structure 结构摘要 + document 有界内容，不返回行列统计。time_column 可显式指定，省略时按列名候选并只在取值全为数字或日期样式时采用。不接受任何文件路径、脚本内容或额外 schema。批量描述请用 describe_dataset（一次一份、可并发）；本工具用于单点复核或补取一份完整 profile。`,
       jsonObject({
         dataset_id: datasetIdSchema,
         task_id: { type: 'string' },
@@ -385,8 +423,8 @@ export function registerDatasetTools(ctx: Context, store: WorkspaceDatasetStore)
       profileDatasetResultSchema,
       async (args, exec) => store.profileDataset({
         session: delegatedSession(exec, 'profile_dataset'),
-        dataset_id: datasetId(args.dataset_id),
-        task_id: optionalTaskId(args.task_id),
+        dataset_id: readDatasetId(args.dataset_id),
+        task_id: readOptionalTaskId(args.task_id),
         time_column: typeof args.time_column === 'string' ? args.time_column : undefined,
         primary_key: typeof args.primary_key === 'string' ? args.primary_key : undefined,
         signal: exec.signal,
@@ -394,18 +432,44 @@ export function registerDatasetTools(ctx: Context, store: WorkspaceDatasetStore)
     ),
     tool(
       'query_dataset',
-      `对当前 session 已授权的 json_rows Dataset 执行固定 QuerySpec：参数是一个 JSON 对象，QuerySpec 字段既可平铺在根上（flat），也可整体放进 query（query_request envelope，宿主自动展开）；两种形态同时给出时以 query 为准。支持受限 filter、group_by、count/min/max/avg/sum、asc/desc 和 limit。必须返回聚合或分组结果，禁止原始行投影；select 可省略，默认返回分组列和聚合别名。默认 error_policy=skip_with_warning，脏值会被排除并在 warnings 披露；需要全量类型一致性时显式使用 strict。最多 ${MAX_QUERY_FILTERS} 个条件、${MAX_QUERY_GROUP_BY} 个分组列、${MAX_QUERY_AGGREGATES} 个聚合、${MAX_QUERY_LIMIT} 行，结果最多 ${MAX_QUERY_OUTPUT_BYTES} 字节。数值字符串只在 Dataset schema 明确为 number/integer 时兼容。query_dataset 是受控分组/聚合工具，不是通用 raw.json 读取或自定义分析工具：select 只能引用 group_by 列或聚合别名，取不到原始行（首末/最新值请用 profile 的 time_facts）。select/group_by/aggregates/order_by 请传真正的 JSON 数组（宿主也兼容 JSON 字符串，但不要依赖）。`,
+      `对当前 session 已授权的 json_rows Dataset 执行固定 QuerySpec：参数是一个 JSON 对象，QuerySpec 字段既可平铺在根上（flat），也可整体放进 query（query_request envelope，宿主自动展开）；两种形态同时给出时以 query 为准。支持受限 filter、group_by、count/min/max/avg/sum、asc/desc 和 limit。必须返回聚合或分组结果，禁止原始行投影；select 可省略，默认返回分组列和聚合别名。默认 error_policy=skip_with_warning，脏值会被排除并在 warnings 披露；需要全量类型一致性时显式使用 strict。**时间筛选直接写日期**：时间列（如 date_ms）的 filter 值可写 "2026-08-23" / "2026-08" / "2026" 或 {period:"last_3_months"}（period 省略锚点时以该 Dataset 最后一天为准），宿主按该列自身的时区偏移换算成边界，不要自己算毫秒；日期写法配 >、<、!= 无意义会报 query_type_conflict（用 >= / <= / =）。结果里时间列会附 *_iso 可读日期。最多 ${MAX_QUERY_FILTERS} 个条件、${MAX_QUERY_GROUP_BY} 个分组列、${MAX_QUERY_AGGREGATES} 个聚合、${MAX_QUERY_LIMIT} 行，结果最多 ${MAX_QUERY_OUTPUT_BYTES} 字节。数值字符串只在 Dataset schema 明确为 number/integer 时兼容。query_dataset 是受控分组/聚合工具，不是通用 raw.json 读取或自定义分析工具：select 只能引用 group_by 列或聚合别名，取不到原始行（首末/最新值请用 profile 的 time_facts）。select/group_by/aggregates/order_by 请传真正的 JSON 数组（宿主也兼容 JSON 字符串，但不要依赖）。若还要 profile/元数据，可用 describe_dataset 的 queries 参数一次拿到；本工具用于单点补查。`,
       queryParametersSchema,
       queryResultSchema,
       async (args, exec) => {
         const normalized = normalizeQueryArgs(args)
-        return store.queryDataset({
-          session: delegatedSession(exec, 'query_dataset'),
+        const session = delegatedSession(exec, 'query_dataset')
+        const timeColumn = typeof args.time_column === 'string' && args.time_column.length > 0 ? args.time_column : undefined
+        const prepared = await normalizeQueryDates({
+          store,
+          session,
           dataset_id: normalized.dataset_id,
           query: normalized.query,
+          time_column: timeColumn,
           signal: exec.signal,
         })
+        const result = await store.queryDataset({
+          session,
+          dataset_id: normalized.dataset_id,
+          query: prepared.query,
+          signal: exec.signal,
+        })
+        if (prepared.axis !== undefined) withIsoTimeColumns(result as unknown as Record<string, unknown>, prepared.axis)
+        return result
       },
+    ),
+    tool(
+      'describe_dataset',
+      `读取一份 Dataset 的**默认入口**：一次调用完成 inspect（元数据与可读性/形状）、profile（宿主算基础质量与四类事实，写入 profile_ref）与受控 query（可选）；原始 rows 不进入模型上下文。一次只处理一个 dataset_id——本轮有多份数据时，请在**同一条消息里一次发出多个调用**（本工具可并发执行，结果会一起返回），不要一份一份等。行集合返回：① 元数据 artifact_ref/capability/source_label/captured_at/retention_until 与 query_access.shape（array / envelope_item = 行集合；document = 顶层文档对象，只能 profile，queries 由宿主跳过）；② profile 四类事实——statistics（count/sum/min/max/mean/分位数）、categories（distinct + 最多 5 个高频取值）、time_facts（覆盖范围与首行/末行取值；回答"最新值、区间涨跌"必须用它，不要用 min/max 代替）、structure（嵌套路径摘要）；③ queries——每条的 QueryResult，或该条自己的 error（单条失败不影响其余）。columns_of_interest 只对这些列返回 statistics/categories/schema（并同样收窄 time_facts 的首末值投影，时间列永远保留），是收窄结果体积的唯一手段。结果超过 ${SAFE_RESULT_CHARS} 码点时宿主不返回超长载荷，而返回 {status:'too_large', profile_ref, columns, hint}：按 hint 用 columns_of_interest（或减少 queries，最多 ${MAX_DESCRIBE_QUERIES} 条）重发一次即可。单点复核仍可用 inspect_dataset / profile_dataset / query_dataset；不接受任何文件路径、脚本内容或自定义表达式。`,
+      describeParametersSchema,
+      describeResultSchema,
+      async (args, exec) => describeDataset({
+        store,
+        session: delegatedSession(exec, 'describe_dataset'),
+        request: normalizeDescribeArgs(args),
+        signal: exec.signal,
+      }),
+      // 让"同一条消息里的多个 describe_dataset"进框架并发池：这是省往返的机制本身。
+      { concurrencySafe: true },
     ),
     tool(
       'write_profile',
@@ -430,8 +494,8 @@ export function registerDatasetTools(ctx: Context, store: WorkspaceDatasetStore)
       profileRefSchema,
       async (args, exec) => store.writeProfile({
         session: delegatedSession(exec, 'write_profile'),
-        dataset_id: datasetId(args.dataset_id),
-        task_id: optionalTaskId(args.task_id),
+        dataset_id: readDatasetId(args.dataset_id),
+        task_id: readOptionalTaskId(args.task_id),
         profile: args.profile as ProfilePayload,
         signal: exec.signal,
       }),

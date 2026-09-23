@@ -126,6 +126,37 @@ export interface ProfileCategory {
     /** true = 还有未展示的取值，`top_values` 不是全部。 */
     truncated: boolean;
 }
+/**
+ * 时间轴的**语义**（形态 + 该列自身观测到的时区偏移）。
+ *
+ * 存在的理由：`date_ms` 这类列的取值是 epoch 毫秒，模型既无法直接读出"这是哪一天"，
+ * 也无法把"近 1 个月"翻译回毫秒；没有这一块事实，它只能自己推算——实测单步
+ * 41,961 字符的思考里绝大部分是时间戳算术（真机会话 1e44050e）。
+ * 块内只放**观测到的**事实，不做猜测：推断不出就报 `unknown`。
+ */
+export interface ProfileTimeAxis {
+    column: string;
+    value_format: 'epoch_ms' | 'date_string' | 'unknown';
+    /** 该列的取值按哪个时区解释（epoch_ms 且能推断时才有）。 */
+    time_zone?: string;
+    /** 上面的时区的 `+08:00` 形态；`time_zone` 已是 `UTC+08:00` 时不重复（避免同一事实写两遍）。 */
+    utc_offset?: string;
+    /** 取值对齐到当地午夜、日历日，还是无法判断。 */
+    aligned_to?: 'local_midnight' | 'calendar_day' | 'unknown';
+}
+/** 一个可直接使用的分析窗口：日历区间 + 该列里真正的查询边界。 */
+export interface ProfileTimeWindow {
+    name: string;
+    start_date: string;
+    end_date: string;
+    /** `>= value_ge` 即"从这个窗口的第一天开始"（epoch 轴为当地午夜）。 */
+    value_ge: number | string;
+    /** `<= value_le` 即"到这个窗口的最后一天结束"。 */
+    value_le: number | string;
+    /** 该窗口在 Dataset 里**真实存在**的首末日期；起点落在非交易日时这里是下一个交易日。 */
+    data_from: string | null;
+    data_to: string | null;
+}
 export interface ProfileTimeFacts {
     time_column: string;
     /** 文件顺序是否随时间递增；null = 时间列有缺失，无法判断。 */
@@ -133,6 +164,13 @@ export interface ProfileTimeFacts {
     /** 时间列的最小/最大值（覆盖范围），原值不改写。 */
     covered_from: unknown;
     covered_to: unknown;
+    /** 覆盖范围的人类可读日期；只对 epoch_ms 轴出现（date_string 轴本身可读）。 */
+    covered_from_iso?: string;
+    covered_to_iso?: string;
+    /** 时间轴语义：形态与时区偏移。 */
+    axis: ProfileTimeAxis;
+    /** 常用窗口（近 1 月 / 近 3 月 / 近 1 年 / 年初至今）的现成边界。 */
+    windows?: ProfileTimeWindow[];
     /** 首行与末行的「时间列 + 数值列」取值（文件顺序），用于首末值与区间变化。 */
     first: Record<string, unknown>;
     last: Record<string, unknown>;
@@ -235,6 +273,20 @@ export interface QueryDatasetInput {
     query: QuerySpec;
     signal?: AbortSignal;
 }
+/**
+ * 时间轴探针结果：形态 + 已出现的日期 + 列清单。
+ *
+ * 三条消费路径共用同一份事实，避免"谁猜时间列"出现第二套判据：
+ * ① `query_dataset` 的日期筛选归一；② `resolve_data_time_range` 的数据集模式；
+ * ③ 报错信息里列出可选列。
+ */
+export interface TimeAxisSnapshot {
+    dataset_id: string;
+    columns: string[];
+    axis: ProfileTimeAxis;
+    /** 探针看到的日期（升序、去重）；用于把窗口夹到真实存在的交易日。 */
+    dates: string[];
+}
 export interface ProfileDatasetResult extends ProfileRef {
     row_count: number;
     columns: string[];
@@ -317,6 +369,19 @@ export declare class WorkspaceDatasetStore {
     inspectDataset(datasetId: string, session: SessionLike, signal?: AbortSignal): Promise<DatasetInspection>;
     profileDataset(input: ProfileDatasetInput): Promise<ProfileDatasetResult>;
     queryDataset(input: QueryDatasetInput): Promise<QueryResult>;
+    /**
+     * 时间轴只读探针（`query_dataset` 的日期归一边界与 `resolve_data_time_range` 的数据集模式共用）。
+     *
+     * 只读前 {@link MAX_AXIS_PROBE_ROWS} 行推断形态与偏移：时间列一定在每行都出现，日线数据
+     * 的有序性也让前若干行足以定出粒度；这样这个探针**可以随查询逐次调用**，
+     * 代价与"读一份 16MB raw.json 只为一个问题"不同量级。
+     */
+    describeTimeAxis(input: {
+        session: SessionLike;
+        dataset_id: string;
+        time_column?: string;
+        signal?: AbortSignal;
+    }): Promise<TimeAxisSnapshot | undefined>;
     writeProfile(input: WriteProfileInput): Promise<ProfileRef>;
     /**
      * 宿主内部**呈现层**读取有界行集（图表用）。
@@ -388,6 +453,11 @@ export declare class WorkspaceDatasetStore {
     private writeContext;
     private readRoot;
     private mapWriteError;
+}
+/** 行内取列值：`present=false` 表示该列在这行不存在（缺失），与显式 null 区分开。 */
+export interface ProfileCell {
+    present: boolean;
+    value: unknown;
 }
 export declare function provideWorkspaceDatasetStore(ctx: import('@deepseek-ai/cordis').Context, options?: WorkspaceDatasetStoreOptions): WorkspaceDatasetStore;
 declare module '@deepseek-ai/cordis' {

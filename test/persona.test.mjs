@@ -116,7 +116,7 @@ const childRows = [collectorRow, juniorRow, retrieverRow]
 // 创建子 Agent 时被 tools.restrict() 拒绝，所以它必须与这份清单求交集。
 const PLUGIN_TOOLS = [
   'request_data', 'list_capabilities', 'describe_capability', 'dc_status',
-  'inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile', 'prepare_chart_source', 'render_chart',
+  'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile', 'prepare_chart_source', 'render_chart',
   'get_local_datetime',
   'resolve_data_time_range',
   'web_retriever_search', 'web_retriever_fetch',
@@ -447,7 +447,7 @@ test('通用 subagent 行：必须 deny Capital 数据/出图管线与专用角�
   }
   for (const name of [
     'render_chart', 'prepare_chart_source',
-    'inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile',
+    'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile',
     'request_data', 'list_capabilities', 'describe_capability', 'dc_status',
     'subagent_data_collector', 'subagent_data_junior', 'subagent_visualization_specialist', 'subagent_web_retriever',
   ]) {
@@ -548,7 +548,7 @@ test('subagent_data_junior 行：continuable、persona 覆盖、toolFilter 只�
   assert.equal(juniorRow.config.backgroundMode, 'continuable')
   const allow = juniorRow.config.toolFilter?.allow
   assert.ok(Array.isArray(allow), 'toolFilter.allow 必须存在')
-  assert.deepEqual([...allow].sort(), ['get_local_datetime', 'inspect_dataset', 'prepare_chart_source', 'profile_dataset', 'query_dataset', 'resolve_data_time_range', 'send_message', 'skill', 'subagent_visualization_specialist'])
+  assert.deepEqual([...allow].sort(), ['describe_dataset', 'get_local_datetime', 'inspect_dataset', 'prepare_chart_source', 'profile_dataset', 'query_dataset', 'resolve_data_time_range', 'send_message', 'skill', 'subagent_visualization_specialist'])
   // data_junior 不得访问外部行情 API、网页检索、凭据或委派能力
   for (const forbiddenTool of ['request_data', 'list_capabilities', 'dc_status', 'subagent', 'subagent_data_collector', 'subagent_data_junior', 'subagent_data_analyst', 'ask_user_question', 'todo_write', 'web_search', 'web_fetch', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'bash', 'python', 'write_profile', 'render_chart']) {
     assert.ok(!allow.includes(forbiddenTool), `toolFilter.allow 不应包含 ${forbiddenTool}`)
@@ -574,6 +574,9 @@ test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质�
     /profile_failed/,
     /profile_ref/,
     /DatasetRef/,
+    /describe_dataset/,
+    /同一条消息/,
+    /单点复核/,
     /inspect_dataset/,
     /profile_dataset/,
     /query_dataset/,
@@ -640,6 +643,13 @@ test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质�
     /只能是\*\*手上 DatasetRef 里出现过的 capability 原值\*\*|手上 DatasetRef 里出现过的 capability/,
     /`?time_facts`? 已经给了首末行取值/,
     /不得出现原始数据行|绝不把 rows 写进|不含任何数据行/,
+    // §3.0 describe_dataset：默认入口、一次一份、同一步批量、体积闸门与收窄手段
+    /describe_dataset/,
+    /一次一份|一次调用只传一个/,
+    /同一条 assistant 消息|同一条消息/,
+    /too_large/,
+    /columns_of_interest/,
+    /7000/,
   ]) assertRule(dataProtocol, pattern, `capital-data-protocol 缺少要点: ${pattern}`)
 })
 
@@ -661,7 +671,7 @@ test('visualization_specialist 行：one-shot 前台、只允许 skill + render_
 })
 
 test('data_junior persona：profile 后负责可视化 gate、签发 token、等待 one-shot barrier', () => {
-  for (const pattern of [/可视化编排/, /capital-visualization-protocol/, /profile_dataset 完成后无条件加载/, /用户明确要求图表/, /时间序列/, /OHLC\+volume/, /多个可比数值序列/, /必须选择 recommended/, /prepare_chart_source/, /subagent_visualization_specialist/, /not_needed/, /recommended/, /blocked/, /failed/, /one-shot barrier/, /chart_ref/, /rendered \/ skipped \/ failed/]) {
+  for (const pattern of [/可视化编排/, /capital-visualization-protocol/, /描述完成（describe_dataset \/ profile_dataset）后无条件加载/, /用户明确要求图表/, /时间序列/, /OHLC\+volume/, /多个可比数值序列/, /必须选择 recommended/, /prepare_chart_source/, /subagent_visualization_specialist/, /not_needed/, /recommended/, /blocked/, /failed/, /one-shot barrier/, /chart_ref/, /rendered \/ skipped \/ failed/]) {
     assertRule(JUNIOR_PERSONA, pattern, `data_junior persona 缺少可视化编排要点: ${pattern}`)
   }
   assertRuleAny(MAIN_PERSONA, [/visualization_specialist/, /可视化.*data_junior/], '主 persona 必须说明 visualization_specialist 由 data_junior 管理')

@@ -74,7 +74,7 @@ export interface RetrieverConfig {
  *   原始 HTML**（见 `html-markdown.ts`），而 markdown 输出只有 HTML 的 12–33%，
  *   所以这个数必须按 HTML 体积给足；20,000 会把 109KB 的页面腰斩到 18%。
  *
- * `userAgent` 默认是产品标识（`@v587d/capital-generation`）：裸版本号（`2.1.1`）是
+ * `userAgent` 默认是产品标识（`@v587d/capital-generation`）：裸版本号（`2.1.2`）是
  * WAF 眼里的典型爬虫特征。显式配成空串时消费点回落到 `LOCAL_FETCH_CLIENT_VERSION`
  * （版本号真值仍只有一处，由测试守着等于 `package.json` 的 version）。
  */
@@ -237,7 +237,9 @@ export function apply(ctx: Context, config: Config) {
   registerDataCollectorTools(ctx, hub, diagnostics)
   registerDatasetTools(ctx, store)
   // 时间工具：主 Agent 与所有子 Agent（含 data_collector）共享。
-  registerTimeTool(ctx)
+  // store 只用于 resolve_data_time_range 的 Dataset 形态（按该 Dataset 时间列的偏移
+  // 解析窗口边界）——data_junior 因此不必自己把日期换算成毫秒。
+  registerTimeTool(ctx, store)
   // 呈现层图表工具：只有 data_junior 创建的 visualization_specialist 能调用它
   // （主 Agent 的入口由 registerRootToolPolicy 在它自己的 agent scope 上 deny 掉）。
   // 只回小回执、不回原始行；序列落在 workspace 产物里，

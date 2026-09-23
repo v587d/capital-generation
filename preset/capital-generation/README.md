@@ -75,6 +75,12 @@
   `if (!label) return`），其余名字沿原型链向外解析，因此跨平面消费成立。
   这一条与"realm 里的行不能消费外面的服务"并不矛盾：那条规则说的是**提供方**在 realm 内、
   消费方在 realm 外的情况。
+- **时间轴换算不在 preset 里，在宿主插件里**（`src/data-collector/time-axis.ts`）。理由与
+  "为什么这几个服务归宿主"同源：它是**确定性计算**，且**有三个入口**必须共用同一份答案——
+  profile 写出的 `time_facts`（`store.ts`）、工具边界收到的日期筛选值（`dataset-tools.ts`）、
+  `resolve_data_time_range` 的 Dataset 形态（`time/tools.ts`）。写进 persona 或 skill 只会变成
+  "请模型自己算"的口头约定（实测单步思考 41,961 字符全是时间戳算术）；在 preset 侧再定义一个
+  模型工具则会把同一套偏移推断实现第二遍。放进宿主后，模型只需要写 `2026-08-23`。
 
 ## 5. 各行的作用与坑
 

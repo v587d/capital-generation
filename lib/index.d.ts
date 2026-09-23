@@ -35,7 +35,7 @@ export interface RetrieverConfig {
  *   原始 HTML**（见 `html-markdown.ts`），而 markdown 输出只有 HTML 的 12–33%，
  *   所以这个数必须按 HTML 体积给足；20,000 会把 109KB 的页面腰斩到 18%。
  *
- * `userAgent` 默认是产品标识（`@v587d/capital-generation`）：裸版本号（`2.1.1`）是
+ * `userAgent` 默认是产品标识（`@v587d/capital-generation`）：裸版本号（`2.1.2`）是
  * WAF 眼里的典型爬虫特征。显式配成空串时消费点回落到 `LOCAL_FETCH_CLIENT_VERSION`
  * （版本号真值仍只有一处，由测试守着等于 `package.json` 的 version）。
  */

@@ -14,7 +14,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.1.1-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.1.2-9cf" alt="Version"></a>
 </p>
 
 > [!IMPORTANT]
@@ -72,7 +72,7 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
 2. 所有 Agent，包括主 Agent 均不能直接接触原始结构数据（行情、财务报表细目等），需要时 Agent 可按需提取再提炼发送消息至主 Agent。
 目前覆盖以下 Subagent（data_analyst 为预留角色，暂未启用）：
   - data_collector: 主 Agent 直属下级（spawn），负责根据上级指令收集金融财经类结构化数据，目前支持 同花顺（fuyao）约61个数据 API接口。
-  - data_junior: 主 Agent 直属下级（spawn），负责根据上级指令清洗、整理出有效数据、基础描述性统计以及数据透视，目的是阐述数据背后的“故事”。
+  - data_junior: 主 Agent 直属下级（spawn），负责根据上级指令清洗、整理出有效数据、基础描述性统计以及数据透视，目的是阐述数据背后的“故事”。读一份 Dataset 默认走 `describe_dataset`（一次调用完成元数据 + 基础 profile + 受控查询，多份数据在同一条消息里并发）；时间窗与时间戳换算一律由宿主完成（`time_facts` 的 `axis` / `windows`、`resolve_data_time_range`），子 Agent 不自行把日期算成毫秒。
   - data_analyst: 主 Agent 直属下级，负责根据上级指令，通过运用编程技能分析上游数据（**仍在开发中**，委派行 disabled，暂不启用）。
   - web_retriever: 主 Agent 直属下级（spawn），负责根据上级指令，运用网络搜索和抓取能力，获取外部非结构化数据，目前支持 AnySearch(search/fetch) API 数据接口和 Wind Alice 相关服务。
   - visualization_specialist: 主 Agent 的孙 Agent（data_junior 的 one-shot 前台子 Agent），由 data_junior 在 profile 完成后的可视化 gate 中按需创建；只接收 `profile_ref`、有限 profile 事实与短期 `chart_source_ref`，使用受控 `render_chart` 生成自包含 HTML 图表，并只向 data_junior 回传 `chart_ref` 小回执；不接触原始 rows、不向主 Agent 直接发消息，当前是唯一的 one-shot 角色。
@@ -97,15 +97,16 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
 
 > 出图只有一个入口：`data_junior` 的可视化 gate → one-shot `visualization_specialist`。
 > 序列数据不进模型上下文；图表由宿主以**官方** `deliverables/presented` 登记为**本轮交付物**，
-> 在收尾的「本轮文件改动 / 交付」行点开即可在右侧看到可交互图表。下图为真实会话截图，点击可查看原图。
+> 在收尾的「本轮文件改动 / 交付」行点开即可在右侧看到可交互图表。以下均为真实会话截图，点击可查看原图。
 
 | 侧栏自包含 HTML：折线 | 侧栏自包含 HTML：K 线 + 量价 |
 | :---: | :---: |
 | [<img src="assets/chart-line-sidebar.png" width="400" alt="成交额折线图在侧栏打开的自包含 chart.html 中">](assets/chart-line-sidebar.png) | [<img src="assets/chart-candlestick-sidebar.png" width="400" alt="日线量价 K 线在侧栏打开的自包含 chart.html 中">](assets/chart-candlestick-sidebar.png) |
 | 某股票近一月日成交额 | 某股票近一月日线·量价 |
 
-> 历史截图 `assets/chart-turn-tail-candlestick.png` 记录的是 2026-09-18 之前"图表内嵌在答复末尾"的形态；
-> 该通道因会让会话日志不可加载而整体移除（见 `AGENTS.md` 的「图表呈现纪律」），保留仅供对照。
+| 同一窗口：左侧报告 · 右侧侧栏图表 |
+| :---: |
+| [<img src="assets/left-report-right-chart.png" width="800" alt="左侧报告正文与右侧侧栏打开的自包含图表在同一窗口并排">](assets/left-report-right-chart.png) |
 
 `chart.html` 自包含（内联图表库与数据），可离线打开、零外部请求；图内保留
 `Lightweight Charts™ v5.2.1 (Apache-2.0)` 归属信息。
@@ -125,6 +126,20 @@ npm run smoke:boot   # 冒烟验证装配可正常 boot
 
 ## Changelog
 
+### 2.1.2 — 2026-09-23
+
+- **`describe_dataset`（读 Dataset 的默认入口）**：一次调用完成元数据 + 基础 profile + 可选受控查询，
+  多份数据在同一条消息里并发执行；结果超过 7000 码点时返回带完整列名的 `too_large` 小回执，
+  而不是把超长载荷丢给剪枝器截断。
+- **时间换算交给宿主**：`time_facts` 增 `axis` / `windows[]` / `covered_*_iso`；`query_dataset` 的
+  filter 直接写 `2026-08-23` / `2026-08` / `{ "period": "last_1_month" }`；`resolve_data_time_range`
+  新增 Dataset 形态（传 `dataset_id + period`，返回的边界可直接填 filter）。子 Agent 不再自行把日期算成毫秒。
+- **修复**：`resolve_data_time_range` 两种形态此前一个必失败、一个报无权限；`describe_dataset`
+  内嵌 queries 的时间筛选与 `query_dataset` 行为不一致；`last_N_week` 退化成 0 天；日期串落到
+  数值时间列被静默跳过等。
+
+非破坏性新增，从 2.1.1 升级无需迁移（两处结果收紧的细节见 CHANGELOG）。完整变更历史见 [CHANGELOG.md](CHANGELOG.md)。
+
 ### 2.1.1 — 2026-09-22
 
 - **设置卡片**：新增 设置 → 插件 → 插件配置 → Capital 模式，可视化配置 Fuyao / AnySearch /
@@ -132,7 +147,7 @@ npm run smoke:boot   # 冒烟验证装配可正常 boot
 - **抓取回退**：AnySearch fetch 失败且开关开启时，自动改由本机直连抓取该页面并抽取正文
   （回执 `via` 标注 `anysearch` | `local-http`），失败语义按结构化错误码归类。
 
-非破坏性新增，从 2.1.0 升级无需迁移。完整变更历史见 [CHANGELOG.md](CHANGELOG.md)。
+非破坏性新增，从 2.1.0 升级无需迁移。
 
 # 贡献
 可自行克隆本项目，按上方「本地开发 / 构建 / 测试」执行。
@@ -141,7 +156,7 @@ npm run smoke:boot   # 冒烟验证装配可正常 boot
 
 [DSH 官方社区](https://github.com/deepseek-ai/deepseek-harness/discussions/6947)
 
-[Captail Generation 项目社区](https://github.com/v587d/capital-generation/discussions)
+[Capital Generation 项目社区](https://github.com/v587d/capital-generation/discussions)
 
 # MIT
 

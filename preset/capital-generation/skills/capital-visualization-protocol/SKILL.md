@@ -80,14 +80,13 @@ failed
 以下情况不得选择 `not_needed`：用户明确要求图表，或 profile 已确认存在时间序列、OHLC+volume、多期比较或多个可比数值序列。此时必须选择 `recommended`，完成 `prepare_chart_source → subagent_visualization_specialist → one-shot barrier`；只有字段/数据实际不足才可 `blocked`，只有合法工具已经失败才可 `failed`。不要把“本 Agent 没有 render_chart”当作跳过理由，render_chart 属于 specialist 的受控工具。
 
 
-### 2.1 profile 后判断
+### 2.1 描述后判断
 
 data_junior 必须先完成：
 
 ```text
-inspect_dataset
-profile_dataset
-必要时 query_dataset
+describe_dataset（默认：一次完成 inspect + profile + 可选 queries）
+必要时用 inspect_dataset / profile_dataset / query_dataset 做单点复核
 ```
 
 然后形成最小决策记录：
@@ -121,6 +120,10 @@ prepare_chart_source({ dataset_id, task_id })
 
 只使用工具返回的 `chart_source_ref`。不要自己构造 token、路径或 `raw.json` 地址。
 
+**一张图一个 token，且 token 有 15 分钟 TTL**：先定好要出哪几张图、每张用哪份 Dataset，
+再一次性签发；**不要**因为改了视图方案就为同一个 dataset 重签（实测代价：多花 8.3K 字符思考，
+还把剩下的窗口压得更短）。
+
 传给 visualization_specialist 的内容只能包括：
 
 - `task_id`；
@@ -137,6 +140,16 @@ prepare_chart_source({ dataset_id, task_id })
 - 绝对路径；
 - 任意脚本或 HTML；
 - 未经 profile 允许的其他 Dataset。
+
+**分工硬规则：spec 由 specialist 组装，data_junior 只交"要什么视图"。** `kind` / `x` / `series` /
+`markers` / `title` 的取值由 specialist 读 `capital-chart-protocol` 决定；data_junior 的 prompt 只写
+视图角色（主视图/辅助视图）、目标窗口与关心的字段名。实测偏离这条要付两笔账：一次 8.3K 字符的
+思考（在替 specialist 算 spec 与标记位置），以及为同一个 dataset 重签 token。
+
+**协议排除的视图要记为 limitation，不要改方案重签。** 需要"归一化对比 / 多源叠加"（例如个股与
+指数同图）时：当前能力不支持，按"图表跟着 Dataset 一对一"拆成各自独立的单源图，并在回传的
+`warnings` 里写明「归一化叠加对比不支持，已拆为 N 张单源图」。不要为此重新 `prepare_chart_source`，
+也不要自造归一化序列。
 
 ## 3. visualization_specialist 选图规则
 
