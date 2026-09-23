@@ -233,19 +233,34 @@ test('apply()：注册根 Agent 工具收敛监听（只拿掉主 Agent 的专�
     await Promise.all(effectResults)
 
     const created = listeners.filter((entry) => entry.event === 'agent/created')
-    assert.equal(created.length, 1, 'apply 必须恰好注册一个 agent/created 监听')
+    // 两个监听是两件事，不能合并：① 根 Agent 工具收敛（render_chart 等）；
+    // ② data_junior 的 bash 闸门（身份 + 必然失败的升级）。顺序即 apply() 里的注册顺序，
+    // 但这里不去依赖它——逐个调用、按行为断言。
+    assert.equal(created.length, 2, 'apply 必须注册两个 agent/created 监听：根收敛 + bash 闸门')
+    const notifyCreated = (agent) => { for (const entry of created) entry.listener({ agent }) }
 
     const restricted = []
-    const agentCtx = { tools: { restrict: (filter) => { restricted.push(filter); return () => {} } } }
+    const guarded = []
+    const agentCtx = {
+      tools: {
+        restrict: (filter) => { restricted.push(filter); return () => {} },
+        guard: (guard) => { guarded.push(guard); return () => {} },
+      },
+    }
     // 根 Agent（无 parentSession）→ 收敛；子 Agent（有 parentSession）→ 原样放行。
-    created[0].listener({ agent: { session: { header: { cwd: '/w' } }, ctx: agentCtx } })
-    created[0].listener({ agent: { session: { header: { cwd: '/w', parentSession: 'main-1' } }, ctx: agentCtx } })
+    notifyCreated({ session: { header: { cwd: '/w' } }, ctx: agentCtx })
+    notifyCreated({ session: { header: { cwd: '/w', parentSession: 'main-1' } }, ctx: agentCtx })
     assert.equal(restricted.length, ROOT_AGENT_DENIED_TOOLS.length, '根 Agent 逐名收敛；子 Agent 一次都不碰')
     assert.deepEqual(restricted.map((filter) => filter.deny[0]).sort(), [...ROOT_AGENT_DENIED_TOOLS].sort())
+    assert.equal(guarded.length, 2, '每个 agent 各装一次 bash 闸门（同一实现，按调用身份判定）')
+    assert.equal(guarded[0], guarded[1], '闸门必须是同一个函数：判定只有一份实现')
+    // 闸门本身按调用身份判定：根会话的 bash 调用被拒，被委派子会话的算术命令放行。
+    assert.match(String(guarded[0]({ name: 'bash', agent: { session: { header: { cwd: '/w' } } }, arguments: { command: 'date' } })), /只对被委派/)
+    assert.equal(guarded[0]({ name: 'bash', agent: { session: { header: { cwd: '/w', parentSession: 'main-1' } } }, arguments: { command: 'node -e 1' } }), undefined)
 
     // 收敛失败（工具名未知 / ctx 缺工具）不得抛出：调用方是 agent 创建路径。
-    assert.doesNotThrow(() => created[0].listener({ agent: { session: { header: {} }, ctx: { tools: { restrict: () => { throw new Error('unknown tool') } } } } }))
-    assert.doesNotThrow(() => created[0].listener({ agent: { session: { header: {} }, ctx: {} } }))
+    assert.doesNotThrow(() => notifyCreated({ agent: { session: { header: {} }, ctx: { tools: { restrict: () => { throw new Error('unknown tool') } } } } }))
+    assert.doesNotThrow(() => notifyCreated({ agent: { session: { header: {} }, ctx: {} } }))
   } finally {
     if (SAVED_KEY === undefined) delete process.env.FUYAO_API_KEY
     else process.env.FUYAO_API_KEY = SAVED_KEY

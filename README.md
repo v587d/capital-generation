@@ -30,7 +30,7 @@
 Next-Gen AI-Driven Capital Generation.
 
 ## 样例
-[报告样例（最新）](docs/sample/指南针综合研判分析完整报告.md)
+[报告样例（最新）](docs/sample/指南针技术分析报告.md)
 
 ## 安装到 DSH Web Profile
 

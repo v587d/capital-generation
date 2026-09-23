@@ -25,17 +25,40 @@ export const ROOT_AGENT_DENIED_TOOLS = [
   'subagent_visualization_specialist',
   /** 只签发给 delegated data agent（运行时本就拒绝根会话），留在表里只会诱导误调。 */
   'prepare_chart_source',
+  /**
+   * bash 只给 data_junior（它是数据侧的"纯计算兜底"）。主 Agent 不需要它，而且一旦拥有
+   * 就等于拿到通用执行 + 整机读 + 出网能力，会绕过数据调度与出图两道结构 gate。
+   * 注意 preset 里那两行 shell 是**平台成对**挂载的（Windows 上是 pwsh），名字由平台决定。
+   */
+  'bash', 'pwsh',
 ] as const
 
 /** 本 preset 的 id（`composedPreset` 的返回值）。 */
 export const CAPITAL_PRESET_ID = 'capital-generation'
 
 interface ToolRestriction { allow?: readonly string[]; deny?: readonly string[] }
-interface RestrictedToolRuntime { restrict?(filter: ToolRestriction): unknown }
+/**
+ * `ctx.tools` 里本仓真正用到的两个方法。
+ *
+ * `guard` 是单调执行闸门（`dsh-tools` 的 `ToolGuard`）：同步检查一次调用，返回字符串即拒绝，
+ * **没有 allow 结果**，所以任何监听顺序都翻不回 allow。bash 闸门（`bash-guard.ts`）用它，
+ * 因为「只按调用内容 deny」这件事只有这里有正确的语义。
+ */
+interface RestrictedToolRuntime {
+  restrict?(filter: ToolRestriction): unknown
+  guard?(guard: (execution: GuardedExecution) => string | undefined): unknown
+}
+
+/** 闸门看到的调用形状（`name` + 解析后的 `arguments` + 调用方 agent）。 */
+export interface GuardedExecution {
+  readonly name?: string
+  readonly arguments?: unknown
+  readonly agent?: AgentLike
+}
 
 /** 事件载荷里我们真正用到的 Agent 形状。 */
 export interface AgentLike {
-  readonly session?: { readonly header?: { readonly parentSession?: string } }
+  readonly session?: { readonly id?: string; readonly header?: { readonly parentSession?: string } }
   readonly ctx?: { readonly tools?: RestrictedToolRuntime; readonly [key: string]: unknown }
 }
 

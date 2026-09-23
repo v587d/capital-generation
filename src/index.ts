@@ -12,6 +12,7 @@ import { registerTimeTool } from './time/tools.js'
 import { registerChartTool } from './chart/tool.js'
 import { createChartEventPublisher, type ChartEventContext } from './chart/events.js'
 import { registerRootToolPolicy } from './agents/root-tool-policy.js'
+import { registerBashGuard } from './agents/bash-guard.js'
 import { ChartSourceTokenStore, registerChartSourceTool } from './chart/source-token.js'
 import { ChartArtifactRegistry } from './chart/artifact-ref.js'
 import { WebRetriever } from './web-retriever/retriever.js'
@@ -314,6 +315,13 @@ export function apply(ctx: Context, config: Config) {
   // scope 上 deny render_chart / subagent_visualization_specialist / prepare_chart_source。
   // 子 Agent 的 scope parent 是 standing key（兄弟），因此不受影响。
   registerRootToolPolicy(ctx as unknown as Parameters<typeof registerRootToolPolicy>[0])
+  // data_junior 的 bash 闸门：对**本 preset 的每个 agent** 在其自己的 scope 上装一次单调 guard。
+  // 两层可靠判定——A 只对**被委派**子会话开放（镜像 tool-exec.ts 的 delegatedSession）；
+  // B 拦掉必然失败的 `sandbox_permissions`（委派会话的审批策略由框架固定为 never，
+  // answerer 根本不会被调用），并给出正确路径。**不解析命令内容**：正则挡不住
+  // `node -e`，而 node/python 正是引入 bash 的目的；禁区纪律走 data_junior 的 persona。
+  // 理由全文见 src/agents/bash-guard.ts 与 AGENTS.md「data_junior 的 bash 闸门」。
+  registerBashGuard(ctx as unknown as Parameters<typeof registerBashGuard>[0])
   ctx.effect(async () => {
     try {
       const apiKey = await resolveFuyaoApiKey(ctx, effectiveConfig.fuyaoCredentialRef || 'FUYAO_API_KEY')

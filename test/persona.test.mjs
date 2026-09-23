@@ -126,8 +126,24 @@ const PRESET_TOOLS = [
   'send_message', 'interrupt_agent', 'list_agents',
   'subagent', 'subagent_data_collector', 'subagent_data_junior', 'subagent_web_retriever', 'subagent_visualization_specialist',
   'ask_user_question', 'todo_write', 'skill',
+  // shell 工具由 preset 自己挂（web 平面把 host 层的 tool-bash/tool-pwsh 都 disabled 了）；
+  // 平台二选一，两个名字都是真实注册的全局名。
+  'bash', 'pwsh',
 ]
 const KNOWN_TOOLS = new Set([...PLUGIN_TOOLS, ...PRESET_TOOLS])
+
+/**
+ * shell 槽位按平台选名（preset 里写成 `!!js "process.platform === 'win32' ? 'pwsh' : 'bash'"`）。
+ *
+ * 为什么必须按平台选：Windows 上没有 `bash-sandbox`，host 层挂的是 pwsh 执行器，
+ * 于是 `tool-bash` 若在 Windows 上启用，名为 bash 的工具会实际执行 PowerShell；
+ * 而 `tools.restrict()` 又对**未注册**的名字报错（表现是"创建子 Agent 失败"），
+ * 所以 allow/deny 里的名字必须与平台行一致。结构化解析剥掉 `!!js` 标签后拿到的是
+ * 表达式字符串，因此这里核验"原文里确实是 !!js 表达式"，并按同一条件解析出真实工具名。
+ */
+const SHELL_SLOT = "process.platform === 'win32' ? 'pwsh' : 'bash'"
+const SHELL_TOOL = process.platform === 'win32' ? 'pwsh' : 'bash'
+const isShellSlot = (name) => name === SHELL_SLOT
 
 const SKILL_DIR = fileURLToPath(new URL('../preset/capital-generation/skills/', import.meta.url))
 const INDEX_SOURCE = readFileSync(fileURLToPath(new URL('../src/index.ts', import.meta.url)), 'utf8')
@@ -144,12 +160,17 @@ test('preset 结构：persona 行为声明式行，插件不再占用 deployment
   // 要做什么之前就必须生效"的每轮硬规则，不是可外迁到 skills/ 的协议正文，所以闸门
   // 放宽到 16,200。真正的防回涨靠下面两条：主 persona < 5000、
   // 子 persona 骨架上限——协议细节回涨会先在那里失败。
-  assert.ok(COMPOSITION_TEXT.length < 16200, `agent.cordis.yml 过长（${COMPOSITION_TEXT.length} 字符 / 目标 <16200）：参考材料进 skills/，设计理由进 preset README.md`)
+  // 2026-09 给 data_junior 配 bash（纯计算兜底）时再放宽到 17,600：新增三行
+  // （平台成对的 tool-bash / tool-pwsh 行 + data_junior 的 BASH DISCIPLINE 软约束），
+  // 设计理由一律进 preset README.md，不占这里。
+  assert.ok(COMPOSITION_TEXT.length < 17600, `agent.cordis.yml 过长（${COMPOSITION_TEXT.length} 字符 / 目标 <17600）：参考材料进 skills/，设计理由进 preset README.md`)
   // 子 persona 只留硬规则骨架：协议正文在 skills/（子 Agent 通过 skill 按需加载），
   // 与工具 description/schema 重复的事实不再抄一遍。
-  // data_junior 的上限随"可视化 gate + one-shot barrier"两条新职责上调（实测 2168）；
-  // 它仍必须低于 2400，载荷样例与 QuerySpec 细则一律留在 skill capital-data-protocol。
-  for (const [id, cap] of [['tool-subagent-data-collector', 1700], ['tool-subagent-data-junior', 2400], ['tool-subagent-web-retriever', 1300]]) {
+  // data_junior 的上限随"可视化 gate + one-shot barrier"两条新职责上调（实测 2168），
+  // 再随「BASH DISCIPLINE」（bash 只做纯计算、不读文件不联网）上调到 2650（实测 2574）：
+  // 这条是"模型拿到 bash 之前就必须生效"的每轮硬规则，不是可外迁的协议正文；
+  // 载荷样例与 QuerySpec 细则仍一律留在 skill capital-data-protocol。
+  for (const [id, cap] of [['tool-subagent-data-collector', 1700], ['tool-subagent-data-junior', 2650], ['tool-subagent-web-retriever', 1300]]) {
     const persona = rowById(id).config.persona
     assert.ok(persona.length < cap, `${id} 的 persona 过长（${persona.length} 字符）：协议细节应进 skills/`)
   }
@@ -421,7 +442,13 @@ test('子 Agent 委派行：continuable、persona 覆盖、toolFilter 收敛工�
     assert.ok(allow.includes('skill'), `${row.id} 必须允许 skill，否则子 Agent 拿不到协议 skill`)
     assert.ok(allow.includes('send_message'), `${row.id} 必须能回传`)
     // 未知工具名会在创建子 Agent 时被 tools.restrict() 拒绝，必须与真实注册名一致。
+    // shell 槽位是唯一的例外：它是 !!js 表达式（按平台解析成 bash / pwsh），
+    // 结构化解析后拿到表达式字符串，所以单独核验"原文里确实是 !!js 表达式"。
     for (const name of allow) {
+      if (isShellSlot(name)) {
+        assert.ok(COMPOSITION_TEXT.includes(`- !!js "${SHELL_SLOT}"`), `${row.id} 的 shell 槽位必须是 !!js 表达式`)
+        continue
+      }
       assert.ok(KNOWN_TOOLS.has(name), `${row.id} 的 toolFilter 含未注册工具名：${name}`)
     }
   }
@@ -443,9 +470,14 @@ test('通用 subagent 行：必须 deny Capital 数据/出图管线与专用角�
 
   // deny 也是 tools.restrict()：名字必须真实注册，否则创建通用 child 时报错。
   for (const name of deny) {
+    if (isShellSlot(name)) {
+      assert.ok(COMPOSITION_TEXT.includes(`- !!js "${SHELL_SLOT}"`), 'shell 槽位必须是 !!js 表达式，否则平台选名不会生效')
+      continue
+    }
     assert.ok(KNOWN_TOOLS.has(name), `通用 subagent 的 toolFilter.deny 含未注册工具名：${name}`)
   }
   for (const name of [
+    SHELL_SLOT,
     'render_chart', 'prepare_chart_source',
     'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile',
     'request_data', 'list_capabilities', 'describe_capability', 'dc_status',
@@ -453,6 +485,40 @@ test('通用 subagent 行：必须 deny Capital 数据/出图管线与专用角�
   ]) {
     assert.ok(deny.includes(name), `通用 subagent 的 child 不得拿到 ${name}`)
   }
+})
+
+test('shell 行：平台成对挂载、只给 data_junior，且不给后台执行', () => {
+  const bashRow = rowById('tool-bash')
+  const pwshRow = rowById('tool-pwsh')
+  assert.ok(bashRow, 'preset 必须自己挂 tool-bash（web 平面把 host 层那一行 disabled 了）')
+  assert.ok(pwshRow, 'preset 必须自己挂 tool-pwsh，否则 Windows 上没有可用的 shell 槽位名')
+  assert.equal(bashRow.name, '@deepseek-ai/dsh-tool-bash')
+  assert.equal(pwshRow.name, '@deepseek-ai/dsh-tool-pwsh')
+
+  // 平台二选一：同一时刻只该有一个 shell 执行器（Windows 上是 pwsh-sandbox）
+  assertMatches(COMPOSITION_TEXT, /id: tool-bash[\s\S]{0,200}process\.platform === 'win32'/)
+  assertMatches(COMPOSITION_TEXT, /id: tool-pwsh[\s\S]{0,200}process\.platform !== 'win32'/)
+
+  // 本 preset 不挂 tool-jobs：给后台执行只会让模型拿到一个永远读不回来的 jobId
+  for (const [row, id] of [[bashRow, 'tool-bash'], [pwshRow, 'tool-pwsh']]) {
+    assert.equal(row.config?.enableRunInBackground, false, `${id} 必须关掉后台执行（preset 没有 tool-jobs）`)
+  }
+
+  // 主 Agent 的收敛在 src/agents/root-tool-policy.ts（ROOT_AGENT_DENIED_TOOLS），不在 preset 层：
+  // preset 层 deny 会把子 Agent 一起砍掉（allow 是交集过滤，加不回来）。
+  assertNotMatches(COMPOSITION_TEXT, /id: tool-bash[\s\S]{0,80}deny/)
+})
+
+test('data_junior persona：bash 是纯计算兜底，且禁区/出网纪律必须写明（软约束）', () => {
+  assertRule(JUNIOR_PERSONA, /BASH DISCIPLINE/)
+  assertRuleAny(JUNIOR_PERSONA, [/只用于算/, /只做纯计算/], 'persona 必须写明 bash 的用途边界')
+  assertRule(JUNIOR_PERSONA, /变化量|增幅|CAGR/, 'persona 必须点明 bash 是给哪类派生指标兜底的')
+  assertRule(JUNIOR_PERSONA, /优先 resolve_data_time_range/, '时间窗仍归宿主：bash 不得取代 resolve_data_time_range')
+  assertRuleAny(JUNIOR_PERSONA, [/不读文件/, /不碰 capital-data/], 'persona 必须写明不读文件（原始行边界）')
+  assertRule(JUNIOR_PERSONA, /capital-data/, '禁区要具体到路径，否则等于没说')
+  assertRuleAny(JUNIOR_PERSONA, [/不联网/, /不跑 curl/], 'persona 必须写明不出网')
+  assertRule(JUNIOR_PERSONA, /data_gap/, '缺数据的正确路径必须写明')
+  assertRuleAny(JUNIOR_PERSONA, [/只留结论数字/, /输出只留/], 'bash 输出体积纪律必须写明（工具结果同样过 pruner）')
 })
 
 test('子 Agent 按需协议：三个子 persona 都点名真实存在的 skill，写错名字会静默拿不到契约', () => {
@@ -548,11 +614,14 @@ test('subagent_data_junior 行：continuable、persona 覆盖、toolFilter 只�
   assert.equal(juniorRow.config.backgroundMode, 'continuable')
   const allow = juniorRow.config.toolFilter?.allow
   assert.ok(Array.isArray(allow), 'toolFilter.allow 必须存在')
-  assert.deepEqual([...allow].sort(), ['describe_dataset', 'get_local_datetime', 'inspect_dataset', 'prepare_chart_source', 'profile_dataset', 'query_dataset', 'resolve_data_time_range', 'send_message', 'skill', 'subagent_visualization_specialist'])
+  assert.deepEqual([...allow].sort(), ['describe_dataset', 'get_local_datetime', 'inspect_dataset', 'prepare_chart_source', SHELL_SLOT, 'profile_dataset', 'query_dataset', 'resolve_data_time_range', 'send_message', 'skill', 'subagent_visualization_specialist'])
   // data_junior 不得访问外部行情 API、网页检索、凭据或委派能力
-  for (const forbiddenTool of ['request_data', 'list_capabilities', 'dc_status', 'subagent', 'subagent_data_collector', 'subagent_data_junior', 'subagent_data_analyst', 'ask_user_question', 'todo_write', 'web_search', 'web_fetch', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'bash', 'python', 'write_profile', 'render_chart']) {
+  for (const forbiddenTool of ['request_data', 'list_capabilities', 'dc_status', 'subagent', 'subagent_data_collector', 'subagent_data_junior', 'subagent_data_analyst', 'ask_user_question', 'todo_write', 'web_search', 'web_fetch', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'python', 'write_profile', 'render_chart']) {
     assert.ok(!allow.includes(forbiddenTool), `toolFilter.allow 不应包含 ${forbiddenTool}`)
   }
+  // bash/pwsh 是唯一按平台选名的槽位：只认表达式本身，别把平台解析后的名字当成硬编码
+  assert.ok(allow.some(isShellSlot), `data_junior 的 allow 必须含 shell 槽位（当前平台解析为 ${SHELL_TOOL}）`)
+  assert.ok(!allow.includes(SHELL_TOOL), 'shell 槽位不要写成硬编码名字：Windows 上 restrict() 会因未注册而报错')
 })
 
 test('主 persona：子 Agent 中途请求按工单处理——取数后发回同一个子 Agent，结算通知不等于完成', () => {

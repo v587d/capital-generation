@@ -23,6 +23,14 @@ import {
 const childAgent = (tools) => ({ session: { header: { cwd: '/w', parentSession: 'main-1' } }, ctx: { tools } })
 const rootAgent = (tools) => ({ session: { header: { cwd: '/w' } }, ctx: { tools } })
 
+test('ROOT_AGENT_DENIED_TOOLS：bash/pwsh 必须点名（主 Agent 不得继承 shell）', () => {
+  // preset 的 shell 行注册在 standing 层，主 Agent 会直接继承——收敛只能靠这份名单。
+  // 按平台选名，所以两个名字都点名（未注册的那个由逐名 restrict 的 try/catch 跳过）。
+  for (const name of ['bash', 'pwsh']) {
+    assert.ok(ROOT_AGENT_DENIED_TOOLS.includes(name), `主 Agent 不得看到 ${name}：那是通用执行 + 整机读 + 出网能力`)
+  }
+})
+
 test('isRootAgent：只有没有 parentSession 的才是根 Agent', () => {
   assert.equal(isRootAgent(rootAgent({})), true)
   assert.equal(isRootAgent(childAgent({})), false)

@@ -99,6 +99,21 @@
          不得冒充行情证据或补位缺失能力。不支持的频率如实披露，用已有粒度降级，不编造。
 
 
+# ── shell：只给 data_junior（主 Agent 由 root-tool-policy 在自己 scope 上 deny）──────
+# 边界、为什么不按命令内容 deny、平台门控：见同目录 README.md 的「bash」一节。
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+  config:
+    # 本 preset 不挂 tool-jobs：不给后台执行，免得模型拿到永远读不回来的 jobId。
+    enableRunInBackground: false
+
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+  config:
+    enableRunInBackground: false
+
 - id: tool-subagent-data-collector
   name: '@deepseek-ai/dsh-tool-subagent'
   config:
@@ -197,11 +212,19 @@
       任何时间窗/时间戳换算一律交给宿主：分析窗口调 resolve_data_time_range（传 dataset_id + period，
       拿 bounds 填 filter），取数时间参数也用它（传 capability + period），绝不自行把日期算成毫秒；
       看到 epoch 要加减乘除才能得出结论，就是走错了路。
+
+      # BASH DISCIPLINE
+      bash 只用于中间步骤计算，比如：变化量 / 增幅 / CAGR / 比值 / 单位换算等。
+      bash 输出只留结论数字（原始行与中间数据不进回传），并注明算法与口径。
+      不读写文件。
     
     toolFilter:
       allow:
         - send_message
         - skill
+        # shell 名按平台选：Windows 上没有 bash-sandbox，挂的是 pwsh 执行器与 pwsh 工具。
+        # restrict() 对未注册的名字报错（表现是"创建子 Agent 失败"），所以这里必须与上面的行一致。
+        - !!js "process.platform === 'win32' ? 'pwsh' : 'bash'"
         - describe_dataset
         - inspect_dataset
         - profile_dataset
@@ -347,6 +370,7 @@
     # deny 只从继承层移除名字，专用行的 allow 不受影响；名字必须真实注册，写错 = 创建子 Agent 失败。
     toolFilter:
       deny:
+        - !!js "process.platform === 'win32' ? 'pwsh' : 'bash'"
         - render_chart
         - prepare_chart_source
         - describe_dataset

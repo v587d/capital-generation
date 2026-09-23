@@ -231,6 +231,36 @@ description: Use when composing or reading a Capital data message — the exact 
 硬规则：字段按工具返回原样填入；统计项只报告可计算的部分，数据不足如实说明；
 profile 失败不影响原始 Dataset，可按指示重试。
 
+### 3.3 bash：派生算术的兜底，不是第二条取数通道
+
+只有 data_junior 有 `bash`。它存在的唯一理由是 `query_dataset` 的聚合只有
+`count / min / max / avg / sum`——**变化量、增幅、CAGR、比值、单位换算**这类派生指标没有宿主
+工具，硬心算既慢又容易错。
+
+**可以做的**（拿手里已有的数字算）：
+
+```bash
+node -e 'const a=98.2,b=120.5; console.log(((b-a)/a*100).toFixed(2))'   # 区间涨幅
+python3 -c "print((120.5/98.2)**(252/60)-1)"                            # 年化
+```
+
+**不许做的**（这是纪律，不是沙箱限制——沙箱只拦写，不拦读与网络）：
+
+| 不许 | 为什么 | 正确做法 |
+|---|---|---|
+| 读 `capital-data/**`、`raw.json` | 原始行**永不**进入你的上下文（AGENTS.md §1.2）；而且工具结果会被剪枝成 head+tail，读了也算错 | 数值走 `describe_dataset` / `query_dataset` 的统计与聚合 |
+| 读 `~/.dsh/**`、`sessions/**` | 那是宿主凭据与全部会话日志 | 不碰；需要元数据用工具回执 |
+| 读 / 改 `preset/`、`src/`、`test/` | 那是装配与门禁本身 | 不碰 |
+| `curl` / `wget` / 任何网络请求、`git clone`、`npm i`、`pip install` | 你的角色没有网络能力，外部材料只经主 Agent 转交 `web_retriever` | 缺外部事实就在回传里写明缺口 |
+| 申请更高权限（`sandbox_permissions`） | 委派会话的审批策略被框架固定为 `never`，必然失败 | 不要试；缺数据发 `data_gap` |
+
+另外两条：
+
+- **输出只留结论数字**：bash 的工具结果同样会过剪枝器（>8192 字符中间段被剪掉），把中间过程
+  打印出来只会挤掉真正要看的东西；回传时注明算法与口径（如「按首末收盘价、未复权」）。
+- **时间窗仍归宿主**：窗口边界一律用 `time_facts.windows` / `resolve_data_time_range`
+  （§3.2），不要用 `date` 命令自己造边界——口径错了数字就全错，而且没人会发现。
+
 `profile_dataset` 的统计项：数值字段的 count 与 sum（合计多少、覆盖多少条）、字符串字段的
 `distinct_count` 与高频取值、字段类型（observed / contract）、缺失值与显式 null、类型冲突、
 重复主键、时间范围、最小/最大/均值/分位数——**只报告可计算的部分**，数据不足就如实说明。

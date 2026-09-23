@@ -17,19 +17,34 @@
  * 正是因为它们未打标签。因此这里取 `ctx.root`，再用 `agentPresets.composedPreset(agent.ctx)`
  * 筛出本 preset 的 agent。
  */
-export declare const ROOT_AGENT_DENIED_TOOLS: readonly ["render_chart", "subagent_visualization_specialist", "prepare_chart_source"];
+export declare const ROOT_AGENT_DENIED_TOOLS: readonly ["render_chart", "subagent_visualization_specialist", "prepare_chart_source", "bash", "pwsh"];
 /** 本 preset 的 id（`composedPreset` 的返回值）。 */
 export declare const CAPITAL_PRESET_ID = "capital-generation";
 interface ToolRestriction {
     allow?: readonly string[];
     deny?: readonly string[];
 }
+/**
+ * `ctx.tools` 里本仓真正用到的两个方法。
+ *
+ * `guard` 是单调执行闸门（`dsh-tools` 的 `ToolGuard`）：同步检查一次调用，返回字符串即拒绝，
+ * **没有 allow 结果**，所以任何监听顺序都翻不回 allow。bash 闸门（`bash-guard.ts`）用它，
+ * 因为「只按调用内容 deny」这件事只有这里有正确的语义。
+ */
 interface RestrictedToolRuntime {
     restrict?(filter: ToolRestriction): unknown;
+    guard?(guard: (execution: GuardedExecution) => string | undefined): unknown;
+}
+/** 闸门看到的调用形状（`name` + 解析后的 `arguments` + 调用方 agent）。 */
+export interface GuardedExecution {
+    readonly name?: string;
+    readonly arguments?: unknown;
+    readonly agent?: AgentLike;
 }
 /** 事件载荷里我们真正用到的 Agent 形状。 */
 export interface AgentLike {
     readonly session?: {
+        readonly id?: string;
         readonly header?: {
             readonly parentSession?: string;
         };
