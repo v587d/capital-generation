@@ -18,6 +18,8 @@ capital-data/
 capital-analysis/
 
 # ── 本地研发文档，不随仓库发布 ──
+# 发版说明草稿：正文发布时贴到 GitHub Release 页面，仓库只保留 README 摘要与 CHANGELOG
+.release-notes-*.md
 .dsh/
 ths_api.md
 AGENTS.md
