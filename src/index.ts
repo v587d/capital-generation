@@ -6,6 +6,8 @@ import z from '@deepseek-ai/schemastery'
 import { provideDataCollectorHub } from './data-collector/hub.js'
 import { WorkspaceDatasetStore, type FsLike, type SandboxPolicyLike } from './data-collector/store.js'
 import { resolveFuyaoApiKey, createFuyaoRestSources } from './sources/fuyao-rest.js'
+import { createTencentSources } from './sources/tencent-http.js'
+import { createEastmoneySources } from './sources/eastmoney-http.js'
 import { registerDataCollectorTools, type DataCollectorDiagnostics } from './data-collector/tools.js'
 import { registerDatasetTools } from './data-collector/dataset-tools.js'
 import { registerTimeTool } from './time/tools.js'
@@ -16,7 +18,7 @@ import { registerBashGuard } from './agents/bash-guard.js'
 import { ChartSourceTokenStore, registerChartSourceTool } from './chart/source-token.js'
 import { ChartArtifactRegistry } from './chart/artifact-ref.js'
 import { WebRetriever } from './web-retriever/retriever.js'
-import { registerWebRetrieverTools } from './web-retriever/tools.js'
+import { registerSourceTools, registerWebRetrieverTools } from './web-retriever/tools.js'
 import { createAnySearchClient, envKey } from './web-retriever/engines.js'
 import { createLocalFetcher, LOCAL_FETCH_CLIENT_VERSION } from './web-retriever/local-fetch.js'
 import { createWindClient } from './web-retriever/wind-client.js'
@@ -75,7 +77,7 @@ export interface RetrieverConfig {
  *   原始 HTML**（见 `html-markdown.ts`），而 markdown 输出只有 HTML 的 12–33%，
  *   所以这个数必须按 HTML 体积给足；20,000 会把 109KB 的页面腰斩到 18%。
  *
- * `userAgent` 默认是产品标识（`@v587d/capital-generation`）：裸版本号（`2.1.2`）是
+ * `userAgent` 默认是产品标识（`@v587d/capital-generation`）：裸版本号是
  * WAF 眼里的典型爬虫特征。显式配成空串时消费点回落到 `LOCAL_FETCH_CLIENT_VERSION`
  * （版本号真值仍只有一处，由测试守着等于 `package.json` 的 version）。
  */
@@ -322,6 +324,20 @@ export function apply(ctx: Context, config: Config) {
   // `node -e`，而 node/python 正是引入 bash 的目的；禁区纪律走 data_junior 的 persona。
   // 理由全文见 src/agents/bash-guard.ts 与 AGENTS.md「data_junior 的 bash 闸门」。
   registerBashGuard(ctx as unknown as Parameters<typeof registerBashGuard>[0])
+  ctx.effect(() => {
+    const sources = createTencentSources()
+    const disposers = sources.map((dataSource) => hub.registerSource(dataSource))
+    ctx.logger.info(`capital-generation: 已注册 ${disposers.length} 个腾讯数据源（tencent_*）`)
+    return () => { for (const dispose of disposers) dispose() }
+  }, 'capital-generation.tencent-sources()')
+
+  ctx.effect(() => {
+    const sources = createEastmoneySources()
+    const disposers = sources.map((dataSource) => hub.registerSource(dataSource))
+    ctx.logger.info(`capital-generation: 已注册 ${disposers.length} 个东方财富数据源（eastmoney_*）`)
+    return () => { for (const dispose of disposers) dispose() }
+  }, 'capital-generation.eastmoney-sources()')
+
   ctx.effect(async () => {
     try {
       const apiKey = await resolveFuyaoApiKey(ctx, effectiveConfig.fuyaoCredentialRef || 'FUYAO_API_KEY')
@@ -390,6 +406,18 @@ export function apply(ctx: Context, config: Config) {
       })
     : undefined
   registerWebRetrieverTools(ctx, new WebRetriever(client, localFetch), windClient)
+  // 九个具名来源工具（cls_telegraph / wscn_lives / cninfo_irm / sseinfo_qa /
+  // eastmoney_724 / eastmoney_stock_news / eastmoney_reports / sina_reports / ths_eps_forecast）走本机 HTTP，
+  // **不受 `localFetch.enabled` 支配**：那个开关的语义是"AnySearch 失败后是否允许自动改走本机直抓"
+  // （回退链的一环），而这些工具没有 AnySearch 主路可回退。让一个回退开关静默决定"某些来源工具
+  // 整个消失"是错的——工具注册面要么在，要么由显式配置关掉。共用的是出口校验与超时/大小上限。
+  registerSourceTools(ctx, {
+    timeoutMs: localFetchConfig.timeoutMs,
+    maxBytes: localFetchConfig.maxBytes,
+    maxContentChars: localFetchConfig.maxContentChars,
+    maxRedirects: localFetchConfig.maxRedirects,
+    userAgent: localFetchConfig.userAgent,
+  })
 
   ctx.effect(() => {
     const section = resolveUserCustomizationSection(effectiveConfig.customPersona)

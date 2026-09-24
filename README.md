@@ -14,7 +14,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.1.2-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.2.0-9cf" alt="Version"></a>
 </p>
 
 > [!IMPORTANT]
@@ -55,6 +55,10 @@ dsh plugin --profile web add github:v587d/capital-generation
 > 开启时 AnySearch 抓取失败会自动改由本机直连抓取该页面（回执 `via` 标注 `local-http`），
 > 关闭则失败原样回传；改动即时保存，新 Capital 会话生效。
 >
+> 除上述三个密钥外不再需要任何 key：`data_collector` 的腾讯 / 东方财富公开能力，以及 `web_retriever`
+> 的九个具名来源查询工具（财联社、华尔街见闻、巨潮、上证e互动、东财、新浪、同花顺）都走公开端点，
+> 装好即可用。
+>
 > 不想用设置界面的话，也可以直接把密钥写进 `~/.dsh/.credentials.yaml`，名字用
 > `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`，插件会自动读取。
 
@@ -71,10 +75,10 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
 
 2. 所有 Agent，包括主 Agent 均不能直接接触原始结构数据（行情、财务报表细目等），需要时 Agent 可按需提取再提炼发送消息至主 Agent。
 目前覆盖以下 Subagent（data_analyst 为预留角色，暂未启用）：
-  - data_collector: 主 Agent 直属下级（spawn），负责根据上级指令收集金融财经类结构化数据，目前支持 同花顺（fuyao）约61个数据 API接口。
+  - data_collector: 主 Agent 直属下级（spawn），负责根据上级指令收集金融财经类结构化数据，目前支持 **69 个数据 capability**：同花顺（fuyao）61 个（行情、财务、估值竞价、盘面特色、指数、基金），腾讯公开 HTTP 3 个（实时行情快照 / 复权与分钟 K 线 / 分笔，行情 fallback），东方财富 HTTP 5 个（龙虎榜汇总、限售解禁日历、板块行情排名与资金流）。后两类走公开端点，无需额外密钥。
   - data_junior: 主 Agent 直属下级（spawn），负责根据上级指令清洗、整理出有效数据、基础描述性统计以及数据透视，目的是阐述数据背后的“故事”。读一份 Dataset 默认走 `describe_dataset`（一次调用完成元数据 + 基础 profile + 受控查询，多份数据在同一条消息里并发）；时间窗与时间戳换算一律由宿主完成（`time_facts` 的 `axis` / `windows`、`resolve_data_time_range`），子 Agent 不自行把日期算成毫秒。
   - data_analyst: 主 Agent 直属下级，负责根据上级指令，通过运用编程技能分析上游数据（**仍在开发中**，委派行 disabled，暂不启用）。
-  - web_retriever: 主 Agent 直属下级（spawn），负责根据上级指令，运用网络搜索和抓取能力，获取外部非结构化数据，目前支持 AnySearch(search/fetch) API 数据接口和 Wind Alice 相关服务。
+  - web_retriever: 主 Agent 直属下级（spawn），负责根据上级指令，运用网络搜索和抓取能力，获取外部非结构化数据。检索面为 AnySearch（`anysearch_search` / `web_retriever_fetch`，失败可按开关回退本机直连）与 Wind Alice（`wind_docs_announcements` / `wind_docs_news`，公告与权威新闻）；另有九个**具名来源查询工具**（财联社快讯、华尔街见闻快讯、东财 7×24 快讯 / 个股新闻 / 个股研报、新浪研报、同花顺机构一致预期 EPS、巨潮互动易、上证e互动），均为公开端点、零密钥，详见下方能力小节。
   - visualization_specialist: 主 Agent 的孙 Agent（data_junior 的 one-shot 前台子 Agent），由 data_junior 在 profile 完成后的可视化 gate 中按需创建；只接收 `profile_ref`、有限 profile 事实与短期 `chart_source_ref`，使用受控 `render_chart` 生成自包含 HTML 图表，并只向 data_junior 回传 `chart_ref` 小回执；不接触原始 rows、不向主 Agent 直接发消息，当前是唯一的 one-shot 角色。
   - 未来更多，欢迎 PR 
 
@@ -91,7 +95,33 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
  
 ## data_collector 能力总表
 
-[data_collector 能力总表](docs/data-collector-capabilities.md) 列出全部 **61 个**数据 capability（元数据 / A股行情与财务 / 估值竞价 / 盘面特色 / 指数 / 基金），含端点路径、主要参数（必填以 `*` 标注）、是否分页与用途，并说明**不覆盖**的模块及原因。
+[data_collector 能力总表](docs/data-collector-capabilities.md) 列出全部 **69 个**数据 capability（元数据 / A股行情与财务 / 估值竞价 / 盘面特色 / 指数 / 基金 / 腾讯公开行情 fallback / 东方财富资金与筹码），含端点路径、主要参数（必填以 `*` 标注）、是否分页与用途，并说明**不覆盖**的模块及原因。表格由 `npm run docs:capabilities` 从 source 定义生成，测试断言「文档 == 实现」。
+
+构成：同花顺 Fuyao **61** 个（需 `FUYAO_API_KEY`）、腾讯公开 HTTP **3** 个（`tencent_quote` / `tencent_kline` / `tencent_ticks`）、东方财富 HTTP **5** 个（`eastmoney_top_buy_sell_market` / `eastmoney_top_buy_sell_ticker` / `eastmoney_lockup_expiry` / `eastmoney_sector_rotation` / `eastmoney_cashflow_rotation`）；后两类为公开端点，**无需额外密钥**。
+
+## web_retriever 能力（检索 + 来源查询）
+
+web_retriever 有两个工作面，共 **13 个工具**：
+
+- **检索**（发现候选 → 按 URL 取正文）：`anysearch_search`（AnySearch 全网搜索）、
+  `web_retriever_fetch`（抓取正文，AnySearch 失败时按开关回退本机直连，回执 `via` 标注实际来源）、
+  `wind_docs_announcements` / `wind_docs_news`（Wind Alice 公告与权威新闻，默认第一选择）。
+- **来源查询**（具名来源 + 业务参数 → 确定、有序、可翻页、同参可复现的结果集；全部公开端点、零密钥）：
+
+| 来源 | 工具 | 用途 |
+|---|---|---|
+| 财联社 | `cls_telegraph` | 7×24 全市场快讯（签名本地计算、零 key） |
+| 华尔街见闻 | `wscn_lives` | 7×24 快讯，按 `channel` + `cursor` 翻页 |
+| 东方财富 | `eastmoney_724` | 7×24 快讯，与财联社 / 见闻三条互为备份（聚合内容按标题去重） |
+| 东方财富 | `eastmoney_stock_news` | 个股新闻（区分「上游风控」与「该股确实没有新闻」） |
+| 东方财富 | `eastmoney_reports` | 个股研报列表（含评级与逐篇预测 EPS；研报正文是 PDF，不在覆盖范围） |
+| 新浪 | `sina_reports` | 研报第二来源（不含评级与目标价） |
+| 同花顺 | `ths_eps_forecast` | 机构一致预期 EPS（逐年：机构数 / 最小 / **均值** / 最大 / 行业平均） |
+| 巨潮互动易（深市） | `cninfo_irm` | 投资者问答：公司怎么回应某传闻 / 关切 |
+| 上证e互动（沪市） | `sseinfo_qa` | 沪市投资者问答，不传 `code` 可看全市场最新 |
+
+来源边界（深沪不可互换、北交所两边都没有、研报正文取不到）、翻页纪律（该翻页就翻到没有、空结果是真事实）
+与回传格式见 [capital-web-protocol](preset/capital-generation/skills/capital-web-protocol/SKILL.md)。
 
 ## 图表呈现（截图）
 
@@ -125,6 +155,38 @@ npm run smoke:boot   # 冒烟验证装配可正常 boot
 维护子包时才需要执行以上命令。
 
 ## Changelog
+
+### 2.2.0 — 2026-09-24
+
+- **data_collector 扩到 69 个能力（61 → 69，零新增密钥）**：新增腾讯公开 HTTP 3 个
+  （`tencent_quote` 实时快照 / `tencent_kline` 复权与分钟 K 线 / `tencent_ticks` 分笔，行情 fallback）
+  与东方财富 HTTP 5 个（龙虎榜全市场与单票汇总、限售解禁日历、板块行情排名、板块资金流）；
+  时间窗同步接入 `resolve_data_time_range`，能力总表由 `npm run docs:capabilities` 重新生成，
+  测试断言「文档 == 实现」。
+- **web_retriever 新增九个具名来源查询工具**：`cls_telegraph`（财联社 7×24 快讯，签名本地计算、零 key）、
+  `wscn_lives`（华尔街见闻快讯，按 `channel` + `cursor` 翻页）、`eastmoney_724`（东财 7×24 快讯，
+  与前两条互为备份）、`cninfo_irm`（巨潮互动易问答，深市）、`sseinfo_qa`（上证e互动问答，沪市）、
+  `eastmoney_stock_news`（个股新闻）、`eastmoney_reports`（个股研报列表）、`sina_reports`
+  （研报第二来源，不含评级与目标价）、`ths_eps_forecast`（机构一致预期 EPS，逐年给出机构数 / 最小 /
+  **均值** / 最大 / 行业平均）。它们与检索工具是两个工作面：**检索**是发现候选、按 URL 取正文；
+  **查询**是"具名来源 + 业务参数 → 确定、有序、可翻页、同参可复现的结果集"，
+  该翻页就翻到没有，空结果是真事实。回执带 `count` / `next_cursor` / `note`，
+  并按来源分别计入 `provider_tally`。
+- **东财请求收敛到一份网络面**：进程级共享客户端 + 串行最小间隔（350ms），数据面与 web_retriever
+  共用同一个节流器——东财按出口 IP 风控，两套独立限流等于没限。
+  （`DataCollectorHub` 的 FIFO 只保证"同一时刻一个请求"，**不含最小间隔**：串行 ≠ 节流。）
+- **改名**：`web_retriever_search` → **`anysearch_search`**（按 provider 命名，与 `wind_docs_*` 同口径）。
+  `web_retriever_fetch` 不改名——它是一条 AnySearch→本机直连的**回退链**，回执 `via` 标明实际来源。
+- **修复**：本机直连不再改写 JSON 正文（此前数组括号变 `\[ \]` 让 `JSON.parse` 失效、字段名被转义）、
+  接受 `json/javascript` 类 MIME、上证e互动公司列表改按 `<a>` 元素解析（窗口式正则会跨条目错配
+  uid↔代码）；东财研报预测 EPS 因上游返回**字符串**而恒为 null；新浪研报的日期与类型两列写反、
+  个股查询缺交易所前缀会拿到**假空页**（真实原因不是限流）；`eastmoney_stock_news` 现在区分
+  "上游风控"与"该股确实没有新闻"；同花顺一致预期页是 GBK 而响应头不带 charset，按 UTF-8 解会整页
+  变替换字符。
+
+从 2.1.2 升级需迁移一处：自定义 prompt / 脚本里的 `web_retriever_search` 改读 `anysearch_search`
+（能力与入参不变）；其余升级无需改调用方式，新增能力均为公开端点、无需新增密钥。
+完整变更历史见 [CHANGELOG.md](CHANGELOG.md)。
 
 ### 2.1.2 — 2026-09-23
 

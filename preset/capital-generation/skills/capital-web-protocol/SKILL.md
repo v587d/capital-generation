@@ -6,25 +6,67 @@ description: Use in Capital mode when retrieving or presenting external material
 # Capital 检索协议（完整版）
 
 `web_retriever` 子 Agent 的工作细则；主 Agent 呈现检索结论时同样按第 5 节的回传格式保留来源标注。
-persona 只保留硬规则（先定来源再动手、只用四个工具、一次一个 URL、无来源不作证据）；
+persona 只保留硬规则（先定来源再动手、只用这十三个工具、一次一个 URL、无来源不作证据）；
 本文件是其余细节。
 
-## 1. 来源边界（两个 search_engine_provider）
+## 1. 来源边界（两个 search_engine_provider + 九个具名来源工具）
+
+**两类工作面，别混**：`search` / `fetch` 是**检索**（先发现候选，再按 URL 取正文）；
+下面九个工具是**来源查询**（具名来源 + 业务参数 → 确定、有序、可翻页、同参可复现的结果集）。
 
 | 来源 | 工具 | 性格 | 用途 |
 |---|---|---|---|
 | `wind_docs` | `wind_docs_announcements` / `wind_docs_news` | 精准（`public_document`） | 官方正式文件（公告/年报/招股书）与权威新闻的**默认第一选择** |
-| `anysearch` | `web_retriever_search` / `web_retriever_fetch` | 广度 | 候选探索与线索、官方页面归属核验、Wind 覆盖之外的内容（监管政策原文、境外或非上市主体、市场传闻） |
+| `anysearch` | `anysearch_search` / `web_retriever_fetch` | 广度 | 候选探索与线索、官方页面归属核验、Wind 覆盖之外的内容（监管政策原文、境外或非上市主体、市场传闻） |
+| `cls` | `cls_telegraph` | 来源查询（媒体） | 财联社 7×24 全市场快讯 |
+| `wscn` | `wscn_lives` | 来源查询（媒体） | 华尔街见闻 7×24 快讯，按 `channel` + `cursor` 翻页 |
+| `eastmoney` | `eastmoney_724` / `eastmoney_stock_news` / `eastmoney_reports` | 来源查询（媒体 / 券商研报） | 东财 7×24 快讯、个股新闻、个股研报列表 |
+| `sina` | `sina_reports` | 来源查询（研报第二来源） | 新浪研报列表（**不含评级与目标价**） |
+| `ths` | `ths_eps_forecast` | 来源查询（一致预期） | 同花顺机构一致预期 EPS（逐年：机构数 / 最小 / **均值** / 最大 / 行业平均） |
+| `cninfo_irm` | `cninfo_irm` | 来源查询（巨潮，**深市**） | 互动易投资者问答：公司怎么回应某传闻/关切 |
+| `sseinfo` | `sseinfo_qa` | 来源查询（上交所平台，**沪市**） | 上证e互动问答；不传 `code` 可看全市场 |
+
+**互为备份的成对来源**：三个快讯来源（`cls_telegraph` / `wscn_lives` / `eastmoney_724`）三条不同源、
+不同风控面，一条不可用另一条仍在——但东财会把它聚合到的财联社内容一并返回，**同一事件可能重复，
+按标题去重**，不要当成两条独立证据。两个研报来源（`eastmoney_reports` / `sina_reports`）同理。
+
+**三个来源有硬边界，不要越过**：
+
+- `eastmoney_reports` **拿不到研报正文**：列表只有标题/机构/研究员/日期/评级与研报自带的预测 EPS，
+  正文在 `pdf.dfcfw.com` 的 PDF 里，而本机直连只处理文本（`application/pdf` 会被拒）。
+  **不要用标题当结论**；需要正文就如实说明这个边界。
+- `ths_eps_forecast` 是**一致预期**（观点聚合），不是官方事实、也不是已实现业绩。
+  `institutions`（预测机构数）< 3 时参考价值有限，回传时必须把机构数一并向用户披露。
+- `sina_reports` **不含评级与目标价**；需要这些改用 `eastmoney_reports`。
 
 - **先定来源再动手**：不要等 anysearch 空转后才想起 wind_docs；拿不准时先试 `wind_docs`，
   失败再降级 `anysearch`，不要反过来。
-- `verified_official` 只能来自 `web_retriever_fetch` 的官方域名核验路径。
+- `verified_official` 只能来自 `web_retriever_fetch` 的官方域名核验路径。九个具名来源都是
+  **媒体或互动平台**，其内容只能作旁证（媒体转述 / 投资者问答），**不得标 `verified_official`**。
 - 不调用官方名称为 `web_search` 或 `web_fetch` 的其他工具。
+
+### 1.1 来源查询的纪律（与检索不同）
+
+- **结果集是确定的**：`该翻页就翻到没有`。回执带 `count`；`wscn_lives` 翻页把 `next_cursor`
+  原样传回 `cursor`。不要因为一次返回条数少就换来源重搜。
+- **空结果是真事实**：`cninfo_irm` 返回 0 条说明该公司近一个月确实没有问答；平台只开放近期
+  问答（公司维度约近 1 个月）。**不要把"没有问答"写成"无法确认"**。
+- **深沪不可互换**：互动易只覆盖深市（沪市实测返回 0 条），沪市问答必须用 `sseinfo_qa`；
+  **北交所两个平台都没有**。传错市场会拿到空表，那不是数据缺口。
+- **`status` 字段是事实不是缺口**：`answered` = 公司已回复（`answer` 有正文）；
+  `unanswered` = 尚未回复（`answer` 为空）。未回复本身就是要回传的信息。
+- **回执 `note` 必须读**：它写明上游口径、覆盖范围与被丢弃的条目（如上游把别的公司数据混进来
+  时按条过滤的条数），据此判断结果可信度。
+- **单条正文有长度上限**（约 1200 字符，超出以 `…` 结尾）：需要完整原文时用回执里的 `url`
+  走 `web_retriever_fetch`，不要凭截断片段下结论。
+- 这九个工具的失败是**工具错误**（`isError`），不是"正常返回的失败信封"；`code` 取值见回执
+  （`UPSTREAM` 上游报错 / `INVALID_RESPONSE` 上游结构变了 / `NOT_FOUND` 标的不存在 /
+  `NETWORK` 网络失败）。**结构变更类错误不要重试**，如实回传。
 
 ## 2. 搜索收敛（经验法则，不是硬性配额）
 
 - 一次任务对同一个 `search_engine_provider` 的全部检索调用——anysearch 的
-  `web_retriever_search`、wind_docs 的 `wind_docs_announcements` / `wind_docs_news` 都算——
+  `anysearch_search`、wind_docs 的 `wind_docs_announcements` / `wind_docs_news` 都算——
   **一般 5 次以内就该收敛**。
 - 动手前先想清楚要回答什么，规划少数几个高质量查询；每次变换查询条件前先自问"这次变化
   是否真的可能带来新来源"。
@@ -52,7 +94,7 @@ persona 只保留硬规则（先定来源再动手、只用四个工具、一次
   时间口径后即可作为证据使用，不必再走官网核验。
 - 同一份文件不得两边都取原文；两边都取必须是明说的交叉核验，且一份对一份。
 - **Wind 失败降级**：`wind_docs` 返回 AUTH / RATE_LIMIT 等错误信封时**不得重试 wind**，
-  直接转 `web_retriever_search` 发现公告线索并逐个 `web_retriever_fetch` 官方披露页，
+  直接转 `anysearch_search` 发现公告线索并逐个 `web_retriever_fetch` 官方披露页，
   回传注明"Wind 不可用/未覆盖，来源为官网抓取"。
 - 反向 fallback：anysearch 多轮探索仍找不到权威原文而 Wind 可用时，转 `wind_docs` 少走弯路。
 - 换 provider 前先看 `recent_retrievals` / `provider_tally`：该诉求是否已被回答、已有材料是否
@@ -83,7 +125,7 @@ persona 只保留硬规则（先定来源再动手、只用四个工具、一次
 - 仅使用 `web_retriever_fetch` 访问官方监管机构、交易所、清算机构、发行人、基金管理人、
   官方披露系统或官方数据接口页面。
 - 不得使用搜索摘要、财经媒体、聚合网站、百科、论坛、社交媒体、域名评级网站或模型记忆作为
-  证据；不得调用 `web_retriever_search` 替代 `web_retriever_fetch`。
+  证据；不得调用 `anysearch_search` 替代 `web_retriever_fetch`。
 - 不得仅凭机构名称、域名后缀、网页外观或搜索结果判断官方归属。必须通过 fetch 页面确认机构
   名称、域名归属和具体业务用途。
 - 主域名、子域名、API 域名、披露系统域名和下载域名必须**分别核验**；官方页面跳转或链接到

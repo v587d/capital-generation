@@ -266,14 +266,45 @@ test('缺 Content-Type 时按正文保守嗅探：HTML 放行（cls.cn 回归）
 })
 
 test('缺 Content-Type 时按正文保守嗅探：JSON 与裸标签放行', async () => {
-  for (const body of ['{"ok":true}', '<div>x</div>', '<?xml version="1.0"?><r/>']) {
+  // 本用例只负责"嗅探放行"这一半；**只有 JSON 承诺原样返回**——HTML/XML 仍走标签剥除
+  // （实测 `<?xml version="1.0"?><r/>` 会被剥成空串，属既有行为、不在本次 JSON 修复范围内）。
+  for (const [body, expected] of [['{"ok":true}', '{"ok":true}'], ['<div>x</div>', 'x'], ['<?xml version="1.0"?><r/>', '']]) {
     const restore = installFetch(async () => makeResponse(200, {}, body))
     try {
       const result = await makeFetcher().fetch('https://example.test/x')
       assert.equal(result.status, 200, `正文 ${JSON.stringify(body.slice(0, 12))} 应被嗅探放行`)
+      assert.equal(result.markdown, expected, `正文 ${JSON.stringify(body.slice(0, 12))} 的转换结果`)
     } finally {
       restore()
     }
+  }
+})
+
+test('JSON 正文原文直通：字段名与数组括号不得被 markdown 转义（2026-09 缺陷回归）', async () => {
+  // 事故形态：此前一律走 htmlToMarkdown，`\[ ... \]` 让 JSON.parse 失效、
+  // `content_text` 变 `content\_text` 让按字段名读取失效。声明头与缺头两条路都要守住。
+  const payload = '{"code":20000,"items":[{"content_text":"正文","score":2}]}'
+  for (const headers of [{ 'content-type': 'application/json' }, {}]) {
+    const restore = installFetch(async () => makeResponse(200, headers, payload))
+    try {
+      const result = await makeFetcher().fetch('https://example.test/api')
+      assert.equal(result.markdown, payload, `headers=${JSON.stringify(headers)} 时 JSON 必须原样返回`)
+      assert.deepEqual(JSON.parse(result.markdown), JSON.parse(payload), '回执正文必须仍可 JSON.parse')
+      assert.ok(!result.markdown.includes('\\'), '不得出现 markdown 转义反斜杠')
+    } finally {
+      restore()
+    }
+  }
+})
+
+test('JSON 原文直通同样受字符上限约束并披露 truncated', async () => {
+  const restore = installFetch(async () => makeResponse(200, { 'content-type': 'application/json' }, '{"a":"bbbbbbbbbb"}'))
+  try {
+    const result = await makeFetcher({ maxContentChars: 8 }).fetch('https://example.test/api')
+    assert.equal(result.truncated, true)
+    assert.ok(result.markdown.length <= 8)
+  } finally {
+    restore()
   }
 })
 

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { DataCollectorHub, buildDataKey, normalizeKeyToken } from '../lib/data-collector/hub.js'
 import { DatasetStoreError } from '../lib/data-collector/store.js'
 import { createFuyaoRestSources } from '../lib/sources/fuyao-rest.js'
+import { createTencentSources } from '../lib/sources/tencent-http.js'
+import { createEastmoneySources } from '../lib/sources/eastmoney-http.js'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const SESSION = { id: 'session-1', header: { cwd: '/workspace/proj' } }
@@ -328,9 +330,9 @@ test('describeCapability：返回单个能力详情，未知名字返回 undefin
 
 test('能力目录体积预算：必须留在 DSH 剪枝阈值（8192）以内，否则中间能力会被截断', async () => {
   const { hub } = makeHub()
-  for (const dataSource of createFuyaoRestSources(async () => 'key')) hub.registerSource(dataSource)
+  for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources()]) hub.registerSource(dataSource)
   const directory = JSON.stringify(hub.listCapabilities())
-  assert.ok(hub.capabilityNames().length >= 61, '端点数量回归：目录预算断言必须覆盖全部已注册能力')
+  assert.equal(hub.capabilityNames().length, 69, '端点数量回归：目录预算断言必须覆盖 Fuyao、Tencent 与 Eastmoney 全部已注册能力')
 
   // 预算的来源（实测本机 dsh 0.1.5-rc.1，不是拍脑袋的数字）：
   // - 真实上限是 dsh-compaction-tool-result-pruner 的 `thresholdChars`（preset 里配 8192）。

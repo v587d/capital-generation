@@ -119,8 +119,14 @@ const PLUGIN_TOOLS = [
   'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile', 'prepare_chart_source', 'render_chart',
   'get_local_datetime',
   'resolve_data_time_range',
-  'web_retriever_search', 'web_retriever_fetch',
+  'anysearch_search', 'web_retriever_fetch',
   'wind_docs_announcements', 'wind_docs_news',
+  // 具名来源查询面（provider + operation 命名，见 src/web-retriever/sources.ts）：
+  // 与 PLUGIN_TOOLS 里其余名字一样，allow 写了就必须真注册，否则 tools.restrict() 会在
+  // **创建子 Agent 的窗口**报错（表现是"创建子 Agent 失败"，不是挂载失败）。
+  'cls_telegraph', 'wscn_lives', 'cninfo_irm', 'sseinfo_qa',
+  // 东财 / 新浪 / 同花顺侧（2026-09-24 新增；同一族：写了就必须真注册）
+  'eastmoney_724', 'eastmoney_stock_news', 'eastmoney_reports', 'sina_reports', 'ths_eps_forecast',
 ]
 const PRESET_TOOLS = [
   'send_message', 'interrupt_agent', 'list_agents',
@@ -375,11 +381,25 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
   assert.equal(retrieverRow.config.toolName, 'subagent_web_retriever')
   assert.equal(retrieverRow.config.backgroundMode, 'continuable')
   assert.deepEqual(retrieverRow.config.toolFilter?.allow, [
-    'send_message', 'skill', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'resolve_data_time_range',
+    'send_message', 'skill', 'anysearch_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news',
+    // 具名来源查询面（provider + operation 命名）：缺一个，对应的来源在子 Agent 手里就是"看不见的能力"。
+    'cls_telegraph', 'wscn_lives', 'cninfo_irm', 'sseinfo_qa',
+    'eastmoney_724', 'eastmoney_stock_news', 'eastmoney_reports', 'sina_reports', 'ths_eps_forecast',
+    'resolve_data_time_range',
   ])
   // persona 只留每轮硬规则；检索法则、回传格式与官方域名核验清单在 skill capital-web-protocol。
-  for (const pattern of [/网页材料获取执行器/, /web_retriever_search/, /web_retriever_fetch/, /先定来源再动手/, /不要等 anysearch 空转后才想起/, /禁止把搜索结果全部 fetch/, /一次只能提交一个 URL/, /search_engine_provider/, /Wind 查询要素/, /public_document/, /wind_docs_announcements/, /wind_docs_news/, /recent_retrievals/, /provider_tally/, /不得重试 wind/, /每条证据都要有来源/, /不得编造链接/, /无来源的信息不得作为证据/, /verified_official 只能来自/, /verified_official/, /unverified/, /not_verified/, /不调用官方名称为 web_search 或 web_fetch/, /不索取或保存.*API Key/, /resolve_data_time_range/, /skill capital-web-protocol/]) {
+  for (const pattern of [/网页材料获取执行器/, /anysearch_search/, /web_retriever_fetch/, /先定来源再动手/, /不要等 anysearch 空转后才想起/, /禁止把搜索结果全部 fetch/, /一次只能提交一个 URL/, /search_engine_provider/, /Wind 三要素/, /public_document/, /wind_docs_announcements/, /wind_docs_news/, /recent_retrievals/, /provider_tally/, /不得重试 wind/, /每条证据都要有来源/, /不得编造链接/, /无来源的信息不得作为证据/, /verified_official 只能来自/, /verified_official/, /unverified/, /not_verified/, /不调用官方名称为 web_search 或 web_fetch/, /不索取或保存.*API Key/, /resolve_data_time_range/, /skill capital-web-protocol/]) {
     assertRule(RETRIEVER_PERSONA, pattern, `web_retriever persona 缺少要点: ${pattern}`)
+  }
+  // 具名来源面的硬规则：九个工具名都要点名（否则模型不知道有这个能力），
+  // 且必须写明"确定/可复现 + 该翻页就翻到没有 + 空结果是真事实"与深沪不可互换。
+  for (const pattern of [
+    /cls_telegraph/, /wscn_lives/, /cninfo_irm/, /sseinfo_qa/,
+    /eastmoney_724/, /eastmoney_stock_news/, /eastmoney_reports/, /sina_reports/, /ths_eps_forecast/,
+    /确定、可复现的结果集/, /空结果是真事实/, /深沪不可互换/, /北交所两边都没有/, /研报正文取不到/,
+    /具名来源都是媒体或互动平台.*不得标 verified_official/,
+  ]) {
+    assertRule(RETRIEVER_PERSONA, pattern, `web_retriever persona 缺少具名来源要点: ${pattern}`)
   }
   assertNoRule(RETRIEVER_PERSONA, /web_begin|web_latest|web_material|web_save|web_engines|wr_status|time_budget|from_cache/)
 
@@ -391,6 +411,11 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
     /链接只放一条最权威的/, /不得编造链接/, /每条证据都要有来源/, /无来源的信息不得作为证据/,
     /已核验官方白名单/, /候选\/未核验域名/, /verified_official/, /unverified/, /not_verified/,
     /不得重试 wind/, /recent_retrievals/, /provider_tally/, /public_document/,
+    // 具名来源面的协议：九个工具名 + 两类工作面的区分 + 空结果/深沪/status/note/截断口径。
+    // 这些是"检索纪律 vs 来源查询纪律"的差别所在，掉了就会退化成"搜不到就换来源重搜"。
+    /cls_telegraph/, /wscn_lives/, /cninfo_irm/, /sseinfo_qa/,
+    /来源查询/, /该翻页就翻到没有/, /空结果是真事实/, /深沪不可互换/, /北交所两个平台都没有/,
+    /status.*answered.*unanswered/, /回执 `note` 必须读/, /1200 字符/, /INVALID_RESPONSE/, /NOT_FOUND/,
     // 本地直连回退：来源标注、能力边界与"不算重试"三条硬约束（Task 8）。
     /local-http/, /`via`/, /truncated/, /本机直连/, /官网直抓/, /PDF/, /不算.*重试/,
   ]) {
@@ -542,7 +567,7 @@ test('subagent_data_collector 行：叶子执行器工具边界', () => {
     assert.ok(!allow.includes(removedTool), `toolFilter.allow 不应包含已删除的 ${removedTool}`)
   }
   // 叶子执行器：不应被允许委派/提问/网页/文件操作
-  for (const forbiddenTool of ['interrupt_agent', 'subagent', 'subagent_data_collector', 'ask_user_question', 'todo_write', 'web_search', 'web_fetch', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'bash']) {
+  for (const forbiddenTool of ['interrupt_agent', 'subagent', 'subagent_data_collector', 'ask_user_question', 'todo_write', 'web_search', 'web_fetch', 'anysearch_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'bash']) {
     assert.ok(!allow.includes(forbiddenTool), `toolFilter.allow 不应包含 ${forbiddenTool}`)
   }
 })
@@ -616,7 +641,7 @@ test('subagent_data_junior 行：continuable、persona 覆盖、toolFilter 只�
   assert.ok(Array.isArray(allow), 'toolFilter.allow 必须存在')
   assert.deepEqual([...allow].sort(), ['describe_dataset', 'get_local_datetime', 'inspect_dataset', 'prepare_chart_source', SHELL_SLOT, 'profile_dataset', 'query_dataset', 'resolve_data_time_range', 'send_message', 'skill', 'subagent_visualization_specialist'])
   // data_junior 不得访问外部行情 API、网页检索、凭据或委派能力
-  for (const forbiddenTool of ['request_data', 'list_capabilities', 'dc_status', 'subagent', 'subagent_data_collector', 'subagent_data_junior', 'subagent_data_analyst', 'ask_user_question', 'todo_write', 'web_search', 'web_fetch', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'python', 'write_profile', 'render_chart']) {
+  for (const forbiddenTool of ['request_data', 'list_capabilities', 'dc_status', 'subagent', 'subagent_data_collector', 'subagent_data_junior', 'subagent_data_analyst', 'ask_user_question', 'todo_write', 'web_search', 'web_fetch', 'anysearch_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'python', 'write_profile', 'render_chart']) {
     assert.ok(!allow.includes(forbiddenTool), `toolFilter.allow 不应包含 ${forbiddenTool}`)
   }
   // bash/pwsh 是唯一按平台选名的槽位：只认表达式本身，别把平台解析后的名字当成硬编码

@@ -2,7 +2,7 @@
  * 生成 docs/data-collector-capabilities.md（能力总表）。
  *
  * 为什么是脚本而不是手写：61 个端点的表格手工维护必然漂移。本脚本从
- * `src/sources/fuyao-rest.ts` 的端点定义直接生成表格，`test/data-collector-capabilities.test.mjs`
+ * `src/sources/fuyao-rest.ts` 与 `src/sources/tencent-http.ts` 的端点定义直接生成表格，`test/data-collector-capabilities.test.mjs`
  * 再断言"文档 == 实现"，于是新增端点忘了同步时会在测试里失败，而不是在文档里悄悄过期。
  *
  *   npm run docs:capabilities
@@ -10,15 +10,21 @@
 import { writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { createFuyaoRestSources } from '../lib/sources/fuyao-rest.js'
+import { createTencentSources } from '../lib/sources/tencent-http.js'
+import { createEastmoneySources } from '../lib/sources/eastmoney-http.js'
 import { DataCollectorHub } from '../lib/data-collector/hub.js'
 
 const OUTPUT = fileURLToPath(new URL('../docs/data-collector-capabilities.md', import.meta.url))
 
 const hub = new DataCollectorHub({ store: { async save() { throw new Error('unused') } } })
-const sources = createFuyaoRestSources(async () => 'unused')
+const sources = [...createFuyaoRestSources(async () => 'unused'), ...createTencentSources(), ...createEastmoneySources()]
 for (const source of sources) hub.registerSource(source)
 
-const pathOf = (source) => '/' + source.schema.data_key.replace('fuyao.api.', '').replace(/\./g, '/')
+const pathOf = (source) => source.schema.source_label === 'tencent'
+  ? `/tencent/${source.schema.capability.replace(/^tencent_/, '')}`
+  : source.schema.source_label === 'eastmoney'
+    ? `/eastmoney/${source.schema.capability.replace(/^eastmoney_/, '')}`
+    : '/' + source.schema.data_key.replace('fuyao.api.', '').replace(/\./g, '/')
 
 const GROUPS = [
   ['元数据（代码表与消歧）', (p) => p.startsWith('/api/meta/')],
@@ -34,6 +40,8 @@ const GROUPS = [
   ['基金 · 财务、指标与诊断', (p) => p.startsWith('/api/fund/financials/') || p.startsWith('/api/fund/indicators/') || p.startsWith('/api/fund/diagnostics/')],
   ['基金 · 分红、募集与额度', (p) => p.startsWith('/api/fund/corporate-actions/') || p.startsWith('/api/fund/offerings/') || p.startsWith('/api/fund/quota/')],
   ['基金 · 在线回测', (p) => p.startsWith('/api/fund/backtest/')],
+  ['腾讯公开 HTTP（fallback）', (p) => p.startsWith('/tencent/')],
+  ['东方财富 HTTP（资金与筹码）', (p) => p.startsWith('/eastmoney/')],
 ]
 
 const paramsOf = (source) => {
@@ -47,11 +55,14 @@ const paramsOf = (source) => {
 const L = []
 L.push('# data_collector 能力总表')
 L.push('')
-L.push('> 本表由 `npm run docs:capabilities` 从 `src/sources/fuyao-rest.ts` 的端点定义生成，并由 `test/data-collector-capabilities.test.mjs` 断言与实现同步：新增端点若忘了重新生成，测试会失败。')
+L.push('> 本表由 `npm run docs:capabilities` 从 Fuyao、Tencent 与 Eastmoney source 定义生成，并由 `test/data-collector-capabilities.test.mjs` 断言与实现同步：新增端点若忘了重新生成，测试会失败。')
 L.push('')
-L.push('当前共 **' + sources.length + ' 个 capability**，全部来自同花顺 Fuyao 开放平台（`source_label: fuyao`）。参数后带 **\\*** 表示必填。')
+const fuyaoCount = sources.filter((source) => source.schema.source_label === 'fuyao').length
+const tencentCount = sources.filter((source) => source.schema.source_label === 'tencent').length
+const eastmoneyCount = sources.filter((source) => source.schema.source_label === 'eastmoney').length
+L.push('当前共 **' + sources.length + ' 个 capability**：同花顺 Fuyao ' + fuyaoCount + ' 个，腾讯公开 HTTP ' + tencentCount + ' 个，东方财富 HTTP ' + eastmoneyCount + ' 个。参数后带 **\\*** 表示必填。')
 L.push('')
-L.push('**复核方式**：`npm run smoke:fuyao` 会对全部已注册 capability 发真实请求，逐条报告上游 `code` 与输出护栏判定（不打印密钥、不落盘响应数据）。')
+L.push('**复核方式**：Fuyao 能力可用 `npm run smoke:fuyao` 真实复核；Tencent 能力使用最小 smoke fixture 或按需真实请求复核；Eastmoney 能力使用固定 fixture，并按需执行公开网页 JSON smoke。')
 L.push('')
 L.push('## 怎么用')
 L.push('')

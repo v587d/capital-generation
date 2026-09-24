@@ -77,9 +77,9 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
     const hub = services.get('dataCollectorHub')
     assert.ok(hub, 'apply 必须提供 dataCollectorHub 服务')
     assert.ok(services.get('datasetStore'), 'apply 必须提供 datasetStore 服务')
-    assert.equal(hub.capabilityNames().length, 61, '装配后应注册全部 61 个 Fuyao capability')
+    assert.equal(hub.capabilityNames().length, 69, '装配后应注册 61 个 Fuyao、3 个 Tencent 与 5 个 Eastmoney capability')
 
-    for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status', 'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'prepare_chart_source', 'get_local_datetime', 'resolve_data_time_range', 'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'render_chart']) {
+    for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status', 'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'prepare_chart_source', 'get_local_datetime', 'resolve_data_time_range', 'anysearch_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'render_chart']) {
       assert.ok(toolNamed(tools, name), `装配后应注册工具 ${name}`)
     }
     // 2026-09-17 设计修订：final_report 整条链路删除（报告投影不再是主 Agent 的职责）。
@@ -91,11 +91,11 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
     assert.equal(status.api_key.present, true)
     assert.equal(status.api_key.source, 'env(FUYAO_API_KEY)')
     assert.equal(status.registration_error, null)
-    assert.equal(status.registered_capabilities.length, 61)
+    assert.equal(status.registered_capabilities.length, 69)
 
     // 能力目录应可用（两级发现的第一级）
     const directory = await toolNamed(tools, 'list_capabilities').execute({}, exec(delegated))
-    assert.equal(directory.length, 61)
+    assert.equal(directory.length, 69)
     const detail = await toolNamed(tools, 'describe_capability').execute({ capability: 'quote' }, exec(delegated))
     assert.equal(detail.capability, 'quote')
   } finally {
@@ -104,7 +104,7 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
   }
 })
 
-test('apply()：无 Key 时数据源不注册，但工具仍可见且 dc_status 说明原因', async () => {
+test('apply()：无 Fuyao Key 时 Tencent 数据源仍注册，工具与诊断状态可用', async () => {
   delete process.env.FUYAO_API_KEY
   try {
     const { ctx, tools, services, effectResults } = fakeCtx()
@@ -112,7 +112,7 @@ test('apply()：无 Key 时数据源不注册，但工具仍可见且 dc_status 
     await Promise.all(effectResults)
 
     const hub = services.get('dataCollectorHub')
-    assert.equal(hub.capabilityNames().length, 0, '无凭据时不应注册任何 Fuyao 数据源')
+    assert.equal(hub.capabilityNames().length, 8, '无 Fuyao 凭据时仍应注册 3 个 Tencent 与 5 个 Eastmoney capability')
 
     // 工具表与凭据状态解耦：Key 缺失不能让子 Agent 创建失败（toolFilter 里的名字必须真实存在）
     for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status']) {
@@ -122,12 +122,16 @@ test('apply()：无 Key 时数据源不注册，但工具仍可见且 dc_status 
     const status = await toolNamed(tools, 'dc_status').execute({}, exec(delegated))
     assert.equal(status.api_key.present, false)
     assert.match(status.registration_error, /FUYAO_API_KEY/)
-    assert.deepEqual(status.registered_capabilities, [])
+    assert.deepEqual(status.registered_capabilities, [
+      'tencent_quote', 'tencent_kline', 'tencent_ticks',
+      'eastmoney_top_buy_sell_market', 'eastmoney_top_buy_sell_ticker', 'eastmoney_lockup_expiry',
+      'eastmoney_sector_rotation', 'eastmoney_cashflow_rotation',
+    ])
 
     // 目录为空时 describe_capability 必须给出可引导的错误，而不是含糊的 not found
     await assert.rejects(
       () => toolNamed(tools, 'describe_capability').execute({ capability: 'quote' }, exec(delegated)),
-      /capability_catalog_empty/,
+      /capability_unknown/,
     )
   } finally {
     if (SAVED_KEY !== undefined) process.env.FUYAO_API_KEY = SAVED_KEY

@@ -43,6 +43,7 @@ const FIVE_YEAR_DAYS = 1830
 /** 数据接口时间参数的唯一模型可见契约；不从自然语言 description 反推规则。 */
 const DATA_TIME_CONTRACTS: Record<string, DataTimeContract> = {
   history: { kind: 'epoch_range', fields: ['start', 'end'], maxDays: TEN_YEAR_DAYS },
+  tencent_kline: { kind: 'date_range', fields: ['start', 'end'], maxDays: TEN_YEAR_DAYS, warning: '腾讯 K 线的 start/end 仅支持日/周/月；分钟线只能取最近 count 根' },
   index_history: { kind: 'epoch_range', fields: ['start', 'end'], maxDays: TEN_YEAR_DAYS },
   income_statement: { kind: 'epoch_range', fields: ['start', 'end'], maxDays: TEN_YEAR_DAYS },
   balance_sheet: { kind: 'epoch_range', fields: ['start', 'end'], maxDays: TEN_YEAR_DAYS },
@@ -54,6 +55,9 @@ const DATA_TIME_CONTRACTS: Record<string, DataTimeContract> = {
   hot_stock_rank_trend: { kind: 'date_range', fields: ['start_date', 'end_date'], maxDays: LAST_YEAR_DAYS },
   hot_stock_history: { kind: 'date', fields: ['date'], maxDays: LAST_YEAR_DAYS },
   dragon_tiger: { kind: 'date', fields: ['date'], maxDays: LAST_YEAR_DAYS, warning: '显式日期必须是交易日；工具不会自动回退到最近交易日' },
+  eastmoney_top_buy_sell_market: { kind: 'date_range', fields: ['start_date', 'end_date'], maxDays: LAST_YEAR_DAYS },
+  eastmoney_top_buy_sell_ticker: { kind: 'date_range', fields: ['start_date', 'end_date'], maxDays: LAST_YEAR_DAYS },
+  eastmoney_lockup_expiry: { kind: 'date_range', fields: ['start_date', 'end_date'] },
   auction_benchmark: { kind: 'date', fields: ['date'], warning: '显式日期必须是交易日；工具不会自动回退到最近交易日' },
   limit_up_pool: { kind: 'date_ms', fields: ['date_ms'], warning: 'date_ms 必须对应交易日；工具不会自动回退到最近交易日' },
   limit_down_pool: { kind: 'date_ms', fields: ['date_ms'], warning: 'date_ms 必须对应交易日；工具不会自动回退到最近交易日' },
@@ -62,7 +66,7 @@ const DATA_TIME_CONTRACTS: Record<string, DataTimeContract> = {
   fund_bond_history: { kind: 'date', fields: ['end_date'], warning: 'end_date 必须是可用报告期截止日；如需确认，请先查询 fund_bond_report_dates' },
   fund_nav: { kind: 'enum_range', fields: ['range'], enumValues: ['week', 'month', 'tmonth', 'hyear', 'year', 'twoyear', 'tyear', 'fyear'], enumMap: { last_7_days: 'week', last_1_month: 'month', last_3_months: 'tmonth', last_6_months: 'hyear', last_1_year: 'year', last_2_years: 'twoyear', last_3_years: 'tyear', last_5_years: 'fyear' } },
   fund_manager_performance: { kind: 'enum_range', fields: ['range'], enumValues: ['month', 'tmonth', 'year', 'nowyear', 'now'], enumMap: { last_1_month: 'month', last_3_months: 'tmonth', last_1_year: 'year', current_year: 'nowyear', since_inception: 'now' } },
-  web_retriever_search: { kind: 'date_range', fields: ['start_date', 'end_date'] },
+  anysearch_search: { kind: 'date_range', fields: ['start_date', 'end_date'] },
   wind_docs_announcements: { kind: 'date_range', fields: ['start_date', 'end_date'] },
   wind_docs_news: { kind: 'date_range', fields: ['start_date', 'end_date'] },
 }
@@ -372,7 +376,7 @@ function dataTimeRangeDefinition(store?: TimeAxisReader) {
     name: 'resolve_data_time_range',
     description: '解析时间窗，**两种形态**，绝不自行换算时间戳。① 取数形态：传 capability + period，输出可直接交给 request_data 的时间参数；② Dataset 分析形态：传 dataset_id（可选 time_column）+ period 或 anchor_date，按**该 Dataset 时间列自身的时区偏移**输出可直接用于 query_dataset filters 的边界（bounds.bound_ge/bound_le）与人类可读日期（range/data）。period 支持 today、yesterday、YYYY、YYYY-MM、ytd、current_year、previous_year、all、last_N_days/weeks/months/years，或 {unit,count}。anchor_date 省略时：取数形态用当前 Asia/Shanghai 日期，Dataset 形态用该 Dataset 的最后一天（相对期因此不会因数据陈旧而落空）。交易日与基金报告期不会自动猜测，结果中的 warnings 必须遵守。',
     parameters: jsonObject({
-      capability: { type: 'string', description: '形态①：数据能力名，或 web_retriever_search / wind_docs_announcements / wind_docs_news' },
+      capability: { type: 'string', description: '形态①：数据能力名，或 anysearch_search / wind_docs_announcements / wind_docs_news' },
       dataset_id: { type: 'string', description: '形态②：已授权的 dataset_id；给出时按该 Dataset 的时间轴解析（此时忽略 capability）。该形态只对**被委派的子 Agent**（如 data_junior）开放' },
       time_column: { type: 'string', description: '形态②可选：显式指定时间列；省略时宿主按列名与取值形态探测' },
       period: { oneOf: [{ type: 'string' }, { type: 'object', properties: { unit: { type: 'string', enum: ['day', 'week', 'month', 'quarter', 'year'] }, count: { type: 'integer' } }, required: ['unit', 'count'], additionalProperties: false }] },

@@ -36,7 +36,7 @@ description: Use when composing or reading a Capital data message — the exact 
 | `task_id` | 同一任务复用同一个值，便于回传对账 |
 | `description` | 用自然语言写清要什么数据；也可含标的、区间、频率 |
 | `capability` | 可选。明确知道能力名时才指定；省略时由 `data_collector` 走下面 §1.1 的两步发现 |
-| `params` | 按该 capability 的 `input_schema` 填写；标的使用完整代码（如 `600519.SH`），不自行拼接交易所后缀 |
+| `params` | 按该 capability 的 `input_schema` 填写；标的使用完整代码（如 `600519.SH`），不自行拼接交易所后缀。腾讯 fallback 使用 `tencent_quote` / `tencent_kline`，不要改写成已有 `quote` / `history` |
 | `force_refresh` | `false`/省略：宿主可复用当前 session 内未过期的 Dataset；`true`：强制重新取数并生成新的不可变 Dataset，**绝不覆盖旧文件** |
 
 硬规则：

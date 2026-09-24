@@ -5,7 +5,103 @@
 
 **版本号口径（本仓实践）**：
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
-- **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做）。
+- **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容）。
+
+## [2.2.0] - 2026-09-24
+
+**2.1.2 以来最大的一次能力扩容，有一处工具改名需迁移**：
+
+- **改名**：`web_retriever_search` → **`anysearch_search`**（按 provider 命名，与 `wind_docs_*` 同口径）。
+  任何自定义 prompt、外部脚本或审计脚本里出现 `web_retriever_search` 的地方改读 `anysearch_search`；
+  工具**能力**与入参完全一致，只是名字变了。`web_retriever_fetch` **不改名**——它是一条
+  AnySearch→本机直连的**回退链**，回执里的 `via` 标明实际来源，按传输命名会与该字段自相矛盾。
+  既有 `wind_docs_announcements` / `wind_docs_news`、以及 `request_data` / `list_capabilities` /
+  `describe_capability` 等数据面工具的名字与入参均不变，其余升级无需改调用方式。
+- **扩容**：`data_collector` **61 → 69 个 capability**（新增腾讯 3 个 + 东财 5 个，全部公开端点、
+  **无需新增密钥**）；`web_retriever` 新增**九个具名来源查询工具**（此前只有 anysearch 与 wind_docs
+  两个 provider、4 个检索工具）；东财请求收敛到**一个进程级共享客户端**，数据面与 web 面共用同一个
+  节流器。
+
+### Added
+
+- **`data_collector` 新增八个 capability（61 → 69）**（`src/sources/tencent-http.ts`、
+  `src/sources/eastmoney-http.ts`；均走公开端点、零密钥，注册进同一个 `DataCollectorHub`，与 Fuyao
+  能力共用 `list_capabilities` → `describe_capability` → `request_data` 的两步发现与落盘链路）：
+  - **腾讯公开 HTTP 三个（行情 fallback）**：`tencent_quote`（实时行情、估值、涨跌停和 ETF 快照）、
+    `tencent_kline`（日/周/月复权与 1~60 分钟 K 线）、`tencent_ticks`（最近交易日分笔成交明细）。
+  - **东方财富 HTTP 五个（资金与筹码）**：`eastmoney_top_buy_sell_market`（全市场龙虎榜汇总）、
+    `eastmoney_top_buy_sell_ticker`（单票龙虎榜汇总）、`eastmoney_lockup_expiry`（限售解禁日历）、
+    `eastmoney_sector_rotation`（板块行情排名快照）、`eastmoney_cashflow_rotation`（板块资金流快照）。
+  - **时间契约同步**：`tencent_kline`（`start`/`end` 仅日/周/月，分钟线只能取最近 `count` 根）与三个
+    东财日期区间能力进 `DATA_TIME_CONTRACTS`，`resolve_data_time_range` 可直接产出这些能力的入参；
+    `capital-data-protocol` skill 同步提示腾讯 fallback 的能力名（`tencent_quote` / `tencent_kline`，
+    不要改写成已有 `quote` / `history`）。
+  - **能力总表重新生成**：`npm run docs:capabilities` 从 Fuyao / Tencent / Eastmoney 三份 source
+    定义生成 `docs/data-collector-capabilities.md`，测试断言「文档 == 实现」；能力目录体积仍留在
+    DSH 剪枝阈值（8192）以内。
+- **`web_retriever` 九个具名来源查询工具**（`src/web-retriever/sources.ts`，provider + feature 命名，
+  全部公开端点、零 key）：`cls_telegraph`（财联社 7×24 快讯，`sign = md5(sha1(排序 query 串))`
+  本地计算）、`wscn_lives`（华尔街见闻快讯，`channel` + `cursor` 翻页）、`eastmoney_724`
+  （东财 7×24 快讯，与前两条互为备份）、`cninfo_irm`（巨潮互动易问答，深市，两步 POST）、
+  `sseinfo_qa`（上证e互动问答，沪市，公司列表二分定位 uid）、`eastmoney_stock_news`（个股新闻）、
+  `eastmoney_reports`（个股研报列表，含评级与逐篇预测 EPS）、`sina_reports`（研报第二来源，
+  不含评级与目标价）、`ths_eps_forecast`（同花顺机构一致预期 EPS，逐年给出机构数 / 最小 /
+  **均值** / 最大 / 行业平均）。它们与 `search` / `fetch` 是**两个不同工作面**：后者是检索
+  （发现候选、按 URL 取正文），前者是**查询**（具名来源 + 业务参数 → 确定、有序、可翻页、同参可复现
+  的结果集）。回执带 `provider` / `operation` / `count` / `next_cursor` / `note`，并计入
+  `provider_tally`（按来源分别计数），"同一 provider 5 次内收敛"的经验法则因此自动覆盖到新来源。
+- **东财共享网络面**（`src/net/eastmoney-client.ts` + `src/net/throttle.ts`）：进程级单例 + 串行最小
+  间隔（350ms ≈ 2.9 次/秒）。数据面（Hub 的 `eastmoney_*` 能力）与 web_retriever 侧**共用同一个
+  节流器**，不各建 HTTP 出口——东财按**出口 IP** 风控（社区实测 >5 次/秒、1 分钟 ≥200 次、
+  5 分钟 ≥300 次即临时封禁），两套独立限流等于没有限流。
+  ⚠️ `DataCollectorHub` 的 FIFO 只保证"同一时刻一个请求"，**不含最小间隔**：串行 ≠ 节流。
+- **`createHttpRequester`**（`src/web-retriever/local-fetch.ts`）：出口校验（URL 合法性 + DNS 公网
+  IP 闸门 + 重定向重校验 + 大小/超时上限 + 取消语义）抽出为共用实现，`createLocalFetcher` 与九个
+  来源工具走同一条路径，不新增第二份网络实现；**不引** `ctx.web` / `dsh-tool-web`。
+- **`HttpRequest.encoding`**（`local-fetch.ts`）：允许来源实现声明正文编码（同花顺一致预期页是 GBK
+  而响应头不带 charset），**不暴露给模型**。
+
+### Changed
+
+- **`web_retriever_search` → `anysearch_search`**（46 处引用、11 个文件同步：工具注册、persona、
+  skill、`resolve_data_time_range` 的能力表、测试与设计文档）。
+- **`web_retriever` persona 与 `capital-web-protocol` skill**：来源边界表扩到两个 provider +
+  九个具名来源工具，新增「来源查询纪律」（该翻页就翻到没有、空结果是真事实、深沪不可互换、
+  `status` 是事实不是缺口、`note` 必读、单条正文约 1200 字符上限与截断提示、失败码含义）；
+  persona 保持瘦身，工具清单与细则进 skill。
+- **`data_junior` 的 `# BASH DISCIPLINE` 补回软约束**：写明 bash 只做纯计算兜底（不是取数通道）、
+  不联网、不读文件、不碰 `capital-data` 路径、时间窗仍优先 `resolve_data_time_range`。
+- **分层判据（写进注释与文档，供后续维护者）**：数据面按**可复用性**切——数值/分页端点走 Hub
+  （Dataset 复用是收益），流式文本来源走 web_retriever（Dataset 复用是语义错误）；
+  **网络面只有一份**。判据不是 provider。
+
+### Fixed
+
+- **本机直连不再改写 JSON 正文**：此前所有正文一律交给 markdown 转换器，导致数组括号变
+  `\[ ... \]`（`JSON.parse` 不再成立）、字段名 `content_text` 变 `content\_text`（按字段名读取
+  不可靠）、`<script>` 内容被当标签删除（数据丢失）。现在 JSON 按**正文**判定并原文直通
+  （不再只看响应头），HTML 仍照旧转 markdown。
+- **接受 `json/javascript` 等 script 类 MIME**：严格按 `application/json` 判定会把正常返回 JSON 的
+  接口（如上证e互动的公司列表）误判成 `UNSUPPORTED_CONTENT_TYPE`。
+- **上证e互动公司列表按 `<a>` 元素解析**：窗口式正则（`uid=…[\s\S]{0,N}?…png`）在真实页面上会
+  跨条目错配（实测把 `600369` 配成上一条的 `uid=65`）——"能跑但错"的映射比报错危险得多。
+- **上证e互动时间支持三类写法**：`2026年09月24日 09:30` / `昨天 18:16` / `2分钟前`、`1小时前`。
+  只认绝对写法会让"最新提问"列表**整次失败**（真机冒烟实测）。
+- **uid 缓存层次**：不再把扫描到的整页代码灌进 uid 缓存（那会在一次解析内塞满容量并淘汰掉正在解析
+  的代码，症状是"单次成功、再查同码却 NOT_FOUND"）。
+- **九个来源工具的调用方取消原样抛出**（`ABORTED`），不降级成 `ok:false` 失败信封。
+- **东财研报的预测 EPS 恒为 null**：上游该字段是**字符串**（`'1.0700000000'`），按 `typeof === 'number'`
+  判定会静默当成缺失。现在按值转换（`toFloat`），并补 `eps_next_year`。
+- **新浪研报的日期与类型两列写反**：按页面表头实测为「序号 / 标题 / 报告类型 / 发布日期 / 机构 /
+  研究员」，此前产出 `date:"公司"` / `type:"2026-09-01"`——每列都有值却整行错位。
+- **新浪研报的个股查询缺交易所前缀**：实测 `688017` 纯 6 位返回**假空页**（HTTP 200 且与"没有研报"
+  同形），必须 `sh688017`。北交所新号段 `920xxx` 必须先于 `9 → sh` 判定，否则会被发到上交所。
+  （参考实践把空页归因于"限流、必须间隔 6 秒"；本仓实测间隔 0 连续 4 次全部成功，真实原因是缺前缀。）
+- **`eastmoney_stock_news` 区分风控与真无新闻**：上游对部分 IP 间歇风控时只返回 `passportWeb` 而无
+  `cmsArticleWebOld`，按**键是否存在**判定并报错，不再静默返回空表。
+- **同花顺一致预期页是 GBK 而响应头不带 charset**：按 UTF-8 解会产生 11,800 个替换字符、中文与正则
+  全部失效；现由来源实现显式声明 `gbk`。同时表定位改为认表头（中英兼容），不再依赖固定位置。
+- **东财请求的 UA**：共享客户端统一带浏览器特征 UA（上游对空 UA / 无浏览器特征有风控）。
 
 ## [2.1.2] - 2026-09-23
 

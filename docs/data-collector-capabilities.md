@@ -1,10 +1,10 @@
 # data_collector 能力总表
 
-> 本表由 `npm run docs:capabilities` 从 `src/sources/fuyao-rest.ts` 的端点定义生成，并由 `test/data-collector-capabilities.test.mjs` 断言与实现同步：新增端点若忘了重新生成，测试会失败。
+> 本表由 `npm run docs:capabilities` 从 Fuyao、Tencent 与 Eastmoney source 定义生成，并由 `test/data-collector-capabilities.test.mjs` 断言与实现同步：新增端点若忘了重新生成，测试会失败。
 
-当前共 **61 个 capability**，全部来自同花顺 Fuyao 开放平台（`source_label: fuyao`）。参数后带 **\*** 表示必填。
+当前共 **69 个 capability**：同花顺 Fuyao 61 个，腾讯公开 HTTP 3 个，东方财富 HTTP 5 个。参数后带 **\*** 表示必填。
 
-**复核方式**：`npm run smoke:fuyao` 会对全部已注册 capability 发真实请求，逐条报告上游 `code` 与输出护栏判定（不打印密钥、不落盘响应数据）。
+**复核方式**：Fuyao 能力可用 `npm run smoke:fuyao` 真实复核；Tencent 能力使用最小 smoke fixture 或按需真实请求复核；Eastmoney 能力使用固定 fixture，并按需执行公开网页 JSON smoke。
 
 ## 怎么用
 
@@ -160,3 +160,21 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 |---|---|---|---|---|
 | `fund_backtest` | `/api/fund/backtest/result` | `thscode`\* `buy_conditions`\* `sell_conditions`\* `buy_frequency_type`\* `max_buy_times`\* `per_buy_amount`\* | 否 | 基金在线回测（策略/基准/曲线） |
 | `fund_backtest_indicators` | `/api/fund/backtest/indicators` | 无参数 | 否 | 回测可用指标清单（无参数） |
+
+## 腾讯公开 HTTP（fallback）
+
+| capability | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|
+| `tencent_quote` | `/tencent/quote` | `codes`\* | 否 | 腾讯实时行情、估值、涨跌停和 ETF 快照 |
+| `tencent_kline` | `/tencent/kline` | `code`\* `period` `adjust` `start` `end` `count` | 否 | 腾讯日周月复权和分钟 K 线 |
+| `tencent_ticks` | `/tencent/ticks` | `code`\* | 否 | 腾讯最近交易日分笔成交明细 |
+
+## 东方财富 HTTP（资金与筹码）
+
+| capability | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|
+| `eastmoney_top_buy_sell_market` | `/eastmoney/top_buy_sell_market` | `start_date`\* `end_date`\* `page` `size` | 是 | 东财全市场龙虎榜汇总 |
+| `eastmoney_top_buy_sell_ticker` | `/eastmoney/top_buy_sell_ticker` | `ticker`\* `start_date`\* `end_date`\* `page` `size` | 是 | 东财单票龙虎榜汇总 |
+| `eastmoney_lockup_expiry` | `/eastmoney/lockup_expiry` | `start_date`\* `end_date`\* `page` `size` | 是 | 东财限售解禁日历 |
+| `eastmoney_sector_rotation` | `/eastmoney/sector_rotation` | `board_type` `sort_field` `page` `size` | 是 | 东财板块行情排名快照 |
+| `eastmoney_cashflow_rotation` | `/eastmoney/cashflow_rotation` | `board_type` `page` `size` | 是 | 东财板块资金流快照 |

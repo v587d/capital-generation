@@ -81,22 +81,22 @@ function runTool(runtime, name, args, sessionId) {
 test('工具注册：anysearch 两工具 + wind_docs 两工具，无条件注册', () => {
   const runtime = registerAll(fakeRetriever().retriever, fakeWindClient().client)
   assert.deepEqual(runtime.definitions.map((item) => item.name), [
-    'web_retriever_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news',
+    'anysearch_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news',
   ])
 })
 
-test('web_retriever_search：单查询、参数有界、信封带 provider 与 recent_retrievals', async () => {
+test('anysearch_search：单查询、参数有界、信封带 provider 与 recent_retrievals', async () => {
   const { retriever, calls } = fakeRetriever()
   const runtime = registerAll(retriever, fakeWindClient().client)
-  const result = await runTool(runtime, 'web_retriever_search', { query: '贵州茅台公告', max_results: 3 }, 's1')
+  const result = await runTool(runtime, 'anysearch_search', { query: '贵州茅台公告', max_results: 3 }, 's1')
   assert.equal(result.ok, true)
   assert.equal(result.provider, 'anysearch')
   assert.equal(result.sources[0].url, 'https://example.test/result')
   assert.equal(result.recent_retrievals.length, 1)
-  assert.equal(result.recent_retrievals[0].tool, 'web_retriever_search')
+  assert.equal(result.recent_retrievals[0].tool, 'anysearch_search')
   assert.deepEqual(calls.search, [{ query: '贵州茅台公告', max_results: 3 }])
-  await assert.rejects(() => runTool(runtime, 'web_retriever_search', { query: '' }), /query is required/)
-  await assert.rejects(() => runTool(runtime, 'web_retriever_search', { query: 'x', max_results: 21 }), /between 1 and 20/)
+  await assert.rejects(() => runTool(runtime, 'anysearch_search', { query: '' }), /query is required/)
+  await assert.rejects(() => runTool(runtime, 'anysearch_search', { query: 'x', max_results: 21 }), /between 1 and 20/)
 })
 
 test('web_retriever_fetch：严格单 URL，信封带 provider 与回声', async () => {
@@ -118,23 +118,23 @@ test('web_retriever_fetch：严格单 URL，信封带 provider 与回声', async
 test('recent_retrievals 与 provider_tally：跨 provider 累计、按调用方 session 隔离、回声上限 8 而计数不封顶', async () => {
   const { retriever } = fakeRetriever()
   const runtime = registerAll(retriever, fakeWindClient().client)
-  await runTool(runtime, 'web_retriever_search', { query: 'q1' }, 's1')
+  await runTool(runtime, 'anysearch_search', { query: 'q1' }, 's1')
   await runTool(runtime, 'wind_docs_announcements', { query: 'q2' }, 's1')
-  const third = await runTool(runtime, 'web_retriever_search', { query: 'q3' }, 's1')
+  const third = await runTool(runtime, 'anysearch_search', { query: 'q3' }, 's1')
   assert.deepEqual(third.recent_retrievals.map((item) => [item.provider, item.tool, item.query]), [
-    ['anysearch', 'web_retriever_search', 'q1'],
+    ['anysearch', 'anysearch_search', 'q1'],
     ['wind_docs', 'wind_docs_announcements', 'q2'],
-    ['anysearch', 'web_retriever_search', 'q3'],
+    ['anysearch', 'anysearch_search', 'q3'],
   ])
   assert.deepEqual(third.provider_tally, { anysearch: 2, wind_docs: 1 }, 'tally 按 provider 累计且含本次')
 
-  const other = await runTool(runtime, 'web_retriever_search', { query: 'other-session' }, 's2')
+  const other = await runTool(runtime, 'anysearch_search', { query: 'other-session' }, 's2')
   assert.equal(other.recent_retrievals.length, 1, '不同调用方 session 的回声相互隔离')
   assert.deepEqual(other.provider_tally, { anysearch: 1 }, '不同调用方 session 的计数相互隔离')
 
   let last
   for (let i = 0; i < 10; i += 1) {
-    last = await runTool(runtime, 'web_retriever_search', { query: `loop-${i}` }, 's3')
+    last = await runTool(runtime, 'anysearch_search', { query: `loop-${i}` }, 's3')
   }
   assert.equal(last.recent_retrievals.length, 8, '回声最多保留最近 8 条')
   assert.equal(last.recent_retrievals[7].query, 'loop-9')
