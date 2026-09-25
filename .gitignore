@@ -43,3 +43,7 @@ docs/dev/*
 
 # ── 一次性复核/复现脚本的暂存目录（含内部安全复核内容，不随仓库发布）──
 .review/
+
+# 研发 Agent 本机的工具授权记录（每跑一条命令就追加，因人而异）；
+# .qoder/ 下将来要共享的 commands/workflows 不在此列。
+.qoder/settings.local.json
