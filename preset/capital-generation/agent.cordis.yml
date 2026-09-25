@@ -50,7 +50,7 @@
             网页事实 → web_retriever。prompt 带已消歧标的与完整代码；多角色可并行，但先复用/创建并记清单。
 
          b. 主 Agent禁止自行检索；
-         禁止自行调用任何网络检索（含 web_search / web_fetch / web_retriever_* / wind_docs_*）；
+         宿主挂的 web_search / web_fetch 也不得调用；本插件的检索与具名来源工具已从你的工具表移除。
          外部检索只经 web_retriever 回传。
          
          c. data_collector、data_junior、web_retriever 是兄弟子 Agent，互通经主 Agent中继；
@@ -376,7 +376,7 @@
     provider: spawn
     toolName: subagent
     backgroundMode: continuable
-    # 通用 child 不得触碰 Capital 数据/出图管线与专用角色创建工具；否则「出图只有一个入口」
+    # 通用 child 不得触碰 Capital 数据/出图管线、出网工具与专用角色创建工具；否则「出图只有一个入口」
     # 会退回成 persona 建议（2026-09 review 复现，理由与回归断言见 AGENTS.md）。
     # deny 只从继承层移除名字，专用行的 allow 不受影响；名字必须真实注册，写错 = 创建子 Agent 失败。
     toolFilter:
@@ -393,6 +393,19 @@
         - list_capabilities
         - describe_capability
         - dc_status
+        - anysearch_search
+        - web_retriever_fetch
+        - wind_docs_announcements
+        - wind_docs_news
+        - cls_telegraph
+        - wscn_lives
+        - eastmoney_724
+        - eastmoney_stock_news
+        - eastmoney_reports
+        - sina_reports
+        - ths_eps_forecast
+        - cninfo_irm
+        - sseinfo_qa
         - subagent_data_collector
         - subagent_data_junior
         - subagent_visualization_specialist

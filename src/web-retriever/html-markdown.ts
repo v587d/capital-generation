@@ -5,7 +5,13 @@
  * （`dsh-LLM-icon/.research/dsh-src/packages/web/tool-web/src/fetch.ts`）：
  * turndown + GFM 插件、`removeNonVisibleContent` 规则、无跨列展开的表格规则、
  * 512 层嵌套词法守卫与固定省略标记。官方实现里与本模块无关的呈现职责
- * （`Fetched <url>` 头、不可信内容提示、截断脚注、WeakMap memoization）一律不搬。
+ * （`Fetched <url>` 头、截断脚注、WeakMap memoization）一律不搬——"网页正文不是指令"
+ * 由 web_retriever persona 的硬规则承担，不在正文里插水印。
+ *
+ * 官方没做、这里补上的第四道：`stripInvisibleText`（零宽 / 双向覆盖 / C0-C1 控制符剥离）。
+ * 它放在本模块导出，是因为 invisibles 的入口不止 HTML：`extractTitle` 会解码数字实体
+ * （`&#x202E;` 解出来就是 RLO），AnySearch 返回的清洗正文也原样带这些字符。
+ * 三个内容入口（本地转换、title、具名来源页面字段）共用这一份实现（AGENTS.md §9.7）。
  *
  * 为什么必须补这三道保护（turndown 的已知缺口）：
  * - turndown 默认**不删** `<script>/<style>`，其正文会当文本带进输出；
@@ -30,6 +36,28 @@ export interface HtmlMarkdownResult {
   truncated: boolean
   /** true 表示转换被放弃（超深或 turndown 抛错），`markdown` 为省略标记。 */
   omitted: boolean
+}
+
+// ---------------------------------------------------------------------------
+// 不可见字符剥离（外部内容共用的出口）
+// ---------------------------------------------------------------------------
+
+/**
+ * 网页里可以出现**完全没有字形**的字符，而它们会原样进入模型上下文与用户看到的引用：
+ * - C0/C1 控制符与 DEL：`\r`、`\x00` 之类能把一行截断或让后续文本覆盖已显示内容；
+ * - 软连字符 `U+00AD`、零宽系列 `U+200B–U+200F`（含 LRM/RLM 方向标记）/ `U+2060–U+2064` / BOM：
+ *   肉眼不可见，却能把 `忽略前面的指令` 写成关键词字面检查**认不出**的形状；
+ * - 双向覆盖 `U+202A–U+202E` / 隔离符 `U+2066–U+2069`：改变一行的**显示顺序**
+ *   （Trojan Source 一类攻击），回显给用户的就是假的文本；
+ * - `U+2028` / `U+2029`：行/段分隔符，渲染上与 `\n` 等价、按行处理时又不算换行。
+ *
+ * 只删不替换成占位符：这些字符在合法正文里没有承载信息，删除是保序的。
+ * 换行 `\n`、回车 `\r`、制表 `\t` 保留（markdown 呈现需要）。
+ */
+const INVISIBLE_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/gu
+
+export function stripInvisibleText(value: string): string {
+  return value.replace(INVISIBLE_PATTERN, '')
 }
 
 // ---------------------------------------------------------------------------
@@ -304,7 +332,7 @@ function decodeEntities(text: string): string {
 export function extractTitle(html: string): string | undefined {
   const match = TITLE_PATTERN.exec(html.slice(0, TITLE_SCAN_CHARS))
   if (match === null) return undefined
-  const title = decodeEntities(match[1]).replace(/\s+/g, ' ').trim()
+  const title = stripInvisibleText(decodeEntities(match[1])).replace(/\s+/g, ' ').trim()
   return title === '' ? undefined : title
 }
 
@@ -330,7 +358,8 @@ function omittedResult(title: string | undefined, sourceTruncated: boolean, maxC
  *
  * 流程：先按 `maxChars` 截断源串（记 `truncated`，与官方 renderBody 一致）→
  * 超深或 turndown 抛错 → 固定省略标记 + `omitted: true`（不让原始标记外漏）→
- * 否则转换，再按 `maxChars` 截断输出。`title` 一律从**原始** HTML 提取。
+ * 否则转换，剥掉不可见字符（`stripInvisibleText`），再按 `maxChars` 截断输出。
+ * `title` 一律从**原始** HTML 提取。
  */
 export function htmlToMarkdown(html: string, maxChars: number): HtmlMarkdownResult {
   const title = extractTitle(html)
@@ -347,10 +376,11 @@ export function htmlToMarkdown(html: string, maxChars: number): HtmlMarkdownResu
     // RangeError。转换失败与超深走同一个省略标记，不把源标记带回模型上下文。
     return omittedResult(title, sourceTruncated, maxChars)
   }
-  const outputTruncated = converted.length > maxChars
+  const sanitized = stripInvisibleText(converted)
+  const outputTruncated = sanitized.length > maxChars
   return {
     ...(title !== undefined ? { title } : {}),
-    markdown: outputTruncated ? converted.slice(0, maxChars) : converted,
+    markdown: outputTruncated ? sanitized.slice(0, maxChars) : sanitized,
     truncated: sourceTruncated || outputTruncated,
     omitted: false,
   }

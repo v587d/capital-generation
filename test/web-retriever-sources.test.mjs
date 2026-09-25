@@ -10,7 +10,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { registerSourceTools } from '../lib/web-retriever/tools.js'
+import { registerSourceTools, SOURCE_OUTPUT_BUDGET_CHARS } from '../lib/web-retriever/tools.js'
 import { createEastmoneyClient } from '../lib/net/eastmoney-client.js'
 import {
   clsSign,
@@ -22,6 +22,7 @@ import {
   eastmoneyStockNews,
   sinaReports,
   sinaSymbol,
+  SSE_UID_LOCATE_TIMEOUT_MS,
   thsEpsForecast,
   parseCompanyList,
   parseSseFeed,
@@ -356,6 +357,41 @@ test('sseinfo_qa：公司列表返回 json/javascript 也必须收下（严格 a
   }
 })
 
+test('sseinfo_qa：uid 定位有总时限，超时是 TIMEOUT 而不是"这一轮被取消"', async () => {
+  resetSseCachesForTest()
+  // 永不 settle 的上游：单请求超时（TRANSPORT_OPTIONS 1s）管不住"10–13 个串行请求"这一整段，
+  // 只有注入的总预算能结束它。
+  const restore = installFetch(async () => new Promise(() => {}))
+  try {
+    await assert.rejects(
+      sseinfoQa(makeTransport(), { code: '600519', kind: 'answered', page: 1, pageSize: 10, uidLocateBudgetMs: 30 }),
+      (error) => {
+        assert.equal(error.code, 'TIMEOUT', `总时限到点必须报来源超时，实际 ${error.name}: ${error.message}`)
+        assert.match(error.message, /uid 定位超过/)
+        return true
+      },
+    )
+    // 调用方先取消：原样是取消，不能被总时限改写成 TIMEOUT（§4.1）。
+    const controller = new AbortController()
+    controller.abort()
+    await assert.rejects(
+      sseinfoQa(makeTransport(), { code: '600520', kind: 'answered', page: 1, pageSize: 10, uidLocateBudgetMs: 30, signal: controller.signal }),
+      (error) => {
+        assert.notEqual(error.code, 'TIMEOUT', '调用方取消不得被写成上游超时')
+        return true
+      },
+    )
+  } finally {
+    restore.restore()
+  }
+})
+
+test('sseinfo_qa 描述里写给模型的定位时限 = 代码实际用的预算', () => {
+  const definition = registerSources().find((candidate) => candidate.name === 'sseinfo_qa')
+  assert.match(definition.description, new RegExp(`整段定位有 ${SSE_UID_LOCATE_TIMEOUT_MS / 1000} 秒总时限`),
+    '描述里的秒数与 SSE_UID_LOCATE_TIMEOUT_MS 不一致：模型会按错的口径决定要不要等/重试')
+})
+
 test('sseinfo_qa：上游把别的公司数据混进来时按条过滤并写进 note，不整次失败', async () => {
   resetSseCachesForTest()
   // 实测形态：600519（uid 518）在 kind='questions' 下返回 600518 的问答。
@@ -493,14 +529,159 @@ test('工具输出：调用方取消必须原样抛出，不得降级成 ok:fals
   )
 })
 
+test('同意开关：enabled:false 时九个来源工具响亮失败（DISABLED），且一次本机 HTTP 都不发起', async () => {
+  const definitions = []
+  const runtime = { register: (definition) => { definitions.push(definition); return () => {} } }
+  registerSourceTools({ get: (name) => (name === 'tools' ? runtime : undefined), effect: (fn) => fn() },
+    { ...TRANSPORT_OPTIONS, enabled: false })
+  const restore = installFetch(async () => makeResponse(200, { 'content-type': 'application/json' }, '{}'))
+  try {
+    const byName = new Map(definitions.map((definition) => [definition.name, definition]))
+    const exec = { signal: new AbortController().signal, agent: { session: { id: 'source-disabled' } } }
+    // 覆盖一条闸门直连来源与一条东财共享客户端来源：开关管的是**全部九个**。
+    for (const name of ['cls_telegraph', 'eastmoney_724']) {
+      await assert.rejects(byName.get(name).execute({}, exec), (error) => {
+        const payload = JSON.parse(error.message)
+        assert.equal(payload.ok, false, `${name} 关闭时必须失败`)
+        assert.equal(payload.code, 'DISABLED')
+        assert.match(payload.error, /允许启动本地提取网页内容/)
+        return true
+      })
+    }
+    assert.equal(restore.requests.length, 0, '关闭后不得发起任何本机 HTTP')
+  } finally {
+    restore.restore()
+  }
+})
+
+test('eastmoney_* 与其余来源共用同一份出口闸门：不支持的内容类型被闸门拦下（不再是裸 fetch 直通）', async () => {
+  const definitions = registerSources()
+  const byName = new Map(definitions.map((definition) => [definition.name, definition]))
+  // 正文是合法 JSON：裸 fetch 会照常解析成功；闸门则按 content-type 拒绝。
+  const restore = installFetch(async () => makeResponse(200, { 'content-type': 'application/octet-stream' }, '{"code":"1","data":{"fastNewsList":[]}}'))
+  try {
+    const exec = { signal: new AbortController().signal, agent: { session: { id: 'source-gate' } } }
+    await assert.rejects(byName.get('eastmoney_724').execute({ limit: 5 }, exec), (error) => {
+      const payload = JSON.parse(error.message)
+      assert.equal(payload.ok, false)
+      assert.match(payload.error, /unsupported content type/)
+      return true
+    })
+  } finally {
+    restore.restore()
+  }
+})
+
+test('eastmoney_724 取消：取消信号原样穿过东财客户端与闸门适配，不被包成失败信封', async () => {
+  const definitions = registerSources()
+  const byName = new Map(definitions.map((definition) => [definition.name, definition]))
+  const controller = new AbortController()
+  controller.abort()
+  await assert.rejects(
+    byName.get('eastmoney_724').execute({ limit: 5 }, { signal: controller.signal }),
+    (error) => {
+      assert.equal(error.name, 'AbortError', `取消必须原样抛出，实际：${error.message}`)
+      assert.throws(() => JSON.parse(error.message), '取消不得被包成结构化失败信封')
+      return true
+    },
+  )
+})
+
 test('工具参数校验：代码必须 6 位、channel 形如 *-channel、kind 只能两个取值', async () => {
   const definitions = registerSources()
   const byName = new Map(definitions.map((definition) => [definition.name, definition]))
   const exec = { signal: new AbortController().signal }
-  await assert.rejects(byName.get('cninfo_irm').execute({ code: '60051' }, exec), /6-digit/)
+  await assert.rejects(byName.get('cninfo_irm').execute({ code: '60051' }, exec), /six-digit/)
   await assert.rejects(byName.get('wscn_lives').execute({ channel: 'global' }, exec), /global-channel/)
   await assert.rejects(byName.get('sseinfo_qa').execute({ kind: 'all' }, exec), /answered/)
   await assert.rejects(byName.get('cls_telegraph').execute({ limit: 999 }, exec), /limit/)
+})
+
+test('工具参数：带交易所前缀的代码由工具归一化，上游只看到纯 6 位', async () => {
+  // 实测：东财研报库对 `SH600519` 返回 hits=0，看起来像"这只票没研报"。归一化因此属于
+  // 工具职责（`bareAshareDigits`），而不是靠模型记得每次都写对格式。
+  const definitions = registerSources()
+  const byName = new Map(definitions.map((definition) => [definition.name, definition]))
+  const restore = installFetch(async (url) => {
+    if (url.includes('reportapi')) {
+      return makeResponse(200, { 'content-type': 'application/json' }, JSON.stringify({ data: [], TotalPage: 1, hits: 0 }))
+    }
+    if (url.includes('queryKeyboardInfo')) return json({ data: [{ secid: 'gssz0000001', code: '000001' }] })
+    return json({ rows: [], total: 0 })
+  })
+  try {
+    const exec = { signal: new AbortController().signal, agent: { session: { id: 'code-forms' } } }
+    for (const form of ['SH600519', '600519.SH', '600519']) {
+      await byName.get('eastmoney_reports').execute({ code: form }, exec)
+    }
+    const reportUrls = restore.requests.filter((request) => request.url.includes('reportapi')).map((request) => request.url)
+    assert.equal(reportUrls.length, 3)
+    for (const url of reportUrls) {
+      assert.match(url, /[?&]code=600519(&|$)/u, `带前缀写法必须先归一化：${url}`)
+      assert.doesNotMatch(url, /SH/iu)
+    }
+    await byName.get('cninfo_irm').execute({ code: 'SZ000001' }, exec)
+    // 两步取数：queryKeyboardInfo（POST body 带 keyWord）→ company/question（GET 带 stockcode）。
+    const irm = restore.requests.filter((request) => request.url.includes('irm.cninfo.com.cn'))
+    const keyword = irm.find((request) => request.url.includes('queryKeyboardInfo'))
+    assert.ok(keyword, 'cninfo_irm 第一步必须查 queryKeyboardInfo')
+    assert.match(String(keyword.init.body), /keyWord=000001(&|$)/u, '深市代码归一化后不带 SZ')
+    const qa = irm.find((request) => request.url.includes('company/question'))
+    assert.ok(qa, 'cninfo_irm 第二步必须按 orgId 查问答')
+    assert.match(qa.url, /[?&]stockcode=000001(&|$)/u)
+    await assert.rejects(byName.get('eastmoney_reports').execute({ code: '60051' }, exec), /six-digit/)
+  } finally {
+    restore.restore()
+  }
+})
+
+test('工具输出：条目再多也留在宿主剪枝阈值内，count 只说真放下的条数', async () => {
+  const definitions = registerSources()
+  const byName = new Map(definitions.map((definition) => [definition.name, definition]))
+  const long = '财联社9月24日电'.repeat(150)
+  // 只有 `content` 是长正文（`brief` 真实上一句话就够）：50 条的 JSON 约 6.4 万字符，
+  // 仍在出口 `maxContentChars`（100k）之内——否则正文会被静默切一刀，测试打的就不是预算了。
+  const rows = Array.from({ length: 50 }, (_unused, index) => ({
+    id: 2490000 + index, ctime: 1790224318 - index, title: `第${index}条`, content: long,
+    brief: `第${index}条`,
+    shareurl: `https://api3.cls.cn/share/article/${2490000 + index}`, in_roll: true,
+  }))
+  const restore = installFetch(async () => json({ errno: 0, data: { roll_data: rows } }))
+  try {
+    const exec = { signal: new AbortController().signal, agent: { session: { id: 'budget' } } }
+    const payload = await byName.get('cls_telegraph').execute({ limit: 50 }, exec)
+    const chars = JSON.stringify(payload).length
+    assert.ok(chars <= SOURCE_OUTPUT_BUDGET_CHARS, `输出必须留在剪枝阈值内，实际 ${chars} 字符`)
+    assert.ok(payload.count < 50, '单条 1200 字的 50 条必然超预算，必须裁')
+    assert.equal(payload.count, payload.items.length, 'count 必须等于真放下的条数，否则头部声明与正文不一致')
+    assert.match(payload.note, /只放了前 \d+ 条，省略其后 \d+ 条/, '被省略的条数必须写进 note，不能静默')
+  } finally {
+    restore.restore()
+  }
+})
+
+test('条目的 url 字段：不合法链接丢字段不丢条目', async () => {
+  // 这些 url 会变成用户可点击的 markdown 链接（AGENTS.md §4），所以协议、控制符、
+  // 凭据、超长四种形态都不配出现在证据里。
+  const page = {
+    errno: 0,
+    data: {
+      roll_data: [
+        { id: 1, ctime: 1790224318, title: '脚本协议', content: '正文', brief: '正文', shareurl: 'javascript:alert(document.cookie)', in_roll: true },
+        { id: 2, ctime: 1790224317, title: '超长链接', content: '正文', brief: '正文', shareurl: `https://api3.cls.cn/share/article/1?p=${'x'.repeat(600)}`, in_roll: true },
+        { id: 3, ctime: 1790224316, title: '凭据伪装', content: '正文', brief: '正文', shareurl: 'https://sseinfo.com.cn@evil.example/x', in_roll: true },
+      ],
+    },
+  }
+  const restore = installFetch(async () => json(page))
+  try {
+    const outcome = await clsTelegraph(makeTransport(), { limit: 10 })
+    assert.equal(outcome.items.length, 3, '链接不合法不是丢条目的理由，条目本身仍是证据')
+    assert.deepEqual(outcome.items.map((item) => item.url), ['', '', ''])
+    assert.deepEqual(outcome.items.map((item) => item.title), ['脚本协议', '超长链接', '凭据伪装'])
+  } finally {
+    restore.restore()
+  }
 })
 
 // ── 东财 / 新浪 / 同花顺（2026-09-24 新增）──────────────────────────────────

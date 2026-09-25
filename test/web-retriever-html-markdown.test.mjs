@@ -4,6 +4,7 @@ import {
   MAX_CONVERSION_DEPTH,
   extractTitle,
   htmlToMarkdown,
+  stripInvisibleText,
 } from '../lib/web-retriever/html-markdown.js'
 
 const OMITTED_MARKDOWN = '[HTML content omitted: unable to convert safely.]'
@@ -251,4 +252,16 @@ test('结果形状：无 title 时不携带 title 字段；有 title 时字段�
   assert.equal(typeof withTitle.markdown, 'string')
   assert.equal(typeof withTitle.truncated, 'boolean')
   assert.equal(typeof withTitle.omitted, 'boolean')
+})
+
+test('不可见字符：零宽 / 双向覆盖 / 软连字符不进上下文，实体写法同样剥掉', () => {
+  // 顺序要紧：先解码实体、后剥不可见字符，否则 `&#8206;` 解出来的是一个**活的** U+200E 方向标记。
+  const html = '<title>浦发&#8206;银行&#xFEFF;</title><p>浦发\u200B银行\u202E反向\u00AD软</p>'
+  const result = htmlToMarkdown(html, 20_000)
+  assert.equal(result.title, '浦发银行', `title 里的不可见字符必须消失：${JSON.stringify(result.title)}`)
+  assert.ok(!/[\u00AD\u200B-\u200F\u202E\uFEFF]/u.test(result.markdown), `正文里的不可见字符必须消失：${JSON.stringify(result.markdown)}`)
+  assert.match(result.markdown, /浦发银行反向软/u, '可见文字与顺序不得受影响')
+  // 换行 / 回车 / 制表是呈现需要的，不能连带删掉。
+  assert.equal(stripInvisibleText('a\r\n\tb'), 'a\r\n\tb')
+  assert.equal(extractTitle('<title>公告\u200B\u202A</title>'), '公告')
 })

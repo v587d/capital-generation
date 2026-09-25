@@ -20,6 +20,11 @@ test('Eastmoney identity：明确市场才归一证券，板块保持独立类�
   })
   assert.deepEqual(normalizeEastmoneySecurityIdentity({ secucode: '000430', market: 'SZ' }).thscode, '000430.SZ')
   assert.deepEqual(normalizeEastmoneySecurityIdentity({ secid: '1.600519' }).thscode, '600519.SH')
+  // secid 市场码实测（2026-09-24 push2）：北交所与深市共用 `0.`，`2.*` 上游直接 rc=100。
+  assert.deepEqual(normalizeEastmoneySecurityIdentity({ secid: '0.920982' }).thscode, '920982.BJ')
+  assert.deepEqual(normalizeEastmoneySecurityIdentity({ secid: '0.430047' }).thscode, '430047.BJ')
+  assert.deepEqual(normalizeEastmoneySecurityIdentity({ secid: '0.000993' }).thscode, '000993.SZ')
+  assert.throws(() => normalizeEastmoneySecurityIdentity({ secid: '2.920982' }), /secid must have the form/)
   assert.throws(() => normalizeEastmoneySecurityIdentity({ secucode: '000430' }), /requires an explicit market/)
   assert.deepEqual(normalizeEastmoneyBoardIdentity('bk0481', '汽车零部件', 'industry'), {
     board_code: 'BK0481', board_name: '汽车零部件', board_type: 'industry',
@@ -78,6 +83,24 @@ test('eastmoney_top_buy_sell_market：解析分页龙虎榜并保留 canonical t
     assert.equal(result.data.item[0].thscode, '000993.SZ')
     assert.equal(result.data.item[0].ticker, '000993')
     assert.equal(result.data.pagination.total, 71)
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_top_buy_sell_market：MARKET 为自由文本/空时护栏不误杀（SECUCODE 已带市场）', async () => {
+  // 真实龙虎榜的 `MARKET` 不是 SH/SZ 白名单口径（如 `深交所主板`、空值）。把它喂进硬校验
+  // 会让整页判错（§10.2 护栏误杀族）；SECUCODE 自带市场后缀时以它为准，`market` 列仍存原文。
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => response({ success: true, code: 0, result: { pages: 1, count: 2, data: [
+    { TRADE_DATE: '2026-09-23 00:00:00', SECURITY_CODE: '000993', SECUCODE: '000993.SZ', MARKET: '深交所主板', SECURITY_NAME_ABBR: '闽东电力' },
+    { TRADE_DATE: '2026-09-23 00:00:00', SECURITY_CODE: '600519', SECUCODE: '600519.SH', MARKET: null, SECURITY_NAME_ABBR: '贵州茅台' },
+  ] } })
+  try {
+    const source = sourceMap().eastmoney_top_buy_sell_market
+    const result = await source.execute({ capability: source.schema.capability, params: { start_date: '2026-09-23', end_date: '2026-09-23', page: 1, size: 5 }, session }, signal)
+    assert.equal(result.data.item[0].thscode, '000993.SZ')
+    assert.equal(result.data.item[0].market, '深交所主板')
+    assert.equal(result.data.item[1].thscode, '600519.SH')
+    assert.equal(result.data.item[1].market, 'SH', 'MARKET 为空时回落身份市场')
   } finally { globalThis.fetch = originalFetch }
 })
 

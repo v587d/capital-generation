@@ -13,7 +13,7 @@
  * `createHttpRequester`，本文件不自建网络路径（AGENTS.md §9.7）。
  */
 import { createHttpRequester } from './local-fetch.js';
-import type { EastmoneyClient } from '../net/eastmoney-client.js';
+import type { EastmoneyClient, EastmoneyTransport } from '../net/eastmoney-client.js';
 import type { LocalFetchOptions } from './local-fetch.js';
 /** 错误信封里的上游名，也是 `provider_tally` 的键。 */
 export type SourceId = 'cls' | 'wscn' | 'cninfo_irm' | 'sseinfo' | 'eastmoney' | 'ths' | 'sina';
@@ -42,6 +42,16 @@ export declare class SourceError extends Error {
 type Requester = ReturnType<typeof createHttpRequester>;
 /** 每个来源工具调用一次；transport 惰性建、按配置缓存。 */
 export declare function createSourceTransport(options: LocalFetchOptions): Requester;
+/**
+ * 东财客户端传输层的**闸门适配**：三个 `eastmoney_*` 工具与其余六个来源共用同一份出口校验
+ * （URL 合法性 + DNS 公网 IP 闸门 + 手动重定向逐跳重校验 + 大小/超时上限），不再是第二份
+ * 裸 `fetch`（AGENTS.md §9.7）。节流器不在这里——仍由进程级共享的东财节流器提供
+ * （`sharedEastmoneyThrottle()`），本适配只替换"怎么发出去"。
+ *
+ * 带分类 `code` 的 `LocalFetchError` 原样穿过（`createEastmoneyClient` 见 code 即不包裹），
+ * 取消因此保持 `ABORTED` 语义、不被降级成网络失败（§4.1）。
+ */
+export declare function createGatedEastmoneyTransport(requester: Requester): EastmoneyTransport;
 /**
  * 财联社 v1 接口的本地签名：`sign = md5(sha1(按 key 字典序拼接的 query 串))`。
  *
@@ -93,6 +103,13 @@ export declare function parseCompanyList(content: string): Array<{
 }>;
 export declare function resetSseCachesForTest(): void;
 /**
+ * 一次 uid 定位的**总**时限。`REQUEST_TIMEOUT_MS` 只管单个请求，而定位一次要串行 10–13 个
+ * 请求（最坏 13 × 20s ≈ 4 分钟），所以这段必须有自己的上限——工具层的超时由宿主决定，
+ * 不能拿"整轮对话还剩多少"来兜一个内部元数据查询。`sseinfoQa` 的 `uidLocateBudgetMs`
+ * 仅供测试注入缩短（与 `wind-client.ts` 的 `retryDelaysMs` 同一约定）。
+ */
+export declare const SSE_UID_LOCATE_TIMEOUT_MS = 60000;
+/**
  * 代码 → uid：公司列表分页升序，用**倍增 + 二分**定位。
  *
  * ⚠️ 缓存层次是本函数最容易写错的地方（2026-09-24 实测踩坑，症状很绕）：
@@ -129,6 +146,7 @@ export declare function sseinfoQa(transport: Requester, input: {
     page: number;
     pageSize: number;
     signal?: AbortSignal;
+    uidLocateBudgetMs?: number;
 }): Promise<SourceOutcome>;
 /**
  * 取东财 7×24 全球快讯。媒体的独立备份来源（与 `cls_telegraph` / `wscn_lives` 互备）：

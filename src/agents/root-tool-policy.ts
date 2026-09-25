@@ -18,6 +18,30 @@
  * 筛出本 preset 的 agent。
  */
 
+/**
+ * 出网工具名（唯一一份事实来源）：检索面 2 + wind 2 + 具名来源查询面 9。
+ *
+ * 主 Agent 侧「外部检索只经 web_retriever 回传」必须是**结构件**，不能只写在 persona 里：
+ * 2026-09-24 review 复现——persona 禁直连清单当时写的是 `web_retriever_*` 通配，工具改名后
+ * 通配一个都不匹配，禁令名存实亡，而工具表里那 13 个入口始终摆着。逐名 deny 由本清单决定，
+ * preset 与测试都从这里取名字（`test/persona.test.mjs` 交叉核验），新增来源只改这一处。
+ */
+export const RETRIEVAL_DENIED_TOOLS = [
+  'anysearch_search', 'web_retriever_fetch',
+  'wind_docs_announcements', 'wind_docs_news',
+  'cls_telegraph', 'wscn_lives', 'cninfo_irm', 'sseinfo_qa',
+  'eastmoney_724', 'eastmoney_stock_news', 'eastmoney_reports', 'sina_reports', 'ths_eps_forecast',
+] as const
+
+/**
+ * 宿主自己挂的检索工具：persona 早就禁过它们，这里把禁令变成结构件。
+ *
+ * ⚠️ 这两个名字**只能出现在根收敛里，不能进 preset 的 `toolFilter.deny`**：它们不由本插件
+ * 注册，`restrict()` 对未注册名字报错的表现是"创建子 Agent 失败"。根侧逐名 restrict 的
+ * try/catch 正好容忍"这个 scope 里根本没有这个名字"，所以放在这里是安全的（装了就有、没装就跳）。
+ */
+const HOST_RETRIEVAL_DENIED_TOOLS = ['web_search', 'web_fetch'] as const
+
 export const ROOT_AGENT_DENIED_TOOLS = [
   /** 出图只走 data_junior 的可视化 gate（main → junior → specialist）。 */
   'render_chart',
@@ -25,6 +49,13 @@ export const ROOT_AGENT_DENIED_TOOLS = [
   'subagent_visualization_specialist',
   /** 只签发给 delegated data agent（运行时本就拒绝根会话），留在表里只会诱导误调。 */
   'prepare_chart_source',
+  /**
+   * 十三个出网工具全部收敛：外部检索只有一个入口（web_retriever 子 Agent），它的兄弟行
+   * （data_collector / data_junior / visualization_specialist）的 allow 里本来就没有这些名字，
+   * 因此根侧 deny 不影响它们，只拿掉主 Agent 自己的直连能力。
+   */
+  ...RETRIEVAL_DENIED_TOOLS,
+  ...HOST_RETRIEVAL_DENIED_TOOLS,
   /**
    * bash 只给 data_junior（它是数据侧的"纯计算兜底"）。主 Agent 不需要它，而且一旦拥有
    * 就等于拿到通用执行 + 整机读 + 出网能力，会绕过数据调度与出图两道结构 gate。

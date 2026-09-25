@@ -35,6 +35,19 @@ export interface LocalFetchOutcome {
 /** Return true only for an address safe to use as a public outbound target. */
 export declare function isPublicIp(address: string): boolean;
 /**
+ * 上游返回的 URL 字段（搜索结果的 `url`、各来源条目的 `url`）会**变成用户可点击的
+ * markdown 链接**（AGENTS.md §4 回传引用格式），所以这里按"要展示"的口径再收一道；
+ * `validateUrl` 是"要请求"的口径，抛错语义不适合逐条字段。
+ * 返回 `''` 表示这个值不配成为链接，调用方据此**丢字段**（不是丢条目）：
+ * - 非 http(s) 协议：`javascript:` / `data:` 点下去就是执行；
+ * - 含空白或控制符：换行能把后半截甩出链接语法，变成正文里的新内容；
+ * - 带凭据：`https://sseinfo.com.cn@evil.example/` 显示的是官方域名、跳的是别的站；
+ * - 超长串：不是链接该占的体积（条目的输出预算见 `tools.ts` 的 `SOURCE_OUTPUT_BUDGET_CHARS`）。
+ * 返回**剥完不可见字符的原串**而不是 `url.toString()`：后者会把非 ASCII 路径按
+ * percent-encoding 展开（中文 URL 一字 9 字符），模型引用时白白吃掉预算。
+ */
+export declare function safeUrl(value: unknown, maxChars?: number): string;
+/**
  * 请求描述符：`createLocalFetcher`（GET+markdown 化，回退链用）与来源工具
  * （`src/web-retriever/sources.ts`，硬编码主机的 JSON/HTML 接口）共用同一个出口校验。
  *

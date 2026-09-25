@@ -7,7 +7,7 @@
  * dispatcher; this module keeps the same explicit trade-off as dsh-search-first.
  */
 
-import { htmlToMarkdown } from './html-markdown.js'
+import { htmlToMarkdown, stripInvisibleText } from './html-markdown.js'
 
 export const LOCAL_FETCH_CLIENT_VERSION = '2.2.0'
 export const LOCAL_FETCH_MAX_URL_LENGTH = 2048
@@ -114,6 +114,8 @@ function parseIpv6(address: string): number[] | null {
 
 function isPrivateIpv4(address: [number, number, number, number]): boolean {
   const [first, second, third] = address
+  // 100.64/10 覆盖 100.64.0.0 ~ 100.127.255.255，因此阿里云元数据端点
+  // 100.100.100.200 已被 `first===100 && second>=64 && second<=127` 这条挡住。
   return first === 0
     || first === 10
     || first === 127
@@ -129,6 +131,11 @@ function isPrivateIpv4(address: [number, number, number, number]): boolean {
     || first >= 224
 }
 
+/** 两个 16 位组 → 点分 IPv4（用于 6to4 / Teredo 内嵌地址解出）。 */
+function groupsToIpv4(high: number, low: number): [number, number, number, number] {
+  return [high >> 8, high & 0xff, low >> 8, low & 0xff]
+}
+
 /** Return true only for an address safe to use as a public outbound target. */
 export function isPublicIp(address: string): boolean {
   const ipv4 = parseIpv4(address)
@@ -140,9 +147,16 @@ export function isPublicIp(address: string): boolean {
   if (groups.slice(0, 7).every((group) => group === 0) && groups[7] === 1) return false
 
   const isMappedIpv4 = groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff
-  if (isMappedIpv4) {
-    const mapped = `${groups[6] >> 8}.${groups[6] & 0xff}.${groups[7] >> 8}.${groups[7] & 0xff}`
-    return !isPrivateIpv4(parseIpv4(mapped) as [number, number, number, number])
+  if (isMappedIpv4) return !isPrivateIpv4(groupsToIpv4(groups[6], groups[7]))
+
+  // 6to4（2002::/16）把 IPv4 明文嵌在第 2、3 组：`2002:7f00:0001::` 即 127.0.0.1。
+  if (groups[0] === 0x2002) return !isPrivateIpv4(groupsToIpv4(groups[1], groups[2]))
+  // Teredo（2001:0000::/32）的客户端 IPv4 在第 7、8 组按位取反存储（服务端 IPv4 在第 3、4 组，
+  // 一并校验）：解出内嵌 v4 后递归判定，否则 `2001::` 前缀会绕过整张私网 v4 表。
+  if (groups[0] === 0x2001 && groups[1] === 0x0000) {
+    const client = groupsToIpv4(~groups[6] & 0xffff, ~groups[7] & 0xffff)
+    const server = groupsToIpv4(groups[2], groups[3])
+    return !isPrivateIpv4(client) && !isPrivateIpv4(server)
   }
 
   const first = groups[0]
@@ -179,6 +193,35 @@ function validateUrl(input: string): URL {
     throw new LocalFetchError('INVALID_URL', 'URL credentials are not allowed')
   }
   return url
+}
+
+/** 可展示链接的形态：字面 http(s) 开头，且整串不含空白与控制符。 */
+const HYPERLINK_PATTERN = /^https?:\/\/[^\s\u0000-\u001F\u007F-\u009F]+$/u
+
+/**
+ * 上游返回的 URL 字段（搜索结果的 `url`、各来源条目的 `url`）会**变成用户可点击的
+ * markdown 链接**（AGENTS.md §4 回传引用格式），所以这里按"要展示"的口径再收一道；
+ * `validateUrl` 是"要请求"的口径，抛错语义不适合逐条字段。
+ * 返回 `''` 表示这个值不配成为链接，调用方据此**丢字段**（不是丢条目）：
+ * - 非 http(s) 协议：`javascript:` / `data:` 点下去就是执行；
+ * - 含空白或控制符：换行能把后半截甩出链接语法，变成正文里的新内容；
+ * - 带凭据：`https://sseinfo.com.cn@evil.example/` 显示的是官方域名、跳的是别的站；
+ * - 超长串：不是链接该占的体积（条目的输出预算见 `tools.ts` 的 `SOURCE_OUTPUT_BUDGET_CHARS`）。
+ * 返回**剥完不可见字符的原串**而不是 `url.toString()`：后者会把非 ASCII 路径按
+ * percent-encoding 展开（中文 URL 一字 9 字符），模型引用时白白吃掉预算。
+ */
+export function safeUrl(value: unknown, maxChars = LOCAL_FETCH_MAX_URL_LENGTH): string {
+  if (typeof value !== 'string') return ''
+  const raw = stripInvisibleText(value.trim())
+  if (raw === '' || raw.length > maxChars || !HYPERLINK_PATTERN.test(raw)) return ''
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return ''
+  }
+  if (url.username !== '' || url.password !== '') return ''
+  return raw
 }
 
 function getDns(): DnsLookupLike | undefined {

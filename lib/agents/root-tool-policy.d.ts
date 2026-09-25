@@ -17,7 +17,16 @@
  * 正是因为它们未打标签。因此这里取 `ctx.root`，再用 `agentPresets.composedPreset(agent.ctx)`
  * 筛出本 preset 的 agent。
  */
-export declare const ROOT_AGENT_DENIED_TOOLS: readonly ["render_chart", "subagent_visualization_specialist", "prepare_chart_source", "bash", "pwsh"];
+/**
+ * 出网工具名（唯一一份事实来源）：检索面 2 + wind 2 + 具名来源查询面 9。
+ *
+ * 主 Agent 侧「外部检索只经 web_retriever 回传」必须是**结构件**，不能只写在 persona 里：
+ * 2026-09-24 review 复现——persona 禁直连清单当时写的是 `web_retriever_*` 通配，工具改名后
+ * 通配一个都不匹配，禁令名存实亡，而工具表里那 13 个入口始终摆着。逐名 deny 由本清单决定，
+ * preset 与测试都从这里取名字（`test/persona.test.mjs` 交叉核验），新增来源只改这一处。
+ */
+export declare const RETRIEVAL_DENIED_TOOLS: readonly ["anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "sina_reports", "ths_eps_forecast"];
+export declare const ROOT_AGENT_DENIED_TOOLS: readonly ["render_chart", "subagent_visualization_specialist", "prepare_chart_source", "anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "sina_reports", "ths_eps_forecast", "web_search", "web_fetch", "bash", "pwsh"];
 /** 本 preset 的 id（`composedPreset` 的返回值）。 */
 export declare const CAPITAL_PRESET_ID = "capital-generation";
 interface ToolRestriction {

@@ -8,6 +8,7 @@ import {
   LocalFetchError,
   createLocalFetcher,
   isPublicIp,
+  safeUrl,
 } from '../lib/web-retriever/local-fetch.js'
 
 const ROOT = new URL('..', import.meta.url).pathname.replace(/\/$/u, '')
@@ -72,8 +73,15 @@ test('isPublicIp：拒绝保留 IPv4/IPv6 地址，允许公网地址', () => {
     '100.64.0.1', '224.0.0.1', '0.0.0.0', '192.0.2.1', '198.18.0.1',
     '198.51.100.1', '203.0.113.1', '::', '::1', 'fe80::1', 'fd00::1',
     'ff02::1', '::ffff:127.0.0.1',
+    // 6to4（2002::/16）内嵌私网 IPv4：2002:0a00:0001:: = 10.0.0.1，不得因前缀 2002 放行。
+    '2002:0a00:0001::', '2002:7f00:0001::', '2002:c0a8:0001::',
+    // Teredo（2001::/32）客户端 IPv4 按位取反存储：末两组取反后 = 127.0.0.1 / 10.0.0.1。
+    '2001:0000:0000:0000:0000:0000:80ff:fffe', '2001:0000:0000:0000:0000:0000:f5ff:ffff',
   ]) assert.equal(isPublicIp(address), false, address)
-  for (const address of ['8.8.8.8', '1.1.1.1', '2606:4700::1111']) {
+  for (const address of ['8.8.8.8', '1.1.1.1', '2606:4700::1111',
+    // 6to4 内嵌公网 IPv4：2002:0808:0808:: = 8.8.8.8 → 仍应放行。
+    '2002:0808:0808::',
+  ]) {
     assert.equal(isPublicIp(address), true, address)
   }
 })
@@ -413,6 +421,28 @@ test('调用方 abort 与内部超时区分错误码', async () => {
   } finally {
     timeoutRestore()
   }
+})
+
+test('safeUrl：只有能安全展示给用户的 http(s) 链接才留下', () => {
+  assert.equal(safeUrl('https://static.sse.com.cn/disclosure/a.pdf?id=1'), 'https://static.sse.com.cn/disclosure/a.pdf?id=1')
+  assert.equal(safeUrl('http://a.example/x'), 'http://a.example/x')
+  // 不可见字符会改变链接的显示文字与真实目标之间的关系：先剥再判。
+  assert.equal(safeUrl('https://a.example/x\u200By'), 'https://a.example/x\u200By'.replace(/\u200B/u, ''))
+  for (const bad of [
+    'javascript:alert(1)',
+    'data:text/html;base64,PHNjcmlwdD4=',
+    '//a.example/x',
+    '/relative/path',
+    'https://sseinfo.com.cn@evil.example/x',
+    'https://a.example/x\n续行',
+    '',
+    '   ',
+    undefined,
+    42,
+  ]) {
+    assert.equal(safeUrl(bad), '', `${JSON.stringify(bad)} 不配成为链接`)
+  }
+  assert.equal(safeUrl(`https://a.example/x?p=${'y'.repeat(200)}`, 100), '', '超出显式上限就丢')
 })
 
 test('src/web-retriever 不使用静态 node: 导入，依赖不引入 @types/node', async () => {

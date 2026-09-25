@@ -51,7 +51,7 @@ const LOCAL_FETCH_DEFAULTS = {
 }
 
 const LocalFetchSchema = z.object({
-  enabled: z.boolean().default(LOCAL_FETCH_DEFAULTS.enabled).description('AnySearch 失败后是否允许本机直连回退（默认开启）'),
+  enabled: z.boolean().default(LOCAL_FETCH_DEFAULTS.enabled).description('是否允许本机直连出网：AnySearch 失败后的回退抓取 + 具名来源工具的执行（默认开启；关闭时来源工具调用响亮失败）'),
   timeoutMs: z.number().default(LOCAL_FETCH_DEFAULTS.timeoutMs).description('本机直连单次请求超时毫秒'),
   maxBytes: z.number().default(LOCAL_FETCH_DEFAULTS.maxBytes).description('本机直连响应体字节上限'),
   maxContentChars: z.number().default(LOCAL_FETCH_DEFAULTS.maxContentChars).description('本机直连正文码点上限（切在转换前的原始 HTML 上，不是 markdown 输出）'),

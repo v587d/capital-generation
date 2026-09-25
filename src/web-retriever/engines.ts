@@ -5,6 +5,10 @@
  * provider 目录。未来真正接入第二个后端时，再根据实际差异抽象接口。
  */
 
+/** 第三方页面的正文与链接：与本机直抓共用同一份不可见字符剥离与可展示链接口径。 */
+import { stripInvisibleText } from './html-markdown.js'
+import { safeUrl } from './local-fetch.js'
+
 export interface SearchHit {
   url: string
   title?: string
@@ -105,13 +109,15 @@ function responseData(raw: unknown): Record<string, unknown> | null {
 export function normalizeSearchHit(raw: unknown): SearchHit | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const record = raw as Record<string, unknown>
-  if (typeof record.url !== 'string' || record.url.length === 0) return null
+  // 候选链接不合法就整条丢掉：既不能 fetch、也不能作为引用给用户点。
+  const url = safeUrl(record.url)
+  if (url === '') return null
   return {
-    url: record.url,
-    ...(typeof record.title === 'string' && record.title ? { title: record.title } : {}),
-    ...(typeof record.snippet === 'string' && record.snippet ? { snippet: record.snippet } : {}),
+    url,
+    ...(typeof record.title === 'string' && record.title ? { title: stripInvisibleText(record.title) } : {}),
+    ...(typeof record.snippet === 'string' && record.snippet ? { snippet: stripInvisibleText(record.snippet) } : {}),
     ...(typeof record.content === 'string' && record.content
-      ? { content: record.content.slice(0, MAX_CONTENT_CHARS) }
+      ? { content: stripInvisibleText(record.content).slice(0, MAX_CONTENT_CHARS) }
       : {}),
   }
 }
@@ -133,9 +139,9 @@ export function normalizeSearchResponse(query: string, raw: unknown): SearchResu
 export function normalizeFetchResponse(url: string, raw: unknown): FetchResult {
   const data = responseData(raw)
   if (!data) return { url, ok: false, error: 'AnySearch returned an invalid fetch response' }
-  const title = typeof data.title === 'string' && data.title ? data.title : undefined
-  const sourceContent = typeof data.content === 'string' && data.content ? data.content : undefined
-  const content = sourceContent ? sourceContent.slice(0, MAX_CONTENT_CHARS) : undefined
+  const title = typeof data.title === 'string' && data.title ? stripInvisibleText(data.title) : undefined
+  const sourceContent = typeof data.content === 'string' && data.content ? stripInvisibleText(data.content) : undefined
+  const content = sourceContent === undefined ? undefined : sourceContent.slice(0, MAX_CONTENT_CHARS)
   const truncated = sourceContent !== undefined && sourceContent.length > MAX_CONTENT_CHARS
   if (!title && !content) return { url, ok: false, error: 'fetch returned no content' }
   return {

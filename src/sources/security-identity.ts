@@ -9,7 +9,19 @@ export interface EastmoneySecurityIdentity {
   eastmoney_market: EastmoneyMarket
 }
 
-const MARKET_BY_PREFIX: Record<string, EastmoneyMarket> = { '0': 'SZ', '1': 'SH', '2': 'BJ' }
+/**
+ * secid 市场码（实测于 2026-09-24，`push2.eastmoney.com/api/qt/stock/get`）：
+ * `1.` = 沪；`0.` = **深市与北交所共用**（`0.920982`、`0.430047` 返回 rc=0，`2.*` 一律 rc=100）。
+ * 因此 `0.` 的 BJ/SZ 由数字前缀区分（4/8/92 为北交所），与 `normalizeEastmoneyAshareIdentity`
+ * 共用 `marketFromAshareDigits` 的同一份规则（§9.7：一条知识一个实现）。
+ */
+const SECID_MARKET_BY_PREFIX: Record<string, 'SH' | 'SZ_OR_BJ'> = { '1': 'SH', '0': 'SZ_OR_BJ' }
+
+function marketFromAshareDigits(digits: string): EastmoneyMarket {
+  if (/^(?:4|8|92)/u.test(digits)) return 'BJ'
+  if (/^(?:6|9)/u.test(digits)) return 'SH'
+  return 'SZ'
+}
 
 function text(value: unknown, name: string): string {
   if (typeof value !== 'string' || value.trim().length === 0) throw new Error(`${name} must be a non-empty string`)
@@ -59,10 +71,10 @@ export function normalizeEastmoneySecurityIdentity(input: {
   }
 
   const rawSecid = text(input.secid, 'secid')
-  const match = /^(0|1|2)\.(\d{6})$/.exec(rawSecid)
-  if (!match) throw new Error('secid must have the form 0.000001, 1.600519, or 2.920982')
-  const resolvedMarket = MARKET_BY_PREFIX[match[1]]
+  const match = /^(0|1)\.(\d{6})$/.exec(rawSecid)
+  if (!match) throw new Error('secid must have the form 0.000001 or 1.600519 (北交所同为 0.)')
   const digits = match[2]
+  const resolvedMarket: EastmoneyMarket = SECID_MARKET_BY_PREFIX[match[1]] === 'SH' ? 'SH' : marketFromAshareDigits(digits)
   return {
     thscode: `${digits}.${resolvedMarket}`,
     ticker: digits,
@@ -75,11 +87,7 @@ export function normalizeEastmoneyAshareIdentity(value: unknown): EastmoneySecur
   const raw = text(value, 'security_code').toUpperCase()
   const digits = raw.includes('.') ? raw.slice(0, 6) : raw
   if (!/^\d{6}$/.test(digits)) throw new Error('security_code must be a six-digit A-share code')
-  const resolvedMarket: EastmoneyMarket = /^(?:4|8|92)/.test(digits)
-    ? 'BJ'
-    : /^(?:6|9)/.test(digits)
-      ? 'SH'
-      : 'SZ'
+  const resolvedMarket = marketFromAshareDigits(digits)
   return { thscode: `${digits}.${resolvedMarket}`, ticker: digits, eastmoney_code: digits, eastmoney_market: resolvedMarket }
 }
 

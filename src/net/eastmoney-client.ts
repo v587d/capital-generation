@@ -23,9 +23,14 @@
  *
  * ## 边界
  *
- * 本模块**不**做 SSRF 出口校验。两个调用方各自已有出口治理（web_retriever 侧走
- * `createHttpRequester` 的公网 IP 闸门 + 代理环境变量；数据面侧是既有行为）。此处若再塞一套，
- * 就会变成"闸门有两个实现"——本仓在 AGENTS.md §9.7 上已经为这类重复踩过两次。
+ * 本模块**不**做 SSRF 出口校验，但**出口校验在哪一份实现里**必须说清楚：
+ * - web_retriever 侧的三个 `eastmoney_*` 工具通过 `createEastmoneyClient({ transport })`
+ *   注入 `createHttpRequester` 的闸门实现（DNS 公网 IP 校验 + 手动重定向重校验 + 大小/超时上限），
+ *   与其余六个来源共用同一份出口治理；
+ * - 数据面（Hub 侧能力）用默认 transport（裸 `fetch`）：URL 全部是代码内常量 + 白名单参数，
+ *   模型不能投喂任意 URL，这是既有行为。
+ * 闸门只有 `createHttpRequester` 一份实现；本层只加节流与状态归类，不复制第二套校验
+ * （AGENTS.md §9.7）。
  */
 
 import { createRequestThrottle } from './throttle.js'
@@ -46,7 +51,8 @@ export interface EastmoneyFetchInit {
 
 export interface EastmoneyResponse {
   status: number
-  headers: Headers
+  /** 注入式 transport（闸门适配层）可以不提供 headers。 */
+  headers?: Headers
   text: string
 }
 
@@ -78,19 +84,36 @@ export class EastmoneyTransportError extends Error {
   }
 }
 
-export function createEastmoneyClient(options: { userAgent?: string; minIntervalMs?: number } = {}): EastmoneyClient {
+/** 传输器返回的最小响应形状（真实 `Response` 天然满足；闸门适配层按此构造）。 */
+export interface EastmoneyTransportResponse {
+  status: number
+  headers?: Headers
+  text(): Promise<string>
+  json(): Promise<unknown>
+}
+
+/** 可注入传输器：默认裸 `fetch`（数据面），web_retriever 侧注入 SSRF 闸门实现。 */
+export type EastmoneyTransport = (url: string, init: { headers: Record<string, string>; signal?: AbortSignal }) => Promise<EastmoneyTransportResponse>
+
+export function createEastmoneyClient(options: {
+  userAgent?: string
+  minIntervalMs?: number
+  /** 注入进程级共享节流器时 `minIntervalMs` 失效（节流只该有一份）。 */
+  throttle?: <T>(task: () => Promise<T>) => Promise<T>
+  transport?: EastmoneyTransport
+} = {}): EastmoneyClient {
   const userAgent = options.userAgent ?? DEFAULT_USER_AGENT
-  const throttle = createRequestThrottle(options.minIntervalMs ?? EASTMONEY_MIN_INTERVAL_MS)
-  const transport = createEastmoneyTransport()
+  const throttle = options.throttle ?? createRequestThrottle(options.minIntervalMs ?? EASTMONEY_MIN_INTERVAL_MS)
+  const transport = options.transport ?? createEastmoneyTransport()
 
   /** 节流 + 发请求 + 状态判定：两条读取路径（text / json）共用这一份，避免状态判定被复制。 */
-  const send = (url: string, init: EastmoneyFetchInit): Promise<Response> => throttle(async () => {
+  const send = (url: string, init: EastmoneyFetchInit): Promise<EastmoneyTransportResponse> => throttle(async () => {
     if (init.signal?.aborted) {
       const error = new Error('eastmoney request aborted')
       error.name = 'AbortError'
       throw error
     }
-    let response: Response
+    let response: EastmoneyTransportResponse
     try {
       response = await transport(url, {
         headers: { 'user-agent': userAgent, ...(init.headers ?? {}) },
@@ -99,6 +122,9 @@ export function createEastmoneyClient(options: { userAgent?: string; minInterval
     } catch (error) {
       // 取消原样抛出（`AbortError`），调用方据此区分"网络失败"与"调用方不要了"。
       if (error instanceof Error && error.name === 'AbortError') throw error
+      // 已带分类 `code` 的错误（如闸门注入的 `LocalFetchError`：ABORTED/TIMEOUT/REDIRECT…）
+      // 原样抛出：再包一层会把"取消"降级成网络失败（§4.1），也丢掉失败原因。
+      if (typeof (error as { code?: unknown })?.code === 'string') throw error
       throw new EastmoneyTransportError(`eastmoney request failed: ${error instanceof Error ? error.message : String(error)}`)
     }
     // 按 `status` 判定而不是 `response.ok`：本仓多处测试的假 Response 只提供 status/text/json，
@@ -120,23 +146,29 @@ export function createEastmoneyClient(options: { userAgent?: string; minInterval
   }
 }
 
-/**
- * 传输器可注入（与 `local-fetch.ts` 的 `resolveAddresses` 同一个惯用法）：
- * 测试里替换掉 `globalThis.fetch` 即可，不需要为了注入再包一层。
- */
-type Transport = (url: string, init: { headers: Record<string, string>; signal?: AbortSignal }) => Promise<Response>
-
-function createEastmoneyTransport(): Transport {
+function createEastmoneyTransport(): EastmoneyTransport {
   return (url, init) => globalThis.fetch(url, init)
+}
+
+let sharedThrottle: (<T>(task: () => Promise<T>) => Promise<T>) | undefined
+
+/**
+ * **进程级共享节流器**：数据面与 web_retriever 侧可能各持一个客户端实例（transport 不同），
+ * 但东财风控按出口 IP 计，节流必须仍只有一份。两侧客户端都从这里取。
+ */
+export function sharedEastmoneyThrottle(): <T>(task: () => Promise<T>) => Promise<T> {
+  sharedThrottle ??= createRequestThrottle(EASTMONEY_MIN_INTERVAL_MS)
+  return sharedThrottle
 }
 
 let shared: EastmoneyClient | undefined
 
 /**
- * **进程级单例**：数据面与 web_retriever 侧必须拿到同一个实例，否则节流器就有两个，
- * 等于回到"两份独立限流"的老问题。宿主进程内所有东财请求都应经这里。
+ * **进程级单例**（数据面用，默认裸 fetch transport）：所有默认客户端共享同一个节流器，
+ * 等于回到"两份独立限流"的老问题的解法。宿主进程内所有东财请求都应经这里或
+ * 显式注入 `sharedEastmoneyThrottle()` 的实例。
  */
 export function sharedEastmoneyClient(): EastmoneyClient {
-  shared ??= createEastmoneyClient()
+  shared ??= createEastmoneyClient({ throttle: sharedEastmoneyThrottle() })
   return shared
 }

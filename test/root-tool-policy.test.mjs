@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   CAPITAL_PRESET_ID,
+  RETRIEVAL_DENIED_TOOLS,
   ROOT_AGENT_DENIED_TOOLS,
   isCapitalAgent,
   isRootAgent,
@@ -28,6 +29,21 @@ test('ROOT_AGENT_DENIED_TOOLS：bash/pwsh 必须点名（主 Agent 不得继承 
   // 按平台选名，所以两个名字都点名（未注册的那个由逐名 restrict 的 try/catch 跳过）。
   for (const name of ['bash', 'pwsh']) {
     assert.ok(ROOT_AGENT_DENIED_TOOLS.includes(name), `主 Agent 不得看到 ${name}：那是通用执行 + 整机读 + 出网能力`)
+  }
+})
+
+test('RETRIEVAL_DENIED_TOOLS：十三个出网工具全部从根 Agent 拿掉（出网只有一个入口）', () => {
+  // 2026-09-24 review：persona 的禁直连清单写成 `web_retriever_*` 通配，改名后一个都不匹配。
+  // 「外部检索只经 web_retriever」因此必须是结构件，而不是靠人设文案；名单长度也是断言的一部分
+  // ——少一个名字就等于主 Agent 仍能直连那个来源。
+  assert.equal(RETRIEVAL_DENIED_TOOLS.length, 13, '检索面 2 + wind 2 + 具名来源 9 = 13')
+  assert.equal(new Set(RETRIEVAL_DENIED_TOOLS).size, 13, '出网名单不得有重名')
+  for (const name of RETRIEVAL_DENIED_TOOLS) {
+    assert.ok(ROOT_AGENT_DENIED_TOOLS.includes(name), `主 Agent 不得看到出网工具 ${name}`)
+  }
+  // 宿主的两个检索工具只能在这一层 deny（不由本插件注册 → preset 的 deny 里写它们会炸 child 创建）。
+  for (const name of ['web_search', 'web_fetch']) {
+    assert.ok(ROOT_AGENT_DENIED_TOOLS.includes(name), `主 Agent 不得看到宿主的 ${name}`)
   }
 })
 

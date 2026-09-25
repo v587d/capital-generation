@@ -4,6 +4,8 @@ import { readFileSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { load as yamlLoad } from 'js-yaml'
 import { resolveUserCustomizationSection } from '../lib/index.js'
+import { RETRIEVAL_DENIED_TOOLS } from '../lib/agents/root-tool-policy.js'
+import { SOURCE_OUTPUT_BUDGET_CHARS } from '../lib/web-retriever/tools.js'
 
 const COMPOSITION = fileURLToPath(new URL('../preset/capital-generation/agent.cordis.yml', import.meta.url))
 // preset 里 `!!js` 门控（如 customSkillDirs 的 baseUrl 解析）不是 js-yaml 的已知标签；
@@ -139,6 +141,15 @@ const PRESET_TOOLS = [
 const KNOWN_TOOLS = new Set([...PLUGIN_TOOLS, ...PRESET_TOOLS])
 
 /**
+ * 出网工具名清单（检索面 2 + wind 2 + 具名来源查询面 9 = 十三）。
+ * 「出网只有一个入口（web_retriever）」是结构性约束，凡声明它的地方都必须是同一份名单：
+ * 事实来源是 `src/agents/root-tool-policy.ts` 的 `RETRIEVAL_DENIED_TOOLS`（根 Agent 逐名 deny
+ * 用的就是它），这里只是把它对齐到 preset 的 persona 禁直连清单与通用 subagent 的 deny——
+ * 各自抄一份字面量的结果是漂移：deny 少一个名字，通用 child 就能自己抓网页。
+ */
+const NETWORK_TOOLS = [...RETRIEVAL_DENIED_TOOLS]
+
+/**
  * shell 槽位按平台选名（preset 里写成 `!!js "process.platform === 'win32' ? 'pwsh' : 'bash'"`）。
  *
  * 为什么必须按平台选：Windows 上没有 `bash-sandbox`，host 层挂的是 pwsh 执行器，
@@ -169,7 +180,11 @@ test('preset 结构：persona 行为声明式行，插件不再占用 deployment
   // 2026-09 给 data_junior 配 bash（纯计算兜底）时再放宽到 17,600：新增三行
   // （平台成对的 tool-bash / tool-pwsh 行 + data_junior 的 BASH DISCIPLINE 软约束），
   // 设计理由一律进 preset README.md，不占这里。
-  assert.ok(COMPOSITION_TEXT.length < 17600, `agent.cordis.yml 过长（${COMPOSITION_TEXT.length} 字符 / 目标 <17600）：参考材料进 skills/，设计理由进 preset README.md`)
+  // 2026-09-24 放宽到 18,000：通用 subagent 的 toolFilter.deny 补上 13 个出网工具名
+  // （「出网只有一个入口」此前只是 persona 文案，且文案里的 `web_retriever_*` 通配已失配）。
+  // 这 300 余字符是**结构件的工具名**（deny 里的名字必须真实注册，见上），不是可外迁的协议正文；
+  // 防回涨仍靠下面两条：主 persona < 5000、子 persona 骨架上限。
+  assert.ok(COMPOSITION_TEXT.length < 18000, `agent.cordis.yml 过长（${COMPOSITION_TEXT.length} 字符 / 目标 <18000）：参考材料进 skills/，设计理由进 preset README.md`)
   // 子 persona 只留硬规则骨架：协议正文在 skills/（子 Agent 通过 skill 按需加载），
   // 与工具 description/schema 重复的事实不再抄一遍。
   // data_junior 的上限随"可视化 gate + one-shot barrier"两条新职责上调（实测 2168），
@@ -368,8 +383,14 @@ test('主 persona：web_retriever 编排与检索路由', () => {
   assertRule(MAIN_PERSONA, /subagent_web_retriever/)
   assertRule(MAIN_PERSONA, /web_retriever/)
   assertRule(MAIN_PERSONA, /send_message/)
-  assertRuleAny(MAIN_PERSONA, [/不再自行调用任何网络检索/, /禁止自行调用任何网络检索/], '主 persona 应禁止主 Agent 自行检索')
-  assertRule(MAIN_PERSONA, /wind_docs/, '主 persona 禁直连清单应点名 wind_docs 系列工具')
+  assertRuleAny(MAIN_PERSONA, [/不再自行调用任何网络检索/, /禁止自行调用任何网络检索/, /主 Agent禁止自行检索/], '主 persona 应禁止主 Agent 自行检索')
+  // 2026-09-24 review：禁直连清单当时写 `web_retriever_*` 通配，工具改名后一个都不匹配 = 禁令名存实亡。
+  // 修法不是把 13 个名字再抄一遍（那只是把漂移从"文案"搬到"文案+名单"），而是：
+  // ① 十三个插件工具由 `RETRIEVAL_DENIED_TOOLS` 从根 Agent 工具表里结构摘除（下面的 deny 用例核验覆盖面）；
+  // ② persona 只点名**宿主**给的 web_search / web_fetch（那两个不由本插件注册，摘不到就得靠文案）。
+  assertRule(MAIN_PERSONA, /web_search/, '主 persona 应点名宿主 web_search')
+  assertRule(MAIN_PERSONA, /web_fetch/, '主 persona 应点名宿主 web_fetch')
+  assert.ok(!/[a-z0-9_]{4,}_\*/.test(MAIN_PERSONA), '主 persona 不得出现 `工具前缀_*` 式通配（重命名后会静默失配）')
   assertRuleAny(MAIN_PERSONA, [/已消歧的标的与完整代码/, /已消歧标的与完整代码/], '主 persona 委派 web_retriever 应带上标的与代码（Wind 查询要素依赖）')
   assertRuleAny(MAIN_PERSONA, [/一律委派/, /外部检索只经/], '主 persona 应把外部检索收敛到委派')
   assertRuleAny(MAIN_PERSONA, [/并行委派/, /多需求可并行/, /可并行/], '主 persona 应说明多需求可并行委派')
@@ -416,6 +437,8 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
     /cls_telegraph/, /wscn_lives/, /cninfo_irm/, /sseinfo_qa/,
     /来源查询/, /该翻页就翻到没有/, /空结果是真事实/, /深沪不可互换/, /北交所两个平台都没有/,
     /status.*answered.*unanswered/, /回执 `note` 必须读/, /1200 字符/, /INVALID_RESPONSE/, /NOT_FOUND/,
+    // 输出预算 / 链接丢弃 / 代码写法 / TIMEOUT 语义：四条都是"模型会误读回执"的形态，必须写在 skill。
+    /整段丢掉/, /真放进回执的条数/, /省略其后/, /归一化成同一个查询/, /`code=TIMEOUT` 是上游慢/,
     // 本地直连回退：来源标注、能力边界与"不算重试"三条硬约束（Task 8）。
     /local-http/, /`via`/, /truncated/, /本机直连/, /官网直抓/, /PDF/, /不算.*重试/,
   ]) {
@@ -479,7 +502,7 @@ test('子 Agent 委派行：continuable、persona 覆盖、toolFilter 收敛工�
   }
 })
 
-test('通用 subagent 行：必须 deny Capital 数据/出图管线与专用角色创建工具', () => {
+test('通用 subagent 行：必须 deny Capital 数据/出图管线、十三个联网工具与专用角色创建工具', () => {
   const genericRow = rowById('tool-subagent')
   assert.ok(genericRow, 'preset 必须有通用 subagent 行')
   assert.equal(genericRow.name, '@deepseek-ai/dsh-tool-subagent')
@@ -506,10 +529,20 @@ test('通用 subagent 行：必须 deny Capital 数据/出图管线与专用角�
     'render_chart', 'prepare_chart_source',
     'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile',
     'request_data', 'list_capabilities', 'describe_capability', 'dc_status',
+    ...NETWORK_TOOLS,
     'subagent_data_collector', 'subagent_data_junior', 'subagent_visualization_specialist', 'subagent_web_retriever',
   ]) {
     assert.ok(deny.includes(name), `通用 subagent 的 child 不得拿到 ${name}`)
   }
+  // 出网只有一个入口：deny 的覆盖面就是上面这份名单，多写名字 = 砍掉通用 child 的正当能力。
+  assert.deepEqual(
+    [...deny].sort(),
+    [SHELL_SLOT, 'render_chart', 'prepare_chart_source', 'describe_dataset', 'inspect_dataset', 'profile_dataset',
+      'query_dataset', 'write_profile', 'request_data', 'list_capabilities', 'describe_capability', 'dc_status',
+      ...NETWORK_TOOLS, 'subagent_data_collector', 'subagent_data_junior', 'subagent_visualization_specialist',
+      'subagent_web_retriever'].sort(),
+    '通用 subagent 的 deny 必须恰好是「数据/出图管线 + 十三个联网工具 + 专用角色创建工具 + shell」',
+  )
 })
 
 test('shell 行：平台成对挂载、只给 data_junior，且不给后台执行', () => {
@@ -849,4 +882,16 @@ test('resolveUserCustomizationSection：独立 section，不能覆盖核心约�
 test('主 persona：内置安全条目（不索取凭据、不承诺收益）', () => {
   assertRule(MAIN_PERSONA, /不索取或保存账户密码|不主动索取账户密码|不索取凭据|不索取账户密码/)
   assertRule(MAIN_PERSONA, /不承诺收益|不保证收益/)
+})
+
+test('具名来源的输出预算必须留在宿主剪枝阈值内（两处必须同源）', () => {
+  // pruner 不是顶层行：它在 compaction 组里（compaction-basic 通过 ctx.get 读它，必须同 realm）。
+  const children = rowById('compaction')?.config ?? []
+  const pruner = children.find((row) => row?.id === 'tool-result-pruner')
+  assert.ok(pruner, 'preset 的 compaction 组必须有 tool-result-pruner 行：工具结果的剪枝阈值由它决定')
+  const threshold = Number(pruner.config?.thresholdChars)
+  assert.ok(Number.isInteger(threshold) && threshold > 0, `thresholdChars 必须是正整数，实际：${pruner.config?.thresholdChars}`)
+  assert.ok(SOURCE_OUTPUT_BUDGET_CHARS < threshold,
+    `SOURCE_OUTPUT_BUDGET_CHARS（${SOURCE_OUTPUT_BUDGET_CHARS}）必须低于 preset 的 thresholdChars（${threshold}）：`
+    + '越过阈值的工具结果会被剪成 head + [middle pruned] + tail，而 JSON 头部的 count 仍写着原来的条数')
 })

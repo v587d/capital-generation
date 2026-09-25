@@ -19,6 +19,14 @@ test('normalizeSearchHit：容错字段缺失；无 url 判空', () => {
   assert.equal(normalizeSearchHit('x'), null)
 })
 
+test('normalizeSearchHit：伪协议 URL 整条丢掉；标题与摘要剥掉不可见字符', () => {
+  // 候选链接既是要 fetch 的目标，也是给用户点的引用——不合法的 url 没有价值（与条目 url 同一口径）。
+  assert.equal(normalizeSearchHit({ url: 'javascript:alert(1)', title: 'T' }), null)
+  assert.equal(normalizeSearchHit({ url: '   ', title: 'T' }), null)
+  const hit = normalizeSearchHit({ url: 'https://a.example', title: '浦发\u200B银行', snippet: 'RLO\u202E点', content: '正\u00AD文' })
+  assert.deepEqual(hit, { url: 'https://a.example', title: '浦发银行', snippet: 'RLO点', content: '正文' })
+})
+
 test('normalizeSearchResponse：支持 AnySearch envelope，坏响应明确失败', () => {
   const good = normalizeSearchResponse('q', {
     code: 0,

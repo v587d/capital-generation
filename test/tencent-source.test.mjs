@@ -112,6 +112,87 @@ test('tencent_kline rotates empty host and parses raw daily rows', async () => {
   }
 })
 
+test('tencent_kline 取消原样抛出：不拉黑任何入口、不降级成 tencent_kline_unavailable（§4.1）', async () => {
+  const sources = sourceMap()
+  const originalFetch = globalThis.fetch
+  const aborted = new Error('This operation was aborted')
+  aborted.name = 'AbortError'
+  globalThis.fetch = async () => { throw aborted }
+  try {
+    await assert.rejects(
+      execute(sources.tencent_kline, { code: '600519.SH', period: 'day', adjust: 'none', count: 2 }),
+      (error) => error.name === 'AbortError',
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  // 取消不得把入口写进 hostDownUntil：紧随其后的正常调用一次命中。
+  let calls = 0
+  globalThis.fetch = async () => {
+    calls += 1
+    return response(JSON.stringify({ code: 0, data: { sh600519: { day: [['2026-09-22', '10', '10.5', '10.8', '9.9', '123']] } } }))
+  }
+  try {
+    const result = await execute(sources.tencent_kline, { code: '600519.SH', period: 'day', adjust: 'none', count: 1 })
+    assert.equal(calls, 1, '取消不该造成连带拉黑后的换机或整表不可用')
+    assert.deepEqual(result.data.map((row) => row.date), ['2026-09-22'])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('腾讯出口只有一条节流链：并发调用被串开，不重叠打到上游', async () => {
+  const sources = sourceMap()
+  const originalFetch = globalThis.fetch
+  let inFlight = 0
+  let maxConcurrent = 0
+  const startedAt = []
+  globalThis.fetch = async () => {
+    inFlight += 1
+    maxConcurrent = Math.max(maxConcurrent, inFlight)
+    startedAt.push(Date.now())
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    inFlight -= 1
+    return response(quoteText('sh600519'))
+  }
+  try {
+    // 模型在一条消息里发多个调用时框架会并发执行——各自 sleep 仍会同时到达上游。
+    await Promise.all([
+      execute(sources.tencent_quote, { codes: ['600519.SH'] }),
+      execute(sources.tencent_quote, { codes: ['600519.SH'] }),
+      execute(sources.tencent_quote, { codes: ['600519.SH'] }),
+    ])
+    assert.equal(maxConcurrent, 1, '腾讯出口必须串行：同一时刻只允许一个请求在飞')
+    assert.equal(startedAt.length, 3)
+    for (const gap of [startedAt[1] - startedAt[0], startedAt[2] - startedAt[1]]) {
+      assert.ok(gap >= 110, `相邻两次请求之间必须留出一个最小间隔，实测 ${gap}ms`)
+    }
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('腾讯出口：信号已取消时不排队，直接原样抛 AbortError（§4.1）', async () => {
+  const sources = sourceMap()
+  const originalFetch = globalThis.fetch
+  let calls = 0
+  globalThis.fetch = async () => { calls += 1; return response(quoteText('sh600519')) }
+  const controller = new AbortController()
+  controller.abort()
+  try {
+    await assert.rejects(
+      sources.tencent_quote.execute(
+        { capability: 'tencent_quote', params: { codes: ['600519.SH'] }, session },
+        controller.signal,
+      ),
+      (error) => error.name === 'AbortError',
+    )
+    assert.equal(calls, 0, '已取消的调用不得排进节流链（队首挂住时会把这次取消吞掉）')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('tencent_ticks parses paged rows and verifies continuous-session amount', async () => {
   const sources = sourceMap()
   const originalFetch = globalThis.fetch

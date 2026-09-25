@@ -1,6 +1,7 @@
 import type { DataRequest, DataSource, SchemaDescriptor } from '../data-collector/hub.js'
 import { buildDataKey } from '../data-collector/hub.js'
 import { getDataTimeContract } from '../time/tools.js'
+import { createRequestThrottle } from '../net/throttle.js'
 import { isLikelyIndex, normalizeSecurityCodes, parseSecurityCode, requireTencentSecurity, type SecurityCode } from './security-code.js'
 
 const QUOTE_URL = 'https://qt.gtimg.cn/q='
@@ -17,6 +18,16 @@ const KLINE_SPAN_DAYS: Record<string, number> = { day: 700, week: 3650, month: 1
 const MAX_TICK_PAGES = 300
 const TICK_SESSION_END = '15:00:59'
 const hostDownUntil = new Map<string, number>()
+
+/**
+ * 腾讯出口的**唯一**节流链（进程级）。三个端点都按 IP 风控（429 / 空 data / 静默限流），
+ * 而模型一次并发多个 quote / kline 调用会把请求成倍打出去。此前只有 `tencent_ticks` 翻页里
+ * 有一处 100ms 本地 sleep——并发调用各自 sleep，请求仍同时到达，等于没有 pacing；
+ * 现在所有出口（行情、分笔每一页、K 线的每一次换机）都过这一条链，见 `src/net/throttle.ts`。
+ * 间隔取 120ms：与原来翻页的节奏同量级，不会因为把风控间隔"调保守"而拖慢 300 页分笔下载。
+ */
+const TENCENT_MIN_INTERVAL_MS = 120
+const tencentThrottle = createRequestThrottle(TENCENT_MIN_INTERVAL_MS)
 
 type Params = Record<string, unknown>
 type JsonRecord = Record<string, unknown>
@@ -149,14 +160,18 @@ async function readResponse(response: Response, encoding: 'utf-8' | 'gbk'): Prom
 }
 
 async function getText(url: string, signal: AbortSignal, encoding: 'utf-8' | 'gbk' = 'utf-8', init: RequestInit = {}): Promise<string> {
-  const response = await fetch(url, {
-    ...init,
-    headers: { 'User-Agent': 'Mozilla/5.0', ...(init.headers ?? {}) },
-    signal,
+  // 取消不排队：队首那个请求挂住时，把这次取消塞进队列等于把它吞掉（§4.1「取消原样抛出」）。
+  signal.throwIfAborted()
+  return tencentThrottle(async () => {
+    const response = await fetch(url, {
+      ...init,
+      headers: { 'User-Agent': 'Mozilla/5.0', ...(init.headers ?? {}) },
+      signal,
+    })
+    const text = await readResponse(response, encoding)
+    if (!response.ok) throw sourceError(`Tencent HTTP ${response.status} for ${url}`, response.status === 429 ? 'tencent_rate_limit' : 'tencent_http_error')
+    return text
   })
-  const text = await readResponse(response, encoding)
-  if (!response.ok) throw sourceError(`Tencent HTTP ${response.status} for ${url}`, response.status === 429 ? 'tencent_rate_limit' : 'tencent_http_error')
-  return text
 }
 
 function parseJson(text: string, context: string): JsonRecord {
@@ -286,6 +301,9 @@ async function callKline(path: string, param: string, signal: AbortSignal): Prom
       errors.push(`${host}: empty data`)
       hostDownUntil.set(host, Date.now() + HOST_COOLDOWN_MS)
     } catch (error) {
+      // 取消原样抛出，**先于**一切拉黑/换机逻辑：一次用户取消或 Hub 超时不得把全部
+      // K 线入口进程级拉黑，更不得降级成 `tencent_kline_unavailable`（§4.1「取消原样抛出」）。
+      if (error instanceof Error && error.name === 'AbortError') throw error
       if (error instanceof Error && error.message.includes('parameter error')) throw error
       errors.push(`${host}: ${error instanceof Error ? error.message : String(error)}`)
       hostDownUntil.set(host, Date.now() + HOST_COOLDOWN_MS)
@@ -449,7 +467,6 @@ async function executeTicks(params: Params, signal: AbortSignal): Promise<{ data
       }
       rows.push(row)
     }
-    await new Promise((resolve) => setTimeout(resolve, 100))
   }
   if (rows.length === 0) throw new Error(`${symbol} returned no tick rows`)
   const after = parseSnapshot(await getText(`${QUOTE_URL}${symbol}`, signal, 'gbk'), symbol)

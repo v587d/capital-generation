@@ -13,9 +13,9 @@
  * `createHttpRequester`，本文件不自建网络路径（AGENTS.md §9.7）。
  */
 
-import { createHttpRequester } from './local-fetch.js'
-import { sharedEastmoneyClient } from '../net/eastmoney-client.js'
-import type { EastmoneyClient } from '../net/eastmoney-client.js'
+import { createHttpRequester, safeUrl } from './local-fetch.js'
+import { stripInvisibleText } from './html-markdown.js'
+import type { EastmoneyClient, EastmoneyTransport } from '../net/eastmoney-client.js'
 import type { LocalFetchOptions } from './local-fetch.js'
 
 /** 错误信封里的上游名，也是 `provider_tally` 的键。 */
@@ -79,24 +79,68 @@ export function createSourceTransport(options: LocalFetchOptions): Requester {
   return createHttpRequester({ ...options, timeoutMs: options.timeoutMs || REQUEST_TIMEOUT_MS })
 }
 
+/**
+ * 东财客户端传输层的**闸门适配**：三个 `eastmoney_*` 工具与其余六个来源共用同一份出口校验
+ * （URL 合法性 + DNS 公网 IP 闸门 + 手动重定向逐跳重校验 + 大小/超时上限），不再是第二份
+ * 裸 `fetch`（AGENTS.md §9.7）。节流器不在这里——仍由进程级共享的东财节流器提供
+ * （`sharedEastmoneyThrottle()`），本适配只替换"怎么发出去"。
+ *
+ * 带分类 `code` 的 `LocalFetchError` 原样穿过（`createEastmoneyClient` 见 code 即不包裹），
+ * 取消因此保持 `ABORTED` 语义、不被降级成网络失败（§4.1）。
+ */
+export function createGatedEastmoneyTransport(requester: Requester): EastmoneyTransport {
+  return async (url, init) => {
+    const outcome = await requester.request(
+      { url, ...(init.headers === undefined ? {} : { headers: init.headers }) },
+      init.signal,
+    )
+    return {
+      status: outcome.status,
+      text: async () => outcome.text,
+      json: async () => JSON.parse(outcome.text) as unknown,
+    }
+  }
+}
+
+/** 条目链接的最大长度：链接只是引用，不该吃掉整份输出的字符预算（`tools.ts` 的条目预算）。 */
+const ITEM_URL_MAX_CHARS = 500
+
 function clip(text: unknown): string {
   if (typeof text !== 'string') return ''
-  const trimmed = text.trim()
+  // 上游字段（页面文本、JSON 正文）与抓取正文同一口径：先剥不可见字符再裁剪。
+  const trimmed = stripInvisibleText(text).trim()
   return trimmed.length > MAX_ITEM_CHARS ? `${trimmed.slice(0, MAX_ITEM_CHARS)}…` : trimmed
 }
 
-/** 把 HTML 片段压成可读纯文本（sseinfo 的正文块里带 `<p>` / `<br/>`）。 */
+/** 条目的可点击链接：非 http(s) / 含控制符 / 带凭据 / 超长一律丢字段（不丢条目）。 */
+function itemUrl(value: unknown): string {
+  return safeUrl(value, ITEM_URL_MAX_CHARS)
+}
+
+/**
+ * 把 HTML 片段压成可读纯文本（sseinfo 的正文块里带 `<p>` / `<br/>`）。
+ *
+ * ⛔ 顺序必须是"先解码实体、后剥标签"：反过来时外部内容里的 `&lt;system&gt;…&lt;/system&gt;`
+ * 会在剥完标签后被解码成**活标签**，进入模型上下文就是提示注入面。解码出的新标签同样要剥，
+ * 所以标签剥离循环到有界轮数（双重编码的 `&amp;lt;` 解出来是字面 `&lt;`，惰性问题不大）。
+ */
 function stripHtml(fragment: string): string {
-  return fragment
-    .replace(/<br\s*\/?>/giu, '\n')
-    .replace(/<\/p>/giu, '\n')
-    .replace(/<[^>]+>/gu, '')
+  let text = stripInvisibleText(fragment)
     .replace(/&nbsp;/gu, ' ')
-    .replace(/&amp;/gu, '&')
+    .replace(/&#39;/gu, "'")
+    .replace(/&quot;/gu, '"')
     .replace(/&lt;/gu, '<')
     .replace(/&gt;/gu, '>')
-    .replace(/&quot;/gu, '"')
-    .replace(/&#39;/gu, "'")
+    .replace(/&amp;/gu, '&')
+  for (let round = 0; round < 3; round += 1) {
+    const stripped = text
+      .replace(/<br\s*\/?>/giu, '\n')
+      .replace(/<\/p>/giu, '\n')
+      .replace(/<[^>]+>/gu, '')
+    if (stripped === text) break
+    text = stripped
+  }
+  return text
     .replace(/[ \t]{2,}/gu, ' ')
     .replace(/\n{3,}/gu, '\n\n')
     .trim()
@@ -203,7 +247,7 @@ export async function clsTelegraph(
       time: cstStamp(ctime),
       title: clip(title),
       content: clip(typeof row.content === 'string' && row.content.trim() !== '' ? row.content : brief),
-      url: typeof row.shareurl === 'string' ? row.shareurl : '',
+      url: itemUrl(row.shareurl),
     })
   }
   return {
@@ -250,7 +294,7 @@ export async function wscnLives(
       content: clip(row.content_text),
       // score 是见闻的重要性字段：实测 1 / 2，少量 3（越高越重要）。
       importance: typeof row.score === 'number' ? row.score : null,
-      url: typeof row.uri === 'string' ? row.uri : (typeof row.id === 'number' ? `https://wallstreetcn.com/livenews/${row.id}` : ''),
+      url: itemUrl(row.uri) || (typeof row.id === 'number' ? `https://wallstreetcn.com/livenews/${row.id}` : ''),
     })
   }
   const next = data?.next_cursor
@@ -408,6 +452,10 @@ async function sseCompanyPage(transport: Requester, page: number, signal?: Abort
   if (pairs.length === 0 && !content.includes(SSE_COMPANY_END)) {
     throw new SourceError('sseinfo', 'INVALID_RESPONSE', `上证e互动公司列表第 ${page} 页既没有公司也没有末页提示（页面格式可能已变）`)
   }
+  // 兑现"每次使用前做升序自检"：页面进二分包面前先验序。parseCompanyList 已按 code 排序，
+  // 因此这里真正抓的是**重复 code**（正则配对错位、一家公司配了两次不同 uid）——
+  // 二分会据此定位 uid，宁可响亮失败也不返回错配的问答。
+  assertAscending(pairs, page)
   if (ssePageCache.size >= SSE_UID_CACHE_LIMIT) {
     // 逐条淘汰最旧的一项，**不能整表 clear()**：解析一次公司可能扫过十几页，
     // 而整表清空会把**本次刚刚定位到的** uid 一起丢掉 ⇒ 下一次调用（或同一函数后半段）
@@ -426,6 +474,44 @@ function assertAscending(pairs: Array<{ code: string; uid: string }>, page: numb
     if (pairs[index - 1].code >= pairs[index].code) {
       throw new SourceError('sseinfo', 'INVALID_RESPONSE', `上证e互动公司列表第 ${page} 页不是按代码升序（配对可能错位，拒绝据此定位 uid）`)
     }
+  }
+}
+
+/**
+ * 一次 uid 定位的**总**时限。`REQUEST_TIMEOUT_MS` 只管单个请求，而定位一次要串行 10–13 个
+ * 请求（最坏 13 × 20s ≈ 4 分钟），所以这段必须有自己的上限——工具层的超时由宿主决定，
+ * 不能拿"整轮对话还剩多少"来兜一个内部元数据查询。`sseinfoQa` 的 `uidLocateBudgetMs`
+ * 仅供测试注入缩短（与 `wind-client.ts` 的 `retryDelaysMs` 同一约定）。
+ */
+export const SSE_UID_LOCATE_TIMEOUT_MS = 60_000
+
+interface Deadline {
+  signal: AbortSignal
+  /** 只有"定时器到点且调用方没取消"才算超限：调用方取消要原样上抛（§4.1）。 */
+  exceeded: () => boolean
+  dispose: () => void
+}
+
+/** 给"一串串行请求"套一个总时限，并与调用方的取消信号复合。 */
+function startDeadline(outer: AbortSignal | undefined, budgetMs: number): Deadline {
+  const controller = new AbortController()
+  let fired = false
+  const timer = setTimeout(() => {
+    fired = true
+    controller.abort(new Error(`deadline after ${budgetMs}ms`))
+  }, budgetMs)
+  const onOuterAbort = () => controller.abort(outer?.reason)
+  if (outer) {
+    if (outer.aborted) onOuterAbort()
+    else outer.addEventListener('abort', onOuterAbort, { once: true })
+  }
+  return {
+    signal: controller.signal,
+    exceeded: () => fired && outer?.aborted !== true,
+    dispose: () => {
+      clearTimeout(timer)
+      outer?.removeEventListener('abort', onOuterAbort)
+    },
   }
 }
 
@@ -564,7 +650,7 @@ export function sseTime(text: string, now: Date = new Date()): string | undefine
 
 export async function sseinfoQa(
   transport: Requester,
-  input: { code?: string; kind: string; page: number; pageSize: number; signal?: AbortSignal },
+  input: { code?: string; kind: string; page: number; pageSize: number; signal?: AbortSignal; uidLocateBudgetMs?: number },
 ): Promise<SourceOutcome> {
   const type = SSE_KIND[input.kind]
   let text: string
@@ -579,7 +665,21 @@ export async function sseinfoQa(
     const outcome = await transport.request({ url: `${SSE_BASE}/ajax/feeds.do?${params.toString()}`, headers: { referer: SSE_REFERER } }, input.signal)
     text = outcome.text
   } else {
-    const uid = await resolveSseCompanyUid(transport, input.code, input.signal)
+    const budgetMs = input.uidLocateBudgetMs ?? SSE_UID_LOCATE_TIMEOUT_MS
+    const deadline = startDeadline(input.signal, budgetMs)
+    let uid: string
+    try {
+      uid = await resolveSseCompanyUid(transport, input.code, deadline.signal)
+    } catch (error) {
+      // 总时限到点是"这个来源查得慢"，不是调用方取消：必须翻成 SourceError，
+      // 否则工具层会按 ABORTED 原样上抛，上层误读成"用户中断了这一轮"。
+      if (deadline.exceeded()) {
+        throw new SourceError('sseinfo', 'TIMEOUT', `上证e互动公司 uid 定位超过 ${Math.round(budgetMs / 1000)}s（一次定位需 10–13 个串行请求）；稍后重试，或先用不带 code 的 sseinfo_qa 取全市场问答`)
+      }
+      throw error
+    } finally {
+      deadline.dispose()
+    }
     const params = new URLSearchParams({
       typeCode: 'company',
       type: String(type),
@@ -666,7 +766,7 @@ export async function eastmoneyFastNews(
       time: clip(row.showTime),
       title: clip(row.title),
       content: clip(row.summary),
-      url: typeof row.url === 'string' ? row.url : '',
+      url: itemUrl(row.url),
     })
   }
   return { source: 'eastmoney', operation: 'fast_news', items: clipItems(items) }
@@ -729,10 +829,10 @@ export async function eastmoneyStockNews(
     if (!row) continue
     items.push({
       time: clip(row.date),
-      title: stripHtml(typeof row.title === 'string' ? row.title : ''),
+      title: clip(stripHtml(typeof row.title === 'string' ? row.title : '')),
       content: clip(stripHtml(typeof row.content === 'string' ? row.content : '')),
       media: clip(row.mediaName),
-      url: typeof row.url === 'string' ? row.url : '',
+      url: itemUrl(row.url),
     })
   }
   return { source: 'eastmoney', operation: 'stock_news', items: clipItems(items) }
@@ -855,17 +955,19 @@ export async function sinaReports(
   const items: SourceItem[] = []
   for (const match of text.matchAll(rowPattern)) {
     const href = match[2]
+    // 页面偶尔给协议相对链接（`//host/...`）：补成 https 后走同一份链接口径。
+    const url = itemUrl(href.startsWith('//') ? `https:${href}` : href)
     items.push({
       // ⚠️ 列顺序按**页面表头**实测为准：序号 / 标题 / **报告类型** / **发布日期** / 机构 / 研究员。
       // 即第 4 列是类型、第 5 列才是日期。早先按"日期在前"的想当然写反了，
       // 产出 `date:"公司"`、`type:"2026-09-01"` —— 每列都有值、却整行错位，比报错危险。
       date: clip(match[5]),
-      title: stripHtml(match[1]),
+      title: clip(stripHtml(match[1])),
       type: clip(match[4]),
-      org: stripHtml(match[6]),
-      researcher: stripHtml(match[7]),
+      org: clip(stripHtml(match[6])),
+      researcher: clip(stripHtml(match[7])),
       report_id: match[3],
-      url: href.startsWith('//') ? `https:${href}` : href,
+      url,
     })
   }
   // 结构自检：带序号的行必须全部解析出来，否则是页面结构变了（不是"没有研报"）。
