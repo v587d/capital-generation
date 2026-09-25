@@ -17,12 +17,13 @@ chart-ui/client.runtime.gen.cjs
 capital-data/
 capital-analysis/
 
-# ── 本地研发文档，不随仓库发布 ──
+# ── 本地研发文档 ──
 # 发版说明草稿：正文发布时贴到 GitHub Release 页面，仓库只保留 README 摘要与 CHANGELOG
 .release-notes-*.md
 .dsh/
 ths_api.md
-AGENTS.md
+# AGENTS.md（研发索引）与 docs/dev/（详情层）是**研发约定**，随仓库发布：新克隆的
+# 研发 Agent 一读就有闸门。使用者 Agent 读的是 persona + skill，两者不共用文本。
 docs/*
 !docs/sample/
 !docs/data-collector-capabilities.md
@@ -31,6 +32,10 @@ docs/*
 !docs/reference/
 docs/reference/*
 !docs/reference/dsh-surface-ledger.md
+# docs/dev/ = AGENTS.md 的详情层，整目录都是研发文档（同样要先放行目录再挑文件）。
+!docs/dev/
+docs/dev/*
+!docs/dev/*.md
 
 # smoke 脚本的临时 profile（正常会自清理，异常退出时可能残留）
 .tmp-boot/

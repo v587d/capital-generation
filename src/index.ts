@@ -322,7 +322,7 @@ export function apply(ctx: Context, config: Config) {
   // B 拦掉必然失败的 `sandbox_permissions`（委派会话的审批策略由框架固定为 never，
   // answerer 根本不会被调用），并给出正确路径。**不解析命令内容**：正则挡不住
   // `node -e`，而 node/python 正是引入 bash 的目的；禁区纪律走 data_junior 的 persona。
-  // 理由全文见 src/agents/bash-guard.ts 与 AGENTS.md「data_junior 的 bash 闸门」。
+  // 理由全文见 src/agents/bash-guard.ts 与 docs/dev/bash-gate.md §1.6「data_junior 的 bash 闸门」。
   registerBashGuard(ctx as unknown as Parameters<typeof registerBashGuard>[0])
   ctx.effect(() => {
     const sources = createTencentSources()

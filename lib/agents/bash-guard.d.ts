@@ -17,7 +17,7 @@
  * 两层规则：
  *  A 结构层：bash 只对**被委派**的子会话开放（镜像 src/tool-exec.ts 的 delegatedSession）——
  *    即使哪天 ROOT_AGENT_DENIED_TOOLS 或 allow 过滤被改坏，执行层仍然拒绝根会话。
- *    AGENTS.md「工具可见性不是权限隔离」。
+ *    docs/dev/bash-gate.md「工具可见性不是权限隔离」。
  *  B UX 层：委派子会话的审批策略由框架固定为 `never`（dsh-subagent 的
  *    `captureDelegatedPolicyOverrides` → `approval/policy: never`，`dsh-user-approval.decide()`
  *    在 never 时**直接返回 rejected、根本不调用 answerer**），所以 `sandbox_permissions`

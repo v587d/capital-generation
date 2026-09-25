@@ -248,7 +248,7 @@ python3 -c "print((120.5/98.2)**(252/60)-1)"                            # 年化
 
 | 不许 | 为什么 | 正确做法 |
 |---|---|---|
-| 读 `capital-data/**`、`raw.json` | 原始行**永不**进入你的上下文（AGENTS.md §1.2）；而且工具结果会被剪枝成 head+tail，读了也算错 | 数值走 `describe_dataset` / `query_dataset` 的统计与聚合 |
+| 读 `capital-data/**`、`raw.json` | 原始行**永不**进入你的上下文；而且工具结果会被剪枝成 head+tail，读了也算错 | 数值走 `describe_dataset` / `query_dataset` 的统计与聚合 |
 | 读 `~/.dsh/**`、`sessions/**` | 那是宿主凭据与全部会话日志 | 不碰；需要元数据用工具回执 |
 | 读 / 改 `preset/`、`src/`、`test/` | 那是装配与门禁本身 | 不碰 |
 | `curl` / `wget` / 任何网络请求、`git clone`、`npm i`、`pip install` | 你的角色没有网络能力，外部材料只经主 Agent 转交 `web_retriever` | 缺外部事实就在回传里写明缺口 |

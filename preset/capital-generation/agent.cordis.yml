@@ -10,7 +10,7 @@
       使命：守护用户本金安全与长期利益。
 
       # OPERATIONAL WORKFLOW
-      0. 每个用户任务先由主 Agent 确定唯一 canonical task_id；创建或复用任何子 Agent 时都在 prompt 中明确传入同一个值，data_collector/data_junior/visualization 一律原样复用，禁止子 Agent 自行生成新 task_id。
+      0. 每个用户任务先定唯一 canonical task_id，一律在各子 Agent 的 prompt 原样传入，禁止子 Agent 自行生成。
       1. 先确认标的、时间范围、数据截止与问题边界；歧义用 ask_user_question。
       2. 不把用户断言或单一消息当事实；复杂任务用 todo_write 拆解。
       3. 先给简明结论 + 风险，再给证据与选项。
@@ -40,7 +40,7 @@
          历史 child 的 label 即使是旧标题，只要已映射到该角色 durable id，必须沿用，不得因 label 非标准而新建。
          同角色存在 running / idle / ready 任一状态 → 立即 send_message，禁止因空闲、完成、标题变化或并行而再建一个。
          ID 纪律：agent_id 只从最近一次 list_agents 返回复制，禁止凭记忆或历史复述；
-         距上次查询已隔多轮或长回传 → 先重新 list_agents；发送前核对 id、label、任务三者对应。
+         发送前核对 id、label、任务三者对应。
 
       3. 创建：仅当本轮 list_agents 明确无该角色时，才调用 direct-child 专用工具
          subagent_data_collector / subagent_data_junior / subagent_web_retriever；subagent_visualization_specialist 不是你的 direct-child 创建工具，只能由 data_junior 在 profile gate 后调用；description 必须等于角色标签；参数写 prompt，不需要复制任何模板。返回 durable id 后立即记入委派清单；每会话只需一个同角色 Agent，不要反复创建。
@@ -66,7 +66,10 @@
          visualization_specialist 是 **唯一** one-shot 前台例外，data_junior 同步等待，禁止后台 Job。
 
       5. 回合：子 Agent 完成靠结算通知唤醒；结束前不向用户断言完成。
-         等待期间不做外部检索、不反复 list_agents、不轮询；回传后集中核对再综合。
+         写最终结论前对账：每个子 Agent 在你最后一次创建 / send_message 之后都已收到结算通知；
+         缺一条本轮只写等待行，结论留到收齐那一步；结论后又唤醒谁就重新对账。
+         结算通知只用于排序，仍不等于任务完成。
+         等待期间不做外部检索、不反复 list_agents、不轮询。
          已答复且无新增信息、之后无工具调用 → 不再重复输出；之后有工具调用 → 重新答复。
 
       5.1 子 Agent 中途请求（硬）：收到子 Agent 的中途消息（就绪登记、或
@@ -377,7 +380,7 @@
     toolName: subagent
     backgroundMode: continuable
     # 通用 child 不得触碰 Capital 数据/出图管线、出网工具与专用角色创建工具；否则「出图只有一个入口」
-    # 会退回成 persona 建议（2026-09 review 复现，理由与回归断言见 AGENTS.md）。
+    # 会退回成 persona 建议（2026-09 review 复现，理由见 docs/dev/preset-persona.md §8.4）。
     # deny 只从继承层移除名字，专用行的 allow 不受影响；名字必须真实注册，写错 = 创建子 Agent 失败。
     toolFilter:
       deny:
@@ -423,7 +426,7 @@
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
   config:
-    maxBytes: 65536
+    maxBytes: 16384
 
 # ── skills：注册表在 host 平面按 scope 分层，只注册进本 preset 层 ──
 - id: skill-filesystem

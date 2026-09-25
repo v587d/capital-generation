@@ -56,7 +56,7 @@ export declare function createGatedEastmoneyTransport(requester: Requester): Eas
  * 财联社 v1 接口的本地签名：`sign = md5(sha1(按 key 字典序拼接的 query 串))`。
  *
  * 旧 `nodeapi/telegraphList` 于 2026-05 下线，现接口强制校验 sign，但**纯本地计算、无需任何 key**
- * （外部实践文献 §5.2，2026-07 复活；2026-09-24 本仓按此式复现，`errno=0` 正常返回）。
+ * （外部实践文献 5.2 节，2026-07 复活；2026-09-24 本仓按此式复现，`errno=0` 正常返回）。
  * 签名必须由代码在请求前算出——这正是"模型只给参数、不给 URL"的原因。
  */
 export declare function clsSign(params: Record<string, string>): string;

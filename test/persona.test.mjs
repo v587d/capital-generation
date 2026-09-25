@@ -379,6 +379,19 @@ test('主 persona：预热与回合纪律——每会话一个 dc、等待期不
   assertRuleAny(MAIN_PERSONA, [/抽样核对/, /异常抽样/], '主 persona 应把网页比对限定为抽样核对')
 })
 
+test('主 persona：最终结论前对账结算通知——排序规则，不等于任务完成', () => {
+  // 真机会话 01d6197b：data_junior 业务回传先到、结算通知约 2ms 后到，结论写在 step 1、
+  // 结算回执追加在同轮 step 2 —— 结论被尾部回执分割。修法是"对账"而不是猜轮号：
+  // DSH 没有"最终轮"概念（docs/dev/chart-delivery-events.md §6.3），但收齐最后一次交互后的全部结算通知后，
+  // 就不可能再有新通知到达，结论那一步必然是最后一步。
+  assertRuleAny(MAIN_PERSONA, [/写最终结论前对账/, /结论前先对账/], '主 persona 必须要求写最终结论前对账结算通知')
+  assertRule(MAIN_PERSONA, /缺一条本轮只写等待行/, '对账不齐时本轮只写等待行，结论留到收齐那一步')
+  assertRule(MAIN_PERSONA, /重新对账/, '结论之后又唤醒子 Agent 必须重新对账')
+  // 与 waiting_data 语义的边界：对账只约束顺序，绝不允许被读成完成判据。
+  assertRuleAny(MAIN_PERSONA, [/结算通知只用于排序/, /结算.*只用于排序/], '新规则必须写明结算通知只用于排序')
+  assertRuleAny(MAIN_PERSONA, [/仍不等于任务完成/, /仍不等于完成/], '排序规则不得被读成完成判据')
+})
+
 test('主 persona：web_retriever 编排与检索路由', () => {
   assertRule(MAIN_PERSONA, /subagent_web_retriever/)
   assertRule(MAIN_PERSONA, /web_retriever/)
@@ -854,7 +867,7 @@ test('data_collector persona：叶子边界——不得创建/指挥 data_junior
 
 test('skill 内容：编排 skill 覆盖预检异常与清单，数据 skill 覆盖三种载荷', () => {
   const orchestration = readFileSync(`${SKILL_DIR}capital-orchestration/SKILL.md`, 'utf8')
-  for (const pattern of [/list_agents\(scope="children"\)/, /running/, /idle/, /ready/, /diagnostic/, /委派清单/, /data_collector/, /data_junior/, /web_retriever/, /capital-data-protocol/, /Wind 能力暂不可用/, /dataset_session_mismatch/, /分钟级/, /ID 纪律/, /投错对象/, /waiting_data/, /data_gap/, /中途消息是工单/, /结算通知 ≠ 任务完成/]) {
+  for (const pattern of [/list_agents\(scope="children"\)/, /running/, /idle/, /ready/, /diagnostic/, /委派清单/, /data_collector/, /data_junior/, /web_retriever/, /capital-data-protocol/, /Wind 能力暂不可用/, /dataset_session_mismatch/, /分钟级/, /ID 纪律/, /投错对象/, /waiting_data/, /data_gap/, /中途消息是工单/, /结算通知 ≠ 任务完成/, /Canonical task_id/, /中间隔了长回传/, /回传到达后集中核对/]) {
     assertMatches(orchestration, pattern, `capital-orchestration 缺少要点: ${pattern}`)
   }
   const protocol = readFileSync(`${SKILL_DIR}capital-data-protocol/SKILL.md`, 'utf8')

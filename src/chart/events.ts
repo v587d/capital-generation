@@ -138,7 +138,7 @@ export function chartEventPublishTrace(): string {
  * 交付通道的**诊断开关**：`CAPITAL_CHART_TRACE=1` 时才输出进度日志与落盘 trace。
  *
  * 默认关闭——对外发布不该往用户终端刷进度、也不该往 workspace 写调试文件。
- * 排查"图表/交付行不出现"时打开它（见 `deliverable-trace.txt` 与 AGENTS.md 的说明）。
+ * 排查"图表/交付行不出现"时打开它（见 `deliverable-trace.txt` 与 docs/dev/chart-delivery-events.md §6.3 的说明）。
  */
 export function chartTraceEnabled(): boolean {
   try {

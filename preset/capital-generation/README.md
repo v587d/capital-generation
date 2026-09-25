@@ -8,7 +8,8 @@
   以 `trust=system` 挂载；**不要**手抄进 `~/.dsh/.agent-presets`。
 - 长协议在 `skills/`（同目录），由本 preset 自己的 `skill-filesystem` 行发现；`capital-visualization-protocol` 同时供 data_junior 的 gate 和 visualization_specialist 按需加载。
 - visualization_specialist 是 data_junior 创建的 one-shot 前台子 Agent，不进入主 Agent 的 direct-child 复用清单；它只消费 chart_source_ref 并使用受控 render_chart。
-- 验证方式与"改 preset 前后的必做检查"见仓库根 `AGENTS.md` 的「Preset 维护纪律」。
+- 验证方式与"改 preset 前后的必做检查"见仓库根 `AGENTS.md` §8.3；设计理由与「不许改」全表见
+`docs/dev/preset-persona.md`。
 
 ## 1. 平面纪律（plane discipline）
 
@@ -85,7 +86,7 @@
 ## 5. 各行的作用与坑
 
 - `agent-instructions`：注入 `AGENTS.md` / `CLAUDE.md`（宿主行在本 profile 被关，由 preset
-  自持，`maxBytes: 65536`）。没有它，工作区约定对 Capital 会话不可见。
+  自持，`maxBytes: 16384`）。没有它，工作区约定对 Capital 会话不可见。
 - `tool-result-pruner`：`thresholdChars: 8192`（head 4096 + tail 1024）。真实后果是
   **能力目录与工具结果超过阈值时中间段被剪掉**；`test/data-collector-hub.test.mjs` 因此用
   "目录 6144 + 单能力详情 4096"两道测试预算，让测试先失败而不是运行时静默截断。该阈值
@@ -111,7 +112,7 @@
   重复；时间读数只来自后者（会话组作用域内注册，主 Agent 与全部子 Agent 共享，支持
   `timezone` 换算）。
 - `data_analyst` 行保持 `disabled`。启用前置条件（缺一不可）：宿主先实现 Python runner 与
-  coding 工具；插件注册 `read_profile`（allow 里的名字必须先真实存在）；更新 `AGENTS.md`
+  coding 工具；插件注册 `read_profile`（allow 里的名字必须先真实存在）；更新 `AGENTS.md` 与 `docs/dev/data-roles.md`
   的角色边界与 `test/persona.test.mjs` 的预留期断言。
 
 ## 5.1 bash：为什么只给 data_junior，以及它到底能做什么
@@ -147,7 +148,9 @@
 ## 6. 改动流程
 
 1. 先判断内容属于"每轮硬规则"（→ persona）还是"按需协议"（→ `skills/`）。
-2. 专用角色五处齐改：委派行（provider / toolName / backgroundMode / persona / toolFilter）、
-   子 persona、主 persona 的路由与复用规则、`AGENTS.md` 角色边界、测试断言。
+2. 专用角色六处齐改（判据与顺序见 `docs/dev/preset-persona.md` §8.5）：委派行（provider /
+   toolName / backgroundMode / persona / toolFilter，allow 必须含 `skill`）、子 persona（骨架 +
+   第一条 duty `skill <name>`）、`skills/<name>/SKILL.md`、主 persona 的路由与复用规则、
+   `docs/dev/data-roles.md` §1.1 的角色边界、测试断言。
 3. `npm test` 全绿 + `agentPresets.standingKeyFor('capital-generation')` 挂载成功，再开一个
    Capital 会话确认工具表、首轮预检，以及子 Agent 是否真的按第一条 duty 先加载 skill。

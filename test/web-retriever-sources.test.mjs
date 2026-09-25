@@ -661,7 +661,7 @@ test('工具输出：条目再多也留在宿主剪枝阈值内，count 只说�
 })
 
 test('条目的 url 字段：不合法链接丢字段不丢条目', async () => {
-  // 这些 url 会变成用户可点击的 markdown 链接（AGENTS.md §4），所以协议、控制符、
+  // 这些 url 会变成用户可点击的 markdown 链接（docs/dev/web-retriever.md §4），所以协议、控制符、
   // 凭据、超长四种形态都不配出现在证据里。
   const page = {
     errno: 0,

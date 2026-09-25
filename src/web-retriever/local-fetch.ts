@@ -200,7 +200,7 @@ const HYPERLINK_PATTERN = /^https?:\/\/[^\s\u0000-\u001F\u007F-\u009F]+$/u
 
 /**
  * 上游返回的 URL 字段（搜索结果的 `url`、各来源条目的 `url`）会**变成用户可点击的
- * markdown 链接**（AGENTS.md §4 回传引用格式），所以这里按"要展示"的口径再收一道；
+ * markdown 链接**（docs/dev/web-retriever.md §4 回传引用格式），所以这里按"要展示"的口径再收一道；
  * `validateUrl` 是"要请求"的口径，抛错语义不适合逐条字段。
  * 返回 `''` 表示这个值不配成为链接，调用方据此**丢字段**（不是丢条目）：
  * - 非 http(s) 协议：`javascript:` / `data:` 点下去就是执行；

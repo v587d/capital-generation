@@ -105,7 +105,8 @@ route owner 自己负责，平台自己的 `/api` 与首页分别走 `connection
 词汇表是**闭集**、读取侧 fail-closed，且 `Session.append` 无法设置 `ignorable`——自定义事件写进日志后
 会让**整份会话在冷加载时打不开**（实测 6 份会话 `failed to observe session`）。所以客户端不再持有
 任何图表专属会话投影，**turn-tail 卡片通道已整体移除**；回归断言在 `test/chart-client.test.mjs`。
-详见 `src/chart/events.ts` 头部与 `AGENTS.md` 的「图表呈现纪律」。
+详见 `src/chart/events.ts` 头部、`docs/dev/chart-presentation.md` §6.1 与
+`docs/dev/chart-delivery-events.md` §6.3。
 
 `tool.call.toolview['render_chart']` 保留为工具过程明细（子会话与展开视图可见），
 经 `/capital-charts/<chart_id>.json` 旁路取数渲染，**不经**会话事件。
