@@ -139,7 +139,7 @@ async function getJson(url: string, signal: AbortSignal, context: string): Promi
 function requireDatacenterResult(payload: JsonRecord, context: string): JsonRecord {
   // 上游用 code 9201 表示"返回数据为空"（success:false），这是**真实数据缺口**而非上游故障：
   // 节假日、或该窗口确实没有任何记录。归类成 eastmoney_upstream_error 会诱导模型反复重试
-  // （§10 第 4 条明令"数据缺口不要重试"），也与单票路径把 9201 判成"无记录"自相矛盾。
+  // （§10.4 明令"数据缺口不要重试"），也与单票路径把 9201 判成"无记录"自相矛盾。
   if (payload.success !== true && Number(payload.code) === 9201) return { data: [], pages: 0, count: 0 }
   if (payload.success !== true || Number(payload.code) !== 0 || !isRecord(payload.result)) throw sourceError(`Eastmoney ${context} failed: ${String(payload.message ?? 'unknown upstream error')} (code ${String(payload.code ?? 'unknown')})`, 'eastmoney_upstream_error')
   return payload.result
@@ -207,7 +207,7 @@ function topFilter(params: Params, ticker?: string): string {
 function parseTopRow(raw: JsonRecord): JsonRecord {
   // ⚠️ 上游 `MARKET` 是自由文本（实测存在 `SZ` 之外的写法），而 SECUCODE 自带市场后缀时
   // 它是冗余信息：只有 SECUCODE 不带市场时才拿它做必填校验，否则原文喂进硬白名单会把
-  // 整页龙虎榜判成错误（护栏误杀真实数据，§10 第 2 条）。行里的 `market` 字段仍原样保留。
+  // 整页龙虎榜判成错误（护栏误杀真实数据，§10.2）。行里的 `market` 字段仍原样保留。
   const secucode = typeof raw.SECUCODE === 'string' ? raw.SECUCODE : ''
   const identity = secucode.includes('.')
     ? normalizeEastmoneySecurityIdentity({ secucode })

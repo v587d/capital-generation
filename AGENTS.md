@@ -23,7 +23,7 @@
 | `render_chart` 准入与呈现 | `docs/dev/chart-presentation.md`（§6.1 §6.2）|
 | 交付登记与会话事件类型 | `docs/dev/chart-delivery-events.md`（§6.3）|
 | preset 现状、人设落点、「不许改」全表、新增角色六处齐改 | `docs/dev/preset-persona.md`（§8.1 §8.2 §8.4 §8.5）|
-| 工具 schema 全表、数据源验收全表 | `docs/dev/tool-schema.md`（§9 §10）|
+| 工具 schema 全表、数据源验收全表 | `docs/dev/tool-schema.md`（§9.1–§9.6 §10.1–§10.5）|
 
 ### ⛔ 硬约束一览
 
@@ -38,7 +38,7 @@
 - **§6.1** `/capital-charts` 序列旁路必须接 `connection.requestRejection`，否则是无认证端点。
 - **§6.3** 会话事件词汇表是闭集，交付必须走 first-party `deliverables/presented`；cordis ctx 不能用
   `{ ...ctx }` 展开（`get`/`on`/`effect` 挂在原型上）；寄存队列按 owner（根会话）归档。
-- **§9 第 5、6 条** 工具返回值必须无损 JSON（`undefined` / `NaN` / 空洞不许带出），且必须满足自己
+- **§9.5 / §9.6** 工具返回值必须无损 JSON（`undefined` / `NaN` / 空洞不许带出），且必须满足自己
   声明的 `output.schema`——多返回一个未声明字段同样致命。
 
 ## 1. 角色边界与数据调度纪律
@@ -132,10 +132,10 @@ credentials 域、回退开关即时写与两处 schema 默认值逐字一致—
 
 ## 9. 工具 schema 纪律（改任何模型工具定义之后）
 
-全表在 `docs/dev/tool-schema.md` §9。四条硬指标：① `parameters` 根只能是 `jsonObject()` 的
-`{ type:'object', properties, required }`（根级组合子或不写 `type` 会被供应商在第一个 token 前整体
-400）；② 多形态靠可选属性 + 边界归一化（`normalizeQueryArgs`）；③ 新增工具**必须经 `apply()`
-注册**才在回归保护内；④ 改完 `src/` 必须重建并**重启 dsh 进程**。两条 ⛔ 见上面「§9 第 5、6 条」。
+全表在 `docs/dev/tool-schema.md`。四条硬指标：① §9.1 `parameters` 根只能是 `jsonObject()` 的
+`{ type:'object', properties, required }`（根级组合子或不写 `type` 会被供应商在第一个 token 前 400）；
+② §9.2 多形态靠可选属性 + 边界归一化；③ §9.3 新工具**必须经 `apply()` 注册**才在回归保护内；
+④ §9.4 改完 `src/` 必须重建并**重启 dsh 进程**。两条 ⛔ 见上面 §9.5 / §9.6。
 
 ### 9.7 同一能力接多个入口：共用一份实现、逐入口验证
 
@@ -146,5 +146,5 @@ credentials 域、回退开关即时写与两处 schema 默认值逐字一致—
 
 ## 10. 数据源验收纪律（改 `src/sources/fuyao-rest.ts` 之后）
 
-全表在 `docs/dev/tool-schema.md` §10。底线：改端点要同步 `npm run docs:capabilities`；**任何新护栏
+全表在 `docs/dev/tool-schema.md` §10.1–§10.5。底线：改端点要同步 `npm run docs:capabilities`；**任何新护栏
 先拿官方示例 / 真报文验过**（护栏拒绝官方示例就是真实取数事故）；`2004` 不注册、`5003` 是数据缺口。

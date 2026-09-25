@@ -45,6 +45,20 @@ for (const [file, list] of devHeadings) {
   }
 }
 
+/** 索引行的编号写法：`§4.1`、`§9.1–§9.6`（连字符展开为连续区间）；整数节只校验存在于根。 */
+function expandIndexCell(cell) {
+  const out = []
+  for (const m of cell.matchAll(/§(\d+(?:\.\d+)?)(?:–§?(\d+(?:\.\d+)?))?/g)) {
+    out.push(m[1])
+    if (!m[2]) continue
+    const [parent, from] = m[1].split('.')
+    const [toParent, to] = m[2].split('.')
+    assert.equal(toParent, parent, `索引区间 ${m[0]} 跨了父节`)
+    for (let n = Number(from) + 1; n <= Number(to); n += 1) out.push(`${parent}.${n}`)
+  }
+  return out
+}
+
 const lineCount = (text) => text.replace(/\n$/, '').split('\n').length
 const filesToScan = []
 const walk = (dir) => {
@@ -91,7 +105,12 @@ test('§0 阅读路径表与 docs/dev/ 正文一一对应', () => {
   const listed = new Map()
   for (const [, file, numbers] of table) {
     assert.ok(existsSync(join(ROOT, file)), `索引指向不存在的 ${file}`)
-    listed.set(file, numbers.match(/§(\d+(?:\.\d+)?)/g)?.map((s) => s.slice(1)) ?? [])
+    const cell = expandIndexCell(numbers)
+    for (const h of cell) {
+      if (h.includes('.')) continue
+      assert.ok(rootHeadings.includes(h), `索引行给 ${file} 写了整数节 §${h}，但 AGENTS.md 没有这个顶层节`)
+    }
+    listed.set(file, cell.filter((h) => h.includes('.')))
   }
   assert.deepEqual(
     [...listed.keys()].sort(),
@@ -99,11 +118,43 @@ test('§0 阅读路径表与 docs/dev/ 正文一一对应', () => {
     '索引表与 docs/dev/ 文件清单必须一致（新文档要进表，删文档要一起删行）',
   )
   for (const [file, numbers] of listed) {
-    assert.deepEqual(
-      [...numbers].sort(),
-      devHeadings.get(file).slice().sort(),
-      `${file} 的索引行与实际小节不符（内容搬进/搬出要同步索引）`,
-    )
+    const cell = [...numbers].sort()
+    const actual = devHeadings.get(file).filter((h) => h.includes('.')).sort()
+    assert.deepEqual(cell, actual, `${file} 的索引行与实际小节不符（内容搬进/搬出要同步索引；整数节属于 AGENTS.md，不写在行里）`)
+    for (const h of devHeadings.get(file)) {
+      if (h.includes('.')) continue
+      assert.ok(rootHeadings.includes(h), `${file} 的整数节 §${h} 在 AGENTS.md 里没有对应顶层节`)
+    }
+  }
+})
+
+test('§编号规则：整数节只在 AGENTS.md 索引，小数节按父节从 .1 连续编号', () => {
+  // 编号是全仓唯一的指针命名空间（代码注释按 § 找文档）。上一版的手工引用清单会失真，
+  // 所以这里不查"谁引用了谁"，只查编号本身是否自洽：
+  // ① 一个小数节只能有一个载体文件（前面的定义阶段已断言）；
+  // ② 同一父节下的小数必须从 .1 起连续（跨载体判定）——有洞就意味着某节被删了却没重编号，
+  //    或者列表项没升级成小节（曾经的 §9：只有 §9.7，正文第 1-6 条无处可指）。
+  // 连续性是全命名空间的性质，与载体无关：§8.3 与 §9.7 就住在 AGENTS.md 里。
+  const byParent = new Map()
+  const collect = (file, list) => {
+    for (const h of list) {
+      if (!h.includes('.')) continue
+      const [parent, child] = h.split('.')
+      const bucket = byParent.get(parent) ?? []
+      const clash = bucket.find((k) => k.child === Number(child))
+      assert.ok(!clash, `§${parent}.${child} 同时在 ${clash?.file} 与 ${file} 里定义——§编号是全仓唯一命名空间`)
+      bucket.push({ child: Number(child), file })
+      byParent.set(parent, bucket)
+    }
+  }
+  collect('AGENTS.md', rootHeadings)
+  for (const [file, list] of devHeadings) collect(file, list)
+  for (const [parent, kids] of byParent) {
+    assert.ok(rootHeadings.includes(parent), `§${parent} 的小节存在，但 AGENTS.md 没有 §${parent} 顶层节`)
+    kids.sort((a, b) => a.child - b.child)
+    kids.forEach((k, i) => {
+      assert.equal(k.child, i + 1, `§${parent} 的小节不连续：期望 §${parent}.${i + 1}，实际是 §${parent}.${k.child}（${k.file}）——补编号或整体重编，不要留洞`)
+    })
   }
 })
 

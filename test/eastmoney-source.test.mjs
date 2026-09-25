@@ -88,7 +88,7 @@ test('eastmoney_top_buy_sell_market：解析分页龙虎榜并保留 canonical t
 
 test('eastmoney_top_buy_sell_market：MARKET 为自由文本/空时护栏不误杀（SECUCODE 已带市场）', async () => {
   // 真实龙虎榜的 `MARKET` 不是 SH/SZ 白名单口径（如 `深交所主板`、空值）。把它喂进硬校验
-  // 会让整页判错（§10 第 2 条护栏误杀族）；SECUCODE 自带市场后缀时以它为准，`market` 列仍存原文。
+  // 会让整页判错（§10.2 护栏误杀族）；SECUCODE 自带市场后缀时以它为准，`market` 列仍存原文。
   const originalFetch = globalThis.fetch
   globalThis.fetch = async () => response({ success: true, code: 0, result: { pages: 1, count: 2, data: [
     { TRADE_DATE: '2026-09-23 00:00:00', SECURITY_CODE: '000993', SECUCODE: '000993.SZ', MARKET: '深交所主板', SECURITY_NAME_ABBR: '闽东电力' },
