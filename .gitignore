@@ -47,3 +47,7 @@ docs/dev/*
 # 研发 Agent 本机的工具授权记录（每跑一条命令就追加，因人而异）；
 # .qoder/ 下将来要共享的 commands/workflows 不在此列。
 .qoder/settings.local.json
+
+# 一次性调试手（tmp-dump.mjs 那类）：会话解压/工具回执打印已有 scripts/session-trace.mjs
+# 等正式脚本，散装脚本只在本机看，不许随宽范围 git add 混进 master。
+tmp-*.mjs
