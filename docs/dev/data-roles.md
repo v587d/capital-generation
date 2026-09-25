@@ -26,7 +26,7 @@
 - **`visualization_specialist`**：one-shot 前台子 Agent，工具表只有 `skill` + `render_chart`；
   spec 由它组装，data_junior 只交"要什么视图"。
 - **`data_analyst`**：保持 `disabled`，启用前置条件见 §8.4（`preset-persona.md`）。
-  **`web_retriever`**：纪律见 §4（`web-retriever.md`）。
+  **`web_retriever`**：纪律见 §4.1（`web-retriever.md`）。
 
 ## 1.2 两条数据边界（必须分清；2026-09 放宽仅此一处）
 

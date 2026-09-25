@@ -3,7 +3,7 @@
 > 索引见仓库根 `AGENTS.md` §4。改 `src/web-retriever/`、`src/net/` 或九个具名来源之前读这里。
 > §编号沿用 `AGENTS.md` 的全局命名空间。
 
-## 4. 工作面与分工
+## 4.1 工作面与分工
 
 - **模型侧纪律不在本文**（同一份规则抄三处迟早失真）：硬规则在主 / 子 persona，细则在 skill
   `capital-web-protocol`——两者都由 `test/persona.test.mjs` 断言（体积上限 + 要点逐条 pattern：
@@ -16,11 +16,11 @@
   验收记录 `docs/design/web-retriever-source-expansion.md`。**新增来源只改一处名单**
   （`RETRIEVAL_DENIED_TOOLS`，§8.4 → `preset-persona.md`）就要进这九个的注册面。
 
-## 4.1 本地回退（AnySearch 失败后的本机直连）
+## 4.2 本地回退（AnySearch 失败后的本机直连）
 
 - **触发**：AnySearch **明确失败**且"值得换路"且**回退开关开启**时，工具内部**自动**本机直连同
   一页面（HTML → GFM markdown）——**不是模型要做的第二次调用**，不占"最多重试一次"额度。开关 =
-  设置卡片「允许启动本地提取网页内容」（默认开启，写入路径与 `applies:'restart'` 见 §5 →
+  设置卡片「允许启动本地提取网页内容」（默认开启，写入路径与 `applies:'restart'` 见 §5.2 →
   `settings-config.md`）；**同时支配九个具名来源**：关闭时工具仍在注册面但每次响亮失败
   （`DISABLED`）。
 - **不回退的三类**：`INVALID_URL` / `UNSUPPORTED_CONTENT` / `ABORTED`（调用方取消**原样抛出，

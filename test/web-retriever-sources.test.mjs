@@ -371,7 +371,7 @@ test('sseinfo_qa：uid 定位有总时限，超时是 TIMEOUT 而不是"这一�
         return true
       },
     )
-    // 调用方先取消：原样是取消，不能被总时限改写成 TIMEOUT（§4.1）。
+    // 调用方先取消：原样是取消，不能被总时限改写成 TIMEOUT（docs/dev/web-retriever.md §4.2）。
     const controller = new AbortController()
     controller.abort()
     await assert.rejects(
@@ -661,7 +661,7 @@ test('工具输出：条目再多也留在宿主剪枝阈值内，count 只说�
 })
 
 test('条目的 url 字段：不合法链接丢字段不丢条目', async () => {
-  // 这些 url 会变成用户可点击的 markdown 链接（docs/dev/web-retriever.md §4），所以协议、控制符、
+  // 这些 url 会变成用户可点击的 markdown 链接（docs/dev/web-retriever.md §4.2），所以协议、控制符、
   // 凭据、超长四种形态都不配出现在证据里。
   const page = {
     errno: 0,

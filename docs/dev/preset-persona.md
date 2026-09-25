@@ -53,7 +53,7 @@
   shell 槽位 → `bash-gate.md`）；③ 出网只有一个入口：`RETRIEVAL_DENIED_TOOLS`
   （`src/agents/root-tool-policy.ts`，13 个检索 / 来源工具名的**唯一事实来源**，spread 进
   `ROOT_AGENT_DENIED_TOOLS`，**新增来源只改这一处**）+ 通用 subagent deny + 主 persona 禁直连
-  文案；④ 本地回退开关支配九个具名来源（§4.1 → `web-retriever.md`）。②③ 由
+  文案；④ 本地回退开关支配九个具名来源（§4.2 → `web-retriever.md`）。②③ 由
   `test/persona.test.mjs`（无通配 + deepEqual 对齐同一名单）与 `test/root-tool-policy.test.mjs`
   （名单长度 13）钉死。**教训**：`工具前缀_*` 通配在工具改名后一个都不匹配——禁直连文案必须
   **只点名宿主的 `web_search` / `web_fetch`**。

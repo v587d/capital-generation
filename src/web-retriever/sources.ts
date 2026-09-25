@@ -86,7 +86,7 @@ export function createSourceTransport(options: LocalFetchOptions): Requester {
  * （`sharedEastmoneyThrottle()`），本适配只替换"怎么发出去"。
  *
  * 带分类 `code` 的 `LocalFetchError` 原样穿过（`createEastmoneyClient` 见 code 即不包裹），
- * 取消因此保持 `ABORTED` 语义、不被降级成网络失败（§4.1）。
+ * 取消因此保持 `ABORTED` 语义、不被降级成网络失败（docs/dev/web-retriever.md §4.2）。
  */
 export function createGatedEastmoneyTransport(requester: Requester): EastmoneyTransport {
   return async (url, init) => {
@@ -487,7 +487,7 @@ export const SSE_UID_LOCATE_TIMEOUT_MS = 60_000
 
 interface Deadline {
   signal: AbortSignal
-  /** 只有"定时器到点且调用方没取消"才算超限：调用方取消要原样上抛（§4.1）。 */
+  /** 只有"定时器到点且调用方没取消"才算超限：调用方取消要原样上抛（docs/dev/web-retriever.md §4.2）。 */
   exceeded: () => boolean
   dispose: () => void
 }

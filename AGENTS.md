@@ -6,8 +6,8 @@
 > - 本文只放**索引**与**每次动手都要过的闸门**（§3 §7 §8.3 §9 §10），详情按 §编号住 `docs/dev/`，
 >   靠指针按需 `Read`（DSH 只从 session cwd 往上找指令文件，子目录不会被注入）。
 > - 本文件由 preset 的 `agent-instructions` 行注入会话，`maxBytes: 16384` 是硬闸门（超出即截断，
->   尾部规则静默消失）。行数、体积与 **§指针一致性**由 `test/dev-docs.test.mjs` 钉住——所以本文
->   不手工维护"谁引用了哪节"的清单（上一版那样做，它已经失真了）。
+>   尾部规则静默消失）。行数、体积与 **§指针一致性**由 `test/dev-docs.test.mjs` 钉住：整数节只住
+>   本文，`docs/dev/*.md` 只有小数节且同一父节从 `.1` 连续。不手工维护"谁引用了哪节"的清单。
 > - **⛔ = 曾造成真实事故的硬约束**；改动须有明确设计决策并同步回归测试。只读事实（字段、schema、
 >   能力清单）以代码与工具 `description` 为准，本文不抄。
 
@@ -18,8 +18,8 @@
 | 角色边界、Dataset 消息 / 返回边界、capability 目录预算 | `docs/dev/data-roles.md`（§1.1 §1.2 §1.4 §1.5）|
 | 时间轴、日期归一、session 读取 | `docs/dev/time-axis.md`（§1.3）|
 | data_junior 的 bash 闸门与 shell 挂载 | `docs/dev/bash-gate.md`（§1.6）|
-| web_retriever、本地回退、九个具名来源 | `docs/dev/web-retriever.md`（§4 §4.1）|
-| settings 卡片（host 平面嵌套包） | `docs/dev/settings-config.md`（§5）|
+| web_retriever、本地回退、九个具名来源 | `docs/dev/web-retriever.md`（§4.1 §4.2）|
+| settings 卡片（host 平面嵌套包） | `docs/dev/settings-config.md`（§5.1–§5.3）|
 | `render_chart` 准入与呈现 | `docs/dev/chart-presentation.md`（§6.1 §6.2）|
 | 交付登记与会话事件类型 | `docs/dev/chart-delivery-events.md`（§6.3）|
 | preset 现状、人设落点、「不许改」全表、新增角色六处齐改 | `docs/dev/preset-persona.md`（§8.1 §8.2 §8.4 §8.5）|

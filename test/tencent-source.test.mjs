@@ -112,7 +112,7 @@ test('tencent_kline rotates empty host and parses raw daily rows', async () => {
   }
 })
 
-test('tencent_kline 取消原样抛出：不拉黑任何入口、不降级成 tencent_kline_unavailable（§4.1）', async () => {
+test('tencent_kline 取消原样抛出：不拉黑任何入口、不降级成 tencent_kline_unavailable（§4.2）', async () => {
   const sources = sourceMap()
   const originalFetch = globalThis.fetch
   const aborted = new Error('This operation was aborted')
@@ -172,7 +172,7 @@ test('腾讯出口只有一条节流链：并发调用被串开，不重叠打�
   }
 })
 
-test('腾讯出口：信号已取消时不排队，直接原样抛 AbortError（§4.1）', async () => {
+test('腾讯出口：信号已取消时不排队，直接原样抛 AbortError（§4.2）', async () => {
   const sources = sourceMap()
   const originalFetch = globalThis.fetch
   let calls = 0

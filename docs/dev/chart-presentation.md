@@ -25,7 +25,7 @@
 
 ## 6.2 模型侧呈现纪律
 
-- **细则不在本文**（与 §4 → `web-retriever.md` 同口径）：不出图 / 不罗列图表文件、一张图一个
+- **细则不在本文**（与 §4.1 → `web-retriever.md` 同口径）：不出图 / 不罗列图表文件、一张图一个
   `chart_source_ref`（15 分钟 TTL）、一对一不叠图、被排除视图记进 `warnings`、spec 由 specialist
   组装——persona 或 skill 里各有**被测试钉住的**一份，此处不复述。
 - **数据的物理路径**：`render_chart` 只回小回执，序列写 `capital-analysis/charts/<id>/`，浏览器

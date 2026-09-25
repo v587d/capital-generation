@@ -49,7 +49,7 @@ export declare function createSourceTransport(options: LocalFetchOptions): Reque
  * （`sharedEastmoneyThrottle()`），本适配只替换"怎么发出去"。
  *
  * 带分类 `code` 的 `LocalFetchError` 原样穿过（`createEastmoneyClient` 见 code 即不包裹），
- * 取消因此保持 `ABORTED` 语义、不被降级成网络失败（§4.1）。
+ * 取消因此保持 `ABORTED` 语义、不被降级成网络失败（docs/dev/web-retriever.md §4.2）。
  */
 export declare function createGatedEastmoneyTransport(requester: Requester): EastmoneyTransport;
 /**

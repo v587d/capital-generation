@@ -16,7 +16,7 @@ const read = (rel) => readFileSync(join(ROOT, rel), 'utf8')
 
 const DEV_DIR = 'docs/dev'
 // 行数上限来自"一份 md 不超过 150 行"的拆分约定；字节上限 = preset 注入闸门
-// （agent-instructions 的 maxBytes: 16384）的 75%，与 §1.5 / §4.1 的输出预算同一口径。
+// （agent-instructions 的 maxBytes: 16384）的 75%，与 §1.5 / §4.2 的输出预算同一口径。
 const MAX_LINES = 150
 const MAX_AGENTS_BYTES = 12288
 
@@ -30,22 +30,21 @@ const headingsOf = (text) => [...text.matchAll(HEADING)].map((m) => m[1])
 const rootHeadings = headingsOf(agentsText)
 const devHeadings = new Map([...devTexts].map(([file, text]) => [file, headingsOf(text)]))
 
-/** 全仓文档层的 §定义：整数节只在根定义（详情文件可重复父节做标题），小数节全局唯一。 */
+/** 全仓文档层的 §定义：整数节只住 AGENTS.md，详情文件只有小数节；小数节全局唯一。 */
 const defined = new Set(rootHeadings)
 const decimalOwners = new Map()
 for (const [file, list] of devHeadings) {
   for (const h of list) {
-    if (!h.includes('.')) {
-      assert.ok(rootHeadings.includes(h), `${file} 的 ## ${h} 在 AGENTS.md 里没有对应的顶层节`)
-      continue
-    }
+    // 对称性：详情文件里出现整数节就意味着"同一节两个载体"——根说一遍、详情再说一遍，
+    // 迟早失真（§8.2 的落点判据同样适用于文档层自己）。拆成 §N.1… 并把整数节留在根。
+    assert.ok(h.includes('.'), `${file} 定义了整数节 ## ${h}——整数节只住 AGENTS.md，这里按 §${h}.1… 拆小节`)
     assert.ok(!decimalOwners.has(h), `§${h} 同时在 ${decimalOwners.get(h)} 与 ${file} 里定义——§编号是全仓唯一命名空间`)
     decimalOwners.set(h, file)
     defined.add(h)
   }
 }
 
-/** 索引行的编号写法：`§4.1`、`§9.1–§9.6`（连字符展开为连续区间）；整数节只校验存在于根。 */
+/** 索引行的编号写法：`§4.2`、`§9.1–§9.6`（连字符展开为连续区间）；只写小数节，整数节属于根。 */
 function expandIndexCell(cell) {
   const out = []
   for (const m of cell.matchAll(/§(\d+(?:\.\d+)?)(?:–§?(\d+(?:\.\d+)?))?/g)) {
@@ -107,10 +106,9 @@ test('§0 阅读路径表与 docs/dev/ 正文一一对应', () => {
     assert.ok(existsSync(join(ROOT, file)), `索引指向不存在的 ${file}`)
     const cell = expandIndexCell(numbers)
     for (const h of cell) {
-      if (h.includes('.')) continue
-      assert.ok(rootHeadings.includes(h), `索引行给 ${file} 写了整数节 §${h}，但 AGENTS.md 没有这个顶层节`)
+      assert.ok(h.includes('.'), `索引行给 ${file} 写了整数节 §${h}——整数节属于 AGENTS.md，行里只列该文件的小节`)
     }
-    listed.set(file, cell.filter((h) => h.includes('.')))
+    listed.set(file, cell)
   }
   assert.deepEqual(
     [...listed.keys()].sort(),
@@ -119,12 +117,8 @@ test('§0 阅读路径表与 docs/dev/ 正文一一对应', () => {
   )
   for (const [file, numbers] of listed) {
     const cell = [...numbers].sort()
-    const actual = devHeadings.get(file).filter((h) => h.includes('.')).sort()
+    const actual = devHeadings.get(file).sort()
     assert.deepEqual(cell, actual, `${file} 的索引行与实际小节不符（内容搬进/搬出要同步索引；整数节属于 AGENTS.md，不写在行里）`)
-    for (const h of devHeadings.get(file)) {
-      if (h.includes('.')) continue
-      assert.ok(rootHeadings.includes(h), `${file} 的整数节 §${h} 在 AGENTS.md 里没有对应顶层节`)
-    }
   }
 })
 

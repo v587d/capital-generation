@@ -160,7 +160,7 @@ async function readResponse(response: Response, encoding: 'utf-8' | 'gbk'): Prom
 }
 
 async function getText(url: string, signal: AbortSignal, encoding: 'utf-8' | 'gbk' = 'utf-8', init: RequestInit = {}): Promise<string> {
-  // 取消不排队：队首那个请求挂住时，把这次取消塞进队列等于把它吞掉（§4.1「取消原样抛出」）。
+  // 取消不排队：队首那个请求挂住时，把这次取消塞进队列等于把它吞掉（docs/dev/web-retriever.md §4.2「取消原样抛出」）。
   signal.throwIfAborted()
   return tencentThrottle(async () => {
     const response = await fetch(url, {
@@ -302,7 +302,7 @@ async function callKline(path: string, param: string, signal: AbortSignal): Prom
       hostDownUntil.set(host, Date.now() + HOST_COOLDOWN_MS)
     } catch (error) {
       // 取消原样抛出，**先于**一切拉黑/换机逻辑：一次用户取消或 Hub 超时不得把全部
-      // K 线入口进程级拉黑，更不得降级成 `tencent_kline_unavailable`（§4.1「取消原样抛出」）。
+      // K 线入口进程级拉黑，更不得降级成 `tencent_kline_unavailable`（docs/dev/web-retriever.md §4.2「取消原样抛出」）。
       if (error instanceof Error && error.name === 'AbortError') throw error
       if (error instanceof Error && error.message.includes('parameter error')) throw error
       errors.push(`${host}: ${error instanceof Error ? error.message : String(error)}`)

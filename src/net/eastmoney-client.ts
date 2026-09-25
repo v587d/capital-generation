@@ -123,7 +123,7 @@ export function createEastmoneyClient(options: {
       // 取消原样抛出（`AbortError`），调用方据此区分"网络失败"与"调用方不要了"。
       if (error instanceof Error && error.name === 'AbortError') throw error
       // 已带分类 `code` 的错误（如闸门注入的 `LocalFetchError`：ABORTED/TIMEOUT/REDIRECT…）
-      // 原样抛出：再包一层会把"取消"降级成网络失败（§4.1），也丢掉失败原因。
+      // 原样抛出：再包一层会把"取消"降级成网络失败（docs/dev/web-retriever.md §4.2），也丢掉失败原因。
       if (typeof (error as { code?: unknown })?.code === 'string') throw error
       throw new EastmoneyTransportError(`eastmoney request failed: ${error instanceof Error ? error.message : String(error)}`)
     }
