@@ -57,6 +57,11 @@
   `test/persona.test.mjs`（无通配 + deepEqual 对齐同一名单）与 `test/root-tool-policy.test.mjs`
   （名单长度 13）钉死。**教训**：`工具前缀_*` 通配在工具改名后一个都不匹配——禁直连文案必须
   **只点名宿主的 `web_search` / `web_fetch`**。
+- **③ 的唯一例外是 `ocr`，且例外开在"形态"而不是"工具名"上**（§4.3）：主 Agent 拿本地文档
+  （`file` / `doc_id`）是正当入口，外部链接（`url`）仍必须委派。名字级 deny 表达不了这个粒度，
+  所以走 `installRootOcrGuard` 的调用级 monotonic guard 只拒 `url` 形态。加 `ocr` 时**不要**把它
+  塞进 `RETRIEVAL_DENIED_TOOLS`（那会连带关掉本地形态），也**不要**省掉通用 subagent 的 deny 行
+  （否则通用 child 继承它能自己出文档）。
 - **`data_analyst` 保持 `disabled`**。启用前需同时满足：宿主 Python runner + coding 工具；插件注册
   `read_profile`；更新本文 §1；更新测试预留断言；shell 槽位进 allow 并重定沙箱写边界（写
   `capital-analysis/runs/` 需 `workspace-write`，不要 read-only 钉会话，§1.6）。

@@ -17,12 +17,27 @@ export interface LocalFetchConfig {
     maxRedirects?: number;
     userAgent?: string;
 }
-/** web_retriever 会话配置：anysearch（广度）+ wind_docs（public_document 精准）。 */
+/**
+ * PaddleOCR 文档解析（`ocr` 工具）配置。
+ *
+ * `endpoint` / `model` 空值 = 用 `src/ocr/client.ts` 里的官方端点与模型名（真值只在那一处，
+ * 与 `windDocs.endpoint` 同一口径）。`pollBudgetMs` 是**工具内部**等作业的自有预算，
+ * 必须小于工具声明的 `timeoutMs: 240000`——余量留给"决定回 pending 之后把回执写出去"，
+ * 撞上框架超时就没有 `doc_id` 可续查了。
+ */
+export interface PaddleOcrConfig {
+    endpoint?: string;
+    credentialRef?: string;
+    model?: string;
+    pollBudgetMs?: number;
+}
+/** web_retriever 会话配置：anysearch（广度）+ wind_docs（public_document 精准）+ 文档解析。 */
 export interface RetrieverConfig {
     baseURL?: string;
     credentialRef?: string;
     windDocs?: WindDocsConfig;
     localFetch?: LocalFetchConfig;
+    paddleOcr?: PaddleOcrConfig;
 }
 /**
  * 本地直连回退的默认值（唯一真值来源）：schema 的 `.default()` 与消费点
@@ -40,6 +55,14 @@ export interface RetrieverConfig {
  * （版本号真值仍只有一处，由测试守着等于 `package.json` 的 version）。
  */
 export declare const LOCAL_FETCH_DEFAULTS: Required<LocalFetchConfig>;
+/**
+ * `ocr`（PaddleOCR 文档解析）配置的默认值：与 `LOCAL_FETCH_DEFAULTS` 同一口径，
+ * schema 的 `.default()` 与消费点都引用它，字面量只有一处。
+ *
+ * `endpoint` / `model` 留空是把真值让给 `src/ocr/client.ts`（那边还有 `PADDLE_OCR_MAX_PAGES`
+ * 这类跟着端点走的常数）；`pollBudgetMs: 0` 同理让给客户端的 `DEFAULT_WAIT_BUDGET_MS`。
+ */
+export declare const PADDLE_OCR_DEFAULTS: Required<PaddleOcrConfig>;
 /**
  * 消费点独立补齐默认值。`apply()` 在无 settings 的宿主/测试里拿到的是**未过 schema**
  * 的原始对象，`retriever.localFetch` 可能是 `undefined`，因此消费点不能依赖 schema 补默认值。
@@ -85,6 +108,17 @@ export declare const Config: z<Schemastery.ObjectS<{
             maxRedirects: z<number, number>;
             userAgent: z<string, string>;
         }>>;
+        paddleOcr: z<Schemastery.ObjectS<{
+            endpoint: z<string, string>;
+            credentialRef: z<string, string>;
+            model: z<string, string>;
+            pollBudgetMs: z<number, number>;
+        }>, Schemastery.ObjectT<{
+            endpoint: z<string, string>;
+            credentialRef: z<string, string>;
+            model: z<string, string>;
+            pollBudgetMs: z<number, number>;
+        }>>;
     }>, Schemastery.ObjectT<{
         baseURL: z<string, string>;
         credentialRef: z<string, string>;
@@ -111,6 +145,17 @@ export declare const Config: z<Schemastery.ObjectS<{
             maxContentChars: z<number, number>;
             maxRedirects: z<number, number>;
             userAgent: z<string, string>;
+        }>>;
+        paddleOcr: z<Schemastery.ObjectS<{
+            endpoint: z<string, string>;
+            credentialRef: z<string, string>;
+            model: z<string, string>;
+            pollBudgetMs: z<number, number>;
+        }>, Schemastery.ObjectT<{
+            endpoint: z<string, string>;
+            credentialRef: z<string, string>;
+            model: z<string, string>;
+            pollBudgetMs: z<number, number>;
         }>>;
     }>>;
 }>, Schemastery.ObjectT<{
@@ -143,6 +188,17 @@ export declare const Config: z<Schemastery.ObjectS<{
             maxRedirects: z<number, number>;
             userAgent: z<string, string>;
         }>>;
+        paddleOcr: z<Schemastery.ObjectS<{
+            endpoint: z<string, string>;
+            credentialRef: z<string, string>;
+            model: z<string, string>;
+            pollBudgetMs: z<number, number>;
+        }>, Schemastery.ObjectT<{
+            endpoint: z<string, string>;
+            credentialRef: z<string, string>;
+            model: z<string, string>;
+            pollBudgetMs: z<number, number>;
+        }>>;
     }>, Schemastery.ObjectT<{
         baseURL: z<string, string>;
         credentialRef: z<string, string>;
@@ -169,6 +225,17 @@ export declare const Config: z<Schemastery.ObjectS<{
             maxContentChars: z<number, number>;
             maxRedirects: z<number, number>;
             userAgent: z<string, string>;
+        }>>;
+        paddleOcr: z<Schemastery.ObjectS<{
+            endpoint: z<string, string>;
+            credentialRef: z<string, string>;
+            model: z<string, string>;
+            pollBudgetMs: z<number, number>;
+        }>, Schemastery.ObjectT<{
+            endpoint: z<string, string>;
+            credentialRef: z<string, string>;
+            model: z<string, string>;
+            pollBudgetMs: z<number, number>;
         }>>;
     }>>;
 }>>;

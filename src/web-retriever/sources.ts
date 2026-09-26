@@ -842,13 +842,27 @@ export async function eastmoneyStockNews(
 
 const EM_REPORT_URL = 'https://reportapi.eastmoney.com/report/list'
 const EM_DATA_REFERER = 'https://data.eastmoney.com/'
+const EM_PDF_BASE = 'https://pdf.dfcfw.com/pdf/'
+
+/**
+ * 研报 PDF 直链由 `infoCode` 派生：`H3_<infoCode>_1.pdf`（`_1` = 第一个附件，个股研报都是
+ * `H3` 类）。2026-09-25 实测三个不同年份的 `infoCode` 全部 `HTTP 200` + `application/pdf`、
+ * 无需 Referer。
+ *
+ * 形状不认识就**不给链接**（宁缺勿造）：从上游文本里拼一条可能指向别人文档的 URL，
+ * 比让模型说"这条没直链"危险得多。
+ */
+function emReportPdfUrl(infoCode: unknown): string | undefined {
+  return typeof infoCode === 'string' && /^AP\d{6,}$/u.test(infoCode) ? `${EM_PDF_BASE}H3_${infoCode}_1.pdf` : undefined
+}
 
 /**
  * 取个股研报列表。
  *
  * ⚠️ **没有摘要可给**（2026-09-24 实测该接口 51 个字段）：列表只有标题 / 机构 / 研究员 /
- * 日期 / 评级，正文在 `pdf.dfcfw.com` 的 PDF 里，而本机直连只处理文本（`application/pdf`
- * 会被拒），**web_retriever 拿不到研报正文**。需要正文时如实说明这个边界，不要拿标题当结论。
+ * 日期 / 评级。正文在那份 PDF 里——本机直连只处理文本（`application/pdf` 会被
+ * `web_retriever_fetch` 拒），要走 `ocr` 解析（§4.3）。所以本函数把**每条的 PDF 直链**交出去
+ * （`pdf_url`），通路才是完整的：没有它，模型手上没有任何稳定 `.pdf` URL，而人设又禁止编链接。
  *
  * 有用的派生信息：每篇研报自带分析师预测 EPS（`predictThisYearEps` / `predictNextYearEps` /
  * `predictNextTwoYearEps`）与对应 PE，以及评级与评级变动（`emRatingName` / `ratingChange`）。
@@ -889,6 +903,7 @@ export async function eastmoneyReports(
   for (const raw of rows) {
     const row = asRecord(raw)
     if (!row) continue
+    const pdfUrl = emReportPdfUrl(row.infoCode)
     items.push({
       date: typeof row.publishDate === 'string' ? row.publishDate.slice(0, 10) : '',
       title: clip(row.title),
@@ -901,6 +916,10 @@ export async function eastmoneyReports(
       eps_this_year: toNumber(row.predictThisYearEps),
       eps_next_year: toNumber(row.predictNextYearEps),
       info_code: clip(row.infoCode),
+      // 列表把正文的**入口**一并交出来：没有 `pdf_url`，模型手上就没有任何稳定 `.pdf` 直链，
+      // 而 `ocr` 这条通路只吃直链或本地文件。
+      ...(pdfUrl === undefined ? {} : { pdf_url: pdfUrl }),
+      attach_pages: typeof row.attachPages === 'number' && Number.isFinite(row.attachPages) ? row.attachPages : null,
     })
   }
   return {
@@ -908,7 +927,7 @@ export async function eastmoneyReports(
     operation: 'reports',
     items: clipItems(items),
     ...(totalPage > input.pageNo ? { next_cursor: String(input.pageNo + 1) } : {}),
-    note: `东财研报库共 ${hits} 篇；列表不含摘要，正文在 PDF 里，web_retriever 无法取回（本机直连只处理文本）`,
+    note: `东财研报库共 ${hits} 篇；列表不含摘要，正文在各条的 pdf_url（研报 PDF）里，交 ocr 解析（整篇一次算完）`,
   }
 }
 

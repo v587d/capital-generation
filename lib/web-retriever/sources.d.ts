@@ -177,8 +177,9 @@ export declare function eastmoneyStockNews(client: EastmoneyClient, input: {
  * 取个股研报列表。
  *
  * ⚠️ **没有摘要可给**（2026-09-24 实测该接口 51 个字段）：列表只有标题 / 机构 / 研究员 /
- * 日期 / 评级，正文在 `pdf.dfcfw.com` 的 PDF 里，而本机直连只处理文本（`application/pdf`
- * 会被拒），**web_retriever 拿不到研报正文**。需要正文时如实说明这个边界，不要拿标题当结论。
+ * 日期 / 评级。正文在那份 PDF 里——本机直连只处理文本（`application/pdf` 会被
+ * `web_retriever_fetch` 拒），要走 `ocr` 解析（§4.3）。所以本函数把**每条的 PDF 直链**交出去
+ * （`pdf_url`），通路才是完整的：没有它，模型手上没有任何稳定 `.pdf` URL，而人设又禁止编链接。
  *
  * 有用的派生信息：每篇研报自带分析师预测 EPS（`predictThisYearEps` / `predictNextYearEps` /
  * `predictNextTwoYearEps`）与对应 PE，以及评级与评级变动（`emRatingName` / `ratingChange`）。

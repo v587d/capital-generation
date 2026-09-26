@@ -322,6 +322,11 @@ export interface FsLike {
     sandboxPolicy?: SandboxPolicyResultLike,
   ): Promise<unknown>
   readText(target: FsTargetLike, signal?: AbortSignal): Promise<string>
+  /**
+   * 原样读字节（本地 PDF / 图片交给外部解析服务时用）。宿主把上限放在这道缝上：
+   * 超过 `maxBytes` 抛 `FS_TOO_LARGE`，**不会**返回截断结果。
+   */
+  readBytes?(target: FsTargetLike, signal: AbortSignal | undefined, maxBytes: number): Promise<Uint8Array>
   listDir(target: FsTargetLike, signal?: AbortSignal): Promise<Array<{ name: string; type: 'file' | 'directory' | 'other'; target: FsTargetLike }>>
 }
 
@@ -735,43 +740,97 @@ export class WorkspaceDatasetStore {
   }
 
   /**
-   * 宿主内部呈现层读取 workspace 内的 JSON 文件（用户本地数据直接可视化的入口）。
+   * 宿主内部读取 workspace 内的**文本**文件（图表 spec、OCR 产物、用户本地数据）。
    *
-   * 只接受 workspace **相对**路径：绝对路径、`..` 段与反斜杠一律拒绝，随后仍走
-   * `resolveContained` 做沙箱归属校验——两道关卡都要过。
+   * 这是 workspace 读取的**唯一**实现：`readWorkspaceJson` / `readWorkspaceBytes` 都从
+   * `workspaceFileTarget` 取归属与体积闸门，不各自再写一遍路径校验（§9.7——同一个事实
+   * 有两份实现就一定会漂移）。
    */
-  async readWorkspaceJson(input: { session: SessionLike; path: string; signal?: AbortSignal }): Promise<unknown> {
-    const root = this.readRoot(input.session)
-    if (!root || !this.fs) throw new DatasetStoreError('filesystem_unavailable', 'workspace filesystem is unavailable')
-    const relative = normalizeWorkspaceRelativePath(input.path)
-    const target = await this.resolveContained(relative, root, input.signal)
-    const info = this.fs.stat ? await this.fs.stat(target, input.signal) : undefined
-    if (info && info.type !== 'file') throw new DatasetStoreError('workspace_file_invalid', `${relative} is not a regular file`)
-    if (typeof info?.size === 'number' && info.size > MAX_RAW_READ_BYTES) {
-      throw new DatasetStoreError('dataset_too_large', `${relative} exceeds ${MAX_RAW_READ_BYTES} bytes`)
-    }
+  async readWorkspaceText(input: {
+    session: SessionLike
+    path: string
+    signal?: AbortSignal
+    maxBytes?: number
+  }): Promise<string> {
+    const maxBytes = input.maxBytes ?? MAX_RAW_READ_BYTES
+    const { relative, target } = await this.workspaceFileTarget(input.session, input.path, input.signal, maxBytes)
     let text: string
     try {
-      text = await this.fs.readText(target, input.signal)
+      text = await this.fs!.readText(target, input.signal)
     } catch (error) {
       if (errorCodeOf(error) === 'FS_NOT_FOUND') throw new DatasetStoreError('dataset_not_found', `${relative} was not found`)
       throw new DatasetStoreError('workspace_file_invalid', `${relative} could not be read`)
     }
-    if (byteLength(text) > MAX_RAW_READ_BYTES) {
-      throw new DatasetStoreError('dataset_too_large', `${relative} exceeds ${MAX_RAW_READ_BYTES} bytes`)
+    if (byteLength(text) > maxBytes) {
+      throw new DatasetStoreError('dataset_too_large', `${relative} exceeds ${maxBytes} bytes`)
     }
+    return text
+  }
+
+  /**
+   * 宿主内部读取 workspace 内的**原始字节**（本地 PDF / 图片上传给外部解析服务的入口）。
+   *
+   * 上限必须显式给出：这道缝后面的调用方要把字节整个装进内存，没有默认值可兜。
+   * `fs.readBytes` 缺席（载体未挂载该能力）时**响亮失败**，不回退成 `readText`——
+   * 二进制走文本读取会得到被解码污染的字节。
+   */
+  async readWorkspaceBytes(input: {
+    session: SessionLike
+    path: string
+    signal?: AbortSignal
+    maxBytes: number
+  }): Promise<Uint8Array> {
+    const { relative, target } = await this.workspaceFileTarget(input.session, input.path, input.signal, input.maxBytes)
+    if (typeof this.fs?.readBytes !== 'function') {
+      throw new DatasetStoreError('filesystem_unavailable', 'the mounted filesystem cannot read raw bytes')
+    }
+    try {
+      return await this.fs.readBytes(target, input.signal, input.maxBytes)
+    } catch (error) {
+      const code = errorCodeOf(error)
+      if (code === 'FS_NOT_FOUND') throw new DatasetStoreError('dataset_not_found', `${relative} was not found`)
+      if (code === 'FS_TOO_LARGE') throw new DatasetStoreError('dataset_too_large', `${relative} exceeds ${input.maxBytes} bytes`)
+      throw new DatasetStoreError('workspace_file_invalid', `${relative} could not be read`)
+    }
+  }
+
+  private async workspaceFileTarget(
+    session: SessionLike,
+    path: string,
+    signal: AbortSignal | undefined,
+    maxBytes: number,
+  ): Promise<{ relative: string; target: FsTargetLike }> {
+    const root = this.readRoot(session)
+    if (!root || !this.fs) throw new DatasetStoreError('filesystem_unavailable', 'workspace filesystem is unavailable')
+    const relative = normalizeWorkspaceRelativePath(path)
+    const target = await this.resolveContained(relative, root, signal)
+    const info = this.fs.stat ? await this.fs.stat(target, signal) : undefined
+    if (info && info.type !== 'file') throw new DatasetStoreError('workspace_file_invalid', `${relative} is not a regular file`)
+    if (typeof info?.size === 'number' && info.size > maxBytes) {
+      throw new DatasetStoreError('dataset_too_large', `${relative} exceeds ${maxBytes} bytes`)
+    }
+    return { relative, target }
+  }
+
+  /** 宿主内部呈现层读取 workspace 内的 JSON 文件（用户本地数据直接可视化的入口）。 */
+  async readWorkspaceJson(input: { session: SessionLike; path: string; signal?: AbortSignal }): Promise<unknown> {
+    const text = await this.readWorkspaceText(input)
     try {
       return JSON.parse(text)
     } catch {
-      throw new DatasetStoreError('workspace_file_invalid', `${relative} is not valid JSON`)
+      throw new DatasetStoreError('workspace_file_invalid', `${input.path} is not valid JSON`)
     }
   }
 
   /**
-   * 宿主内部**产物层**把一组文本文件写进 workspace 的一个子目录（图表产物用）。
+   * 宿主内部**产物层**把一组文本文件写进 workspace 的一个子目录（图表与 OCR 产物用）。
    *
-   * 走与 Dataset 落盘完全相同的沙箱策略与归属校验；`createIfAbsent` 保证不会静默覆盖
-   * 已有产物（图表 id 唯一，重复即 bug，应当响亮失败）。
+   * 走与 Dataset 落盘完全相同的沙箱策略与归属校验；默认 `createIfAbsent`，保证不会静默
+   * 覆盖已有产物（图表 id 唯一，重复即 bug，应当响亮失败）。
+   *
+   * `overwrite: true` 是给**内容寻址产物**重跑用的（OCR：上次在两个文件之间被中断，
+   * 半件产物必须能被下一次解析自愈）。它不是"跳过幂等"的口子：幂等判断在调用方，
+   * 只有已经决定重新生成时才传。
    *
    * 返回值同时给出**相对路径**（可以进 Agent 消息、可以 present 给用户）与**绝对路径**
    * （只供宿主内部使用，例如登记给 host 平面的取数路由）。这个区分是本仓的数据纪律：
@@ -782,6 +841,7 @@ export class WorkspaceDatasetStore {
     dir: string
     files: Array<{ name: string; content: string }>
     signal?: AbortSignal
+    overwrite?: boolean
   }): Promise<Array<{ name: string; path: string; absolutePath: string }>> {
     const { session, signal } = input
     const { root, policy } = this.writeContext(session)
@@ -795,7 +855,7 @@ export class WorkspaceDatasetStore {
       const relative = `${dir}/${file.name}`
       const target = await this.resolveContained(relative, root, signal)
       try {
-        await this.fs!.writeText(target, file.content, { kind: 'createIfAbsent' }, signal, policy)
+        await this.fs!.writeText(target, file.content, input.overwrite ? undefined : { kind: 'createIfAbsent' }, signal, policy)
       } catch (error) {
         this.mapWriteError(error, `writing ${relative}`)
       }

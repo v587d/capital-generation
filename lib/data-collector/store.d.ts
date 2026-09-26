@@ -253,6 +253,11 @@ export interface FsLike {
         version: unknown;
     }, signal?: AbortSignal, sandboxPolicy?: SandboxPolicyResultLike): Promise<unknown>;
     readText(target: FsTargetLike, signal?: AbortSignal): Promise<string>;
+    /**
+     * 原样读字节（本地 PDF / 图片交给外部解析服务时用）。宿主把上限放在这道缝上：
+     * 超过 `maxBytes` 抛 `FS_TOO_LARGE`，**不会**返回截断结果。
+     */
+    readBytes?(target: FsTargetLike, signal: AbortSignal | undefined, maxBytes: number): Promise<Uint8Array>;
     listDir(target: FsTargetLike, signal?: AbortSignal): Promise<Array<{
         name: string;
         type: 'file' | 'directory' | 'other';
@@ -404,21 +409,47 @@ export declare class WorkspaceDatasetStore {
         rows: unknown[];
     }>;
     /**
-     * 宿主内部呈现层读取 workspace 内的 JSON 文件（用户本地数据直接可视化的入口）。
+     * 宿主内部读取 workspace 内的**文本**文件（图表 spec、OCR 产物、用户本地数据）。
      *
-     * 只接受 workspace **相对**路径：绝对路径、`..` 段与反斜杠一律拒绝，随后仍走
-     * `resolveContained` 做沙箱归属校验——两道关卡都要过。
+     * 这是 workspace 读取的**唯一**实现：`readWorkspaceJson` / `readWorkspaceBytes` 都从
+     * `workspaceFileTarget` 取归属与体积闸门，不各自再写一遍路径校验（§9.7——同一个事实
+     * 有两份实现就一定会漂移）。
      */
+    readWorkspaceText(input: {
+        session: SessionLike;
+        path: string;
+        signal?: AbortSignal;
+        maxBytes?: number;
+    }): Promise<string>;
+    /**
+     * 宿主内部读取 workspace 内的**原始字节**（本地 PDF / 图片上传给外部解析服务的入口）。
+     *
+     * 上限必须显式给出：这道缝后面的调用方要把字节整个装进内存，没有默认值可兜。
+     * `fs.readBytes` 缺席（载体未挂载该能力）时**响亮失败**，不回退成 `readText`——
+     * 二进制走文本读取会得到被解码污染的字节。
+     */
+    readWorkspaceBytes(input: {
+        session: SessionLike;
+        path: string;
+        signal?: AbortSignal;
+        maxBytes: number;
+    }): Promise<Uint8Array>;
+    private workspaceFileTarget;
+    /** 宿主内部呈现层读取 workspace 内的 JSON 文件（用户本地数据直接可视化的入口）。 */
     readWorkspaceJson(input: {
         session: SessionLike;
         path: string;
         signal?: AbortSignal;
     }): Promise<unknown>;
     /**
-     * 宿主内部**产物层**把一组文本文件写进 workspace 的一个子目录（图表产物用）。
+     * 宿主内部**产物层**把一组文本文件写进 workspace 的一个子目录（图表与 OCR 产物用）。
      *
-     * 走与 Dataset 落盘完全相同的沙箱策略与归属校验；`createIfAbsent` 保证不会静默覆盖
-     * 已有产物（图表 id 唯一，重复即 bug，应当响亮失败）。
+     * 走与 Dataset 落盘完全相同的沙箱策略与归属校验；默认 `createIfAbsent`，保证不会静默
+     * 覆盖已有产物（图表 id 唯一，重复即 bug，应当响亮失败）。
+     *
+     * `overwrite: true` 是给**内容寻址产物**重跑用的（OCR：上次在两个文件之间被中断，
+     * 半件产物必须能被下一次解析自愈）。它不是"跳过幂等"的口子：幂等判断在调用方，
+     * 只有已经决定重新生成时才传。
      *
      * 返回值同时给出**相对路径**（可以进 Agent 消息、可以 present 给用户）与**绝对路径**
      * （只供宿主内部使用，例如登记给 host 平面的取数路由）。这个区分是本仓的数据纪律：
@@ -432,6 +463,7 @@ export declare class WorkspaceDatasetStore {
             content: string;
         }>;
         signal?: AbortSignal;
+        overwrite?: boolean;
     }): Promise<Array<{
         name: string;
         path: string;

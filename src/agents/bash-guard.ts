@@ -30,7 +30,7 @@
  * 监听改写。
  */
 
-import { isCapitalAgent, type AgentLike, type GuardedExecution, type PolicyContext } from './root-tool-policy.js'
+import { agentSessionId, isCapitalAgent, type AgentLike, type GuardedExecution, type PolicyContext } from './root-tool-policy.js'
 
 /** bash 工具名（`@deepseek-ai/dsh-tool-bash` 注册的全局名）。 */
 export const BASH_TOOL_NAME = 'bash'
@@ -105,10 +105,6 @@ export function registerBashGuard(ctx: PolicyContext): void {
   if (typeof listenCtx.on !== 'function') return
   /** agent 会话 id → guard 的 disposer；agent/disposed 时释放，避免跨实例残留。 */
   const guards = new Map<string, () => void>()
-  const sessionIdOf = (agent: AgentLike | undefined): string | undefined => {
-    const id = (agent?.session as { id?: unknown } | undefined)?.id
-    return typeof id === 'string' && id.length > 0 ? id : undefined
-  }
   const install = () => {
     const stopCreated = listenCtx.on?.('agent/created', (payload: AgentEventPayload) => {
       try {
@@ -119,7 +115,7 @@ export function registerBashGuard(ctx: PolicyContext): void {
           ctx.logger?.warn('capital-generation: bash 闸门未生效（agent scope 上没有 tools.guard）：data_junior 的 bash 只剩 persona 软约束')
           return
         }
-        const id = sessionIdOf(agent)
+        const id = agentSessionId(agent)
         if (id !== undefined) guards.set(id, dispose)
       } catch (error) {
         ctx.logger?.warn(`capital-generation: bash 闸门安装异常：${error instanceof Error ? error.message : String(error)}`)
@@ -127,7 +123,7 @@ export function registerBashGuard(ctx: PolicyContext): void {
     })
     const stopDisposed = listenCtx.on?.('agent/disposed', (payload: AgentEventPayload) => {
       try {
-        const id = sessionIdOf(payload?.agent)
+        const id = agentSessionId(payload?.agent)
         if (id === undefined) return
         const dispose = guards.get(id)
         if (dispose === undefined) return

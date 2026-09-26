@@ -1,6 +1,6 @@
 {
   "name": "@v587d/capital-config",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Capital 模式的 DSH settings 配置卡片（Fuyao / AnySearch / Wind Alice credentials）",
   "license": "MIT",
   "type": "module",

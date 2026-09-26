@@ -18,7 +18,7 @@
 | 角色边界、Dataset 消息 / 返回边界、capability 目录预算 | `docs/dev/data-roles.md`（§1.1 §1.2 §1.4 §1.5）|
 | 时间轴、日期归一、session 读取 | `docs/dev/time-axis.md`（§1.3）|
 | data_junior 的 bash 闸门与 shell 挂载 | `docs/dev/bash-gate.md`（§1.6）|
-| web_retriever、本地回退、九个具名来源 | `docs/dev/web-retriever.md`（§4.1 §4.2）|
+| web_retriever、本地回退、九个具名来源、文档解析 `ocr` | `docs/dev/web-retriever.md`（§4.1 §4.2 §4.3）|
 | settings 卡片（host 平面嵌套包） | `docs/dev/settings-config.md`（§5.1–§5.3）|
 | `render_chart` 准入与呈现 | `docs/dev/chart-presentation.md`（§6.1 §6.2）|
 | 交付登记与会话事件类型 | `docs/dev/chart-delivery-events.md`（§6.3）|
@@ -53,8 +53,7 @@ main Agent
 ```
 
 一句话版：**原始 rows 永不出工具层**，Agent 间只传 `DatasetRef` / profile 引用 / 聚合结果；主 Agent
-一律委派（工具层拒绝它直连 Dataset 系列）、自己不出图；专用角色是叶子、互通须经主 Agent 中继；
-`data_analyst` 保持 `disabled`。
+一律委派（工具层拒绝它直连 Dataset 系列）、自己不出图；专用角色是叶子、互通须经主 Agent 中继。
 
 ## 2. 项目结构
 
@@ -71,6 +70,7 @@ capital-generation/
 │   ├── agents/                   # root-tool-policy（根收敛）+ bash-guard（§1.6）
 │   ├── net/                      # 出网共用实现（§9.7）
 │   ├── web-retriever/            # anysearch / wind-client / 具名来源 / 检索工具
+│   ├── ocr/                      # PaddleOCR job / markdown 归一 / 落盘（§4.3）
 │   └── time/tools.ts             # get_local_datetime
 ├── chart-ui/ capital-config/     # host 平面嵌套包（图表 UI + 序列旁路；settings 卡片 §5）
 ├── vendor/                       # 固定版本第三方前端库（lightweight-charts）
@@ -83,17 +83,17 @@ capital-generation/
 ```text
 capital-data/datasets/<dataset_id>/raw.json   # 原始 Dataset，不可变，默认保留 7 天
 capital-data/profiles/<profile_id>/profile.json
+capital-data/ocr/<doc_id>/                    # ocr 产物：document.md + meta.json（§4.3）
 capital-analysis/charts/<chart_id>/           # render_chart 产物：spec.json / series.json / chart.html（自包含）
 capital-analysis/runs/<analysis_id>/          # 预留（data_analyst）
 ```
 
-业务数据不落 `.dsh` 或 DSH home；Agent 间用 workspace-scoped 的 opaque `artifact_ref`，不传真实
-绝对路径；内存只留 in-flight 请求与临时元数据，不做长期缓存。
+业务数据不落 `.dsh` 或 DSH home；跨 Agent 只传 workspace-scoped 的 opaque `artifact_ref`；内存只留 in-flight。
 
 ## 4. web_retriever 纪律
 
-模型侧纪律在主 / 子 persona 与 skill `capital-web-protocol`（都有断言）；维护者结构事实——两类
-工作面、九个具名来源、本地回退的触发与边界、输出预算——在 `docs/dev/web-retriever.md`。
+模型侧纪律在主 / 子 persona 与 skill `capital-web-protocol`（都有断言）；维护者结构事实——三类工作面
+（含文档解析 `ocr`）、本地回退边界、输出预算与 `ocr` 的 job 生命周期与落盘——在 `docs/dev/web-retriever.md`。
 
 ## 5. settings 配置纪律（`capital-config`，host 平面）
 

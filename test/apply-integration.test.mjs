@@ -79,7 +79,7 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
     assert.ok(services.get('datasetStore'), 'apply 必须提供 datasetStore 服务')
     assert.equal(hub.capabilityNames().length, 69, '装配后应注册 61 个 Fuyao、3 个 Tencent 与 5 个 Eastmoney capability')
 
-    for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status', 'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'prepare_chart_source', 'get_local_datetime', 'resolve_data_time_range', 'anysearch_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'render_chart']) {
+    for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status', 'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'prepare_chart_source', 'get_local_datetime', 'resolve_data_time_range', 'anysearch_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'ocr', 'render_chart']) {
       assert.ok(toolNamed(tools, name), `装配后应注册工具 ${name}`)
     }
     // 2026-09-17 设计修订：final_report 整条链路删除（报告投影不再是主 Agent 的职责）。
@@ -256,11 +256,21 @@ test('apply()：注册根 Agent 工具收敛监听（只拿掉主 Agent 的专�
     notifyCreated({ session: { header: { cwd: '/w', parentSession: 'main-1' } }, ctx: agentCtx })
     assert.equal(restricted.length, ROOT_AGENT_DENIED_TOOLS.length, '根 Agent 逐名收敛；子 Agent 一次都不碰')
     assert.deepEqual(restricted.map((filter) => filter.deny[0]).sort(), [...ROOT_AGENT_DENIED_TOOLS].sort())
-    assert.equal(guarded.length, 2, '每个 agent 各装一次 bash 闸门（同一实现，按调用身份判定）')
-    assert.equal(guarded[0], guarded[1], '闸门必须是同一个函数：判定只有一份实现')
+    // 3 = bash 闸门每 agent 一次（根 + 子）+ `ocr` 的 `url` 形态闸门**只装根**一次。
+    // 按行为分流而不是按顺序取下标：注册顺序不该被测试钉死（§8.5），但"谁装了什么闸门"必须可指认。
+    const rootBashCall = () => ({ name: 'bash', agent: { session: { header: { cwd: '/w' } } }, arguments: { command: 'date' } })
+    const rootOcrCall = (arguments_) => ({ name: 'ocr', agent: { session: { header: { cwd: '/w' } } }, arguments: arguments_ })
+    const bashGuards = guarded.filter((guard) => /只对被委派/.test(String(guard(rootBashCall()))))
+    const ocrGuards = guarded.filter((guard) => guard(rootOcrCall({ url: 'https://pdf.dfcfw.com/H3_x_1.pdf' })) !== undefined)
+    assert.equal(bashGuards.length, 2, '每个 agent 各装一次 bash 闸门（同一实现，按调用身份判定）')
+    assert.equal(bashGuards[0], bashGuards[1], '闸门必须是同一个函数：判定只有一份实现')
+    assert.equal(ocrGuards.length, 1, '⛔ `ocr` 的 url 闸门只装根 Agent：主 Agent 不自己抓外链，但本地文档解析留给它')
+    assert.equal(ocrGuards[0](rootOcrCall({ file: 'refs/茅台研报.pdf' })), undefined, 'file 形态放行：那是主 Agent 的正当入口')
+    assert.equal(ocrGuards[0](rootOcrCall({ doc_id: 'ocr_000000000000', pages: '1' })), undefined, '读盘形态放行')
+    assert.equal(ocrGuards.every((guard) => !bashGuards.includes(guard)), true, '两份闸门互不冒充')
     // 闸门本身按调用身份判定：根会话的 bash 调用被拒，被委派子会话的算术命令放行。
-    assert.match(String(guarded[0]({ name: 'bash', agent: { session: { header: { cwd: '/w' } } }, arguments: { command: 'date' } })), /只对被委派/)
-    assert.equal(guarded[0]({ name: 'bash', agent: { session: { header: { cwd: '/w', parentSession: 'main-1' } } }, arguments: { command: 'node -e 1' } }), undefined)
+    assert.match(String(bashGuards[0](rootBashCall())), /只对被委派/)
+    assert.equal(bashGuards[0]({ name: 'bash', agent: { session: { header: { cwd: '/w', parentSession: 'main-1' } } }, arguments: { command: 'node -e 1' } }), undefined)
 
     // 收敛失败（工具名未知 / ctx 缺工具）不得抛出：调用方是 agent 创建路径。
     assert.doesNotThrow(() => notifyCreated({ agent: { session: { header: {} }, ctx: { tools: { restrict: () => { throw new Error('unknown tool') } } } } }))

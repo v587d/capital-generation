@@ -2,12 +2,16 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   CAPITAL_PRESET_ID,
+  OCR_ROOT_URL_DENIED,
+  OCR_TOOL_NAME,
   RETRIEVAL_DENIED_TOOLS,
   ROOT_AGENT_DENIED_TOOLS,
+  installRootOcrGuard,
   isCapitalAgent,
   isRootAgent,
   registerRootToolPolicy,
   restrictRootAgentTools,
+  rootOcrGuardReason,
 } from '../lib/agents/root-tool-policy.js'
 
 /**
@@ -45,6 +49,43 @@ test('RETRIEVAL_DENIED_TOOLS：十三个出网工具全部从根 Agent 拿掉（
   for (const name of ['web_search', 'web_fetch']) {
     assert.ok(ROOT_AGENT_DENIED_TOOLS.includes(name), `主 Agent 不得看到宿主的 ${name}`)
   }
+  // `ocr` 是**刻意的例外**：主 Agent 要能解析用户放在工作目录的本地文档，名字级 deny 做不到
+  // "只关外部取数"，所以它不进名单，改由下面的调用级 guard 关掉 `url` 形态。
+  assert.ok(!RETRIEVAL_DENIED_TOOLS.includes('ocr'), 'ocr 不得整名 deny（否则本地 file / doc_id 形态一起没了）')
+})
+
+test('rootOcrGuardReason：主 Agent 只被关掉 ocr 的 url 形态，本地形态一律放行', () => {
+  assert.equal(rootOcrGuardReason({ name: 'ocr', arguments: { url: 'https://pdf.dfcfw.com/pdf/H3_x_1.pdf' } }), OCR_ROOT_URL_DENIED)
+  // 空串不是"提交了一个 URL"，交给工具自己的参数校验报响亮错误，这里不抢话。
+  assert.equal(rootOcrGuardReason({ name: 'ocr', arguments: { url: '' } }), undefined)
+  for (const callArgs of [
+    { file: 'refs/年报.pdf' },
+    { doc_id: 'ocr_0123456789ab', pages: '1-3' },
+    { doc_id: 'ocr_0123456789ab', query: '营业收入' },
+    { doc_id: 'ocr_0123456789ab', job_id: 'j-1' },
+    {},
+  ]) {
+    assert.equal(rootOcrGuardReason({ name: 'ocr', arguments: callArgs }), undefined, `本地形态不该被拦：${JSON.stringify(callArgs)}`)
+  }
+  // 别的工具名一律不看（guard 是单调的，越界一次就可能吃掉别人的正当调用）。
+  assert.equal(rootOcrGuardReason({ name: 'web_retriever_fetch', arguments: { url: 'https://example.com/a.pdf' } }), undefined)
+  assert.equal(rootOcrGuardReason({ name: 'ocr' }), undefined)
+  assert.equal(rootOcrGuardReason(undefined), undefined)
+  // 拒绝文案必须给出正确路径（委派 / 本地形态），不能只说"不行"。
+  assert.match(OCR_ROOT_URL_DENIED, /subagent_web_retriever/)
+  assert.match(OCR_ROOT_URL_DENIED, /file/)
+})
+
+test('installRootOcrGuard：只装在根 Agent，安装失败不外抛', () => {
+  const installed = []
+  const tools = { guard: (guard) => { installed.push(guard); return () => {} } }
+  assert.ok(installRootOcrGuard(rootAgent(tools)), '根 Agent 必须装上闸门')
+  assert.equal(installed.length, 1)
+  assert.equal(installRootOcrGuard(childAgent(tools)), undefined, '子 Agent 不装（url 形态归它们）')
+  assert.equal(installRootOcrGuard({ session: { header: {} }, ctx: { tools: {} } }), undefined, 'scope 没有 guard 时静默跳过')
+  const throwing = { session: { header: {} } }
+  Object.defineProperty(throwing, 'ctx', { get() { throw new Error('no ctx') } })
+  assert.equal(installRootOcrGuard(throwing), undefined)
 })
 
 test('isRootAgent：只有没有 parentSession 的才是根 Agent', () => {
@@ -102,15 +143,20 @@ test('registerRootToolPolicy：注册在 Root context 的 agent/created 上（sc
   scoped.root = { on: (event, listener) => { rootListeners.push({ event, listener }); return () => {} } }
   registerRootToolPolicy(scoped)
 
-  assert.equal(rootListeners.length, 1, '必须注册在 Root context 上')
+  assert.deepEqual(rootListeners.map((entry) => entry.event), ['agent/created', 'agent/disposed'], '必须注册在 Root context 上（两个事件）')
   assert.equal(scopedListeners.length, 0, '不得注册在 scoped context 上（那会静默失效）')
   assert.equal(rootListeners[0].event, 'agent/created')
 
   const calls = []
-  const tools = { restrict: (filter) => { calls.push(filter); return () => {} } }
+  const guards = []
+  const tools = {
+    restrict: (filter) => { calls.push(filter); return () => {} },
+    guard: (guard) => { guards.push(guard); return () => {} },
+  }
   rootListeners[0].listener({ agent: rootAgent(tools) })
   rootListeners[0].listener({ agent: childAgent(tools) })
   assert.equal(calls.length, ROOT_AGENT_DENIED_TOOLS.length, '只有根 Agent 被收敛')
+  assert.equal(guards.length, 1, '`ocr` 的调用级闸门只装在主 Agent 自己的 scope 上（子 Agent 保留 url 形态）')
 
   // 收敛不可用必须留诊断，且不得抛回 agent 创建路径。
   assert.doesNotThrow(() => rootListeners[0].listener({ agent: { session: { header: {} } } }))
@@ -149,11 +195,11 @@ test('registerRootToolPolicy：registry 读不到时保守放行（逐名 restri
 test('registerRootToolPolicy：Root 监听器必须由本 fiber 持有 disposer（否则卸载后泄漏）', () => {
   const disposed = []
   const scoped = {
-    root: { on: () => () => { disposed.push('listener') } },
+    root: { on: (event) => () => { disposed.push(event) } },
     effect: (callback) => { const dispose = callback(); dispose(); return () => {} },
   }
   registerRootToolPolicy(scoped)
-  assert.deepEqual(disposed, ['listener'])
+  assert.deepEqual(disposed, ['agent/created', 'agent/disposed'], '两个 Root 监听器都要被本 fiber 释放')
 })
 
 test('isCapitalAgent：按 composedPreset 筛本 preset', () => {

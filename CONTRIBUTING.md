@@ -39,6 +39,7 @@
    ANYSEARCH_API_KEY: as_sk_......
    FUYAO_API_KEY: sk-fuyao-......
    WIND_API_KEY: ak_......   # 推荐
+   PADDLE_OCR_TOKEN: ......  # 可选：web_retriever 的 ocr 工具解析 PDF 正文
    ```
 5. 运行测试：
    ```bash

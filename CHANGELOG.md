@@ -7,6 +7,59 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容）。
 
+## [2.3.0] - 2026-09-26
+
+**web_retriever 新增第三类工作面「文档解析」（`ocr` 工具，13 → 14 个工具）**：
+
+- **无破坏性变更**：没有工具改名、没有入参变化，既有调用方式全部不变；唯一要用户知晓的是
+  `ocr` 需要**新申请一个可选密钥**（PaddleOCR AIStudio Token，免费额度）——不填则只有 `ocr`
+  响亮报错（`NO_CREDENTIAL`，指明卡片位置），其余能力不受影响。
+- 研报正文不再是死路：`eastmoney_reports` 条目现在直接给出 `pdf_url` 直链，交 `ocr` 即可拿到正文。
+
+### Added
+
+- **`ocr` 工具（PDF / 图片 → markdown，`src/ocr/`）**：上游是 PaddleOCR AIStudio 的异步 job API，
+  一个工具四种形态——`url`（公网 `.pdf` 直链，本机不抓文件、由上游取）/ `file`（session workspace
+  内的本地 pdf 或图片，`@mention` 推进来的文档直接可解析）/ `job_id` + `doc_id`（续查未跑完的作业，
+  **不重复提交、不重复计费**）/ `doc_id` + `pages` \| `query`（纯本地读已落盘正文，零出网）。
+  ⚠️ 作业**整篇一次算完**（上游口径最多 100 页、按整篇计费），`pages` 只影响读、不影响算价。
+- **产物一律落盘** `capital-data/ocr/<doc_id>/{document.md,meta.json}`：`doc_id` 内容寻址，
+  同一份文档重复调用直接回读缓存、不再出网（`refresh: true` 才强制重跑）；回执只给
+  `workspace://` 的 opaque `artifact_ref` 与页索引（每页字符数与首个标题），超输出预算时
+  靠 `pages`（一次最多 8 页）或 `query`（关键词定位）取回正文，整页进整页出。
+- **长任务不占死会话**：工具声明 `timeoutMs: 240000`，客户端自有等待预算 200s（可在设置里
+  `retriever.paddleOcr.pollBudgetMs` 覆盖）；预算耗尽**不是失败**，回 `status: 'pending'` 带
+  `job_id` / `doc_id`，照 `hint` 再调一次续查即可。
+- **`PADDLE_OCR_TOKEN` 密钥**：设置卡片新增第四字段「PaddleOCR 文档解析 Token」（中英文案齐备），
+  或直接写进 `~/.dsh/.credentials.yaml`；每次调用现解（credentials 优先、环境变量同名回退，与
+  Wind 同口径），密钥永不出现在回执 / 日志 / 错误串。`ocr` **无条件注册**、**不受**
+  「允许启动本地提取网页内容」开关支配（那个开关管的是 HTML 本机回退）。
+- **`eastmoney_reports` 条目新增 `pdf_url` 与 `attach_pages`**：正文入口由列表工具直接给出，
+  派生只认 `^AP\d{6,}$` 形状（认不出就不给字段），模型不需要也不应该自己拼链接。
+- **主 Agent 可解析本地文档**：`ocr` 是根侧工具收敛的唯一例外——不进 deny 名单，改由调用级
+  guard（`installRootOcrGuard`）只拒它的 `url` 形态；用户 `@xxx.pdf` 推进工作目录的文档主 Agent
+  可直接解析，外部 PDF 链接仍必须委派 `web_retriever`。通用 `subagent` 连本地形态一起 deny。
+- **网络面同步扩容（仍只有一份实现）**：`HttpRequest.body` 支持 `FormData`（multipart 上传）、
+  `maxBytes` / `maxContentChars` 可逐请求覆盖（OCR 结果 JSONL 不挤网页正文的 512 KB 额度）、
+  4xx/5xx 响应体摘录进错误信息（上游 `{"code":10004,"msg":"文件格式不支持"}` 这类缘由模型
+  才可能据此换路）、新增 `assertPublicUrlTarget`（`url` 形态复用同一份公网 IP 闸门，本机不做
+  "把内网 URL 交给第三方去戳"的通道）、store 新增 `readWorkspaceBytes`（超上限响亮失败，
+  不返回截断结果）。
+
+### Changed
+
+- **`web_retriever` persona 与 `capital-web-protocol` skill**：工具清单 13 → 14，新增第 8 节
+  「文档解析纪律」（何时动 `ocr`、四形态一次只走一种、`pending` 续查不重传 `url`、`pages` 不省钱、
+  引用必须写 `doc_id` 与页号、**不得把 PDF 链接当"已读到正文"的证据**、重跑不是独立验证——实测
+  同一份 PDF 两次给出过 18% 与 19% 的不同数字）。
+- **「研报正文取不到」这条硬边界移除**：`eastmoney_reports` / `sina_reports` 的条目说明改为
+  「把 `pdf_url` 原样交 `ocr`」；`web_retriever_fetch` 拿到 PDF 仍是能力边界不是故障，改道 `ocr`。
+- **主 Agent persona**：「外部检索只经 web_retriever 回传」补上唯一例外——工作目录里的本地
+  PDF / 图片可直接 `ocr` 解析，外部链接仍走委派。
+- **markdown 归一化在工具侧做**：上游表格带约 60% 的单元格 `style='…'` 排版样板（实测 15 页
+  研报），归一为 markdown 管道表后降到约四分之一；引擎侧未经验证的 flag（`mergeTables` /
+  `prettifyMarkdown`）一律不传——上游对未知键是静默忽略，不给"看起来能配"的假象。
+
 ## [2.2.0] - 2026-09-24
 
 **2.1.2 以来最大的一次能力扩容，有一处工具改名需迁移**：

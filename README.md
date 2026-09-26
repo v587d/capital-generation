@@ -14,7 +14,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.2.0-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.3.0-9cf" alt="Version"></a>
 </p>
 
 > [!IMPORTANT]
@@ -43,24 +43,25 @@ dsh plugin --profile web add github:v587d/capital-generation
 
 | 配置 API Key |
 | :---: |
-| [<img src="assets/settings-plugins_1.png" width="600" alt="设置 → 插件 → 插件配置 → Capital 模式：填入 Fuyao / AnySearch / Wind 密钥">](assets/settings-plugins_1.png) |
+| [<img src="assets/settings-plugins_2.png" width="600" alt="设置 → 插件 → 插件配置 → Capital 模式：填入 Fuyao / AnySearch / Wind / PaddleOCR 密钥，以及允许启动本地提取网页内容开关">](assets/settings-plugins_2.png) |
 
 > [!NOTE]
 > 密钥都是免费申请的：必填 [同花顺（fuyao）](https://fuyao.aicubes.cn/docs/)（行情、财务等结构化数据）；
 > 必填 [AnySearch](https://www.anysearch.com/docs)（实时网络搜索）；
-> 推荐 [Wind Alice](https://market.windalice.com/#/home)（公告与信披文档，每天送 300 积分，日常够用）。
+> 推荐 [Wind Alice](https://market.windalice.com/#/home)（公告与信披文档，每天送 300 积分，日常够用）；
+> 推荐 [PaddleOCR AIStudio](https://aistudio.baidu.com/paddleocr)（每天2万页 OCR 免费额度）。
 >
 > 在设置里粘贴保存即可，重启后新开的 Capital 会话就能用。
 > 同一卡片下方的 **「允许启动本地提取网页内容」** 开关（默认开启）控制抓取回退：
 > 开启时 AnySearch 抓取失败会自动改由本机直连抓取该页面（回执 `via` 标注 `local-http`），
 > 关闭则失败原样回传；改动即时保存，新 Capital 会话生效。
 >
-> 除上述三个密钥外不再需要任何 key：`data_collector` 的腾讯 / 东方财富公开能力，以及 `web_retriever`
+> 除上述密钥外不再需要任何 key：`data_collector` 的腾讯 / 东方财富公开能力，以及 `web_retriever`
 > 的九个具名来源查询工具（财联社、华尔街见闻、巨潮、上证e互动、东财、新浪、同花顺）都走公开端点，
 > 装好即可用。
 >
 > 不想用设置界面的话，也可以直接把密钥写进 `~/.dsh/.credentials.yaml`，名字用
-> `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`，插件会自动读取。
+> `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`、`PADDLE_OCR_TOKEN`，插件会自动读取。
 
 ### 简单用法
 
@@ -78,7 +79,7 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
   - data_collector: 主 Agent 直属下级（spawn），负责根据上级指令收集金融财经类结构化数据，目前支持 **69 个数据 capability**：同花顺（fuyao）61 个（行情、财务、估值竞价、盘面特色、指数、基金），腾讯公开 HTTP 3 个（实时行情快照 / 复权与分钟 K 线 / 分笔，行情 fallback），东方财富 HTTP 5 个（龙虎榜汇总、限售解禁日历、板块行情排名与资金流）。后两类走公开端点，无需额外密钥。
   - data_junior: 主 Agent 直属下级（spawn），负责根据上级指令清洗、整理出有效数据、基础描述性统计以及数据透视，目的是阐述数据背后的“故事”。读一份 Dataset 默认走 `describe_dataset`（一次调用完成元数据 + 基础 profile + 受控查询，多份数据在同一条消息里并发）；时间窗与时间戳换算一律由宿主完成（`time_facts` 的 `axis` / `windows`、`resolve_data_time_range`），子 Agent 不自行把日期算成毫秒。
   - data_analyst: 主 Agent 直属下级，负责根据上级指令，通过运用编程技能分析上游数据（**仍在开发中**，委派行 disabled，暂不启用）。
-  - web_retriever: 主 Agent 直属下级（spawn），负责根据上级指令，运用网络搜索和抓取能力，获取外部非结构化数据。检索面为 AnySearch（`anysearch_search` / `web_retriever_fetch`，失败可按开关回退本机直连）与 Wind Alice（`wind_docs_announcements` / `wind_docs_news`，公告与权威新闻）；另有九个**具名来源查询工具**（财联社快讯、华尔街见闻快讯、东财 7×24 快讯 / 个股新闻 / 个股研报、新浪研报、同花顺机构一致预期 EPS、巨潮互动易、上证e互动），均为公开端点、零密钥，详见下方能力小节。
+  - web_retriever: 主 Agent 直属下级（spawn），负责根据上级指令，运用网络搜索和抓取能力，获取外部非结构化数据。检索面为 AnySearch（`anysearch_search` / `web_retriever_fetch`，失败可按开关回退本机直连）与 Wind Alice（`wind_docs_announcements` / `wind_docs_news`，公告与权威新闻）；另有九个**具名来源查询工具**（财联社快讯、华尔街见闻快讯、东财 7×24 快讯 / 个股新闻 / 个股研报、新浪研报、同花顺机构一致预期 EPS、巨潮互动易、上证e互动），均为公开端点、零密钥；第三个工作面是**文档解析** `ocr`（PaddleOCR，PDF 研报 / 公告正文与图片 → markdown，需 Token）。详见下方能力小节。
   - visualization_specialist: 主 Agent 的孙 Agent（data_junior 的 one-shot 前台子 Agent），由 data_junior 在 profile 完成后的可视化 gate 中按需创建；只接收 `profile_ref`、有限 profile 事实与短期 `chart_source_ref`，使用受控 `render_chart` 生成自包含 HTML 图表，并只向 data_junior 回传 `chart_ref` 小回执；不接触原始 rows、不向主 Agent 直接发消息，当前是唯一的 one-shot 角色。
   - 未来更多，欢迎 PR 
 
@@ -99,12 +100,13 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
 
 构成：同花顺 Fuyao **61** 个（需 `FUYAO_API_KEY`）、腾讯公开 HTTP **3** 个（`tencent_quote` / `tencent_kline` / `tencent_ticks`）、东方财富 HTTP **5** 个（`eastmoney_top_buy_sell_market` / `eastmoney_top_buy_sell_ticker` / `eastmoney_lockup_expiry` / `eastmoney_sector_rotation` / `eastmoney_cashflow_rotation`）；后两类为公开端点，**无需额外密钥**。
 
-## web_retriever 能力（检索 + 来源查询）
+## web_retriever 能力（检索 + 来源查询 + 文档解析）
 
-web_retriever 有两个工作面，共 **13 个工具**：
+web_retriever 有三个工作面，共 **14 个工具**：
 
 - **检索**（发现候选 → 按 URL 取正文）：`anysearch_search`（AnySearch 全网搜索）、
-  `web_retriever_fetch`（抓取正文，AnySearch 失败时按开关回退本机直连，回执 `via` 标注实际来源）、
+  `web_retriever_fetch`（抓取正文，AnySearch 失败时按开关回退本机直连，回执 `via` 标注实际来源；
+  遇到 PDF 是能力边界不是故障，改道 `ocr`）、
   `wind_docs_announcements` / `wind_docs_news`（Wind Alice 公告与权威新闻，默认第一选择）。
 - **来源查询**（具名来源 + 业务参数 → 确定、有序、可翻页、同参可复现的结果集；全部公开端点、零密钥）：
 
@@ -114,13 +116,23 @@ web_retriever 有两个工作面，共 **13 个工具**：
 | 华尔街见闻 | `wscn_lives` | 7×24 快讯，按 `channel` + `cursor` 翻页 |
 | 东方财富 | `eastmoney_724` | 7×24 快讯，与财联社 / 见闻三条互为备份（聚合内容按标题去重） |
 | 东方财富 | `eastmoney_stock_news` | 个股新闻（区分「上游风控」与「该股确实没有新闻」） |
-| 东方财富 | `eastmoney_reports` | 个股研报列表（含评级与逐篇预测 EPS；研报正文是 PDF，不在覆盖范围） |
+| 东方财富 | `eastmoney_reports` | 个股研报列表（含评级与逐篇预测 EPS；正文是 PDF，条目直接给出 `pdf_url` 直链，原样交 `ocr` 解析） |
 | 新浪 | `sina_reports` | 研报第二来源（不含评级与目标价） |
 | 同花顺 | `ths_eps_forecast` | 机构一致预期 EPS（逐年：机构数 / 最小 / **均值** / 最大 / 行业平均） |
 | 巨潮互动易（深市） | `cninfo_irm` | 投资者问答：公司怎么回应某传闻 / 关切 |
 | 上证e互动（沪市） | `sseinfo_qa` | 沪市投资者问答，不传 `code` 可看全市场最新 |
 
-来源边界（深沪不可互换、北交所两边都没有、研报正文取不到）、翻页纪律（该翻页就翻到没有、空结果是真事实）
+- **文档解析**：`ocr`（PaddleOCR AIStudio，14 个工具里**唯一要 Token** 的）把 PDF 研报 / 公告正文
+  或图片解析成 markdown。一个工具四种形态：`url`（公网 PDF 直链）/ `file`（工作目录里的本地文档，
+  用户 `@xxx.pdf` 推给主 Agent 的可直接解析）/ `job_id` + `doc_id`（续查未跑完的作业，不重复计费）/
+  `doc_id` + `pages` \| `query`（本地读已落盘正文，零出网）。作业**整篇一次算完、按整篇计费**，
+  `pages` 只影响读；产物落 `capital-data/ocr/<doc_id>/`，同一份文档重复调用命中缓存直接回读。
+
+| 本地研报 PDF 交给 `ocr` 解析（用户 `@` 推文件 → 主 Agent 直接出正文与页索引） |
+| :---: |
+| [<img src="assets/ocr.png" width="360" alt="用户把研报 PDF @ 给主 Agent，ocr 工具解析出 4 页 9147 字符正文，回答含来源标注、核心内容表格与局限说明">](assets/ocr.png) |
+
+来源边界（深沪不可互换、北交所两边都没有）、翻页纪律（该翻页就翻到没有、空结果是真事实）
 与回传格式见 [capital-web-protocol](preset/capital-generation/skills/capital-web-protocol/SKILL.md)。
 
 ## 图表呈现（截图）
@@ -155,6 +167,24 @@ npm run smoke:boot   # 冒烟验证装配可正常 boot
 维护子包时才需要执行以上命令。
 
 ## Changelog
+
+### 2.3.0 — 2026-09-26
+
+- **web_retriever 新增第三个工作面「文档解析」：`ocr` 工具（13 → 14 个工具）**：把 PDF 研报 /
+  公告正文与图片解析成 markdown（PaddleOCR AIStudio）。一个工具四种形态——`url`（公网 PDF 直链）、
+  `file`（工作目录本地文档）、`job_id` + `doc_id`（续查未跑完的作业，不重复计费）、
+  `doc_id` + `pages` \| `query`（本地读已落盘正文，零出网）；作业整篇算完才出结果、按整篇计费，
+  产物落 `capital-data/ocr/<doc_id>/`，同一份文档重复调用命中缓存。
+- **研报正文不再是死路**：`eastmoney_reports` 每条直接给出 `pdf_url` 直链与页数，原样交 `ocr`
+  即可拿到正文，不必再用标题猜结论。
+- **主 Agent 可直接解析用户 `@xxx.pdf` 推进来的本地文档**（`ocr` 是根侧工具收敛的唯一例外，
+  外部 PDF 链接仍须委派 `web_retriever`）。
+- **新增一个可选密钥**：设置卡片多出「PaddleOCR 文档解析 Token」字段（或
+  `~/.dsh/.credentials.yaml` 里写 `PADDLE_OCR_TOKEN`）。免费额度申请；**不填只有 `ocr` 响亮报错，
+  其余能力不受影响**，它也不受「允许启动本地提取网页内容」开关支配。
+
+从 2.2.0 升级无破坏性变更：无工具改名、无入参变化，只有想用 `ocr` 才需多填一个可选 Token。
+完整变更历史见 [CHANGELOG.md](CHANGELOG.md)。
 
 ### 2.2.0 — 2026-09-24
 

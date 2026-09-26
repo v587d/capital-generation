@@ -10,9 +10,10 @@ export const name = 'capital-config'
  *     Removing or renaming this registration makes the browser card **silently
  *     disappear** — no error, the credential fields are simply never offered.
  *  2. **It is the ref source.** The card reads `fuyaoCredentialRef` /
- *     `retriever.credentialRef` / `retriever.windDocs.credentialRef` from the
- *     resolved section to know which credential references to address. The main
- *     plugin (`@v587d/capital-generation`) reads the same section to resolve the keys.
+ *     `retriever.credentialRef` / `retriever.windDocs.credentialRef` /
+ *     `retriever.paddleOcr.credentialRef` from the resolved section to know which
+ *     credential references to address. The main plugin
+ *     (`@v587d/capital-generation`) reads the same section to resolve the keys.
  *
  * The card deliberately does **not** write credentials into this namespace: API keys
  * live in the credentials domain (`remote.credentials.set`), and the section holds
@@ -59,6 +60,28 @@ const LocalFetchSchema = z.object({
   userAgent: z.string().default(LOCAL_FETCH_DEFAULTS.userAgent).description('本机直连 User-Agent；空 = 回落到插件版本号'),
 })
 
+/**
+ * PaddleOCR 文档解析（`ocr` 工具）默认值。必须与主插件 `src/index.ts` 的
+ * `PADDLE_OCR_DEFAULTS` 逐字一致（漂移被 `test/capital-config.test.mjs` 的 deepEqual 抓住）。
+ *
+ * `endpoint` / `model` 留空 = 用 `src/ocr/client.ts` 里的官方端点与模型名（真值只在那一处，
+ * 与 `windDocs.endpoint` 同一口径）；`pollBudgetMs: 0` = 客户端默认的 200000 毫秒自有等待
+ * 预算，必须小于 `ocr` 工具声明的 240000 超时，否则框架先超时、回执里没有 `doc_id` 可续查。
+ */
+const PADDLE_OCR_DEFAULTS = {
+  endpoint: '',
+  credentialRef: 'PADDLE_OCR_TOKEN',
+  model: '',
+  pollBudgetMs: 0,
+}
+
+const PaddleOcrSchema = z.object({
+  endpoint: z.string().default(PADDLE_OCR_DEFAULTS.endpoint).description('PaddleOCR 作业端点；空 = 官方端点'),
+  credentialRef: z.string().default(PADDLE_OCR_DEFAULTS.credentialRef).description('PaddleOCR Token 的 credentials 引用名'),
+  model: z.string().default(PADDLE_OCR_DEFAULTS.model).description('解析模型名；空 = PaddleOCR-VL-1.6'),
+  pollBudgetMs: z.number().default(PADDLE_OCR_DEFAULTS.pollBudgetMs).description('ocr 内部等作业的预算毫秒，0 = 默认 200000'),
+})
+
 export const Config = z.object({
   customPersona: z.string().default('').description('Capital 模式附加人设文本'),
   fuyaoCredentialRef: z.string().default('FUYAO_API_KEY').description('Fuyao credentials 引用名'),
@@ -71,11 +94,13 @@ export const Config = z.object({
       timeoutMs: 60000,
     }),
     localFetch: LocalFetchSchema.default({ ...LOCAL_FETCH_DEFAULTS }),
+    paddleOcr: PaddleOcrSchema.default({ ...PADDLE_OCR_DEFAULTS }),
   }).default({
     baseURL: '',
     credentialRef: 'ANYSEARCH_API_KEY',
     windDocs: { endpoint: '', credentialRef: 'WIND_API_KEY', timeoutMs: 60000 },
     localFetch: { ...LOCAL_FETCH_DEFAULTS },
+    paddleOcr: { ...PADDLE_OCR_DEFAULTS },
   }),
 })
 

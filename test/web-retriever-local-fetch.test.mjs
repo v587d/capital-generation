@@ -6,6 +6,7 @@ import {
   LOCAL_FETCH_CLIENT_VERSION,
   LOCAL_FETCH_MAX_URL_LENGTH,
   LocalFetchError,
+  createHttpRequester,
   createLocalFetcher,
   isPublicIp,
   safeUrl,
@@ -258,6 +259,37 @@ test('状态码与 Content-Type 闸门拒绝错误页和 PDF', async () => {
   }
 })
 
+test('4xx/5xx 把上游写在响应体里的缘由带进错误消息（只报状态码等于什么也没说）', async () => {
+  // 实测：PaddleOCR 对某些直链回 HTTP 400 + {"code":10004,"msg":"文件格式不支持"}。
+  // 模型拿到 `HTTP 400` 决定不了换链接还是换形态，拿到那句 msg 才可能决定。
+  const restore = installFetch(async () => makeResponse(400, { 'content-type': 'application/json' }, '{"code":10004,"msg":"文件格式不支持"}'))
+  try {
+    await assert.rejects(() => makeRequester().request({ url: 'https://example.test/jobs' }), (error) => {
+      assert.equal(error.code, 'HTTP')
+      assert.match(error.message, /returned HTTP 400/u)
+      assert.match(error.message, /文件格式不支持/u, '缘由必须在消息里，而不是被丢掉')
+      return true
+    })
+  } finally {
+    restore()
+  }
+  // 摘录读不出来（这里连流都没有）也必须**保持原失败**：加信息不能改成另一种失败。
+  const broken = installFetch(async () => ({
+    status: 502,
+    headers: { get: () => null },
+    body: { getReader() { throw new Error('stream broken') } },
+  }))
+  try {
+    await expectCode(makeRequester().request({ url: 'https://example.test/jobs' }), 'HTTP')
+    await assert.rejects(() => makeRequester().request({ url: 'https://example.test/jobs' }), (error) => {
+      assert.match(error.message, /returned HTTP 502/u, '读体失败不许顶替原始的状态码事实')
+      return true
+    })
+  } finally {
+    broken()
+  }
+})
+
 test('缺 Content-Type 时按正文保守嗅探：HTML 放行（cls.cn 回归）', async () => {
   // 实测 https://www.cls.cn/detail/2188659 的 GET 响应不带任何 Content-Type，
   // 而同一 URL 的 HEAD 带 text/html；正文是完好的 SSR HTML。原实现"缺头即拒"
@@ -344,6 +376,65 @@ test('字节截断使用增量解码，不产生 U+FFFD，并披露 truncated', 
     const result = await makeFetcher({ maxBytes: hanByte + 1 }).fetch('https://example.test/')
     assert.equal(result.truncated, true)
     assert.ok(!result.markdown.includes('\ufffd'))
+  } finally {
+    restore()
+  }
+})
+
+// ── createHttpRequester 直调：multipart 与逐请求上限（`ocr` 用到的两条分支）──────────
+//
+// 这一层此前只被 `fetch()` 与九个来源**间接**覆盖，而那两类调用都不传 `FormData`、也不覆盖
+// 上限。分支坏了只有 `ocr` 的上传/取回会坏，网页链路全绿——正是 §9.7 说的"只测接好的那个入口"。
+
+function makeRequester(overrides = {}) {
+  return createHttpRequester({
+    timeoutMs: 1_000,
+    maxBytes: 100,
+    maxContentChars: 200,
+    maxRedirects: 3,
+    userAgent: 'test-local-fetch',
+    resolveAddresses: async () => [{ address: '93.184.216.34', family: 4 }],
+    ...overrides,
+  })
+}
+
+const REQUESTER_JSON_URL = 'https://example.test/result.jsonl'
+
+test('createHttpRequester：FormData 交回 fetch 且不写 content-type，字符串体仍是 urlencoded', async () => {
+  const seen = []
+  const restore = installFetch(async (url, init) => {
+    seen.push({ url, init })
+    return makeResponse(200, { 'content-type': 'application/json' }, '{"ok":true}')
+  })
+  try {
+    const form = new FormData()
+    form.append('file', new Blob([new Uint8Array([37, 80, 68, 70])], { type: 'application/pdf' }), 'x.pdf')
+    form.append('model', 'PaddleOCR-VL-1.6')
+    await makeRequester().request({ url: REQUESTER_JSON_URL, method: 'POST', body: form })
+    assert.equal(seen[0].init.method, 'POST')
+    assert.equal(seen[0].init.body, form, 'FormData 原样交给 fetch：序列化与 boundary 不由本层重做')
+    assert.equal(seen[0].init.headers['content-type'], undefined, '⛔ 手写 content-type 会顶掉 boundary，上游直接收不到文件')
+    assert.equal(seen[0].init.redirect, 'manual', '上传也不许被静默重定向：每一跳都要重新过闸门')
+
+    await makeRequester().request({ url: REQUESTER_JSON_URL, method: 'POST', body: '' })
+    assert.equal(seen[1].init.headers['content-type'], 'application/x-www-form-urlencoded', '字符串体的既有形态不许连带改坏')
+    assert.equal(seen[1].init.body, '')
+  } finally {
+    restore()
+  }
+})
+
+test('createHttpRequester：maxBytes / maxContentChars 只对当次请求生效，不放宽所有网页出口', async () => {
+  const json = JSON.stringify({ lines: 'x'.repeat(2_000) })
+  const restore = installFetch(async () => makeResponse(200, { 'content-type': 'application/json' }, json))
+  const requester = makeRequester()
+  try {
+    const capped = await requester.request({ url: REQUESTER_JSON_URL })
+    assert.equal(capped.truncated, true, '默认额度是给网页正文定的：超了就必须截并披露')
+    const granted = await requester.request({ url: REQUESTER_JSON_URL, maxBytes: 64_000, maxContentChars: 64_000 })
+    assert.equal(granted.truncated, false, 'OCR 结果 JSONL 被截断是**解析失败**，不是"少读几条"，所以这条出口要能单独放行')
+    assert.equal(granted.text, json)
+    assert.equal((await requester.request({ url: REQUESTER_JSON_URL })).truncated, true, '覆盖必须是逐请求的，不能留在 requester 上')
   } finally {
     restore()
   }

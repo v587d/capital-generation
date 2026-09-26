@@ -750,6 +750,7 @@ test('eastmoney_reports：预测 EPS 是**字符串**也要转成数字（按类
       predictThisYearEps: '1.0700000000',
       predictNextYearEps: '1.4000000000',
       infoCode: 'AP202609021828901486',
+      attachPages: 15,
     }],
   })))
   try {
@@ -758,9 +759,32 @@ test('eastmoney_reports：预测 EPS 是**字符串**也要转成数字（按类
     assert.equal(outcome.items[0].eps_next_year, 1.4)
     assert.equal(outcome.items[0].date, '2026-09-02')
     assert.equal(outcome.next_cursor, '2', '还有下一页时要给游标')
-    assert.match(String(outcome.note), /PDF/, '必须写明拿不到摘要/正文这个边界')
+    // 正文入口跟着列表一起交出来：`ocr` 只吃直链，没有 `pdf_url` 这条最有价值的路就断了。
+    assert.equal(outcome.items[0].pdf_url, 'https://pdf.dfcfw.com/pdf/H3_AP202609021828901486_1.pdf', '直链由 infoCode 派生（实测 200 application/pdf）')
+    assert.equal(outcome.items[0].attach_pages, 15, '页数让模型能判断这次解析值不值（整篇一次算完）')
+    assert.match(String(outcome.note), /PDF/, '必须写明拿不到摘要、正文在 pdf_url 里')
   } finally {
     restore.restore()
+  }
+})
+
+test('eastmoney_reports：infoCode 形状不认识就不给 pdf_url（宁缺勿造链接）', async () => {
+  const row = (infoCode) => ({ publishDate: '2026-09-02 00:00:00.000', title: 't', infoCode })
+  for (const [infoCode, expectation] of [
+    ['AP202609021828901486', 'https://pdf.dfcfw.com/pdf/H3_AP202609021828901486_1.pdf'],
+    ['https://evil.test/x?AP202609021828901486', undefined],
+    ['../../etc/passwd', undefined],
+    ['', undefined],
+    [null, undefined],
+  ]) {
+    const restore = installFetch(async () => makeResponse(200, { 'content-type': 'text/plain;charset=UTF-8' }, JSON.stringify({ hits: 1, TotalPage: 1, data: [row(infoCode)] })))
+    try {
+      const outcome = await eastmoneyReports(makeEastmoneyClient(), { code: '688017', pageSize: 20, pageNo: 1 })
+      assert.equal(outcome.items[0].pdf_url, expectation, `infoCode=${String(infoCode)} 的期望直链`)
+      assert.ok(!String(outcome.items[0].pdf_url ?? '').includes('evil.test'), '⛔ 上游字段不得变成一条我们能点出去的第三方 URL')
+    } finally {
+      restore.restore()
+    }
   }
 })
 

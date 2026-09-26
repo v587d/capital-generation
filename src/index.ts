@@ -20,8 +20,9 @@ import { ChartArtifactRegistry } from './chart/artifact-ref.js'
 import { WebRetriever } from './web-retriever/retriever.js'
 import { registerSourceTools, registerWebRetrieverTools } from './web-retriever/tools.js'
 import { createAnySearchClient, envKey } from './web-retriever/engines.js'
-import { createLocalFetcher, LOCAL_FETCH_CLIENT_VERSION } from './web-retriever/local-fetch.js'
+import { createLocalFetcher, createHttpRequester, LOCAL_FETCH_CLIENT_VERSION } from './web-retriever/local-fetch.js'
 import { createWindClient } from './web-retriever/wind-client.js'
+import { createPaddleOcrClient } from './ocr/client.js'
 /** Internal plugin name used by the Capital mode preset. */
 export const name = 'capital-generation'
 
@@ -58,12 +59,28 @@ export interface LocalFetchConfig {
   userAgent?: string
 }
 
-/** web_retriever 会话配置：anysearch（广度）+ wind_docs（public_document 精准）。 */
+/**
+ * PaddleOCR 文档解析（`ocr` 工具）配置。
+ *
+ * `endpoint` / `model` 空值 = 用 `src/ocr/client.ts` 里的官方端点与模型名（真值只在那一处，
+ * 与 `windDocs.endpoint` 同一口径）。`pollBudgetMs` 是**工具内部**等作业的自有预算，
+ * 必须小于工具声明的 `timeoutMs: 240000`——余量留给"决定回 pending 之后把回执写出去"，
+ * 撞上框架超时就没有 `doc_id` 可续查了。
+ */
+export interface PaddleOcrConfig {
+  endpoint?: string
+  credentialRef?: string
+  model?: string
+  pollBudgetMs?: number
+}
+
+/** web_retriever 会话配置：anysearch（广度）+ wind_docs（public_document 精准）+ 文档解析。 */
 export interface RetrieverConfig {
   baseURL?: string
   credentialRef?: string
   windDocs?: WindDocsConfig
   localFetch?: LocalFetchConfig
+  paddleOcr?: PaddleOcrConfig
 }
 
 /**
@@ -91,6 +108,20 @@ export const LOCAL_FETCH_DEFAULTS: Required<LocalFetchConfig> = {
 }
 
 /**
+ * `ocr`（PaddleOCR 文档解析）配置的默认值：与 `LOCAL_FETCH_DEFAULTS` 同一口径，
+ * schema 的 `.default()` 与消费点都引用它，字面量只有一处。
+ *
+ * `endpoint` / `model` 留空是把真值让给 `src/ocr/client.ts`（那边还有 `PADDLE_OCR_MAX_PAGES`
+ * 这类跟着端点走的常数）；`pollBudgetMs: 0` 同理让给客户端的 `DEFAULT_WAIT_BUDGET_MS`。
+ */
+export const PADDLE_OCR_DEFAULTS: Required<PaddleOcrConfig> = {
+  endpoint: '',
+  credentialRef: 'PADDLE_OCR_TOKEN',
+  model: '',
+  pollBudgetMs: 0,
+}
+
+/**
  * 消费点独立补齐默认值。`apply()` 在无 settings 的宿主/测试里拿到的是**未过 schema**
  * 的原始对象，`retriever.localFetch` 可能是 `undefined`，因此消费点不能依赖 schema 补默认值。
  */
@@ -115,6 +146,13 @@ const WindDocsSchema = z.object({
   timeoutMs: z.number().default(0).description('可选：单次调用超时毫秒，0 = 默认 60000'),
 })
 
+const PaddleOcrSchema = z.object({
+  endpoint: z.string().default(PADDLE_OCR_DEFAULTS.endpoint).description('PaddleOCR 作业端点；空 = 官方 jobs 端点'),
+  credentialRef: z.string().default(PADDLE_OCR_DEFAULTS.credentialRef).description('PaddleOCR Token 的 credentials 引用名，空 = PADDLE_OCR_TOKEN'),
+  model: z.string().default(PADDLE_OCR_DEFAULTS.model).description('解析模型名；空 = PaddleOCR-VL-1.6'),
+  pollBudgetMs: z.number().default(PADDLE_OCR_DEFAULTS.pollBudgetMs).description('ocr 工具内部等作业的预算毫秒，0 = 默认 200000（必须小于工具声明的 240000 超时）'),
+})
+
 const LocalFetchSchema = z.object({
   enabled: z.boolean().default(LOCAL_FETCH_DEFAULTS.enabled).description('是否允许本机直连出网：AnySearch 失败后的回退抓取 + 具名来源工具的执行（默认开启；关闭时来源工具调用响亮失败）'),
   timeoutMs: z.number().default(LOCAL_FETCH_DEFAULTS.timeoutMs).description('本机直连单次请求超时毫秒'),
@@ -131,6 +169,8 @@ const RetrieverSchema = z.object({
     .description('Wind 金融文档检索（public_document）配置；缺省使用官方端点与 WIND_API_KEY'),
   localFetch: LocalFetchSchema.default({ ...LOCAL_FETCH_DEFAULTS })
     .description('本地直连回退配置（AnySearch 明确失败后改由本机抓取公开文本页面）'),
+  paddleOcr: PaddleOcrSchema.default({ ...PADDLE_OCR_DEFAULTS })
+    .description('PaddleOCR 文档解析（ocr 工具）配置；Token 走 credentials 引用 PADDLE_OCR_TOKEN'),
 })
 
 /** Configuration accepted by the Capital Generation plugin. */
@@ -151,7 +191,7 @@ export const Config = z.object({
   fuyaoCredentialRef: z.string()
     .default('FUYAO_API_KEY')
     .description('Fuyao credentials 引用名，空 = FUYAO_API_KEY'),
-  retriever: RetrieverSchema.default({ baseURL: '', credentialRef: 'ANYSEARCH_API_KEY', windDocs: { endpoint: '', credentialRef: 'WIND_API_KEY', timeoutMs: 60000 }, localFetch: { ...LOCAL_FETCH_DEFAULTS } })
+  retriever: RetrieverSchema.default({ baseURL: '', credentialRef: 'ANYSEARCH_API_KEY', windDocs: { endpoint: '', credentialRef: 'WIND_API_KEY', timeoutMs: 60000 }, localFetch: { ...LOCAL_FETCH_DEFAULTS }, paddleOcr: { ...PADDLE_OCR_DEFAULTS } })
     .description('web_retriever 配置（可选；缺省使用 AnySearch 默认地址与凭据名）'),
 })
 
@@ -405,7 +445,40 @@ export function apply(ctx: Context, config: Config) {
         userAgent: localFetchConfig.userAgent,
       })
     : undefined
-  registerWebRetrieverTools(ctx, new WebRetriever(client, localFetch), windClient)
+  // ── 文档解析面：PaddleOCR 作业（`ocr` 工具）───────────────────────────────
+  // Token 每次调用解析（credentials 优先、环境变量回退），与 Wind 同一口径；客户端构造不
+  // 依赖 Token——`ocr` 无条件注册，缺 Key 只影响调用结果（错误信封），不影响子 Agent 创建。
+  // ⚠️ **不受 `localFetch.enabled` 支配**：那道开关的字面语义是"允许本机直连提取网页
+  // 内容"，而这里的文件由上游解析服务取（用户同意的是 Token 卡片这件事）。判据见
+  // `docs/dev/web-retriever.md` §4.3。
+  const paddleOcrConfig = retriever.paddleOcr ?? {}
+  const paddleOcrCredentialRef = paddleOcrConfig.credentialRef || PADDLE_OCR_DEFAULTS.credentialRef
+  const ocrClient = createPaddleOcrClient({
+    endpoint: paddleOcrConfig.endpoint || undefined,
+    model: paddleOcrConfig.model || undefined,
+    ...(paddleOcrConfig.pollBudgetMs ? { waitBudgetMs: paddleOcrConfig.pollBudgetMs } : {}),
+    resolveToken: async () => {
+      try {
+        const credentials = ctx.get('credentials') as { resolve?: (ref: string) => Promise<{ value?: string } | undefined> } | undefined
+        const resolved = await credentials?.resolve?.(paddleOcrCredentialRef)
+        if (resolved?.value) return resolved.value
+      } catch {
+        // credentials 服务不可用时回退环境变量。
+      }
+      return envKey(paddleOcrCredentialRef)
+    },
+    // 出口仍是 `local-fetch` 那一份实现（URL 形态 + 公网 IP 闸门 + 体积/超时上限）。
+    // 单次请求 120s：提交与轮询只有几 KB，但 multipart 上传几 MB 的 PDF、取回整篇 JSONL
+    // 都不是 30s 的网页预算装得下的；结果侧另有逐请求覆盖（见 `src/ocr/client.ts` 的 `load`）。
+    request: createHttpRequester({
+      timeoutMs: 120_000,
+      maxBytes: 1_048_576,
+      maxContentChars: 1_048_576,
+      maxRedirects: localFetchConfig.maxRedirects,
+      userAgent: localFetchConfig.userAgent,
+    }).request,
+  })
+  registerWebRetrieverTools(ctx, new WebRetriever(client, localFetch), windClient, { store, client: ocrClient })
   // 九个具名来源工具（cls_telegraph / wscn_lives / cninfo_irm / sseinfo_qa /
   // eastmoney_724 / eastmoney_stock_news / eastmoney_reports / sina_reports / ths_eps_forecast）走本机 HTTP，
   // **受 `localFetch.enabled` 支配**：卡片文案是"允许启动本地提取网页内容"，而这九个工具全部

@@ -8,11 +8,29 @@ const NS = 'capital-generation'
 const FUYAO_DEFAULT_REF = 'FUYAO_API_KEY'
 const ANYSEARCH_DEFAULT_REF = 'ANYSEARCH_API_KEY'
 const WIND_DEFAULT_REF = 'WIND_API_KEY'
+const PADDLE_OCR_DEFAULT_REF = 'PADDLE_OCR_TOKEN'
 const DOC_URLS = {
   fuyao: 'https://fuyao.aicubes.cn/docs/',
   anysearch: 'https://www.anysearch.com/docs/auth',
   wind: 'https://market.windalice.com/',
+  paddleocr: 'https://aistudio.baidu.com/paddleocr',
 }
+
+/**
+ * 密钥字段清单（渲染顺序 = 数组顺序）。读状态、写草稿、脏检查、事件刷新都遍历这一份：
+ * 加一个 Key 以前要在九处各补一遍，漏掉的那处不会报错，只会让用户填了却不生效。
+ */
+const CREDENTIAL_FIELDS = ['fuyao', 'anysearch', 'wind', 'paddleocr']
+const DEFAULT_REFS = {
+  fuyao: FUYAO_DEFAULT_REF,
+  anysearch: ANYSEARCH_DEFAULT_REF,
+  wind: WIND_DEFAULT_REF,
+  paddleocr: PADDLE_OCR_DEFAULT_REF,
+}
+const emptyDrafts = () => Object.fromEntries(CREDENTIAL_FIELDS.map((field) => [field, '']))
+const freshStatus = () => Object.fromEntries(
+  CREDENTIAL_FIELDS.map((field) => [field, { ref: DEFAULT_REFS[field], configured: false, writable: true }]),
+)
 
 const zh = {
   title: 'Capital 模式',
@@ -25,6 +43,8 @@ const zh = {
   localFetchHint: '开启后 AnySearch 抓取失败会自动改由本机直连抓取该页面（回执来源 local-http）；关闭则 AnySearch 失败即回传失败，且具名来源工具（财联社快讯 / 东财资讯等，均需本机直连）调用时返回"已被设置关闭"。改动即时保存，新 Capital 会话生效。',
   windLabel: 'Wind Alice API Key',
   windHint: 'Wind 金融信披类文档检索接口。保存后新 Capital 会话生效。',
+  paddleocrLabel: 'PaddleOCR 文档解析 Token',
+  paddleocrHint: '选填。Capital 的 ocr 工具用它把 PDF 研报 / 公告解析成正文，在 AIStudio 申请。密钥只存在凭证域，不写进会话配置；作业按整篇计费，保存后新 Capital 会话生效。',
   openDocs: '打开接口文档',
   configured: '已配置密钥。',
   notConfigured: '未配置密钥。',
@@ -49,6 +69,8 @@ const en = {
   localFetchHint: 'When on, an AnySearch fetch failure falls back to direct local fetching (receipt via: local-http); when off, failures are returned as-is and the named-source tools (e.g. cls_telegraph, eastmoney_724 — all local HTTP) fail with "disabled by settings". Changes save immediately and take effect in new Capital sessions.',
   windLabel: 'Wind Alice API Key',
   windHint: 'Wind financial disclosure document retrieval interface. Takes effect in new Capital sessions.',
+  paddleocrLabel: 'PaddleOCR document token',
+  paddleocrHint: 'Optional. The Capital ocr tool uses it to turn PDF research reports / announcements into body text; apply at AIStudio. The secret lives only in the credentials domain, never in session config. Jobs are billed per whole document; takes effect in new Capital sessions.',
   openDocs: 'Open API documentation',
   configured: 'Configured',
   notConfigured: 'Not configured',
@@ -69,6 +91,7 @@ function text(value, fallback) {
 function refOf(snapshot, field, fallback) {
   if (field === 'fuyao') return text(snapshot.value?.fuyaoCredentialRef, fallback)
   if (field === 'wind') return text(snapshot.value?.retriever?.windDocs?.credentialRef, fallback)
+  if (field === 'paddleocr') return text(snapshot.value?.retriever?.paddleOcr?.credentialRef, fallback)
   return text(snapshot.value?.retriever?.credentialRef, fallback)
 }
 
@@ -135,12 +158,8 @@ class CapitalCardController {
     this.scope = scope
     this.ctx = ctx
     this.listeners = new Set()
-    this.drafts = { fuyao: '', anysearch: '', wind: '' }
-    this.status = {
-      fuyao: { ref: FUYAO_DEFAULT_REF, configured: false, writable: true },
-      anysearch: { ref: ANYSEARCH_DEFAULT_REF, configured: false, writable: true },
-      wind: { ref: WIND_DEFAULT_REF, configured: false, writable: true },
-    }
+    this.drafts = emptyDrafts()
+    this.status = freshStatus()
     this.saving = false
     this.failed = false
     this.localFetchWriting = false
@@ -160,18 +179,16 @@ class CapitalCardController {
 
   snapshot() {
     const settings = this.scope.getSnapshot()
-    const fuyao = this.status.fuyao
-    const anysearch = this.status.anysearch
-    const wind = this.status.wind
+    const fields = Object.fromEntries(
+      CREDENTIAL_FIELDS.map((field) => [field, { ...this.status[field], draft: this.drafts[field] }]),
+    )
     return {
       available: settings.status === 'ready',
       writable: settings.writable,
       saving: this.saving,
       failed: this.failed,
-      dirty: this.drafts.fuyao.trim() !== '' || this.drafts.anysearch.trim() !== '' || this.drafts.wind.trim() !== '',
-      fuyao: { ...fuyao, draft: this.drafts.fuyao },
-      anysearch: { ...anysearch, draft: this.drafts.anysearch },
-      wind: { ...wind, draft: this.drafts.wind },
+      dirty: CREDENTIAL_FIELDS.some((field) => this.drafts[field].trim() !== ''),
+      ...fields,
       // 本机直连回退开关：严格渲染自 settings 段（schema 解析后带默认值）。
       // `!== false` 与主插件消费点 resolveLocalFetchConfig 的默认语义逐字一致（默认开）。
       localFetch: {
@@ -192,27 +209,24 @@ class CapitalCardController {
 
   refreshRefs() {
     const snapshot = this.scope.getSnapshot()
-    const next = {
-      fuyao: refOf(snapshot, 'fuyao', FUYAO_DEFAULT_REF),
-      anysearch: refOf(snapshot, 'anysearch', ANYSEARCH_DEFAULT_REF),
-      wind: refOf(snapshot, 'wind', WIND_DEFAULT_REF),
-    }
-    for (const field of ['fuyao', 'anysearch', 'wind']) {
-      if (this.status[field].ref !== next[field]) {
-        this.status[field] = { ref: next[field], configured: false, writable: true }
+    for (const field of CREDENTIAL_FIELDS) {
+      const next = refOf(snapshot, field, DEFAULT_REFS[field])
+      if (this.status[field].ref !== next) {
+        this.status[field] = { ref: next, configured: false, writable: true }
         this.drafts[field] = ''
       }
     }
   }
 
   async readCredentials() {
-    const refs = [this.status.fuyao.ref, this.status.anysearch.ref, this.status.wind.ref]
+    const refs = CREDENTIAL_FIELDS.map((field) => this.status[field].ref)
     try {
       const response = await this.ctx.remote.credentials.describe(refs)
       if (!response?.ok) return
-      if (refs[0] !== this.status.fuyao.ref || refs[1] !== this.status.anysearch.ref || refs[2] !== this.status.wind.ref) return
+      // 读回来后清单已变（settings 事件改了 ref 名）：这批响应不再对应当前字段，丢掉。
+      if (CREDENTIAL_FIELDS.some((field, index) => refs[index] !== this.status[field].ref)) return
       const values = response.value ?? {}
-      for (const field of ['fuyao', 'anysearch', 'wind']) {
+      for (const field of CREDENTIAL_FIELDS) {
         const current = this.status[field]
         const view = values[current.ref]
         if (view === undefined) continue
@@ -229,7 +243,7 @@ class CapitalCardController {
   }
 
   refresh(ref) {
-    if (ref === this.status.fuyao.ref || ref === this.status.anysearch.ref || ref === this.status.wind.ref) this.readCredentials()
+    if (CREDENTIAL_FIELDS.some((field) => ref === this.status[field].ref)) this.readCredentials()
   }
 
   edit(field, value) {
@@ -239,7 +253,7 @@ class CapitalCardController {
   }
 
   discard() {
-    this.drafts = { fuyao: '', anysearch: '', wind: '' }
+    this.drafts = emptyDrafts()
     this.failed = false
     this.publish()
   }
@@ -273,7 +287,7 @@ class CapitalCardController {
 
   async save() {
     const snapshot = this.scope.getSnapshot()
-    const writes = ['fuyao', 'anysearch', 'wind'].filter((field) => this.drafts[field].trim() !== '')
+    const writes = CREDENTIAL_FIELDS.filter((field) => this.drafts[field].trim() !== '')
     if (writes.length === 0 || this.saving || snapshot.status !== 'ready' || !snapshot.writable) return
     this.saving = true
     this.failed = false
@@ -288,7 +302,7 @@ class CapitalCardController {
         landed = false
       }
     }
-    if (landed) this.drafts = { fuyao: '', anysearch: '', wind: '' }
+    if (landed) this.drafts = emptyDrafts()
     this.saving = false
     this.failed = !landed
     this.publish()
@@ -405,6 +419,7 @@ function CapitalCard(props) {
         onToggle: props.toggleLocalFetch,
       }),
       h(CredentialField, { id: 'capital-config-wind-key', label: t('windLabel'), hint: t('windHint'), docsUrl: DOC_URLS.wind, state: state.wind, disabled: disabled || state.saving || !state.wind.writable, onEdit: (value) => props.edit('wind', value), t }),
+      h(CredentialField, { id: 'capital-config-paddleocr-key', label: t('paddleocrLabel'), hint: t('paddleocrHint'), docsUrl: DOC_URLS.paddleocr, state: state.paddleocr, disabled: disabled || state.saving || !state.paddleocr.writable, onEdit: (value) => props.edit('paddleocr', value), t }),
       h('div', { className: 'capital-config-footer' },
         state.failed ? h('p', { role: 'status', className: 'capital-config-failed' }, t('saveFailed')) : null,
         h('button', { type: 'button', disabled: !state.dirty || state.saving, onClick: props.discard, className: 'capital-config-discard' }, t('discard')),

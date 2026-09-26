@@ -9,7 +9,7 @@
 
 import { htmlToMarkdown, stripInvisibleText } from './html-markdown.js'
 
-export const LOCAL_FETCH_CLIENT_VERSION = '2.2.0'
+export const LOCAL_FETCH_CLIENT_VERSION = '2.3.0'
 export const LOCAL_FETCH_MAX_URL_LENGTH = 2048
 
 export type LocalFetchErrorCode =
@@ -275,7 +275,7 @@ async function defaultResolveAddresses(hostname: string, signal: AbortSignal) {
 
 async function assertAllowedHost(
   url: URL,
-  options: LocalFetchOptions,
+  options: Pick<LocalFetchOptions, 'allowPrivate' | 'resolveAddresses'>,
   signal: AbortSignal,
 ): Promise<void> {
   if (signal.aborted) throw new OperationAborted()
@@ -300,6 +300,28 @@ async function assertAllowedHost(
   if (!options.allowPrivate && addresses.some(({ address }) => !isPublicIp(address))) {
     throw new LocalFetchError('BLOCKED_URL', `DNS result for ${hostname} contains a private or reserved address`)
   }
+}
+
+/**
+ * 「把这条 URL 交给**别人**去取」的闸门：只判形态与主机，不发任何请求。
+ *
+ * `ocr` 的 `url` 形态本机不抓这个文件——上游解析服务替我们取。但本插件不能成为
+ * "把内网 URL 交给第三方去戳"的通道，所以这里复用与本机直连**同一份**主机校验
+ * （形态走 `safeUrl` + `validateUrl`，公网性走 `assertAllowedHost`），只是跳过后面的
+ * 重定向与体积那几步。SSRF 面因此不新长第二份实现，也不会随两处漂移。
+ *
+ * 返回**原串**（不是 `url.href`）：`href` 会把非 ASCII 路径 percent-encode 展开，
+ * 白吃输出预算；`allowPrivate` 在这里恒为 false，不提供开关——关掉的不是我们的风险面。
+ */
+export async function assertPublicUrlTarget(
+  value: unknown,
+  signal: AbortSignal,
+  resolveAddresses?: LocalFetchOptions['resolveAddresses'],
+): Promise<string> {
+  const display = safeUrl(value)
+  if (display === '') throw new LocalFetchError('BLOCKED_URL', 'url must be a plain http(s) URL without credentials or whitespace')
+  await assertAllowedHost(validateUrl(display), { allowPrivate: false, resolveAddresses }, signal)
+  return display
 }
 
 function contentType(response: Response): { mime: string; charset?: string } {
@@ -364,6 +386,27 @@ interface ReadBodyResult {
   text: string
   byteTruncated: boolean
   charTruncated: boolean
+}
+
+/** 错误响应体的摘录上限：够指认原因就停，不拿它当第二条正文通道。 */
+const ERROR_DETAIL_MAX_CHARS = 180
+
+/**
+ * 把 4xx/5xx 的**响应体**读成一小段可展示的缘由。
+ *
+ * 为什么必须带：2026-09-25 实测 PaddleOCR 对某个 PDF 直链回 `HTTP 400` +
+ * `{"code":10004,"msg":"文件格式不支持"}`——只报状态码，模型面对 `local fetch returned HTTP 400`
+ * 什么也决定不了（换链接？换形态？放弃？）。原因在上游写的正文里，不在我们造的码里。
+ * 读失败一律吞掉返回空串：这是给失败**加**信息，不能反过来把原始失败弄丢或改成另一种失败。
+ */
+async function errorDetail(response: Response, signal: AbortSignal): Promise<string> {
+  try {
+    const body = await readBody(response, undefined, 1_024, ERROR_DETAIL_MAX_CHARS, signal)
+    const text = body.text.replace(/[\r\n\t]+/gu, ' ').trim()
+    return text.length === 0 ? '' : `：${text}`
+  } catch {
+    return ''
+  }
 }
 
 async function readBody(
@@ -438,8 +481,11 @@ export interface HttpRequest {
   method?: 'GET' | 'POST'
   /** 额外请求头（如上证e互动要求 `Referer`）。仅由来源配方内部提供，不接受模型入参。 */
   headers?: Record<string, string>
-  /** POST 用的表单串；省略即空 body（互动易第二步要求 POST 但 body 为空）。 */
-  body?: string
+  /**
+   * 请求体。字符串按 `application/x-www-form-urlencoded` 发（互动易第二步要求 POST 但 body 为空）；
+   * `FormData` 则**故意不写 content-type**——boundary 必须由实现自己带，写死就是把请求写坏。
+   */
+  body?: string | FormData
   /** 覆盖本次请求的 accept 头；省略用默认。 */
   accept?: string
   /**
@@ -452,6 +498,16 @@ export interface HttpRequest {
    * 与 `headers` 一样，只由来源实现按硬编码知识填写。
    */
   encoding?: string
+  /**
+   * 逐请求覆盖响应体/正文上限（省略用 `LocalFetchOptions` 的全局值）。
+   *
+   * 为什么要覆盖而不是把全局值调大：全局 `maxBytes` 是给"抓一个网页正文"定的（512 KB），
+   * 网页抓取的响应体积就是风险体积；OCR 结果 JSONL 是**我们自己提交出去再取回来**的解析产物
+   * （实测 15 页研报 258 KB），把它挤进网页的额度会让大文档静默 `truncated`——
+   * 而截断的 JSONL 是解析失败，不是"少读了几条"。调大全局值等于放宽所有网页出口。
+   */
+  maxBytes?: number
+  maxContentChars?: number
 }
 
 export interface HttpOutcome {
@@ -494,7 +550,7 @@ export function createHttpRequester(options: LocalFetchOptions): {
             headers: {
               'user-agent': options.userAgent,
               accept: input.accept ?? ACCEPT_HEADER,
-              ...(input.body === undefined ? {} : { 'content-type': 'application/x-www-form-urlencoded' }),
+              ...(typeof input.body === 'string' ? { 'content-type': 'application/x-www-form-urlencoded' } : {}),
               ...(input.headers ?? {}),
             },
             ...(input.body === undefined ? {} : { body: input.body }),
@@ -524,7 +580,7 @@ export function createHttpRequester(options: LocalFetchOptions): {
         }
 
         if (response.status >= 400) {
-          throw new LocalFetchError('HTTP', `local fetch returned HTTP ${response.status}`)
+          throw new LocalFetchError('HTTP', `local fetch returned HTTP ${response.status}${await errorDetail(response, controller.signal)}`)
         }
         const type = contentType(response)
         // 缺头（mime 为空）不当场拒绝：正文读进来嗅探后再判。头存在但不支持的类型
@@ -538,8 +594,8 @@ export function createHttpRequester(options: LocalFetchOptions): {
           // 工具内部的显式声明优先于响应头：实测存在"头不带 charset 但正文是 GBK"的站点
           // （`basic.10jqka.com.cn`），按 UTF-8 解会整页变成替换字符（见 `HttpRequest.encoding`）。
           input.encoding ?? type.charset,
-          options.maxBytes,
-          options.maxContentChars,
+          input.maxBytes ?? options.maxBytes,
+          input.maxContentChars ?? options.maxContentChars,
           controller.signal,
         )
         if (missingContentType && sniffMissingContentType(body.text) === undefined) {

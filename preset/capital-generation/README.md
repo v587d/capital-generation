@@ -102,10 +102,13 @@
   通用行只能有一个 filter，所以用 `deny` 列全敏感工具（数据管线 + Dataset 系列 + 出图 +
   专用角色创建工具）；`deny` 里的名字同样必须真实注册。回归断言见
   `test/persona.test.mjs` 的「通用 subagent 行」用例。
-- **同一份 `deny` 也覆盖出网（2026-09-24）**：本插件 13 个检索 / 来源工具全部列进来，否则只带
+- **同一份 `deny` 也覆盖出网（2026-09-24）**：本插件 14 个检索 / 来源 / 文档解析工具全部列进来，否则只带
   `parentSession` 的通用 child 能自己抓网页，「外部检索只经 web_retriever」又是一条 persona 文案。
   名字的唯一事实来源是 `src/agents/root-tool-policy.ts` 的 `RETRIEVAL_DENIED_TOOLS`（根 Agent 逐名
-  deny 用的就是它），测试把两处对齐成同一份名单。**宿主自己挂的 `web_search` / `web_fetch` 绝不能
+  deny 用的就是它），测试把两处对齐成同一份名单。**`ocr` 是根侧收敛的唯一例外（2026-09-26）**：它
+  不进 `RETRIEVAL_DENIED_TOOLS`（主 Agent 要能解析用户 `@` 进来的本地文档），改由调用级 guard 只拒
+  `url` 形态；但通用 child 的这份 `deny` 里它**必须在**——连本地形态一起拿掉，否则通用 child
+  继承它能自己解析文档（见 §4.3 → `docs/dev/web-retriever.md`）。**宿主自己挂的 `web_search` / `web_fetch` 绝不能
   写进这里的 `deny`**：它们不由本插件注册，未注册名字在 `deny` 里的表现是"创建子 Agent 失败"；
   它们只出现在根侧 `ROOT_AGENT_DENIED_TOOLS`（逐名 `restrict` 的 try/catch 容忍"这个 scope 里没有"）。
 - 不用 `dsh-time-context` 行：它每个 step 自动注入时钟读数，与自研 `get_local_datetime`

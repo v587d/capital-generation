@@ -60,6 +60,11 @@ dsh 处于快速迭代期，"版本升级"与"大规模破坏性更新"是常态
   仍要自己做，并不省一半工作量。
   因此本方案**不新增任何 DSH 接口面**：`check:dsh` 的探针条数保持不变（15 条），无需新增探针。
   本地回退的取舍、安全边界与已知局限见 `docs/design/web-retriever-local-fetch.md`。
+- **DSH 的 OCR / 文档解析能力**：`ocr`（§4.3 → `docs/dev/web-retriever.md`）直连第三方
+  PaddleOCR AIStudio 的异步 job API，出网全部走**同一个**自研 `createHttpRequester`
+  （不引 `ctx.web`，也不给 `HttpRequest` 加第二种出口实现）。这是一条**新的第三方出网依赖**，
+  但**不是**新的 DSH 接口面——探针仍是 15 条。密钥只进 credentials 域（`PADDLE_OCR_TOKEN`），
+  宿主没有"托管 OCR"这类服务可替代。
 
 ## 升级 runbook
 

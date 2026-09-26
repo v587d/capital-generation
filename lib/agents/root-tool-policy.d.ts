@@ -20,12 +20,28 @@
 /**
  * 出网工具名（唯一一份事实来源）：检索面 2 + wind 2 + 具名来源查询面 9。
  *
+ * ⚠️ **不含 `ocr`**：主 Agent 保留它的本地形态（`file` / `doc_id`），只由
+ * {@link rootOcrGuardReason} 关掉 `url` 形态——名字级 deny 做不到这个区分。
+ *
  * 主 Agent 侧「外部检索只经 web_retriever 回传」必须是**结构件**，不能只写在 persona 里：
  * 2026-09-24 review 复现——persona 禁直连清单当时写的是 `web_retriever_*` 通配，工具改名后
  * 通配一个都不匹配，禁令名存实亡，而工具表里那 13 个入口始终摆着。逐名 deny 由本清单决定，
  * preset 与测试都从这里取名字（`test/persona.test.mjs` 交叉核验），新增来源只改这一处。
  */
 export declare const RETRIEVAL_DENIED_TOOLS: readonly ["anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "sina_reports", "ths_eps_forecast"];
+/** 文档解析工具名（`web_retriever` 的第三个工作面）。 */
+export declare const OCR_TOOL_NAME = "ocr";
+/**
+ * 根 Agent 的 `ocr` 只放行**本地形态**（`file` / `doc_id`），`url` 形态拒绝。
+ *
+ * 为什么不整名 deny：用户把 PDF 放在工作目录用 `@xxx.pdf` 推给主 Agent 是正当入口，
+ * 解析它不需要经过委派；但 `url` 形态等于"主 Agent 自己决定去戳一个外部链接"，
+ * 那是「外部检索只经 web_retriever」这条结构约束唯一被留的口子。名字级 deny 做不到
+ * 这个区分（`render_chart` 的教训一样：可见性不是权限），所以用调用级 guard。
+ */
+export declare const OCR_ROOT_URL_DENIED: string;
+/** 单次调用的判定：根 Agent 用 `ocr` 提交外部 `url` 才拒绝，其余一律放行。 */
+export declare function rootOcrGuardReason(exec: GuardedExecution | undefined): string | undefined;
 export declare const ROOT_AGENT_DENIED_TOOLS: readonly ["render_chart", "subagent_visualization_specialist", "prepare_chart_source", "anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "sina_reports", "ths_eps_forecast", "web_search", "web_fetch", "bash", "pwsh"];
 /** 本 preset 的 id（`composedPreset` 的返回值）。 */
 export declare const CAPITAL_PRESET_ID = "capital-generation";
@@ -79,6 +95,8 @@ export interface PolicyContext {
 export type RootToolPolicyOutcome = 'restricted' | 'skipped' | 'unavailable';
 /** 根 Agent 判据：没有 parentSession。子 Agent 一律有（spawn provider 写入）。 */
 export declare function isRootAgent(agent: AgentLike | undefined): boolean;
+/** 会话 id（guard 归档用）；缺失或空串返回 undefined。 */
+export declare function agentSessionId(agent: AgentLike | undefined): string | undefined;
 /** 只有本 preset 的 agent 才收敛：别的 preset 的 agent 不该被我们碰。 */
 export declare function isCapitalAgent(ctx: PolicyContext, agent: AgentLike | undefined): boolean;
 /**
@@ -89,6 +107,13 @@ export declare function isCapitalAgent(ctx: PolicyContext, agent: AgentLike | un
  * 任何异常都不抛出：调用方是 agent 创建路径，宁可少收敛也不能挡住建 agent。
  */
 export declare function restrictRootAgentTools(agent: AgentLike | undefined): RootToolPolicyOutcome;
+/**
+ * 在**根 Agent 自己的 scope** 上装 `ocr` 的调用级闸门（子 Agent 不装：`url` 形态归它们）。
+ *
+ * 与 `restrictRootAgentTools` 同一个监听、同一份判据；guard 不可用或安装异常都不影响
+ * 已经完成的 deny 收敛（宁可少一层闸门，不能挡住建 agent）。
+ */
+export declare function installRootOcrGuard(agent: AgentLike | undefined): (() => void) | undefined;
 /**
  * 注册 `agent/created` 监听。监听器只做一件事：对本 preset 的根 Agent 收敛一次。
  *

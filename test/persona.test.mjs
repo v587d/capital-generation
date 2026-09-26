@@ -121,7 +121,7 @@ const PLUGIN_TOOLS = [
   'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile', 'prepare_chart_source', 'render_chart',
   'get_local_datetime',
   'resolve_data_time_range',
-  'anysearch_search', 'web_retriever_fetch',
+  'anysearch_search', 'web_retriever_fetch', 'ocr',
   'wind_docs_announcements', 'wind_docs_news',
   // 具名来源查询面（provider + operation 命名，见 src/web-retriever/sources.ts）：
   // 与 PLUGIN_TOOLS 里其余名字一样，allow 写了就必须真注册，否则 tools.restrict() 会在
@@ -406,6 +406,9 @@ test('主 persona：web_retriever 编排与检索路由', () => {
   assert.ok(!/[a-z0-9_]{4,}_\*/.test(MAIN_PERSONA), '主 persona 不得出现 `工具前缀_*` 式通配（重命名后会静默失配）')
   assertRuleAny(MAIN_PERSONA, [/已消歧的标的与完整代码/, /已消歧标的与完整代码/], '主 persona 委派 web_retriever 应带上标的与代码（Wind 查询要素依赖）')
   assertRuleAny(MAIN_PERSONA, [/一律委派/, /外部检索只经/], '主 persona 应把外部检索收敛到委派')
+  // `ocr` 是根侧唯一保留的出网口子（只关 url 形态），人设必须说清哪一侧能自己用。
+  assertRule(MAIN_PERSONA, /本地 PDF \/ 图片可直接用 ocr 解析/, '主 persona 必须写明本地文档解析是主 Agent 的正当入口')
+  assertRule(MAIN_PERSONA, /外部链接仍走委派/, '主 persona 必须把外部 PDF 链接留在委派那一侧')
   assertRuleAny(MAIN_PERSONA, [/并行委派/, /多需求可并行/, /可并行/], '主 persona 应说明多需求可并行委派')
 })
 
@@ -415,7 +418,7 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
   assert.equal(retrieverRow.config.toolName, 'subagent_web_retriever')
   assert.equal(retrieverRow.config.backgroundMode, 'continuable')
   assert.deepEqual(retrieverRow.config.toolFilter?.allow, [
-    'send_message', 'skill', 'anysearch_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news',
+    'send_message', 'skill', 'anysearch_search', 'web_retriever_fetch', 'ocr', 'wind_docs_announcements', 'wind_docs_news',
     // 具名来源查询面（provider + operation 命名）：缺一个，对应的来源在子 Agent 手里就是"看不见的能力"。
     'cls_telegraph', 'wscn_lives', 'cninfo_irm', 'sseinfo_qa',
     'eastmoney_724', 'eastmoney_stock_news', 'eastmoney_reports', 'sina_reports', 'ths_eps_forecast',
@@ -430,7 +433,9 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
   for (const pattern of [
     /cls_telegraph/, /wscn_lives/, /cninfo_irm/, /sseinfo_qa/,
     /eastmoney_724/, /eastmoney_stock_news/, /eastmoney_reports/, /sina_reports/, /ths_eps_forecast/,
-    /确定、可复现的结果集/, /空结果是真事实/, /深沪不可互换/, /北交所两边都没有/, /研报正文取不到/,
+    /确定、可复现的结果集/, /空结果是真事实/, /深沪不可互换/, /北交所两边都没有/,
+    // `ocr`：正文形态 + "整篇计费" + "按 doc_id 取回"三条都在（少一条模型就会以为翻页省钱）。
+    /正文是 PDF 交 ocr/, /整篇计费/, /doc_id 用 pages\/query 取回/,
     /具名来源都是媒体或互动平台.*不得标 verified_official/,
   ]) {
     assertRule(RETRIEVER_PERSONA, pattern, `web_retriever persona 缺少具名来源要点: ${pattern}`)
@@ -454,6 +459,12 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
     /整段丢掉/, /真放进回执的条数/, /省略其后/, /归一化成同一个查询/, /`code=TIMEOUT` 是上游慢/,
     // 本地直连回退：来源标注、能力边界与"不算重试"三条硬约束（Task 8）。
     /local-http/, /`via`/, /truncated/, /本机直连/, /官网直抓/, /PDF/, /不算.*重试/,
+    // `ocr`（第 8 节）：四条"模型一定会误读"的形态——pages 省不了钱、pending 不是失败、
+    // doc_id 是 opaque、PDF 链接不等于已读到正文。掉一条就是重复计费或伪造来源。
+    /四种调用形态/, /`pages` 不省钱/, /status: 'pending'` 不是失败/, /不要重传 `url`/,
+    /`doc_id` 是 opaque 引用/, /一次最多 8 页/, /不下载、不内联/, /标页号/,
+    /不得把那条 PDF 链接本身当成/, /OCR 解析/, /`provider_tally`）里\*\*记一次/,
+    /NO_CREDENTIAL/,
   ]) {
     assertRule(webProtocol, pattern, `capital-web-protocol 缺少要点: ${pattern}`)
   }
@@ -515,7 +526,7 @@ test('子 Agent 委派行：continuable、persona 覆盖、toolFilter 收敛工�
   }
 })
 
-test('通用 subagent 行：必须 deny Capital 数据/出图管线、十三个联网工具与专用角色创建工具', () => {
+test('通用 subagent 行：必须 deny Capital 数据/出图管线、十四个联网工具与专用角色创建工具', () => {
   const genericRow = rowById('tool-subagent')
   assert.ok(genericRow, 'preset 必须有通用 subagent 行')
   assert.equal(genericRow.name, '@deepseek-ai/dsh-tool-subagent')
@@ -543,6 +554,9 @@ test('通用 subagent 行：必须 deny Capital 数据/出图管线、十三个�
     'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile',
     'request_data', 'list_capabilities', 'describe_capability', 'dc_status',
     ...NETWORK_TOOLS,
+    // `ocr` 不在 NETWORK_TOOLS 里（主 Agent 刻意保留它的本地形态，见 root-tool-policy.ts），
+    // 但通用 child 连本地形态都不该有：它不是任何角色的正当能力，多一个名字就多一个出网口子。
+    'ocr',
     'subagent_data_collector', 'subagent_data_junior', 'subagent_visualization_specialist', 'subagent_web_retriever',
   ]) {
     assert.ok(deny.includes(name), `通用 subagent 的 child 不得拿到 ${name}`)
@@ -552,9 +566,9 @@ test('通用 subagent 行：必须 deny Capital 数据/出图管线、十三个�
     [...deny].sort(),
     [SHELL_SLOT, 'render_chart', 'prepare_chart_source', 'describe_dataset', 'inspect_dataset', 'profile_dataset',
       'query_dataset', 'write_profile', 'request_data', 'list_capabilities', 'describe_capability', 'dc_status',
-      ...NETWORK_TOOLS, 'subagent_data_collector', 'subagent_data_junior', 'subagent_visualization_specialist',
+      ...NETWORK_TOOLS, 'ocr', 'subagent_data_collector', 'subagent_data_junior', 'subagent_visualization_specialist',
       'subagent_web_retriever'].sort(),
-    '通用 subagent 的 deny 必须恰好是「数据/出图管线 + 十三个联网工具 + 专用角色创建工具 + shell」',
+    '通用 subagent 的 deny 必须恰好是「数据/出图管线 + 十四个联网工具 + 专用角色创建工具 + shell」',
   )
 })
 
