@@ -132,10 +132,6 @@ web_retriever 有三个工作面，共 **14 个工具**：
   `doc_id` + `pages` \| `query`（本地读已落盘正文，零出网）。作业**整篇一次算完、按整篇计费**，
   `pages` 只影响读；产物落 `capital-data/ocr/<doc_id>/`，同一份文档重复调用命中缓存直接回读。
 
-| 本地研报 PDF 交给 `ocr` 解析（用户 `@` 推文件 → 主 Agent 直接出正文与页索引） |
-| :---: |
-| [<img src="assets/ocr.png" width="360" alt="用户把研报 PDF @ 给主 Agent，ocr 工具解析出 4 页 9147 字符正文，回答含来源标注、核心内容表格与局限说明">](assets/ocr.png) |
-
 来源边界（深沪不可互换、北交所两边都没有）、翻页纪律（该翻页就翻到没有、空结果是真事实）
 与回传格式见 [capital-web-protocol](preset/capital-generation/skills/capital-web-protocol/SKILL.md)。
 
