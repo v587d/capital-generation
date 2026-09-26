@@ -2,6 +2,15 @@ import { Context } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
 /** Internal plugin name used by the Capital mode preset. */
 export declare const name = "capital-generation";
+/**
+ * 取数配置所在的 **profile 条目 id**（随包的 `capital-config` 行）。0.1.7 的 settings 面
+ * 以条目 id 为命名空间，本插件经 `settings.describe()` 按它读回用户配的引用名与开关。
+ *
+ * 这个字符串有三处必须一致：`cordis.patch.yml` 的行 id、`capital-config/index.js` 的
+ * `SETTINGS_ENTRY_ID`、以及浏览器半边 `client.src.cjs` 的 `ENTRY_ID`；由
+ * `test/capital-config.test.mjs` 逐一对齐（漂移的表现为卡片静默消失）。
+ */
+export declare const CAPITAL_CONFIG_ENTRY_ID = "capital-config";
 /** Wind 文档检索配置：JSON-RPC 端点与凭据名（线格式为 MCP 线协议，零依赖适配）。 */
 export interface WindDocsConfig {
     endpoint?: string;
@@ -78,167 +87,167 @@ export interface Config {
     retriever?: RetrieverConfig;
 }
 /** DSH 0.1.2-rc.1 configuration schema. */
-export declare const Config: z<Schemastery.ObjectS<{
-    customPersona: z<string, string>;
-    fuyaoCredentialRef: z<string, string>;
-    retriever: z<Schemastery.ObjectS<{
-        baseURL: z<string, string>;
-        credentialRef: z<string, string>;
-        windDocs: z<Schemastery.ObjectS<{
-            endpoint: z<string, string>;
-            credentialRef: z<string, string>;
-            timeoutMs: z<number, number>;
-        }>, Schemastery.ObjectT<{
-            endpoint: z<string, string>;
-            credentialRef: z<string, string>;
-            timeoutMs: z<number, number>;
-        }>>;
-        localFetch: z<Schemastery.ObjectS<{
-            enabled: z<boolean, boolean>;
-            timeoutMs: z<number, number>;
-            maxBytes: z<number, number>;
-            maxContentChars: z<number, number>;
-            maxRedirects: z<number, number>;
-            userAgent: z<string, string>;
-        }>, Schemastery.ObjectT<{
-            enabled: z<boolean, boolean>;
-            timeoutMs: z<number, number>;
-            maxBytes: z<number, number>;
-            maxContentChars: z<number, number>;
-            maxRedirects: z<number, number>;
-            userAgent: z<string, string>;
-        }>>;
-        paddleOcr: z<Schemastery.ObjectS<{
-            endpoint: z<string, string>;
-            credentialRef: z<string, string>;
-            model: z<string, string>;
-            pollBudgetMs: z<number, number>;
-        }>, Schemastery.ObjectT<{
-            endpoint: z<string, string>;
-            credentialRef: z<string, string>;
-            model: z<string, string>;
-            pollBudgetMs: z<number, number>;
-        }>>;
-    }>, Schemastery.ObjectT<{
-        baseURL: z<string, string>;
-        credentialRef: z<string, string>;
-        windDocs: z<Schemastery.ObjectS<{
-            endpoint: z<string, string>;
-            credentialRef: z<string, string>;
-            timeoutMs: z<number, number>;
-        }>, Schemastery.ObjectT<{
-            endpoint: z<string, string>;
-            credentialRef: z<string, string>;
-            timeoutMs: z<number, number>;
-        }>>;
-        localFetch: z<Schemastery.ObjectS<{
-            enabled: z<boolean, boolean>;
-            timeoutMs: z<number, number>;
-            maxBytes: z<number, number>;
-            maxContentChars: z<number, number>;
-            maxRedirects: z<number, number>;
-            userAgent: z<string, string>;
-        }>, Schemastery.ObjectT<{
-            enabled: z<boolean, boolean>;
-            timeoutMs: z<number, number>;
-            maxBytes: z<number, number>;
-            maxContentChars: z<number, number>;
-            maxRedirects: z<number, number>;
-            userAgent: z<string, string>;
-        }>>;
-        paddleOcr: z<Schemastery.ObjectS<{
-            endpoint: z<string, string>;
-            credentialRef: z<string, string>;
-            model: z<string, string>;
-            pollBudgetMs: z<number, number>;
-        }>, Schemastery.ObjectT<{
-            endpoint: z<string, string>;
-            credentialRef: z<string, string>;
-            model: z<string, string>;
-            pollBudgetMs: z<number, number>;
-        }>>;
-    }>>;
-}>, Schemastery.ObjectT<{
-    customPersona: z<string, string>;
-    fuyaoCredentialRef: z<string, string>;
-    retriever: z<Schemastery.ObjectS<{
-        baseURL: z<string, string>;
-        credentialRef: z<string, string>;
-        windDocs: z<Schemastery.ObjectS<{
-            endpoint: z<string, string>;
-            credentialRef: z<string, string>;
-            timeoutMs: z<number, number>;
-        }>, Schemastery.ObjectT<{
-            endpoint: z<string, string>;
-            credentialRef: z<string, string>;
-            timeoutMs: z<number, number>;
-        }>>;
-        localFetch: z<Schemastery.ObjectS<{
-            enabled: z<boolean, boolean>;
-            timeoutMs: z<number, number>;
-            maxBytes: z<number, number>;
-            maxContentChars: z<number, number>;
-            maxRedirects: z<number, number>;
-            userAgent: z<string, string>;
-        }>, Schemastery.ObjectT<{
-            enabled: z<boolean, boolean>;
-            timeoutMs: z<number, number>;
-            maxBytes: z<number, number>;
-            maxContentChars: z<number, number>;
-            maxRedirects: z<number, number>;
-            userAgent: z<string, string>;
-        }>>;
-        paddleOcr: z<Schemastery.ObjectS<{
-            endpoint: z<string, string>;
-            credentialRef: z<string, string>;
-            model: z<string, string>;
-            pollBudgetMs: z<number, number>;
-        }>, Schemastery.ObjectT<{
-            endpoint: z<string, string>;
-            credentialRef: z<string, string>;
-            model: z<string, string>;
-            pollBudgetMs: z<number, number>;
-        }>>;
-    }>, Schemastery.ObjectT<{
-        baseURL: z<string, string>;
-        credentialRef: z<string, string>;
-        windDocs: z<Schemastery.ObjectS<{
-            endpoint: z<string, string>;
-            credentialRef: z<string, string>;
-            timeoutMs: z<number, number>;
-        }>, Schemastery.ObjectT<{
-            endpoint: z<string, string>;
-            credentialRef: z<string, string>;
-            timeoutMs: z<number, number>;
-        }>>;
-        localFetch: z<Schemastery.ObjectS<{
-            enabled: z<boolean, boolean>;
-            timeoutMs: z<number, number>;
-            maxBytes: z<number, number>;
-            maxContentChars: z<number, number>;
-            maxRedirects: z<number, number>;
-            userAgent: z<string, string>;
-        }>, Schemastery.ObjectT<{
-            enabled: z<boolean, boolean>;
-            timeoutMs: z<number, number>;
-            maxBytes: z<number, number>;
-            maxContentChars: z<number, number>;
-            maxRedirects: z<number, number>;
-            userAgent: z<string, string>;
-        }>>;
-        paddleOcr: z<Schemastery.ObjectS<{
-            endpoint: z<string, string>;
-            credentialRef: z<string, string>;
-            model: z<string, string>;
-            pollBudgetMs: z<number, number>;
-        }>, Schemastery.ObjectT<{
-            endpoint: z<string, string>;
-            credentialRef: z<string, string>;
-            model: z<string, string>;
-            pollBudgetMs: z<number, number>;
-        }>>;
-    }>>;
-}>>;
+export declare const Config: z<Schemastery.ObjectS<NoInfer<{
+    customPersona: z<string, string, "defined">;
+    fuyaoCredentialRef: z<string, string, "defined">;
+    retriever: z<Schemastery.ObjectS<NoInfer<{
+        baseURL: z<string, string, "defined">;
+        credentialRef: z<string, string, "defined">;
+        windDocs: z<Schemastery.ObjectS<NoInfer<{
+            endpoint: z<string, string, "defined">;
+            credentialRef: z<string, string, "defined">;
+            timeoutMs: z<number, number, "defined">;
+        }>>, Schemastery.ObjectT<NoInfer<{
+            endpoint: z<string, string, "defined">;
+            credentialRef: z<string, string, "defined">;
+            timeoutMs: z<number, number, "defined">;
+        }>>, "defined">;
+        localFetch: z<Schemastery.ObjectS<NoInfer<{
+            enabled: z<boolean, boolean, "defined">;
+            timeoutMs: z<number, number, "defined">;
+            maxBytes: z<number, number, "defined">;
+            maxContentChars: z<number, number, "defined">;
+            maxRedirects: z<number, number, "defined">;
+            userAgent: z<string, string, "defined">;
+        }>>, Schemastery.ObjectT<NoInfer<{
+            enabled: z<boolean, boolean, "defined">;
+            timeoutMs: z<number, number, "defined">;
+            maxBytes: z<number, number, "defined">;
+            maxContentChars: z<number, number, "defined">;
+            maxRedirects: z<number, number, "defined">;
+            userAgent: z<string, string, "defined">;
+        }>>, "defined">;
+        paddleOcr: z<Schemastery.ObjectS<NoInfer<{
+            endpoint: z<string, string, "defined">;
+            credentialRef: z<string, string, "defined">;
+            model: z<string, string, "defined">;
+            pollBudgetMs: z<number, number, "defined">;
+        }>>, Schemastery.ObjectT<NoInfer<{
+            endpoint: z<string, string, "defined">;
+            credentialRef: z<string, string, "defined">;
+            model: z<string, string, "defined">;
+            pollBudgetMs: z<number, number, "defined">;
+        }>>, "defined">;
+    }>>, Schemastery.ObjectT<NoInfer<{
+        baseURL: z<string, string, "defined">;
+        credentialRef: z<string, string, "defined">;
+        windDocs: z<Schemastery.ObjectS<NoInfer<{
+            endpoint: z<string, string, "defined">;
+            credentialRef: z<string, string, "defined">;
+            timeoutMs: z<number, number, "defined">;
+        }>>, Schemastery.ObjectT<NoInfer<{
+            endpoint: z<string, string, "defined">;
+            credentialRef: z<string, string, "defined">;
+            timeoutMs: z<number, number, "defined">;
+        }>>, "defined">;
+        localFetch: z<Schemastery.ObjectS<NoInfer<{
+            enabled: z<boolean, boolean, "defined">;
+            timeoutMs: z<number, number, "defined">;
+            maxBytes: z<number, number, "defined">;
+            maxContentChars: z<number, number, "defined">;
+            maxRedirects: z<number, number, "defined">;
+            userAgent: z<string, string, "defined">;
+        }>>, Schemastery.ObjectT<NoInfer<{
+            enabled: z<boolean, boolean, "defined">;
+            timeoutMs: z<number, number, "defined">;
+            maxBytes: z<number, number, "defined">;
+            maxContentChars: z<number, number, "defined">;
+            maxRedirects: z<number, number, "defined">;
+            userAgent: z<string, string, "defined">;
+        }>>, "defined">;
+        paddleOcr: z<Schemastery.ObjectS<NoInfer<{
+            endpoint: z<string, string, "defined">;
+            credentialRef: z<string, string, "defined">;
+            model: z<string, string, "defined">;
+            pollBudgetMs: z<number, number, "defined">;
+        }>>, Schemastery.ObjectT<NoInfer<{
+            endpoint: z<string, string, "defined">;
+            credentialRef: z<string, string, "defined">;
+            model: z<string, string, "defined">;
+            pollBudgetMs: z<number, number, "defined">;
+        }>>, "defined">;
+    }>>, "defined">;
+}>>, Schemastery.ObjectT<NoInfer<{
+    customPersona: z<string, string, "defined">;
+    fuyaoCredentialRef: z<string, string, "defined">;
+    retriever: z<Schemastery.ObjectS<NoInfer<{
+        baseURL: z<string, string, "defined">;
+        credentialRef: z<string, string, "defined">;
+        windDocs: z<Schemastery.ObjectS<NoInfer<{
+            endpoint: z<string, string, "defined">;
+            credentialRef: z<string, string, "defined">;
+            timeoutMs: z<number, number, "defined">;
+        }>>, Schemastery.ObjectT<NoInfer<{
+            endpoint: z<string, string, "defined">;
+            credentialRef: z<string, string, "defined">;
+            timeoutMs: z<number, number, "defined">;
+        }>>, "defined">;
+        localFetch: z<Schemastery.ObjectS<NoInfer<{
+            enabled: z<boolean, boolean, "defined">;
+            timeoutMs: z<number, number, "defined">;
+            maxBytes: z<number, number, "defined">;
+            maxContentChars: z<number, number, "defined">;
+            maxRedirects: z<number, number, "defined">;
+            userAgent: z<string, string, "defined">;
+        }>>, Schemastery.ObjectT<NoInfer<{
+            enabled: z<boolean, boolean, "defined">;
+            timeoutMs: z<number, number, "defined">;
+            maxBytes: z<number, number, "defined">;
+            maxContentChars: z<number, number, "defined">;
+            maxRedirects: z<number, number, "defined">;
+            userAgent: z<string, string, "defined">;
+        }>>, "defined">;
+        paddleOcr: z<Schemastery.ObjectS<NoInfer<{
+            endpoint: z<string, string, "defined">;
+            credentialRef: z<string, string, "defined">;
+            model: z<string, string, "defined">;
+            pollBudgetMs: z<number, number, "defined">;
+        }>>, Schemastery.ObjectT<NoInfer<{
+            endpoint: z<string, string, "defined">;
+            credentialRef: z<string, string, "defined">;
+            model: z<string, string, "defined">;
+            pollBudgetMs: z<number, number, "defined">;
+        }>>, "defined">;
+    }>>, Schemastery.ObjectT<NoInfer<{
+        baseURL: z<string, string, "defined">;
+        credentialRef: z<string, string, "defined">;
+        windDocs: z<Schemastery.ObjectS<NoInfer<{
+            endpoint: z<string, string, "defined">;
+            credentialRef: z<string, string, "defined">;
+            timeoutMs: z<number, number, "defined">;
+        }>>, Schemastery.ObjectT<NoInfer<{
+            endpoint: z<string, string, "defined">;
+            credentialRef: z<string, string, "defined">;
+            timeoutMs: z<number, number, "defined">;
+        }>>, "defined">;
+        localFetch: z<Schemastery.ObjectS<NoInfer<{
+            enabled: z<boolean, boolean, "defined">;
+            timeoutMs: z<number, number, "defined">;
+            maxBytes: z<number, number, "defined">;
+            maxContentChars: z<number, number, "defined">;
+            maxRedirects: z<number, number, "defined">;
+            userAgent: z<string, string, "defined">;
+        }>>, Schemastery.ObjectT<NoInfer<{
+            enabled: z<boolean, boolean, "defined">;
+            timeoutMs: z<number, number, "defined">;
+            maxBytes: z<number, number, "defined">;
+            maxContentChars: z<number, number, "defined">;
+            maxRedirects: z<number, number, "defined">;
+            userAgent: z<string, string, "defined">;
+        }>>, "defined">;
+        paddleOcr: z<Schemastery.ObjectS<NoInfer<{
+            endpoint: z<string, string, "defined">;
+            credentialRef: z<string, string, "defined">;
+            model: z<string, string, "defined">;
+            pollBudgetMs: z<number, number, "defined">;
+        }>>, Schemastery.ObjectT<NoInfer<{
+            endpoint: z<string, string, "defined">;
+            credentialRef: z<string, string, "defined">;
+            model: z<string, string, "defined">;
+            pollBudgetMs: z<number, number, "defined">;
+        }>>, "defined">;
+    }>>, "defined">;
+}>>, "plain">;
 /**
  * 把可选的用户人设文本转成独立 system-prompt section（官方 systemPrompt
  * registry 的注册对象）。空白输入返回 undefined（不注册）；超长抛错；

@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { load as yamlLoad } from 'js-yaml'
+import { presetRows } from './preset-rows.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const read = (rel) => readFileSync(join(ROOT, rel), 'utf8')
@@ -84,7 +84,7 @@ test('AGENTS.md 与 docs/dev/*.md 守住体积闸门', () => {
 })
 
 test('agent-instructions 的 maxBytes 与本文体积匹配，且不被擅自放大', () => {
-  const rows = yamlLoad(read('preset/capital-generation/agent.cordis.yml').replace(/!!js\s+/g, ''))
+  const rows = presetRows()
   const instructions = rows.find((row) => row?.id === 'agent-instructions')
   assert.ok(instructions, 'preset 必须有 agent-instructions 行')
   const maxBytes = instructions.config?.maxBytes
@@ -205,7 +205,7 @@ test('研发文档不外泄进使用者 Agent 的运行时文本', () => {
     assertNotDevRef(read(rel), rel)
   }
   assert.ok(skillFiles.length >= 5, `skills/ 下应有五个长协议 SKILL.md，实际：${skillFiles.join(', ')}`)
-  const rows = yamlLoad(read('preset/capital-generation/agent.cordis.yml').replace(/!!js\s+/g, ''))
+  const rows = presetRows()
   const texts = []
   for (const row of rows) {
     const config = row?.config
@@ -221,7 +221,7 @@ test('研发文档不外泄进使用者 Agent 的运行时文本', () => {
     }
   }
   assert.ok(texts.length >= 4, `应至少抓到主 persona 与三个子 persona，实际 ${texts.length} 段`)
-  for (const text of texts) assertNotDevRef(text, 'agent.cordis.yml persona')
+  for (const text of texts) assertNotDevRef(text, 'agent.patch.yml persona')
 })
 
 function assertNotDevRef(text, label) {

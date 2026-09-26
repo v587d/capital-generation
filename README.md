@@ -9,12 +9,12 @@
 <p align="center">
   <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DeepSeek_Harness-plugin-blue" alt="DSH Plugin"></a>
   <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DeepSeek_Harness-web-orange" alt="DSH Web"></a>
-  <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DSH%20Baseline-0.1.5--rc.2-blue" alt="DSH@0.1.5-rc.2"></a>
+  <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DSH%20Baseline-0.1.7--rc.2-blue" alt="DSH@0.1.7-rc.2"></a>
 </p>
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.3.0-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.4.0-9cf" alt="Version"></a>
 </p>
 
 > [!IMPORTANT]
@@ -23,7 +23,8 @@
 > 愿大家的财富数字就像"text generation"一样，不断增长，永不停止。
 
 > [!NOTE]
-> 先安装 [Deepseek Harness(DSH)](https://github.com/deepseek-ai/deepseek-harness) ，目前已适配 DSH`@0.1.5-rc.2` 。
+> 先安装 [Deepseek Harness(DSH)](https://github.com/deepseek-ai/deepseek-harness) ，本项目自 2.4.0 起适配 DSH`@0.1.7-rc.2`
+> （**需要 DSH ≥ 0.1.7**：0.1.5 的 settings 与 preset 挂载面已被上游删除，装在旧版上会起不来）。
 > 建议使用 **Deepseek/deepseek-flash**(High thinking) 搭配本项目， GPT / Claude 尚未充分测试，理论亦可。
 
 # Slogan
@@ -39,11 +40,12 @@ Next-Gen AI-Driven Capital Generation.
 dsh plugin --profile web add github:v587d/capital-generation
 ```
 安装后，重启 Web profile 使装配生效。
-然后在 设置 → 插件 → 插件配置 → Capital 模式 里填入 API Key：
+密钥填在 **「插件」页**（0.1.7 起第三方插件的可编辑面就在这里，不在「设置」页）：
+已安装列表点开 `@v587d/capital-generation` → 「包含的组件」里的 `capital-config` 那一行 → 行详情页的配置段：
 
-| 配置 API Key |
-| :---: |
-| [<img src="assets/settings-plugins_2.png" width="600" alt="设置 → 插件 → 插件配置 → Capital 模式：填入 Fuyao / AnySearch / Wind / PaddleOCR 密钥，以及允许启动本地提取网页内容开关">](assets/settings-plugins_2.png) |
+| ① 「插件」页 → 已安装 | ② 该 bundle 的 `capital-config` 行 | ③ 卡片：四个密钥 + 本地回退开关 |
+| :---: | :---: | :---: |
+| [<img src="assets/DSH@0.1.7rc2插件设置_1.png" width="300" alt="DSH 0.1.7-rc.2「插件」页：官方分组之下是已安装的 @v587d/capital-generation">](assets/DSH@0.1.7rc2插件设置_1.png) | [<img src="assets/DSH@0.1.7rc2插件设置_2.png" width="300" alt="bundle 详情页「包含的组件」三行：capital-config、capital-charts、preset-capital-generation，点 capital-config 行">](assets/DSH@0.1.7rc2插件设置_2.png) | [<img src="assets/DSH@0.1.7rc2插件设置_3.png" width="300" alt="capital-config 卡片：Fuyao / AnySearch / Wind Alice / PaddleOCR 四个密钥字段（各标已配置密钥）与「允许启动本地提取网页内容」开关">](assets/DSH@0.1.7rc2插件设置_3.png) |
 
 > [!NOTE]
 > 密钥都是免费申请的：必填 [同花顺（fuyao）](https://fuyao.aicubes.cn/docs/)（行情、财务等结构化数据）；
@@ -51,8 +53,9 @@ dsh plugin --profile web add github:v587d/capital-generation
 > 推荐 [Wind Alice](https://market.windalice.com/#/home)（公告与信披文档，每天送 300 积分，日常够用）；
 > 推荐 [PaddleOCR AIStudio](https://aistudio.baidu.com/paddleocr)（每天2万页 OCR 免费额度）。
 >
-> 在设置里粘贴保存即可，重启后新开的 Capital 会话就能用。
-> 同一卡片下方的 **「允许启动本地提取网页内容」** 开关（默认开启）控制抓取回退：
+> 在卡片里粘贴保存即可，**无需重启**——新开的 Capital 会话就生效。密钥值只写进 DSH 的 credentials 域
+> （配置里只存引用名，值从不随响应出网），字段旁只会显示「已配置密钥 / 未配置」。
+> 卡片中间的 **「允许启动本地提取网页内容」** 开关（默认开启）控制抓取回退：
 > 开启时 AnySearch 抓取失败会自动改由本机直连抓取该页面（回执 `via` 标注 `local-http`），
 > 关闭则失败原样回传；改动即时保存，新 Capital 会话生效。
 >
@@ -60,15 +63,15 @@ dsh plugin --profile web add github:v587d/capital-generation
 > 的九个具名来源查询工具（财联社、华尔街见闻、巨潮、上证e互动、东财、新浪、同花顺）都走公开端点，
 > 装好即可用。
 >
-> 不想用设置界面的话，也可以直接把密钥写进 `~/.dsh/.credentials.yaml`，名字用
+> 不想用卡片界面的话，也可以直接把密钥写进 `~/.dsh/.credentials.yaml`，名字用
 > `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`、`PADDLE_OCR_TOKEN`，插件会自动读取。
 
 ### 简单用法
 
 | 选择 Capital 模式 | 设为默认模式 |
 | :---: | :---: |
-| [<img src="assets/mode_selector.png" width="400" alt="新会话在 Agent Preset 选择器中选择 Capital 模式">](assets/mode_selector.png) | [<img src="assets/set_default.png" width="400" alt="在 Settings 中把 Capital 模式设为默认">](assets/set_default.png) |
-| 新会话在 Agent Preset 选择器中选择 Capital 模式 | 也可以在 Settings 中设为默认模式 |
+| [<img src="assets/mode_selector.png" width="400" alt="新会话在 Agent Preset 选择器中选择 Capital 模式">](assets/mode_selector.png) | [<img src="assets/DSH@_0.1.7rc2设置默认模式.png" width="400" alt="DSH 0.1.7-rc.2 设置 → Agent 预设：自定义分组里的 Capital 模式与四个内置模式并列">](assets/DSH@_0.1.7rc2设置默认模式.png) |
+| 新会话在 Agent Preset 选择器中选择 Capital 模式 | 也可以在 设置 → Agent 预设 里把 Capital 模式设为默认 |
 
 # What
 Capital Generation 是面向中国散户，适用于日常证券研究的 DSH 插件，简单地说：
@@ -84,13 +87,14 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
   - 未来更多，欢迎 PR 
 
 3. 沿用 DSH 官方基础设施，不自行实现底层机制：
+  - **预设挂载**：整份装配由一颗官方 `@deepseek-ai/dsh-agent-preset` **声明行**声明（`config = { id, plugins }`），组合与 `agentPresets` 服务归宿主；插件不扫目录、不自建 registry。`config.id` 是写进会话日志的身份，历史会话靠它恢复。
   - **Subagent 编排**：通过官方 `dsh-subagent` 行注册委派工具，子 Agent 的创建、消息收发与生命周期管理完全交给宿主；本插件只定义每个角色的 persona 与 toolFilter。
   - **人设注入**：通过官方 `dsh-persona` 行声明主 Agent 人设，不占用 `deployment:persona` 节；子 Agent 人设由委派行 `config.persona` 承载，由宿主自动注入子 Agent 作用域。
   - **技能注入**：主 persona 只保留每轮都要生效的硬规则（预检、复用、路由、合规），长协议与载荷示例放在 preset 自带的 `skills/` 目录，由 `dsh-skill-filesystem` + `dsh-tool-skill` 两行按需加载；插件代码不注册 skill provider。
   - **工作区约定**：通过官方 `dsh-agent-instructions` 行加载工作区 `AGENTS.md` / `CLAUDE.md`。
   - **上下文压缩**：通过官方 `dsh-compaction-basic` / `dsh-compaction-tool-result-pruner` 行提供长会话压缩与大结果剪枝。
   - **数据持久化**：通过宿主侧 `fs` / `sandboxPolicy` 服务完成 Dataset 落盘与权限校验，不直接操作文件系统；所有数据落在用户 workspace，服从当前 session 的沙箱策略。
-  - **凭据管理**：通过宿主侧 `credentials` 服务解析 API Key 引用，不硬编码、不缓存、不自行存储密钥。
+  - **配置与凭据**：可编辑项就是插件条目 Config 里标了 `.volatile()` 的字段，DSH 自动把它投影成「插件」页上的表单（命名空间恒等于条目 id），插件不自建设置界面；API Key 经宿主 `credentials` 服务解析引用，不硬编码、不缓存、不写进配置文档、不随响应出网。
   - **工具注册**：通过官方 `tools` 服务向会话注册模型工具，由宿主统一管理工具的生命周期与权限控制。
   - **用户交互**：复用官方 `ask_user_question`、`todo_write`、`send_message`、`list_agents` 等工具，不重复造轮子。
  
@@ -160,13 +164,31 @@ npm install
 npm run build        # 生成 lib/ 与两个浏览器端产物（chart-ui、capital-config）
 npm test             # 构建后运行全部测试
 npm run check:dsh    # 检查上游 DSH 扩展面兼容性，升级/发布前建议跑
-npm run smoke:boot   # 冒烟验证装配可正常 boot
+npm run smoke:boot   # 真实 boot graph 冒烟：装配能起、预设能解析、卡片有座位
+npm run verify:sessions  # 发布前复核真实会话日志可被冷加载（需本机已装 dsh）
 ```
 
 构建产物 `lib/` 已随仓库提交，普通用户从 GitHub 安装时**无需**本地构建；只有需要改插件源码或
 维护子包时才需要执行以上命令。
 
 ## Changelog
+
+### 2.4.0 — 2026-09-26
+
+- **适配 DSH `@0.1.7-rc.2`（破坏性：需要 DSH ≥ 0.1.7）**：0.1.7 删掉了第三方插件依赖的两条旧通道，
+  本版本按新契约重做（issue #3 就是这个适配）。
+- **设置卡片搬到「插件」页**：可编辑面现在是插件条目 Config 里标了 `.volatile()` 的字段，由 DSH
+  自动投影成表单（见上方三步截图）。四个密钥字段与「允许启动本地提取网页内容」开关**内容不变**。
+- **保存后不必再重启**：改动在新开的 Capital 会话即生效（旧版要重启 profile）。
+- **历史 Capital 会话恢复修复**：预设改由官方 `@deepseek-ai/dsh-agent-preset` 声明行注册，
+  不再出现 `RemoteError: Unknown agent preset: capital-generation`。
+- **可视化 gate 认「委派收窄」**：主 Agent 在委派 prompt 里写明「只到 profile」时，`data_junior`
+  照给 `recommended` 结论但**不出图**，并标注未出图是收窄而非数据不支持；想要图就别写这句。
+- **装配自检扩成两条腿**：`npm run smoke:boot` 现在在真实 boot graph 里读运行期的预设解析结果、
+  配置镜像与卡片座位，并用"重复声明同一预设"的反向对照证明这道闸门真的会失败。
+
+从 2.3.0 升级**必须先升级 DSH 到 0.1.7**（留在 0.1.5 就继续用 2.3.0，二者不兼容）。工具入参、
+数据能力与会话日志格式均无变化。完整变更历史见 [CHANGELOG.md](CHANGELOG.md)。
 
 ### 2.3.0 — 2026-09-26
 

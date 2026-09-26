@@ -13,24 +13,26 @@ import { collectUndeclaredRequired } from './output-contract.mjs'
  */
 
 /** 最小 ctx：只实现 apply() 真正触达的服务与生命周期方法。 */
-function fakeCtx({ credentials } = {}) {
+function fakeCtx({ credentials, settings } = {}) {
   const tools = []
   const services = new Map()
   const effectResults = []
   const listeners = []
+  const sections = []
   const ctx = {
     get: (name) => {
       if (name === 'tools') return { register: (definition) => { tools.push(definition); return () => {} } }
       if (name === 'credentials') return credentials
+      if (name === 'settings') return settings
       return services.get(name)
     },
     provide: (name, value) => { services.set(name, value) },
     effect: (callback) => { effectResults.push(callback()); return () => {} },
     on: (event, listener) => { listeners.push({ event, listener }); return () => {} },
     logger: { info() {}, warn() {}, error() {}, debug() {} },
-    systemPrompt: { section: () => () => {} },
+    systemPrompt: { section: (section) => { sections.push(section); return () => {} } },
   }
-  return { ctx, tools, services, effectResults, listeners }
+  return { ctx, tools, services, effectResults, listeners, sections }
 }
 
 const toolNamed = (tools, name) => tools.find((definition) => definition.name === name)
@@ -150,6 +152,59 @@ test('apply()：credentials 优先于环境变量', async () => {
     const status = await toolNamed(tools, 'dc_status').execute({}, exec(delegated))
     assert.equal(status.api_key.present, true)
     assert.equal(status.api_key.source, 'file', 'credentials 解析成功时应报告其 source')
+  } finally {
+    if (SAVED_KEY === undefined) delete process.env.FUYAO_API_KEY
+    else process.env.FUYAO_API_KEY = SAVED_KEY
+  }
+})
+
+/**
+ * 事故族回归（issue #3 / 2026-09-26 迁 0.1.7）：卡片的可编辑面是 `capital-config` **条目**
+ * Config 的 `.volatile()` 投影，主插件经 `settings.describe()` 按条目 id 读回解析值。
+ * 这条用例钉的是"读回"这一步：条目里改了引用名与人设，装配必须跟着变；不接这一步的表现
+ * 是用户在设置页保存了却毫无效果（零报错）。同时钉住"条目缺席 / describe 抛错"时沿用
+ * preset 配置，不把整个插件装配掀掉。
+ */
+test('apply()：配置读自 capital-config 条目，条目缺席或报错时回落 preset 配置', async () => {
+  process.env.FUYAO_API_KEY = 'env-key-should-lose'
+  try {
+    const asked = []
+    const { ctx, tools, sections, effectResults } = fakeCtx({
+      credentials: {
+        resolve: async (ref) => {
+          asked.push(ref)
+          return ref === 'CUSTOM_FUYAO' ? { value: 'entry-key', source: 'credentials(CUSTOM_FUYAO)' } : undefined
+        },
+      },
+      // Host 的 describe() 把所有活动条目都列出来：值已按条目 Config 摊平解析（无取值单元）。
+      settings: {
+        describe: () => [
+          { ns: 'dsh-brand', value: {} },
+          { ns: 'capital-config', value: { customPersona: '  从卡片保存的人设  ', fuyaoCredentialRef: 'CUSTOM_FUYAO' } },
+        ],
+      },
+    })
+    apply(ctx, { customPersona: '', fuyaoCredentialRef: 'FUYAO_API_KEY', retriever: { baseURL: '', credentialRef: '', windDocs: { endpoint: '', credentialRef: '', timeoutMs: 0 } } })
+    await Promise.all(effectResults)
+
+    const status = await toolNamed(tools, 'dc_status').execute({}, exec(delegated))
+    assert.equal(status.api_key.present, true, '条目里的引用名必须被用上（否则卡片改了名却仍找默认名）')
+    assert.equal(status.api_key.source, 'credentials(CUSTOM_FUYAO)')
+    assert.ok(asked.includes('CUSTOM_FUYAO') && !asked.includes('FUYAO_API_KEY'),
+      `解析凭证只能问条目给出的引用名，实际问过：${asked.join(', ')}`)
+    assert.equal(sections.length, 1, '条目里的 customPersona 必须注册成人设节')
+    assert.match(sections[0].text, /从卡片保存的人设/, '人设正文来自条目配置（首尾空白按实现 trim）')
+
+    // describe 抛错（条目未装配 / schema 漂移）：回落 preset 配置，装配照常完成。
+    const falling = fakeCtx({
+      credentials: { resolve: async () => undefined },
+      settings: { describe: () => { throw new Error('entry not mounted') } },
+    })
+    apply(falling.ctx, { customPersona: 'preset 人设', fuyaoCredentialRef: 'FUYAO_API_KEY', retriever: {} })
+    await Promise.all(falling.effectResults)
+    assert.equal(falling.sections[0].text.includes('preset 人设'), true, 'describe 抛错时不得丢掉 preset 配置')
+    const fallbackStatus = await toolNamed(falling.tools, 'dc_status').execute({}, exec(delegated))
+    assert.equal(fallbackStatus.api_key.present, true, '回落路径仍按 FUYAO_API_KEY 找得到环境变量里的密钥')
   } finally {
     if (SAVED_KEY === undefined) delete process.env.FUYAO_API_KEY
     else process.env.FUYAO_API_KEY = SAVED_KEY

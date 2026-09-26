@@ -19,7 +19,7 @@
 | 时间轴、日期归一、session 读取 | `docs/dev/time-axis.md`（§1.3）|
 | data_junior 的 bash 闸门与 shell 挂载 | `docs/dev/bash-gate.md`（§1.6）|
 | web_retriever、本地回退、九个具名来源、文档解析 `ocr` | `docs/dev/web-retriever.md`（§4.1 §4.2 §4.3）|
-| settings 卡片（host 平面嵌套包） | `docs/dev/settings-config.md`（§5.1–§5.3）|
+| settings 卡片（host 平面嵌套包，座位在「插件」页） | `docs/dev/settings-config.md`（§5.1–§5.4）|
 | `render_chart` 准入与呈现 | `docs/dev/chart-presentation.md`（§6.1 §6.2）|
 | 交付登记与会话事件类型 | `docs/dev/chart-delivery-events.md`（§6.3）|
 | preset 现状、人设落点、「不许改」全表、新增角色六处齐改 | `docs/dev/preset-persona.md`（§8.1 §8.2 §8.4 §8.5）|
@@ -59,8 +59,8 @@ main Agent
 
 ```text
 capital-generation/
-├── preset/capital-generation/    # 装配（preset.yml + agent.cordis.yml + README.md 设计理由，
-│   └── skills/                   #   不注入模型）+ 五个长协议 skill，主 / 子 Agent 按需加载
+├── preset/capital-generation/    # 装配（agent.patch.yml = 一颗 @deepseek-ai/dsh-agent-preset
+│   └── skills/                   #   声明行 + README.md 设计理由，不注入模型）+ 五个长协议 skill
 ├── src/
 │   ├── index.ts                  # 装配入口
 │   ├── tool-exec.ts              # callerSession / delegatedSession 唯一实现
@@ -97,8 +97,8 @@ capital-analysis/runs/<analysis_id>/          # 预留（data_analyst）
 
 ## 5. settings 配置纪律（`capital-config`，host 平面）
 
-卡片是 host 平面独立嵌套包，由 `cordis.patch.yml` insert 行挂载；命名空间两处同改、密钥进
-credentials 域、回退开关即时写与两处 schema 默认值逐字一致——全在 `docs/dev/settings-config.md`。
+卡片是 host 平面独立嵌套包（`cordis.patch.yml` insert 行）；0.1.7 起可编辑面就是条目 Config 的 `.volatile()` 字段（命名空间 ≡ 条目 id，**四处同字**），密钥只进 credentials 域。
+**卡片座位在「插件」页该 bundle 的 `capital-config` 行详情里，不在「设置」页**（§5.4）——全在 `docs/dev/settings-config.md`。
 
 ## 6. 图表呈现纪律（`render_chart`，只有 visualization_specialist 持有）
 
@@ -120,11 +120,11 @@ credentials 域、回退开关即时写与两处 schema 默认值逐字一致—
 
 ### 8.3 改完后必须验证（缺一不可）
 
-1. **挂载验证**：`agentPresets.standingKeyFor('capital-generation')` 成功；`compositionInventory()`
-   新增行为 active（`FiberState.ACTIVE = 2`）。挂载失败信息会点名问题行。
+1. **挂载验证**（0.1.7 起用 `agentPresets.resolve(id)`：结果无 `broken`，且 `compositionInventory()`
+   新增行 active（`FiberState.ACTIVE = 2`），失败信息点名问题行；旧 `standingKeyFor` 已消失）
 2. **`npm test` 全绿**（会先跑 `npm run build`）。断言的是"实测教训"不是措辞，**不允许靠删断言
    变绿**：`assertRuleAny()` 全部落空 = 规则真消失，**补人设**；规则外迁时断言跟着改读目标正文。
-   体积闸门（persona 与 `agent.cordis.yml`）见 `test/persona.test.mjs`，文档行数见
+   体积闸门（persona 与 `agent.patch.yml` 正文）见 `test/persona.test.mjs`，文档行数见
    `test/dev-docs.test.mjs`；上调须同步测试数字与理由注释。
 3. **测试跟随本机 dsh 版本**：`dsh-persona` 字段是 `prefix` 不是 `text`（`test/persona.test.mjs`
    有核对用例）。字段名变化必须只在**一条**用例里失败并点名文件。

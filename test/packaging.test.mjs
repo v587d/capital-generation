@@ -46,7 +46,7 @@ test('打包闸门：vendored 图表库与构建产物都在发布清单里', (t
     'capital-config/package.json',
     'capital-config/index.js',
     'capital-config/client.js',
-    'preset/capital-generation/agent.cordis.yml',
+    'preset/capital-generation/agent.patch.yml',
     'preset/capital-generation/skills/capital-chart-protocol/SKILL.md',
     'cordis.patch.yml',
   ]) {
@@ -56,6 +56,17 @@ test('打包闸门：vendored 图表库与构建产物都在发布清单里', (t
   // 许可证必须随包发布：Apache-2.0 的 NOTICE 义务。
   const license = [...paths].find((path) => path.endsWith('chart/vendor/LICENSE'))
   assert.ok(license, 'vendored 图表库的 LICENSE 必须随包发布')
+
+  // `dsh.bundle.patch` 现在是**数组**（主 patch + 预设声明行）：漏发其中任何一个的表现不是
+  // 报错，而是"预设根本没注册"——历史会话恢复时 Unknown agent preset。
+  const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
+  const declared = manifest.dsh?.bundle?.patch
+  const patches = Array.isArray(declared) ? declared : declared ? [declared] : []
+  assert.ok(patches.length >= 2, `预设行搬到 agent.patch.yml 后，patch 至少要有两颗文件，实际：${patches.join(', ') || '(空)'}`)
+  for (const relative of patches) {
+    const packed = relative.replace(/^\.\//, '')
+    assert.ok(paths.has(packed), `dsh.bundle.patch 指向的 ${packed} 不在发布清单里（装配整行会静默不生效）`)
+  }
 
   // 反向断言：本地研发文档不进包（.gitignore 之外的第二道闸门）。
   for (const path of paths) {

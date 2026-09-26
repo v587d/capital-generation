@@ -79,6 +79,8 @@ failed
 
 以下情况不得选择 `not_needed`：用户明确要求图表，或 profile 已确认存在时间序列、OHLC+volume、多期比较或多个可比数值序列。此时必须选择 `recommended`，完成 `prepare_chart_source → subagent_visualization_specialist → one-shot barrier`；只有字段/数据实际不足才可 `blocked`，只有合法工具已经失败才可 `failed`。不要把“本 Agent 没有 render_chart”当作跳过理由，render_chart 属于 specialist 的受控工具。
 
+`recommended` 回答的是“这份数据该不该被画出来”，不是“这次委派要不要出图”。委派 prompt 显式限定范围（如「只到 profile」「不要图」）时，仍按上面的判据给出 `recommended`，但**停在结论不出图**，并在回传里写明未执行是**委派收窄**——它既不是 `blocked`（字段不足）也不是 `failed`（工具失败），三者混淆会让主 Agent 把范围决定误读成能力结论。范围下一轮放开时无需重新 profile，按同一结论直接走 `prepare_chart_source` 即可。
+
 
 ### 2.1 描述后判断
 

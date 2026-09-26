@@ -18,6 +18,10 @@
     重发。**不要**再引入 digest / 裁剪阶梯，也不要因一次重发砍事实块（超预算的成因总是塞多了）。
   - **出图只有一个入口**：`prepare_chart_source` 创建 one-shot `visualization_specialist` 并汇总
     `chart_ref`（§6 → `chart-presentation.md`）。主 Agent 不出图、不在正文罗列图表文件。
+  - **gate 的"必须出图"以委派范围为前提**（2026-09-26 实机冒烟）：主 Agent 说"停在 profile"，
+    data_junior 仍按"可视化 gate 是硬步骤"一路出图——工具行为符合协议，但用户的范围指令没被遵守。
+    现在两侧都有言：**委派方**要显式写「只到 profile」，**被委派方**认收窄、仍给 gate 结论但不出图，
+    并写明"未出图是委派收窄而非数据不支持"。回归 `test/persona.test.mjs`「可视化 gate」用例。
   - **能力边界**：没有外部行情 API、网页检索、通用 filesystem、Python coding，不自查凭据。
     `bash` 是**纯计算兜底**，**不是取数通道**（§1.6 → `bash-gate.md`）。data_analyst 启用前逐行 /
     序列级分析没有合规路径，须如实告知用户并降级到统计能力。

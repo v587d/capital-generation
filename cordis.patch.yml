@@ -1,17 +1,15 @@
 # Capital Generation is a distributable DSH profile bundle.
 #
-# The web profile already provides the single agent-presets roster row. Patch
-# that row rather than registering a second roster (which would collide on the
-# agentPresets service), and add this package's bundled preset directory as a
-# read-only system root. `baseUrl` is the profile root at evaluation time, so
-# resolve this package through the Loader's own Node module resolution first.
-- id: agent-presets
-  name: '@deepseek-ai/dsh-agent-presets'
-  config:
-    default: standard
-    roots:
-      - path: !!js "process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:path').dirname(process.getBuiltinModule('node:path').dirname(process.getBuiltinModule('node:module').createRequire(baseUrl).resolve('@v587d/capital-generation'))), 'preset')"
-        trust: system
+# 本文件只挂 **host 平面** 的客户端 bundle 行（下面两个 insert）。预设不在这里：0.1.7 起
+# 预设是普通条目行，本包的预设声明住在 `preset/capital-generation/agent.patch.yml`，由
+# package.json 的 `dsh.bundle.patch` 数组按序应用（`agent-preset-registry` 行由 dsh-web-app
+# 自己提供，我们只 insert 自己的预设声明，不动它的 config）。
+#
+# ⛔ 升级事故（2026-09-26，issue #3）：这里原先是 patch `agent-presets` 行 + `config.roots`
+# 的目录式注册。0.1.7 把该条目改名为 `agent-preset-registry` 并**删掉了 roots 机制**（registry
+# 「既不扫目录也不接受预设路径」），于是每次启动静默报
+# `dsh: [@v587d/capital-generation] patch: entry "agent-presets" not found` —— 预设永不注册，
+# 历史会话（头部记着 `"agentPreset":"capital-generation"`）全部 `Unknown agent preset` 读不回。
 
 # ── 图表前端组件（host 平面行）────────────────────────────────────────────────
 #

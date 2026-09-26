@@ -1,6 +1,6 @@
 {
   "name": "@v587d/capital-generation",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "Capital Generation：面向中国散户的 AI 投资助手插件(Capital mode Agent Preset）",
   "author": "v587d",
   "license": "MIT",
@@ -12,7 +12,8 @@
       "types": "./lib/index.d.ts",
       "import": "./lib/index.js",
       "default": "./lib/index.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "lib",
@@ -25,7 +26,10 @@
   ],
   "dsh": {
     "bundle": {
-      "patch": "./cordis.patch.yml"
+      "patch": [
+        "./cordis.patch.yml",
+        "./preset/capital-generation/agent.patch.yml"
+      ]
     }
   },
   "scripts": {
@@ -52,14 +56,14 @@
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
     "@deepseek-ai/dsh-system-prompt": "^0.1.2-rc.1",
-    "@deepseek-ai/schemastery": "^3.18.2",
+    "@deepseek-ai/schemastery": "^3.18.4",
     "esbuild": "^0.28.2",
     "js-yaml": "^5.4.1",
     "lightweight-charts": "5.2.1",
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "@deepseek-ai/schemastery": "^3.18.2",
+    "@deepseek-ai/schemastery": "^3.18.4",
     "@joplin/turndown-plugin-gfm": "^1.0.68",
     "turndown": "^7.2.4"
   }

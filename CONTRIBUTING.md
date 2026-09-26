@@ -23,7 +23,8 @@
 
 ## 开发环境准备
 
-1. 安装 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness)（当前适配 `@0.1.5-rc.2`）
+1. 安装 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness)（当前适配 `@0.1.7-rc.2`，
+   需要 DSH ≥ 0.1.7：0.1.5 的 settings 注册面与 preset 挂载方式已被上游删除）
 2. 克隆本仓库：
    ```bash
    git clone https://github.com/v587d/capital-generation.git
@@ -47,6 +48,7 @@
    npm run check:dsh
    npm run smoke:boot
    ```
+   动过交付通道或准备发版时再加跑 `npm run verify:sessions`（用本机已装的 dsh 后端逐份冷加载真实会话）。
 
 ## 提交流程（Pull Request）
 

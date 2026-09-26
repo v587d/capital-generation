@@ -1,11 +1,12 @@
 # Capital 模式 preset：组合设计说明
 
-本文件是 `agent.cordis.yml` 的**维护者文档**（人类可读），不是模型可见内容：
-`skill-filesystem` 只扫 `skills/`，本文件既不会进 skill 目录，也不会被注入上下文。
+本文件是 `agent.patch.yml`（那颗 `@deepseek-ai/dsh-agent-preset` 声明行）的**维护者文档**（人类可读），
+不是模型可见内容：`skill-filesystem` 只扫 `skills/`，本文件既不会进 skill 目录，也不会被注入上下文。
 组合文件里只留"就地必需"的一行注（realm、`!!js`、disabled 行），其余设计理由都在这里。
 
-- 本目录由 `@v587d/capital-generation` 随包分发，由 `cordis.patch.yml` 的 bundle patch
-  以 `trust=system` 挂载；**不要**手抄进 `~/.dsh/.agent-presets`。
+- 本目录由 `@v587d/capital-generation` 随包分发，`agent.patch.yml` 走 `package.json` 的
+  `dsh.bundle.patch`（**数组**：主 patch + 这颗）以 `trust=system` 挂载；**不要**手抄进
+  `~/.dsh/.agent-presets`。
 - 长协议在 `skills/`（同目录），由本 preset 自己的 `skill-filesystem` 行发现；`capital-visualization-protocol` 同时供 data_junior 的 gate 和 visualization_specialist 按需加载。
 - visualization_specialist 是 data_junior 创建的 one-shot 前台子 Agent，不进入主 Agent 的 direct-child 复用清单；它只消费 chart_source_ref 并使用受控 render_chart。
 - 验证方式与"改 preset 前后的必做检查"见仓库根 `AGENTS.md` §8.3；设计理由与「不许改」全表见
@@ -21,7 +22,8 @@
 
 ## 2. 人设（persona）承载与官方语义
 
-实测 `dsh 0.1.5-rc.1`，三层载体注册的是**同一个 system-prompt 节名**：
+实测 `dsh 0.1.5-rc.1`，`0.1.7-rc.2` 复核字段未变（`test/persona.test.mjs` 对着本机 dsh 核对），
+三层载体注册的是**同一个 system-prompt 节名**：
 
 | 载体 | 位置 | 字段 | 生效范围 |
 |---|---|---|---|
@@ -155,5 +157,5 @@
    toolName / backgroundMode / persona / toolFilter，allow 必须含 `skill`）、子 persona（骨架 +
    第一条 duty `skill <name>`）、`skills/<name>/SKILL.md`、主 persona 的路由与复用规则、
    `docs/dev/data-roles.md` §1.1 的角色边界、测试断言。
-3. `npm test` 全绿 + `agentPresets.standingKeyFor('capital-generation')` 挂载成功，再开一个
-   Capital 会话确认工具表、首轮预检，以及子 Agent 是否真的按第一条 duty 先加载 skill。
+3. `npm test` 全绿 + `agentPresets.resolve('capital-generation')` 结果里没有 `broken`（挂载成功），
+   再开一个 Capital 会话确认工具表、首轮预检，以及子 Agent 是否真的按第一条 duty 先加载 skill。

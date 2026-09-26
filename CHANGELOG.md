@@ -5,7 +5,67 @@
 
 **版本号口径（本仓实践）**：
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
-- **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容）。
+- **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**——本插件自己的工具与数据契约没变，所以只抬第二位）。
+
+## [2.4.0] - 2026-09-26
+
+本版是**跟随 DSH `0.1.7-rc.2` 的适配版**（[issue #3](https://github.com/v587d/capital-generation/issues/3)）。
+**破坏性**：本插件需要 **DSH ≥ 0.1.7**——装在 0.1.5 上会 `web boot: 1 entry did not activate`。
+工具入参、数据能力、图表呈现与会话日志格式**都没有变化**。
+
+### ⚠️ 破坏性变更：上游删了两条通道，我们跟着搬家
+
+| | 2.3.0（DSH 0.1.5-rc.2） | 2.4.0（DSH 0.1.7-rc.2） |
+|---|---|---|
+| 设置卡片 | `settings.register` 命名空间 + 客户端 `settingsScope.bind` + `settings.plugin.item` keyed 槽，坐在「设置 → 插件 → 插件配置 → Capital 模式」 | 条目 Config 里标 `.volatile()` 的字段由 DSH 自动投影成表单，**命名空间恒等于 profile 条目 id**；卡片坐在**「插件」页**该 bundle 的 `capital-config` 行详情里 |
+| 预设挂载 | registry 行 `config.roots` 指向 preset 目录 | 一颗 `@deepseek-ai/dsh-agent-preset` **声明行**（`config = { id, name, description, order, plugins }`）；registry 既不扫目录也不接受 `roots` |
+| 保存后何时生效 | 重启 profile | 新开的 Capital 会话即生效（`applies` 恒为 `live`，主插件在装配时读一次） |
+
+升级前若直接装本版到 0.1.5 上，症状是两条：`dsh web` 打开即失败
+（`@v587d/capital-config: pending (waiting for service: settingsScope)`），以及历史 Capital 会话恢复报
+`RemoteError: Unknown agent preset: capital-generation`。
+
+### Changed
+
+- **设置卡片整条链路按 0.1.7 契约重写**：改用官方表单件 `SettingsForm` / `SettingsFormModel` /
+  `SettingsSecretField` / `Switch`，服务面是 `ctx.configForms` 的 `get(条目 id)` + `whileServed(...)`。
+  四个密钥字段（Fuyao / AnySearch / Wind Alice / PaddleOCR）与「允许启动本地提取网页内容」开关
+  **语义不变**；密钥仍只进 credentials 域，配置里只存引用名，值从不随响应出网。
+  0.1.7 的 primitives 删掉了外链图标 ⇒ 「接口文档」链接改为纯文字。
+- **预设迁到声明行**：`preset/capital-generation/` 的装配从 `preset.yml` + `agent.cordis.yml`
+  合成一颗 `@deepseek-ai/dsh-agent-preset` 声明行 `agent.patch.yml`（`plugins` 就是原来的行数组）。
+- **运行期依赖**：`@deepseek-ai/schemastery` 抬到 `^3.18.4`（`.volatile()` 的最低版本）；
+  `capital-config` 的 `dsh.client.inject` 从 `dsh-client-ui-settings-plugins` 换到
+  `dsh-client-ui-plugin-manager`（插件页现在归它所有）。
+
+### Fixed
+
+- **历史 Capital 会话恢复**：`capital-generation` 这个预设现在真的注册得上（旧写法在 0.1.7 下
+  静默不注册，只有打开历史会话才暴露）。
+- **可视化 gate 覆盖主 Agent 的「停在 profile」**：委派 prompt 写明「只到 profile」时，
+  `data_junior` 仍给 `recommended` 结论但**不出图**，并把未出图标注为**委派收窄**（不是数据不支持、
+  也不是被拦）；想常规出图就别写这句。两侧规则由 `test/persona.test.mjs` 钉住。
+
+### Added
+
+- **扩展面账本**：新增 **L17**（预设声明面：`PresetDefinition` / `composedPreset` / registry 无
+  `roots`）；**L15** 探针按新契约重写；**L10** 探针退休（该槽 kind 由 `chain` 变 `list`，本仓
+  早已不消费，留着只会制造假失败）；**L12** 证据文件从 `dsh-agent-presets` 换到 `dsh-tool-subagent`。
+  `npm run check:dsh` 16 → **17 条**。
+- **`npm run smoke:boot` 扩成两条腿**：正向在真实 boot graph 里挂一颗一次性探针行，读运行期的
+  `agentPresets.resolve('capital-generation').broken`、`settings.describe()` 的条目镜像，以及
+  `pluginManager.listBundles()` 里该 bundle **有没有 `capital-config` 那一行**（卡片座位）；
+  反向另起一个 profile **重复声明**同一预设 id，确认这道闸门会失败而不是永远绿。
+
+### 迁移
+
+- 先升级 DSH 到 `0.1.7-rc.2`（或更高），再 `dsh plugin --profile web add github:v587d/capital-generation`
+  并重启 profile。留在 0.1.5 的话请继续用 2.3.0。
+- **API Key 不用重填**：值本来就存在 credentials 域（`~/.dsh/.credentials.yaml`），升级后卡片
+  直接显示「已配置密钥」。
+- **偏好要重设一次**：旧命名空间下的值随上游一起退休了（那份全局 settings 文件已被 0.1.7 改名为
+  `settings.yaml.imported`，不再被读取），所以若曾**关掉**过「允许启动本地提取网页内容」，升级后
+  会回到默认（开启），需要在新卡片里再关一次。
 
 ## [2.3.0] - 2026-09-26
 

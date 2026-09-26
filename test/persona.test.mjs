@@ -1,18 +1,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { load as yamlLoad } from 'js-yaml'
 import { resolveUserCustomizationSection } from '../lib/index.js'
 import { RETRIEVAL_DENIED_TOOLS } from '../lib/agents/root-tool-policy.js'
 import { SOURCE_OUTPUT_BUDGET_CHARS } from '../lib/web-retriever/tools.js'
+import { PRESET_PATCH_TEXT, presetRows } from './preset-rows.mjs'
 
-const COMPOSITION = fileURLToPath(new URL('../preset/capital-generation/agent.cordis.yml', import.meta.url))
-// preset 里 `!!js` 门控（如 customSkillDirs 的 baseUrl 解析）不是 js-yaml 的已知标签；
-// 结构化断言前先剥掉标签本身，需要核对 `!!js` 形状的断言另读原文。
-const COMPOSITION_TEXT = readFileSync(COMPOSITION, 'utf8')
-const rows = yamlLoad(COMPOSITION_TEXT.replace(/!!js\s+/g, ''))
-assert.ok(Array.isArray(rows), 'agent.cordis.yml 必须解析为行数组')
+// 预设装配行的读取（含 `!!js` 剥离）只在 test/preset-rows.mjs 有一份。
+const COMPOSITION_TEXT = PRESET_PATCH_TEXT
+const rows = presetRows()
+assert.ok(Array.isArray(rows), 'agent.patch.yml 的 config.plugins 必须解析为行数组')
 
 const rowById = (id) => rows.find((row) => row?.id === id)
 const rowByName = (name) => rows.find((row) => row?.name === name)
@@ -162,6 +160,9 @@ const SHELL_SLOT = "process.platform === 'win32' ? 'pwsh' : 'bash'"
 const SHELL_TOOL = process.platform === 'win32' ? 'pwsh' : 'bash'
 const isShellSlot = (name) => name === SHELL_SLOT
 
+/** 去掉每行行首缩进：体积闸门量正文，不量 YAML 包装层级。 */
+const dedent = (value) => value.split('\n').map((line) => line.trimStart()).join('\n')
+
 const SKILL_DIR = fileURLToPath(new URL('../preset/capital-generation/skills/', import.meta.url))
 const INDEX_SOURCE = readFileSync(fileURLToPath(new URL('../src/index.ts', import.meta.url)), 'utf8')
 
@@ -184,7 +185,11 @@ test('preset 结构：persona 行为声明式行，插件不再占用 deployment
   // （「出网只有一个入口」此前只是 persona 文案，且文案里的 `web_retriever_*` 通配已失配）。
   // 这 300 余字符是**结构件的工具名**（deny 里的名字必须真实注册，见上），不是可外迁的协议正文；
   // 防回涨仍靠下面两条：主 persona < 5000、子 persona 骨架上限。
-  assert.ok(COMPOSITION_TEXT.length < 18000, `agent.cordis.yml 过长（${COMPOSITION_TEXT.length} 字符 / 目标 <18000）：参考材料进 skills/，设计理由进 preset README.md`)
+  // 2026-09-26 迁到 0.1.7 的声明式预设行（agent.patch.yml）：闸门量的是**正文**，所以先去缩进
+  // 再数——包装那一层 10 空格 × 500 行是格式成本，不是协议正文，让它计入预算等于凭空吃掉
+  // 5,000 字符的额度，下次真要放宽闸门时谁也说不清是内容涨了还是缩进涨了。
+  const compositionChars = dedent(COMPOSITION_TEXT).length
+  assert.ok(compositionChars < 18000, `agent.patch.yml 正文过长（${compositionChars} 字符 / 目标 <18000）：参考材料进 skills/，设计理由进 preset README.md`)
   // 子 persona 只留硬规则骨架：协议正文在 skills/（子 Agent 通过 skill 按需加载），
   // 与工具 description/schema 重复的事实不再抄一遍。
   // data_junior 的上限随"可视化 gate + one-shot barrier"两条新职责上调（实测 2168），
@@ -217,11 +222,16 @@ test('skills：两行组合式注册（skill-filesystem + tool-skill），不靠
   assert.equal(fsRow.name, '@deepseek-ai/dsh-skill-filesystem')
   const dirs = fsRow.config?.customSkillDirs
   assert.ok(Array.isArray(dirs) && dirs.length === 1, 'customSkillDirs 必须声明 preset 自带的 skills/ 目录')
-  // 必须用 preset 自己的目录（baseUrl）解析，不能写死绝对路径。
-  assertMatches(COMPOSITION_TEXT, /customSkillDirs:[\s\S]{0,200}!!js[\s\S]{0,200}baseUrl/)
-  // 剥掉 !!js 标签后剩下的是待求值的 JS 源码：必须相对 preset 目录（baseUrl）解析 skills/。
-  assertMatches(dirs[0], /skills\//, 'customSkillDirs 必须指向 skills/ 目录')
-  assertMatches(dirs[0], /baseUrl/, 'customSkillDirs 必须用 baseUrl 相对 preset 目录解析')
+  // 0.1.7 的 `!!js` 插值里 baseUrl 指向 **profile 目录**（settings 住那儿），不再是行所在目录；
+  // 所以随包发布的 skills/ 只能按**包名**解析回去（写死绝对路径同样不可接受）。
+  // 漂移不是报错，而是 skill 静默消失、模型侧只剩 persona。
+  const pkg = JSON.parse(readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'))
+  const root = fileURLToPath(new URL('../', import.meta.url))
+  assertMatches(dirs[0], new RegExp(`createRequire\\(baseUrl\\)\\.resolve\\('${pkg.name}/package\\.json'\\)`),
+    `skills 目录必须经包名解析回本包（${pkg.name}）`)
+  const skillsRelative = SKILL_DIR.slice(root.length).replace(/\/$/, '')
+  assert.ok(dirs[0].includes(`'${skillsRelative}'`), `customSkillDirs 必须拼出 ${skillsRelative}`)
+  assert.ok(existsSync(SKILL_DIR), `本仓必须真有 ${skillsRelative}`)
 
   const toolSkillRow = rowById('tool-skill')
   assert.ok(toolSkillRow, 'preset 必须有 tool-skill 行：没有它模型既看不到也加载不了 skill')
@@ -231,7 +241,6 @@ test('skills：两行组合式注册（skill-filesystem + tool-skill），不靠
   assertNotMatches(INDEX_SOURCE, /ctx\.skills|FileSystemSkillProvider|registerProvider/, 'src/index.ts 不应自行注册 skill provider')
 
   // skills/ 必须随包分发：preset 目录已在 package.json 的 files 里。
-  const pkg = JSON.parse(readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'))
   assert.ok(pkg.files.includes('preset'), 'package.json 的 files 必须包含 preset（skills/ 在其中）')
 })
 
@@ -829,6 +838,14 @@ test('data_junior persona：profile 后负责可视化 gate、签发 token、等
     assertRule(JUNIOR_PERSONA, pattern, `data_junior persona 缺少可视化编排要点: ${pattern}`)
   }
   assertRuleAny(MAIN_PERSONA, [/visualization_specialist/, /可视化.*data_junior/], '主 persona 必须说明 visualization_specialist 由 data_junior 管理')
+  // 2026-09-26 实机冒烟：主 Agent 指示 data_junior「停在 profile」，被"gate 是硬步骤"覆盖并自动出图。
+  // 两侧必须同时有言——委派方要显式收窄，被委派方要认收窄并如实说明未出图的原因。
+  assertRule(JUNIOR_PERSONA, /只到 profile/, 'data_junior 必须认委派 prompt 的显式收窄（只到 profile 就不出图）')
+  assertRule(JUNIOR_PERSONA, /委派收窄/, 'data_junior 未出图时必须写明是委派收窄，不是数据不支持')
+  assertRuleAny(MAIN_PERSONA, [/写明「只到 profile」/], '主 persona 必须要求"不要图就显式写明「只到 profile」"')
+  // 长协议必须与 persona 同口径，否则 skill 会把"硬步骤"写成无条件义务、把 persona 的收窄规则盖掉。
+  assertRule(readFileSync(`${SKILL_DIR}capital-visualization-protocol/SKILL.md`, 'utf8'),
+    /委派收窄/, 'capital-visualization-protocol 必须写明委派收窄时仍给 recommended 但不出图')
 })
 
 test('subagent_data_analyst 行：仍在开发中——disabled，且预留工具名不得先行启用', () => {

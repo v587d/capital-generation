@@ -27,6 +27,16 @@ import { createPaddleOcrClient } from './ocr/client.js'
 export const name = 'capital-generation'
 
 /**
+ * 取数配置所在的 **profile 条目 id**（随包的 `capital-config` 行）。0.1.7 的 settings 面
+ * 以条目 id 为命名空间，本插件经 `settings.describe()` 按它读回用户配的引用名与开关。
+ *
+ * 这个字符串有三处必须一致：`cordis.patch.yml` 的行 id、`capital-config/index.js` 的
+ * `SETTINGS_ENTRY_ID`、以及浏览器半边 `client.src.cjs` 的 `ENTRY_ID`；由
+ * `test/capital-config.test.mjs` 逐一对齐（漂移的表现为卡片静默消失）。
+ */
+export const CAPITAL_CONFIG_ENTRY_ID = 'capital-config'
+
+/**
  * 附加人设节的注册名与顺序。主 persona 由 preset 的 `@deepseek-ai/dsh-persona`
  * 行承载（节名 `deployment:persona-prefix`，order 0）；本插件只注册一个附加节，
  * 放在 persona 之后、PLAN_POLICY(500) 之前的空槽位（100），绝不占用该节名。
@@ -230,16 +240,20 @@ export const inject = ['systemPrompt']
  */
 export function apply(ctx: Context, config: Config) {
   // Settings 属于 Host 平面；Capital 仍可在无 settings provider 的测试/载体中运行。
-  const settings = ctx.get('settings') as { get?: (namespace: string) => unknown } | undefined
+  //
+  // 0.1.7 起 settings 不再是「命名空间总线」（`settings.get(ns)` 已随 `settings.register` 一起
+  // 消失），而是 **profile 条目的表单投影**：可编辑字段由条目自己的 Config schema 里的
+  // `.volatile()` 声明，`describe()` 按条目 id 返回解析后的值。所以我们按随包的
+  // `capital-config` **条目 id** 找那一行，而不是按自造的命名空间。
+  const settings = ctx.get('settings') as { describe?: () => ReadonlyArray<{ ns: string; value: unknown }> } | undefined
   let effectiveConfig = config
   try {
-    const resolved = settings?.get?.('capital-generation')
-    // 命名空间由随包的 `capital-config` 行注册（它同时是 settings 卡片的座位）。
+    const resolved = settings?.describe?.().find((entry) => entry.ns === CAPITAL_CONFIG_ENTRY_ID)?.value
     // 这里再用本插件的 Config 过一遍：既补默认值，也把 schema 漂移变成可查的错误，
     // 而不是把 capital-config schema 里的未知/缺失字段静默带进运行期配置。
-    if (resolved && typeof resolved === 'object') effectiveConfig = Config(resolved)
+    if (resolved && typeof resolved === 'object') effectiveConfig = Config(resolved as Config)
   } catch {
-    // 未注册命名空间或解析失败时沿用 preset 配置。
+    // 条目未注册或解析失败时沿用 preset 配置。
   }
 
   // ── data_collector 域：宿主侧 Dataset 落盘 + 取数执行器 ─────────────────────

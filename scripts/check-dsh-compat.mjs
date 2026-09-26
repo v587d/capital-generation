@@ -147,21 +147,13 @@ const probes = [
   {
     id: 'L10',
     title: 'Slot conversation.chat.turnTail + TurnTailOwnerProps',
-    why: '最终图表必须位于收尾 assistant 内容之后且不受 compact tool process 折叠；该 slot 是 DSH 的官方 turn-tail 扩展面。',
+    why: '该槽本是为「最终图表落在收尾正文之后」而接的官方 turn-tail 扩展面。',
     run() {
-      const file = join(PKG('dsh-client-ui-chat'), 'lib/types/client/contract/slots.d.ts')
-      const text = readIfPresent(file)
-      if (text === undefined) return { status: FAIL, detail: `读不到 ${file}` }
-      const checks = [
-        ['conversation.chat.turnTail', /conversation\.chat\.turnTail/],
-        ['kind chain', /'conversation\.chat\.turnTail':\s*\{\s*kind:\s*'chain'/s],
-        ['TurnTailOwnerProps.turn', /interface TurnTailOwnerProps[\s\S]*?turn:\s*TurnLocation/],
-        ['TurnTailOwnerProps.seq', /interface TurnTailOwnerProps[\s\S]*?seq:\s*number/],
-      ]
-      const missing = checks.filter(([, pattern]) => !pattern.test(text)).map(([label]) => label)
-      return missing.length === 0
-        ? { status: PASS, detail: 'turn-tail chain 与 owner props 仍可用' }
-        : { status: FAIL, detail: `turn-tail 契约变了：${missing.join(' / ')}` }
+      // 2026-09-18 起本包不再使用 turn-tail 通道（AGENTS.md §7：连同自定义会话事件类型一起
+      // 移除，禁止恢复），0.1.7 又把它的 kind 从 chain 改成 list——一个我们不消费的面的
+      // 形状漂移不该再让 check:dsh 变红。守卫在 test/chart-client.test.mjs：客户端包只留
+      // tool.call.toolview 卡片与 slots inject。上游若再次改名，无需动本仓。
+      return { status: NA, detail: '本包已摘除 turn-tail 通道（AGENTS.md §7），该面不再消费；探针退休' }
     },
   },
   {
@@ -203,16 +195,20 @@ const probes = [
       const toolsFile = join(PKG('dsh-tools'), 'lib/index.js')
       const tools = readIfPresent(toolsFile)
       if (tools === undefined) return { status: FAIL, detail: `读不到 ${toolsFile}` }
-      const presetsFile = join(PKG('dsh-agent-presets'), 'lib/index.js')
-      const presets = readIfPresent(presetsFile)
-      if (presets === undefined) return { status: FAIL, detail: `读不到 ${presetsFile}` }
+      const subagentFile = join(PKG('dsh-tool-subagent'), 'lib/index.js')
+      const subagent = readIfPresent(subagentFile)
+      if (subagent === undefined) return { status: FAIL, detail: `读不到 ${subagentFile}` }
 
       const checks = [
         ["'agent/created'(this: Scoped<Agent>, payload: { agent })", /'agent\/created'\(this: Scoped<Agent>/, types, agentTypes],
         ['payload 带 agent（监听器据此拿 agent.ctx）', /'agent\/created'\(this: Scoped<Agent>, payload: \{[\s\S]{0,120}agent: Agent/, types, agentTypes],
         ['tools.restrict() 要求 scoped context（agent.ctx）', /tools\.restrict\(\) requires a scoped context/, tools, toolsFile],
         ['restrict 走 layer.restrictions.append（作用域层过滤）', /layer\.restrictions\.append\(compiled\)/, tools, toolsFile],
-        ['上游自己在 agent/created 里用 agent.ctx', /ctx\.on\("agent\/created"[\s\S]{0,240}agent\.ctx/, presets, presetsFile],
+        // 0.1.7：原先借 dsh-agent-presets 的实现做旁证，该包已被 agent-preset-registry 取代且
+        // 不再监听 agent/created；dsh-tool-subagent 是同一条不变量的现役使用者（拿到 created
+        // agent 后用**它自己的 ctx** 装 scoped 运行时——不是 ctx.root）。
+        ['上游自己在 agent/created 里拿 created agent', /"agent\/created",\s*(?:async\s*)?\(\{ agent/, subagent, subagentFile],
+        ['并经由该 agent 自己的 ctx 注入 scoped 运行时', /\w\.ctx\.inject\(\[/, subagent, subagentFile],
       ]
       const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
       return missing.length === 0
@@ -347,23 +343,37 @@ const probes = [
   },
   {
     id: 'L15',
-    title: 'settings / credentials 扩展面：settings.register(ns, schema, {base, applies}) + settingsScope.bind + settings.plugin.item(keyed) + credentials remote',
-    why: 'capital-config 是 host 平面 settings 卡片：host 靠 settings.register 注册命名空间（这个命名空间同时是 settings.plugin.item 的派发键），'
-      + '浏览器半边靠 settingsScope.bind({namespace}) 读命名空间、靠 remote.credentials.describe/set 写密钥。任一处改名都不报错——'
-      + '卡片会静默消失或密钥写不进去，用户只会以为"设置里根本没有这个插件"。',
+    title: 'settings / credentials 扩展面：条目 Config 的 .volatile() 投影（ns = 条目 id）+ configForms.get/whileServed + plugins.row.config(keyed) + credentials remote',
+    why: 'capital-config 是 host 平面 settings 卡片。0.1.7 起命名空间**不再注册**：可编辑面是 profile 条目 Config schema 里 '
+      + '.volatile() 字段的投影（`volatileForm` 在一个 volatile 字段都没有时返回 undefined，该条目就**不进** describe 镜像），'
+      + '且 `ns` 恒等于 `entry.options.id`；浏览器半边靠 `ctx.configForms.get(条目 id)` 读写、靠 Plugins 页的 keyed 槽 `plugins.row.config`（'
+      + 'key = `<包名>#<行 id>`）坐落、靠 `remote.credentials.describe/set` 写密钥。条目 id / 行 id / 槽 key 任一处改名都不报错——'
+      + '卡片静默消失或密钥写不进去，用户只会以为"设置里根本没有这个插件"。',
     run() {
-      const settingsFile = join(PKG('dsh-settings'), 'lib/types/index.d.ts')
-      const settings = readIfPresent(settingsFile)
-      if (settings === undefined) return { status: FAIL, detail: `读不到 ${settingsFile}` }
-      const contractFile = join(PKG('dsh-client-ui-settings'), 'lib/types/client/settings-contract.d.ts')
-      const contract = readIfPresent(contractFile)
-      if (contract === undefined) return { status: FAIL, detail: `读不到 ${contractFile}` }
-      const scopeFile = join(PKG('dsh-client-ui-settings'), 'lib/types/client/settings-scope.d.ts')
-      const scope = readIfPresent(scopeFile)
-      if (scope === undefined) return { status: FAIL, detail: `读不到 ${scopeFile}` }
-      const slotFile = join(PKG('dsh-client-ui-settings-plugins'), 'lib/types/client/slot-contract.d.ts')
+      const hostTypesFile = join(PKG('dsh-settings'), 'lib/types/index.d.ts')
+      const hostTypes = readIfPresent(hostTypesFile)
+      if (hostTypes === undefined) return { status: FAIL, detail: `读不到 ${hostTypesFile}` }
+      const hostImplFile = join(PKG('dsh-settings'), 'lib/index.js')
+      const hostImpl = readIfPresent(hostImplFile)
+      if (hostImpl === undefined) return { status: FAIL, detail: `读不到 ${hostImplFile}` }
+      const formFile = join(PKG('dsh-client-ui-settings'), 'lib/types/client/config-form.d.ts')
+      const form = readIfPresent(formFile)
+      if (form === undefined) return { status: FAIL, detail: `读不到 ${formFile}` }
+      const slotFile = join(PKG('dsh-client-ui-plugin-manager'), 'lib/types/client/slot-contract.d.ts')
       const slot = readIfPresent(slotFile)
       if (slot === undefined) return { status: FAIL, detail: `读不到 ${slotFile}` }
+      const ledgerFile = join(PKG('dsh-client-ui-plugin-manager'), 'lib/types/client/config-ledger.d.ts')
+      const ledger = readIfPresent(ledgerFile)
+      if (ledger === undefined) return { status: FAIL, detail: `读不到 ${ledgerFile}` }
+      const pmPageFile = join(PKG('dsh-client-ui-plugin-manager'), 'lib/client.js')
+      const pmPage = readIfPresent(pmPageFile)
+      if (pmPage === undefined) return { status: FAIL, detail: `读不到 ${pmPageFile}` }
+      const modelFile = join(PKG('dsh-client-ui-primitives'), 'lib/types/settings-form/form-model.d.ts')
+      const model = readIfPresent(modelFile)
+      if (model === undefined) return { status: FAIL, detail: `读不到 ${modelFile}` }
+      const fieldsFile = join(PKG('dsh-client-ui-primitives'), 'lib/types/settings-form/fields.d.ts')
+      const fields = readIfPresent(fieldsFile)
+      if (fields === undefined) return { status: FAIL, detail: `读不到 ${fieldsFile}` }
       const eventsFile = join(PKG('dsh-api-remotes'), 'lib/types/remote-events.d.ts')
       const events = readIfPresent(eventsFile)
       if (events === undefined) return { status: FAIL, detail: `读不到 ${eventsFile}` }
@@ -372,15 +382,23 @@ const probes = [
       if (remote === undefined) return { status: FAIL, detail: `读不到 ${remoteFile}` }
 
       const checks = [
-        ['ctx.settings 服务声明', /settings:\s*SettingsProvider/, settings, settingsFile],
-        ['settings.register(ns, schema, options) 签名', /register<[\s\S]{0,120}schema:\s*z<T>[\s\S]{0,80}SettingsRegisterOptions<T>/, settings, settingsFile],
-        ["SettingsApplies = 'live' | 'restart'", /SettingsApplies\s*=\s*'live'\s*\|\s*'restart'/, settings, settingsFile],
-        ['SettingsRegisterOptions.base', /base\?:\s*Partial<T>/, settings, settingsFile],
-        ['SettingsRegisterOptions.applies', /applies\?:\s*SettingsApplies/, settings, settingsFile],
-        ['SettingsScopeSpec.namespace', /namespace:\s*string/, contract, contractFile],
-        ['settingsScope.bind(spec)', /bind<T>\(spec:\s*SettingsScopeSpec<T>\):\s*SettingsScope<T>/, scope, scopeFile],
-        ['ctx.settingsScope 服务', /settingsScope:\s*SettingsScopeBinder/, scope, scopeFile],
-        ["slot settings.plugin.item 是 keyed", /'settings\.plugin\.item':\s*\{\s*kind:\s*'keyed'/, slot, slotFile],
+        // ── host 半边：可编辑性是 schema 事实，不是注册出来的命名空间 ──
+        ['ctx.settings 服务（SettingsForms）', /settings:\s*SettingsForms/, hostTypes, hostTypesFile],
+        ['settings.describe() 返回条目投影', /describe\(options\?: SettingsDescribeOptions\): SettingsDescriptor\[\]/, hostTypes, hostTypesFile],
+        ['volatileForm(schema) 仍在', /function volatileForm\(schema\)/, hostImpl, hostImplFile],
+        ['没有任何 volatile 字段 ⇒ 条目不进镜像', /Object\.keys\(dict\)\.length === 0 \? void 0 : z\.object\(dict\)/, hostImpl, hostImplFile],
+        ['命名空间恒等于 profile 条目 id', /ns: entry\.options\.id/, hostImpl, hostImplFile],
+        ['写非 volatile 路径被响亮拒绝', /is not volatile/, hostImpl, hostImplFile],
+        // ── 浏览器半边：按条目 id 寻表单，按 served 门控注册 ──
+        ['ctx.configForms.get(entryId)', /get<T>\(entryId: string\): ConfigForm<T>/, form, formFile],
+        ['ctx.configForms.whileServed(namespaces, register)', /whileServed\(namespaces: readonly string\[\], register:/, form, formFile],
+        ["slot plugins.row.config 是 keyed", /'plugins\.row\.config':\s*\{\s*kind:\s*'keyed'/s, slot, slotFile],
+        ['槽 key 由 rowConfigKey(bundle, rowId) 给出', /declare function rowConfigKey\(bundle: string, rowId: string\)/, ledger, ledgerFile],
+        ['槽 key 的分隔符仍是 `<包名>#<行 id>`', /function rowConfigKey\(bundle, rowId\) \{\s*return `\$\{bundle\}#\$\{rowId\}`/, pmPage, pmPageFile],
+        ['Plugins 页按**行 id** 取表单（⇒ 命名空间必须等于行 id）', /form: formFor\(openRow\.rowId\)/, pmPage, pmPageFile],
+        ['SettingsFormModel（暂存 + revision 围栏写）', /declare class SettingsFormModel/, model, modelFile],
+        ['write-only 密钥控件的 spec 形状', /interface SettingsSecretSpec/, model, modelFile],
+        ['SettingsSecretField（只报"是否已配置"）', /declare function SettingsSecretField/, fields, fieldsFile],
         ['credential 变更事件被转发到客户端', /"credentials\/reference-updated"/, events, eventsFile],
         ['settings 文档更新事件被转发到客户端', /"settings\/document-updated"/, events, eventsFile],
         ['credentials/describe remote', /credentials\/describe/, remote, remoteFile],
@@ -388,7 +406,7 @@ const probes = [
       ]
       const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
       return missing.length === 0
-        ? { status: PASS, detail: 'settings 命名空间注册 / 客户端 scope / keyed 卡片槽 / credentials remote 都仍在' }
+        ? { status: PASS, detail: '条目 volatile 投影 / 命名空间=条目 id / configForms 读写 / keyed 行配置槽 / credentials remote 都仍在' }
         : { status: FAIL, detail: `settings 卡片链路的接口变了：${missing.join(' / ')}（见账本 L15；改本仓 adapter，不要改探针）` }
     },
   },
@@ -420,6 +438,43 @@ const probes = [
       return missing.length === 0
         ? { status: PASS, detail: '返回值仍按 output.schema 校验（required / additionalProperties / oneOf），镜像断言成立' }
         : { status: FAIL, detail: `工具输出校验链变了：${missing.join(' / ')}（见账本 L16 与 test/output-contract.mjs；上游若取消这层校验，先改探针再改镜像）` }
+    },
+  },
+  {
+    id: 'L17',
+    title: '预设声明面：@deepseek-ai/dsh-agent-preset 声明行（Config = PresetDefinition{id, plugins}）+ registry 不吃 roots + agentPresets.composedPreset',
+    why: 'issue #3 的第二条根因：0.1.7 把预设挂载从"registry 行 config.roots 指目录"换成"一颗声明行"，'
+      + 'registry 既不扫目录也不接受路径。这一面漂移最阴——启动期什么都正常，直到用户点开历史会话才 '
+      + 'RemoteError: Unknown agent preset: capital-generation（config.id 是写进会话日志的身份）。'
+      + '同时 src/agents/root-tool-policy.ts 靠 agentPresets.composedPreset(agent.ctx) 筛本 preset，'
+      + '那个方法改名就是根收敛静默失效（主 Agent 又看见 render_chart）。',
+    run() {
+      const presetTypesFile = join(PKG('dsh-agent-preset'), 'lib/types/index.d.ts')
+      const presetTypes = readIfPresent(presetTypesFile)
+      if (presetTypes === undefined) return { status: FAIL, detail: `读不到 ${presetTypesFile}` }
+      const definitionFile = join(PKG('dsh-agent-preset-registry'), 'lib/types/definition.d.ts')
+      const definition = readIfPresent(definitionFile)
+      if (definition === undefined) return { status: FAIL, detail: `读不到 ${definitionFile}` }
+      const registryTypesFile = join(PKG('dsh-agent-preset-registry'), 'lib/types/index.d.ts')
+      const registryTypes = readIfPresent(registryTypesFile)
+      if (registryTypes === undefined) return { status: FAIL, detail: `读不到 ${registryTypesFile}` }
+      const checks = [
+        ['声明行的 config 就是 PresetDefinition', /export type Config = PresetDefinition/, presetTypes, presetTypesFile],
+        ['声明行把子行收进 EntryGroup（保留表达式到子插件激活）', /EntryGroup\.key\] = true/, presetTypes, presetTypesFile],
+        ['PresetDefinition.id（写进会话日志的身份）', /readonly id: string/, definition, definitionFile],
+        ['PresetDefinition.plugins（行数组 = 旧 agent.cordis.yml）', /readonly plugins: readonly/, definition, definitionFile],
+        ['registry 服务名仍是 agentPresets', /agentPresets:\s*AgentPresetRegistry/, registryTypes, registryTypesFile],
+        ['root 收敛用的 composedPreset(ctx) 仍在', /composedPreset\(ctx: Context\): string \| undefined/, registryTypes, registryTypesFile],
+        ['registry 仍按声明注册（register(definition)）', /register\(definition: PresetDefinition\)/, registryTypes, registryTypesFile],
+      ]
+      const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
+      // 反向断言：旧的"registry 指目录"写法不许回来（它现在会静默不注册，issue #3）。
+      if (/roots\b/.test(definition) || /roots\b/.test(registryTypes)) {
+        missing.push(`registry 又出现 roots 字段（${registryTypesFile}；0.1.7 的声明式挂载与之互斥）`)
+      }
+      return missing.length === 0
+        ? { status: PASS, detail: '预设声明行 / PresetDefinition.id / composedPreset 都仍在，且 registry 无 roots' }
+        : { status: FAIL, detail: `预设声明面变了：${missing.join(' / ')}（见账本 L17；历史会话恢复依赖它，改本仓装配行不要改探针）` }
     },
   },
 ]

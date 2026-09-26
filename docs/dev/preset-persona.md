@@ -4,11 +4,21 @@
 > （§8.3）与新增角色流程（§8.5）留在 `AGENTS.md`，因为它们是每次动手都要过的闸门。
 > §编号沿用 `AGENTS.md` 的全局命名空间。
 
-## 8.1 现状（实测于 dsh 0.1.5-rc.2）
+## 8.1 现状（实测于 dsh 0.1.7-rc.2）
 
-- `preset/capital-generation/` 由 `cordis.patch.yml` bundle patch 以 system root 挂载
-  （`trust=system`）。**不要**手抄进 `~/.dsh/.agent-presets`，也不要编辑 DSH 自带安装目录
+- 装配整体住 **`preset/capital-generation/agent.patch.yml`**：一颗 `@deepseek-ai/dsh-agent-preset`
+  insert 行，`config = { id, name, description, order, plugins: [...] }`，`plugins` 就是旧的
+  `agent.cordis.yml` 行数组。由 `package.json` 的 `dsh.bundle.patch`（**数组**：主 patch + 这颗）
+  随包挂载，`trust=system`。**不要**手抄进 `~/.dsh/.agent-presets`，也不要编辑 DSH 自带安装目录
   （`standard` / `ptc` / `minimal` / `cordis`）——要改就复制成本地 preset。
+- ⛔ **`config.id`（`capital-generation`）是写进会话日志的身份**：0.1.7 的
+  `dsh-agent-preset-registry` **既不扫目录也不接受 preset 路径**，只认声明行。旧写法
+  （registry 行 `config.roots` 指目录）整体失效，漂移的表现是**历史会话恢复时
+  `RemoteError: Unknown agent preset: capital-generation`**——不是启动报错。
+- ⛔ 嵌套行里的 `!!js` 插值中 `baseUrl` 是 **profile 目录**（settings 住那儿），不是这颗 yml
+  所在目录：所以 `skill-filesystem` 的 `customSkillDirs` 只能
+  `createRequire(baseUrl).resolve('<包名>/package.json')` 解析回随包发布的
+  `preset/capital-generation/skills`（回归 `test/persona.test.mjs`，路径与本仓目录实况同源比对）。
 - 主 persona 由 `@deepseek-ai/dsh-persona` 行 `config.prefix` 承载（**没有** `config.text`）；
   不设 `suffix` 时部署级后缀被遮蔽为空（有意）。子 persona 由委派行 `config.persona` 承载：
   同一节名注册进子 scope，**最近 scope 胜出 ⇒ 覆盖（不是追加）**主 persona。
