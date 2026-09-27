@@ -1,6 +1,6 @@
 ---
 name: capital-data-protocol
-description: Use when composing or reading a Capital data message — the exact data_request, dataset_ready, data_failed, profile_request, dataset_profile_completed, profile_failed, query_request, dataset_query_completed and query_failed payloads, field-by-field rules, force_refresh semantics, capability selection, retry discipline, and the disclosure fields an answer must carry.
+description: Use when composing or reading a Capital data message — data_request, per-Dataset dataset_ready, data_failed, data_collection_completed, profile and query payloads, freshness, capability selection, retry discipline, and disclosure fields.
 ---
 
 # Capital 数据协议（完整版）
@@ -37,13 +37,14 @@ description: Use when composing or reading a Capital data message — the exact 
 | `description` | 用自然语言写清要什么数据；也可含标的、区间、频率 |
 | `capability` | 可选。明确知道能力名时才指定；省略时由 `data_collector` 走下面 §1.1 的两步发现 |
 | `params` | 按该 capability 的 `input_schema` 填写；标的使用完整代码（如 `600519.SH`），不自行拼接交易所后缀。腾讯 fallback 使用 `tencent_quote` / `tencent_kline`，不要改写成已有 `quote` / `history` |
-| `force_refresh` | `false`/省略：宿主可复用当前 session 内未过期的 Dataset；`true`：强制重新取数并生成新的不可变 Dataset，**绝不覆盖旧文件** |
+| `force_refresh` | `false`/省略：宿主可复用当前 session 内未过期且满足该能力缓存新鲜度的 Dataset；`true`：强制重新取数并生成新的不可变 Dataset，**绝不覆盖旧文件**。用户要求“现在/最新”的快照时传 `true`；保留 7 天不代表行情仍是最新 |
 
 硬规则：
 
 - 委派消息只带需求与参数，**不带任何内部数据源键名**，也不携带原始数据行。
 - 能力名一律以 `list_capabilities` 返回的目录为准，不要编造。
-- 一次请求一个能力、串行推进；单回合通常 1 个、最多 3 个、硬性不超过 5 个能力。
+- 一次 `request_data` 只请求一个能力，按已发现的依赖与证据价值串行推进；**没有单回合能力数量上限**。先确定问题所需事实与缺口，再按来源、资产类型、时间粒度挑相关能力；不为凑数量遍历目录。遇到 `data_gap` 可继续补数，数据充分或上游不可用时停止。
+- 含义相近的能力不自动互换：例如 Fuyao `history` 仅日线，腾讯 `tencent_kline` 支持近期分钟线；按 `describe_capability` 核对粒度、字段与单位，来源切换须写进回传。
 - `task_id` 由主 Agent 在本轮首次委派前确定；同一用户任务的 data_collector、data_junior 与 visualization 必须原样复用。data_collector 不得自行生成或改写 task_id，缺失时应拒绝请求并回告主 Agent。
 
 ## 1.1 能力发现（data_collector 侧：两步，且各只做一次）
@@ -68,14 +69,15 @@ description: Use when composing or reading a Capital data message — the exact 
 | `capability_catalog_empty` | 当前没有任何已注册能力（数据源未注册，常见原因是凭据未配置） | **不要重试**（此刻任何名字都会失败）；用 `dc_status` 读注册错误并如实回告主 Agent |
 | `request_params_invalid` | `request_data` 的 `params` 不符合该能力契约（错误会保留具体字段原因） | 先按错误中的 capability 调 `describe_capability({"capability":"..."})`，重新读取 `input_schema`，修正后只重试一次；不要凭记忆猜参数。网络、超时、落盘错误不要走这条路径 |
 
-## 2. 数据回传（data_collector → 主 Agent）
+## 2. 逐份回传（data_collector → 主 Agent）
 
-成功：
+每次 `request_data` 返回后立即 `send_message`，成功时每条只含**一份** DatasetRef（缓存命中也一样）：
 
 ```json
 {
   "type": "dataset_ready",
   "task_id": "task_01J...",
+  "request_index": 1,
   "datasets": [
     {
       "dataset_id": "ds_01J...",
@@ -92,15 +94,30 @@ description: Use when composing or reading a Capital data message — the exact 
 }
 ```
 
-失败：
+某次请求最终失败也立即回告（`request_index` 从本次委派的 1 开始，翻页或重复能力也各占一次）：
 
 ```json
-{ "type": "data_failed", "task_id": "task_01J...", "error": "...", "code": "..." }
+{ "type": "data_failed", "task_id": "task_01J...", "request_index": 2, "capability": "history", "error": "request timed out" }
+```
+
+所有请求处理完后**另发一条**终结消息，即使全部失败也必须发：
+
+```json
+{
+  "type": "data_collection_completed",
+  "task_id": "task_01J...",
+  "dataset_ids": ["ds_01J..."],
+  "failed": [{ "request_index": 2, "capability": "history", "error": "request timed out" }],
+  "gaps": ["尚未取得该标的的历史分钟线"]
+}
 ```
 
 硬规则：
 
 - 回传必须携带结构化载荷；可以附表格或摘要，但**禁止只回传 markdown 汇总**。
+- 每份成功 Dataset（含缓存命中）立刻通知主 Agent，下一次 `request_data` 不必等 data_junior 处理完；分页若每页都调用 `request_data`，每页分别通知。终结消息只汇总 id / 失败 / 缺口，不重复塞 DatasetRef，也不由 data_collector 直接找 data_junior。
+- `data_failed` 只结束该次请求；只有 `data_collection_completed` 才结束本次委派。未发出终结消息前，主 Agent 不得把任意一次进度通知或子 Agent 结算当作取数完成。若 junior 在已结算后发 `data_gap`，主 Agent 再次委派同一个 collector，此次补数也须逐份回传并另发终结消息。
+- 每个 `data_failed` 和终结消息里的失败项必须包含真实 `error`，只有工具返回了 `code` 才附带原值，不能把错误文本编造成 code。
 - `dataset_id` / `artifact_ref` / `capability` / `source_label` / `schema` / `row_count` /
   `captured_at` / `retention_until` 按工具返回**原样填入**，字段名、数值、日期不改写。
 - 载荷中不得出现原始数据行、内部数据源键名或文件绝对路径。
@@ -175,6 +192,7 @@ description: Use when composing or reading a Capital data message — the exact 
 
 - `schema` 是字段类型和计数的有限摘要；完整 profile 以 `profile_ref` 为准，不把完整 profile 或 raw rows 放进消息。
 - `validation.status=fail` 表示 profile 发现结构化 violations，不表示原始 Dataset 被删除或不可用。
+- 主 Agent 可以在 collector 继续取数时逐份委派 data_junior，显式说「只到 profile」（包括必要的受控 queries）；后续只送新到的 dataset_id，不重做已完成的 profile。等 `data_collection_completed` 和补数据回执后，再指示同一个 junior 综合已有结果并完成可视化 gate。
 
 失败：`{ "type": "profile_failed", "task_id": "task_01J...", "error": "...", "code": "..." }`
 

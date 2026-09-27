@@ -153,6 +153,35 @@ test('in-flight 合并：相同 capability+params+task 的并发请求只执行�
   assert.equal(new Set(results.map((r) => r.dataset_id)).size, 1, '合并请求共享同一个 Dataset')
 })
 
+test('快照缓存独立于保留期：有效期内复用，超过来源新鲜度后重新落盘', async () => {
+  let clock = 1_700_000_000_001
+  const { hub, store } = makeHub({ now: () => clock })
+  const source = testSource('live_quote')
+  source.schema.cacheMaxAgeMs = 60_000
+  hub.registerSource(source)
+  const first = await hub.request(request({ capability: 'live_quote' }))
+  clock += 59_999
+  const cached = await hub.request(request({ capability: 'live_quote' }))
+  assert.equal(cached.dataset_id, first.dataset_id)
+  clock += 1
+  const fresh = await hub.request(request({ capability: 'live_quote' }))
+  assert.notEqual(fresh.dataset_id, first.dataset_id)
+  assert.equal(source.calls(), 2)
+  assert.equal(store.refs.length, 2, '旧 Dataset 仍然不可变且可读，只是不再复用')
+})
+
+test('来源声明的新鲜度必须为正整数，实际快照能力带有限制', () => {
+  const { hub } = makeHub()
+  const source = testSource('bad_cache')
+  source.schema.cacheMaxAgeMs = -1
+  assert.throws(() => hub.registerSource(source), /cacheMaxAgeMs must be a positive safe integer/)
+  for (const live of [
+    ...createFuyaoRestSources(async () => 'key').filter((item) => ['quote', 'valuation', 'auction', 'index_quote', 'fund_quote'].includes(item.schema.capability)),
+    ...createTencentSources().filter((item) => ['tencent_quote', 'tencent_kline'].includes(item.schema.capability)),
+    ...createEastmoneySources().filter((item) => ['eastmoney_sector_rotation', 'eastmoney_cashflow_rotation'].includes(item.schema.capability)),
+  ]) assert.equal(live.schema.cacheMaxAgeMs, 60_000, `${live.schema.capability} 必须限制快照缓存年龄`)
+})
+
 test('manifest 复用：相同 capability+params 的顺序请求复用已有 Dataset，不重复取数', async () => {
   const { hub } = makeHub()
   const source = testSource('reuse')
@@ -479,7 +508,7 @@ test('Fuyao 参数规范化端到端：大小写/空白/重复代码差异只取
     return { ok: true, json: async () => ({ code: 0, data: { item: [{ thscode: '600519.SH', last_price: 1 }] } }) }
   }
   try {
-    const { hub, store } = makeHub()
+    const { hub, store } = makeHub({ now: () => 1_700_000_000_001 })
     for (const source of createFuyaoRestSources(async () => 'key')) hub.registerSource(source)
     const first = await hub.request(request({ capability: 'quote', params: { thscodes: '600519.sh' } }))
     const second = await hub.request(request({ capability: 'quote', params: { thscodes: ' 600519.SH , 600519.SH' } }))

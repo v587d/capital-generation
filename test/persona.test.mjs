@@ -401,6 +401,26 @@ test('主 persona：最终结论前对账结算通知——排序规则，不等
   assertRuleAny(MAIN_PERSONA, [/仍不等于任务完成/, /仍不等于完成/], '排序规则不得被读成完成判据')
 })
 
+test('主 persona + skill：对账必须是逐行产物（结算对账表），✗ 只由结算通知翻正', () => {
+  // 真机会话 cst7n9j3 turn 11：规则上一条已存在，仍被跳过——主 Agent 在 reasoning 里写
+  // "All three roles done" 就开始综合，把 data_junior 的回传正文（"7/7 profile 完成、
+  // pending = 0"）当成完成证据。实测回传先到、结算通知 14s 后到，结论本身生成 156s，
+  // 于是结算落在结论之后、框架只能再开一个 step 投递（step 边界 inbox 非空不结束 turn），
+  // 结论被切成两条并追加一段"无新增信息"。修法：把沉默的心算改成必须逐行写出来的表，
+  // 漏计表现为自相矛盾的行。细则住 skill capital-orchestration §6.1，persona 只留判据。
+  assertRule(MAIN_PERSONA, /逐行核对/, '对账必须是逐行的产物，不能是一句"都齐了"的印象')
+  assertRuleAny(MAIN_PERSONA, [/回传正文再像完成也不算/, /回传正文.*不算 ✓/], '主 persona 必须写明回传正文不构成结算 ✓')
+  assertRuleAny(MAIN_PERSONA, [/细则见 skill capital-orchestration/, /见 skill capital-orchestration/], '对账表格式必须指向 skill capital-orchestration')
+
+  const orchestration = readFileSync(`${SKILL_DIR}capital-orchestration/SKILL.md`, 'utf8')
+  assertRule(orchestration, /结算对账表/, 'skill 必须给出结算对账表')
+  assertRule(orchestration, /✗ 只能被结算通知翻正/, 'skill 必须写明唯一判据：✗ 只由结算通知翻正')
+  assertRule(orchestration, /不构成 ✓/, 'skill 必须写明回传完成正文不构成 ✓')
+  assertRule(orchestration, /只写等待行/, 'skill 必须要求欠结算时本步只写等待行')
+  assertRule(orchestration, /只回一行确认/, 'skill 必须写明结论已被追上且无新信息时只回一行确认')
+  assertRule(orchestration, /禁止复述/, 'skill 必须禁止在尾部回执里复述已交付的结论')
+})
+
 test('主 persona：web_retriever 编排与检索路由', () => {
   assertRule(MAIN_PERSONA, /subagent_web_retriever/)
   assertRule(MAIN_PERSONA, /web_retriever/)
@@ -672,11 +692,11 @@ test('data_collector persona：覆盖 Phase 1 数据集协议全部必须要点'
   assertRule(COLLECTOR_PERSONA, /阻塞/, 'dc persona 应说明 request_data 阻塞等待执行')
   assertRule(COLLECTOR_PERSONA, /30 秒|超时/, 'dc persona 应说明执行超时报错')
   assertRule(COLLECTOR_PERSONA, /skill capital-data-protocol/, 'dc persona 必须按需加载数据协议 skill')
-  // 能力发现的步骤、用量上限与分类错误处置已外迁到 skill capital-data-protocol：
-  // 规则一条都不许丢，只是换了承载面（persona 只留每轮硬规则）。
+  // 能力发现与分类错误仍由 skill 承载；过时的固定能力上限改为问题驱动选数。
   const dataProtocol = readFileSync(`${SKILL_DIR}capital-data-protocol/SKILL.md`, 'utf8')
-  assertRule(dataProtocol, /最多 3 个/, 'skill 需含能力用量引导（最多 3 个）')
-  assertRule(dataProtocol, /不超过 5 个/, 'skill 需含能力用量硬性上限（不超过 5 个）')
+  assertRule(dataProtocol, /没有单回合能力数量上限/, '旧五能力上限已不适用于当前目录')
+  assertRule(dataProtocol, /证据价值/, '应按需求与证据价值选择能力')
+  assertNoRule(dataProtocol, /最多 3 个|硬性不超过 5 个/, '不得恢复历史能力数量上限')
   assertRule(dataProtocol, /list_capabilities 返回的目录为准|目录为准/, 'skill 应要求 capability 以 list_capabilities 返回为准')
   assertRule(dataProtocol, /describe_capability/, 'skill 必须写明用 describe_capability 取单个能力的完整 schema')
   assertRule(dataProtocol, /一个任务只调一次/, 'skill 必须限定 list_capabilities 一个任务只调一次')
@@ -687,8 +707,17 @@ test('data_collector persona：覆盖 Phase 1 数据集协议全部必须要点'
     assertRule(dataProtocol, new RegExp(code), `skill 必须给出 ${code} 的处置指引`)
   }
   assertRuleAny(dataProtocol, [/不要重试/, /不要反复重试/], 'catalog_empty 必须明确不要重试')
-  // 实测教训：多端点一次性回传、只许结构化载荷（禁止只回传 markdown）、载荷字段原样不改写
-  assertRule(COLLECTOR_PERSONA, /一次性/, 'dc persona 应要求多端点一次性回传')
+  // 每份 Dataset 落盘后立即通知父 Agent，全部请求结束再发终结消息；不能退回批量等待。
+  assertRule(COLLECTOR_PERSONA, /每次 request_data 成功.*立刻 send_message/, 'collector 应逐份发成功消息')
+  assertRule(COLLECTOR_PERSONA, /包括缓存命中/, '缓存命中也必须通知')
+  assertRule(COLLECTOR_PERSONA, /每次请求最终失败立刻发 data_failed/, '单次失败应即时上报')
+  assertRule(COLLECTOR_PERSONA, /全部请求结束再发 data_collection_completed/, '必须有明确终结消息')
+  assertNoRule(COLLECTOR_PERSONA, /多个能力全部完成后一次性回传/, '不得等全部取完才通知')
+  assertRule(MAIN_PERSONA, /每收到一份 dataset_ready.*立即复用\/创建同一个 data_junior/, '主 Agent 应逐份转交同一个 junior')
+  assertRule(MAIN_PERSONA, /task_id \+ dataset_id 不重复派发/, '主 Agent 应按数据集去重')
+  assertRule(MAIN_PERSONA, /data_collection_completed/, '主 Agent 应区分进度与终结')
+  assertRule(JUNIOR_PERSONA, /已完成 profile 不重复做/, 'junior 收到新 Dataset 时复用旧 profile')
+  assertRule(dataProtocol, /每页分别通知/, '分页的每份 Dataset 也要立即通知')
   assertRule(COLLECTOR_PERSONA, /禁止只回传/, 'dc persona 应禁止只回传 markdown 汇总')
   assertRule(COLLECTOR_PERSONA, /原样填入/, 'dc persona 应要求载荷字段按原样填入')
   assertRule(COLLECTOR_PERSONA, /串行推进|不存在并行/, 'dc persona 应说明 request_data 串行推进')
@@ -699,6 +728,14 @@ test('data_collector persona：覆盖 Phase 1 数据集协议全部必须要点'
   assertNoRule(COLLECTOR_PERSONA, /"requester_agent_id"/)
   assertNoRule(COLLECTOR_PERSONA, /subscribe_data|unsubscribe_data|订阅/)
   assertNoRule(COLLECTOR_PERSONA, /消息总站/)
+})
+
+test('分钟数据路由：已启用的腾讯 m1-m60 K 线不能被旧日线降级规则掩盖', () => {
+  const orchestration = readFileSync(`${SKILL_DIR}capital-orchestration/SKILL.md`, 'utf8')
+  assertRule(orchestration, /tencent_kline/)
+  assertRule(orchestration, /m1\/m5\/m15\/m30\/m60/)
+  assertRule(orchestration, /仅支持最近.*count.*最多 320/)
+  assertNoRule(orchestration, /数据管道只支持日线/)
 })
 
 test('subagent_data_junior 行：continuable、persona 覆盖、toolFilter 只含只读 Dataset 工具', () => {

@@ -77,7 +77,8 @@ A 角色的请求投给 B 角色。官方机制是 **`list_agents` 即权威 id 
 | web_retriever | … | task_… | 交易所公告原文 | done | url + 正文要点 |
 
 状态取值：`running` / `done` / `failed` / `waiting_data`（子 Agent 已发 `data_gap` 或
-就绪登记、正等主 Agent 补数据）。回传引用只记 DatasetRef、profile_ref、URL 等标识，
+就绪登记、正等主 Agent 补数据）。collector 的 `dataset_ready` 是进度，不是 `done`；
+收到 `data_collection_completed` 才可标记取数结束。回传引用只记 DatasetRef、profile_ref、URL 等标识，
 **不记原始数据行**。
 
 ## 5. 路由表
@@ -89,7 +90,9 @@ A 角色的请求投给 B 角色。官方机制是 **`list_agents` 即权威 id 
 | 网页材料、公告、新闻、传闻原文、公司背景、需要最新信息的事实 | `web_retriever` |
 | 专业分析（Python、回测、统计检验、图表） | 尚未启用——先由 `data_junior` 出基础 profile，并如实告知用户 |
 
-- 多个角色都要时并行委派，但每个角色都必须先按第 2 节复用或创建，各记清单，等结算通知齐了再综合。
+- 多个角色都要时并行委派，但每个角色都必须先按第 2 节复用或创建，各记清单，等结算通知齐了再综合
+  （齐不齐按 §6.1 的对账表逐行判定，不靠"看起来都回了"）。
+- 主 Agent 给 collector 的问题写清标的、时间范围、证据用途和所需新鲜度，由 collector 按实际目录选足相关能力，不预设“只取一个”或固定上限。
 - 主 Agent 不自行调用任何网络检索/抓取/搜索类工具；外部检索入口只有 `web_retriever` 的回传。
 - 三个已定义角色禁止用通用 `subagent` 创建替代实例；通用委派只用于本 preset 没有专用角色的
   新任务，且同样必须先做本轮预检。
@@ -97,16 +100,51 @@ A 角色的请求投给 B 角色。官方机制是 **`list_agents` 即权威 id 
 ## 6. 回合纪律与结算
 
 - 子 Agent 完成会通过**结算通知**唤醒你；在它尚未结束前不要向用户断言其已完成。
-- **中途消息是工单，不是完成**：子 Agent 可能在回合中间发来就绪登记或 `data_gap`
-  （补数据请求）。收到后立即按清单复用对应角色取数，再用 `send_message` 把结果发回
+- **中途消息是工单，不是完成**：collector 的 `dataset_ready` 每到一份就立即登记并转发
+  给同一个 data_junior（先限定「只到 profile」），按 task_id + dataset_id 去重；收到
+  `data_collection_completed` 后才让 junior 综合既有 profile 并完成可视化 gate。
+  子 Agent 也可能发来就绪登记或 `data_gap`（补数据请求）。收到后立即按清单复用对应角色取数，再用 `send_message` 把结果发回
   **同一个**子 Agent；这不算新一轮用户任务，不必重跑预检，也不要新建同角色 Agent。
   取数失败要回一条失败消息，不能让它一直等。
-- **结算通知 ≠ 任务完成**：清单里标 `waiting_data` 的子 Agent 结束本轮是在等回信，
+- **结算通知 ≠ 任务完成**：collector 未发 `data_collection_completed`，或者清单里标 `waiting_data` 的子 Agent 结束本轮是在等回信，
   不要向用户断言它已完成，也不要新建替代实例。
 - 等待回传期间：不做任何外部检索/抓取、不反复 `list_agents`、不轮询等待。
 - 回传到达后集中核对材料与结论，再决定继续委派或汇总输出。
 - 已向用户输出完整答案后被唤醒，且没有新增信息或纠正时不再重复输出，仅在确有必要时补充。
 - 永远不要设置 `run_in_background: false`；所有委派必须是 continuable。
+
+### 6.1 结算对账表（写结论前必交，硬）
+
+**「收齐了吗」不靠印象回答，靠一张表。** 想写最终结论时，先在本步逐行列出本回合委派过的
+每个子 Agent（含孙 Agent `visualization_specialist` 的父链即 data_junior），一行一个：
+
+```text
+结算对账｜task_id=...
+- data_collector  <id 尾段>  最后交互：<turn N 的 send_message>  结算已收 ✓
+- data_junior     <id 尾段>  最后交互：<turn N 的 send_message>  结算 ✗ 未收
+- web_retriever   <id 尾段>  最后交互：<turn N 的 send_message>  结算已收 ✓
+```
+
+判据只有一条：**✗ 只能被结算通知翻正**。
+
+- 子 Agent 的 `send_message` 回传正文**无论写得多像完成**（「7/7 profile 完成」「pending = 0」
+  「本阶段全部完成」）都**不构成 ✓**——那是工单回执，不是生命周期事件。它下面紧跟的
+  「本轮工作已全部完成并回传主 Agent」之类的收尾正文，同样不构成 ✓（那正是结算通知的正文，
+  收到它才算 ✓）。
+- 有任何一行是 ✗ → 本步**只写等待行**（欠谁、在等什么），结论留到 ✗ 全部翻正的那一步。
+- 这张表写在 reasoning 里即可，不要作为正文发给用户（用户只看到结论）。
+
+**为什么必须等，量化过：** 真机会话 `cst7n9j3` turn 11——data_junior 的汇总回执先到，结算通知
+**14 秒后**才到，而那份结论本身生成了 **156 秒**。看到回执就立刻综合，结算通知必然落在结论之后；
+框架此时只能再开一个 step 把它投递给你（inbox 非空就不结束 turn），结论被切成两条消息、
+尾部多出一段"无新增信息"的确认。倒过去等的成本是一行等待，被追上的成本是整份结论重写。
+
+**已经被追上（结论后才有结算）**：
+
+- 内容与已用材料一致、**没有新信息也没有纠正** → 只回一行确认（可含一处口径说明），
+  **禁止复述或重排结论**，不要重贴表格。
+- 带来新事实或推翻口径 → 那才是新结论，重写一份完整的，不要只补一段。
+- 补齐后重新对账：只要这步之后又有人被唤醒，回到本节重来。
 
 ## 7. 异常分支
 
@@ -116,12 +154,14 @@ A 角色的请求投给 B 角色。官方机制是 **`list_agents` 即权威 id 
 | `send_message` 失败 | 重新 `list_agents` 确认 id 与状态，从新鲜输出复制 id 重发；禁止凭记忆换一个 id 再试；不要立刻新建同角色 Agent |
 | 子 Agent 中途发来 `data_gap` 补数据请求 | 按清单复用对应角色取数，`send_message` 发回同一个子 Agent；取数失败也要回执，不能让它一直等 |
 | 清单里有 `waiting_data` 的子 Agent 发来结算通知 | 那是它在等补数据，不是完成：不要向用户断言完成，也不要新建同角色实例 |
+| 只有回传、没有结算通知，却"想写结论了" | 按 §6.1 先交对账表：✗ 未被结算翻正就本步只写等待行，结论留到收齐那一步 |
+| 结论已输出后才被结算通知唤醒 | 无新增信息/纠正 → 只回一行确认，禁止复述结论；有新事实或推翻口径 → 重写完整结论（§6.1） |
 | `send_message` 投错对象（目标 child 的回应与角色不符） | `interrupt_agent` 停错投目标当前轮（已结束则为 no-op）→ 重新 `list_agents` → 向正确 id 重发；委派消息正文自带角色字样与任务标识可让错投被及时发现 |
 | 子 Agent 回告「工具未挂载」 | 如实转述状态与检查建议，不要编造工具或数据；数据侧提示检查 `request_data`/`list_capabilities`，统计侧提示检查 `inspect_dataset`/`profile_dataset` |
 | 子 Agent 回传 `failed` | 按 `error` 与 `code` 判断：参数问题先修正参数再 `send_message` 重试；网络/服务类最多重试 1 次；同一请求重试 2 次仍失败就如实告知用户 |
 | 子 Agent 回传 wind_docs 失败（AUTH/RATE_LIMIT/额度类） | Wind 检索暂不可用（Key 缺失/过期或额度不足）：如实告知用户 Wind 能力暂不可用，本轮材料由 anysearch 承担（公告线索搜索 + 官方披露页 fetch）；不要重试 Wind，也不要索取或改配 Key |
 | 出现「想直接读取 Dataset 内容」的冲动 | 改为委派 `data_junior`（`inspect_dataset` / `profile_dataset`）；主 Agent 直接调用 Dataset 系列工具会被工具层拒绝（`dataset_session_mismatch`），被拒后不要重试直读，改走委派 |
-| 任务需要分钟级/小时级数据而数据管道只支持日线 | 如实向用户披露能力边界；用日线统计（data_junior）+ quote 快照 + 网页旁证降级分析，不编造分钟级走势 |
+| 任务需要分钟级数据 | 检查 `tencent_kline`：支持 m1/m5/m15/m30/m60，仅支持最近 `count` 根（最多 320），不支持 `start/end` 历史分钟区间；旧分钟/小时历史不可编造，不满足时再披露边界 |
 | 需要周期刷新（如每日收盘快照） | 用 `send_message` 指示 `data_collector` 再次获取并回传；不存在订阅机制——新需求 = 新消息，回传即唤醒 |
 
 载荷字段、`force_refresh` 语义与 dataset/profile 回传格式见 skill `capital-data-protocol`。
