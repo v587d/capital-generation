@@ -5,9 +5,11 @@
 
 ## 1.1 各角色的硬边界
 
-- **`data_collector`**：唯一接收上游原始数据的子 Agent；宿主立即持久化到 workspace，只回传
-  `DatasetRef`。叶子节点——不得创建或指挥下游子 Agent（回归 `test/persona.test.mjs`，下同「叶子
-  边界」）。
+- **`data_collector`**：唯一接收上游原始数据的子 Agent；宿主立即持久化到 workspace，每次
+  `request_data` 返回一份 DatasetRef 就向主 Agent 发送一次 `dataset_ready`（缓存命中、分页每页也一样），
+  每次最终失败发 `data_failed`，所有请求结束再发 `data_collection_completed`。不设单回合能力数量上限，
+  根据问题所需证据与实际来源选择，绝不为凑能力而全量遍历。叶子节点——不得创建或指挥下游子 Agent
+  （回归 `test/persona.test.mjs`，下同「叶子边界」）。
 - **`data_junior`**（`subagent_data_junior`）：主 Agent 直接子 Agent，与 data_collector 是兄弟、
   后者不得指挥它；只接收 `DatasetRef`。用法口径在工具 description、子 persona 与 skill
   `capital-data-protocol`，本节只留维护者约束：
@@ -26,7 +28,8 @@
     `bash` 是**纯计算兜底**，**不是取数通道**（§1.6 → `bash-gate.md`）。data_analyst 启用前逐行 /
     序列级分析没有合规路径，须如实告知用户并降级到统计能力。
 - **主 Agent 读数据一律委派 data_junior**，绝不直接调用 Dataset 系列工具（工具层拒绝主 Agent，
-  `dataset_session_mismatch`）。
+  `dataset_session_mismatch`）。collector 每送达一份 DatasetRef 就把该份交同一个 junior 先到 profile / query，
+  收到 collector 终结消息后才要求综合与可视化 gate；同一 task_id + dataset_id 不重复派发。
 - **`visualization_specialist`**：one-shot 前台子 Agent，工具表只有 `skill` + `render_chart`；
   spec 由它组装，data_junior 只交"要什么视图"。
 - **`data_analyst`**：保持 `disabled`，启用前置条件见 §8.4（`preset-persona.md`）。
@@ -50,6 +53,15 @@
 - **最终结论前对账结算通知**（真机 `01d6197b`：回传先到、结算后到，结论被切成两个消息）：收齐
   每个子 Agent **最后一次交互之后**的全部结算通知才写结论。对账只约束顺序 ≠ 完成判定；不是猜
   轮号（那条路见 §6.3 → `chart-delivery-events.md`）。回归 `test/persona.test.mjs`「对账结算通知」。
+- **对账必须是逐行产物，不是心算**（真机 `cst7n9j3` turn 11 复发，规则当时已存在但被跳过）：
+  data_junior 汇总回执先到、结算通知 **14s 后**到，而结论生成占了 **156s**，主 Agent 在 reasoning
+  里直接写 "All three roles done" 就开始综合——把回传正文（"7/7 完成、pending = 0"）当成了完成
+  证据。框架侧没有商量余地：step 边界 inbox 非空就必然再开一个 step 投递那条结算，turn 不会结束
+  （对比同一会话 turn 9→10：结算到达时 turn 已收，splice 目标是 `next-turn`，落成干净的新轮）。
+  所以修法是把沉默的判断变成必须输出的**结算对账表**（格式与"✗ 只能被结算通知翻正"的判据在
+  skill `capital-orchestration` §6.1），漏计会表现为自相矛盾的行而不是悄悄溜过去；结论已被追上的
+  处置（无新增信息只回一行、有新事实才重写）同节。回归断言在 `test/persona.test.mjs`
+  「对账表」与「skill 内容」两处。
 
 ## 1.5 capability 发现与体积预算
 

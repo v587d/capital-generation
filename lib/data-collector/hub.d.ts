@@ -37,6 +37,8 @@ export interface SchemaDescriptor {
     data_key: string;
     source_label?: string;
     paginated?: boolean;
+    /** 可复用 Dataset 的最长采集年龄；未声明时仅受 Dataset 保留期约束。宿主内部字段。 */
+    cacheMaxAgeMs?: number;
     /**
      * 行数组位置的显式声明。龙虎榜这类响应的行数组不在 `item` 下（`stock_items`），
      * 只靠形状推断会把整份数据判成「不可读的文档」。谁产出数据谁声明行在哪里，

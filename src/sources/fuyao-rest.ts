@@ -584,6 +584,7 @@ interface EndpointDefinition {
   normalize(params: Params): Params
   guard: GuardSpec
   paginated?: boolean
+  cacheMaxAgeMs?: number
 }
 
 function normalizeQuote(params: Params): Params {
@@ -974,6 +975,7 @@ function endpointDefinitions(): EndpointDefinition[] {
     {
       name: 'get_a_share_prices_snapshot',
       capability: 'quote',
+      cacheMaxAgeMs: 60_000,
       summary: 'A 股行情快照（指定标的或全市场分页）',
       description: '获取 A 股行情快照。两种模式：①指定标的：thscodes 传逗号分隔的完整代码（如 600519.SH,000001.SZ；自动 trim/大写/去重，裸代码被拒），此模式下 limit/offset 按上游语义忽略；②全市场遍历：省略 thscodes，用 limit/offset（limit >= 1、offset >= 0）逐页取数。快照不含股票名称。',
       path: '/api/a-share/prices/snapshot',
@@ -1163,6 +1165,7 @@ function endpointDefinitions(): EndpointDefinition[] {
     {
       name: 'get_a_share_valuations_snapshot',
       capability: 'valuation',
+      cacheMaxAgeMs: 60_000,
       summary: '批量估值快照（PE/PB/PS/PCF）',
       description: '批量获取 A 股最新估值快照（固定 5 个指标：市盈率 TTM/MRQ、市净率 MRQ、市销率 TTM、市现率 TTM）。thscodes 必填，逗号分隔的完整代码（6 位数字 + .SH/.SZ/.BJ），单次最多 100 个原始 token（去重前校验，服务端按请求顺序去重返回）。不提供历史估值、分页或指标选择；上游缺失的指标为 null，不补零；未返回的股票不会生成占位项（无匹配时 item 为空数组）。',
       path: '/api/a-share/valuations/snapshot',
@@ -1177,6 +1180,7 @@ function endpointDefinitions(): EndpointDefinition[] {
     {
       name: 'get_a_share_auction_snapshot',
       capability: 'auction',
+      cacheMaxAgeMs: 60_000,
       summary: '集合竞价快照（实时盘口或终态）',
       description: '获取 A 股集合竞价快照。thscodes 必填，逗号分隔的完整代码，单次最多 100 个原始 token；stage 取 live（实时盘口）或 final（9:25 最终撮合形态，默认 final）。返回 data.auction_phase / data.data_status 与竞价明细：auction_pct 为涨跌幅百分数原值，auction_volume/auction_unmatched 单位为股，auction_amount 单位为元，auction_turnover_pct 为竞价换手率百分数原值，auction_volume_ratio 为竞价量比。',
       path: '/api/a-share/auction/snapshot',
@@ -1270,6 +1274,7 @@ function endpointDefinitions(): EndpointDefinition[] {
     {
       name: 'get_a_share_index_prices_snapshot',
       capability: 'index_quote',
+      cacheMaxAgeMs: 60_000,
       summary: '指数行情快照（批量）',
       description: '按 thscodes 批量获取指数最新行情快照（覆盖交易所指数与同花顺板块/行业指数）。thscodes 必填，逗号分隔，不接受空入参枚举全指数；limit/offset 对本接口无效，故不暴露。返回 item[] 字段结构与 A 股行情快照一致（last_price/涨跌/开高低/前收/成交量额），不含指数名称。',
       path: '/api/a-share-index/prices/snapshot',
@@ -1518,6 +1523,7 @@ function endpointDefinitions(): EndpointDefinition[] {
     {
       name: 'get_fund_market_snapshot',
       capability: 'fund_quote',
+      cacheMaxAgeMs: 60_000,
       summary: '场内基金（ETF）行情快照',
       description: '获取单只**场内 ETF** 的最新行情快照。thscode 必填、单只、带后缀，不接受逗号多值。**当前仅支持 ETF：LOF、场外基金、REITs 或尚未开放的基金叶子类型返回 code=3004。** item[] 含 last_price / open_price / high_price / low_price / prev_price / price_change / price_change_ratio_pct（百分数原值）/ price_amplitude_ratio_pct（振幅，百分数原值）/ volume / turnover / turnover_ratio_pct（换手率，百分数原值）；价格按原始货币计价。data.timestamp 在无有效数据时为 null。',
       path: '/api/fund/market/snapshot',
@@ -2075,6 +2081,7 @@ function createSource(definition: EndpointDefinition, baseUrl: string, resolveAp
     data_key: buildDataKey('fuyao', 'api', path),
     source_label: 'fuyao',
     paginated: definition.paginated === true,
+    cacheMaxAgeMs: definition.cacheMaxAgeMs,
     // 行数组位置由端点自己声明（护栏里的 itemKey 就是同一份知识）：龙虎榜的行
     // 在 `stock_items` 下，不声明就会被存储层按 `item` 猜成「非行集合」。
     rowShape: { rowKey: definition.guard.itemKey ?? 'item', ...(definition.guard.rowKeys === undefined ? {} : { rowKeys: definition.guard.rowKeys }) },

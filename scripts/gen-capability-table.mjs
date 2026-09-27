@@ -1,8 +1,8 @@
 /**
  * 生成 docs/data-collector-capabilities.md（能力总表）。
  *
- * 为什么是脚本而不是手写：61 个端点的表格手工维护必然漂移。本脚本从
- * `src/sources/fuyao-rest.ts` 与 `src/sources/tencent-http.ts` 的端点定义直接生成表格，`test/data-collector-capabilities.test.mjs`
+ * 为什么是脚本而不是手写：69 个端点的表格手工维护必然漂移。本脚本从
+ * `src/sources/fuyao-rest.ts`、`src/sources/tencent-http.ts` 与 `src/sources/eastmoney-http.ts` 的端点定义直接生成表格，`test/data-collector-capabilities.test.mjs`
  * 再断言"文档 == 实现"，于是新增端点忘了同步时会在测试里失败，而不是在文档里悄悄过期。
  *
  *   npm run docs:capabilities
@@ -69,9 +69,9 @@ L.push('')
 L.push('data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，主 Agent 与用户都不直接接触原始数据：')
 L.push('')
 L.push('1. 主 Agent 通过 `subagent_data_collector` 委派需求（只传需求与参数，不传原始数据）。')
-L.push('2. data_collector 先调一次 `list_capabilities` 取回**能力目录**（capability + 一行摘要 + 是否分页），再对要用的能力调一次 `describe_capability` 取回 `input_schema`，最后用 `request_data` 取数。')
-L.push('3. 宿主把上游原始数据**立即持久化**为不可变 Dataset（workspace 内、默认保留 7 天），工具只回传 `DatasetRef` 元数据；原始行永不进入任何 Agent 的上下文。')
-L.push('4. 需要看数据内容或基础统计时，由兄弟子 Agent `data_junior` 用 `inspect_dataset` / `profile_dataset` 完成，回传 `profile_ref`。')
+L.push('2. data_collector 按问题涉及的事实选能力，不设单回合数量上限；先调一次 `list_capabilities` 取回精简目录，再逐个 `describe_capability` 核对 `input_schema`，用 `request_data` 逐份取数。')
+L.push('3. 宿主把上游原始数据**立即持久化**为不可变 Dataset（workspace 内、默认保留 7 天）；每份 DatasetRef（含缓存命中、分页的每页）由 collector 立即通知主 Agent，全部请求结束另发终结消息。原始行永不进入任何 Agent 的上下文；主 Agent 可在取下一份期间把已到的数据交给 data_junior。')
+L.push('4. 需要看数据内容或基础统计时，由兄弟子 Agent `data_junior` 用 `describe_dataset` 完成 profile 与受控 query，回传 `profile_ref`。')
 L.push('')
 L.push('## 通用约定')
 L.push('')

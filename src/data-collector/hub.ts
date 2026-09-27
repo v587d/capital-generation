@@ -48,6 +48,8 @@ export interface SchemaDescriptor {
   data_key: string
   source_label?: string
   paginated?: boolean
+  /** 可复用 Dataset 的最长采集年龄；未声明时仅受 Dataset 保留期约束。宿主内部字段。 */
+  cacheMaxAgeMs?: number
   /**
    * 行数组位置的显式声明。龙虎榜这类响应的行数组不在 `item` 下（`stock_items`），
    * 只靠形状推断会把整份数据判成「不可读的文档」。谁产出数据谁声明行在哪里，
@@ -219,6 +221,9 @@ export class DataCollectorHub {
   registerSource(source: DataSource): () => void {
     const capability = source.schema.capability
     if (!capability) throw new Error('data source requires a capability')
+    if (source.schema.cacheMaxAgeMs !== undefined && (!Number.isSafeInteger(source.schema.cacheMaxAgeMs) || source.schema.cacheMaxAgeMs <= 0)) {
+      throw new Error(`data source ${capability} cacheMaxAgeMs must be a positive safe integer`)
+    }
     if (this.sources.has(capability)) throw new Error(`data source capability already registered: ${capability}`)
     for (const other of this.sources.values()) {
       if (other.schema.data_key === source.schema.data_key) throw new Error(`data source data_key already registered: ${source.schema.data_key}`)
@@ -262,7 +267,9 @@ export class DataCollectorHub {
         }).catch(() => {})
       }
       const reusable = await lookup
-      if (reusable) return reusable
+      const maxAge = this.sources.get(normalized.capability)?.schema.cacheMaxAgeMs
+      const age = reusable ? this.now() - reusable.captured_at : 0
+      if (reusable && (maxAge === undefined || (age >= 0 && age < maxAge))) return reusable
       const afterLookup = this.queue.find((item) => item.mergeKey === key) ?? (this.active && this.active.mergeKey === key ? this.active : undefined)
       if (afterLookup) return this.awaitSettlement(afterLookup, options.signal)
     }

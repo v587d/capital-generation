@@ -121,7 +121,7 @@ function probeSource() {
     `}`,
     ``,
     `async function attempt(ctx) {`,
-    `  const result = { preset: null, broken: null, entry: null, localFetchEnabled: null, rows: null, problems: [] }`,
+    `  const result = { preset: null, broken: null, entry: null, localFetchEnabled: null, rows: null, presetRows: null, problems: [] }`,
     `  try {`,
     `    const agentPresets = ctx.get('agentPresets')`,
     `    if (!agentPresets) result.problems.push('agentPresets 服务未提供')`,
@@ -131,6 +131,10 @@ function probeSource() {
     `      result.broken = record?.broken ?? null`,
     `      if (record?.id !== PRESET_ID) result.problems.push('预设未注册：resolve(' + PRESET_ID + ') 返回 ' + String(record?.id))`,
     `      else if (record.broken) result.problems.push('预设激活失败：' + record.broken)`,
+    `      const composition = (await agentPresets.compositionInventory()).find((item) => item.id === PRESET_ID)`,
+    `      const required = ['persona', 'tool-subagent-data-collector', 'tool-subagent-data-junior', 'capital-generation']`,
+    `      result.presetRows = required.map((id) => ({ id, state: composition?.rows?.find((row) => row.entryId === id)?.fiberState ?? null }))`,
+    `      for (const row of result.presetRows) if (row.state !== 2) result.problems.push('预设子行未激活：' + row.id + '（fiberState=' + row.state + '）')`,
     `    }`,
     `  } catch (error) {`,
     `    result.problems.push('预设解析抛错：' + String(error && error.message || error))`,
@@ -332,6 +336,7 @@ try {
       : ['boot 内探针没有打印结果（探针行未激活，或 resolve/describe 卡住）']
     if (probe.printed) {
       console.log(`smoke-boot: ${probe.preset === PRESET_ID && !probe.broken ? '✅' : '❌'} 预设 ${probe.preset}（broken=${probe.broken ?? 'null'}）`)
+      console.log(`smoke-boot: ${probe.presetRows?.every((row) => row.state === 2) ? '✅' : '❌'} 关键预设行：${JSON.stringify(probe.presetRows ?? [])}`)
       console.log(`smoke-boot: ${probe.entry === 'present' && typeof probe.localFetchEnabled === 'boolean' ? '✅' : '❌'} settings 条目 ${SETTINGS_ENTRY_ID}：${probe.entry}，retriever.localFetch.enabled=${probe.localFetchEnabled}`)
       // 卡片座位在**插件页**（0.1.7 起设置页不再托管第三方卡片）：按 bundle 的行清单核对。
       console.log(probe.rows
