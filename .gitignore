@@ -17,6 +17,11 @@ chart-ui/client.runtime.gen.cjs
 capital-data/
 capital-analysis/
 
+# DSH 会话快照（session.v4.jsonl 那类）：含用户 query、会话全文与内部配置，
+# 2026-09-27 曾随大范围 git add 泄漏到公开仓库，一律禁止入库。
+session*.jsonl
+*.jsonl
+
 # ── 本地研发文档 ──
 # 发版说明草稿：正文发布时贴到 GitHub Release 页面，仓库只保留 README 摘要与 CHANGELOG
 .release-notes-*.md
