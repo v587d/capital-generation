@@ -7,6 +7,9 @@ node_modules/
 *:Zone.Identifier
 *.Zone.Identifier
 
+# ── session capture logs (contain provider/model/header config; never commit) ──
+session.v*.jsonl
+
 # ── build output（本仓库对外提供 lib/，不忽略）──
 # lib/
 
