@@ -27,13 +27,27 @@
 > （**需要 DSH ≥ 0.1.7**：0.1.5 的 settings 与 preset 挂载面已被上游删除，装在旧版上会起不来）。
 > 建议使用 **Deepseek/deepseek-flash**(High thinking) 搭配本项目， GPT / Claude 尚未充分测试，理论亦可。
 
-# Slogan
+# 💬 Slogan
 Next-Gen AI-Driven Capital Generation.
 
-## 样例
+## 📄 样例
 [报告样例（最新）](docs/sample/指南针技术分析报告.md)
 
-## 安装到 DSH Web Profile
+## 📑 目录
+
+- [💬 Slogan](#-slogan)
+  - [📄 样例](#-样例)
+  - [📦 安装到 DSH Web Profile](#-安装到-dsh-web-profile)
+- [🔍 What](#-what)
+  - [📊 data_collector 能力总表](#-data_collector-能力总表)
+  - [🌐 web_retriever 能力](#-web_retriever-能力)
+  - [📈 图表呈现（截图）](#-图表呈现截图)
+  - [🔧 本地开发、构建、测试](#-本地开发构建测试)
+  - [📝 Changelog](#-changelog)
+- [🤝 贡献](#-贡献)
+- [📜 MIT](#-mit)
+
+## 📦 安装到 DSH Web Profile
 
 从 GitHub 安装插件（构建产物 `lib/` 已随仓库提交，**无需**克隆本项目或自行构建）：
 ```bash
@@ -73,7 +87,7 @@ dsh plugin --profile web add github:v587d/capital-generation
 | [<img src="assets/mode_selector.png" width="400" alt="新会话在 Agent Preset 选择器中选择 Capital 模式">](assets/mode_selector.png) | [<img src="assets/DSH@_0.1.7rc2设置默认模式.png" width="400" alt="DSH 0.1.7-rc.2 设置 → Agent 预设：自定义分组里的 Capital 模式与四个内置模式并列">](assets/DSH@_0.1.7rc2设置默认模式.png) |
 | 新会话在 Agent Preset 选择器中选择 Capital 模式 | 也可以在 设置 → Agent 预设 里把 Capital 模式设为默认 |
 
-# What
+# 🔍 What
 Capital Generation 是面向中国散户，适用于日常证券研究的 DSH 插件，简单地说：
 1. Agent preset（人设）：面向金融场景的 Capital 模式，与 DSH 默认的标准、PTC、极简、创造模式并列。
 
@@ -98,15 +112,15 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
   - **工具注册**：通过官方 `tools` 服务向会话注册模型工具，由宿主统一管理工具的生命周期与权限控制。
   - **用户交互**：复用官方 `ask_user_question`、`todo_write`、`send_message`、`list_agents` 等工具，不重复造轮子。
  
-## data_collector 能力总表
+## 📊 data_collector 能力总表
 
 [data_collector 能力总表](docs/data-collector-capabilities.md) 列出全部 **69 个**数据 capability（元数据 / A股行情与财务 / 估值竞价 / 盘面特色 / 指数 / 基金 / 腾讯公开行情 fallback / 东方财富资金与筹码），含端点路径、主要参数（必填以 `*` 标注）、是否分页与用途，并说明**不覆盖**的模块及原因。表格由 `npm run docs:capabilities` 从 source 定义生成，测试断言「文档 == 实现」。
 
 构成：同花顺 Fuyao **61** 个（需 `FUYAO_API_KEY`）、腾讯公开 HTTP **3** 个（`tencent_quote` / `tencent_kline` / `tencent_ticks`）、东方财富 HTTP **5** 个（`eastmoney_top_buy_sell_market` / `eastmoney_top_buy_sell_ticker` / `eastmoney_lockup_expiry` / `eastmoney_sector_rotation` / `eastmoney_cashflow_rotation`）；后两类为公开端点，**无需额外密钥**。
 
-## web_retriever 能力（检索 + 来源查询 + 文档解析）
+## 🌐 web_retriever 能力
 
-web_retriever 有三个工作面，共 **14 个工具**：
+web_retriever 有三个工作面（检索、来源查询、文档解析），共 **14 个工具**：
 
 - **检索**（发现候选 → 按 URL 取正文）：`anysearch_search`（AnySearch 全网搜索）、
   `web_retriever_fetch`（抓取正文，AnySearch 失败时按开关回退本机直连，回执 `via` 标注实际来源；
@@ -135,7 +149,7 @@ web_retriever 有三个工作面，共 **14 个工具**：
 来源边界（深沪不可互换、北交所两边都没有）、翻页纪律（该翻页就翻到没有、空结果是真事实）
 与回传格式见 [capital-web-protocol](preset/capital-generation/skills/capital-web-protocol/SKILL.md)。
 
-## 图表呈现（截图）
+## 📈 图表呈现（截图）
 
 > 出图只有一个入口：`data_junior` 的可视化 gate → one-shot `visualization_specialist`。
 > 序列数据不进模型上下文；图表由宿主以**官方** `deliverables/presented` 登记为**本轮交付物**，
@@ -153,7 +167,7 @@ web_retriever 有三个工作面，共 **14 个工具**：
 `chart.html` 自包含（内联图表库与数据），可离线打开、零外部请求；图内保留
 `Lightweight Charts™ v5.2.1 (Apache-2.0)` 归属信息。
 
-## 本地开发 / 构建 / 测试
+## 🔧 本地开发、构建、测试
 
 ```bash
 npm install
@@ -167,7 +181,7 @@ npm run verify:sessions  # 发布前复核真实会话日志可被冷加载（�
 构建产物 `lib/` 已随仓库提交，普通用户从 GitHub 安装时**无需**本地构建；只有需要改插件源码或
 维护子包时才需要执行以上命令。
 
-## Changelog
+## 📝 Changelog
 
 ### 2.4.0 — 2026-09-26
 
@@ -259,8 +273,8 @@ npm run verify:sessions  # 发布前复核真实会话日志可被冷加载（�
 
 非破坏性新增，从 2.1.0 升级无需迁移。
 
-# 贡献
-可自行克隆本项目，按上方「本地开发 / 构建 / 测试」执行。
+# 🤝 贡献
+可自行克隆本项目，按上方「本地开发、构建、测试」执行。
 由于本项目正在迭代中，具体贡献规则见[CONTRIBUTING](CONTRIBUTING.md)，提 PR 前建议 rebase.
 欢迎提 issue 和 PR.
 
@@ -268,6 +282,6 @@ npm run verify:sessions  # 发布前复核真实会话日志可被冷加载（�
 
 [Capital Generation 项目社区](https://github.com/v587d/capital-generation/discussions)
 
-# MIT
+# 📜 MIT
 
 
