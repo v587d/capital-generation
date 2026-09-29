@@ -32,6 +32,11 @@ ths_api.md
 docs/*
 !docs/sample/
 !docs/data-collector-capabilities.md
+# README 的详情层：首页只留一览表 + 链接，逐角色说明与 web_retriever 工具表住这里。
+# 与能力总表同性质（面向使用者、README 直接链接），所以同样要逐文件放行——漏一行的症状是
+# GitHub 上 404，而 test/release-version.test.mjs 的「README 链接必须被 git 跟踪」会先红。
+!docs/agent-roles.md
+!docs/web-retriever-capabilities.md
 # 接口账本是 scripts/check-dsh-compat.mjs 的操作手册（探针报错会直接指向它），必须入库。
 # 注意：git 不允许重新包含"父目录已被排除"的文件，所以要先放行 docs/reference/ 再逐文件挑选。
 !docs/reference/

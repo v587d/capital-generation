@@ -55,32 +55,29 @@ Next-Gen AI-Driven Capital Generation.
 ```bash
 dsh plugin --profile web add github:v587d/capital-generation
 ```
-安装后，重启 Web profile 使装配生效。
-密钥填在 **「插件」页**（0.1.7 起第三方插件的可编辑面就在这里，不在「设置」页）：
-已安装列表点开 `@v587d/capital-generation` → 「包含的组件」里的 `capital-config` 那一行 → 行详情页的配置段：
+安装后，重启 Web profile 使装配生效。密钥填在 **「插件」页**（0.1.7 起第三方插件的可编辑面就在这里，
+不在「设置」页）：已安装列表点开 `@v587d/capital-generation` → 「包含的组件」里的 `capital-config`
+那一行 → 行详情页的配置段：
 
 | ① 「插件」页 → 已安装 | ② 该 bundle 的 `capital-config` 行 | ③ 卡片：四个密钥 + 本地回退开关 |
 | :---: | :---: | :---: |
-| [<img src="assets/DSH@0.1.7rc2插件设置_1.png" width="300" alt="DSH 0.1.7-rc.2「插件」页：官方分组之下是已安装的 @v587d/capital-generation">](assets/DSH@0.1.7rc2插件设置_1.png) | [<img src="assets/DSH@0.1.7rc2插件设置_2.png" width="300" alt="bundle 详情页「包含的组件」三行：capital-config、capital-charts、preset-capital-generation，点 capital-config 行">](assets/DSH@0.1.7rc2插件设置_2.png) | [<img src="assets/DSH@0.1.7rc2插件设置_3.png" width="300" alt="capital-config 卡片：Fuyao / AnySearch / Wind Alice / PaddleOCR 四个密钥字段（各标已配置密钥）与「允许启动本地提取网页内容」开关">](assets/DSH@0.1.7rc2插件设置_3.png) |
+| [<img src="assets/DSH@0.1.7rc2插件设置_1.png" width="300" alt="DSH 0.1.7-rc.2「插件」页：官方分组之下是已安装的 @v587d/capital-generation">](assets/DSH@0.1.7rc2插件设置_1.png) | [<img src="assets/DSH@0.1.7rc2插件设置_2.png" width="300" alt="bundle 详情页「包含的组件」三行：capital-config、capital-charts、capital-watchlist、preset-capital-generation，点 capital-config 行">](assets/DSH@0.1.7rc2插件设置_2.png) | [<img src="assets/DSH@0.1.7rc2插件设置_3.png" width="300" alt="capital-config 卡片：Fuyao / AnySearch / Wind Alice / PaddleOCR 四个密钥字段（各标已配置密钥）与「允许启动本地提取网页内容」开关">](assets/DSH@0.1.7rc2插件设置_3.png) |
 
 > [!NOTE]
-> 密钥都是免费申请的：必填 [同花顺（fuyao）](https://fuyao.aicubes.cn/docs/)（行情、财务等结构化数据）；
-> 必填 [AnySearch](https://www.anysearch.com/docs)（实时网络搜索）；
-> 推荐 [Wind Alice](https://market.windalice.com/#/home)（公告与信披文档，每天送 300 积分，日常够用）；
-> 推荐 [PaddleOCR AIStudio](https://aistudio.baidu.com/paddleocr)（每天2万页 OCR 免费额度）。
->
-> 在卡片里粘贴保存即可，**无需重启**——新开的 Capital 会话就生效。密钥值只写进 DSH 的 credentials 域
-> （配置里只存引用名，值从不随响应出网），字段旁只会显示「已配置密钥 / 未配置」。
-> 卡片中间的 **「允许启动本地提取网页内容」** 开关（默认开启）控制抓取回退：
-> 开启时 AnySearch 抓取失败会自动改由本机直连抓取该页面（回执 `via` 标注 `local-http`），
-> 关闭则失败原样回传；改动即时保存，新 Capital 会话生效。
->
-> 除上述密钥外不再需要任何 key：`data_collector` 的腾讯 / 东方财富公开能力，以及 `web_retriever`
-> 的九个具名来源查询工具（财联社、华尔街见闻、巨潮、上证e互动、东财、新浪、同花顺）都走公开端点，
-> 装好即可用。
->
-> 不想用卡片界面的话，也可以直接把密钥写进 `~/.dsh/.credentials.yaml`，名字用
-> `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`、`PADDLE_OCR_TOKEN`，插件会自动读取。
+> - **四把密钥都免费申请**：必填 [同花顺（fuyao）](https://fuyao.aicubes.cn/docs/)（行情、财务等结构化数据）
+>   与 [AnySearch](https://www.anysearch.com/docs)（实时网络搜索）；推荐
+>   [Wind Alice](https://market.windalice.com/#/home)（公告与权威新闻，每天送 300 积分）与
+>   [PaddleOCR AIStudio](https://aistudio.baidu.com/paddleocr)（每天 2 万页 OCR 免费额度）。
+>   除这四把之外**不再需要任何 key**：`data_collector` 的腾讯 / 东财公开能力与 `web_retriever` 的九个
+>   具名来源查询工具都走公开端点，装好即可用（明细见
+>   [data_collector 能力总表](docs/data-collector-capabilities.md)、
+>   [web_retriever 能力](docs/web-retriever-capabilities.md)）。
+> - 卡片里粘贴保存即可，**无需重启**——新开的 Capital 会话就生效。密钥值只写进 DSH 的 credentials 域
+>   （配置里只存引用名，值从不随响应出网），字段旁只会显示「已配置密钥 / 未配置」。
+> - 不想用卡片界面也可以直接写 `~/.dsh/.credentials.yaml`，名字用 `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、
+>   `WIND_API_KEY`、`PADDLE_OCR_TOKEN`，插件会自动读取。
+> - 卡片中间的 **「允许启动本地提取网页内容」** 开关（默认开启）控制抓取回退：开启时 AnySearch 抓取失败
+>   会自动改由本机直连抓取该页面（回执 `via` 标注 `local-http`），关闭则失败原样回传。
 
 ### 简单用法
 
@@ -91,29 +88,26 @@ dsh plugin --profile web add github:v587d/capital-generation
 
 # 🔍 What
 Capital Generation 是面向中国散户，适用于日常证券研究的 DSH 插件，简单地说：
-1. Agent preset（人设）：面向金融场景的 Capital 模式，与 DSH 默认的标准、PTC、极简、创造模式并列。
 
-2. 所有 Agent，包括主 Agent 均不能直接接触原始结构数据（行情、财务报表细目等），需要时 Agent 可按需提取再提炼发送消息至主 Agent。
-目前覆盖以下 Subagent（data_analyst 为预留角色，暂未启用）：
-  - data_collector: 主 Agent 直属下级（spawn），负责根据上级指令收集金融财经类结构化数据，目前支持 **69 个数据 capability**：同花顺（fuyao）61 个（行情、财务、估值竞价、盘面特色、指数、基金），腾讯公开 HTTP 3 个（实时行情快照 / 复权与分钟 K 线 / 分笔，行情 fallback），东方财富 HTTP 5 个（龙虎榜汇总、限售解禁日历、板块行情排名与资金流）。后两类走公开端点，无需额外密钥。
-  - data_junior: 主 Agent 直属下级（spawn），负责根据上级指令清洗、整理出有效数据、基础描述性统计以及数据透视，目的是阐述数据背后的“故事”。读一份 Dataset 默认走 `describe_dataset`（一次调用完成元数据 + 基础 profile + 受控查询，多份数据在同一条消息里并发）；时间窗与时间戳换算一律由宿主完成（`time_facts` 的 `axis` / `windows`、`resolve_data_time_range`），子 Agent 不自行把日期算成毫秒。
-  - data_analyst: 主 Agent 直属下级，负责根据上级指令，通过运用编程技能分析上游数据（**仍在开发中**，委派行 disabled，暂不启用）。
-  - web_retriever: 主 Agent 直属下级（spawn），负责根据上级指令，运用网络搜索和抓取能力，获取外部非结构化数据。检索面为 AnySearch（`anysearch_search` / `web_retriever_fetch`，失败可按开关回退本机直连）与 Wind Alice（`wind_docs_announcements` / `wind_docs_news`，公告与权威新闻）；另有九个**具名来源查询工具**（财联社快讯、华尔街见闻快讯、东财 7×24 快讯 / 个股新闻 / 个股研报、新浪研报、同花顺机构一致预期 EPS、巨潮互动易、上证e互动），均为公开端点、零密钥；第三个工作面是**文档解析** `ocr`（PaddleOCR，PDF 研报 / 公告正文与图片 → markdown，需 Token）。详见下方能力小节。
-  - visualization_specialist: 主 Agent 的孙 Agent（data_junior 的 one-shot 前台子 Agent），由 data_junior 在 profile 完成后的可视化 gate 中按需创建；只接收 `profile_ref`、有限 profile 事实与短期 `chart_source_ref`，使用受控 `render_chart` 生成自包含 HTML 图表，并只向 data_junior 回传 `chart_ref` 小回执；不接触原始 rows、不向主 Agent 直接发消息，当前是唯一的 one-shot 角色。
-  - 未来更多，欢迎 PR 
+1. **Agent preset（人设）**：面向金融场景的 Capital 模式，与 DSH 默认的标准、PTC、极简、创造模式并列。
 
-3. 沿用 DSH 官方基础设施，不自行实现底层机制：
-  - **预设挂载**：整份装配由一颗官方 `@deepseek-ai/dsh-agent-preset` **声明行**声明（`config = { id, plugins }`），组合与 `agentPresets` 服务归宿主；插件不扫目录、不自建 registry。`config.id` 是写进会话日志的身份，历史会话靠它恢复。
-  - **Subagent 编排**：通过官方 `dsh-subagent` 行注册委派工具，子 Agent 的创建、消息收发与生命周期管理完全交给宿主；本插件只定义每个角色的 persona 与 toolFilter。
-  - **人设注入**：通过官方 `dsh-persona` 行声明主 Agent 人设，不占用 `deployment:persona` 节；子 Agent 人设由委派行 `config.persona` 承载，由宿主自动注入子 Agent 作用域。
-  - **技能注入**：主 persona 只保留每轮都要生效的硬规则（预检、复用、路由、合规），长协议与载荷示例放在 preset 自带的 `skills/` 目录，由 `dsh-skill-filesystem` + `dsh-tool-skill` 两行按需加载；插件代码不注册 skill provider。
-  - **工作区约定**：通过官方 `dsh-agent-instructions` 行加载工作区 `AGENTS.md` / `CLAUDE.md`。
-  - **上下文压缩**：通过官方 `dsh-compaction-basic` / `dsh-compaction-tool-result-pruner` 行提供长会话压缩与大结果剪枝。
-  - **数据持久化**：通过宿主侧 `fs` / `sandboxPolicy` 服务完成 Dataset 落盘与权限校验，不直接操作文件系统；所有数据落在用户 workspace，服从当前 session 的沙箱策略。
-  - **用户级资产**：自选股这类**跨 workspace** 的用户数据走官方 `dsh-storage-domain`（域 `capital_watchlist`，落 `~/.dsh/storages/`），不自建文件路径；浏览器半边只与本机 loopback 上的宿主路由对话，密钥从不进浏览器。
-  - **配置与凭据**：可编辑项就是插件条目 Config 里标了 `.volatile()` 的字段，DSH 自动把它投影成「插件」页上的表单（命名空间恒等于条目 id），插件不自建设置界面；API Key 经宿主 `credentials` 服务解析引用，不硬编码、不缓存、不写进配置文档、不随响应出网。
-  - **工具注册**：通过官方 `tools` 服务向会话注册模型工具，由宿主统一管理工具的生命周期与权限控制。
-  - **用户交互**：复用官方 `ask_user_question`、`todo_write`、`send_message`、`list_agents` 等工具，不重复造轮子。
+2. **多 Agent 分工，原始数据不进上下文**：所有 Agent（含主 Agent）都不直接接触原始结构数据，
+   需要时由下级按需提取、提炼后回传。目前覆盖以下 Subagent（`data_analyst` 为预留角色，暂未启用）：
+
+   | 角色 | 层级 | 一句话 |
+   |---|---|---|
+   | `data_collector` | 主 Agent 直属（可续接） | 收集结构化数据：**69 个 capability**（同花顺 61 + 腾讯公开 3 + 东财 5），后两类零密钥 |
+   | `data_junior` | 主 Agent 直属（可续接） | 清洗、整理、基础统计与透视：读 Dataset 默认 `describe_dataset`，时间换算一律由宿主完成 |
+   | `data_analyst` | 主 Agent 直属 | 用编程技能分析上游数据（**仍在开发中**，委派行 disabled） |
+   | `web_retriever` | 主 Agent 直属（可续接） | 外部非结构化数据：检索 / 具名来源查询 / 文档解析，共 **14 个工具** |
+   | `visualization_specialist` | `data_junior` 的 one-shot 子 Agent | 出图：只收 `profile_ref`、只回 `chart_ref`，不接触原始 rows，不直接向主 Agent 发消息 |
+
+   逐角色职责与更多细节见 [Agent 角色与 DSH 能力复用](docs/agent-roles.md)。
+
+3. **沿用 DSH 官方基础设施，不自行实现底层机制**：预设挂载、Subagent 编排、人设与技能注入、工作区约定、
+   上下文压缩、数据持久化与用户级资产、配置与凭据、工具注册、用户交互——全部走官方扩展面，插件只带
+   persona、toolFilter 与工具实现。这些通道的上游契约由 22 条探针逐条看守（`npm run check:dsh`）；
+   11 条复用清单见 [Agent 角色与 DSH 能力复用](docs/agent-roles.md)。
 
 ## 🧭 多 Agent 编排（截图）
 
@@ -125,43 +119,25 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
 | :---: |
 | [<img src="assets/agent-task-management.png" width="900" alt="任务管理树状图：主代理之下是 web_retriever、data_collector 与运行中的 data_junior（三者标注可续接），data_junior 再挂六个一次性子代理，卡片标题是走势对照与 OHLC 出图任务">](assets/agent-task-management.png) |
 
-卡片上的「可续接 / 一次性」两种形态正好对上上面第 2 节的角色表：三个直属下级是 continuable 的常驻角色
-（`send_message` 可反复来回），出图那一层是 one-shot——只收 `profile_ref` 与短期图表引用，
-只回一个 `chart_ref` 小回执。这一轮共 9 个子代理：3 个常驻 + 6 个一次性出图（走势对照与 OHLC 缩放）。
+卡片上的「可续接 / 一次性」两种形态正好对上上面的角色表：三个直属下级是 continuable 的常驻角色
+（`send_message` 可反复来回），出图那一层是 one-shot。这一轮共 9 个子代理：3 个常驻 + 6 个一次性出图。
 
 ## 📊 data_collector 能力总表
 
 [data_collector 能力总表](docs/data-collector-capabilities.md) 列出全部 **69 个**数据 capability（元数据 / A股行情与财务 / 估值竞价 / 盘面特色 / 指数 / 基金 / 腾讯公开行情 fallback / 东方财富资金与筹码），含端点路径、主要参数（必填以 `*` 标注）、是否分页与用途，并说明**不覆盖**的模块及原因。表格由 `npm run docs:capabilities` 从 source 定义生成，测试断言「文档 == 实现」。
 
-构成：同花顺 Fuyao **61** 个（需 `FUYAO_API_KEY`）、腾讯公开 HTTP **3** 个（`tencent_quote` / `tencent_kline` / `tencent_ticks`）、东方财富 HTTP **5** 个（`eastmoney_top_buy_sell_market` / `eastmoney_top_buy_sell_ticker` / `eastmoney_lockup_expiry` / `eastmoney_sector_rotation` / `eastmoney_cashflow_rotation`）；后两类为公开端点，**无需额外密钥**。
+构成：同花顺 Fuyao **61** 个（需 `FUYAO_API_KEY`）、腾讯公开 HTTP **3** 个（`tencent_quote` / `tencent_kline` / `tencent_ticks`）、东方财富 HTTP **5** 个（龙虎榜汇总与单票、限售解禁日历、板块行情排名、板块资金流）；后两类为公开端点，**无需额外密钥**。
 
 ## 🌐 web_retriever 能力
 
-web_retriever 有三个工作面（检索、来源查询、文档解析），共 **14 个工具**：
+三个工作面共 **14 个工具**，逐个的上游、参数与用途见
+[web_retriever 能力](docs/web-retriever-capabilities.md)（同样由测试断言「文档 == 实现」）：
 
-- **检索**（发现候选 → 按 URL 取正文）：`anysearch_search`（AnySearch 全网搜索）、
-  `web_retriever_fetch`（抓取正文，AnySearch 失败时按开关回退本机直连，回执 `via` 标注实际来源；
-  遇到 PDF 是能力边界不是故障，改道 `ocr`）、
-  `wind_docs_announcements` / `wind_docs_news`（Wind Alice 公告与权威新闻，默认第一选择）。
-- **来源查询**（具名来源 + 业务参数 → 确定、有序、可翻页、同参可复现的结果集；全部公开端点、零密钥）：
-
-| 来源 | 工具 | 用途 |
-|---|---|---|
-| 财联社 | `cls_telegraph` | 7×24 全市场快讯（签名本地计算、零 key） |
-| 华尔街见闻 | `wscn_lives` | 7×24 快讯，按 `channel` + `cursor` 翻页 |
-| 东方财富 | `eastmoney_724` | 7×24 快讯，与财联社 / 见闻三条互为备份（聚合内容按标题去重） |
-| 东方财富 | `eastmoney_stock_news` | 个股新闻（区分「上游风控」与「该股确实没有新闻」） |
-| 东方财富 | `eastmoney_reports` | 个股研报列表（含评级与逐篇预测 EPS；正文是 PDF，条目直接给出 `pdf_url` 直链，原样交 `ocr` 解析） |
-| 新浪 | `sina_reports` | 研报第二来源（不含评级与目标价） |
-| 同花顺 | `ths_eps_forecast` | 机构一致预期 EPS（逐年：机构数 / 最小 / **均值** / 最大 / 行业平均） |
-| 巨潮互动易（深市） | `cninfo_irm` | 投资者问答：公司怎么回应某传闻 / 关切 |
-| 上证e互动（沪市） | `sseinfo_qa` | 沪市投资者问答，不传 `code` 可看全市场最新 |
-
-- **文档解析**：`ocr`（PaddleOCR AIStudio，14 个工具里**唯一要 Token** 的）把 PDF 研报 / 公告正文
-  或图片解析成 markdown。一个工具四种形态：`url`（公网 PDF 直链）/ `file`（工作目录里的本地文档，
-  用户 `@xxx.pdf` 推给主 Agent 的可直接解析）/ `job_id` + `doc_id`（续查未跑完的作业，不重复计费）/
-  `doc_id` + `pages` \| `query`（本地读已落盘正文，零出网）。作业**整篇一次算完、按整篇计费**，
-  `pages` 只影响读；产物落 `capital-data/ocr/<doc_id>/`，同一份文档重复调用命中缓存直接回读。
+- **检索**（4）：`anysearch_search` 发现候选、`web_retriever_fetch` 按 URL 取正文（失败可按开关回退本机直连），
+  `wind_docs_announcements` / `wind_docs_news`（Wind Alice）是官方公告与权威新闻的默认第一选择。
+- **来源查询**（9，全部公开端点、零密钥）：财联社 / 华尔街见闻 / 东财三条 7×24 快讯互为备份，东财个股新闻
+  与研报列表、新浪研报、同花顺机构一致预期 EPS、巨潮互动易（深市）、上证e互动（沪市）。
+- **文档解析**（1）：`ocr`（PaddleOCR，14 个工具里唯一要 Token 的）把 PDF 研报 / 公告或图片解析成 markdown。
 
 来源边界（深沪不可互换、北交所两边都没有）、翻页纪律（该翻页就翻到没有、空结果是真事实）
 与回传格式见 [capital-web-protocol](preset/capital-generation/skills/capital-web-protocol/SKILL.md)。
@@ -195,12 +171,11 @@ web_retriever 有三个工作面（检索、来源查询、文档解析），共
 | [<img src="assets/instruction-watchlist.png" width="400" alt="输入框菜单「指令」小节末尾的自选股一行，右侧是添加 / 查看 / 删除的说明">](assets/instruction-watchlist.png) | [<img src="assets/watchlist-popup.png" width="400" alt="自选股面板：搜索框、带类型标签与最新价涨跌幅的清单、刷新报价按钮与更新时间">](assets/watchlist-popup.png) |
 | 输入 `/`（与左下角 `+` 是同一份菜单）打开，只在 Capital 会话出现 | 默认播种四条主要沪深指数，删空不重建 |
 
-- **搜索添加**：输证券代码（不带后缀，如 `300750`）或中文名（如 `宁德时代`）都能命中，
-  多命中时列候选由用户点选；本版覆盖 A 股 / 指数 / ETF 三类，候选最多 10 条。
-- **报价**：按标的类型分流到行情快照端点，清单上限 10 条；每行显示最新价与涨跌幅
-  （红涨绿跌），底部是本次快照的更新时间。打开面板即刷一次（清单为空则只读本地、不出网），
-  此后只有点「刷新报价」才出网，同一时刻只允许一次刷新在途。
-- **删除**：面板内二次确认，不弹系统原生对话框。
+- **搜索添加**：输证券代码（不带后缀，如 `300750`）或中文名（如 `宁德时代`）都能命中，多命中时列候选
+  由用户点选；覆盖 A 股 / 指数 / ETF 三类，候选最多 10 条，清单上限 10 条。
+- **报价**：每行显示最新价与涨跌幅（红涨绿跌），底部是本次快照的更新时间。打开面板即刷一次
+  （清单为空则只读本地、不出网），此后只有点「刷新报价」才出网，同一时刻只允许一次刷新在途；
+  删除走面板内二次确认。
 - **边界**：清单落在 `~/.dsh/storages/capital_watchlist.json`（官方存储域，不在任何 workspace 目录内）；
   浏览器半边只与本机 loopback 上的宿主路由对话，且该路由接宿主的认证围栏——密钥与上游调用全在宿主侧。
 
@@ -238,97 +213,8 @@ npm run verify:sessions  # 发布前复核真实会话日志可被冷加载（�
   （typed 路径按注册名直查，与过滤面无关）。
 
 从 2.4.0 升级**无迁移**：无工具改名、无入参变化、无新增密钥；只是多了一颗宿主平面行，
-装完重启 DSH web profile 生效。完整变更历史见 [CHANGELOG.md](CHANGELOG.md)。
-
-### 2.4.0 — 2026-09-26
-
-- **适配 DSH `@0.1.7-rc.2`（破坏性：需要 DSH ≥ 0.1.7）**：0.1.7 删掉了第三方插件依赖的两条旧通道，
-  本版本按新契约重做（issue #3 就是这个适配）。
-- **设置卡片搬到「插件」页**：可编辑面现在是插件条目 Config 里标了 `.volatile()` 的字段，由 DSH
-  自动投影成表单（见上方三步截图）。四个密钥字段与「允许启动本地提取网页内容」开关**内容不变**。
-- **保存后不必再重启**：改动在新开的 Capital 会话即生效（旧版要重启 profile）。
-- **历史 Capital 会话恢复修复**：预设改由官方 `@deepseek-ai/dsh-agent-preset` 声明行注册，
-  不再出现 `RemoteError: Unknown agent preset: capital-generation`。
-- **可视化 gate 认「委派收窄」**：主 Agent 在委派 prompt 里写明「只到 profile」时，`data_junior`
-  照给 `recommended` 结论但**不出图**，并标注未出图是收窄而非数据不支持；想要图就别写这句。
-- **装配自检扩成两条腿**：`npm run smoke:boot` 现在在真实 boot graph 里读运行期的预设解析结果、
-  配置镜像与卡片座位，并用"重复声明同一预设"的反向对照证明这道闸门真的会失败。
-
-从 2.3.0 升级**必须先升级 DSH 到 0.1.7**（留在 0.1.5 就继续用 2.3.0，二者不兼容）。工具入参、
-数据能力与会话日志格式均无变化。完整变更历史见 [CHANGELOG.md](CHANGELOG.md)。
-
-### 2.3.0 — 2026-09-26
-
-- **web_retriever 新增第三个工作面「文档解析」：`ocr` 工具（13 → 14 个工具）**：把 PDF 研报 /
-  公告正文与图片解析成 markdown（PaddleOCR AIStudio）。一个工具四种形态——`url`（公网 PDF 直链）、
-  `file`（工作目录本地文档）、`job_id` + `doc_id`（续查未跑完的作业，不重复计费）、
-  `doc_id` + `pages` \| `query`（本地读已落盘正文，零出网）；作业整篇算完才出结果、按整篇计费，
-  产物落 `capital-data/ocr/<doc_id>/`，同一份文档重复调用命中缓存。
-- **研报正文不再是死路**：`eastmoney_reports` 每条直接给出 `pdf_url` 直链与页数，原样交 `ocr`
-  即可拿到正文，不必再用标题猜结论。
-- **主 Agent 可直接解析用户 `@xxx.pdf` 推进来的本地文档**（`ocr` 是根侧工具收敛的唯一例外，
-  外部 PDF 链接仍须委派 `web_retriever`）。
-- **新增一个可选密钥**：设置卡片多出「PaddleOCR 文档解析 Token」字段（或
-  `~/.dsh/.credentials.yaml` 里写 `PADDLE_OCR_TOKEN`）。免费额度申请；**不填只有 `ocr` 响亮报错，
-  其余能力不受影响**，它也不受「允许启动本地提取网页内容」开关支配。
-
-从 2.2.0 升级无破坏性变更：无工具改名、无入参变化，只有想用 `ocr` 才需多填一个可选 Token。
-完整变更历史见 [CHANGELOG.md](CHANGELOG.md)。
-
-### 2.2.0 — 2026-09-24
-
-- **data_collector 扩到 69 个能力（61 → 69，零新增密钥）**：新增腾讯公开 HTTP 3 个
-  （`tencent_quote` 实时快照 / `tencent_kline` 复权与分钟 K 线 / `tencent_ticks` 分笔，行情 fallback）
-  与东方财富 HTTP 5 个（龙虎榜全市场与单票汇总、限售解禁日历、板块行情排名、板块资金流）；
-  时间窗同步接入 `resolve_data_time_range`，能力总表由 `npm run docs:capabilities` 重新生成，
-  测试断言「文档 == 实现」。
-- **web_retriever 新增九个具名来源查询工具**：`cls_telegraph`（财联社 7×24 快讯，签名本地计算、零 key）、
-  `wscn_lives`（华尔街见闻快讯，按 `channel` + `cursor` 翻页）、`eastmoney_724`（东财 7×24 快讯，
-  与前两条互为备份）、`cninfo_irm`（巨潮互动易问答，深市）、`sseinfo_qa`（上证e互动问答，沪市）、
-  `eastmoney_stock_news`（个股新闻）、`eastmoney_reports`（个股研报列表）、`sina_reports`
-  （研报第二来源，不含评级与目标价）、`ths_eps_forecast`（机构一致预期 EPS，逐年给出机构数 / 最小 /
-  **均值** / 最大 / 行业平均）。它们与检索工具是两个工作面：**检索**是发现候选、按 URL 取正文；
-  **查询**是"具名来源 + 业务参数 → 确定、有序、可翻页、同参可复现的结果集"，
-  该翻页就翻到没有，空结果是真事实。回执带 `count` / `next_cursor` / `note`，
-  并按来源分别计入 `provider_tally`。
-- **东财请求收敛到一份网络面**：进程级共享客户端 + 串行最小间隔（350ms），数据面与 web_retriever
-  共用同一个节流器——东财按出口 IP 风控，两套独立限流等于没限。
-  （`DataCollectorHub` 的 FIFO 只保证"同一时刻一个请求"，**不含最小间隔**：串行 ≠ 节流。）
-- **改名**：`web_retriever_search` → **`anysearch_search`**（按 provider 命名，与 `wind_docs_*` 同口径）。
-  `web_retriever_fetch` 不改名——它是一条 AnySearch→本机直连的**回退链**，回执 `via` 标明实际来源。
-- **修复**：本机直连不再改写 JSON 正文（此前数组括号变 `\[ \]` 让 `JSON.parse` 失效、字段名被转义）、
-  接受 `json/javascript` 类 MIME、上证e互动公司列表改按 `<a>` 元素解析（窗口式正则会跨条目错配
-  uid↔代码）；东财研报预测 EPS 因上游返回**字符串**而恒为 null；新浪研报的日期与类型两列写反、
-  个股查询缺交易所前缀会拿到**假空页**（真实原因不是限流）；`eastmoney_stock_news` 现在区分
-  "上游风控"与"该股确实没有新闻"；同花顺一致预期页是 GBK 而响应头不带 charset，按 UTF-8 解会整页
-  变替换字符。
-
-从 2.1.2 升级需迁移一处：自定义 prompt / 脚本里的 `web_retriever_search` 改读 `anysearch_search`
-（能力与入参不变）；其余升级无需改调用方式，新增能力均为公开端点、无需新增密钥。
-完整变更历史见 [CHANGELOG.md](CHANGELOG.md)。
-
-### 2.1.2 — 2026-09-23
-
-- **`describe_dataset`（读 Dataset 的默认入口）**：一次调用完成元数据 + 基础 profile + 可选受控查询，
-  多份数据在同一条消息里并发执行；结果超过 7000 码点时返回带完整列名的 `too_large` 小回执，
-  而不是把超长载荷丢给剪枝器截断。
-- **时间换算交给宿主**：`time_facts` 增 `axis` / `windows[]` / `covered_*_iso`；`query_dataset` 的
-  filter 直接写 `2026-08-23` / `2026-08` / `{ "period": "last_1_month" }`；`resolve_data_time_range`
-  新增 Dataset 形态（传 `dataset_id + period`，返回的边界可直接填 filter）。子 Agent 不再自行把日期算成毫秒。
-- **修复**：`resolve_data_time_range` 两种形态此前一个必失败、一个报无权限；`describe_dataset`
-  内嵌 queries 的时间筛选与 `query_dataset` 行为不一致；`last_N_week` 退化成 0 天；日期串落到
-  数值时间列被静默跳过等。
-
-非破坏性新增，从 2.1.1 升级无需迁移（两处结果收紧的细节见 CHANGELOG）。完整变更历史见 [CHANGELOG.md](CHANGELOG.md)。
-
-### 2.1.1 — 2026-09-22
-
-- **设置卡片**：新增 设置 → 插件 → 插件配置 → Capital 模式，可视化配置 Fuyao / AnySearch /
-  Wind API Key，并可开关「允许启动本地提取网页内容」（默认开启）。
-- **抓取回退**：AnySearch fetch 失败且开关开启时，自动改由本机直连抓取该页面并抽取正文
-  （回执 `via` 标注 `anysearch` | `local-http`），失败语义按结构化错误码归类。
-
-非破坏性新增，从 2.1.0 升级无需迁移。
+装完重启 DSH web profile 生效。**更早版本（2.4.0 及以前）的变更历史见
+[CHANGELOG.md](CHANGELOG.md)**，GitHub Release 说明也从那里复制。
 
 # 🤝 贡献
 可自行克隆本项目，按上方「本地开发、构建、测试」执行。
@@ -340,5 +226,3 @@ npm run verify:sessions  # 发布前复核真实会话日志可被冷加载（�
 [Capital Generation 项目社区](https://github.com/v587d/capital-generation/discussions)
 
 # 📜 MIT
-
-

@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -14,9 +15,10 @@ import { fileURLToPath } from 'node:url'
  * 发版时漏改不会有任何测试失败，只能靠人记得改全（2.1.0 发版就漏过两处）。
  * 这里把"忘了同步"变成具名失败。
  *
- * 同一族的还有两件事：**DSH 基线版本**（README 徽章 + README/CONTRIBUTING 正文，2.4.0 迁
+ * 同一族的还有三件事：**DSH 基线版本**（README 徽章 + README/CONTRIBUTING 正文，2.4.0 迁
  * 0.1.7 时 CONTRIBUTING 就漏了一处）与 **README 引用的截图**（换图/改名后留空引用是 404 图片，
- * 用户看到的是裂图，测试与构建都不会失败）。
+ * 用户看到的是裂图，测试与构建都不会失败），以及 **README 跳转的详情页**（`docs/*` 默认被
+ * `.gitignore` 排除、逐文件放行，忘了放行那一行时本地读得好好的、GitHub 上是 404）。
  */
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const rootVersion = () => JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version
@@ -74,4 +76,24 @@ test('发版闸门：README 引用的截图都在 assets/ 里（换图改名不�
   assert.ok(refs.length >= 5, `README 只引用了 ${refs.length} 张图，多半是引用被误删`)
   const missing = refs.filter((ref) => !existsSync(join(ROOT, decodeURIComponent(ref))))
   assert.deepEqual(missing, [], `README 引用了不存在的图片（GitHub 上会是裂图）：${missing.join(', ')}`)
+})
+
+test('发版闸门：README 跳转的详情页必须被 git 跟踪（docs/* 默认被 .gitignore 排除）', () => {
+  const readme = readFileSync(join(ROOT, 'README.md'), 'utf8')
+  const links = [
+    ...new Set(
+      [...readme.matchAll(/\]\(([^)#\s]+?\.md)\)/g)]
+        .map((match) => match[1])
+        .filter((link) => !/^[a-z]+:\/\//.test(link)),
+    ),
+  ]
+  assert.ok(links.length >= 5, `README 只剩 ${links.length} 条相对 .md 链接，多半是跳转被误删`)
+  const untracked = links.filter(
+    (link) => !existsSync(join(ROOT, link)) || spawnSync('git', ['ls-files', '--error-unmatch', link], { cwd: ROOT }).status !== 0,
+  )
+  assert.deepEqual(
+    untracked,
+    [],
+    `README 链接了未入库的文件（GitHub 上会是 404）——在 .gitignore 补 !${untracked.join(' 与 !')} 一行`,
+  )
 })
