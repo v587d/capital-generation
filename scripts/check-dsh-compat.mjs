@@ -87,7 +87,7 @@ const probes = [
     title: '声明 dsh.client 的包（主包与随包携带的嵌套包），exports["./client"] 必须真实存在且在 files 里',
     why: 'bundle 缺失会让 ClientPackageCompositionError 在注册表构造时抛出——整个 web profile 起不来，不是图表坏掉。',
     run() {
-      const manifests = ['package.json', 'chart-ui/package.json', 'capital-config/package.json']
+      const manifests = ['package.json', 'chart-ui/package.json', 'capital-config/package.json', 'capital-watchlist/package.json']
       const declared = []
       for (const relativeManifest of manifests) {
         const manifestPath = join(process.cwd(), relativeManifest)
@@ -475,6 +475,150 @@ const probes = [
       return missing.length === 0
         ? { status: PASS, detail: '预设声明行 / PresetDefinition.id / composedPreset 都仍在，且 registry 无 roots' }
         : { status: FAIL, detail: `预设声明面变了：${missing.join(' / ')}（见账本 L17；历史会话恢复依赖它，改本仓装配行不要改探针）` }
+    },
+  },
+  {
+    id: 'L18',
+    title: '客户端命令贡献面 ctx.commandUi.register(CommandContribution) 与菜单过滤的匹配字段',
+    why: '自选股入口就是这一行：`available(session)` 每次候选重新求值（只在 Capital 会话出现的唯一判据），而菜单过滤只匹配 label/detail——上游把匹配字段改掉，`/watch` 就再也过滤不到别名（行在，搜不到）。',
+    run() {
+      const contractFile = join(PKG('dsh-client-ui-commands'), 'lib/types/client/contract.d.ts')
+      const contract = readIfPresent(contractFile)
+      if (contract === undefined) return { status: FAIL, detail: `读不到 ${contractFile}` }
+      const shellFile = join(PKG('dsh-client-ui-commands'), 'lib/client.js')
+      const shell = readIfPresent(shellFile)
+      if (shell === undefined) return { status: FAIL, detail: `读不到 ${shellFile}` }
+      const checks = [
+        ['贡献项接口仍在（name/label/description/icon/available/ui）', /export interface CommandContribution \{/, contract, contractFile],
+        ['available 以 ClientSessionContext 为准入判据', /available\(session: ClientSessionContext\): boolean/, contract, contractFile],
+        ['action 形态的 run(session)', /run\(session: ClientSessionContext\): void/, contract, contractFile],
+        ['register(contribution) 返回 disposer', /register\(contribution: CommandContribution\): \(\) => void/, contract, contractFile],
+        ['菜单过滤仍只对 label 与 detail 做大小写不敏感 substring', /o\.label\.toLowerCase\(\)\.includes\(query\)/, shell, shellFile],
+        ['typed 路径仍按注册名直查贡献项（bare token，不靠过滤面）', /this\.live\.contributions\.get\(typedName\)/, shell, shellFile],
+      ]
+      const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: 'commandUi 贡献面、过滤字段与 bare-token 直查都仍在（所以菜单行可以只留中文，`/watchlist`↵ 照开）' }
+        : { status: FAIL, detail: `命令贡献面变了：${missing.join(' / ')}（见账本 L18；改 capital-watchlist 客户端半边，不要改探针）` }
+    },
+  },
+  {
+    id: 'L19',
+    title: '座位 conversation.input.overlay（kind list / scope session）与官方 Modal 的 props / headless 卡片底板',
+    why: '自选股弹窗挂在这个座位上，而座位是**常驻**的（客户端 bundle 在 host 平面，与 preset 无关）：上游改 kind/scope 或改 Modal props，症状是弹窗打不开或刷新按钮落点失效。面板用 `headless: true` 自绘全部几何，所以**卡片底板**（`.dialog` 的 background / radius / overflow / flex）也进了账目：官方散列类够不着，这四条漂了只能靠这条探针点名。',
+    run() {
+      const slotsFile = join(PKG('dsh-client-ui-conversation'), 'lib/types/client/contract/slots.d.ts')
+      const slots = readIfPresent(slotsFile)
+      if (slots === undefined) return { status: FAIL, detail: `读不到 ${slotsFile}` }
+      const modalFile = join(PKG('dsh-client-ui-primitives'), 'lib/types/Modal.d.ts')
+      const modal = readIfPresent(modalFile)
+      if (modal === undefined) return { status: FAIL, detail: `读不到 ${modalFile}` }
+      const modalCssFile = join(PKG('dsh-client-ui-primitives'), 'lib/Modal.module.css')
+      const modalCss = readIfPresent(modalCssFile)
+      if (modalCss === undefined) return { status: FAIL, detail: `读不到 ${modalCssFile}` }
+      const overlay = /'conversation\.input\.overlay': \{\s*kind: 'list';\s*scope: 'session';/.test(slots)
+      const props = ['open', 'onClose', 'title', 'closeLabel', 'footer', 'contentClassName', 'shortcutModal', 'headless']
+      const missingProps = props.filter((name) => !new RegExp(`\\b${name}\\??:`).test(modal))
+      // headless 卡片只拿到 .dialog 这一块底板：底色 / 圆角 / 阴影 / overflow 归官方，几何归我们。
+      // 这四条里任何一条漂了，面板就会变成"没有底的浮层"或"圆角外沿漏内容"。
+      const card = [
+        ['background 仍来自 layer-2 token', /background: var\(--dsw-alias-bg-layer-2\)/],
+        ['圆角仍来自 panel token', /border-radius: var\(--dsw-radius-panel\)/],
+        ['卡片仍是 overflow:hidden（确认层与滚动区靠它裁边）', /overflow: hidden/],
+        ['卡片仍是 flex column（我们把 padding 收到 0）', /display: flex;\s*flex-direction: column/],
+      ]
+      const missingCard = card.filter(([label, pattern]) => !pattern.test(modalCss)).map(([label]) => label)
+      const missing = []
+      if (!overlay) missing.push(`overlay 座位不再是 list/session（${slotsFile}）`)
+      if (/headerActions|[aA]ctions\?:/.test(modal)) missing.push(`Modal 出现了 header 动作位，刷新工具条落点要重看（${modalFile}）`)
+      if (missingProps.length > 0) missing.push(`Modal 缺 props：${missingProps.join(' / ')}（${modalFile}）`)
+      if (missingCard.length > 0) missing.push(`headless 卡片底板变了：${missingCard.join(' / ')}（${modalCssFile}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: "overlay 座位仍是 list/session，Modal props 与 headless 卡片底板未变（无 header 动作位）" }
+        : { status: FAIL, detail: `弹窗座位或外壳变了：${missing.join(' / ')}（见账本 L19）` }
+    },
+  },
+  {
+    id: 'L20',
+    title: 'storage-domain：ctx.storageDomain.open(spec) / Domain.close() / single 布局 / 必填 backend 路由',
+    why: '自选股清单与报价快照的唯一持久化面。三条静默断裂：facility 改名或不再 open（功能整个不可用）、`Domain.close()` 语义变化（我们打开的域没人关）、上游默认后端漂移（清单落到别的介质，用户以为数据没了）。',
+    run() {
+      const indexFile = join(PKG('dsh-storage-domain'), 'lib/types/index.d.ts')
+      const index = readIfPresent(indexFile)
+      if (index === undefined) return { status: FAIL, detail: `读不到 ${indexFile}` }
+      const domainFile = join(PKG('dsh-storage-domain'), 'lib/types/domain.d.ts')
+      const domain = readIfPresent(domainFile)
+      if (domain === undefined) return { status: FAIL, detail: `读不到 ${domainFile}` }
+      const specFile = join(PKG('dsh-storage-domain'), 'lib/types/spec.d.ts')
+      const spec = readIfPresent(specFile)
+      if (spec === undefined) return { status: FAIL, detail: `读不到 ${specFile}` }
+      const storageFile = join(PKG('dsh-storage'), 'lib/index.js')
+      const storage = readIfPresent(storageFile)
+      if (storage === undefined) return { status: FAIL, detail: `读不到 ${storageFile}` }
+      const checks = [
+        ['服务名仍是 storageDomain（DomainFacility）', /storageDomain: DomainFacility/, index, indexFile],
+        ['open(spec) 返回 handle（Promise）', /open<S extends DomainSpec>\(spec: S\): Promise<Domain<S>>/, index, indexFile],
+        ['backend 仍是必填（我们不 patch 上游那一行的 config）', /backend: string/, index, indexFile],
+        ['handle 由调用方关（Domain.close()）', /close\(\): Promise<void>/, domain, domainFile],
+        ['single 布局仍是默认（整份 JSON 原子写）', /layout\?: 'single' \| 'per-record'/, spec, specFile],
+        ['声明入口 defineDomain / domainTable 仍在', /export declare function defineDomain/, spec, specFile],
+        // 域名规则是实测坑：连字符 → `malformed-medium：invalid unit name`
+        ['unit name 规则仍是小写字母 / 数字 / 下划线', "UNIT_NAME_RE = /^[a-z][a-z0-9_]*$/", storage, storageFile],
+      ]
+      const missing = checks.filter(([, pattern, text]) => (typeof pattern === 'string' ? !text.includes(pattern) : !pattern.test(text))).map(([label, , , file]) => `${label}（${file}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: 'storage-domain 的 open/close/backend/layout 四项都仍在' }
+        : { status: FAIL, detail: `storage-domain 面变了：${missing.join(' / ')}（见账本 L20；capital-watchlist 的持久化依赖它）` }
+    },
+  },
+  {
+    id: 'L21',
+    title: '客户端读会话 preset：ctx.sessions.list 快照里的 byId[].projectionValues.agentPreset',
+    why: '`available(session)` 只拿到 sessionId（ClientSessionContext 的全体就一个字段），所以「只在 Capital 会话出现」这条判据必须走 sessions 快照投影。上游把投影键改名或把字段从行里去掉，症状是自选股行**在所有会话都不出现**（静默）。',
+    run() {
+      const sessionsFile = join(PKG('dsh-api-session-controller'), 'lib/types/client/contract/sessions.d.ts')
+      const sessions = readIfPresent(sessionsFile)
+      if (sessions === undefined) return { status: FAIL, detail: `读不到 ${sessionsFile}` }
+      const serviceFile = join(PKG('dsh-api-session-controller'), 'lib/types/client/sessions/service.d.ts')
+      const service = readIfPresent(serviceFile)
+      if (service === undefined) return { status: FAIL, detail: `读不到 ${serviceFile}` }
+      const registryFile = join(PKG('dsh-agent-preset-registry'), 'lib/types/types.d.ts')
+      const registry = readIfPresent(registryFile)
+      if (registry === undefined) return { status: FAIL, detail: `读不到 ${registryFile}` }
+      const checks = [
+        ['sessions 服务面暴露 list 快照', /list: ObservableSnapshot<SessionListState>/, sessions, sessionsFile],
+        ['投影可催读（缺席时不轮询、只催一次）', /refreshProjections\(sessionId: SessionId\)/, sessions, sessionsFile],
+        ['byId 行仍在（我们的读法：byId[sessionId]?.projectionValues?.agentPreset）', /byId: Record<SessionId, SessionSummary>/, service, serviceFile],
+        ['projectionValues 仍是可选字段（未落地时整段缺席）', /projectionValues\?:/, service, serviceFile],
+        ['投影键仍是 agentPreset', /agentPreset: string \| null/, registry, registryFile],
+      ]
+      const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: 'sessions 快照投影与 agentPreset 键都仍在' }
+        : { status: FAIL, detail: `会话投影读取面变了：${missing.join(' / ')}（见账本 L21；capital-watchlist 的 available 判据依赖它）` }
+    },
+  },
+  {
+    id: 'L22',
+    title: '半透明菜单材质是一对：--dsw-specific-menu + --dsw-menu-backdrop-filter（深色描边由宿主按 [data-menu-material] 翻）',
+    why: '自选股下拉浮在自己的清单行上。填充本身是半透明的（安装态浅 58% / 深 45%），可读性全靠配套的模糊；上游把模糊 token 改名或撤掉 [data-menu-material] 那条深色描边规则，症状是"下拉和底下的清单高度重叠"——正是 2026-09-29 用户报的那一条，功能 CSS 里不许写主题选择器，所以我们只能靠这个钩子拿深色的 l3 描边。',
+    run() {
+      const themeFile = join(PKG('dsh-client-ui-theme'), 'lib/client.js')
+      const theme = readIfPresent(themeFile)
+      if (theme === undefined) return { status: FAIL, detail: `读不到 ${themeFile}` }
+      const surfaceFile = join(PKG('dsh-client-ui-primitives'), 'lib/MenuSurface.module.css')
+      const surface = readIfPresent(surfaceFile)
+      if (surface === undefined) return { status: FAIL, detail: `读不到 ${surfaceFile}` }
+      const checks = [
+        ['菜单模糊仍是 blur（我们照它配对声明）', /--dsw-menu-backdrop-filter:blur\(/, theme],
+        ['填充 token 仍在且是半透明（var 引用或带 alpha 的字面量）', /--dsw-specific-menu:var\(--dsw-menu-surface-fill\)|--dsw-specific-menu:#[0-9a-f]{6}[0-9a-f]{2}/i, theme],
+        ['深色描边钩子仍在（[data-menu-material] → border-l3）', /\[data-menu-material\]\{--dsw-elevation-stroke-color:var\(--dsw-alias-border-l3\)\}/, theme],
+        ['官方菜单面仍是「填充 + backdrop-filter」成对写法（我们的用法有据）', /backdrop-filter:\s*var\(--dsw-menu-backdrop-filter\)/, surface],
+      ]
+      const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label]) => label)
+      return missing.length === 0
+        ? { status: PASS, detail: '菜单材质的填充、模糊与深色描边钩子都在（改名会静默让下拉透视出底下的清单行）' }
+        : { status: FAIL, detail: `菜单材质契约变了：${missing.join(' / ')}（见账本 L22；capital-watchlist 的下拉可读性依赖它）` }
     },
   },
 ]

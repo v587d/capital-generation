@@ -1,6 +1,6 @@
 # Capital Generation is a distributable DSH profile bundle.
 #
-# 本文件只挂 **host 平面** 的客户端 bundle 行（下面两个 insert）。预设不在这里：0.1.7 起
+# 本文件只挂 **host 平面** 的客户端 bundle 行（下面三个 insert）。预设不在这里：0.1.7 起
 # 预设是普通条目行，本包的预设声明住在 `preset/capital-generation/agent.patch.yml`，由
 # package.json 的 `dsh.bundle.patch` 数组按序应用（`agent-preset-registry` 行由 dsh-web-app
 # 自己提供，我们只 insert 自己的预设声明，不动它的 config）。
@@ -50,4 +50,23 @@
 - insert:
     - id: capital-charts
       name: './chart-ui/index.js'
+
+# ── 用户自选股（host 平面行）──────────────────────────────────────────────────
+#
+# 为什么也必须在 host 平面：自选股是**跨 workspace 的用户侧资产**（清单与报价快照落
+# `~/.dsh/storages/capital_watchlist.json`），而客户端 bundle 的注入只发生在 index.html
+# 渲染那一刻——挂在 preset 行上就到不了已经打开的页面（同 chart-ui 的理由）。
+#
+# 与上一颗 preset 行的方向是**反的**：chart-ui 的数据由插件侧 push 进来（`ctx.get` 只能
+# 从会话作用域向外解析），本行则要在 host 平面自己出网，所以它 import
+# `../lib/sources/fuyao-core.js`（零 import 的叶子内核）——**同一份** key 解析 / 信封判定 /
+# 错误映射，不许有第二份（AGENTS.md §9.7）。这条跨包相对导入在本仓没有先例，因此由
+# `test/watchlist-quote.test.mjs` 的**模块同一性探针**钉住：两处 import 必须拿到同一实例，
+# 探针不过就重新设计，而不是先上线再说。
+#
+# `id` 与 `./capital-watchlist/index.js` 的 path-like 字面量规则同上（!!js / subpath 两个坑
+# 对这颗行同样成立）。
+- insert:
+    - id: capital-watchlist
+      name: './capital-watchlist/index.js'
 

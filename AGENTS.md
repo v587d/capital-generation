@@ -88,7 +88,7 @@ capital-analysis/charts/<chart_id>/           # render_chart 产物：spec.json 
 capital-analysis/runs/<analysis_id>/          # 预留（data_analyst）
 ```
 
-业务数据不落 `.dsh` 或 DSH home；跨 Agent 只传 workspace-scoped 的 opaque `artifact_ref`；内存只留 in-flight。
+业务数据（Dataset/profile/chart/ocr）不落 `.dsh` 或 DSH home；跨 Agent 只传 workspace opaque 引用；用户级资产（自选股）落宿主 storage-domain；内存只留 in-flight。
 
 ## 4. web_retriever 纪律
 

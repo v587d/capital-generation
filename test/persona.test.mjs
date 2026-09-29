@@ -454,7 +454,7 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
     'resolve_data_time_range',
   ])
   // persona 只留每轮硬规则；检索法则、回传格式与官方域名核验清单在 skill capital-web-protocol。
-  for (const pattern of [/网页材料获取执行器/, /anysearch_search/, /web_retriever_fetch/, /先定来源再动手/, /不要等 anysearch 空转后才想起/, /禁止把搜索结果全部 fetch/, /一次只能提交一个 URL/, /search_engine_provider/, /Wind 三要素/, /public_document/, /wind_docs_announcements/, /wind_docs_news/, /recent_retrievals/, /provider_tally/, /不得重试 wind/, /每条证据都要有来源/, /不得编造链接/, /无来源的信息不得作为证据/, /verified_official 只能来自/, /verified_official/, /unverified/, /not_verified/, /不调用官方名称为 web_search 或 web_fetch/, /不索取或保存.*API Key/, /resolve_data_time_range/, /skill capital-web-protocol/]) {
+  for (const pattern of [/金融数据分析师（web_retriever）/, /anysearch_search/, /web_retriever_fetch/, /先定来源再动手/, /不要等 anysearch 空转后才想起/, /禁止把搜索结果全部 fetch/, /一次只能提交一个 URL/, /search_engine_provider/, /Wind 三要素/, /public_document/, /wind_docs_announcements/, /wind_docs_news/, /recent_retrievals/, /provider_tally/, /不得重试 wind/, /每条证据都要有来源/, /不得编造链接/, /无来源的信息不得作为证据/, /verified_official 只能来自/, /verified_official/, /unverified/, /not_verified/, /不调用官方名称为 web_search 或 web_fetch/, /不索取或保存.*API Key/, /resolve_data_time_range/, /skill capital-web-protocol/]) {
     assertRule(RETRIEVER_PERSONA, pattern, `web_retriever persona 缺少要点: ${pattern}`)
   }
   // 具名来源面的硬规则：九个工具名都要点名（否则模型不知道有这个能力），
@@ -663,7 +663,7 @@ test('subagent_data_collector 行：叶子执行器工具边界', () => {
 
 test('data_collector persona：覆盖 Phase 1 数据集协议全部必须要点', () => {
   const required = [
-    /数据收集执行器/,
+    /金融数据分析师（data_collector）/,
     /不是分析师|不是下单员|不负责投资建议/,
     /request_data/,
     /list_capabilities/,
@@ -768,7 +768,7 @@ test('主 persona：子 Agent 中途请求按工单处理——取数后发回�
 
 test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质量统计，绝不回传 rows', () => {
   for (const pattern of [
-    /数据质量与基础分析执行器|数据质量与可视化编排执行器/,
+    /金融数据分析师（data_junior）/,
     /profile_request/,
     /dataset_profile_completed/,
     /profile_failed/,
@@ -871,7 +871,7 @@ test('visualization_specialist 行：one-shot 前台、只允许 skill + render_
 })
 
 test('data_junior persona：profile 后负责可视化 gate、签发 token、等待 one-shot barrier', () => {
-  for (const pattern of [/可视化编排/, /capital-visualization-protocol/, /描述完成（describe_dataset \/ profile_dataset）后无条件加载/, /用户明确要求图表/, /时间序列/, /OHLC\+volume/, /多个可比数值序列/, /必须选择 recommended/, /prepare_chart_source/, /subagent_visualization_specialist/, /not_needed/, /recommended/, /blocked/, /failed/, /one-shot barrier/, /chart_ref/, /rendered \/ skipped \/ failed/]) {
+  for (const pattern of [/可视化协议/, /capital-visualization-protocol/, /描述完成\s*（describe_dataset \/ profile_dataset）后无条件加载/, /用户明确要求图表/, /时间序列/, /OHLC\+volume/, /多个可比数值序列/, /必须选择 recommended/, /prepare_chart_source/, /subagent_visualization_specialist/, /not_needed/, /recommended/, /blocked/, /failed/, /one-shot barrier/, /chart_ref/, /rendered \/ skipped \/ failed/]) {
     assertRule(JUNIOR_PERSONA, pattern, `data_junior persona 缺少可视化编排要点: ${pattern}`)
   }
   assertRuleAny(MAIN_PERSONA, [/visualization_specialist/, /可视化.*data_junior/], '主 persona 必须说明 visualization_specialist 由 data_junior 管理')
@@ -902,7 +902,7 @@ test('subagent_data_analyst 行：仍在开发中——disabled，且预留工�
   for (const forbiddenTool of ['python', 'run_code', 'write_analysis_artifact', 'bash']) {
     assert.ok(!allow.includes(forbiddenTool), `预留期 toolFilter 不应包含 ${forbiddenTool}`)
   }
-  for (const pattern of [/数据分析执行器/, /analysis_request/, /analysis_failed/, /DatasetRef/, /artifact_ref/, /经主 Agent 中继/, /不索取或保存账户密码/]) {
+  for (const pattern of [/金融工程研究员（data_analyst）/, /analysis_request/, /analysis_failed/, /DatasetRef/, /artifact_ref/, /经主 Agent 中继/, /不索取或保存账户密码/]) {
     assertRule(ANALYST_PERSONA, pattern, `data_analyst persona 缺少要点: ${pattern}`)
   }
   assertNoRule(ANALYST_PERSONA, /data_key|官方|DSH|exec\.agent/, 'analyst persona 不应包含内部键名/框架术语')

@@ -87,7 +87,35 @@ async function fetchIndex(url) {
     ? first.headers.getSetCookie()
     : [first.headers.get('set-cookie')].filter(Boolean)
   const cookie = cookies.map((value) => String(value).split(';')[0]).join('; ')
-  return fetch(new URL(location, url).href, { headers: cookie.length > 0 ? { cookie } : {}, signal })
+  const followed = await fetch(new URL(location, url).href, { headers: cookie.length > 0 ? { cookie } : {}, signal })
+  // Node 的 fetch 不做 cookie jar；把接到的 cookie 挂在响应上，后续探针复用同一次握手。
+  followed.cookie = cookie
+  return followed
+}
+
+/**
+ * 自选股路由的**认证围栏**实弹核对（同一 host 平面行注册的路径，跑在真 dsh 里）：
+ * 匿名必须 401，带浏览器 cookie 必须 200。
+ * 这是 AGENTS.md 里那条"prefix 路由自己接 requestRejection"的唯一运行期证据——
+ * 单元测试用的是 fake authorize，证明不了真围栏。
+ */
+async function watchlistFenceProbe(url, cookie) {
+  const signal = AbortSignal.timeout(15_000)
+  const origin = new URL(url).origin
+  const target = `${origin}/capital-watchlist/list`
+  const anonymous = await fetch(target, { signal })
+  const authed = await fetch(target, { headers: cookie.length > 0 ? { cookie } : {}, signal })
+  let items = null
+  let cause = null
+  try {
+    const payload = JSON.parse(await authed.text())
+    items = payload?.items?.length ?? null
+    cause = payload?.code ? `${payload.code}${payload.cause ? `：${payload.cause}` : ''}` : null
+  } catch {
+    items = null
+    cause = '回包不是 JSON'
+  }
+  return { anonymousStatus: anonymous.status, status: authed.status, items, cause, cacheControl: authed.headers.get('cache-control') }
 }
 
 async function bootGraphHasCapitalBundles(url) {
@@ -97,8 +125,9 @@ async function bootGraphHasCapitalBundles(url) {
     const hasBundles = {
       'capital-config': html.includes('capital-config'),
       'capital-charts': html.includes('capital-charts'),
+      'capital-watchlist': html.includes('capital-watchlist'),
     }
-    return { fetched: true, hasBundles, status: response.status, bytes: html.length }
+    return { fetched: true, hasBundles, status: response.status, bytes: html.length, cookie: response.cookie ?? '' }
   } catch (error) {
     return { fetched: false, hasBundles: {}, error: error instanceof Error ? error.message : String(error) }
   }
@@ -317,6 +346,7 @@ const probe = parseProbe(result.output)
 const tail = result.output.split('\n').filter(Boolean).slice(-15).join('\n')
 
 let bundles
+let fence
 try {
   if (result.ok) {
     console.log(`smoke-boot: ✅ ${result.reason}`)
@@ -328,6 +358,19 @@ try {
     if (bundles.fetched) {
       console.log(`smoke-boot: ${bundles.hasBundles['capital-config'] ? '✅' : '⚠️ '} boot graph 中的 Capital settings bundle：${bundles.hasBundles['capital-config'] ? '存在' : '未找到'}`)
       console.log(`smoke-boot: ${bundles.hasBundles['capital-charts'] ? '✅' : '⚠️ '} boot graph 中的图表客户端 bundle：${bundles.hasBundles['capital-charts'] ? '存在' : '未找到'}（HTTP ${bundles.status}，${bundles.bytes} 字节）`)
+      console.log(`smoke-boot: ${bundles.hasBundles['capital-watchlist'] ? '✅' : '⚠️ '} boot graph 中的自选股客户端 bundle：${bundles.hasBundles['capital-watchlist'] ? '存在' : '未找到'}`)
+      // 自选股的 host 半边（storage-domain + prefix 路由）只有在这里才被证明"真的挂载并工作"。
+      try {
+        fence = await watchlistFenceProbe(url, bundles.cookie ?? '')
+        const fenceOk = (bundles.cookie ?? '').length === 0
+          ? fence.status === 200
+          : fence.anonymousStatus === 401 && fence.status === 200
+        fence.ok = fenceOk
+        console.log(`smoke-boot: ${fenceOk ? '✅' : '❌'} /capital-watchlist/list 围栏：匿名 HTTP ${fence.anonymousStatus}（应 401）、带 cookie HTTP ${fence.status}（应 200），清单 ${fence.items ?? '?'} 条，cache-control=${fence.cacheControl}${fence.cause ? `，原因=${fence.cause}` : ''}`)
+      } catch (error) {
+        fence = { ok: false, error: String(error?.message ?? error) }
+        console.log(`smoke-boot: ❌ 自选股路由探针失败：${fence.error}`)
+      }
     } else {
       console.log(`smoke-boot: ⚠️  未能拉取 index.html 复核 boot graph：${bundles.error ?? 'unknown'}`)
     }
@@ -381,6 +424,9 @@ if (gateFired) {
 
 const positiveOk = result.ok
   && (result.probeProblems?.length ?? 1) === 0
-  && (bundles?.fetched !== true || (!!bundles.hasBundles['capital-charts'] && !!bundles.hasBundles['capital-config']))
+  && (bundles?.fetched !== true || (!!bundles.hasBundles['capital-charts'] && !!bundles.hasBundles['capital-config'] && !!bundles.hasBundles['capital-watchlist']))
+  // ⛔ 自选股路由必须"匿名拒绝 + 带 cookie 可读"：prefix 路由自己不接 requestRejection
+  // 就是任何本机进程凭路径即可读写用户自选股（docs/dev/chart-presentation.md §6.1 那条硬约束的同一族）。
+  && (bundles?.fetched !== true || fence?.ok === true)
 // 反向对照**期望**是失败：`negative.ok` 为 false 才算它对，所以这里只问"特征有没有触发"。
 process.exit(positiveOk && gateFired !== undefined ? 0 : 1)

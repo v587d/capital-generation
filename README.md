@@ -14,7 +14,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.4.0-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.4.1-9cf" alt="Version"></a>
 </p>
 
 > [!IMPORTANT]
@@ -42,6 +42,7 @@ Next-Gen AI-Driven Capital Generation.
   - [📊 data_collector 能力总表](#-data_collector-能力总表)
   - [🌐 web_retriever 能力](#-web_retriever-能力)
   - [📈 图表呈现（截图）](#-图表呈现截图)
+  - [📌 自选股（用户级清单）](#-自选股用户级清单)
   - [🔧 本地开发、构建、测试](#-本地开发构建测试)
   - [📝 Changelog](#-changelog)
 - [🤝 贡献](#-贡献)
@@ -108,6 +109,7 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
   - **工作区约定**：通过官方 `dsh-agent-instructions` 行加载工作区 `AGENTS.md` / `CLAUDE.md`。
   - **上下文压缩**：通过官方 `dsh-compaction-basic` / `dsh-compaction-tool-result-pruner` 行提供长会话压缩与大结果剪枝。
   - **数据持久化**：通过宿主侧 `fs` / `sandboxPolicy` 服务完成 Dataset 落盘与权限校验，不直接操作文件系统；所有数据落在用户 workspace，服从当前 session 的沙箱策略。
+  - **用户级资产**：自选股这类**跨 workspace** 的用户数据走官方 `dsh-storage-domain`（域 `capital_watchlist`，落 `~/.dsh/storages/`），不自建文件路径；浏览器半边只与本机 loopback 上的宿主路由对话，密钥从不进浏览器。
   - **配置与凭据**：可编辑项就是插件条目 Config 里标了 `.volatile()` 的字段，DSH 自动把它投影成「插件」页上的表单（命名空间恒等于条目 id），插件不自建设置界面；API Key 经宿主 `credentials` 服务解析引用，不硬编码、不缓存、不写进配置文档、不随响应出网。
   - **工具注册**：通过官方 `tools` 服务向会话注册模型工具，由宿主统一管理工具的生命周期与权限控制。
   - **用户交互**：复用官方 `ask_user_question`、`todo_write`、`send_message`、`list_agents` 等工具，不重复造轮子。
@@ -167,11 +169,31 @@ web_retriever 有三个工作面（检索、来源查询、文档解析），共
 `chart.html` 自包含（内联图表库与数据），可离线打开、零外部请求；图内保留
 `Lightweight Charts™ v5.2.1 (Apache-2.0)` 归属信息。
 
+## 📌 自选股（用户级清单）
+
+> 自选股是**宿主级的用户资产**，不是 Agent 能力：清单与报价快照存在 DSH 的存储域里、跨 workspace 通用，
+> 模型工具表与 persona **零变化**（Agent 既读不到、也写不动这份清单）。出网只由用户动作触发——
+> **无轮询、无自动重试**；沿用已填的同花顺（fuyao）密钥，**不新增任何 key**。
+
+| 「指令」菜单里的入口 | 面板：搜索 / 添加 / 删除 / 刷新报价 |
+| :---: | :---: |
+| [<img src="assets/instruction-watchlist.png" width="400" alt="输入框菜单「指令」小节末尾的自选股一行，右侧是添加 / 查看 / 删除的说明">](assets/instruction-watchlist.png) | [<img src="assets/watchlist-popup.png" width="400" alt="自选股面板：搜索框、带类型标签与最新价涨跌幅的清单、刷新报价按钮与更新时间">](assets/watchlist-popup.png) |
+| 输入 `/`（与左下角 `+` 是同一份菜单）打开，只在 Capital 会话出现 | 默认播种四条主要沪深指数，删空不重建 |
+
+- **搜索添加**：输证券代码（不带后缀，如 `300750`）或中文名（如 `宁德时代`）都能命中，
+  多命中时列候选由用户点选；本版覆盖 A 股 / 指数 / ETF 三类，候选最多 10 条。
+- **报价**：按标的类型分流到行情快照端点，清单上限 10 条；每行显示最新价与涨跌幅
+  （红涨绿跌），底部是本次快照的更新时间。打开面板即刷一次（清单为空则只读本地、不出网），
+  此后只有点「刷新报价」才出网，同一时刻只允许一次刷新在途。
+- **删除**：面板内二次确认，不弹系统原生对话框。
+- **边界**：清单落在 `~/.dsh/storages/capital_watchlist.json`（官方存储域，不在任何 workspace 目录内）；
+  浏览器半边只与本机 loopback 上的宿主路由对话，且该路由接宿主的认证围栏——密钥与上游调用全在宿主侧。
+
 ## 🔧 本地开发、构建、测试
 
 ```bash
 npm install
-npm run build        # 生成 lib/ 与两个浏览器端产物（chart-ui、capital-config）
+npm run build        # 生成 lib/ 与三个浏览器端产物（chart-ui、capital-config、capital-watchlist）
 npm test             # 构建后运行全部测试
 npm run check:dsh    # 检查上游 DSH 扩展面兼容性，升级/发布前建议跑
 npm run smoke:boot   # 真实 boot graph 冒烟：装配能起、预设能解析、卡片有座位
@@ -182,6 +204,26 @@ npm run verify:sessions  # 发布前复核真实会话日志可被冷加载（�
 维护子包时才需要执行以上命令。
 
 ## 📝 Changelog
+
+### 2.4.1 — 2026-09-29
+
+- **新增用户自选股**（见上方「📌 自选股」）：输入 `/` 菜单里的 `自选股` 一行打开面板，
+  搜索（代码或中文名）/ 添加 / 删除 / 刷新报价。清单是**宿主级用户资产**，跨 workspace 通用，
+  默认播种四条主要沪深指数、上限 10 条；**不新增密钥**（复用同花顺那把），Agent 读不到也写不动。
+- **出网只由用户动作触发**：打开面板刷一次、点「刷新报价」、选中候选添加，此外**无轮询、无自动重试**，
+  同一时刻只允许一次刷新在途；搜索框三条事件闸（防抖 / 输入法合成期不发 / 同词不重发）。
+- **修复主 Agent 提前下结论**：写最终结论前必须先交一张「结算对账表」，判据只有一条——
+  子 Agent 的回传正文写得再像完成都**不算结算**，只有生命周期结算通知能把它翻成 ✓。
+  同时把 collector 的 `dataset_ready` 明确成进度信号（到一份就转给 `data_junior` 做 profile）。
+- **修复行情快照可被无限期复用**：`quote` / `index_quote` / `fund_quote` / `valuation` / `auction` /
+  腾讯行情 / 东财板块这类时效能力加了 60 秒复用上限，超龄就重新取数；非时效能力不受影响。
+- **修复浅色模式与下拉材质**：面板颜色全部改走宿主角色 token（此前按深色写死，浅色下控件毫无反差）；
+  搜索备选下拉补上半透明菜单材质**必须配对**的那层模糊——此前底下的清单会直接透视上来。
+- **`/` 菜单行去掉尾部英文别名**：行面只留 `添加 / 查看 / 删除自选股`，`/watchlist`↵ 照开
+  （typed 路径按注册名直查，与过滤面无关）。
+
+从 2.4.0 升级**无迁移**：无工具改名、无入参变化、无新增密钥；只是多了一颗宿主平面行，
+装完重启 DSH web profile 生效。完整变更历史见 [CHANGELOG.md](CHANGELOG.md)。
 
 ### 2.4.0 — 2026-09-26
 

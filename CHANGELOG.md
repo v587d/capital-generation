@@ -7,6 +7,86 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [2.4.1] - 2026-09-29
+
+**新增用户自选股**（宿主级清单 + 输入框 `/` 菜单弹窗），并补上两处会让主 Agent「提前下结论」与
+「看不清」的洞。无破坏性变更：工具入参、数据能力、设置卡片与会话日志格式都没变，**不新增密钥**。
+
+### Added
+
+- **自选股面板（`capital-watchlist/`，第三颗 host 平面行）**：一个用户侧资产，不是 Agent 能力。
+  入口是输入框 `/`（与 `+` 同一份菜单）「指令」小节的 `自选股` 一行，**只在 Capital 会话出现**
+  （`available(session)` 读 `projectionValues.agentPreset`；极简 / 标准模式下这些会话常驻的 overlay
+  组件必须 mount 零请求、关闭即 `return null`）。点开是官方 `Modal` 样式的面板：搜索、添加、删除、
+  打开即刷新、手动「刷新报价」。
+- **清单跨 workspace**：走官方 `dsh-storage-domain`，域名 `capital_watchlist`，落盘
+  `~/.dsh/storages/capital_watchlist.json`——不在任何 workspace 目录内，在 A 目录加的票换到 B 目录
+  的新会话仍然看得到。⚠️ 上游 unit name 规则 `^[a-z][a-z0-9_]*$` **拒连字符**，所以路由叫
+  `/capital-watchlist`、域却叫 `capital_watchlist`，这不是风格问题。
+- **默认不空面板**：域首次创建时播种 4 条主要沪深指数（上证 / 深证成指 / 创业板指 / 沪深300，
+  均已用真报文验证有值）；用户删空后**不重建**。清单上限 **10** 条，超出回 `list_full`
+  并提示「先删一条再加」——这个上限同时也是 ETF 逐只扇出的规模约束。
+- **搜索**：Fuyao `ticker_search`，标的范围锁 `a-share` / `a-share-index` / `fund-etf`
+  （场外基金与北交所不进候选），候选最多 10 条、不分页（倒逼缩小输入）。输 `300750` 与输
+  `宁德时代` 都能命中并显示 `300750.SZ 宁德时代`；多命中时列候选由用户选。
+- **报价按 `asset_type` 分三端点**：A 股与指数走批量快照（`thscodes` 一次带走），ETF 逐只扇出
+  （≤10 个请求，串行且有界）；快照带 `captured_at`。键值与 `data_collector` 同一把
+  `FUYAO_API_KEY`，不新增密钥。
+- **出网只由用户动作触发**：打开面板一次批量刷新（清单为空则只读本地、**零出网**）、点「刷新报价」、
+  选中候选添加（同一动作里 `/add` → `/list` → `/refresh`，新行当场有价、不停在「未刷新」）。
+  **无轮询、无自动重试**——全组件唯一的定时器是搜索防抖；同一时刻只允许一个 in-flight 刷新，
+  期间按钮禁用。搜索那一路另有三条事件闸（尾部防抖 / IME 合成期不发 / 同词不重发）+ 单条在途。
+- **删除用面板内确认**，不用 `window.confirm`（原生弹窗在宿主样式体系之外）。
+- **浏览器只与 loopback 宿主路由对话**：`/capital-watchlist/*` 接官方
+  `connection.requestRejection`（trusted-Host 403 + 签名 cookie 401）；**Fuyao 密钥永不进浏览器**，
+  key 解析、信封判定与错误映射全在宿主半边。
+- **模型侧零变化**：不新增任何工具（**没有** `read_watchlist`），persona / skill / 能力目录一字不改
+  ——自选股是用户资产，Agent 既读不到也写不动。
+- **`src/sources/fuyao-core.ts`**：把上面那套 key 解析 / 信封 / 错误映射从 `fuyao-rest` 抽成零 import
+  的叶子内核，宿主半边 `import '../lib/sources/fuyao-core.js'` 用**同一份**实现（本仓首例跨包相对
+  导入，因此配了一支**模块同一性探针**——真出现第二份就失败，AGENTS.md §9.7）。
+- **插件图标** `assets/cg-icon.png`（`package.json` 的 `icon`），生成脚本
+  `scripts/pad-png-icon.mjs`（纯 `zlib`，把源图补成方形 PNG，不引图像库）。
+
+### Fixed
+
+- **主 Agent 会在子 Agent 尚未结算时给出结论**：`capital-orchestration` §6 新增「结算对账表」——
+  想写最终结论前先逐行列出本回合委派过的每个子 Agent 的 `✓/✗`，判据只有一条：**✗ 只能被结算通知
+  翻正**。子 Agent 的 `send_message` 回传正文无论写得多像完成（「7/7 profile 完成」「pending = 0」）
+  都不构成 ✓，那是工单不是生命周期事件；有任意一行 ✗ 就只写等待行。配套把 collector 的
+  `dataset_ready` 明确成**进度**：到一份就登记并转发给同一个 `data_junior`（先限定「只到 profile」），
+  收到 `data_collection_completed` 才算取数结束。
+- **行情快照类 Dataset 可被无限期复用**：`SchemaDescriptor` 新增宿主内部字段 `cacheMaxAgeMs`，
+  9 个时效能力（`quote` / `valuation` / `auction` / `index_quote` / `fund_quote` / `tencent_quote` /
+  `tencent_kline` / 东财板块行情与资金流）声明 **60s** 上限，超龄的复用会重新取数；非时效类不声明，
+  仍只受 Dataset 保留期约束。
+- **浅色模式看不清**：面板此前按深色一套颜色写死（`label-dimmed` 在白卡上只有 1.26:1；
+  `bg-layer-1/2/3` 在浅色**同为纯白**，控件因此毫无反差），现全部改走 `--dsw-alias-*` 角色 token，
+  反差用 `bg-module-platform`、警示文字用 `state-warn-label`。红涨绿跌只能用**一档字面值**
+  （`#d1493f` / `#17a063`）——宿主从不逐元素声明 `color-scheme`，`light-dark()` 在这里不可用。
+- **搜索备选下拉「透视出底下的自选股清单」**（深浅两色都有）：官方半透明菜单材质
+  `--dsw-specific-menu`（浅 `#f8f9fa94` = 58%、深 `#43454a73` = 45%，只有 macOS 才近不透明）
+  **必须**与 `backdrop-filter: var(--dsw-menu-backdrop-filter)` **成对**声明，上一版只取了填充没取
+  模糊。补齐配对，并给下拉节点挂 `data-menu-material="translucent"`（官方 `MenuSurface` 的挂法）
+  让宿主把深色那档描边翻成 `border-l3`——不自写主题选择器。闸门同时拆成两条分开的钉（模糊只许下拉
+  那一处、模态**遮罩**必须没有模糊），并登记成账本 **L22** + 探针：这类断裂的症状是"下拉读不出"
+  且不报错，正是探针该拦的静默退化。
+
+### Changed
+
+- **`/` 菜单行去掉尾部英文别名**：`添加 / 查看 / 删除自选股`（原行尾还挂着一个 `watchlist`）。
+  别名当初是给过滤面用的（菜单过滤是 `label` / `detail` 的大小写不敏感 substring，**命令名不参与**），
+  但 typed 路径走的是另一条面——`matchEnter` 把 bare token 直接查进贡献表，与过滤面无关，所以
+  `/watchlist`↵ 照开、不受改名影响。这条支撑已并进 **L18** 探针：上游哪天把 Enter 改成"先过过滤面
+  再落命令"，别名就会重新变成必需项，症状是 `/watchlist`↵ 静默退化成发了一句普通消息。
+- **README**：新增「📌 自选股（用户级清单）」小节（两张实机截图）；话术精简。
+- **`.gitignore` 封死 `*.jsonl`**：会话日志曾误入库，现已摘出并拦住。
+
+### 迁移
+
+从 2.4.0 升级**无迁移**：无工具改名、无入参变化、无新增密钥。唯一的安装动作是多了一颗 host 平面行，
+装完需**重启 DSH web profile** 才装配生效；自选股入口与设置卡片（`capital-config`）仍在老位置。
+
 ## [2.4.0] - 2026-09-26
 
 本版是**跟随 DSH `0.1.7-rc.2` 的适配版**（[issue #3](https://github.com/v587d/capital-generation/issues/3)）。

@@ -1,7 +1,7 @@
 {
-  "name": "@v587d/capital-config",
+  "name": "@v587d/capital-watchlist",
   "version": "2.4.1",
-  "description": "Capital 模式的 DSH settings 配置卡片（Fuyao / AnySearch / Wind Alice credentials）",
+  "description": "Capital 模式的用户自选股（宿主级清单 + Fuyao 报价快照 + /capital-watchlist 路由 + 输入框菜单弹窗）：由 @v587d/capital-generation 随包携带并作为 host 平面行挂载。",
   "license": "MIT",
   "type": "module",
   "exports": {
@@ -12,17 +12,18 @@
   "dsh": {
     "client": {
       "platform": "web",
+      "immediately": true,
       "inject": [
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-primitives",
-        "@deepseek-ai/dsh-client-ui-settings",
-        "@deepseek-ai/dsh-client-ui-plugin-manager",
-        "@deepseek-ai/dsh-api-remotes"
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-commands",
+        "@deepseek-ai/dsh-api-session-controller"
       ]
     }
   },
   "dependencies": {
-    "@deepseek-ai/schemastery": "^3.18.4"
+    "zod": "^4.5.4"
   },
   "files": ["index.js", "client.js", "package.json"]
 }

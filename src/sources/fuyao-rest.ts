@@ -2,9 +2,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { DataRequest, DataSource, SchemaDescriptor } from '../data-collector/hub.js'
 import { buildDataKey } from '../data-collector/hub.js'
 import { getDataTimeContract } from '../time/tools.js'
+import { DEFAULT_FUYAO_BASE_URL, FUYAO_MAX_PARAM_LENGTH, fuyaoQuery, fuyaoRequest } from './fuyao-core.js'
 
-const DEFAULT_BASE_URL = 'https://fuyao.aicubes.cn'
-type ApiEnvelope = { code?: number; message?: string; request_id?: string; data?: unknown }
+const DEFAULT_BASE_URL = DEFAULT_FUYAO_BASE_URL
 type CredentialLike = { resolve(ref: string): Promise<{ value: string } | undefined> }
 
 /** 每次执行时解析 API Key 的注入点：符合 credentials 服务「按次解析、不跨操作缓存」的约定。 */
@@ -65,8 +65,8 @@ const MAX_TOP_HOLDERS_LIMIT = 10
 const MANAGER_RANGES = ['month', 'tmonth', 'year', 'nowyear', 'now']
 const OFFERING_SUBSCRIBE = ['active', 'upcoming']
 
-/** 单值参数长度上限；与 queryParams 的硬上限保持一致。 */
-const MAX_PARAM_LENGTH = 2048
+/** 单值参数长度上限；与 `fuyao-core` 的查询串硬上限同值（同一份知识）。 */
+const MAX_PARAM_LENGTH = FUYAO_MAX_PARAM_LENGTH
 const MAX_TEXT_LENGTH = 512
 /** 批量代码接口的原始 token 上限（按文档：去重前校验）。 */
 const MAX_BATCH_CODES = 100
@@ -261,32 +261,13 @@ function objectSchema(properties: Record<string, object>, required: string[] = [
   return { type: 'object', properties, required, additionalProperties: false, ...(description ? { description } : {}) }
 }
 
-function queryParams(params: Params, allowed: string[]): URLSearchParams {
-  const search = new URLSearchParams()
-  for (const name of allowed) {
-    const value = params[name]
-    if (value === undefined) continue
-    if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') {
-      fail(`parameter ${name} must be a string, a number or a boolean`)
-    }
-    const encoded = String(value)
-    if (encoded.length > MAX_PARAM_LENGTH) fail(`parameter ${name} exceeds maximum length`)
-    search.set(name, encoded)
-  }
-  return search
-}
-
+/**
+ * 能力执行侧的信封调用：请求与 `code` 判定住在 `fuyao-core.ts`（host 平面的自选股
+ * 与这里共用一份），本层只把它恢复成 Hub 期望的 `{ data, schema }` 形态。
+ * 错误文案逐字保持历史形态（2004 / 4001 / 1002 那几条都会透到 Agent 眼前）。
+ */
 async function callFuyao(baseUrl: string, apiKey: string, path: string, params: URLSearchParams, signal: AbortSignal, outputSchema: object): Promise<{ data: unknown; schema: object }> {
-  const query = params.toString()
-  const response = await fetch(`${baseUrl}${path}${query ? `?${query}` : ''}`, { headers: { 'X-api-key': apiKey, Accept: 'application/json' }, signal })
-  if (!response.ok) throw new Error(`Fuyao HTTP error ${response.status}`)
-  const envelope = await response.json() as ApiEnvelope
-  // 2004 = 该能力是同花顺 AI 客户端专用，未开放外部接入（实测 capital-flow / high-frequency 均如此）。
-  // 这是能力级不可用，不是瞬时故障：错误文案必须让调用方停止重试，否则会白烧配额与回合。
-  if (envelope.code === 2004) {
-    throw new Error('Fuyao API error 2004: 该数据能力为同花顺 AI 客户端专用，当前未开放外部接入；不要重试，改用其他能力或如实告知用户该能力不可用')
-  }
-  if (envelope.code !== 0) throw new Error(`Fuyao API error ${envelope.code ?? 'unknown'}: ${envelope.message ?? 'request failed'}${envelope.request_id ? ` (request_id: ${envelope.request_id})` : ''}`)
+  const envelope = await fuyaoRequest({ baseUrl, apiKey, path, search: params, signal })
   return { data: envelope.data ?? null, schema: outputSchema }
 }
 
@@ -2104,7 +2085,7 @@ function createSource(definition: EndpointDefinition, baseUrl: string, resolveAp
       const params = normalize(request.params)
       const apiKey = await resolveApiKey()
       if (!apiKey) throw new Error(`FUYAO_API_KEY is not configured; data source ${name} is unavailable`)
-      return callFuyao(baseUrl, apiKey, path, queryParams(params, allowed), signal, outputSchema)
+      return callFuyao(baseUrl, apiKey, path, fuyaoQuery(params, allowed), signal, outputSchema)
     },
   }
 }
