@@ -39,6 +39,7 @@ Next-Gen AI-Driven Capital Generation.
   - [📄 样例](#-样例)
   - [📦 安装到 DSH Web Profile](#-安装到-dsh-web-profile)
 - [🔍 What](#-what)
+  - [🧭 多 Agent 编排（截图）](#-多-agent-编排截图)
   - [📊 data_collector 能力总表](#-data_collector-能力总表)
   - [🌐 web_retriever 能力](#-web_retriever-能力)
   - [📈 图表呈现（截图）](#-图表呈现截图)
@@ -113,7 +114,21 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
   - **配置与凭据**：可编辑项就是插件条目 Config 里标了 `.volatile()` 的字段，DSH 自动把它投影成「插件」页上的表单（命名空间恒等于条目 id），插件不自建设置界面；API Key 经宿主 `credentials` 服务解析引用，不硬编码、不缓存、不写进配置文档、不随响应出网。
   - **工具注册**：通过官方 `tools` 服务向会话注册模型工具，由宿主统一管理工具的生命周期与权限控制。
   - **用户交互**：复用官方 `ask_user_question`、`todo_write`、`send_message`、`list_agents` 等工具，不重复造轮子。
- 
+
+## 🧭 多 Agent 编排（截图）
+
+> 主 Agent 不直接碰原始结构数据：行情与财务由 `data_collector` 取，清洗与 profile 由 `data_junior` 做，
+> 外部材料由 `web_retriever` 取回，出图是 `data_junior` 名下**一次性**的 `visualization_specialist`。
+> 下面是 DSH 官方「任务管理」视图里的真实一轮（右下角可切树状图 / 时间轴），点击可查看原图。
+
+| 主 Agent 与三个常驻角色 · `data_junior` 名下的一次性出图子 Agent |
+| :---: |
+| [<img src="assets/agent-task-management.png" width="900" alt="任务管理树状图：主代理之下是 web_retriever、data_collector 与运行中的 data_junior（三者标注可续接），data_junior 再挂五个一次性子代理，卡片标题是走势对照与 OHLC 出图任务">](assets/agent-task-management.png) |
+
+卡片上的「可续接 / 一次性」两种形态正好对上上面第 2 节的角色表：三个直属下级是 continuable 的常驻角色
+（`send_message` 可反复来回），出图那一层是 one-shot——只收 `profile_ref` 与短期图表引用，
+只回一个 `chart_ref` 小回执。右上角的计数（9 个子代理 · 1 运行中）就是这一轮的实际编排规模。
+
 ## 📊 data_collector 能力总表
 
 [data_collector 能力总表](docs/data-collector-capabilities.md) 列出全部 **69 个**数据 capability（元数据 / A股行情与财务 / 估值竞价 / 盘面特色 / 指数 / 基金 / 腾讯公开行情 fallback / 东方财富资金与筹码），含端点路径、主要参数（必填以 `*` 标注）、是否分页与用途，并说明**不覆盖**的模块及原因。表格由 `npm run docs:capabilities` 从 source 定义生成，测试断言「文档 == 实现」。
