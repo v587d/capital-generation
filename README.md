@@ -23,8 +23,8 @@
 > 愿大家的财富数字就像"text generation"一样，不断增长，永不停止。
 
 > [!NOTE]
-> 先安装 [Deepseek Harness(DSH)](https://github.com/deepseek-ai/deepseek-harness) ，本项目自 2.4.0 起适配 DSH`@0.1.7-rc.2`
-> （**需要 DSH ≥ 0.1.7**：0.1.5 的 settings 与 preset 挂载面已被上游删除，装在旧版上会起不来）。
+> 先安装 [Deepseek Harness(DSH)](https://github.com/deepseek-ai/deepseek-harness) ，本项目自 2.4.0 起适配 DSH`@0.1.7-rc.2`。
+> **需要 DSH ≥ 0.1.7**：0.1.5 的 settings 与 preset 挂载面已被上游删除，装在旧版上会起不来。
 > 建议使用 **Deepseek/deepseek-flash**(High thinking) 搭配本项目， GPT / Claude 尚未充分测试，理论亦可。
 
 # 💬 Slogan
@@ -123,11 +123,11 @@ Capital Generation 是面向中国散户，适用于日常证券研究的 DSH �
 
 | 主 Agent 与三个常驻角色 · `data_junior` 名下的一次性出图子 Agent |
 | :---: |
-| [<img src="assets/agent-task-management.png" width="900" alt="任务管理树状图：主代理之下是 web_retriever、data_collector 与运行中的 data_junior（三者标注可续接），data_junior 再挂五个一次性子代理，卡片标题是走势对照与 OHLC 出图任务">](assets/agent-task-management.png) |
+| [<img src="assets/agent-task-management.png" width="900" alt="任务管理树状图：主代理之下是 web_retriever、data_collector 与运行中的 data_junior（三者标注可续接），data_junior 再挂六个一次性子代理，卡片标题是走势对照与 OHLC 出图任务">](assets/agent-task-management.png) |
 
 卡片上的「可续接 / 一次性」两种形态正好对上上面第 2 节的角色表：三个直属下级是 continuable 的常驻角色
 （`send_message` 可反复来回），出图那一层是 one-shot——只收 `profile_ref` 与短期图表引用，
-只回一个 `chart_ref` 小回执。右上角的计数（9 个子代理 · 1 运行中）就是这一轮的实际编排规模。
+只回一个 `chart_ref` 小回执。这一轮共 9 个子代理：3 个常驻 + 6 个一次性出图（走势对照与 OHLC 缩放）。
 
 ## 📊 data_collector 能力总表
 
