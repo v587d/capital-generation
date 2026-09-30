@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { pathDirs } from '../scripts/lib/run-tool.mjs'
 import { resolveUserCustomizationSection } from '../lib/index.js'
@@ -230,10 +230,11 @@ test('skills：两行组合式注册（skill-filesystem + tool-skill），不靠
   // 所以随包发布的 skills/ 只能按**包名**解析回去（写死绝对路径同样不可接受）。
   // 漂移不是报错，而是 skill 静默消失、模型侧只剩 persona。
   const pkg = JSON.parse(readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'))
-  const root = fileURLToPath(new URL('../', import.meta.url))
   assertMatches(dirs[0], new RegExp(`createRequire\\(baseUrl\\)\\.resolve\\('${pkg.name}/package\\.json'\\)`),
     `skills 目录必须经包名解析回本包（${pkg.name}）`)
-  const skillsRelative = SKILL_DIR.slice(root.length).replace(/\/$/, '')
+  // 截前缀（SKILL_DIR.slice(root.length)）在 Windows 上不成立：root 是 `D:\…\` 而 preset 行里
+  // 写的是 `preset/capital-generation/skills`，切出来的串带反斜杠、永远 includes 不进去。
+  const skillsRelative = relative(fileURLToPath(new URL('../', import.meta.url)), SKILL_DIR).split(sep).join('/')
   assert.ok(dirs[0].includes(`'${skillsRelative}'`), `customSkillDirs 必须拼出 ${skillsRelative}`)
   assert.ok(existsSync(SKILL_DIR), `本仓必须真有 ${skillsRelative}`)
 
@@ -253,7 +254,9 @@ test('skills：四个 skill 文件存在且 frontmatter 合法，persona 指向�
     const file = `${SKILL_DIR}${name}/SKILL.md`
     assert.ok(existsSync(file), `缺少 skill 文件：skills/${name}/SKILL.md`)
     const text = readFileSync(file, 'utf8')
-    const front = text.match(/^---\n([\s\S]*?)\n---\n/)
+    // `\r?` 不是装饰：仓库没有 .gitattributes 前，Windows 工作区拿到的是 CRLF 文件，
+    // 写死 `\n` 的正则匹配不上，症状是"skill 没有 frontmatter"——指向错的文件而不是真原因。
+    const front = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/)
     assert.ok(front, `skills/${name}/SKILL.md 必须有 YAML frontmatter`)
     assertMatches(front[1], new RegExp(`^name: ${name}$`, 'm'), `frontmatter 的 name 必须是 ${name}`)
     const description = front[1].match(/^description: (.+)$/m)

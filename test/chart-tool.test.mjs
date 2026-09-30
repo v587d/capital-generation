@@ -255,7 +255,7 @@ test('图表协议 skill 必须真实存在（工具 description 让模型去加
   assert.ok(existsSync(file), '缺少 skills/capital-chart-protocol/SKILL.md：工具 description 指向的协议不存在，模型会去加载一个空名字')
 
   const text = readFileSync(file, 'utf8')
-  const frontmatter = /^---\n([\s\S]*?)\n---/.exec(text)
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)
   assert.ok(frontmatter, 'skill 必须有 YAML frontmatter')
   assert.match(frontmatter[1], /name:\s*capital-chart-protocol/)
   const description = /description:\s*(.+)/.exec(frontmatter[1])

@@ -58,11 +58,19 @@ function expandIndexCell(cell) {
   return out
 }
 
+// 按行切要认 CRLF：`\r` 在 JS 里算行终止符、`.` 不匹配它，所以逐行喂给非 multiline 的
+// `(.*)$` 时，带 `\r` 尾的行**整行配不上**——下面 persona 抽取会一段都抓不到（真 Windows node 实测）。
+const lines = (text) => text.split(/\r?\n/)
+// 行数：CRLF 下 split('\n') 只是每行尾多带一个 `\r`，条数不变，所以这里不需要额外归一。
 const lineCount = (text) => text.replace(/\n$/, '').split('\n').length
 const filesToScan = []
 const walk = (dir) => {
   for (const entry of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
-    const rel = join(dir, entry.name)
+    // rel 只用 `/` 拼：`join()` 在 Windows 上产出 `docs\dev`，而下面比较的是字面量
+    // （排除表里的 DEV_DIR、`rel !== 'AGENTS.md'`），反斜杠版本永不等于 →
+    // docs/dev/ 被当成根文档扫，报出来的行数/指针错全是假警报。
+    // 落盘访问交给 join(ROOT, rel)，path 模块会把 `/` 换成本机分隔符。
+    const rel = `${dir}/${entry.name}`
     if (entry.isDirectory()) {
       if (!['node_modules', 'lib', '.git', '.review', DEV_DIR].includes(rel)) walk(rel)
     } else if (/\.(ts|mjs|js|cjs|yml|yaml)$/.test(entry.name) || (entry.name.endsWith('.md') && rel !== 'AGENTS.md')) {
@@ -163,7 +171,7 @@ test('文档层内部的 §指针全部可解析', () => {
 
 test('代码与文档里的文件限定指针指向真实的节与真实的文件', () => {
   for (const [file, text] of scanTexts) {
-    for (const line of text.split('\n')) {
+    for (const line of lines(text)) {
       const agents = line.match(/AGENTS\.md[^\n]{0,24}§(\d+(?:\.\d+)?)/)
       if (agents) {
         assert.ok(
@@ -210,7 +218,7 @@ test('研发文档不外泄进使用者 Agent 的运行时文本', () => {
   for (const row of rows) {
     const config = row?.config
     if (typeof config === 'string') {
-      for (const line of config.split('\n')) {
+      for (const line of lines(config)) {
         const match = line.match(/^\s*(?:persona|prefix|text):\s*(.*)$/)
         if (match && match[1].trim()) texts.push(match[1])
       }

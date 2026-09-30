@@ -20,39 +20,17 @@
  */
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { zstdDecompressSync } from 'node:zlib'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
+import { locateDshPackage } from './lib/run-tool.mjs'
 
 function argValue(name, fallback) {
   const index = process.argv.indexOf(name)
   return index >= 0 && process.argv[index + 1] ? process.argv[index + 1] : fallback
 }
 const STRICT = process.argv.includes('--strict')
-
-/** 在 PATH 里找 dsh 可执行文件并回溯到包根（与 check-dsh-compat.mjs 同一套逻辑）。 */
-function locateDshPackage() {
-  if (process.env.DSH_PACKAGE_DIR) return process.env.DSH_PACKAGE_DIR
-  const isWin = process.platform === 'win32'
-  for (const dir of (process.env.PATH ?? '').split(isWin ? ';' : ':')) {
-    if (!dir) continue
-    for (const name of isWin ? ['dsh.cmd', 'dsh'] : ['dsh']) {
-      const candidate = join(dir, name)
-      if (!existsSync(candidate)) continue
-      let current = dirname(realpathSync(candidate))
-      for (let depth = 0; depth < 4; depth += 1) {
-        const manifest = join(current, 'package.json')
-        if (existsSync(manifest)) {
-          try {
-            if (JSON.parse(readFileSync(manifest, 'utf8')).name === '@deepseek-ai/dsh') return current
-          } catch { /* 继续向上找 */ }
-        }
-        current = dirname(current)
-      }
-    }
-  }
-  return undefined
-}
 
 const DSH_DIR = locateDshPackage()
 if (!DSH_DIR) {
@@ -61,7 +39,9 @@ if (!DSH_DIR) {
 }
 
 const NESTED = join(DSH_DIR, 'node_modules', '@deepseek-ai')
-const dshHome = process.env.DSH_HOME ?? join(process.env.HOME ?? '', '.dsh')
+// homedir() 而不是 process.env.HOME：Windows 上没有 HOME，写 `join('', '.dsh')` 会得到
+// 相对路径 `/.dsh/sessions` → 目录不存在 → 扫到 0 份会话还报"通过"（闸门静默失效）。
+const dshHome = process.env.DSH_HOME ?? join(homedir(), '.dsh')
 const sessionsRoot = argValue('--dir', join(dshHome, 'sessions'))
 const since = Date.parse(argValue('--since', (() => {
   const d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString()

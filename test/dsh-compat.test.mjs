@@ -25,7 +25,10 @@ test('DSH 接口账本探针：上游扩展面未漂移', (t) => {
   })
 
   if (result.status === 2) {
-    t.diagnostic('本机未安装 dsh，跳过接口账本核对（设置 DSH_PACKAGE_DIR 可启用）')
+    // 必须是 skip 而不是 return：`t.diagnostic()` + return 会被 node:test 记成 **pass**，
+    // 于是"本机没有 dsh"（桌面端 harness 在 app.asar 里、探针读不到包目录就是这个状态）
+    // 报告里依然全绿，实际一条接口都没核对——账本要防的正是这种静默失效。
+    t.skip('本机未定位到 dsh 包目录，接口账本**未核对**（设置 DSH_PACKAGE_DIR 可启用）')
     return
   }
 
