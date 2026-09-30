@@ -125,7 +125,7 @@ capital-analysis/runs/<analysis_id>/          # 预留（data_analyst）
 2. **`npm test` 全绿**（会先跑 `npm run build`）。断言的是"实测教训"不是措辞，**不允许靠删断言
    变绿**：`assertRuleAny()` 全部落空 = 规则真消失，**补人设**；规则外迁时断言跟着改读目标正文。
    体积闸门（persona 与 `agent.patch.yml` 正文）见 `test/persona.test.mjs`，文档行数见
-   `test/dev-docs.test.mjs`；上调须同步测试数字与理由注释。
+   `test/dev-docs.test.mjs`；上调须同步测试数字与理由注释。改过 `src/`、`scripts/`、host 平面的路径 / 换行 / 子进程形状，`test/cross-platform.test.mjs` 会红——它钉的是只在 Windows 上炸的写法形状，不是行为，别为变绿放宽它。
 3. **测试跟随本机 dsh 版本**：`dsh-persona` 字段是 `prefix` 不是 `text`（`test/persona.test.mjs`
    有核对用例）。字段名变化必须只在**一条**用例里失败并点名文件。
 4. 动过 preset 行 / host 平面 / 交付事件，再跑 `npm run check:dsh`（扩展面账本逐条探测）。
