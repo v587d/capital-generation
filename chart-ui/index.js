@@ -195,6 +195,11 @@ export function apply(ctx) {
       'capital-charts: series route',
     )
   }
-  if (ctx.get('webServer') === undefined) ctx.inject(['webServer'], registerRoute)
-  else registerRoute(ctx)
+  // 只走 inject，不许"先 get 探测、再直接拿属性"。`ctx.get('webServer')` 能解析出值
+  // **不代表** `ctx.webServer` 这个属性访问合法：cordis 的属性代理只认"本层声明过 inject"
+  // （ReflectService 找不到就抛 cannot get property "webServer" without inject）。探测式写法
+  // 把正确性押在装配顺序上——桌面端 webServer 在本行之前已就绪，于是走了"直接调用"那条并
+  // 当场炸（2026-09-30 实机：capital-charts 与 capital-watchlist 两行 异常）；web profile 里
+  // 它还没就绪，反而躲过。inject 两种顺序都对：已就绪立刻起，没出现就一直等（本行仍激活）。
+  ctx.inject(['webServer'], registerRoute)
 }

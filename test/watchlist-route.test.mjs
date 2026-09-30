@@ -7,7 +7,8 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { SEED_ITEMS, createRouteHandler, createWatchlistService } from '../capital-watchlist/index.js'
+import { apply, createRouteHandler, createWatchlistService, ROUTE_PATH, SEED_ITEMS } from '../capital-watchlist/index.js'
+import { fakeCtx } from './cordis-fake.mjs'
 import { createFakeDomain, httpFixture, stubFuyao } from './watchlist-harness.mjs'
 
 function harness(options = {}) {
@@ -229,4 +230,41 @@ test('响应里绝不出现密钥与上游原文', async () => {
   } finally {
     stub.restore()
   }
+})
+
+/**
+ * 两颗 host 行的 webServer 取用形状（2026-09-30 桌面端实机：这行炸成 异常，
+ * 而 chart 那颗同因同炸）。fake 用的是 cordis 真实语义，见 test/cordis-fake.mjs——
+ * 之前这颗行**根本没有 apply() 用例**，所以错路只在真机上暴露。
+ */
+test('apply()：webServer 已就绪的载体（桌面端形状）当场挂上路由，不许炸在属性访问', () => {
+  const routes = []
+  const fake = createFakeDomain()
+  const harness = fakeCtx({
+    webServer: { register: (route) => { routes.push(route); return () => {} } },
+    services: { storageDomain: { open: () => fake.domain } },
+  })
+  apply(harness.ctx)
+
+  assert.ok(harness.provided.get('capitalWatchlist'), '必须提供 capitalWatchlist 服务')
+  assert.deepEqual(harness.injected[0].deps, ['webServer'], '取 webServer 只能经 inject')
+  assert.equal(routes.length, 1, '依赖已就绪时 inject 立刻起子 fiber，路由当场挂上')
+  assert.equal(routes[0].kind, 'prefix')
+  assert.equal(routes[0].path, ROUTE_PATH)
+})
+
+test('apply()：webServer 缺席的载体（web profile 形状）仍激活，出现后才挂', () => {
+  const fake = createFakeDomain()
+  const harness = fakeCtx({ services: { storageDomain: { open: () => fake.domain } } })
+  apply(harness.ctx)
+
+  assert.ok(harness.provided.get('capitalWatchlist'), '没有 Web 载体时服务仍要提供（不许成死行）')
+  assert.equal(harness.injected.length, 1)
+  const routes = []
+  harness.injected[0].callback({
+    effect: (callback) => { callback(); return () => {} },
+    webServer: { register: (route) => { routes.push(route); return () => {} } },
+  })
+  assert.equal(routes.length, 1)
+  assert.equal(routes[0].path, ROUTE_PATH)
 })

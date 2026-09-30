@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createChartStore, createRouteHandler, apply, ROUTE_PATH } from '../chart-ui/index.js'
+import { fakeCtx } from './cordis-fake.mjs'
 
 /**
  * host 半边（`@v587d/capital-charts`）的契约测试。
@@ -152,20 +153,6 @@ test('路由：authorize 返回 undefined（已认证）时照常 200', async ()
 })
 
 
-function fakeCtx({ webServer, connection } = {}) {
-  const provided = new Map()
-  const injected = []
-  const ctx = {
-    // 真实 cordis 里 webServer 既是 ctx.get('webServer') 也是 ctx.webServer。
-    webServer,
-    get: (name) => (name === 'webServer' ? webServer : name === 'connection' ? connection : provided.get(name)),
-    provide: (name, value) => provided.set(name, value),
-    effect: (callback) => { callback(); return () => {} },
-    inject: (deps, callback) => { injected.push({ deps, callback }) },
-    logger: { info() {}, warn() {}, error() {} },
-  }
-  return { provided, injected, ctx }
-}
 
 
 test('apply()：提供 capitalCharts 服务并注册 prefix 路由', () => {
@@ -182,7 +169,8 @@ test('apply()：提供 capitalCharts 服务并注册 prefix 路由', () => {
   assert.equal(routes[0].kind, 'prefix')
   assert.equal(routes[0].path, ROUTE_PATH)
   assert.equal(typeof routes[0].handler, 'function')
-  assert.equal(harness.injected.length, 0, 'webServer 已在时不应走 inject 等待分支')
+  assert.equal(harness.injected.length, 1, '取 webServer 只能经 inject——探测后直接拿属性会在桌面端炸')
+  assert.deepEqual(harness.injected[0].deps, ['webServer'])
   assert.equal(service.publishReport, undefined, 'capitalCharts 不应再有 publishReport')
 })
 

@@ -620,8 +620,10 @@ export function apply(ctx) {
       'capital-watchlist: route',
     )
   }
-  if (ctx.get('webServer') === undefined) ctx.inject(['webServer'], registerRoute)
-  else registerRoute(ctx)
+  // 只走 inject：`ctx.get('webServer')` 有值不代表 `ctx.webServer` 属性可访问（cordis 只认
+  // "本层声明过 inject"）。先探测再直接调用 = 把正确性押在装配顺序上，桌面端就是这么炸的
+  // （2026-09-30 实机，与 capital-charts 同一处形状）。
+  ctx.inject(['webServer'], registerRoute)
 
   // 域是我们打开的，就得自己关（facility 只在自己卸载时兜底）；同名重复 open 会 already-open。
   ctx.effect(() => () => {
