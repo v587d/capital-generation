@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { locateNpmCli } from '../scripts/lib/run-tool.mjs'
 
@@ -107,7 +107,9 @@ test('打包闸门：声明 dsh.client 的包，其客户端 bundle 必须真的
     const onDisk = join(ROOT, owner, resolved)
     assert.ok(existsSync(onDisk), `exports["./client"] 指向的文件不存在：${owner}/${resolved}`)
 
-    const packedPath = join(owner, resolved).replace(/^\.\//, '')
+    // 发布清单这一侧只用 posix 比：`npm pack --json` 返回的是 `chart-ui/client.js`，而
+    // join() 给本机分隔符——Windows 上 has() 永远落空（2026-09-30 双端 CI 实测的唯一红）。
+    const packedPath = join(owner, resolved).replace(/^\.\//, '').split(sep).join('/')
     assert.ok(paths.has(packedPath), `${packedPath} 不在发布清单里；bundle 缺失会让整个 web profile 起不来`)
   }
 
