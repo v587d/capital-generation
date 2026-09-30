@@ -1,0 +1,13 @@
+# 仓库里文本文件的换行符标准：库里存 LF，checkout 也给 LF。
+#
+# 为什么必须有这个文件：没有它时，"磁盘上的文件是 LF 还是 CRLF"由每台机器自己的 git 配置
+# 决定——Git for Windows 在系统级设了 `core.autocrlf=true`，于是 Windows 工作区拿到的是
+# CRLF 版本。症状不是报错，而是"按 `\n` 写死的解析匹配不上""按行算的预算数字不一样""diff
+# 看起来整文件都改了"。定下标准之后分工清楚：本文件保证**形状只有一个**，
+# `test/cross-platform.test.mjs` 保证**代码不许依赖那个形状**。
+* text=auto eol=lf
+
+# cmd.exe 按 `\r\n` 解析批处理，LF-only 的 .bat/.cmd 在不同 Windows 版本上行为不一致，
+# 所以这两类显式留 CRLF（本仓目前没有这类文件，写在这里是防止将来加分发脚本时踩坑）。
+*.cmd text eol=crlf
+*.bat text eol=crlf
