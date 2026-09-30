@@ -7,6 +7,18 @@ export interface DataCollectorDiagnostics {
         source: string | null;
         error?: string;
     }>;
+    /**
+     * 根 Agent 工具收敛的现场记录（`src/agents/root-tool-policy.ts` 的 `RootPolicyProbe`）。
+     * 结构在这里重述一份（不按 import 拿类型）：data_collector 不该依赖 agents 层。
+     */
+    rootPolicy?: () => Array<{
+        agentId: string | undefined;
+        root: boolean;
+        presetId: string;
+        outcome: string;
+        denied: string[];
+        failed: string[];
+    }>;
     /** 每次 dc_status 真实执行时回调（写执行痕迹用；模型可伪造文本，但宿主文件痕迹与计数无法伪造）。 */
     onCall?: (snapshot: {
         at: number;

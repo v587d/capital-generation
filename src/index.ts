@@ -13,7 +13,7 @@ import { registerDatasetTools } from './data-collector/dataset-tools.js'
 import { registerTimeTool } from './time/tools.js'
 import { registerChartTool } from './chart/tool.js'
 import { createChartEventPublisher, type ChartEventContext } from './chart/events.js'
-import { registerRootToolPolicy } from './agents/root-tool-policy.js'
+import { registerRootToolPolicy, rootPolicyProbes } from './agents/root-tool-policy.js'
 import { registerBashGuard } from './agents/bash-guard.js'
 import { ChartSourceTokenStore, registerChartSourceTool } from './chart/source-token.js'
 import { ChartArtifactRegistry } from './chart/artifact-ref.js'
@@ -286,6 +286,8 @@ export function apply(ctx: Context, config: Config) {
         return { present: false, source: null, error: error instanceof Error ? error.message : String(error) }
       }
     },
+    // 根收敛的现场记录：桌面端不落盘宿主日志，没有这条就只剩"模型不太守纪律"这一种表现。
+    rootPolicy: () => rootPolicyProbes(),
   }
   // 工具注册在 Capital 会话组作用域（preset 的 capital-generation-scope 行），
   // 主 Agent 与子 Agent 均可见；子 Agent 的可见集由委派行 toolFilter 收敛。

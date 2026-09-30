@@ -340,6 +340,30 @@ test('dc_status：上报 registered_capabilities 而非内部 source 名，不�
   assert.equal(status.api_key.source, 'file')
   assert.deepEqual(status.registered_capabilities, ['quote'])
   assert.equal('registration_error' in status, false, '注册不再以凭据为门槛，回执里不留这条自相矛盾的字段')
+  assert.equal('root_tool_policy' in status, false, '没注入 rootPolicy 时不许凭空造出这个字段（output.schema 要如实）')
+})
+
+/**
+ * 根收敛的现场记录必须能从**会话侧**读到：桌面端不落盘宿主日志，`ctx.logger.warn`
+ * 在那边等于没有（2026-09-30 同一族第二次踩）。这条断言顺带钉住无损 JSON——
+ * `agentId` 是 undefined，带出去就必须是 null，不许让空洞出工具边界（§9.5）。
+ */
+test('dc_status：root_tool_policy 原样带出收敛现场，undefined 归一成 null', async () => {
+  const { toolRuntime } = makeHubAndTools({
+    diagnostics: {
+      probeApiKey: async () => ({ present: false, source: null }),
+      rootPolicy: () => [
+        { agentId: undefined, root: true, presetId: 'standard', outcome: 'not-capital', denied: [], failed: [] },
+        { agentId: 'root-2', root: true, presetId: 'capital-generation', outcome: 'restricted', denied: ['pwsh'], failed: ['bash'] },
+      ],
+    },
+  })
+  const status = await runTool(toolRuntime, 'dc_status', {}, exec(delegatedSession()))
+  assert.deepEqual(status.root_tool_policy, [
+    { agent_id: null, root: true, preset_id: 'standard', outcome: 'not-capital', denied: [], failed: [] },
+    { agent_id: 'root-2', root: true, preset_id: 'capital-generation', outcome: 'restricted', denied: ['pwsh'], failed: ['bash'] },
+  ])
+  assert.equal(JSON.parse(JSON.stringify(status.root_tool_policy)).length, 2, '回执必须能无损序列化（undefined 不许带出工具边界）')
 })
 
 test('tools 缺失：ctx.get(tools) 为空时不注册也不抛', () => {

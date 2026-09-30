@@ -13,6 +13,18 @@ type ToolExecLike = { agent?: AgentExecutionLike; signal: AbortSignal }
 /** dc_status 诊断信息注入：探测凭据解析状态（只含有无/source，不含密钥值）。 */
 export interface DataCollectorDiagnostics {
   probeApiKey: () => Promise<{ present: boolean; source: string | null; error?: string }>
+  /**
+   * 根 Agent 工具收敛的现场记录（`src/agents/root-tool-policy.ts` 的 `RootPolicyProbe`）。
+   * 结构在这里重述一份（不按 import 拿类型）：data_collector 不该依赖 agents 层。
+   */
+  rootPolicy?: () => Array<{
+    agentId: string | undefined
+    root: boolean
+    presetId: string
+    outcome: string
+    denied: string[]
+    failed: string[]
+  }>
   /** 每次 dc_status 真实执行时回调（写执行痕迹用；模型可伪造文本，但宿主文件痕迹与计数无法伪造）。 */
   onCall?: (snapshot: { at: number; call: number; apiKey: unknown; capabilities: string[] }) => void
 }
@@ -225,17 +237,33 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
       },
     ),
     ...(diagnostics ? [
-      tool('dc_status', '诊断工具：返回数据管道运行状态 —— at/call 为本次真实执行的时间戳与计数（防伪）、api_key 为**本次调用现取**的凭据解析结果（present/source，不含密钥值）、registered_capabilities 为当前已注册 capability 列表。数据源注册不依赖 key：api_key.present=false 时同花顺能力仍在目录里，但每次取数会点名 FUYAO_API_KEY 失败。排障时优先调用。', jsonObject(),
+      tool('dc_status', '诊断工具：返回数据管道运行状态 —— at/call 为本次真实执行的时间戳与计数（防伪）、api_key 为**本次调用现取**的凭据解析结果（present/source，不含密钥值）、registered_capabilities 为当前已注册 capability 列表、root_tool_policy 为根 Agent 工具收敛的现场记录（preset_id / outcome / denied / failed，排查"主 Agent 为什么看得见本该收敛掉的工具"用）。数据源注册不依赖 key：api_key.present=false 时同花顺能力仍在目录里，但每次取数会点名 FUYAO_API_KEY 失败。排障时优先调用。', jsonObject(),
         jsonObject({
           at: { type: 'integer' },
           call: { type: 'integer' },
           api_key: jsonObject({ present: { type: 'boolean' }, source: { oneOf: [{ type: 'string' }, { type: 'null' }] }, error: { oneOf: [{ type: 'string' }, { type: 'null' }] } }, ['present']),
           registered_capabilities: { type: 'array', items: { type: 'string' } },
+          root_tool_policy: { type: 'array', items: jsonObject({
+            agent_id: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+            root: { type: 'boolean' },
+            preset_id: { type: 'string' },
+            outcome: { type: 'string' },
+            denied: { type: 'array', items: { type: 'string' } },
+            failed: { type: 'array', items: { type: 'string' } },
+          }, ['agent_id', 'root', 'preset_id', 'outcome', 'denied', 'failed']) },
         }, ['at', 'call', 'api_key', 'registered_capabilities']),
         async (_args, exec) => {
            delegatedSession(exec, 'dc_status')
           const apiKey = await diagnostics.probeApiKey()
           const capabilities = hub.capabilityNames()
+          const rootPolicy = diagnostics.rootPolicy?.()?.map((probe) => ({
+            agent_id: probe.agentId ?? null,
+            root: probe.root,
+            preset_id: probe.presetId,
+            outcome: probe.outcome,
+            denied: probe.denied,
+            failed: probe.failed,
+          }))
           const snapshot = { at: Date.now(), call: ++dcStatusCalls.current, apiKey, capabilities }
           diagnostics.onCall?.(snapshot)
           return {
@@ -243,6 +271,7 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
             call: snapshot.call,
             api_key: apiKey,
             registered_capabilities: capabilities,
+            ...(rootPolicy === undefined ? {} : { root_tool_policy: rootPolicy }),
           }
         }),
     ] : []),

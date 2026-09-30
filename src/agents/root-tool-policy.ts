@@ -180,13 +180,67 @@ export function isCapitalAgent(ctx: PolicyContext, agent: AgentLike | undefined)
 }
 
 /**
+ * 根收敛的**现场记录**（取证用，不改任何行为）。
+ *
+ * 为什么必须有：`registerRootToolPolicy` 有三条互不相同的静默出口——读不到 registry、
+ * `composedPreset` 判 false、逐名 `restrict()` 抛错被 catch 跳过（此时 outcome 仍记
+ * `restricted`）。三条都**不留痕迹**，而桌面端不落盘 `ctx.logger`，于是"收敛没生效"这件事
+ * 在桌面端等于不可观测。2026-09-30 桌面端实测：Capital 根会话的 `request.header.tools`
+ * 里 `pwsh` / `request_data` / `dc_status` / `render_chart` 全在，就是这条不可观测让它
+ * 一路只表现为"模型不太守纪律"。
+ *
+ * 读法：`dc_status` 的 `root_tool_policy` 字段（模型可见、可回传，不依赖宿主日志）。
+ */
+export interface RootPolicyProbe {
+  /** 根 Agent 会话 id（子 Agent 也有 id，用来区分两条路径）。 */
+  agentId: string | undefined
+  root: boolean
+  /** `composedPreset` 的原样返回值；`'no-registry'` = registry 或方法不在，`'error'` = 它抛错。 */
+  presetId: string
+  outcome: 'pending' | 'restricted' | 'unavailable' | 'skipped' | 'not-capital'
+  /** 真正被 `restrict({deny})` 接住的工具名。 */
+  denied: string[]
+  /** `restrict()` 抛错因而被静默跳过的名字——非空就说明收敛只成功了一部分。 */
+  failed: string[]
+}
+
+const probes: RootPolicyProbe[] = []
+const MAX_PROBES = 8
+
+/** 最近 {@link MAX_PROBES} 条收敛现场（进程内；不落盘，随宿主进程生灭）。 */
+export function rootPolicyProbes(): RootPolicyProbe[] {
+  return probes.map((probe) => ({ ...probe, denied: [...probe.denied], failed: [...probe.failed] }))
+}
+
+/** 只给测试用：清空现场记录，避免用例之间互相污染。 */
+export function resetRootPolicyProbes(): void {
+  probes.length = 0
+}
+
+/** `composedPreset` 的原样答案（诊断口径，不参与判定；判定仍只有一份在 {@link isCapitalAgent}）。 */
+function presetIdOf(ctx: PolicyContext, agent: AgentLike | undefined): string {
+  let presets: { composedPreset?: (agentCtx: unknown) => string | undefined } | undefined
+  try {
+    presets = ctx.get?.('agentPresets') as typeof presets
+  } catch {
+    return 'no-registry'
+  }
+  if (presets === undefined || typeof presets.composedPreset !== 'function') return 'no-registry'
+  try {
+    return presets.composedPreset(agent?.ctx) ?? 'undefined'
+  } catch {
+    return 'error'
+  }
+}
+
+/**
  * 只对根 Agent 生效地 deny {@link ROOT_AGENT_DENIED_TOOLS}。
  *
  * 逐名 restrict：`tools.restrict()` 对"本 scope 看不到的名字"会抛错（别的 preset、或行还没挂载），
  * 逐名调用把这种"本来就不该有"的情况变成无害跳过，而不是整批失败。
  * 任何异常都不抛出：调用方是 agent 创建路径，宁可少收敛也不能挡住建 agent。
  */
-export function restrictRootAgentTools(agent: AgentLike | undefined): RootToolPolicyOutcome {
+export function restrictRootAgentTools(agent: AgentLike | undefined, record?: { denied: string[]; failed: string[] }): RootToolPolicyOutcome {
   if (!isRootAgent(agent)) return 'skipped'
   let tools: RestrictedToolRuntime | undefined
   try {
@@ -198,8 +252,10 @@ export function restrictRootAgentTools(agent: AgentLike | undefined): RootToolPo
   for (const name of ROOT_AGENT_DENIED_TOOLS) {
     try {
       tools.restrict({ deny: [name] })
+      record?.denied.push(name)
     } catch {
       // 这个 scope 本来就没有这个名字（别的 preset / 该行未挂载）：跳过即可。
+      record?.failed.push(name)
     }
   }
   return 'restricted'
@@ -243,8 +299,22 @@ export function registerRootToolPolicy(ctx: PolicyContext): void {
     const stopCreated = listenCtx.on?.('agent/created', (payload: { agent?: AgentLike }) => {
       try {
         const agent = payload?.agent
-        if (!isCapitalAgent(ctx, agent)) return
-        const outcome = restrictRootAgentTools(agent)
+        const isRoot = isRootAgent(agent)
+        // 只记根 Agent 的现场：子 Agent 一律有 parentSession、本来就不该被收敛，
+        // 把它们也塞进这份上限 8 条的窗口里，会把唯一有意义的那行挤掉。
+        const probe: RootPolicyProbe | undefined = isRoot
+          ? { agentId: agentSessionId(agent), root: true, presetId: presetIdOf(ctx, agent), outcome: 'pending', denied: [], failed: [] }
+          : undefined
+        if (probe !== undefined) {
+          probes.push(probe)
+          if (probes.length > MAX_PROBES) probes.shift()
+        }
+        if (!isCapitalAgent(ctx, agent)) {
+          if (probe !== undefined) probe.outcome = 'not-capital'
+          return
+        }
+        const outcome = restrictRootAgentTools(agent, probe)
+        if (probe !== undefined) probe.outcome = outcome
         if (outcome === 'unavailable') {
           ctx.logger?.warn(`capital-generation: 根 Agent 工具收敛未生效（${outcome}）：主 Agent 仍会看到 ${ROOT_AGENT_DENIED_TOOLS.join(' / ')}`)
         }

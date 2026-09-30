@@ -10,8 +10,10 @@ import {
   isCapitalAgent,
   isRootAgent,
   registerRootToolPolicy,
+  resetRootPolicyProbes,
   restrictRootAgentTools,
   rootOcrGuardReason,
+  rootPolicyProbes,
 } from '../lib/agents/root-tool-policy.js'
 
 /**
@@ -179,6 +181,62 @@ test('registerRootToolPolicy：别的 preset 的根 Agent 不动', () => {
   registerRootToolPolicy(ctx)
   rootListeners[0].listener({ agent: { session: { header: {} }, ctx: { tools: { restrict: (filter) => { calls.push(filter) } } } } })
   assert.equal(calls.length, 0, 'standard preset 的根 Agent 不该被我们 restrict')
+})
+
+/**
+ * ⛔ 取证用例（2026-09-30 桌面端）。
+ *
+ * 桌面端 Capital 根会话的 `request.header.tools` 里 `pwsh` / `request_data` / `dc_status` /
+ * `render_chart` **全都在**——收敛一步没走，而当时**没有任何一处能看出来为什么**：三条出口
+ * （registry 读不到、`composedPreset` 判 false、逐名 `restrict()` 抛错被 catch）都不留痕迹，
+ * 桌面端又不落盘 `ctx.logger`。这条用例钉的是"三条出口各自必须在现场记录里可分辨"——
+ * 它不证明收敛成功，只保证下次再坏的时候**看得见坏在哪一步**。
+ */
+test('registerRootToolPolicy：三条静默出口都要在现场记录里留下可分辨的痕迹', () => {
+  resetRootPolicyProbes()
+  const fire = ({ composedPreset, restrict }) => {
+    const listeners = []
+    registerRootToolPolicy({
+      get: (name) => (name === 'agentPresets' ? (composedPreset === undefined ? undefined : { composedPreset }) : undefined),
+      on: (event, listener) => { listeners.push({ event, listener }); return () => {} },
+      logger: { warn() {}, info() {}, error() {} },
+    })
+    listeners[0].listener({ agent: { id: 'root-1', session: { id: 'root-1', header: {} }, ctx: { tools: { restrict } } } })
+    return rootPolicyProbes().at(-1)
+  }
+
+  // 出口一：`composedPreset` 认不出这个根 Agent（桌面端最可疑的一条）。
+  const judged = fire({ composedPreset: () => 'standard', restrict: () => {} })
+  assert.equal(judged.presetId, 'standard', '现场记录要原样带出 composedPreset 的返回值，否则无法判断是不是判错了预设')
+  assert.equal(judged.outcome, 'not-capital')
+  assert.deepEqual(judged.denied, [])
+
+  // 出口二：逐名 `restrict()` 抛错被 catch 跳过——**旧实现连这条都不留**，
+  // outcome 照样是 restricted，看起来像"收敛成功了"。
+  const failed = fire({
+    composedPreset: () => CAPITAL_PRESET_ID,
+    restrict: () => { throw new Error('unknown tool name') },
+  })
+  assert.equal(failed.outcome, 'restricted')
+  assert.deepEqual(failed.failed, [...ROOT_AGENT_DENIED_TOOLS], '每一个被跳过的名字都必须点名')
+  assert.deepEqual(failed.denied, [])
+
+  // 出口三：registry 压根读不到（保守放行分支）。
+  const noRegistry = fire({ composedPreset: undefined, restrict: () => {} })
+  assert.equal(noRegistry.presetId, 'no-registry')
+  assert.equal(noRegistry.denied.length, ROOT_AGENT_DENIED_TOOLS.length, '保守放行也要如实记下 deny 成功的名')
+
+  // 子 Agent 不进这份窗口：它们是绝大多数 agent/created 的来源，会把唯一有意义的那行挤掉。
+  resetRootPolicyProbes()
+  const listeners = []
+  registerRootToolPolicy({
+    get: () => ({ composedPreset: () => CAPITAL_PRESET_ID }),
+    on: (event, listener) => { listeners.push({ event, listener }); return () => {} },
+    logger: { warn() {} },
+  })
+  listeners[0].listener({ agent: { session: { id: 'kid', header: { parentSession: 'root-1' } }, ctx: { tools: { restrict: () => {} } } } })
+  assert.deepEqual(rootPolicyProbes(), [], '现场记录只留根 Agent')
+  resetRootPolicyProbes()
 })
 
 test('registerRootToolPolicy：registry 读不到时保守放行（逐名 restrict 自己会拒绝未知名字）', () => {

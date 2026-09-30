@@ -31,14 +31,15 @@
 - **pwsh 侧只量到一半**（2026-09-30 桌面端记录）：一份 Capital 会话日志里有 **21 次 `pwsh` 调用，全部是读**
   （读到 workspace 外的 `~/.dsh/.credentials.yaml`、`app.asar`、`%APPDATA%`）⇒ **「不拦读」在 pwsh 上已实测**；
   「拦写」与「不拦网」两条仍无记录，别把 bash 的结论当 pwsh 的承诺。
-- **⚠️ 未决（同一份日志暴露的另一件事，比沙箱形状更要紧）**：那 21 次 `pwsh` 是 **Capital 根会话自己**跑的
-  （同一文件 `agent-preset/selected = capital-generation`；首行 `session` 记录写的 `standard` 与之矛盾，以
-  selected 为准——system message 就是我们的人设）。按上面 ① 根侧 deny 应当让主 Agent 看不到 shell。两种解释
-  都还成立，本机无法区分：① deny 在桌面端没生效——`restrictRootAgentTools` 逐名 try/catch 静默跳过、
-  outcome 一律记 `restricted`，所以没生效也不会留 warn；② `isCapitalAgent` 在桌面端的根 agent 上判 false，
-  整批提前 return。Linux 侧 35 份 Capital 会话日志里没有任何 shell 调用，**那不等于 deny 生效**，只是没触发。
-  判据（下一步实测）：在桌面端 Capital 会话里问主 Agent「你手上有没有 pwsh / request_data」——看不见才是
-  收住了；看得见而调用被拒，说明 deny 没落地，只是被工具层那道 `delegatedSession` 兜住。
+- **⛔ 根侧收敛在桌面端整条没走（2026-09-30 硬证据，不再是推断）**：同一份 `session.v4.jsonl` 里
+  `request/header` 带的是**真发给模型的工具表**，桌面端 Capital **根**会话那一份有 40 颗，其中
+  `pwsh`、`request_data`、`dc_status`、`render_chart` 全在——`ROOT_AGENT_DENIED_TOOLS` 一个都没落地。
+  所以这不是"shell 漏了"而是"整条 `registerRootToolPolicy` 没生效"；`render_chart` 那条按 §6.1
+  本来是要防"主 Agent 自己出图"的。**目前仍分不清是哪条出口**（registry 读不到 / `composedPreset`
+  判 false / 逐名 `restrict()` 抛错被 catch 跳过——旧实现三条都不留痕迹，桌面端又不落盘
+  `ctx.logger`）。取证面已经装上：`dc_status` 的 `root_tool_policy` 字段带出
+  `preset_id / outcome / denied / failed`（见 `rootPolicyProbes`），**回执里有这个字段本身就说明
+  装到了带眼睛的构建**。判据不变：主 Agent 的工具表里看不见才算收住。
 - **写边界也无法单独收窄**：`store.writeContext()` 用调用方 session 的 policy 且要求
   `workspace-write`，而 `describe_dataset` 会用 data_junior 的 session 写 `profile.json`——钉成
   read-only 直接打断它：bash 与 Dataset 管线共用同一把尺子（session policy）。

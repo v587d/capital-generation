@@ -109,13 +109,44 @@ export declare function agentSessionId(agent: AgentLike | undefined): string | u
 /** 只有本 preset 的 agent 才收敛：别的 preset 的 agent 不该被我们碰。 */
 export declare function isCapitalAgent(ctx: PolicyContext, agent: AgentLike | undefined): boolean;
 /**
+ * 根收敛的**现场记录**（取证用，不改任何行为）。
+ *
+ * 为什么必须有：`registerRootToolPolicy` 有三条互不相同的静默出口——读不到 registry、
+ * `composedPreset` 判 false、逐名 `restrict()` 抛错被 catch 跳过（此时 outcome 仍记
+ * `restricted`）。三条都**不留痕迹**，而桌面端不落盘 `ctx.logger`，于是"收敛没生效"这件事
+ * 在桌面端等于不可观测。2026-09-30 桌面端实测：Capital 根会话的 `request.header.tools`
+ * 里 `pwsh` / `request_data` / `dc_status` / `render_chart` 全在，就是这条不可观测让它
+ * 一路只表现为"模型不太守纪律"。
+ *
+ * 读法：`dc_status` 的 `root_tool_policy` 字段（模型可见、可回传，不依赖宿主日志）。
+ */
+export interface RootPolicyProbe {
+    /** 根 Agent 会话 id（子 Agent 也有 id，用来区分两条路径）。 */
+    agentId: string | undefined;
+    root: boolean;
+    /** `composedPreset` 的原样返回值；`'no-registry'` = registry 或方法不在，`'error'` = 它抛错。 */
+    presetId: string;
+    outcome: 'pending' | 'restricted' | 'unavailable' | 'skipped' | 'not-capital';
+    /** 真正被 `restrict({deny})` 接住的工具名。 */
+    denied: string[];
+    /** `restrict()` 抛错因而被静默跳过的名字——非空就说明收敛只成功了一部分。 */
+    failed: string[];
+}
+/** 最近 {@link MAX_PROBES} 条收敛现场（进程内；不落盘，随宿主进程生灭）。 */
+export declare function rootPolicyProbes(): RootPolicyProbe[];
+/** 只给测试用：清空现场记录，避免用例之间互相污染。 */
+export declare function resetRootPolicyProbes(): void;
+/**
  * 只对根 Agent 生效地 deny {@link ROOT_AGENT_DENIED_TOOLS}。
  *
  * 逐名 restrict：`tools.restrict()` 对"本 scope 看不到的名字"会抛错（别的 preset、或行还没挂载），
  * 逐名调用把这种"本来就不该有"的情况变成无害跳过，而不是整批失败。
  * 任何异常都不抛出：调用方是 agent 创建路径，宁可少收敛也不能挡住建 agent。
  */
-export declare function restrictRootAgentTools(agent: AgentLike | undefined): RootToolPolicyOutcome;
+export declare function restrictRootAgentTools(agent: AgentLike | undefined, record?: {
+    denied: string[];
+    failed: string[];
+}): RootToolPolicyOutcome;
 /**
  * 在**根 Agent 自己的 scope** 上装 `ocr` 的调用级闸门（子 Agent 不装：`url` 形态归它们）。
  *

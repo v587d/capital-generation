@@ -93,6 +93,11 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
     assert.equal(status.api_key.present, true)
     assert.equal(status.api_key.source, 'env(FUYAO_API_KEY)')
     assert.equal(status.registered_capabilities.length, 69)
+    // ⛔ 生产装配也必须把根收敛的现场记录接进 dc_status：单元测试里手工注入 diagnostics
+    // 会全绿，而 `src/index.ts` 忘传 `rootPolicy` 的表现是"桌面端又查不出来"——正是这次
+    // 事故缺的那双眼睛（§9.7：每个入口都要有对等断言）。
+    assert.ok(Array.isArray(status.root_tool_policy), 'apply() 必须把 rootPolicy 注入 dc_status')
+    assert.deepEqual(status.root_tool_policy, [], '假装配里没有 agent 被创建，记录应为空数组而不是缺字段')
 
     // 能力目录应可用（两级发现的第一级）
     const directory = await toolNamed(tools, 'list_capabilities').execute({}, exec(delegated))
