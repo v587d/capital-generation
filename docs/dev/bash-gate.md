@@ -33,13 +33,21 @@
   「拦写」与「不拦网」两条仍无记录，别把 bash 的结论当 pwsh 的承诺。
 - **⛔ 根侧收敛在桌面端整条没走（2026-09-30 硬证据，不再是推断）**：同一份 `session.v4.jsonl` 里
   `request/header` 带的是**真发给模型的工具表**，桌面端 Capital **根**会话那一份有 40 颗，其中
-  `pwsh`、`request_data`、`dc_status`、`render_chart` 全在——`ROOT_AGENT_DENIED_TOOLS` 一个都没落地。
-  所以这不是"shell 漏了"而是"整条 `registerRootToolPolicy` 没生效"；`render_chart` 那条按 §6.1
-  本来是要防"主 Agent 自己出图"的。**目前仍分不清是哪条出口**（registry 读不到 / `composedPreset`
-  判 false / 逐名 `restrict()` 抛错被 catch 跳过——旧实现三条都不留痕迹，桌面端又不落盘
-  `ctx.logger`）。取证面已经装上：`dc_status` 的 `root_tool_policy` 字段带出
-  `preset_id / outcome / denied / failed`（见 `rootPolicyProbes`），**回执里有这个字段本身就说明
-  装到了带眼睛的构建**。判据不变：主 Agent 的工具表里看不见才算收住。
+  `pwsh`、`render_chart`、`anysearch_search` 等**本该被 deny 的 17 颗全在**——`ROOT_AGENT_DENIED_TOOLS`
+  一个都没落地。（`request_data` / `dc_status` 也在表里，但那**是设计如此**：Dataset 系列从来不在 deny
+  名单里，靠工具层 `delegatedSession` 在调用那一刻拒，别把它当成 deny 失效的证据去改名单。）
+  所以这不是"shell 漏了"而是"整条 `registerRootToolPolicy` 没生效"。**2026-09-30 第二轮取证把它
+  再往前推了一步，而且推翻了"没生效"的三种猜测里的两种**：新构建里 `dc_status` 的现场记录显示
+  `preset_id = capital-generation`、`outcome = restricted`、**17 颗名字 `restrict()` 都没抛错**
+  （`web_search` / `web_fetch` / `bash` 三颗抛错＝那个 scope 里压根没有这些名字，Windows 上没有
+  `bash` 那行，符合预期）——**可同一台机器真发给模型的工具表里，那 17 颗一颗不少地全在**。
+  结论收窄成一句：**监听触发了、预设判对了、`restrict()` 调用成功了，可见面却纹丝不动**。
+- **⛔ 因此 `tools.restrict()` 不是本仓可依赖的收敛手段**（在能重新取证之前都不要加回它然后宣称收住了）。
+  上游对它的语义写得很清楚（`dsh-tools`：*restriction 只过滤 scope **继承**来的工具，**从不过滤本层自己
+  注册的***；而 `view()` 会把 own 层的工具无条件放回可见面），且 `restrict(filter)` **没有 scope 参数**、
+  靠 `scopeOf(this.ctx)` 决定写进哪一层——"通过 `agent.ctx.tools` 拿到的实例到底绑的是哪一层"从外部
+  看不出来。对比之下 `tools.guard()` 是按 `exec.agent` 取链路的，**这才是有正确 per-agent 语义的那个**
+  （`bash-guard.ts` 用它，理由就写在这一节上面）。
 - **写边界也无法单独收窄**：`store.writeContext()` 用调用方 session 的 policy 且要求
   `workspace-write`，而 `describe_dataset` 会用 data_junior 的 session 写 `profile.json`——钉成
   read-only 直接打断它：bash 与 Dataset 管线共用同一把尺子（session policy）。
