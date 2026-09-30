@@ -88,11 +88,10 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
     assert.equal(toolNamed(tools, 'final_report'), undefined, 'final_report 不应再注册')
     assertToolSchemas(tools)
 
-    // dc_status 应报告 Key 存在且无注册错误
+    // dc_status 应报告 Key 存在
     const status = await toolNamed(tools, 'dc_status').execute({}, exec(delegated))
     assert.equal(status.api_key.present, true)
     assert.equal(status.api_key.source, 'env(FUYAO_API_KEY)')
-    assert.equal(status.registration_error, null)
     assert.equal(status.registered_capabilities.length, 69)
 
     // 能力目录应可用（两级发现的第一级）
@@ -106,35 +105,54 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
   }
 })
 
-test('apply()：无 Fuyao Key 时 Tencent 数据源仍注册，工具与诊断状态可用', async () => {
+/**
+ * 2026-09-30 桌面端事故回归。宿主凭据 provider 在 `[Service.init]` 里**先 yield 把服务发布出去、
+ * 之后才 await loadInitial() 装载快照**（实测 dsh-credentials-local/lib/index.js:441-446），
+ * 所以装配期那一次 `resolve()` 返回 `undefined` 且**不抛错**。旧实现把"装配期读到 key"当成
+ * 同花顺源的注册门槛，于是整个进程生命周期内 61 个能力静默缺席，目录只剩 8 项；同一进程里
+ * 走调用期解析的自选股照样取到了 fuyao 行情——这个反差就是它没被立刻发现的原因。
+ * 现在的契约三句：注册不看 key；缺 key 时**调用期**点名 FUYAO_API_KEY 失败；快照装载完同一进程自愈。
+ */
+test('apply()：装配期凭据尚未装载时同花顺源照常注册，失败留到调用期点名', async () => {
   delete process.env.FUYAO_API_KEY
   try {
-    const { ctx, tools, services, effectResults } = fakeCtx()
+    let snapshotLoaded = false
+    const { ctx, tools, services, effectResults } = fakeCtx({
+      credentials: {
+        resolve: async (ref) => (snapshotLoaded && ref === 'FUYAO_API_KEY'
+          ? { value: 'cred-key', source: 'file' }
+          : undefined),
+      },
+    })
     apply(ctx, { customPersona: '', retriever: { baseURL: '', credentialRef: '', windDocs: { endpoint: '', credentialRef: '', timeoutMs: 0 } } })
     await Promise.all(effectResults)
 
     const hub = services.get('dataCollectorHub')
-    assert.equal(hub.capabilityNames().length, 8, '无 Fuyao 凭据时仍应注册 3 个 Tencent 与 5 个 Eastmoney capability')
+    assert.equal(hub.capabilityNames().length, 69,
+      '⛔ 61 个同花顺能力不得因"装配期没读到 key"缺席（桌面端实测：整场进程只剩 8 项且无重试）')
+
+    const unloaded = await toolNamed(tools, 'dc_status').execute({}, exec(delegated))
+    assert.equal(unloaded.api_key.present, false, '快照未装载时探针必须如实报告拿不到 key')
+    assert.equal('registration_error' in unloaded, false,
+      '注册结果与凭据时刻解耦后，同一份 dc_status 不可能再同时报「key 有」和「源未注册」')
 
     // 工具表与凭据状态解耦：Key 缺失不能让子 Agent 创建失败（toolFilter 里的名字必须真实存在）
     for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status']) {
       assert.ok(toolNamed(tools, name), `无 Key 时仍应注册 ${name}`)
     }
-
-    const status = await toolNamed(tools, 'dc_status').execute({}, exec(delegated))
-    assert.equal(status.api_key.present, false)
-    assert.match(status.registration_error, /FUYAO_API_KEY/)
-    assert.deepEqual(status.registered_capabilities, [
-      'tencent_quote', 'tencent_kline', 'tencent_ticks',
-      'eastmoney_top_buy_sell_market', 'eastmoney_top_buy_sell_ticker', 'eastmoney_lockup_expiry',
-      'eastmoney_sector_rotation', 'eastmoney_cashflow_rotation',
-    ])
-
-    // 目录为空时 describe_capability 必须给出可引导的错误，而不是含糊的 not found
     await assert.rejects(
-      () => toolNamed(tools, 'describe_capability').execute({ capability: 'quote' }, exec(delegated)),
-      /capability_unknown/,
+      () => toolNamed(tools, 'request_data').execute({
+        capability: 'quote', params: { thscodes: '600519.SH' }, task_id: 'task-no-key', force_refresh: true,
+      }, exec(delegated)),
+      /FUYAO_API_KEY/,
+      '缺 key 必须响亮失败并点名引用名，不是含糊的 capability_unknown，也不是内存假成功',
     )
+
+    // 快照随后装载完（宿主本来就会做完）：同一进程、同一份注册，不需要重启。
+    snapshotLoaded = true
+    const loaded = await toolNamed(tools, 'dc_status').execute({}, exec(delegated))
+    assert.equal(loaded.api_key.present, true, '调用期解析必须看见晚到的凭据（README「卡片保存即生效」的前提）')
+    assert.equal(loaded.api_key.source, 'file')
   } finally {
     if (SAVED_KEY !== undefined) process.env.FUYAO_API_KEY = SAVED_KEY
   }

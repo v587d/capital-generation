@@ -10,12 +10,11 @@ type AgentExecutionLike = {
 }
 type ToolExecLike = { agent?: AgentExecutionLike; signal: AbortSignal }
 
-/** dc_status 诊断信息注入：探测凭据解析状态与最近一次注册错误（只含有无/source，不含密钥值）。 */
+/** dc_status 诊断信息注入：探测凭据解析状态（只含有无/source，不含密钥值）。 */
 export interface DataCollectorDiagnostics {
   probeApiKey: () => Promise<{ present: boolean; source: string | null; error?: string }>
-  getRegistrationError: () => string | undefined
   /** 每次 dc_status 真实执行时回调（写执行痕迹用；模型可伪造文本，但宿主文件痕迹与计数无法伪造）。 */
-  onCall?: (snapshot: { at: number; call: number; apiKey: unknown; capabilities: string[]; error: string | null }) => void
+  onCall?: (snapshot: { at: number; call: number; apiKey: unknown; capabilities: string[] }) => void
 }
 
 const jsonObject = (properties: Record<string, unknown> = {}, required: string[] = []): object => ({ type: 'object', properties, required, additionalProperties: false })
@@ -153,7 +152,7 @@ function resolveCapability(hub: DataCollectorHub, value: unknown): string {
   if (!hub.describeCapability(name)) {
     const available = hub.capabilityNames()
     if (available.length === 0) {
-      throw capabilityError('capability_catalog_empty', '当前没有任何已注册的数据能力（数据源未注册，常见原因是 API 凭据未配置或装配未生效）。本工具此刻对任何名字都会失败——不要反复重试，也不要编造能力名；请把该状态回告主 Agent，必要时用 dc_status 读取注册错误。')
+      throw capabilityError('capability_catalog_empty', '当前没有任何已注册的数据能力（数据源注册没有生效）。注意：缺凭据**不会**让目录变空——同花顺能力始终在目录里，只在取数那一刻点名 FUYAO_API_KEY 失败。本工具此刻对任何名字都会失败——不要反复重试，也不要编造能力名；请把该状态回告主 Agent，必要时用 dc_status 核对 registered_capabilities 与 api_key。')
     }
     throw capabilityError('capability_unknown', `未注册的能力 "${name}"。当前可用能力：${available.join(', ')}。请从 list_capabilities() 返回的目录里原样复制一个名字，再调用 describe_capability；不要自行编造、缩写或改写。`)
   }
@@ -226,27 +225,24 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
       },
     ),
     ...(diagnostics ? [
-      tool('dc_status', '诊断工具：返回数据管道运行状态 —— at/call 为本次真实执行的时间戳与计数（防伪）、api_key 解析结果（present/source，不含密钥值）、当前已注册 capability 列表、最近一次数据源注册错误（若有）。排障时优先调用。', jsonObject(),
+      tool('dc_status', '诊断工具：返回数据管道运行状态 —— at/call 为本次真实执行的时间戳与计数（防伪）、api_key 为**本次调用现取**的凭据解析结果（present/source，不含密钥值）、registered_capabilities 为当前已注册 capability 列表。数据源注册不依赖 key：api_key.present=false 时同花顺能力仍在目录里，但每次取数会点名 FUYAO_API_KEY 失败。排障时优先调用。', jsonObject(),
         jsonObject({
           at: { type: 'integer' },
           call: { type: 'integer' },
           api_key: jsonObject({ present: { type: 'boolean' }, source: { oneOf: [{ type: 'string' }, { type: 'null' }] }, error: { oneOf: [{ type: 'string' }, { type: 'null' }] } }, ['present']),
           registered_capabilities: { type: 'array', items: { type: 'string' } },
-          registration_error: { oneOf: [{ type: 'string' }, { type: 'null' }] },
         }, ['at', 'call', 'api_key', 'registered_capabilities']),
         async (_args, exec) => {
            delegatedSession(exec, 'dc_status')
           const apiKey = await diagnostics.probeApiKey()
           const capabilities = hub.capabilityNames()
-          const error = diagnostics.getRegistrationError() ?? null
-          const snapshot = { at: Date.now(), call: ++dcStatusCalls.current, apiKey, capabilities, error }
+          const snapshot = { at: Date.now(), call: ++dcStatusCalls.current, apiKey, capabilities }
           diagnostics.onCall?.(snapshot)
           return {
             at: snapshot.at,
             call: snapshot.call,
             api_key: apiKey,
             registered_capabilities: capabilities,
-            registration_error: error,
           }
         }),
     ] : []),

@@ -92,7 +92,7 @@ test('工具注册：request_data + list_capabilities + describe_capability；ge
     assert.ok(definition.parameters, `${definition.name} 必须有 parameters`)
     assert.ok(definition.output?.schema, `${definition.name} 必须有 output schema`)
   }
-  const { toolRuntime: withDiag } = makeHubAndTools({ diagnostics: { probeApiKey: async () => ({ present: false, source: null }), getRegistrationError: () => undefined } })
+  const { toolRuntime: withDiag } = makeHubAndTools({ diagnostics: { probeApiKey: async () => ({ present: false, source: null }) } })
   assert.ok(withDiag.definitions.some((d) => d.name === 'dc_status'), '注入 diagnostics 时 dc_status 应注册')
 })
 
@@ -332,17 +332,14 @@ test('describe_capability：与 list_capabilities 一致地只暴露模型可见
 
 test('dc_status：上报 registered_capabilities 而非内部 source 名，不泄露密钥值', async () => {
   const { hub, toolRuntime } = makeHubAndTools({
-    diagnostics: {
-      probeApiKey: async () => ({ present: true, source: 'file' }),
-      getRegistrationError: () => undefined,
-    },
+    diagnostics: { probeApiKey: async () => ({ present: true, source: 'file' }) },
   })
   hub.registerSource(source('quote'))
   const status = await runTool(toolRuntime, 'dc_status', {}, exec(delegatedSession()))
   assert.equal(status.api_key.present, true)
   assert.equal(status.api_key.source, 'file')
   assert.deepEqual(status.registered_capabilities, ['quote'])
-  assert.equal(status.registration_error, null)
+  assert.equal('registration_error' in status, false, '注册不再以凭据为门槛，回执里不留这条自相矛盾的字段')
 })
 
 test('tools 缺失：ctx.get(tools) 为空时不注册也不抛', () => {
