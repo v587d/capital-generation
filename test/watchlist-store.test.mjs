@@ -170,13 +170,119 @@ test('失败不落"错误快照"：报价仍是 null，当次回包里逐条给 
   const { instance, fake } = service()
   try {
     const result = await instance.refresh()
-    assert.equal(result.error.code, 'rate_limited', '整批失败要能被面板居中显示')
+    assert.equal(result.error.code, 'rate_limited', '整批失败要能被面板看见（红字跟在「刷新报价」下面）')
     assert.equal(result.failures.length, SEED_ITEMS.length)
     for (const item of result.items) assert.equal(item.quote, null, '失败绝不写成 0 或空对象')
     assert.equal(fake.records.get('000001.SH').quote, null)
   } finally {
     stub.restore()
   }
+})
+
+/**
+ * 上一条的另一半：**已经有过成功快照**的行遇上取数失败。域里那条记录不该被碰，
+ * 面板于是照画上一次的值（用户点名"为什么不是取最近一次刷新的报价值"）。
+ * 全批一条都没落地时 `refreshed_at` 回 null——页脚那个时间讲的是"最后一次真取到数"。
+ */
+test('取数失败保住上一次成功的快照：只覆写成功的那几条，全批没落地时 refreshed_at 为 null', async () => {
+  const { instance, fake } = service()
+  let stub = stubFuyao()
+  const swap = (overrides) => { stub.restore(); stub = stubFuyao(overrides); return stub }
+  try {
+    await instance.add({ q: '300750' })
+    const first = await instance.refresh()
+    assert.equal(first.failures.length, 0, 'fixture 里 A 股与指数都有值')
+    assert.ok(first.refreshed_at > 0, '真的落地了才报本次时刻')
+    const before = new Map(first.items.map((item) => [item.thscode, item.quote]))
+    assert.ok(before.get('000001.SH'), '第一次刷新确实把快照写进了域')
+
+    // 只有指数那一路被限流：A 股照常更新，指数那几行保留上一次成功的快照（不是 null、不是 0）。
+    swap({ '/api/a-share-index/prices/snapshot': FIXTURE_RATE_LIMITED })
+    const second = await instance.refresh()
+    assert.equal(second.error.code, 'rate_limited', '整批级失败照旧上抛，面板才有红字可画')
+    assert.deepEqual(second.failures.map((failure) => failure.thscode).sort(), ['000001.SH', '000300.SH', '399001.SZ', '399006.SZ'],
+      '失败逐条给 code，且只给被限流那一路')
+    for (const item of second.items) {
+      if (item.thscode === '300750.SZ') {
+        assert.notDeepEqual(item.quote, before.get(item.thscode), '成功那一路照常写回')
+        continue
+      }
+      assert.deepEqual(item.quote, before.get(item.thscode), `${item.thscode} 本次没取到，回包里仍是上一次成功的快照`)
+      assert.equal(fake.records.get(item.thscode).quote.price, before.get(item.thscode).price, '域里也没被覆写')
+    }
+    assert.ok(second.refreshed_at > 0, 'A 股那一路落地了 → 批次时刻照报')
+
+    // 两路都被限流：一行都不许动，且页脚那格不许往前推。
+    swap({ '/api/a-share-index/prices/snapshot': FIXTURE_RATE_LIMITED, '/api/a-share/prices/snapshot': FIXTURE_RATE_LIMITED })
+    const third = await instance.refresh()
+    assert.equal(third.refreshed_at, null, '⛔ 一条都没落地就不报"刷新于此刻"')
+    const after = new Map(third.items.map((item) => [item.thscode, item.quote]))
+    for (const [thscode, quote] of after) assert.deepEqual(quote, second.items.find((item) => item.thscode === thscode).quote, `${thscode} 的快照在全批失败里保持不动`)
+    assert.equal(after.get('300750.SZ').price, before.get('300750.SZ').price, '第 2 批写回的值也不被第 3 批抹掉')
+  } finally {
+    stub.restore()
+  }
+})
+test('置顶：pinned_at 把该条排到最前，后置顶的在前，未置顶的保持插入顺序', async () => {
+  const stub = stubFuyao()
+  const { instance, fake } = service()
+  try {
+    await instance.list()
+    const pinned = await instance.pin({ thscode: '000300.SH' })
+    assert.equal(pinned.ok, true)
+    assert.deepEqual(pinned.items.map((item) => item.thscode), ['000300.SH', '000001.SH', '399001.SZ', '399006.SZ'],
+      '置顶的那条到第一行，其余保持插入顺序')
+    assert.equal(typeof fake.records.get('000300.SH').pinned_at, 'number', '顺序是读出来的，写进盘的只有时间戳')
+    assert.deepEqual([...fake.records.keys()], ['000001.SH', '399001.SZ', '399006.SZ', '000300.SH'],
+      '文件里的键序不动（官方后端是 Map，删了重插要把整份 JSON 写 N 遍）')
+
+    const second = await instance.pin({ thscode: '399006.SZ' })
+    assert.deepEqual(second.items.map((item) => item.thscode), ['399006.SZ', '000300.SH', '000001.SH', '399001.SZ'],
+      '后置顶的在前')
+
+    const again = await instance.list()
+    assert.deepEqual(again.items.map((item) => item.thscode), ['399006.SZ', '000300.SH', '000001.SH', '399001.SZ'],
+      '重开面板（list）读到的还是置顶顺序')
+
+    const repeated = await instance.pin({ thscode: '399006.SZ' })
+    assert.equal(repeated.items[0].thscode, '399006.SZ', '重复置顶幂等：位置不变')
+    assert.ok(fake.records.get('399006.SZ').pinned_at > second.items[0].pinned_at - 1, '只是把时间戳推新')
+
+    assert.equal((await instance.pin({ thscode: '300750' })).code, 'invalid_query', '裸代码在本地就被拒')
+    assert.equal((await instance.pin({ thscode: '600000.SH' })).code, 'not_found', '不在清单里响亮失败，不写下任何东西')
+    assert.equal(fake.records.get('600000.SH'), undefined)
+  } finally {
+    stub.restore()
+  }
+})
+
+test('刷新写回报价不动置顶：pinned_at 随整条记录 spread 保住，顺序也保住', async () => {
+  const stub = stubFuyao()
+  const { instance, fake } = service()
+  try {
+    await instance.pin({ thscode: '399001.SZ' })
+    const stamp = fake.records.get('399001.SZ').pinned_at
+    const refreshed = await instance.refresh()
+    assert.equal(refreshed.ok, true)
+    assert.equal(fake.records.get('399001.SZ').pinned_at, stamp, '整条写回不许把置顶戳抹掉')
+    assert.equal(refreshed.items[0].thscode, '399001.SZ', '报价刷新之后置顶的那条仍在第一行')
+    assert.equal(fake.records.get('399001.SZ').quote.price, 12858.7532, '报价照常写回')
+  } finally {
+    stub.restore()
+  }
+})
+
+test('pinned_at 是可选字段：磁盘上已有的 v1 记录（没有这一格）必须照样过 schema', () => {
+  // 域在加载边界逐条校验，写成必填会让老清单直接 invalid-record（整条路由变 store_unavailable）。
+  const legacy = {
+    thscode: '000001.SH', ticker: '000001', name: '上证指数', exchange: 'SH', asset_type: 'a-share-index',
+    added_at: 1, source: 'seed', quote: null,
+  }
+  const parsed = domainSpec.tables.items.valueSchema.parse(legacy)
+  assert.equal(parsed.pinned_at, undefined, '没有这一格的记录读出来就是"未置顶"')
+  assert.equal(domainSpec.tables.items.valueSchema.parse({ ...legacy, pinned_at: 5 }).pinned_at, 5)
+  assert.equal(domainSpec.tables.items.valueSchema.safeParse({ ...legacy, pinned_at: 'now' }).success, false,
+    '时间戳只接受整数')
 })
 
 test('写进域里的每条记录都必须过 schema（真域在持久边界逐条校验）', async () => {

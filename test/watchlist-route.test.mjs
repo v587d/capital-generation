@@ -155,6 +155,30 @@ test('业务失败用状态码表达：歧义与超限 409、未匹配 404', asy
     stub.restore()
   }
 })
+test('POST /pin：置顶那条排到最前；不在清单 404、裸代码 400，且一次网都不出', async () => {
+  const stub = stubFuyao()
+  const { handler } = harness()
+  try {
+    const pinned = await call(handler, { method: 'POST', url: '/capital-watchlist/pin', body: { thscode: '000300.SH' } })
+    assert.equal(pinned.statusCode, 200)
+    assert.equal(pinned.json().items[0].thscode, '000300.SH', '回包里就是新顺序（客户端照它贴）')
+    assert.equal(typeof pinned.json().items[0].pinned_at, 'number')
+
+    const again = await call(handler, { method: 'GET', url: '/capital-watchlist/list' })
+    assert.equal(again.json().items[0].thscode, '000300.SH', '再读清单仍是置顶顺序')
+
+    const missing = await call(handler, { method: 'POST', url: '/capital-watchlist/pin', body: { thscode: '600000.SH' } })
+    assert.equal(missing.statusCode, 404)
+    assert.equal(missing.json().code, 'not_found')
+
+    const bare = await call(handler, { method: 'POST', url: '/capital-watchlist/pin', body: { thscode: '300750' } })
+    assert.equal(bare.statusCode, 400)
+    assert.equal(bare.json().code, 'invalid_query')
+    assert.equal(stub.calls.length, 0, '置顶是纯本地动作：一次出网都不许有')
+  } finally {
+    stub.restore()
+  }
+})
 
 test('refresh 回包里 always 有 items / failures / refreshed_at 三件（面板按这个形状渲染）', async () => {
   const stub = stubFuyao()
@@ -178,6 +202,7 @@ test('域打不开时所有路径改口 store_unavailable，不返回空清单�
   try {
     for (const input of [
       { method: 'GET', url: '/capital-watchlist/list' },
+      { method: 'POST', url: '/capital-watchlist/pin', body: { thscode: '000300.SH' } },
       { method: 'POST', url: '/capital-watchlist/refresh', body: {} },
     ]) {
       const res = await call(handler, input)

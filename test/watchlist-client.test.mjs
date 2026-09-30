@@ -110,15 +110,19 @@ function factoryRequire(name) {
   }
   if (name === '@deepseek-ai/dsh-client-store') return { createSnapshotStore }
   if (name === '@deepseek-ai/dsh-client-ui-primitives') {
-    // 面板用到的四个图标都必须在这一表里（官方 98 个 Icon* 之外的名字 stub 给不出来，
+    // 面板用到的图标都必须在这一表里（官方 98 个 Icon* 之外的名字 stub 给不出来，
     // 渲染时就是 undefined 组件——所以有下面的"图标取得到"用例兜着）。
     const icon = () => ({ type: 'icon' })
     return {
       Modal: (props) => ({ type: 'Modal', props }),
+      // 行内「更多」菜单：真身是官方 Menu primitive（portal + 模态层语义），这里只留 props 契约。
+      Menu: (props) => ({ type: 'Menu', props }),
       Button: (props) => ({ type: 'Button', props }),
       Toast: (props) => ({ type: 'Toast', props }),
       IconChecklistOutlineRegular: icon,
       IconCloseOutlineRegular: icon,
+      IconEllipsisOutlineRegular: icon,
+      IconPinOutlineRegular: icon,
       IconSearchOutlineRegular: icon,
       IconRefreshOutlineRegular: icon,
       IconTrashOutlineRegular: icon,
@@ -168,6 +172,26 @@ function classNodes(tree, name) {
     if (typeof node.props?.className === 'string' && node.props.className.split(' ').includes(name)) found.push(node)
   })
   return found
+}
+
+/**
+ * 行内「更多」菜单的节点（stub 出来的 `type` 是字符串 `'Menu'`）。
+ * 触发器住在 `props.anchor` 里——`walkNodes` 只走 children，进不去 props 上的子树。
+ */
+function menuNodes(tree) {
+  const found = []
+  walkNodes(tree, (node) => { if (node.type === 'Menu') found.push(node) })
+  return found
+}
+
+/** 第 `index` 行的「更多」触发器（一行一个 Menu，顺序就是行序）。 */
+const moreButtonAt = (tree, index = 0) => menuNodes(tree)[index].props.anchor
+
+/** 点开第 `index` 行的菜单并选一条：`openMoreMenu` 之后照常 `render()` 取新树。 */
+function selectFromMenu(render, id, index = 0) {
+  moreButtonAt(render(), index).props.onClick()
+  menuNodes(render())[index].props.onSelect(id)
+  return render()
 }
 
 /** 假客户端上下文：够 slots / locale / commandUi / sessions 四条注入路径用。 */
@@ -327,21 +351,116 @@ test('刷新按钮共用同一个闸门：并发只出网一次', async () => {
   assert.equal(calls.filter((url) => url.includes('/refresh')).length, 1)
 })
 
-test('整批失败居中显示、逐条失败走行内：两种失败不混成一个', async () => {
-  const refreshBody = '{"ok":true,"items":[{"thscode":"000001.SH","ticker":"000001","name":"上证指数","exchange":"SH","asset_type":"a-share-index","added_at":1,"source":"seed","quote":null}],"refreshed_at":2,"failures":[{"thscode":"000001.SH","code":"quote_unavailable"}],"error":{"code":"rate_limited","message":"限流"}}'
+test('整批失败跟在「刷新报价」下面、逐条失败走行内：两种失败不混成一个', async () => {
+  const failedRow = { thscode: '000001.SH', ticker: '000001', name: '上证指数', exchange: 'SH', asset_type: 'a-share-index', added_at: 1, source: 'seed', quote: null }
+  const refreshBody = `{"ok":true,"items":[${JSON.stringify(failedRow)}],"refreshed_at":null,"failures":[{"thscode":"000001.SH","code":"quote_unavailable"}],"error":{"code":"rate_limited","message":"限流"}}`
   const { ctx } = mount({
     fetch: async (url) => ({
       ok: true,
       status: 200,
-      text: async () => (String(url).includes('/refresh') ? refreshBody : '{"ok":true,"items":[],"seeded_at":1}'),
+      text: async () => (String(url).includes('/refresh') ? refreshBody : `{"ok":true,"items":[${JSON.stringify(failedRow)}],"seeded_at":1}`),
     }),
   })
   const injected = ctx.registrations[0].declaration.inject('s10')
+  // 先有一次真的落过地：否则"全批失败时页脚不许往前走"这条断言等于没测（初值本来就是 null）。
+  injected.surface.patch({ open: true, loading: false, items: [failedRow], refreshed_at: 1790589000000 })
   await injected.surface.refresh()
   const state = injected.hooks.dialog.getSnapshot()
-  assert.equal(state.error.code, 'rate_limited', '整批失败进 error（面板居中醒目显示）')
+  assert.equal(state.error.code, 'rate_limited', '整批失败进 error')
   assert.equal(state.failures['000001.SH'], 'quote_unavailable', '逐条失败只落在那一行')
   assert.equal(state.items.length, 1, '失败不许把清单清空')
+  assert.equal(state.refreshed_at, 1790589000000, '⛔ 一条都没落地（宿主回 null）时，页脚那行仍报最后一次真取到数的时刻')
+
+  const zh = ctx.dictionaries['capital.watchlist'].zh
+  const t = (key) => zh[key] ?? key
+  resetHooks()
+  const tree = ctx.registrations[0].component({ ...injected, useDialog: (selector) => selector(injected.hooks.dialog.getSnapshot()), t })
+
+  // 位置：报错跟着它的动词走。此前红字飘在输入框下方，离「刷新报价」隔了一整张表。
+  const footcol = classNodes(tree, 'capital-watchlist-footcol')[0]
+  assert.ok(footcol, '底部左列装着刷新按钮与它自己的失败行')
+  assert.equal(childrenOf(footcol).length, 2, '左列两行：按钮 + 失败行')
+  assert.match(textOf(classNodes(footcol, 'capital-watchlist-notice')[0]), /行情服务限流/)
+  assert.equal(classNodes(footcol, 'capital-watchlist-refresh').length, 1, '失败行与刷新按钮同列（红 = 数据不可信那一档）')
+  assert.equal(textOf(classNodes(tree, 'capital-watchlist-search')[0]).includes('行情服务限流'), false, '⛔ 输入框那一带不画整批失败')
+  const notice = classNodes(tree, 'capital-watchlist-notice')[0]
+  assert.equal(notice.props.role, 'alert')
+  assert.equal(notice.props['data-code'], 'rate_limited')
+
+  // 这一行从来没有过值 → 红色 `—`（数据不可信），原因在 tooltip。
+  const price = classNodes(tree, 'capital-watchlist-quotefailed')[0]
+  assert.equal(textOf(price).trim(), '—', '没有值的失败行画破折号')
+  assert.equal(classNodes(tree, 'capital-watchlist-stale').length, 0, '从来没有值 ≠ 陈旧值，两态不混')
+  assert.equal(classNodes(tree, 'capital-watchlist-refresh')[0].props.disabled, false, '失败不锁按钮（本轮不做冷却）')
+})
+
+test('刷新失败 ≠ 没有价：上一次成功的快照照画（降一档色 + tooltip 说是哪一刻的）', async () => {
+  const staleRow = { ...QUOTED, thscode: '000001.SH', ticker: '000001', name: '上证指数', quote: { price: 3823.62, change_pct: -1.665222, captured_at: 1790589000000, source_ts: 1 } }
+  const refreshBody = `{"ok":true,"items":[${JSON.stringify(staleRow)}],"refreshed_at":null,"failures":[{"thscode":"000001.SH","code":"rate_limited"}],"error":{"code":"rate_limited","message":"限流"}}`
+  const { ctx } = mount({
+    fetch: async (url) => ({ ok: true, status: 200, text: async () => (String(url).includes('/refresh') ? refreshBody : `{"ok":true,"items":[${JSON.stringify(staleRow)}],"seeded_at":1}`) }),
+  })
+  const injected = ctx.registrations[0].declaration.inject('s-stale')
+  injected.surface.patch({ open: true, loading: false, items: [staleRow] })
+  await injected.surface.refresh()
+  const zh = ctx.dictionaries['capital.watchlist'].zh
+  const t = (key) => zh[key] ?? key
+  resetHooks()
+  const tree = ctx.registrations[0].component({ ...injected, useDialog: (selector) => selector(injected.hooks.dialog.getSnapshot()), t })
+
+  const row = classNodes(tree, 'capital-watchlist-row')[0]
+  const rowText = textOf(row)
+  assert.match(rowText, /3823\.62/, '⛔ 后端只覆写成功的那几条：本次失败不许把已有的上一次快照画成「—」')
+  assert.match(rowText, /-1\.67%/, '涨跌幅也照画')
+  assert.equal(rowText.includes('—'), false, '手上有值就不画破折号')
+  assert.equal(classNodes(row, 'capital-watchlist-quotefailed').length, 0, '有旧值是"陈旧"那一档，不是"没有数据"')
+  assert.equal(classNodes(row, 'capital-watchlist-stale').length, 2, '最新价与涨跌幅两行都降一档色')
+  assert.equal(classNodes(row, 'capital-watchlist-up').length + classNodes(row, 'capital-watchlist-down').length, 0, '红涨绿跌是"当前"的语义，陈旧值不借用')
+  const quoteCell = classNodes(row, 'capital-watchlist-quote')[0]
+  assert.match(quoteCell.props.title, /行情服务限流/, 'tooltip 说清这一行为什么陈旧')
+  assert.match(quoteCell.props.title, /上一次快照 09-28/, '并给出它是哪一刻的快照（底部那行时间是整批共用的，不替单行背书）')
+})
+
+test('搜索失败占下拉的 hint 位（替换「没有匹配的标的」）；添加失败不随改字消失', async () => {
+  const candidate = { thscode: '300750.SZ', ticker: '300750', name: '宁德时代', exchange: 'SZ', asset_type: 'a-share', in_list: false }
+  const { ctx } = mount({
+    fetch: async (url) => {
+      const target = String(url)
+      if (target.includes('/search')) return { ok: false, status: 429, text: async () => '{"ok":false,"code":"rate_limited","message":"限流"}' }
+      if (target.includes('/add')) return { ok: false, status: 409, text: async () => '{"ok":false,"code":"list_full","message":"满了"}' }
+      return { ok: true, status: 200, text: async () => '{"ok":true,"items":[],"seeded_at":1}' }
+    },
+  })
+  const injected = ctx.registrations[0].declaration.inject('s-searcherr')
+  const surface = injected.surface
+  const zh = ctx.dictionaries['capital.watchlist'].zh
+  const t = (key) => zh[key] ?? key
+  const render = () => {
+    resetHooks()
+    return ctx.registrations[0].component({ ...injected, useDialog: (selector) => selector(injected.hooks.dialog.getSnapshot()), t })
+  }
+  surface.patch({ open: true, loading: false })
+
+  surface.onQueryChange('宁德')
+  await new Promise((resolve) => setTimeout(resolve, SEARCH_WAIT_MS))
+  const tree = render()
+  const hints = classNodes(tree, 'capital-watchlist-hint')
+  assert.equal(hints.length, 1, 'hint 槽只有一条：搜索失败**替换**了「没有匹配的标的」，不是并排多一条')
+  assert.match(textOf(hints[0]), /行情服务限流/)
+  assert.equal(hints[0].props['data-code'], 'rate_limited')
+  assert.equal(hints[0].props.role, 'alert')
+  assert.match(hints[0].props.className, /capital-watchlist-searcherror/, '搜索失败是黄档（动作没成）')
+  assert.equal(textOf(tree).includes('没有匹配的标的'), false, '⛔ 不许一边说限流、一边说"没有这个票"——那等于把服务故障说成用户查错')
+  assert.equal(injected.hooks.dialog.getSnapshot().addError, null, '搜索失败走 searchError，不污染添加那条通道')
+
+  // 添加失败（清单已满）讲的是清单，与输入框里是什么字无关。
+  await surface.add(candidate)
+  assert.equal(injected.hooks.dialog.getSnapshot().addError.code, 'list_full')
+  surface.onQueryChange('宁德时代')
+  const after = injected.hooks.dialog.getSnapshot()
+  assert.equal(after.addError.code, 'list_full', '⛔ 改一个字不许把 list_full 抹掉')
+  assert.equal(after.searchError, null, '改字清的是上一次搜索的失败（新的在途请求已经取代它）')
+  assert.match(textOf(classNodes(render(), 'capital-watchlist-adderror')[0]), /自选股最多 10 条/)
 })
 
 test('credential_missing 有独立文案位（不混进"查询失败"）', async () => {
@@ -381,19 +500,34 @@ test('面板排版：headless 官方卡片 + 420 宽 + 类型徽标 + 两位小�
   assert.equal(text.includes('12858.7532'), false, '原始位数不许漏出来')
   assert.match(text, /-3\.44%/, '涨跌幅两位小数')
   assert.equal(classNodes(tree, 'capital-watchlist-down').length, 1, '跌是绿（A 股口径：红涨绿跌）')
-  assert.ok(text.includes('指数'), '类型列：指数 / 股票 / ETF')
-  assert.equal(classNodes(tree, 'capital-watchlist-tag-index').length, 1, '类型列画成徽标')
+  assert.ok(text.includes('指数'), '类型徽标：指数 / 股票 / ETF')
+  assert.equal(classNodes(tree, 'capital-watchlist-tag-index').length, 1, '类型画成徽标')
+  // 类型从独立一列并进名称列第二行（2026-09-29 用户反馈"类型这一列挺累赘"）：
+  // 代码与徽标同处一个 codeline，间距由 CSS 的 gap 负责；行内只此一处徽标。
+  const codeline = classNodes(tree, 'capital-watchlist-codeline')
+  assert.equal(codeline.length, 1, '代码与徽标同行（一行数据一个 codeline）')
+  assert.match(textOf(codeline[0]), /399001/, '代码在 codeline 里')
+  assert.match(textOf(codeline[0]), /指数/, '徽标在代码右侧（同一行容器）')
+  assert.equal(classNodes(codeline[0], 'capital-watchlist-tag-index').length, 1, '徽标就住在 codeline 里，不再单占一列')
   assert.equal(text.includes('种子'), false, '不再区分种子与自选')
   assert.equal(text.includes('复制清单'), false, '复制清单不进面板（只留 surface 后门）')
   assert.equal(source.includes('window.confirm'), false, '⛔ 不用系统级 confirm 做二次确认')
 
+  // 行内动作只剩一个「更多」键（删除降级成菜单里的一条）：它必须是官方 Menu 的锚点。
+  const menu = menuNodes(tree)[0]
+  assert.equal(typeof menu, 'object', '每行一个官方 Menu 锚点')
+  assert.equal(moreButtonAt(tree).props['aria-haspopup'], 'menu')
+  assert.equal(moreButtonAt(tree).props['aria-expanded'], false, '未展开时 aria-expanded 为假')
+  assert.equal(menu.props.portal, true, '清单区是滚动容器：菜单必须 portal 到 body，否则被裁')
+  assert.equal(menu.props.align, 'end', '菜单贴右缘展开（贴着「更多」键）')
+
   // 表头与数据行必须共用同一个 grid class，否则又会各自排版、串行。
   const grids = classNodes(tree, 'capital-watchlist-grid')
   assert.equal(grids.length, 2, '表头一行 + 数据一行，共用同一个 grid 类')
-  // 表头四格不许借数据列的类（那是 14px 与 label-primary，混用一张表头三种字号）。
+  // 表头三格不许借数据列的类（那是 14px 与 label-primary，混用一张表头三种字号）。
   const head = classNodes(tree, 'capital-watchlist-head')[0]
-  const cells = childrenOf(head).slice(0, 4)
-  assert.equal(cells.length, 4, '名称 / 类型 / 最新价·涨跌幅 / 删除 四格')
+  const cells = childrenOf(head).slice(0, 3)
+  assert.equal(cells.length, 3, '名称 / 最新价·涨跌幅 / 行内动作 三格（类型不再单占一列）')
   for (const cell of cells) {
     const name = cell.props?.className
     if (name === undefined) continue
@@ -440,7 +574,7 @@ test('🔴 浅色模式闸门：面板 CSS 只准用"两套主题都读得出"�
   assert.match(css, /--dsh-scrollbar-thumb:\s*var\(--dsw-alias-scrollbar-bg-l2\)/)
   // 键盘焦点：官方变量表达式（宿主按主题与输入模态管环色），每个可聚焦控件都要覆盖到。
   assert.match(css, /outline:\s*var\(--dsw-focus-ring-width\) solid var\(--dsw-focus-ring-color/)
-  for (const control of ['close', 'clear', 'option', 'remove', 'refresh', 'confirmbtn']) {
+  for (const control of ['close', 'clear', 'option', 'more', 'refresh', 'confirmbtn']) {
     assert.match(css, new RegExp(`\\.capital-watchlist-${control}:focus-visible`), `${control} 缺键盘焦点环`)
   }
   // 正圆 / 胶囊必须配 corner-shape: round，否则被全局超级椭圆平滑拧变形（官方 corner-shape spec 强制配对）。
@@ -633,7 +767,7 @@ test('选中候选 = 添加完顺手整批刷一次：新行当场有价，不�
   assert.equal(quoted.includes('未刷新'), false, '⛔ 刚加进来的标的不能停在「未刷新」')
 })
 
-test('删除二次确认：点行内移除只出确认层，确认才打 /remove，取消不打', async () => {
+test('删除二次确认：行内「更多」→ 移除只出确认层，确认才打 /remove，取消不打', async () => {
   const row = { thscode: '300750.SZ', ticker: '300750', name: '宁德时代', exchange: 'SZ', asset_type: 'a-share', added_at: 1, source: 'user', quote: null }
   const calls = []
   const { ctx } = mount({ fetch: async (url) => { calls.push(String(url)); return { ok: true, status: 200, text: async () => (String(url).includes('/list') ? `{"ok":true,"items":[${JSON.stringify(row)}],"seeded_at":1}` : `{"ok":true,"items":[${JSON.stringify(row)}],"refreshed_at":1,"failures":[]}`) } } })
@@ -649,13 +783,31 @@ test('删除二次确认：点行内移除只出确认层，确认才打 /remove
   for (let round = 0; round < 5; round += 1) await new Promise((resolve) => setTimeout(resolve, 0))
 
   let tree = render()
-  const removeBtn = classNodes(tree, 'capital-watchlist-remove')[0]
-  assert.equal(removeBtn.props['aria-label'], '移除 宁德时代', '行内按钮的可达名点名标的')
-  removeBtn.props.onClick()
+  const more = moreButtonAt(tree)
+  assert.equal(more.props['aria-label'], '更多 宁德时代', '行内按钮的可达名点名标的')
+  assert.equal(more.props.className, 'capital-watchlist-more', '行内键从 trash 换成省略号')
+
+  // 点「更多」只展开菜单：菜单里是「置顶 / 移除」，此刻一个请求都不许发。
+  more.props.onClick()
   tree = render()
+  const menu = menuNodes(tree)[0]
+  assert.equal(menu.props.open, true, '点「更多」展开这一行的菜单')
+  assert.deepEqual([...menu.props.items].map((entry) => entry.id), ['pin', 'remove'], '菜单两条：置顶 + 移除')
+  assert.deepEqual([...menu.props.items].map((entry) => entry.label), ['置顶', '移除'])
+  assert.equal(menu.props.items[0].disabled, true, '只有一行时「置顶」没有位移，置灰')
+  assert.equal(menu.props.items[1].danger, true, '「移除」是破坏性行（danger）')
+  assert.deepEqual(calls.filter((url) => url.includes('/remove') || url.includes('/pin')), [], '只展开菜单，一个请求都不许发')
+
+  // 再点一次同一个键：收起（同一个键既开又关）。
+  moreButtonAt(render()).props.onClick()
+  assert.equal(injected.hooks.dialog.getSnapshot().rowMenu, null, '再点「更多」收起菜单')
+
+  // 选「移除」才进确认层（删除逻辑与旧版一致：面板内二次确认 + /remove）。
+  tree = selectFromMenu(render, 'remove')
   const confirm = classNodes(tree, 'capital-watchlist-confirm')[0]
-  assert.ok(confirm.props.className.includes('capital-watchlist-confirm-open'), '点移除只展开确认层')
+  assert.ok(confirm.props.className.includes('capital-watchlist-confirm-open'), '选移除只展开确认层')
   assert.match(textOf(confirm), /宁德时代 · 300750/, '确认文案带上被移除的那一条（名称 + 代码）')
+  assert.equal(injected.hooks.dialog.getSnapshot().rowMenu, null, '选中之后菜单收起')
   assert.deepEqual(calls.filter((url) => url.includes('/remove')), [], '确认层展开时一次 /remove 都不许发')
 
   // Esc 归确认层：先关确认层，不吃掉整个弹窗（官方 Modal 的 document 监听收不到这个事件）。
@@ -667,17 +819,68 @@ test('删除二次确认：点行内移除只出确认层，确认才打 /remove
   assert.equal(injected.hooks.dialog.getSnapshot().open, true, '弹窗本体还开着')
 
   // 取消：不发请求，行还在。
-  classNodes(tree, 'capital-watchlist-remove')[0].props.onClick()
-  tree = render()
-  classNodes(tree, 'capital-watchlist-confirmbtn').filter((n) => n.props.className.includes('confirmdanger') === false)[0].props.onClick()
+  classNodes(selectFromMenu(render, 'remove'), 'capital-watchlist-confirmbtn').filter((n) => n.props.className.includes('confirmdanger') === false)[0].props.onClick()
   assert.deepEqual(calls.filter((url) => url.includes('/remove')), [], '取消一个请求都不发')
 
   // 确认：走 /remove（乐观删除，失败由 surface.remove 自己回滚）。
-  classNodes(render(), 'capital-watchlist-remove')[0].props.onClick()
+  selectFromMenu(render, 'remove')
   classNodes(render(), 'capital-watchlist-confirmdanger')[0].props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.equal(calls.filter((url) => url.includes('/remove')).length, 1, '确认那一下才真删')
   assert.equal(classNodes(render(), 'capital-watchlist-confirm')[0].props.className.includes('capital-watchlist-confirm-open'), false, '确认后收起确认层')
+})
+test('置顶：菜单选「置顶」把该行提到第一行（乐观 + /pin），失败回滚', async () => {
+  const first = { thscode: '000001.SH', ticker: '000001', name: '上证指数', exchange: 'SH', asset_type: 'a-share-index', added_at: 1, source: 'seed', quote: null }
+  const second = { thscode: '300750.SZ', ticker: '300750', name: '宁德时代', exchange: 'SZ', asset_type: 'a-share', added_at: 2, source: 'user', quote: null }
+  const calls = []
+  let pinFails = false
+  const { ctx } = mount({
+    fetch: async (url) => {
+      const target = String(url)
+      if (target.includes('/pin')) {
+        calls.push('/pin')
+        if (pinFails) return { ok: false, status: 503, text: async () => '{"ok":false,"code":"store_unavailable","message":"x"}' }
+        return { ok: true, status: 200, text: async () => `{"ok":true,"items":[${JSON.stringify({ ...second, pinned_at: 9 })},${JSON.stringify(first)}]}` }
+      }
+      if (target.includes('/list')) return { ok: true, status: 200, text: async () => `{"ok":true,"items":[${JSON.stringify(first)},${JSON.stringify(second)}],"seeded_at":1}` }
+      return { ok: true, status: 200, text: async () => `{"ok":true,"items":[${JSON.stringify(first)},${JSON.stringify(second)}],"refreshed_at":1,"failures":[]}` }
+    },
+  })
+  const injected = ctx.registrations[0].declaration.inject('s-pin')
+  const surface = injected.surface
+  const zh = ctx.dictionaries['capital.watchlist'].zh
+  const t = (key) => zh[key] ?? key
+  const render = () => {
+    resetHooks()
+    return ctx.registrations[0].component({ ...injected, useDialog: (selector) => selector(injected.hooks.dialog.getSnapshot()), t })
+  }
+  // ⚠️ 清单数组来自 vm 里的 JSON.parse（跨 realm）：断言前先摊回测试这一侧的同型数组。
+  const codes = () => [...injected.hooks.dialog.getSnapshot().items.map((row) => row.thscode)]
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+  surface.open()
+  for (let round = 0; round < 5; round += 1) await settle()
+
+  // 第一行没有可置顶的位移 → 它的「置顶」置灰；第二行可以。
+  let tree = render()
+  assert.deepEqual(menuNodes(tree).map((menu) => menu.props.open), [false, false], '初始两行的菜单都收着')
+  assert.equal(menuNodes(tree)[0].props.items[0].disabled, true, '第一行的「置顶」置灰')
+  assert.equal(menuNodes(tree)[1].props.items[0].disabled, false, '第二行可以置顶')
+
+  tree = selectFromMenu(render, 'pin', 1)
+  await settle()
+  assert.deepEqual(calls, ['/pin'], `置顶只打一次 /pin（实际：${calls.join(' ')}）`)
+  assert.deepEqual(codes(), ['300750.SZ', '000001.SH'], '置顶的行到了第一行')
+  assert.equal(injected.hooks.dialog.getSnapshot().rowMenu, null, '选中后菜单收起')
+  // 位移之后第一行换成刚置顶的那条：置灰跟着行序走，不是跟着标的走。
+  assert.equal(menuNodes(tree)[0].props.items[0].disabled, true, '新的第一行「置顶」置灰')
+  assert.equal(menuNodes(tree)[1].props.items[0].disabled, false)
+
+  // 失败回滚：宿主写不进域时行得弹回点击前的顺序（与删除同一条口径）。
+  pinFails = true
+  const before = codes()
+  selectFromMenu(render, 'pin', 1)
+  await settle()
+  assert.deepEqual(codes(), before, '写入失败时顺序回滚到点击前')
 })
 
 test('刷新中价格是 skeleton，不是「未刷新」也不是 —', async () => {
@@ -701,7 +904,7 @@ test('刷新中价格是 skeleton，不是「未刷新」也不是 —', async (
   // 只看那一格：底部一行报"未刷新"是对的（整批从没刷过），价格位上画它才是把在途说成没数据。
   const quoteCell = classNodes(tree, 'capital-watchlist-row')[0]
   assert.equal(textOf(childrenOf(quoteCell)).includes('未刷新'), false, '在途时不许把 skeleton 写成"未刷新"')
-  assert.equal(classNodes(tree, 'capital-watchlist-remove')[0].props.disabled, false, '刷新在途不影响行内按钮')
+  assert.equal(moreButtonAt(tree).props.disabled, false, '刷新在途不影响行内「更多」键')
 })
 
 test('⛔ 客户端不碰被禁的通道：turn-tail 卡片、自造会话事件、报告旁路、typed remote', () => {

@@ -21,13 +21,30 @@
  * 见 `onQueryChange`）——把"每敲一个键出一次网"压成"每次真正改词才出网"。全组件唯一的定时器
  * 就是那个防抖。请求打 host 平面的 `/capital-watchlist/*`（`webServer` 前缀路由不在 typed
  * remote 命名空间表里，所以用 `fetch`，与 `chart-ui` 取序列同一写法）。
+ *
+ * 行内「更多」菜单用官方 `Menu` primitive（`portal: true`）：清单区是滚动容器，就地渲染的浮层
+ * 会被它裁掉；portal 模式把菜单挂到 `document.body`（官方 `.portal` = `z-index: 1100`，压在
+ * 模态的 1000 之上），Escape / Tab / 焦点归还 / 点到外面收起全归它自己，且它按官方的模态层
+ * 契约在 capture 阶段吃掉 Escape——弹窗本体因此不会跟着一起关。我们只提供锚点按钮与
+ * `items`（置顶 / 删除），不自己写浮层几何。
+ *
+ * 失败显示：**两档颜色、四个落点，位置跟着 cause 走**（2026-09-29 用户点名：整批刷新的红字飘在
+ * 输入框下方、离它指的按钮隔了一整张表，而同样是"没成"的两个通道一个红一个黄）：
+ *  - **黄 = 你这一下动作没成**：搜索失败占下拉的 hint 位（与「搜索中…」「没有匹配的标的」同一个
+ *    槽，所以它**替换** noHit 而不是并排多出一条——同一屏不许同时说"没有这个票"和"服务限流"）；
+ *    添加失败（`list_full` / `ambiguous`）留在搜索区下方。这两条是**两个字段**：`list_full` 与
+ *    输入无关，改一个字就把它抹掉是错的。
+ *  - **红 = 数据不可信**：整批刷新失败跟在「刷新报价」按钮下面（跟着动词走），逐标的失败只在这一
+ *    行的价格位标红——且**只有这一行从来没有过值**才标 `—`。取数失败不等于没有价：上一次成功的
+ *    快照仍在域里（后端 `doRefresh` 只写成功的那几条），面板就把那个值照画，只是降一档色 +
+ *    tooltip 说清它是哪一刻的快照。底部那个时间是整批共用的，不替单行背书。
  */
 const { createElement: h, useEffect, useState } = require('react')
 const { createSnapshotStore } = require('@deepseek-ai/dsh-client-store')
 // 图标只从官方集取（98 个 Icon*Regular/Medium，没有 Star / Bookmark 类收藏图标）。
-// 不用 primitives 的 Button：面板里的每个动作都有自带几何（圆形关闭、描边刷新、行内 trash），
+// 不用 primitives 的 Button：面板里的每个动作都有自带几何（圆形关闭、描边刷新、行内省略号），
 // 套官方 Button 反而要对抗它的 sm/md 高度与 variant 调色。
-const { IconChecklistOutlineRegular, IconCloseOutlineRegular, IconRefreshOutlineRegular, IconSearchOutlineRegular, IconTrashOutlineRegular, Modal } = require('@deepseek-ai/dsh-client-ui-primitives')
+const { IconChecklistOutlineRegular, IconCloseOutlineRegular, IconEllipsisOutlineRegular, IconPinOutlineRegular, IconRefreshOutlineRegular, IconSearchOutlineRegular, IconTrashOutlineRegular, Menu, Modal } = require('@deepseek-ai/dsh-client-ui-primitives')
 
 const ENTRY_NAME = 'capital-watchlist'
 const NS = 'capital.watchlist'
@@ -50,11 +67,14 @@ const zh = {
   loading: '正在读取清单…',
   empty: '还没有自选股，用上面的输入框添加。',
   colName: '名称',
-  colType: '类型',
   colQuote: '最新价 / 涨跌幅',
   updated: '更新时间',
   notRefreshed: '未刷新',
+  /** 陈旧值的 tooltip：「……限流，请稍后再试 · 上一次快照 09-29 19:04」。 */
+  stale: '上一次快照',
   remove: '移除',
+  more: '更多',
+  pin: '置顶',
   searching: '搜索中…',
   clearInput: '清空输入',
   confirmTitle: '确认移除？',
@@ -62,7 +82,7 @@ const zh = {
   confirmDescSuffix: ' 从自选中移除吗？',
   confirmCancel: '取消',
   confirmOk: '确认移除',
-  truncated: '候选超过 10 条，请缩小输入。',
+  truncated: '候选超过 10 条，请输入准确证券代码或名称。',
   noHit: '没有匹配的标的（支持沪深 A 股 / 指数 / 场内 ETF）。',
   'error.invalid_query': '输入不被接受',
   'error.not_found': '没有找到该标的',
@@ -89,11 +109,13 @@ const en = {
   loading: 'Loading list…',
   empty: 'No symbols yet — use the input above to add one.',
   colName: 'Symbol',
-  colType: 'Type',
   colQuote: 'Last / change',
   updated: 'Updated',
   notRefreshed: 'Not refreshed',
+  stale: 'last snapshot',
   remove: 'Remove',
+  more: 'More',
+  pin: 'Pin to top',
   searching: 'Searching…',
   clearInput: 'Clear input',
   confirmTitle: 'Remove this symbol?',
@@ -101,7 +123,7 @@ const en = {
   confirmDescSuffix: ' from your watchlist?',
   confirmCancel: 'Cancel',
   confirmOk: 'Remove',
-  truncated: 'More than 10 candidates — narrow the input.',
+  truncated: 'More than 10 candidates — enter the exact code or name.',
   noHit: 'No matching symbol (A-share / index / on-exchange ETF).',
   'error.invalid_query': 'Input not accepted',
   'error.not_found': 'Symbol not found',
@@ -192,7 +214,7 @@ const CSS = `
 .capital-watchlist-option:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent); }
 .capital-watchlist-option:disabled { opacity: .45; cursor: not-allowed; }
 /* 键盘焦点走官方表达式：环色由宿主按主题与输入模态管好（指针模态自动透明），不自己造环。 */
-.capital-watchlist-close:focus-visible, .capital-watchlist-clear:focus-visible, .capital-watchlist-option:focus-visible, .capital-watchlist-remove:focus-visible, .capital-watchlist-refresh:focus-visible, .capital-watchlist-confirmbtn:focus-visible { outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: 1px; }
+.capital-watchlist-close:focus-visible, .capital-watchlist-clear:focus-visible, .capital-watchlist-option:focus-visible, .capital-watchlist-more:focus-visible, .capital-watchlist-refresh:focus-visible, .capital-watchlist-confirmbtn:focus-visible { outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: 1px; }
 .capital-watchlist-optionmain { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .capital-watchlist-optionname { font-size: 14px; font-weight: 500; color: var(--dsw-alias-label-primary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .capital-watchlist-optioncode { font-size: 12px; color: var(--dsw-alias-label-tertiary); }
@@ -203,15 +225,19 @@ const CSS = `
 .capital-watchlist-tag-index { color: var(--dsw-alias-state-business-primary); background: var(--dsw-alias-state-business-tertiary); }
 .capital-watchlist-tag-stock { color: var(--dsw-alias-state-warn-label); background: var(--dsw-alias-state-warn-tertiary); }
 .capital-watchlist-tag-etf { color: var(--dsw-alias-state-success-primary); background: var(--dsw-alias-state-success-tertiary); }
-/* 表头与数据行共用同一个 grid 定义：宽度只在这一处，两处各自排版就会串行（实机踩过）。 */
-.capital-watchlist-grid { display: grid; grid-template-columns: 1.4fr .7fr 1.2fr 36px; gap: 8px; align-items: center; }
+/* 表头与数据行共用同一个 grid 定义：宽度只在这一处，两处各自排版就会串行（实机踩过）。
+   类型徽标从独立列并进名称列（2026-09-29 用户反馈"类型这一列挺累赘"），所以三列：
+   名称 + 第二行的「代码 · 徽标」/ 报价 / 行内更多键。 */
+.capital-watchlist-grid { display: grid; grid-template-columns: 2.1fr 1.2fr 36px; gap: 8px; align-items: center; }
 .capital-watchlist-head { padding: 0 20px 8px; font-size: 12px; line-height: 18px; letter-spacing: .2px; color: var(--dsw-alias-label-tertiary); }
 .capital-watchlist-list { max-height: 300px; padding: 0 12px 8px; overflow-y: auto; }
 .capital-watchlist-row { padding: 11px 8px; border-radius: 10px; transition: background .15s var(--ds-ease-in-out); }
 .capital-watchlist-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .capital-watchlist-namewrap { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .capital-watchlist-name { font-size: 14px; font-weight: 500; color: var(--dsw-alias-label-primary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.capital-watchlist-code { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
+/* 代码与类型徽标同处第二行：gap 是这一对唯一的间距来源，徽标自带内边距，别再各写 margin。 */
+.capital-watchlist-codeline { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.capital-watchlist-code { font-size: 11px; color: var(--dsw-alias-label-tertiary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 /* 最新价在上、涨跌幅在下，右对齐：两行都同一列里排，列宽才不需要跟着涨跌位数抖。 */
 .capital-watchlist-quote { min-width: 0; text-align: right; font-variant-numeric: tabular-nums; }
 .capital-watchlist-price { font-size: 14px; font-weight: 500; color: var(--dsw-alias-label-primary); white-space: nowrap; }
@@ -219,27 +245,45 @@ const CSS = `
 .capital-watchlist-up { color: #d1493f; }
 .capital-watchlist-down { color: #17a063; }
 .capital-watchlist-flat { color: var(--dsw-alias-label-secondary); }
+/* 这一行本次没取到报价、且从来没有过值：破折号标红（红 = 数据不可信，与整批刷新同一档）。
+   写在 up/down/flat 之后，与 .capital-watchlist-price 同 specificity 靠源码序赢——不靠 !important 抢。 */
+.capital-watchlist-quotefailed { color: var(--dsw-alias-state-error-primary); }
+/* 本次没取到、但上一次成功的快照还在（后端只覆写成功的那几条）：值照画，两行都降到 secondary。
+   红涨绿跌是"当前"的语义，一个陈旧值不该借用；它是哪一刻的写在 tooltip 里。 */
+.capital-watchlist-stale { color: var(--dsw-alias-label-secondary); }
 /* 骨架条：bg-skeleton 在浅色只有 4%，官方那一条（.skeletonBar）也是配 2s 呼吸一起用的。 */
 .capital-watchlist-skeleton { display: block; height: 12px; margin: 2px 0 0 auto; border-radius: 6px; background: var(--dsw-alias-bg-skeleton); animation: capital-watchlist-breathe 2s cubic-bezier(.36, 0, .64, 1) infinite; }
 .capital-watchlist-skeleton-price { width: 68px; }
 .capital-watchlist-skeleton-change { width: 44px; height: 10px; }
-/* 删除键：dimmed 在浅底等于图标整个消失，所以常态取 label-tertiary，hover 才转 danger 底 + error 字。 */
-.capital-watchlist-remove { width: 28px; height: 28px; margin-left: auto; display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-tertiary); cursor: pointer; }
-.capital-watchlist-remove:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover-danger); color: var(--dsw-alias-state-error-primary); }
-.capital-watchlist-remove:disabled { opacity: .45; cursor: not-allowed; }
-/* 底部一行：刷新动词在左、整批共用的一次更新时间在右；逐行再各写一遍同样的时间是噪音。 */
-.capital-watchlist-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 20px 18px; border-top: .5px solid var(--dsw-alias-border-l2); }
+/* 「更多」键：dimmed 在浅底等于图标整个消失，所以常态取 label-tertiary，hover 提亮到 primary
+   （破坏性的「移除」降级成菜单里的一条 danger 行，行内不再常驻一个红色动作）。 */
+.capital-watchlist-more { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-tertiary); cursor: pointer; }
+.capital-watchlist-more:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.capital-watchlist-more:disabled { opacity: .45; cursor: not-allowed; }
+/* 官方 Menu 的锚点包着一层 span（.root 是 inline-flex），它才是 grid 第三格：贴右缘靠 justify-content
+   ——旧版删除键是格子本身，用 margin-left:auto；包一层之后 auto 外边距落在 span 自己身上，已无效果。 */
+.capital-watchlist-actions { justify-content: flex-end; }
+/* 底部一行：左列是「刷新报价」动词 + 它自己的整批失败行，右列是共用的更新时间。
+   flex-start 而不是 center：失败行出现时左列变高，居中的话更新时间会跟着往下坠。 */
+.capital-watchlist-footer { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 14px 20px 18px; border-top: .5px solid var(--dsw-alias-border-l2); }
+.capital-watchlist-footcol { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
 /* 刷新按钮底走官方 Tag 的 info 配方（state 色 + color-mix 透明档，要的是"轻"，实心 tertiary 在按钮上
    会糊成一块色斑）；边框按口径例外：状态色 border 保持 1px，0.5px 那条只管中性 border。 */
 .capital-watchlist-refresh { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border: 1px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 25%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent); color: var(--dsw-alias-state-business-primary); font-family: inherit; font-size: 13px; line-height: 20px; font-weight: 500; cursor: pointer; }
 .capital-watchlist-refresh:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 20%, transparent); }
 .capital-watchlist-refresh:disabled { opacity: .45; cursor: not-allowed; }
-.capital-watchlist-updated { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); }
+/* 34px = 刷新按钮的高度：与它同一行的时间按按钮高度行高居中，左列多出失败行也不受影响。 */
+.capital-watchlist-updated { font-size: 12px; line-height: 34px; color: var(--dsw-alias-label-tertiary); }
 .capital-watchlist-hint { padding: 8px 14px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }
-/* 添加失败的字是 warn-primary 还是 warn-label？官方"状态色用作文字"给的是 label 那一档，
-   浅底上的 amber-500 只有 2:1，报错文字反而是最不该看不见的一行。 */
+/* 黄 = 动作没成。两条黄字都用 warn-label：官方"状态色用作文字"给的是 label 那一档，
+   warn-primary 压在浅底上只有 2:1，报错文字反而是最不该看不见的一行。 */
+/* 搜索失败：占下拉的 hint 位（与「搜索中…」「没有匹配的标的」同一个槽，替换而非并列）。
+   不写 padding——它骑在 .capital-watchlist-hint 的 8px 14px 上，只改颜色。 */
+.capital-watchlist-searcherror { color: var(--dsw-alias-state-warn-label); }
+/* 添加失败（list_full / ambiguous）：与输入无关，跟着搜索区坐着，改字不清它。 */
 .capital-watchlist-adderror { padding: 0 20px 10px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-state-warn-label); }
-.capital-watchlist-notice { padding: 16px 20px; text-align: center; font-size: 13px; line-height: 20px; color: var(--dsw-alias-state-error-primary); }
+/* 整批刷新失败：红 = 数据不可信，贴在「刷新报价」下面（跟着动词走），不再居中飘到输入框下方。 */
+.capital-watchlist-notice { font-size: 12px; line-height: 18px; color: var(--dsw-alias-state-error-primary); }
 .capital-watchlist-empty { padding: 24px 20px; text-align: center; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-secondary); }
 /* 删除二次确认：贴在卡片内的绝对层（.dialog 的 overflow:hidden 顺带裁掉圆角外沿）。
    常驻挂载 + 类切换，才有淡入淡出；visibility:hidden 的子节点天然退出 Tab 序。 */
@@ -309,11 +353,21 @@ const blank = () => ({
   query: '',
   /** 下拉是否盖在清单上：由输入打开、由选中/点到框外收起（Esc 也收，见组件的 onKeyDown）。 */
   dropdownOpen: false,
+  /**
+   * 行内「更多」菜单开在哪一行（`thscode`；null = 都关着）。开合状态住 store 而不是组件的
+   * `useState`：面板关掉再打开时，`open()` 的 `...blank()` 会把上一轮的菜单一起收走。
+   */
+  rowMenu: null,
   /** 整批共用的一次刷新时刻（底部那一行就报它）。 */
   refreshed_at: null,
-  /** 整批级失败：居中醒目显示（不是角落 toast，也不是清空列表）。 */
+  /** 整批级失败：红字跟在「刷新报价」下面（数据不可信那一档）。 */
   error: null,
-  /** 添加动作的失败（list_full / ambiguous），显示在搜索区下方。 */
+  /**
+   * 搜索这一路失败（限流 / 服务不可用）：黄字占下拉的 hint 位。
+   * 与 `addError` **分开两个字段**是刻意的——两者清空的时机不同（见 `onQueryChange`）。
+   */
+  searchError: null,
+  /** 添加动作的失败（list_full / ambiguous）：与输入无关，显示在搜索区下方，改字不清它。 */
   addError: null,
   /** 逐标的失败：只影响那一行。 */
   failures: {},
@@ -357,7 +411,7 @@ class WatchlistSurface {
     if (this.searchController !== null) this.searchController.abort()
     this.lastQuery = null
     this.composing = false
-    this.patch({ open: false })
+    this.patch({ open: false, rowMenu: null })
   }
 
   async load() {
@@ -375,7 +429,9 @@ class WatchlistSurface {
         for (const item of payload.failures ?? []) failures[item.thscode] = item.code
         this.patch({
           items: payload.items ?? this.snapshot.items,
-          refreshed_at: payload.refreshed_at,
+          // 整批一条都没落地时宿主回 `null`：底部那行时间讲的是"最后一次真取到数"，
+          // 跟着一次失败的点击往前走，就成了每一行都陈旧、只有页脚是新的。
+          refreshed_at: payload.refreshed_at ?? this.snapshot.refreshed_at,
           failures,
           error: payload.error ? { code: payload.error.code, partial: true } : null,
         })
@@ -403,7 +459,9 @@ class WatchlistSurface {
    */
   onQueryChange(query) {
     const trimmed = query.trim()
-    this.patch({ query, addError: null, dropdownOpen: trimmed.length > 0 })
+    // 改字清的是"上一次搜索没成"（那一行正被新的在途请求取代）；**不清** `addError`——
+    // `list_full` 讲的是清单，跟输入框里是什么字无关。
+    this.patch({ query, searchError: null, dropdownOpen: trimmed.length > 0 })
     if (this.timer !== null) clearTimeout(this.timer)
     if (trimmed.length === 0) {
       if (this.searchController !== null) this.searchController.abort()
@@ -431,12 +489,22 @@ class WatchlistSurface {
     this.patch({ dropdownOpen: false })
   }
 
+  /** 行内「更多」键：再点一次就收起（同一个键既开又关，不用去别处找关闭入口）。 */
+  toggleRowMenu(thscode) {
+    this.patch({ rowMenu: this.snapshot.rowMenu === thscode ? null : thscode })
+  }
+
+  /** 官方 Menu 的 onClose（点到外面 / Escape）与选中之后都走这里。 */
+  closeRowMenu() {
+    if (this.snapshot.rowMenu !== null) this.patch({ rowMenu: null })
+  }
+
   async search(query) {
     this.lastQuery = query
     if (this.searchController !== null) this.searchController.abort()
     const controller = new AbortController()
     this.searchController = controller
-    this.patch({ searching: true })
+    this.patch({ searching: true, searchError: null })
     try {
       const payload = await call('/search', { query: `q=${encodeURIComponent(query)}`, signal: controller.signal })
       this.patch({ candidates: payload.items ?? [], truncated: payload.truncated === true, searching: false })
@@ -444,7 +512,9 @@ class WatchlistSurface {
       if (error.name === 'AbortError') return
       // 失败不记在"这个词查过了"的账上：同样几个字重打一遍还得能再出网。
       if (this.lastQuery === query) this.lastQuery = null
-      this.patch({ candidates: [], truncated: false, searching: false, addError: { code: error.code ?? 'fuyao_unavailable' } })
+      // 走 `searchError` 而不是 `addError`：它占下拉的 hint 位，替换掉「没有匹配的标的」——
+      // 同一屏不许一边说"没有这个票"、一边说"服务限流"（候选清空了，noHit 本来就会亮起来）。
+      this.patch({ candidates: [], truncated: false, searching: false, searchError: { code: error.code ?? 'fuyao_unavailable' } })
     }
   }
 
@@ -458,7 +528,7 @@ class WatchlistSurface {
       // 等于把用户刚加的东西留成半成品——开面板那一步本来就是同一套 load→refresh。
       await this.refresh()
     } catch (error) {
-      // 歧义与超限是"添加"这个动作的失败：留在搜索区，不抢居中醒目位。
+      // 歧义与超限是"添加"这个动作的失败：留在搜索区（黄），不去占刷新那条红字的位置。
       this.patch({ addError: { code: error.code ?? 'fuyao_unavailable', candidates: error.candidates } })
       if (error.candidates !== undefined) this.patch({ candidates: error.candidates, truncated: false })
     }
@@ -466,9 +536,27 @@ class WatchlistSurface {
 
   async remove(thscode) {
     const before = this.snapshot.items
-    this.patch({ items: before.filter((row) => row.thscode !== thscode) })
+    this.patch({ items: before.filter((row) => row.thscode !== thscode), rowMenu: null })
     try {
       await call('/remove', { body: { thscode } })
+    } catch {
+      this.patch({ items: before })
+    }
+  }
+
+  /**
+   * 置顶：先把这一行提到第一行（乐观），再让宿主把 `pinned_at` 写进域。
+   * 失败回滚成原顺序——与 `remove` 同一条口径：面板不弹错框，行自己弹回去就是回执。
+   * 返回的 `items` 是宿主的排序真值（服务端只记时间戳，顺序由读法决定）。
+   */
+  async pin(thscode) {
+    const before = this.snapshot.items
+    const target = before.find((row) => row.thscode === thscode)
+    if (target === undefined) return
+    this.patch({ items: [target, ...before.filter((row) => row.thscode !== thscode)], rowMenu: null })
+    try {
+      const payload = await call('/pin', { body: { thscode } })
+      if (Array.isArray(payload.items)) this.patch({ items: payload.items })
     } catch {
       this.patch({ items: before })
     }
@@ -511,26 +599,36 @@ function TypeTag({ assetType }) {
 
 /**
  * 最新价在上、涨跌幅在下，右对齐；两位小数，红涨绿跌按 A 股习惯。
- * "没有数"分三种画法：整批还在请求中 → skeleton；这一条本次失败 → `—` + code 文案（title）；
- * 从没刷过 → 「未刷新」。
+ * "这一行本次没取到数"**不是**"这一行没有数"：后端只覆写成功的记录，上一次成功的快照仍在
+ * `quote` 里，所以画法是四态而不是两态——
+ *  1. 在途且还没有任何值 → skeleton；
+ *  2. 本次失败、从来没有过值 → 红色 `—`（数据不可信那一档）+ 原因；
+ *  3. 本次失败、但手上有旧快照 → 值照画，两行降一档色，tooltip 说清是哪一刻的；
+ *  4. 从没刷过 → 「未刷新」。
  */
 function QuoteCell({ quote, failureCode, refreshing, t }) {
-  if (failureCode !== undefined) {
-    return h('div', { className: 'capital-watchlist-quote', title: t(`error.${failureCode}`) },
-      h('div', { className: 'capital-watchlist-price' }, '—'))
-  }
+  const stale = failureCode !== undefined
   if (quote === null || quote === undefined) {
     if (refreshing === true) {
       return h('div', { className: 'capital-watchlist-quote' },
         h('span', { className: 'capital-watchlist-skeleton capital-watchlist-skeleton-price' }),
         h('span', { className: 'capital-watchlist-skeleton capital-watchlist-skeleton-change' }))
     }
+    if (stale) {
+      return h('div', { className: 'capital-watchlist-quote', title: t(`error.${failureCode}`) },
+        h('div', { className: 'capital-watchlist-price capital-watchlist-quotefailed' }, '—'))
+    }
     return h('div', { className: 'capital-watchlist-quote' }, h('div', { className: 'capital-watchlist-price' }, t('notRefreshed')))
   }
   const pct = `${quote.change_pct > 0 ? '+' : ''}${quote.change_pct.toFixed(2)}%`
-  const tone = quote.change_pct > 0 ? 'capital-watchlist-up' : quote.change_pct < 0 ? 'capital-watchlist-down' : 'capital-watchlist-flat'
-  return h('div', { className: 'capital-watchlist-quote' },
-    h('div', { className: 'capital-watchlist-price' }, quote.price.toFixed(2)),
+  const tone = stale
+    ? 'capital-watchlist-stale'
+    : quote.change_pct > 0 ? 'capital-watchlist-up' : quote.change_pct < 0 ? 'capital-watchlist-down' : 'capital-watchlist-flat'
+  return h('div', {
+    className: 'capital-watchlist-quote',
+    title: stale ? `${t(`error.${failureCode}`)} · ${t('stale')} ${formatTime(quote.captured_at)}` : undefined,
+  },
+    h('div', { className: stale ? 'capital-watchlist-price capital-watchlist-stale' : 'capital-watchlist-price' }, quote.price.toFixed(2)),
     h('div', { className: `capital-watchlist-change ${tone}` }, pct))
 }
 
@@ -599,16 +697,20 @@ function WatchlistDialog({ useDialog, surface, t }) {
         h(TypeTag, { assetType: candidate.asset_type }))),
       state.searching === true
         ? h('div', { className: 'capital-watchlist-hint' }, t('searching'))
-        : state.candidates.length === 0
-          ? h('div', { className: 'capital-watchlist-hint' }, t('noHit'))
-          : null,
+        : state.searchError !== null && state.searchError !== undefined
+          // **替换** noHit 而不是并排多一条：限流的时候说"没有匹配的标的"，是把服务的故障
+          // 说成用户查错了。同一个 hint 槽、同一档材质，只换颜色与 role。
+          ? h('div', { className: 'capital-watchlist-hint capital-watchlist-searcherror', role: 'alert', 'data-code': state.searchError.code }, t(`error.${state.searchError.code}`))
+          : state.candidates.length === 0
+            ? h('div', { className: 'capital-watchlist-hint' }, t('noHit'))
+            : null,
       state.truncated ? h('div', { className: 'capital-watchlist-hint' }, t('truncated')) : null)
 
   const head = state.items.length === 0
     ? null
     : h('div', { className: 'capital-watchlist-grid capital-watchlist-head' },
+      // 类型不再是独立一列（并进名称列第二行），所以表头也只剩三格。
       h('span', null, t('colName')),
-      h('span', null, t('colType')),
       // 表头只借报价列的右对齐，不复用数据列的类（那是 14px 与 label-primary，混用一张表头三种字号）。
       h('span', { className: 'capital-watchlist-quote' }, t('colQuote')),
       h('span', { 'aria-hidden': true }, ' '))
@@ -617,24 +719,46 @@ function WatchlistDialog({ useDialog, surface, t }) {
     ? h('p', { className: 'capital-watchlist-empty' }, t('loading'))
     : state.items.length === 0
       ? h('p', { className: 'capital-watchlist-empty' }, t('empty'))
-      : h('div', { className: 'capital-watchlist-list' }, state.items.map((item) => h('div', {
+      : h('div', { className: 'capital-watchlist-list' }, state.items.map((item, index) => h('div', {
         key: item.thscode,
         className: 'capital-watchlist-grid capital-watchlist-row',
         'data-thscode': item.thscode,
       },
         h('span', { className: 'capital-watchlist-namewrap' },
           h('span', { className: 'capital-watchlist-name', title: `${item.name} ${item.ticker}` }, item.name),
-          h('span', { className: 'capital-watchlist-code' }, item.ticker)),
-        h(TypeTag, { assetType: item.asset_type }),
+          // 代码与类型徽标同处第二行（用户反馈：类型单占一列太累赘）。
+          h('span', { className: 'capital-watchlist-codeline' },
+            h('span', { className: 'capital-watchlist-code' }, item.ticker),
+            h(TypeTag, { assetType: item.asset_type }))),
         h(QuoteCell, { quote: item.quote, failureCode: state.failures[item.thscode], refreshing: state.refreshing, t }),
-        h('button', {
-          type: 'button',
-          className: 'capital-watchlist-remove',
-          disabled: busy,
-          title: t('remove'),
-          'aria-label': `${t('remove')} ${item.name}`,
-          onClick: () => setPendingRemove(item),
-        }, h(IconTrashOutlineRegular, { size: 14 })))))
+        // 行内动作收进官方 Menu（portal）：就地在滚动容器里画会被裁掉，见文件头。
+        h(Menu, {
+          open: state.rowMenu === item.thscode,
+          anchor: h('button', {
+            type: 'button',
+            className: 'capital-watchlist-more',
+            disabled: busy,
+            title: t('more'),
+            'aria-label': `${t('more')} ${item.name}`,
+            'aria-haspopup': 'menu',
+            'aria-expanded': state.rowMenu === item.thscode,
+            onClick: () => surface.toggleRowMenu(item.thscode),
+          }, h(IconEllipsisOutlineRegular, { size: 14 })),
+          items: [
+            // 已经在第一行就没有可置顶的位移：这一条置灰，菜单不长出一堆 "取消置顶" 的反向动作。
+            { id: 'pin', label: t('pin'), icon: h(IconPinOutlineRegular, { size: 14 }), disabled: index === 0 },
+            { id: 'remove', label: t('remove'), icon: h(IconTrashOutlineRegular, { size: 14 }), danger: true },
+          ],
+          onSelect: (id) => {
+            surface.closeRowMenu()
+            if (id === 'pin') surface.pin(item.thscode)
+            else setPendingRemove(item)
+          },
+          onClose: () => surface.closeRowMenu(),
+          align: 'end',
+          portal: true,
+          className: 'capital-watchlist-actions',
+        }))))
 
   const confirm = h('div', {
     className: confirming ? 'capital-watchlist-confirm capital-watchlist-confirm-open' : 'capital-watchlist-confirm',
@@ -704,24 +828,26 @@ function WatchlistDialog({ useDialog, surface, t }) {
         dropdown),
 
       state.addError !== null && state.addError !== undefined
-        // 超限与歧义是"添加"这个动作的失败：留在搜索区下方，不抢居中醒目位。
+        // 超限与歧义是"添加"这个动作的失败：留在搜索区下方（黄），且**不随改字消失**——
+        // `list_full` 讲的是清单满不满，跟输入框里是什么字无关。
         ? h('p', { className: 'capital-watchlist-adderror', role: 'status', 'data-code': state.addError.code }, t(`error.${state.addError.code}`))
         : null,
-
-      notice,
 
       head,
       list,
 
-      // 底部一行：刷新动词 + 整批共用的一次更新时间（逐行重复同一个时间是噪音，
+      // 底部一行：左列 = 「刷新报价」动词 + 它自己的整批失败行（报错跟着动词走，不再飘到输入
+      // 框下面、离按钮隔一整张表）；右列 = 整批共用的一次更新时间（逐行重复同一个时间是噪音，
       // 顶部再放一个「刷新报价」按钮也与这行重复）。
       h('div', { className: 'capital-watchlist-footer' },
-        h('button', {
-          type: 'button',
-          className: 'capital-watchlist-refresh',
-          disabled: state.refreshing || busy,
-          onClick: () => { surface.refresh() },
-        }, h(IconRefreshOutlineRegular, { size: 14 }), state.refreshing ? t('refreshing') : t('refresh')),
+        h('div', { className: 'capital-watchlist-footcol' },
+          h('button', {
+            type: 'button',
+            className: 'capital-watchlist-refresh',
+            disabled: state.refreshing || busy,
+            onClick: () => { surface.refresh() },
+          }, h(IconRefreshOutlineRegular, { size: 14 }), state.refreshing ? t('refreshing') : t('refresh')),
+          notice),
         h('span', { className: 'capital-watchlist-updated' },
           `${t('updated')} ${state.refreshed_at === null || state.refreshed_at === undefined ? t('notRefreshed') : formatTime(state.refreshed_at)}`)),
 

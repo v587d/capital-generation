@@ -621,6 +621,35 @@ const probes = [
         : { status: FAIL, detail: `菜单材质契约变了：${missing.join(' / ')}（见账本 L22；capital-watchlist 的下拉可读性依赖它）` }
     },
   },
+  {
+    id: 'L23',
+    title: '行内「更多」菜单用官方 Menu primitive：props 面（open / anchor / items / onSelect / onClose / align / side / portal）、条目字段（id / label / icon / danger / disabled）、portal 列表压在模态之上、Escape 在 capture 阶段被菜单吃掉',
+    why: '自选股每行的「置顶 / 移除」菜单就是它。三件事都不会抛错、只会用起来不对：① 清单区是 overflow:auto 的滚动容器，非 portal 的就地浮层会被裁掉（最后几行点开什么都看不见）；② 官方 Modal 的 Escape 是 document 上的层栈监听，菜单若不在 capture 阶段 preventDefault，按 Esc 会把整个面板关掉；③ portal 列表的 z-index 掉到模态遮罩之下时，菜单画在遮罩里——看得见影子、点不着。',
+    run() {
+      const file = join(PKG('dsh-client-ui-primitives'), 'lib/index.js')
+      const text = readIfPresent(file)
+      if (text === undefined) return { status: FAIL, detail: `读不到 ${file}` }
+      const menuCss = readIfPresent(join(PKG('dsh-client-ui-primitives'), 'lib/Menu.module.css'))
+      const modalCss = readIfPresent(join(PKG('dsh-client-ui-primitives'), 'lib/Modal.module.css'))
+      if (menuCss === undefined || modalCss === undefined) return { status: FAIL, detail: '读不到 Menu.module.css / Modal.module.css' }
+      const menuZ = Number(/\n\.portal \{[^}]*z-index:\s*(\d+)/.exec(menuCss)?.[1])
+      const modalZ = Number(/\n\.root \{[^}]*z-index:\s*(\d+)/.exec(modalCss)?.[1])
+      const checks = [
+        ['Menu 仍带 open / anchor / items / onSelect / onClose / align / side / portal 这组 props', /function Menu\(\{ open, anchor, items = \[\],[\s\S]{0,400}?align = "start",[\s\S]{0,200}?portal = false/, text],
+        ['数据行仍是 role="menuitem" 的 button（id / label / icon / danger / disabled 由 items 驱动）', /entry\.danger === true && css\$\d+\.danger/, text],
+        ['portal 模式仍把列表挂到 document.body（否则被清单的 overflow 裁掉）', /portal \? list !== false && createPortal\(list, document\.body\)/, text],
+        ['Escape 仍由菜单在 capture 阶段处理（Modal 的层栈检查 event.defaultPrevented）', /document\.addEventListener\("keydown", onEscape, true\)/, text],
+        ['外点收起仍是 pointerdown（点别的行/弹窗内容即关，不用我们补监听）', /document\.addEventListener\("pointerdown", onPointerDown\)/, text],
+        ['条目里的 disabled 仍会禁用整行（第一行的「置顶」靠它置灰）', /disabled: entry\.disabled/, text],
+      ]
+      const missing = checks.filter(([, pattern, source]) => !pattern.test(source)).map(([label]) => label)
+      if (!Number.isFinite(menuZ) || !Number.isFinite(modalZ)) missing.push('取不到 .portal / .root 的 z-index')
+      else if (menuZ <= modalZ) missing.push(`portal 列表的 z-index（${menuZ}）不再高于模态（${modalZ}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: `Menu primitive 的 props / 条目字段 / portal 层级（${menuZ} > ${modalZ}）/ Escape 归属都仍在` }
+        : { status: FAIL, detail: `行内菜单依赖的 Menu primitive 契约变了：${missing.join(' / ')}（见账本 L23；capital-watchlist 的行内菜单依赖它）` }
+    },
+  },
 ]
 
 const results = []

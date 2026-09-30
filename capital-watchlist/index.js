@@ -77,6 +77,13 @@ const itemSchema = z.object({
   added_at: z.number().int(),
   source: z.enum(['seed', 'user']),
   quote: quoteSchema.nullable(),
+  /**
+   * 置顶时刻（用户动作写入；缺省 = 未置顶，读法见 `rowsOf`）。
+   * **可选是刻意的**：磁盘上已有的 v1 记录没有这一格，写成必填会把整份清单判成
+   * `invalid-record`（域在加载边界逐条校验，读一次就 `store_unavailable`），而新写的记录
+   * 永远带它——两个方向的兼容因此都不需要迁移、也不需要抬 domain version。
+   */
+  pinned_at: z.number().int().optional(),
 })
 
 /**
@@ -124,9 +131,24 @@ export function watchlistErrorCode(error, { perItem = false } = {}) {
   }
 }
 
-/** KvTable 只有 `entries()`，没有 `values()`——清单读法集中在这一个函数里。 */
+/**
+ * 清单读法（KvTable 只有 `entries()`，没有 `values()`）+ 置顶排序，**只有这一份实现**：
+ * 带 `pinned_at` 的排前面（后置顶的在前），其余保持表里的插入顺序（用原始下标兜底，
+ * 比较稳定）。持久化文件里的键序**不动**——顺序是"读"出来的，不是"写"进去的：
+ * 官方单文件后端是 Map，`put` 已有键保留原位置，靠删了重插来改顺序会把整份 JSON 写 N 遍。
+ */
 function rowsOf(table) {
-  return [...table.entries()].map(([, value]) => value)
+  return [...table.entries()]
+    .map(([, value], index) => ({ value, index }))
+    .sort((left, right) => {
+      const a = left.value.pinned_at ?? null
+      const b = right.value.pinned_at ?? null
+      if (a !== null && b !== null && a !== b) return b - a
+      if (a !== null && b === null) return -1
+      if (a === null && b !== null) return 1
+      return left.index - right.index
+    })
+    .map((entry) => entry.value)
 }
 
 function candidateOf(row) {
@@ -278,6 +300,22 @@ export function createWatchlistService(options = {}) {
     return { ok: true, removed: await items.delete(thscode) }
   }
 
+  /**
+   * 置顶 = 给这一条打一个 `pinned_at` 时间戳；排序归 `rowsOf`（后置顶的在前）。
+   * 不把"键挪到最前"当成实现：顺序是读法的一部分，写进去就要求整表重写。
+   * 重复置顶是幂等的用户动作（只是把时间戳推新，行不会跳走），`not_found` 则响亮失败。
+   */
+  async function pin(input) {
+    await ensureSeeded()
+    const items = await table()
+    const thscode = normalizeThscode(input?.thscode)
+    if (thscode === undefined) return { ok: false, code: 'invalid_query', message: '代码格式不符' }
+    const existing = items.get(thscode)
+    if (existing === undefined) return { ok: false, code: 'not_found', message: '该标的不在自选清单里' }
+    await items.put(thscode, { ...existing, pinned_at: now() })
+    return { ok: true, items: rowsOf(items) }
+  }
+
   /** 一个 asset_type 分组 = 一次快照请求；单组失败只记该组，不拖垮其它组。 */
   async function fetchGroup(group, failures) {
     const capturedAt = now()
@@ -354,7 +392,9 @@ export function createWatchlistService(options = {}) {
       if (row === undefined) continue
       await items.put(thscode, { ...row, quote })
     }
-    const result = { ok: true, items: rowsOf(items), refreshed_at: now(), failures }
+    // 一条都没落地就不报"刷新于此刻"：页脚那个时间讲的是最后一次**真取到数**的时刻，
+    // 跟着一次全失败的点击往前走，就成了每一行都陈旧、只有页脚是新的（客户端据此保留上一个值）。
+    const result = { ok: true, items: rowsOf(items), refreshed_at: quotes.size > 0 ? now() : null, failures }
     if (batchError !== undefined) result.error = batchError
     return result
   }
@@ -364,6 +404,7 @@ export function createWatchlistService(options = {}) {
     search,
     add,
     remove,
+    pin,
     refresh,
     async close() {
       const opened = await domainPromise
@@ -492,6 +533,7 @@ export function createRouteHandler(service, options = {}) {
     try {
       if (method === 'POST' && pathname === '/add') return sendBusiness(res, await service.add(input))
       if (method === 'POST' && pathname === '/remove') return sendBusiness(res, await service.remove(input))
+      if (method === 'POST' && pathname === '/pin') return sendBusiness(res, await service.pin(input))
       if (method === 'POST' && pathname === '/refresh') {
         // 刷新是"部分成功 + 逐条失败"的形态：整批失败也带 items 与 error 回来，
         // 面板按 error.code 居中显示，绝不清空列表。
