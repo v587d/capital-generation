@@ -24,14 +24,8 @@
 > 愿大家的财富数字就像"text generation"一样，不断增长，永不停止。
 
 > [!NOTE]
-> 先安装 [Deepseek Harness(DSH)](https://github.com/deepseek-ai/deepseek-harness) ，本项目自 2.5.0 起适配 DSH`@0.2.0-rc.2`。
-> **两种宿主形态都实机验过**（上面 web / desktop 那两枚徽章）：`0.2.0-rc.2` 的 **Web profile**（Linux）与 **Windows 桌面端**
-> （DeepSeek Harness Desktop）。2.5.1 在桌面端跑通了插件页四行装配、自选股增删与报价刷新、以及子 Agent 的
-> 同花顺取数；这两项此前分别只在 Web 形态验过，桌面端各炸过一次（见 CHANGELOG 2.5.1）。
-> **需要 DSH ≥ 0.2.0-rc.2**：2.4.x 那一档是在 0.1.7 上验的，本版起基线抬到这里。再往前，0.1.5 的 settings 与
-> preset 挂载面已被上游删除，装在旧版上会起不来。**桌面端自带宿主**，携带的就是 `0.2.0-rc.2`：不要拿
-> `npm i -g @deepseek-ai/dsh@…` 去换它的版本——那条只作用于 CLI / Web 的全局安装，对桌面端无效。
-> 建议使用 **Deepseek/deepseek-flash**(High thinking) 搭配本项目， GPT / Claude 尚未充分测试，理论亦可。
+> 适配 DSH`@0.2.0-rc.2`（需 ≥ 这一版；宿主本身见 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)）。**Web profile（Linux）与 Windows 桌面端两种宿主形态都实机验过**——就是上面那两枚徽章。
+> 装法见 [📦 安装到 DSH](#-安装到-dsh)。建议搭配 **Deepseek/deepseek-flash**（High thinking）；GPT / Claude 尚未充分测试。
 
 # 💬 Slogan
 Next-Gen AI-Driven Capital Generation.
