@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.5.1-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.5.2-9cf" alt="Version"></a>
 </p>
 
 > [!IMPORTANT]
@@ -213,25 +213,19 @@ npm run verify:sessions  # 发布前复核真实会话日志可被冷加载（�
 
 ## 📝 Changelog
 
-### 2.5.1 — 2026-09-30
+### 2.5.2 — 2026-09-30
 
-两条都是 **Windows 桌面端实机跑出来的装配失效**，`npm test` 在此之前抓不到——一条因为测试的假 ctx
-认证了错的 cordis 规则，一条因为假凭据服务永远「立刻就有值」。详见 [CHANGELOG.md](CHANGELOG.md)。
+- **`dc_status` 多一格 `root_tool_policy`**：主 Agent 的工具收敛以前**坏了也没痕迹**——桌面端实测
+  收敛调用全部"成功"，真发给模型的工具表里 17 颗却一颗没少，而三条可能的失败出口一条都不留记录。
+  现在每次根 Agent 创建都留下 `preset_id / outcome / denied / failed`，会话里就能读出来。
+- **修掉一个谎报平安的体检脚本**：`npm run verify:sessions` 只认旧版会话文件名，在新宿主上扫到
+  0 份却打印 ✅。现在按版本挑最新那份，**读到 0 份就 exit 2 明说"没核对任何东西"**。
+- 清掉名单里两颗当前宿主根本不存在的工具名（`web_search` / `web_fetch`）。
+- 已知未决：**桌面端的主 Agent 工具收敛目前不生效**（同一行代码在 Linux / Web 有效），属宿主产品
+  形态差异，本项目不做平台特判，等 DSH 侧；期间取数纪律仍由工具层兜住，功能与数据不受影响。
 
-- **插件页两行 异常 修好**：`capital-charts` / `capital-watchlist` 原先「先探测 `webServer`、有值就直接
-  调用」，而 `ctx.get` 能解析出值**不代表**属性访问合法（cordis 的属性代理只认本层声明过 `inject`）。
-  桌面端 webServer 就绪得早，于是当场抛 `cannot get property "webServer" without inject`；web 形态里它
-  就绪得晚，反而躲过。现在一律走 `ctx.inject(['webServer'], …)`，两种装配顺序都对。
-- **同花顺 61 颗能力不再可能整场缺席**：注册原先押在「装配期读到 `FUYAO_API_KEY`」上，而宿主的凭据服务
-  是**先把服务挂出来、再去读凭据文件**——那一刻读到的就是「没有」，于是 61 颗能力整个进程静默消失且
-  永不重试。现在注册不看 key，key 留到每次取数现取：缺它时报错点名 `FUYAO_API_KEY`（不再只说「未注册的
-  能力」），凭据配好**同一进程就生效**，不用重启。
-- **`dc_status` 不再自相矛盾**：删掉 `registration_error` 一格。它此前会和 `api_key.present=true` 同时
-  出现在一份回执里，把人引向「是不是我 key 配错了」。
-
-从 2.5.0 升级**无需迁移**：工具入参、数据能力、设置卡片、会话日志格式都没变，宿主仍要求
-`0.2.0-rc.2`（不新增要求）。**更早版本的变更历史见 [CHANGELOG.md](CHANGELOG.md)**，GitHub Release
-说明也从这里对应段落复制。
+从 2.5.1 升级**无需迁移**：工具入参、数据能力、设置卡片、会话日志格式都没变，`dc_status` 只是多一个字段。
+**更早版本的变更历史见 [CHANGELOG.md](CHANGELOG.md)**，GitHub Release 说明也从这里对应段落复制。
 
 # 🤝 贡献
 可自行克隆本项目，按上方「本地开发、构建、测试」执行。
