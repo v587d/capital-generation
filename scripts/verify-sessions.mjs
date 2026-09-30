@@ -20,11 +20,12 @@
  */
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { zstdDecompressSync } from 'node:zlib'
 import { join } from 'node:path'
 import { locateDshPackage } from './lib/run-tool.mjs'
+import { findSessionRecords } from './lib/session-files.mjs'
 
 function argValue(name, fallback) {
   const index = process.argv.indexOf(name)
@@ -74,20 +75,13 @@ function decode(file) {
   return events
 }
 
-// 收集候选会话
-const records = []
-if (existsSync(sessionsRoot)) {
-  for (const workspace of readdirSync(sessionsRoot)) {
-    const workspacePath = join(sessionsRoot, workspace)
-    try { if (!statSync(workspacePath).isDirectory()) continue } catch { continue }
-    for (const id of readdirSync(workspacePath)) {
-      const file = join(workspacePath, id, 'session.v3.jsonl.zstd')
-      let stat
-      try { stat = statSync(file) } catch { continue }
-      if (stat.size === 0 || stat.mtimeMs < since) continue
-      records.push({ id, mtime: stat.mtimeMs, file })
-    }
-  }
+// 收集候选会话（版本无关：按 session.v<N> 挑最新那份，实现与理由见 scripts/lib/session-files.mjs）
+const records = findSessionRecords(sessionsRoot, since)
+if (records.length === 0) {
+  // 0 份**不是通过**：这份闸门曾经硬编码 v3、在 v4 宿主上扫到 0 份却打印 ✅，绿灯空转了一整代。
+  console.log(`verify-sessions: ${sessionsRoot} 下自 ${new Date(since).toISOString()} 没有读到任何会话 ⇒ 闸门**没有核对任何东西**（不是通过）。`)
+  console.log('  先确认宿主写的是哪种文件名（session.v<N>.jsonl[.zstd]），或用 --dir 指一个确有会话的 store、--since 放宽时间窗。')
+  process.exit(2)
 }
 
 // 先解一遍，找出"修复水位线"：最后一份含 deliverables/presented 的会话写入时间
