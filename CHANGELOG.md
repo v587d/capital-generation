@@ -7,6 +7,74 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [2.5.0] - 2026-09-30
+
+本版**跟随 DSH `0.2.0-rc.2`**（Windows 桌面端携带的就是这一版），补齐自选股每行的操作，并把
+跨平台（Windows + Linux）的第一层验收做实。**对停在 0.1.7 的用户是破坏性的**：本版只在
+`0.2.0-rc.2` 上验过，请先升宿主。工具入参、数据能力、图表呈现、会话日志格式与设置卡片**都没变**。
+
+### Added
+
+- **每行「更多」菜单**（置顶 / 移除）改用官方 `Menu` primitive 且 `portal: true`。三种坏法都**不抛错、
+  只用起来不对**：就地渲染会被清单的 `overflow` 容器裁掉（最后几行点开什么都看不见）；Escape 不在
+  capture 阶段截住，按 Esc 关掉的是**整个面板**（官方 Modal 的层栈监听只看 `defaultPrevented`）；
+  `portal` 层级掉到模态之下，菜单画在遮罩里——看得见影子、点不着。这三条钉成接口账本 **L23** 与
+  `check-dsh` 探针（`z-index` 做数值比较，不只断"存在"）。
+- **置顶**：持久化里只多一格**可选**的 `pinned_at`。写成必填会让磁盘上已有的记录在加载边界被判
+  `invalid-record`（读一次就 `store_unavailable`）；顺序由 `rowsOf` **读**出来而不写回键序（官方单文件
+  后端是 Map，`put` 已有键保留原位置，靠删了重插改顺序会把整份 JSON 重写 N 遍）。因此**无需迁移、
+  也不抬 domain version**。
+
+### Fixed
+
+- **⛔ Windows 上那道 shell 闸门是死代码**：`bashGuardReason()` 原先只认 `'bash'`，而 preset 里 shell
+  是**平台成对**挂载的两行（Linux `bash` / Windows `pwsh`）⇒ 在 Windows 上「只对被委派的子会话开放」与
+  「拦掉必然批不了的沙箱升级」两层判定**一次都不触发，且不报错**。根侧 deny 本来就点名了 `pwsh`，
+  所以主 Agent 那条还活着，漏的是子会话侧。现在 shell 名字只有一份定义（`SHELL_TOOL_NAMES`），deny 与
+  guard 同源；两条拒绝文案改成「shell 工具（bash / pwsh）」——两端都会读到这两句，只写一个名字会让
+  另一端的模型以为另一个工具没被管。回归按"逐入口对等断言"补：每条判定对两个名字各跑一遍，另有一条
+  断言「preset 挂的每一行 shell，deny 与 guard 都必须认」。
+- **打包闸门失败时说不清原因**：Windows 上 `npm` 是 `.cmd` 垫片，`spawnSync('npm')` → ENOENT 而
+  `stderr` 是空的，原断言只插值 `stderr`，于是失败被报成一句没有原因的话（`'npm.cmd'` 则是 EINVAL，
+  `shell: true` 配 args 是 DEP0190 弃用形态）。改成用当前进程的 node 直接跑 `npm-cli.js` 与 dsh 的
+  `lib/bin.js`，定位逻辑只在 `scripts/lib/run-tool.mjs` 一份（npm 的两种真实布局都覆盖：官方安装包住在
+  node 旁边，发行版把 `/usr/bin/npm` 链到 `/usr/lib/node_modules`），并把 `result.error` 写进断言。
+- **persona 字段名核对在 Windows 上从来没生效**：`.split(':')` 拆 PATH 会把
+  `C:\Program Files;C:\Windows` 拆成 `['C','\Program Files;C','\Windows']` ⇒ 永远找不到类型声明 ⇒
+  静默降级成"跳过核对"。改用 `node:path` 的 `delimiter`，连平台分支都不必写。
+- **`URL.pathname` 被当文件路径用**：Windows 上它是 `/D:/…`（多一个前导斜杠），拿去读文件全落空，
+  2 条用例红；对齐仓库里其余用例的 `fileURLToPath`。
+
+### Changed / 0.2.0-rc.2 的验证方式
+
+- 抬基线前先在**临时目录**装一份同号 dsh，用 `DSH_PACKAGE_DIR` 指着它跑，不碰本机全局安装：
+  `check:dsh` **23 条全部通过**（并反证过给错路径会成片"读不到"，不是静默回落）；`smoke:boot` 用它
+  **真起了一个进程**——预设 `broken=null`，`persona` / 两条 subagent 行 / `capital-generation` 四行
+  `state=2`，三颗客户端 bundle 都在，`/capital-watchlist/list` 围栏匿名 401、带 cookie 200，重复声明
+  预设的反向对照命中。`dsh-persona` 的类型里 `prefix` / `suffix` / `complete` /
+  `includeRuntimeContext` 都还在。
+- devDep `@deepseek-ai/dsh-system-prompt` 跟到 `^0.2.0-rc.2`：semver 对 `0.x` 的规则让 `^0.1.2-rc.1`
+  **跨不到** `0.2.0`，留着旧声明等于在一个用户机器上不存在的 system prompt 版本上做类型解析。
+  `@deepseek-ai/cordis` 顺带解析到 `4.0.4`，与桌面端携带的同字。
+- **观察到的 0.2.0 行为差**（只此一条）：boot 探针的 stdout 比"已监听"晚到，`smoke-boot` 因此先打一句
+  「（探针未打印）」才收到探针行。判据读的是累积 output，结论不受影响。
+- **跨平台验收口径**（写在这里，因为它决定以后怎么算"过"）：两端测试**条数必须相同**、不许用平台分支
+  跳断言；平台分支只允许出现在 shell 可执行名、子进程启动方式与 PATH 分隔符三处。检出层换行符归一
+  （`.gitattributes` + renormalize）与静态闸门排在下一批，因为它们会改到以 CRLF 入库的 blob、需要两端
+  各自重新检出。
+
+### 迁移
+
+**先把宿主升到 `0.2.0-rc.2`** 再装本版：
+
+```bash
+npm i -g @deepseek-ai/dsh@0.2.0-rc.2
+```
+
+Windows 桌面端携带的就是这一版，**但本版的桌面端装配路径还在验收中**（清单见
+`docs/design/windows-desktop-acceptance.md`，那一层此前零覆盖）——这里不声称"Windows 产品形态已跑通"。
+插件侧无工具改名、无入参变化、无新增密钥；自选股旧记录不用动（`pinned_at` 缺省即未置顶）。
+
 ## [2.4.1] - 2026-09-29
 
 **新增用户自选股**（宿主级清单 + 输入框 `/` 菜单弹窗），并补上两处会让主 Agent「提前下结论」与

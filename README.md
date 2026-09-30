@@ -9,12 +9,12 @@
 <p align="center">
   <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DeepSeek_Harness-plugin-blue" alt="DSH Plugin"></a>
   <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DeepSeek_Harness-web-orange" alt="DSH Web"></a>
-  <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DSH%20Baseline-0.1.7--rc.2-blue" alt="DSH@0.1.7-rc.2"></a>
+  <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DSH%20Baseline-0.2.0--rc.2-blue" alt="DSH@0.2.0-rc.2"></a>
 </p>
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.4.1-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.5.0-9cf" alt="Version"></a>
 </p>
 
 > [!IMPORTANT]
@@ -23,8 +23,9 @@
 > 愿大家的财富数字就像"text generation"一样，不断增长，永不停止。
 
 > [!NOTE]
-> 先安装 [Deepseek Harness(DSH)](https://github.com/deepseek-ai/deepseek-harness) ，本项目自 2.4.0 起适配 DSH`@0.1.7-rc.2`。
-> **需要 DSH ≥ 0.1.7**：0.1.5 的 settings 与 preset 挂载面已被上游删除，装在旧版上会起不来。
+> 先安装 [Deepseek Harness(DSH)](https://github.com/deepseek-ai/deepseek-harness) ，本项目自 2.5.0 起适配 DSH`@0.2.0-rc.2`。
+> **需要 DSH ≥ 0.2.0-rc.2**：2.4.x 那一档是在 0.1.7 上验的，本版起基线抬到 0.2.0-rc.2——**Windows 桌面端携带的正是这一版**，
+> 装在桌面端里要用 `0.2.0-rc.2`（`npm i -g @deepseek-ai/dsh@0.2.0-rc.2`）。再往前，0.1.5 的 settings 与 preset 挂载面已被上游删除，装在旧版上会起不来。
 > 建议使用 **Deepseek/deepseek-flash**(High thinking) 搭配本项目， GPT / Claude 尚未充分测试，理论亦可。
 
 # 💬 Slogan
@@ -201,25 +202,25 @@ npm run verify:sessions  # 发布前复核真实会话日志可被冷加载（�
 
 ## 📝 Changelog
 
-### 2.4.1 — 2026-09-29
+### 2.5.0 — 2026-09-30
 
-- **新增用户自选股**（见上方「📌 自选股」）：输入 `/` 菜单里的 `自选股` 一行打开面板，
-  搜索（代码或中文名）/ 添加 / 删除 / 刷新报价。清单是**宿主级用户资产**，跨 workspace 通用，
-  默认播种四条主要沪深指数、上限 10 条；**不新增密钥**（复用同花顺那把），Agent 读不到也写不动。
-- **出网只由用户动作触发**：打开面板刷一次、点「刷新报价」、选中候选添加，此外**无轮询、无自动重试**，
-  同一时刻只允许一次刷新在途；搜索框三条事件闸（防抖 / 输入法合成期不发 / 同词不重发）。
-- **修复主 Agent 提前下结论**：写最终结论前必须先交一张「结算对账表」，判据只有一条——
-  子 Agent 的回传正文写得再像完成都**不算结算**，只有生命周期结算通知能把它翻成 ✓。
-  同时把 collector 的 `dataset_ready` 明确成进度信号（到一份就转给 `data_junior` 做 profile）。
-- **修复行情快照可被无限期复用**：`quote` / `index_quote` / `fund_quote` / `valuation` / `auction` /
-  腾讯行情 / 东财板块这类时效能力加了 60 秒复用上限，超龄就重新取数；非时效能力不受影响。
-- **修复浅色模式与下拉材质**：面板颜色全部改走宿主角色 token（此前按深色写死，浅色下控件毫无反差）；
-  搜索备选下拉补上半透明菜单材质**必须配对**的那层模糊——此前底下的清单会直接透视上来。
-- **`/` 菜单行去掉尾部英文别名**：行面只留 `添加 / 查看 / 删除自选股`，`/watchlist`↵ 照开
-  （typed 路径按注册名直查，与过滤面无关）。
+- **基线抬到 DSH `0.2.0-rc.2`**（Windows 桌面端携带的就是这一版）。抬之前先在临时目录装一份同号跑
+  预演：接口账本 23 条全部通过，并用它真起了一次 dsh 进程（预设不 broken、四行 active、三颗客户端
+  bundle 到位、自选股路由的认证围栏正确）。详见 [CHANGELOG.md](CHANGELOG.md)。
+- **自选股每行加「更多」菜单**（置顶 / 移除），用官方 `Menu` primitive 且 `portal: true`：清单区是滚动
+  容器，就地画的浮层会被裁掉（最后几行点开什么都看不见），Escape 也得在 capture 阶段被菜单吃掉，
+  否则按 Esc 关掉的是整个面板。
+- **置顶不重排磁盘**：只多一格可选的 `pinned_at`，顺序在读取时算——写成必填会让已有记录被判
+  `invalid-record`，靠删了重插改顺序会把整份清单重写 N 遍。**旧记录无需迁移**。
+- **修复 Windows 上一道静默失效的闸门**：shell 工具在两端名字不同（`bash` / `pwsh`），闸门原先只认
+  `bash`，在 Windows 上两层判定一次都不触发且不报错。现在两端共用一份名字定义，拒绝文案也同时点名
+  两个工具。
+- **修复"失败说不清原因"这一族**：打包闸门经 `.cmd` 垫片启动会拿到空 stderr；persona 字段名核对用
+  `:` 拆 PATH，在 Windows 上永远找不到声明文件于是静默跳过。现在子进程一律绕开 shell、PATH 用平台
+  分隔符，定位逻辑只有一份实现。
 
-从 2.4.0 升级**无迁移**：无工具改名、无入参变化、无新增密钥；只是多了一颗宿主平面行，
-装完重启 DSH web profile 生效。**更早版本（2.4.0 及以前）的变更历史见
+从 2.4.x 升级**需要先把宿主升到 `0.2.0-rc.2`**（`npm i -g @deepseek-ai/dsh@0.2.0-rc.2`），插件侧无工具
+改名、无入参变化、无新增密钥。**更早版本（2.4.1 及以前）的变更历史见
 [CHANGELOG.md](CHANGELOG.md)**，GitHub Release 说明也从那里复制。
 
 # 🤝 贡献

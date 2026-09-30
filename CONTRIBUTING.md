@@ -23,8 +23,9 @@
 
 ## 开发环境准备
 
-1. 安装 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness)（当前适配 `@0.1.7-rc.2`，
-   需要 DSH ≥ 0.1.7：0.1.5 的 settings 注册面与 preset 挂载方式已被上游删除）
+1. 安装 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness)（当前适配 `@0.2.0-rc.2`，
+   需要 DSH ≥ 0.2.0-rc.2：2.5.0 起基线抬到这里，与 Windows 桌面端携带的那一套同源；再往前，0.1.5 的 settings
+   注册面与 preset 挂载方式已被上游删除）
 2. 克隆本仓库：
    ```bash
    git clone https://github.com/v587d/capital-generation.git
