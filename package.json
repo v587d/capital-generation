@@ -59,7 +59,7 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-system-prompt": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "^0.2.0-rc.2",
     "@deepseek-ai/schemastery": "^3.18.4",
     "esbuild": "^0.28.2",
     "js-yaml": "^5.4.1",
