@@ -9,6 +9,7 @@
 <p align="center">
   <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DeepSeek_Harness-plugin-blue" alt="DSH Plugin"></a>
   <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DeepSeek_Harness-web-orange" alt="DSH Web"></a>
+  <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DeepSeek_Harness-desktop-brightgreen" alt="DSH Desktop · 已实机验证"></a>
   <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DSH%20Baseline-0.2.0--rc.2-blue" alt="DSH@0.2.0-rc.2"></a>
 </p>
 <p align="center">
@@ -24,8 +25,12 @@
 
 > [!NOTE]
 > 先安装 [Deepseek Harness(DSH)](https://github.com/deepseek-ai/deepseek-harness) ，本项目自 2.5.0 起适配 DSH`@0.2.0-rc.2`。
-> **需要 DSH ≥ 0.2.0-rc.2**：2.4.x 那一档是在 0.1.7 上验的，本版起基线抬到 0.2.0-rc.2——**Windows 桌面端携带的正是这一版**，
-> 装在桌面端里要用 `0.2.0-rc.2`（`npm i -g @deepseek-ai/dsh@0.2.0-rc.2`）。再往前，0.1.5 的 settings 与 preset 挂载面已被上游删除，装在旧版上会起不来。
+> **两种宿主形态都实机验过**（上面 web / desktop 那两枚徽章）：`0.2.0-rc.2` 的 **Web profile**（Linux）与 **Windows 桌面端**
+> （DeepSeek Harness Desktop）。2.5.1 在桌面端跑通了插件页四行装配、自选股增删与报价刷新、以及子 Agent 的
+> 同花顺取数；这两项此前分别只在 Web 形态验过，桌面端各炸过一次（见 CHANGELOG 2.5.1）。
+> **需要 DSH ≥ 0.2.0-rc.2**：2.4.x 那一档是在 0.1.7 上验的，本版起基线抬到这里。再往前，0.1.5 的 settings 与
+> preset 挂载面已被上游删除，装在旧版上会起不来。**桌面端自带宿主**，携带的就是 `0.2.0-rc.2`：不要拿
+> `npm i -g @deepseek-ai/dsh@…` 去换它的版本——那条只作用于 CLI / Web 的全局安装，对桌面端无效。
 > 建议使用 **Deepseek/deepseek-flash**(High thinking) 搭配本项目， GPT / Claude 尚未充分测试，理论亦可。
 
 # 💬 Slogan
@@ -38,7 +43,7 @@ Next-Gen AI-Driven Capital Generation.
 
 - [💬 Slogan](#-slogan)
   - [📄 样例](#-样例)
-  - [📦 安装到 DSH Web Profile](#-安装到-dsh-web-profile)
+  - [📦 安装到 DSH](#-安装到-dsh)
 - [🔍 What](#-what)
   - [🧭 多 Agent 编排（截图）](#-多-agent-编排截图)
   - [📊 data_collector 能力总表](#-data_collector-能力总表)
@@ -50,15 +55,27 @@ Next-Gen AI-Driven Capital Generation.
 - [🤝 贡献](#-贡献)
 - [📜 MIT](#-mit)
 
-## 📦 安装到 DSH Web Profile
+## 📦 安装到 DSH
 
-从 GitHub 安装插件（构建产物 `lib/` 已随仓库提交，**无需**克隆本项目或自行构建）：
+构建产物 `lib/` 已随仓库提交，**无需**克隆本项目或自行构建。
+
+**Web / CLI profile**（Linux、macOS）：
 ```bash
 dsh plugin --profile web add github:v587d/capital-generation
 ```
-安装后，重启 Web profile 使装配生效。密钥填在 **「插件」页**（0.1.7 起第三方插件的可编辑面就在这里，
-不在「设置」页）：已安装列表点开 `@v587d/capital-generation` → 「包含的组件」里的 `capital-config`
-那一行 → 行详情页的配置段：
+装完重启该 profile 使装配生效。
+
+**Windows 桌面端（DeepSeek Harness Desktop）**：在「添加插件」里填 `github:v587d/capital-generation`
+（也可以直接指一个本地目录）。三点与 Web 形态不同，都是踩过的：
+
+- 桌面端的 `dsh plugin` 是一颗 **pnpm** 包装器 ⇒ 本机要有 `pnpm` 与 `git`，缺了装不上（报错点名 spec 或仓库）。
+- 不带 `#ref` 时解析的是**默认分支当时那个 commit**，随后钉进 profile 的 lock 里 ⇒ **不会自动升级**：要拿新版本
+  就**卸载再重装**（或把地址写成 `github:v587d/capital-generation#v2.5.1` 钉某一版）。装没装上以插件详情页
+  显示的版本号为准——本项目每次发版都会同步抬那个号。
+- 桌面端**自带宿主**（这一版携带 `0.2.0-rc.2`），不用也不能用 `npm i -g` 去换它。
+
+密钥与开关填在 **「插件」页**（0.1.7 起第三方插件的可编辑面就在这里，不在「设置」页），两种形态同一条路径：
+已安装列表点开 `@v587d/capital-generation` → 「包含的组件」里的 `capital-config` 那一行 → 行详情页的配置段：
 
 | ① 「插件」页 → 已安装 | ② 该 bundle 的 `capital-config` 行 | ③ 卡片：四个密钥 + 本地回退开关 |
 | :---: | :---: | :---: |

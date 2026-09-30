@@ -28,9 +28,17 @@
   这仍是 §9.7 那个族：同一能力两个入口，回归只喂了接好的那一个。现在
   `test/bash-guard.test.mjs` 每条判定对 `bash` / `pwsh` 各跑一遍，并另有一条断言
   「preset 挂的每一行 shell，deny 与 guard 都必须认」。
-- **未实测的一半**：上面"只拦写、不拦读、不拦网"的沙箱形状是在 Linux 侧的 `bash` 上量出来的；
-  `pwsh` 侧（桌面端携带的 `@deepseek-ai/dsh-tool-pwsh`）没有本机实测记录，验收项见
-  「桌面端实机验收清单」。别把 bash 的实测结论当成 pwsh 的承诺。
+- **pwsh 侧只量到一半**（2026-09-30 桌面端记录）：一份 Capital 会话日志里有 **21 次 `pwsh` 调用，全部是读**
+  （读到 workspace 外的 `~/.dsh/.credentials.yaml`、`app.asar`、`%APPDATA%`）⇒ **「不拦读」在 pwsh 上已实测**；
+  「拦写」与「不拦网」两条仍无记录，别把 bash 的结论当 pwsh 的承诺。
+- **⚠️ 未决（同一份日志暴露的另一件事，比沙箱形状更要紧）**：那 21 次 `pwsh` 是 **Capital 根会话自己**跑的
+  （同一文件 `agent-preset/selected = capital-generation`；首行 `session` 记录写的 `standard` 与之矛盾，以
+  selected 为准——system message 就是我们的人设）。按上面 ① 根侧 deny 应当让主 Agent 看不到 shell。两种解释
+  都还成立，本机无法区分：① deny 在桌面端没生效——`restrictRootAgentTools` 逐名 try/catch 静默跳过、
+  outcome 一律记 `restricted`，所以没生效也不会留 warn；② `isCapitalAgent` 在桌面端的根 agent 上判 false，
+  整批提前 return。Linux 侧 35 份 Capital 会话日志里没有任何 shell 调用，**那不等于 deny 生效**，只是没触发。
+  判据（下一步实测）：在桌面端 Capital 会话里问主 Agent「你手上有没有 pwsh / request_data」——看不见才是
+  收住了；看得见而调用被拒，说明 deny 没落地，只是被工具层那道 `delegatedSession` 兜住。
 - **写边界也无法单独收窄**：`store.writeContext()` 用调用方 session 的 policy 且要求
   `workspace-write`，而 `describe_dataset` 会用 data_junior 的 session 写 `profile.json`——钉成
   read-only 直接打断它：bash 与 Dataset 管线共用同一把尺子（session policy）。
