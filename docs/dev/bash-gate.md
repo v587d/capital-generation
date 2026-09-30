@@ -31,23 +31,27 @@
 - **pwsh 侧只量到一半**（2026-09-30 桌面端记录）：一份 Capital 会话日志里有 **21 次 `pwsh` 调用，全部是读**
   （读到 workspace 外的 `~/.dsh/.credentials.yaml`、`app.asar`、`%APPDATA%`）⇒ **「不拦读」在 pwsh 上已实测**；
   「拦写」与「不拦网」两条仍无记录，别把 bash 的结论当 pwsh 的承诺。
-- **⛔ 根侧收敛在桌面端整条没走（2026-09-30 硬证据，不再是推断）**：同一份 `session.v4.jsonl` 里
-  `request/header` 带的是**真发给模型的工具表**，桌面端 Capital **根**会话那一份有 40 颗，其中
-  `pwsh`、`render_chart`、`anysearch_search` 等**本该被 deny 的 17 颗全在**——`ROOT_AGENT_DENIED_TOOLS`
-  一个都没落地。（`request_data` / `dc_status` 也在表里，但那**是设计如此**：Dataset 系列从来不在 deny
-  名单里，靠工具层 `delegatedSession` 在调用那一刻拒，别把它当成 deny 失效的证据去改名单。）
-  所以这不是"shell 漏了"而是"整条 `registerRootToolPolicy` 没生效"。**2026-09-30 第二轮取证把它
-  再往前推了一步，而且推翻了"没生效"的三种猜测里的两种**：新构建里 `dc_status` 的现场记录显示
-  `preset_id = capital-generation`、`outcome = restricted`、**17 颗名字 `restrict()` 都没抛错**
-  （`web_search` / `web_fetch` / `bash` 三颗抛错＝那个 scope 里压根没有这些名字，Windows 上没有
-  `bash` 那行，符合预期）——**可同一台机器真发给模型的工具表里，那 17 颗一颗不少地全在**。
-  结论收窄成一句：**监听触发了、预设判对了、`restrict()` 调用成功了，可见面却纹丝不动**。
-- **⛔ 因此 `tools.restrict()` 不是本仓可依赖的收敛手段**（在能重新取证之前都不要加回它然后宣称收住了）。
-  上游对它的语义写得很清楚（`dsh-tools`：*restriction 只过滤 scope **继承**来的工具，**从不过滤本层自己
-  注册的***；而 `view()` 会把 own 层的工具无条件放回可见面），且 `restrict(filter)` **没有 scope 参数**、
-  靠 `scopeOf(this.ctx)` 决定写进哪一层——"通过 `agent.ctx.tools` 拿到的实例到底绑的是哪一层"从外部
-  看不出来。对比之下 `tools.guard()` 是按 `exec.agent` 取链路的，**这才是有正确 per-agent 语义的那个**
-  （`bash-guard.ts` 用它，理由就写在这一节上面）。
+- **⛔ 根侧收敛在桌面端整条没走，而 Linux / Web 上是生效的（两端对账，2026-09-30）**：同一段
+  `request/header.tools` 与同一份探针记录，两端结果相反——
+  探针都报 `preset_id = capital-generation`、`outcome = restricted`、17 颗名字 `restrict()` 没抛错
+  （`web_search` / `web_fetch` 两端都抛错＝那个 scope 里没有这些名字；`bash` / `pwsh` 则**恰好成对**：
+  Linux 拒 `pwsh`、桌面端拒 `bash`，说明逐名 try/catch 的平台判定是对的）；
+  而**真发给模型的工具表**：Linux 那 17 颗 **0 颗可见**，桌面端那 17 颗 **一颗不少全在**（并且真的执行了
+  21 次 `pwsh`）。结论收窄成一句：**`restrict()` 在桌面端不抛错却没写进这个根 Agent 的链路层**。
+  `restrict(filter)` 没有 scope 参数、靠 `scopeOf(this.ctx)` 决定落点，所以"通过 `agent.ctx.tools`
+  拿到的实例绑在哪一层"在桌面端（Electron 打包的 `dsh-desktop-host`，同日 13:16:56 那边还抛过
+  `INACTIVE_EFFECT`）与 CLI/Web 不同。**这是宿主产品形态差异，不是 restrict 这个 API 天生不能用。**
+- **因此桌面端的根侧收敛目前是"看着有、实际没有"**：主 Agent 能直接跑 shell（读整机 + 写 workspace）、
+  能自己 `render_chart`（绕过可视化 gate）、能直接检索（绕过 `web_retriever`）；**只有 Dataset 那一侧
+  还兜得住**，因为它的拒绝发生在工具层 `delegatedSession`（调用期），不依赖 restrict 落没落对层。
+  下一步二选一，做之前**不许在桌面端声称"已收住"**：① 换成 `tools.guard()` 表达根侧禁令（guard 按
+  `exec.agent` 取链路，与实例绑哪层无关，`bash-guard.ts` 用的就是它）；② 找到把限制写进正确层的
+  声明式办法（preset 行侧的 `toolFilter`）。
+- **同族的一条本仓自己的坑，顺手修了**：`scripts/verify-sessions.mjs` 把会话文件名硬编码成
+  `session.v3.jsonl.zstd`，而 0.2.0-rc.2 写的是 v4 ⇒ 本机 431 份会话它一份都没读，却打印
+  "检查 0 份会话 ✅"。现在挑版本改为按 `session.v<N>` 取最新那份（`scripts/lib/session-files.mjs`
+  + 回归 `test/session-files.test.mjs`），且**扫到 0 份就 exit 2 并明说"闸门没有核对任何东西"**——
+  0 份从来不等于通过。
 - **写边界也无法单独收窄**：`store.writeContext()` 用调用方 session 的 policy 且要求
   `workspace-write`，而 `describe_dataset` 会用 data_junior 的 session 写 `profile.json`——钉成
   read-only 直接打断它：bash 与 Dataset 管线共用同一把尺子（session policy）。
