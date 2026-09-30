@@ -57,7 +57,10 @@
   （出 realm 会进程级冲突）；`compaction` / `toolResultPruner` 同在 `compaction` 组 realm 内
   （pruner 是该组 id 为 `tool-result-pruner` 的**子行**）。
 - `toolFilter.allow` / `deny` 只写**真实注册**的全局工具名（写错的表现是"创建子 Agent 失败"）。
-  宿主 `web_search` / `web_fetch` 不由本插件注册，**只准在 `ROOT_AGENT_DENIED_TOOLS` 层 deny**。
+  宿主自己挂的 `web_search` / `web_fetch` 因此**永远不许进 `toolFilter`**；它们现在也**不在
+  `ROOT_AGENT_DENIED_TOOLS` 里**——2026-09-30 双端实测这两个名字在根作用域里并不存在，deny 只会
+  抛错被跳过，对它们目前只剩 persona 文案这一层。**宿主若把它们挂出来，加回
+  `ROOT_AGENT_DENIED_TOOLS`（逐名 restrict 能容忍"没这个名字"），不要加进 `toolFilter`。**
 - **四组结构件，删任一处该闸门就退回"persona 软建议"**：① 可视化 gate（§6.1 三件套 + §6.3 两处
   联动 → `chart-presentation.md` / `chart-delivery-events.md`）；② bash 闸门（§1.6 两结构件 +
   shell 槽位 → `bash-gate.md`）；③ 出网只有一个入口：`RETRIEVAL_DENIED_TOOLS`

@@ -47,9 +47,11 @@ test('RETRIEVAL_DENIED_TOOLS：十三个出网工具全部从根 Agent 拿掉（
   for (const name of RETRIEVAL_DENIED_TOOLS) {
     assert.ok(ROOT_AGENT_DENIED_TOOLS.includes(name), `主 Agent 不得看到出网工具 ${name}`)
   }
-  // 宿主的两个检索工具只能在这一层 deny（不由本插件注册 → preset 的 deny 里写它们会炸 child 创建）。
+  // 宿主的 web_search / web_fetch：2026-09-30 双端实测（Linux 根会话 22 颗 / 桌面端 40 颗的工具表）
+  // 里都没有这两个名字，restrict() 只会抛错被跳过 ⇒ 已从名单清掉，免得每次现场记录都固定多两条
+  // `failed`、把"真有名字 deny 不动"埋掉。**这不是"永远不该 deny"**：宿主把它们挂出来时就该加回。
   for (const name of ['web_search', 'web_fetch']) {
-    assert.ok(ROOT_AGENT_DENIED_TOOLS.includes(name), `主 Agent 不得看到宿主的 ${name}`)
+    assert.ok(!ROOT_AGENT_DENIED_TOOLS.includes(name), `${name} 在当前宿主根作用域里不存在，不该留在名单里`)
   }
   // `ocr` 是**刻意的例外**：主 Agent 要能解析用户放在工作目录的本地文档，名字级 deny 做不到
   // "只关外部取数"，所以它不进名单，改由下面的调用级 guard 关掉 `url` 形态。

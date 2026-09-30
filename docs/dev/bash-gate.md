@@ -34,7 +34,7 @@
 - **⛔ 根侧收敛在桌面端整条没走，而 Linux / Web 上是生效的（两端对账，2026-09-30）**：同一段
   `request/header.tools` 与同一份探针记录，两端结果相反——
   探针都报 `preset_id = capital-generation`、`outcome = restricted`、17 颗名字 `restrict()` 没抛错
-  （`web_search` / `web_fetch` 两端都抛错＝那个 scope 里没有这些名字；`bash` / `pwsh` 则**恰好成对**：
+  （`web_search` / `web_fetch` 两端都抛错＝那个 scope 里压根没有这两个名字，**已从名单清掉**，见 `preset-persona.md` §8.4；`bash` / `pwsh` 则**恰好成对**：
   Linux 拒 `pwsh`、桌面端拒 `bash`，说明逐名 try/catch 的平台判定是对的）；
   而**真发给模型的工具表**：Linux 那 17 颗 **0 颗可见**，桌面端那 17 颗 **一颗不少全在**（并且真的执行了
   21 次 `pwsh`）。结论收窄成一句：**`restrict()` 在桌面端不抛错却没写进这个根 Agent 的链路层**。
@@ -44,9 +44,11 @@
 - **因此桌面端的根侧收敛目前是"看着有、实际没有"**：主 Agent 能直接跑 shell（读整机 + 写 workspace）、
   能自己 `render_chart`（绕过可视化 gate）、能直接检索（绕过 `web_retriever`）；**只有 Dataset 那一侧
   还兜得住**，因为它的拒绝发生在工具层 `delegatedSession`（调用期），不依赖 restrict 落没落对层。
-  下一步二选一，做之前**不许在桌面端声称"已收住"**：① 换成 `tools.guard()` 表达根侧禁令（guard 按
-  `exec.agent` 取链路，与实例绑哪层无关，`bash-guard.ts` 用的就是它）；② 找到把限制写进正确层的
-  声明式办法（preset 行侧的 `toolFilter`）。
+  **处理决定（2026-09-30）**：这条按**宿主产品形态差异**对待，本仓**不写平台特判**（`if 桌面端`
+  那种分支只会把宿主的坑变成我们的隐性契约），先等 DSH 侧；在此之前**不许在桌面端声称"已收住"**，
+  README 的 desktop 徽章也只背书"装得上、四行运行、取数与自选股可用"。真要在我们这侧收口，方向是
+  换成 `tools.guard()` 表达根侧禁令（guard 按 `exec.agent` 取链路，与实例绑哪层无关，
+  `bash-guard.ts` 用的就是它）——**这是备选，不是待办**。
 - **同族的一条本仓自己的坑，顺手修了**：`scripts/verify-sessions.mjs` 把会话文件名硬编码成
   `session.v3.jsonl.zstd`，而 0.2.0-rc.2 写的是 v4 ⇒ 本机 431 份会话它一份都没读，却打印
   "检查 0 份会话 ✅"。现在挑版本改为按 `session.v<N>` 取最新那份（`scripts/lib/session-files.mjs`

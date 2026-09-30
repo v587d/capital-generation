@@ -51,7 +51,7 @@ export declare function rootOcrGuardReason(exec: GuardedExecution | undefined): 
  * `bash-guard.ts` 的子会话 guard 都从这里取名字，不再各写一份。
  */
 export declare const SHELL_TOOL_NAMES: readonly ["bash", "pwsh"];
-export declare const ROOT_AGENT_DENIED_TOOLS: readonly ["render_chart", "subagent_visualization_specialist", "prepare_chart_source", "anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "sina_reports", "ths_eps_forecast", "web_search", "web_fetch", "bash", "pwsh"];
+export declare const ROOT_AGENT_DENIED_TOOLS: readonly ["render_chart", "subagent_visualization_specialist", "prepare_chart_source", "anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "sina_reports", "ths_eps_forecast", "bash", "pwsh"];
 /** 本 preset 的 id（`composedPreset` 的返回值）。 */
 export declare const CAPITAL_PRESET_ID = "capital-generation";
 interface ToolRestriction {
