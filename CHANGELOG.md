@@ -7,6 +7,38 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [2.5.1] - 2026-09-30
+
+桌面端（Windows 携带的 DSH `0.2.0-rc.2`）实机跑出来的**两处装配失效**，都只在真实宿主里发作：
+一条是因为测试的假 ctx 认证了**错的 cordis 规则**，一条是因为假凭据服务永远"立刻就有值"。
+工具入参、数据能力契约、设置卡片、会话日志格式**都没变**；旧会话与磁盘上的已有数据**无需迁移**。
+唯一对外可见的收窄：`dc_status` 回执少了 `registration_error` 一格（没有任何消费方读它，它本身
+就是这次误导的来源，详见下面第二条）。
+
+### Fixed
+
+- **⛔ 插件页里 `capital-charts` 与 `capital-watchlist` 两行 异常**：`cannot get property "webServer" without inject`。
+  两行原先写的是"先 `ctx.get('webServer')` 探测，有值就直接调用"。`ctx.get` 能解析出值**不代表**属性访问
+  合法——cordis 的属性代理只认"本层声明过 `inject`"（`ReflectService` 找不到就抛这句）。桌面端的 webServer
+  在本行之前已就绪，于是走"直接调用"那条并当场炸；web profile 里它还没就绪，反而躲过了。两行现在一律
+  `ctx.inject(['webServer'], registerRoute)`：已就绪立刻挂路由，还没出现就一直等（本行保持激活），
+  两种装配顺序都对。回归把假 ctx 换成**会按真实规则抛错**的那一份（`test/cordis-fake.mjs`），并给
+  `capital-watchlist` 的 `apply()` 补上此前完全缺席的两条顺序断言——这条能漏过 699 个用例，缺的就是覆盖面。
+- **⛔ 同花顺 61 颗能力在桌面端整场进程静默缺席**：注册那颗 effect 原先以"装配期读到 `FUYAO_API_KEY`"为
+  准入门槛，读不到就 `return`——**不重试、不补注册**，于是能力目录只剩 8 颗。宿主凭据 provider 在
+  `[Service.init]` 里**先 yield 把服务发布出去、之后才 `await loadInitial()` 装载快照**（实测
+  `dsh-credentials-local/lib/index.js:441-446`），所以装配期那一次 `resolve()` 返回 `undefined`
+  **且不抛错**；桌面端启动忙，两轮都输了这个竞态，Linux 只是每次都赢。同一条链路上走**调用期**解析的
+  自选股在同一进程里照样取到了 fuyao 行情——这个反差正是它没被立刻发现的原因。现在注册只看结构，
+  key 判定留在每次取数（`createFuyaoRestSources` 本来就带 `resolveApiKey`）：缺 key 的表现从"能力凭空消失、
+  错误只说未注册的能力"换成"取数那一刻点名 `FUYAO_API_KEY` 失败"，凭据装载完同一进程自愈，README
+  那句「卡片里粘贴保存即可，**无需重启**」到这一步才真的成立。**顺带否掉一个直觉修法**：给 `inject`
+  加 `credentials` 治不了这个病——`inject` 等的是服务发布，而服务那一刻已经发布了，缺的是文件内容。
+- **`dc_status` 不再自相矛盾**：同一份回执里能同时出现 `api_key.present=true / source=file` 与
+  `registration_error=未配置`，把人直接引向"是不是我 key 配错了"（上一轮排查就是这么被带偏的）。
+  注册与凭据时刻解耦之后这条字段没有意义，连同两处给模型看的文案一起收掉
+  （`capability_catalog_empty` 错误正文、`capital-data-protocol` 的错误处置表现在都说明**缺凭据不会让目录变空**）。
+
 ## [2.5.0] - 2026-09-30
 
 本版**跟随 DSH `0.2.0-rc.2`**（Windows 桌面端携带的就是这一版），补齐自选股每行的操作，并把

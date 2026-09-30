@@ -9,7 +9,7 @@
 
 import { htmlToMarkdown, stripInvisibleText } from './html-markdown.js'
 
-export const LOCAL_FETCH_CLIENT_VERSION = '2.5.0'
+export const LOCAL_FETCH_CLIENT_VERSION = '2.5.1'
 export const LOCAL_FETCH_MAX_URL_LENGTH = 2048
 
 export type LocalFetchErrorCode =

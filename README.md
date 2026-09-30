@@ -14,7 +14,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.5.0-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.5.1-9cf" alt="Version"></a>
 </p>
 
 > [!IMPORTANT]
@@ -202,26 +202,25 @@ npm run verify:sessions  # 发布前复核真实会话日志可被冷加载（�
 
 ## 📝 Changelog
 
-### 2.5.0 — 2026-09-30
+### 2.5.1 — 2026-09-30
 
-- **基线抬到 DSH `0.2.0-rc.2`**（Windows 桌面端携带的就是这一版）。抬之前先在临时目录装一份同号跑
-  预演：接口账本 23 条全部通过，并用它真起了一次 dsh 进程（预设不 broken、四行 active、三颗客户端
-  bundle 到位、自选股路由的认证围栏正确）。详见 [CHANGELOG.md](CHANGELOG.md)。
-- **自选股每行加「更多」菜单**（置顶 / 移除），用官方 `Menu` primitive 且 `portal: true`：清单区是滚动
-  容器，就地画的浮层会被裁掉（最后几行点开什么都看不见），Escape 也得在 capture 阶段被菜单吃掉，
-  否则按 Esc 关掉的是整个面板。
-- **置顶不重排磁盘**：只多一格可选的 `pinned_at`，顺序在读取时算——写成必填会让已有记录被判
-  `invalid-record`，靠删了重插改顺序会把整份清单重写 N 遍。**旧记录无需迁移**。
-- **修复 Windows 上一道静默失效的闸门**：shell 工具在两端名字不同（`bash` / `pwsh`），闸门原先只认
-  `bash`，在 Windows 上两层判定一次都不触发且不报错。现在两端共用一份名字定义，拒绝文案也同时点名
-  两个工具。
-- **修复"失败说不清原因"这一族**：打包闸门经 `.cmd` 垫片启动会拿到空 stderr；persona 字段名核对用
-  `:` 拆 PATH，在 Windows 上永远找不到声明文件于是静默跳过。现在子进程一律绕开 shell、PATH 用平台
-  分隔符，定位逻辑只有一份实现。
+两条都是 **Windows 桌面端实机跑出来的装配失效**，`npm test` 在此之前抓不到——一条因为测试的假 ctx
+认证了错的 cordis 规则，一条因为假凭据服务永远「立刻就有值」。详见 [CHANGELOG.md](CHANGELOG.md)。
 
-从 2.4.x 升级**需要先把宿主升到 `0.2.0-rc.2`**（`npm i -g @deepseek-ai/dsh@0.2.0-rc.2`），插件侧无工具
-改名、无入参变化、无新增密钥。**更早版本（2.4.1 及以前）的变更历史见
-[CHANGELOG.md](CHANGELOG.md)**，GitHub Release 说明也从那里复制。
+- **插件页两行 异常 修好**：`capital-charts` / `capital-watchlist` 原先「先探测 `webServer`、有值就直接
+  调用」，而 `ctx.get` 能解析出值**不代表**属性访问合法（cordis 的属性代理只认本层声明过 `inject`）。
+  桌面端 webServer 就绪得早，于是当场抛 `cannot get property "webServer" without inject`；web 形态里它
+  就绪得晚，反而躲过。现在一律走 `ctx.inject(['webServer'], …)`，两种装配顺序都对。
+- **同花顺 61 颗能力不再可能整场缺席**：注册原先押在「装配期读到 `FUYAO_API_KEY`」上，而宿主的凭据服务
+  是**先把服务挂出来、再去读凭据文件**——那一刻读到的就是「没有」，于是 61 颗能力整个进程静默消失且
+  永不重试。现在注册不看 key，key 留到每次取数现取：缺它时报错点名 `FUYAO_API_KEY`（不再只说「未注册的
+  能力」），凭据配好**同一进程就生效**，不用重启。
+- **`dc_status` 不再自相矛盾**：删掉 `registration_error` 一格。它此前会和 `api_key.present=true` 同时
+  出现在一份回执里，把人引向「是不是我 key 配错了」。
+
+从 2.5.0 升级**无需迁移**：工具入参、数据能力、设置卡片、会话日志格式都没变，宿主仍要求
+`0.2.0-rc.2`（不新增要求）。**更早版本的变更历史见 [CHANGELOG.md](CHANGELOG.md)**，GitHub Release
+说明也从这里对应段落复制。
 
 # 🤝 贡献
 可自行克隆本项目，按上方「本地开发、构建、测试」执行。
