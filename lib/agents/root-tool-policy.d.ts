@@ -42,6 +42,15 @@ export declare const OCR_TOOL_NAME = "ocr";
 export declare const OCR_ROOT_URL_DENIED: string;
 /** 单次调用的判定：根 Agent 用 `ocr` 提交外部 `url` 才拒绝，其余一律放行。 */
 export declare function rootOcrGuardReason(exec: GuardedExecution | undefined): string | undefined;
+/**
+ * shell 工具名：preset 里这两行是**平台成对**挂载的（`agent.patch.yml` 的 `tool-bash` /
+ * `tool-pwsh`，靠 `process.platform === 'win32'` 互斥 `disabled`），所以名字由平台决定。
+ *
+ * ⛔ 但**闸门必须认全集**：只认本平台那一个，另一端就是静默放行——同一个能力两个入口，
+ * 本地测试只覆盖了接好的那个（AGENTS.md §9.7 的第三种形状）。根侧 deny 与
+ * `bash-guard.ts` 的子会话 guard 都从这里取名字，不再各写一份。
+ */
+export declare const SHELL_TOOL_NAMES: readonly ["bash", "pwsh"];
 export declare const ROOT_AGENT_DENIED_TOOLS: readonly ["render_chart", "subagent_visualization_specialist", "prepare_chart_source", "anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "sina_reports", "ths_eps_forecast", "web_search", "web_fetch", "bash", "pwsh"];
 /** 本 preset 的 id（`composedPreset` 的返回值）。 */
 export declare const CAPITAL_PRESET_ID = "capital-generation";

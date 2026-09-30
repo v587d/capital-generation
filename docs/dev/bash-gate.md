@@ -21,9 +21,20 @@
   词汇表只覆盖文件效果）。`bashGuardReason()` **刻意不解析 `command`**——正则挡不住 `node -e` /
   `python3 -c`，而 node / python 正是引入 bash 的目的。禁区与出网纪律是 data_junior persona 的
   软约束（`# BASH DISCIPLINE`）。真要收紧：换掉 `ctx.shell`（容器 / 远端执行器）或做出网限制。
+- **⛔ 闸门认的是两个名字，不是一个**（2026-09-30 实测教训）：`bash-guard.ts` 原先只认 `bash`，
+  而 Windows 上模型调的是 `pwsh` ⇒ A/B 两层判定在 Windows 上**一次都不触发，且不报错**。根侧
+  deny 里本来就有 `pwsh`，所以主 Agent 那条还活着；漏的是子会话侧。现在 shell 名字只在
+  `SHELL_TOOL_NAMES`（`src/agents/root-tool-policy.ts`）定义一份，deny 与 guard 都从它取。
+  这仍是 §9.7 那个族：同一能力两个入口，回归只喂了接好的那一个。现在
+  `test/bash-guard.test.mjs` 每条判定对 `bash` / `pwsh` 各跑一遍，并另有一条断言
+  「preset 挂的每一行 shell，deny 与 guard 都必须认」。
+- **未实测的一半**：上面"只拦写、不拦读、不拦网"的沙箱形状是在 Linux 侧的 `bash` 上量出来的；
+  `pwsh` 侧（桌面端携带的 `@deepseek-ai/dsh-tool-pwsh`）没有本机实测记录，验收项见
+  「桌面端实机验收清单」。别把 bash 的实测结论当成 pwsh 的承诺。
 - **写边界也无法单独收窄**：`store.writeContext()` 用调用方 session 的 policy 且要求
   `workspace-write`，而 `describe_dataset` 会用 data_junior 的 session 写 `profile.json`——钉成
   read-only 直接打断它：bash 与 Dataset 管线共用同一把尺子（session policy）。
-- 回归：`test/bash-guard.test.mjs`（含「命令内容不参与判定」）、`test/root-tool-policy.test.mjs`
+- 回归：`test/bash-guard.test.mjs`（含「命令内容不参与判定」与两个名字的对等判定）、
+  `test/root-tool-policy.test.mjs`
   「bash/pwsh 必须点名」、`test/persona.test.mjs`「平台成对挂载」「纯计算兜底」、
   `test/apply-integration.test.mjs`。

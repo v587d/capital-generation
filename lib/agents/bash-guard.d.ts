@@ -1,5 +1,5 @@
 /**
- * data_junior 的 bash 调用闸门（两层，都是**可靠判定**，不看命令内容）。
+ * data_junior 的 shell 调用闸门（`bash` / `pwsh` 两个名字都认，两层，都是**可靠判定**，不看命令内容）。
  *
  * 背景与边界（设计理由全文在 preset/capital-generation/README.md）：
  *  - bash 不是计算器，是一台完整终端。本仓实测：沙箱**只拦写**（workspace + /tmp 之外
@@ -15,7 +15,7 @@
  *    （`workspace_not_writable`）。bash 与 Dataset 管线共用同一把尺子（session policy）。
  *
  * 两层规则：
- *  A 结构层：bash 只对**被委派**的子会话开放（镜像 src/tool-exec.ts 的 delegatedSession）——
+ *  A 结构层：shell 只对**被委派**的子会话开放（镜像 src/tool-exec.ts 的 delegatedSession）——
  *    即使哪天 ROOT_AGENT_DENIED_TOOLS 或 allow 过滤被改坏，执行层仍然拒绝根会话。
  *    docs/dev/bash-gate.md「工具可见性不是权限隔离」。
  *  B UX 层：委派子会话的审批策略由框架固定为 `never`（dsh-subagent 的
@@ -30,16 +30,14 @@
  * 监听改写。
  */
 import { type GuardedExecution, type PolicyContext } from './root-tool-policy.js';
-/** bash 工具名（`@deepseek-ai/dsh-tool-bash` 注册的全局名）。 */
-export declare const BASH_TOOL_NAME = "bash";
 /** 闸门看到的调用形状：guard 拿到的是解析后的 arguments，不是一个 shell 字符串。 */
 export type BashGuardExecution = GuardedExecution;
 /** A 结构层拒绝文案：模型可据此改走委派。 */
-export declare const BASH_DELEGATED_ONLY = "bash \u53EA\u5BF9\u88AB\u59D4\u6D3E\u7684\u6570\u636E\u5B50 Agent \u5F00\u653E\uFF0C\u5F53\u524D\u8C03\u7528\u65B9\u4E0D\u662F\u88AB\u59D4\u6D3E\u7684\u5B50\u4F1A\u8BDD\uFF1B\u6570\u636E\u4E0E\u7EDF\u8BA1\u8BF7\u7531\u4E3B Agent \u59D4\u6D3E data_collector / data_junior\u3002";
+export declare const SHELL_DELEGATED_ONLY: string;
 /** B UX 层拒绝文案：说清"这不是用户拒绝"，并给出正确路径。 */
-export declare const BASH_ESCALATION_UNREACHABLE: string;
+export declare const SHELL_ESCALATION_UNREACHABLE: string;
 /**
- * 单次 bash 调用的判定：返回拒绝理由，或 undefined 放行。
+ * 单次 shell 调用的判定：返回拒绝理由，或 undefined 放行。
  *
  * 判定顺序是"先身份、后能力"：身份不对时不该让模型以为问题出在参数上。
  * 注意这里**只读两个字段**（调用方身份、`sandbox_permissions`/`justification`），
