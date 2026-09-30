@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { locateNpmCli } from '../scripts/lib/run-tool.mjs'
 
 /**
  * 打包闸门。
@@ -19,12 +20,21 @@ import { fileURLToPath } from 'node:url'
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
 function packedFilePaths() {
-  const result = spawnSync('npm', ['pack', '--dry-run', '--json', '--cache', './.npm-cache'], {
+  // 不经 shell 启动 npm：Windows 上 `npm` 是 `.cmd` 垫片，`spawnSync('npm')` → ENOENT 且
+  // `stderr` 是空的（原断言只插值 stderr，于是失败被报成一句没有原因的话）；
+  // `spawnSync('npm.cmd')` → EINVAL；`shell: true` 配 args 是 DEP0190 弃用形态。
+  // npm 本身就是 Node CLI，所以直接交给当前进程的 node 跑它的 cli.js。
+  const { cli, searched } = locateNpmCli()
+  assert.ok(cli !== undefined,
+    `定位不到 npm-cli.js，无法问真实打包器"发出去的文件有哪些"。搜过这些路径：\n${searched.join('\n')}`)
+  const result = spawnSync(process.execPath, [cli, 'pack', '--dry-run', '--json', '--cache', './.npm-cache'], {
     cwd: ROOT,
     encoding: 'utf8',
     timeout: 120_000,
   })
-  assert.equal(result.status, 0, `npm pack --dry-run 失败：\n${result.stderr}`)
+  assert.equal(result.status, 0,
+    `npm pack --dry-run 失败（status=${String(result.status)} signal=${result.signal ?? 'none'}）：\n${result.stderr}\n`
+    + `入口：${cli}\n启动本身：${result.error === undefined ? 'ok' : `${result.error.code ?? ''} ${result.error.message}`}`)
   const report = JSON.parse(result.stdout)
   assert.ok(Array.isArray(report) && report.length === 1, 'npm pack --dry-run --json 应返回一个包的报告')
   return new Set(report[0].files.map((file) => file.path))

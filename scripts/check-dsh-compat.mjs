@@ -14,38 +14,16 @@
  *   npm run check:dsh
  *   DSH_PACKAGE_DIR=/path/to/@deepseek-ai/dsh npm run check:dsh
  */
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { locateDshPackage } from './lib/run-tool.mjs'
 
 const PASS = 'pass'
 const FAIL = 'fail'
 const NA = 'n/a'
 
-/** 在 PATH 里找 dsh 可执行文件，回溯到它的包根（bin 指向 <pkg>/lib/bin.js）。 */
-function locateDshPackage() {
-  if (process.env.DSH_PACKAGE_DIR) return process.env.DSH_PACKAGE_DIR
-  const isWin = process.platform === 'win32'
-  for (const dir of (process.env.PATH ?? '').split(isWin ? ';' : ':')) {
-    if (!dir) continue
-    for (const name of isWin ? ['dsh.cmd', 'dsh'] : ['dsh']) {
-      const candidate = join(dir, name)
-      if (!existsSync(candidate)) continue
-      let current = dirname(realpathSync(candidate))
-      for (let depth = 0; depth < 4; depth += 1) {
-        const manifest = join(current, 'package.json')
-        if (existsSync(manifest)) {
-          try {
-            if (JSON.parse(readFileSync(manifest, 'utf8')).name === '@deepseek-ai/dsh') return current
-          } catch {
-            // 继续向上找
-          }
-        }
-        current = dirname(current)
-      }
-    }
-  }
-  return undefined
-}
+// 定位 dsh 包根的实现只在 scripts/lib/run-tool.mjs 有一份（smoke-boot 要用同一个包根的
+// lib/bin.js 起进程；两份 finder 迟早分叉，症状是"一端探到了、另一端说找不到"）。
 
 const DSH_DIR = locateDshPackage()
 if (!DSH_DIR) {

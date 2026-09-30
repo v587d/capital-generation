@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   LOCAL_FETCH_CLIENT_VERSION,
   LOCAL_FETCH_MAX_URL_LENGTH,
@@ -12,7 +13,9 @@ import {
   safeUrl,
 } from '../lib/web-retriever/local-fetch.js'
 
-const ROOT = new URL('..', import.meta.url).pathname.replace(/\/$/u, '')
+// `URL.pathname` 不是文件路径：Windows 上它是 `/D:/Projects/…`（多一个前导斜杠），
+// 拿去 existsSync/readFile 就全落空。仓库里其余用例都用 fileURLToPath，这里对齐。
+const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
 function makeResponse(status, headers = {}, body = '') {
   const bytes = body instanceof Uint8Array ? body : new TextEncoder().encode(body)

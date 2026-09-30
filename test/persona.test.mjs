@@ -1,7 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { pathDirs } from '../scripts/lib/run-tool.mjs'
 import { resolveUserCustomizationSection } from '../lib/index.js'
 import { RETRIEVAL_DENIED_TOOLS } from '../lib/agents/root-tool-policy.js'
 import { SOURCE_OUTPUT_BUDGET_CHARS } from '../lib/web-retriever/tools.js'
@@ -80,9 +82,11 @@ function locatePersonaTypes() {
   const candidates = [
     fileURLToPath(new URL('../node_modules/@deepseek-ai/dsh-persona/lib/types/index.d.ts', import.meta.url)),
   ]
-  for (const dir of (process.env.PATH ?? '').split(':').filter(Boolean)) {
-    candidates.push(`${dir}/../lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-persona/lib/types/index.d.ts`)
-    candidates.push(`${dir}/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-persona/lib/types/index.d.ts`)
+  // 分隔符交给 pathDirs()：Windows 的 PATH 用 `;`，写死 `.split(':')` 会把整条 PATH 拆成
+  // `['C','\\Program Files;C', …]` ⇒ 永远找不到 ⇒ 这条闸门静默退化成"跳过字段名核对"。
+  for (const dir of pathDirs()) {
+    candidates.push(join(dir, '..', 'lib', 'node_modules', '@deepseek-ai', 'dsh', 'node_modules', '@deepseek-ai', 'dsh-persona', 'lib', 'types', 'index.d.ts'))
+    candidates.push(join(dir, 'node_modules', '@deepseek-ai', 'dsh', 'node_modules', '@deepseek-ai', 'dsh-persona', 'lib', 'types', 'index.d.ts'))
   }
   for (const file of candidates) {
     if (existsSync(file)) return { file, text: readFileSync(file, 'utf8') }

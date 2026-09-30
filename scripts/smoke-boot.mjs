@@ -30,10 +30,28 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { locateDshCli } from './lib/run-tool.mjs'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const SANDBOX = join(ROOT, '.tmp-boot')
 const TIMEOUT_MS = 90_000
+
+/**
+ * dsh 的入口脚本，用**当前进程的 node** 跑它，不经过 shell。
+ *
+ * `spawn('dsh')` 在 Windows 上命中的是 `.cmd` 垫片：ENOENT（而且 stderr 为空，看不到原因），
+ * 换成 `'dsh.cmd'` 则是 EINVAL（Node 对批处理强制要求 shell）。dsh 是 Node CLI，
+ * 所以 `package.json` 的 `bin`（`lib/bin.js`）就是可以直接交给 node 的那个文件。
+ * 前置条件缺失就**立刻**点名并退出 2（与 `check-dsh-compat.mjs` 同一个约定），
+ * 不要等 scratch profile 都建好了才失败。
+ */
+const DSH_CLI = locateDshCli()
+if (DSH_CLI === undefined) {
+  console.error('smoke-boot: 定位不到 dsh 入口（<包根>/lib/bin.js）。')
+  console.error('  把已安装的 @deepseek-ai/dsh 包目录写进 DSH_PACKAGE_DIR 后重试，例如：')
+  console.error('  DSH_PACKAGE_DIR=$(dirname $(dirname $(readlink -f $(which dsh)))) npm run smoke:boot')
+  process.exit(2)
+}
 
 /** 预设身份与 settings 条目 id —— 与 `preset/capital-generation/agent.patch.yml`、
  *  `capital-config/index.js` 必须同字，测试另有断言（`test/capital-config.test.mjs`）。 */
@@ -268,7 +286,7 @@ function prepareBadPresetProfile() {
 function run(name, waitMs = 0) {
   const profile = join(SANDBOX, 'profiles', name)
   return new Promise((resolve) => {
-    const child = spawn('dsh', ['--profile', name, '--port', '0', '--no-open'], {
+    const child = spawn(process.execPath, [DSH_CLI, '--profile', name, '--port', '0', '--no-open'], {
       cwd: profile,
       env: { ...process.env, DSH_HOME: SANDBOX },
       stdio: ['ignore', 'pipe', 'pipe'],
