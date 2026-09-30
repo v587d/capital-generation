@@ -1,0 +1,62 @@
+# 双端跑测试。为什么必须有：本仓长期只在 Ubuntu 上验证，分发到 Windows 才暴露问题——
+# 2026-09-30 用真 Windows node 复现的 8 处失败全是同一族"posix 假设"（换行符、路径分隔符、
+# 把 URL 的 pathname 当文件路径、按命令名起 Node CLI）。Windows runner 上是真 Windows：
+# PATH 分隔符是 `;`、npm/dsh 是 .cmd 垫片、盘符路径带 `\`，所以 test/cross-platform.test.mjs
+# 和其余断言终于在两种语义下同时生效，而不是只在一种语义下自我确认。
+#
+# node 版本取这两个：24 = 使用者那台 Windows 机器实测的版本（LTS Krypton）；
+# 26 = 开发机与桌面端 bundle 所在线。少任何一端都会出现"CI 绿、实机红"。
+name: test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # 一端红不要把另一端取消掉：两端同时红才是"平台无关的问题"，只有一端红就是跨平台缺陷。
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ['24', '26']
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+      - name: 测试（含跨平台静态闸门）
+        run: npm test
+
+      # 换行符标准的守门：.gitattributes 已经保证文本入库存 LF，这条是防有人绕过工作区
+      # 直接往索引里塞 CRLF blob（plumbing / 手工 apply 补丁），那种情况下 attr 列会显示
+      # 规则在、i/ 列却是 crlf。
+      - name: 仓库里没有以 CRLF 入库的文本
+        shell: bash
+        run: |
+          if git ls-files --eol | grep -q 'i/crlf'; then
+            git ls-files --eol | grep 'i/crlf'
+            echo '--- 上面这些文件要 git add --renormalize 一次 ---'
+            exit 1
+          fi
+
+      # 接口账本要读已安装 dsh 的包目录，所以只在 ubuntu 侧装 dsh：上游扩展面漂移与操作
+      # 系统无关，装一份就够；Windows 侧装 @deepseek-ai/dsh 要编译原生模块（node-pty/koffi），
+      # 那是把"上游没发预编译包"这种外部故障混进我们的红。桌面端 harness 打在 app.asar 里，
+      # 探针读不到包目录，那边本来也只能靠实机验收——Windows 的 npm test 会把这一条报成
+      # skipped（而不是 pass），那是看得见的"没测"。
+      - name: 装 dsh（只为接口账本）
+        if: matrix.os == 'ubuntu-latest'
+        run: npm install -g @deepseek-ai/dsh@0.2.0-rc.2   # 与 README 的 DSH Baseline 徽章同版本，抬基线要一起改
+
+      - name: DSH 扩展面账本
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run check:dsh
