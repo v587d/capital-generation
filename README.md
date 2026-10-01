@@ -26,7 +26,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 
 **视频演示：**[安装、配置与使用](https://www.bilibili.com/video/BV1fzaZ6CE9J/)。
 
-例如，你可以问：「复盘 XXXX 最近 20 个交易日的走势，结合公告和财务数据说明主要变化，并画一张量价图。」[查看报告样例](docs/sample/指南针技术分析报告.md)。
+例如，你可以问：「复盘 XXXX 最近 20 个交易日的走势，结合公告和财务数据说明主要变化，并画一张量价图。」[查看报告样例](docs/sample/指南针复盘和预测报告.md)。
 
 > [!IMPORTANT]
 > 本项目仍在探索中，不提供金融服务或投资建议，不保证数据完整、及时或准确，也不承诺投资回报。请自行核对来源并承担投资风险。
