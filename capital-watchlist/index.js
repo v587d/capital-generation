@@ -11,8 +11,10 @@
  *    不接就是"任何本机进程凭路径即可读写用户的自选股"。
  *  - 出网复用 `lib/sources/fuyao-core.js`（**同一份实现**，AGENTS.md §9.7）；key 引用名
  *    从 `capital-config` 卡片读，不硬编码 `FUYAO_API_KEY`。
- *  - 报价按 `asset_type` 分流；ETF 上游只接受单只（实测 `code=1002`），所以逐只扇出，
- *    规模由清单上限钉死。
+ *  - 报价按 `asset_type` 分流；ETF 上游只接受单只（实测 `code=1002`），所以逐只扇出，规模由清单
+ *    上限（30）钉住、由 `REFRESH_CONCURRENCY` 收敛成约 8 波，总预算随条数走。
+ *  - 清单的读-改-写在**进程内串行**（`serialize`）：出网不进这一道，跨进程只到"同一键"为止，
+ *    两条边界都写在 `serialize` 的注释里，不假装我们锁住了磁盘。
  */
 import z from 'zod'
 import { DEFAULT_FUYAO_BASE_URL, FuyaoError, fuyaoItems, fuyaoQuery, fuyaoRequest, fuyaoTimestamp } from '../lib/sources/fuyao-core.js'
@@ -28,8 +30,15 @@ export const ROUTE_PATH = '/capital-watchlist'
  * `~/.dsh/storages/capital_watchlist.json`。这不是风格问题，是上游硬约束。
  */
 export const DOMAIN_NAME = 'capital_watchlist'
-/** 清单条目上限：既是 ETF 逐只扇出的规模上限，也约束 `single` 布局的整写体积。 */
-export const MAX_ITEMS = 10
+/**
+ * 清单条目上限（2026-10-01 从 10 抬到 30：用户点名 10 条不可接受）。它同时是**一次刷新的
+ * 请求个数上限**——ETF 上游只认单只，30 只全 ETF 就是 30 个请求，所以扇出必须并发（见
+ * `REFRESH_CONCURRENCY`）并且总预算随条数走（见 `refreshBudgetFor`）；它也约束 `single`
+ * 布局的整写体积。
+ */
+export const MAX_ITEMS = 30
+/** ETF 扇出的并发路数：30 个单只请求压成约 8 波，正常网络一次刷新几秒内落地。 */
+export const REFRESH_CONCURRENCY = 4
 /** 搜索候选上限：倒逼用户缩小输入，不做分页。 */
 export const SEARCH_LIMIT = 10
 /** 本版标的范围（Fuyao 与报价端点双端都有可靠支撑）；场外基金 / 北交所不进候选。 */
@@ -37,6 +46,21 @@ export const SEARCH_ASSET_TYPES = 'a-share,a-share-index,fund-etf'
 const ASSET_TYPES = ['a-share', 'a-share-index', 'fund-etf']
 const EXCHANGES = ['SH', 'SZ']
 const SEARCH_TIMEOUT_MS = 15_000
+/**
+ * 一次刷新的总预算：**随清单条数走**——`20s + 2.5s × 条数`，下界 45 秒、上界 90 秒。
+ * 下界保住 10 条这一档与 2.5.2 的行为完全一致（20 + 2.5×10 = 45），抬到 30 条时不必把小清单
+ * 一起拖长。预算在**每个工作线程领下一组之前**检查，所以真实上界是 `budget + 一次请求的超时`
+ * （一次超时 = `SEARCH_TIMEOUT_MS`）；被预算切掉的行如实记 `refresh_timeout`——它们这次没被问过，
+ * 不是"这个标的没有报价"。最坏情形（每只都撞超时）由并发路数收敛：30 只 ETF ≈ 8 波。
+ */
+const REFRESH_BUDGET_BASE_MS = 20_000
+const REFRESH_BUDGET_PER_ITEM_MS = 2_500
+const REFRESH_BUDGET_FLOOR_MS = 45_000
+const REFRESH_BUDGET_CEIL_MS = 90_000
+/** 一次刷新的总预算：`options.refreshBudgetMs` 给了就用给的，没给按这次要问的条数算。 */
+export function refreshBudgetFor(count) {
+  return Math.min(REFRESH_BUDGET_CEIL_MS, Math.max(REFRESH_BUDGET_FLOOR_MS, REFRESH_BUDGET_BASE_MS + REFRESH_BUDGET_PER_ITEM_MS * count))
+}
 const MAX_BODY_BYTES = 65_536
 const MAX_QUERY_LENGTH = 64
 /** 与 `capital-config` 卡片同一条目 id：0.1.7 起 settings 命名空间恒等于 profile 条目 id。 */
@@ -63,7 +87,13 @@ export const SEED_ITEMS = [
 
 const quoteSchema = z.object({
   price: z.number(),
-  change_pct: z.number(),
+  /**
+   * 涨跌可以是**没有**：上游用 `null` 表示"这个数没有"（停牌、未开盘），此时最新价仍然有值。
+   * 早先这里写死 `z.number()`，于是 `quoteOf` 拿 `pct ?? 0` 兜底——停牌标的被画成「+0.00%」，
+   * 一次刷新把上一次真实的涨跌顶掉、页脚照报"刷新于此刻"、还不记任何失败。金融应用里
+   * "没有这个数"和"这个数是零"必须分开；客户端把 null 画成破折号并降到陈旧那一档的灰。
+   */
+  change_pct: z.number().nullable(),
   captured_at: z.number().int(),
   source_ts: z.number().int().nullable(),
 })
@@ -162,13 +192,29 @@ function candidateOf(row) {
   }
 }
 
+/**
+ * 上游用 `null` 表示"这个数没有"（本仓 `fuyao-rest.ts` 的 `matchesField` 就是为此放行 null 的，
+ * 理由是不能让一个指标缺失打挂整份数据）。这里绝不能拿 `Number()` 硬转：`Number(null)` 是 **0**，
+ * 停牌 / 未开盘的标的会被写成一份"0.00 元、涨跌 0%"的新快照——顶掉上一次成功的值、页脚照报
+ * "刷新于此刻"、还不记任何失败。数字字符串照收（与 `matchesField` 的 number 分支同口径）。
+ */
+function numberValue(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined
+  if (typeof value !== 'string' || value.trim().length === 0) return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
 function quoteOf(row, sourceTs, capturedAt) {
-  const price = typeof row.last_price === 'number' ? row.last_price : Number(row.last_price)
-  if (!Number.isFinite(price)) return undefined
-  const pct = typeof row.price_change_ratio_pct === 'number' ? row.price_change_ratio_pct : Number(row.price_change_ratio_pct)
+  const price = numberValue(row.last_price)
+  if (price === undefined) return undefined
+  const pct = numberValue(row.price_change_ratio_pct)
   return {
     price,
-    change_pct: Number.isFinite(pct) ? pct : 0,
+    // **没有涨跌就是没有**，不许补 0：`0` 在 A 股口径里是一个真值（今日平盘），把它写成
+    // 停牌 / 未开盘的标的，等于伪造一份"横盘"的新快照顶掉上一次的真涨跌，还不记任何失败。
+    // 客户端读到 null 画破折号（与"取不到报价"同一档，而不是红/绿/平三档里的平）。
+    change_pct: pct ?? null,
     captured_at: capturedAt,
     source_ts: typeof sourceTs === 'number' ? sourceTs : null,
   }
@@ -183,6 +229,7 @@ function quoteOf(row, sourceTs, capturedAt) {
  * @param options.credentialRef - `() => string`，取自 `capital-config` 卡片。
  * @param options.baseUrl - Fuyao base URL；省略时用内核里的官方默认值。
  * @param options.now - 时间源（测试可注入）。
+ * @param options.refreshBudgetMs - 一次刷新的总预算；省略时按这次要问的条数算（`refreshBudgetFor`）。
  */
 export function createWatchlistService(options = {}) {
   const {
@@ -192,27 +239,64 @@ export function createWatchlistService(options = {}) {
     baseUrl = DEFAULT_FUYAO_BASE_URL,
     now = () => Date.now(),
     timeoutMs = SEARCH_TIMEOUT_MS,
+    refreshBudgetMs,
   } = options
 
   let domainPromise
   /** 全局单闸门：开面板与手动刷新共用；后来者等同一次结果，而不是并排放第二个请求。 */
   let refreshing = null
 
+  /**
+   * 域只开一次，但**开失败的痕迹不许留下**。`storageDomain` 是 `dsh-storage-domain` 在自己
+   * `inject(backendServices, …)` 的回调里才 provide 的——host 平面这一行的预热完全可能跑在它前面，
+   * 把 rejection memoize 住就等于"装配期抢跑一次，功能锁到进程结束"（AGENTS.md §9.7 ⑤ 的形状，
+   * 与 webServer 那条同一个族）。facility 的 `open()` 失败时已经 `reserved.delete`，所以重试安全。
+   */
   const domain = () => {
-    if (domainPromise === undefined) domainPromise = Promise.resolve().then(() => openDomain())
+    if (domainPromise === undefined) {
+      const opening = Promise.resolve().then(() => openDomain())
+      domainPromise = opening
+      opening.catch(() => {
+        if (domainPromise === opening) domainPromise = undefined
+      })
+    }
     return domainPromise
   }
   const table = async () => (await domain()).table('items')
 
+  /**
+   * 清单的**读-改-写串行队列**（进程内）。同进程的多个窗口打的是同一条路由、同一份内存域，
+   * 所以它们互相看得见；但这里原本没有互斥：`add` 的上限检查发生在最长 15 秒的上游搜索**之前**，
+   * 两个并发 `/add` 都先通过 `size >= MAX_ITEMS`、再各写一条 → 清单能写成 31 条（2.5.2 是 11 条）。
+   * 刷新写回拿批次快照整条覆写、撤销并发删除与置顶，也是同一族（下面 `doRefresh` 里逐键重读那一处）。
+   *
+   * 出网**不进**这一道：只有"读当前记录 → 改 → 落盘"这几步排队。否则一次预算 90 秒的刷新会把
+   * 用户随后的删除与置顶全堵在门外，而那正是这次审查里用户体验最差的一条。
+   *
+   * ⛔ 射程只有本进程。跨进程（桌面端 App 与本机的另一个宿主 profile）共用同一个
+   * `~/.dsh/storages/capital_watchlist.json`，官方原子写只保证文件不撕裂、不保证不丢更新；
+   * 清单必须走官方 storage-domain，本仓不许自建文件锁或文件路径，所以这里的边界是**如实收窄**
+   * 而不是解决：写回改成逐键重读之后，跨进程丢失面从"整张清单"缩到"同一只标的的报价那一格"。
+   */
+  let queue = Promise.resolve()
+  function serialize(task) {
+    const run = queue.then(task, task)
+    // 队列本身不能被一次失败堵住：吞掉这一环的 rejection，让后来者照常跑。
+    queue = run.then(() => {}, () => {})
+    return run
+  }
+
   async function ensureSeeded() {
     const opened = await domain()
-    const items = opened.table('items')
-    if (opened.global.get().seeded_at !== 0 || items.size > 0) return
-    const stamp = now()
-    for (const seed of SEED_ITEMS) {
-      await items.put(seed.thscode, { ...seed, added_at: stamp, source: 'seed', quote: null })
-    }
-    await opened.global.set({ seeded_at: stamp, schema: 1 })
+    return serialize(async () => {
+      const items = opened.table('items')
+      if (opened.global.get().seeded_at !== 0 || items.size > 0) return
+      const stamp = now()
+      for (const seed of SEED_ITEMS) {
+        await items.put(seed.thscode, { ...seed, added_at: stamp, source: 'seed', quote: null })
+      }
+      await opened.global.set({ seeded_at: stamp, schema: 1 })
+    })
   }
 
   async function callFuyao(path, params, allowed) {
@@ -226,6 +310,9 @@ export function createWatchlistService(options = {}) {
     if (q.length === 0 || q.length > MAX_QUERY_LENGTH) {
       return { ok: false, code: 'invalid_query', message: '输入为空或过长' }
     }
+    // 先碰存储再出网：域打不开时 `/search` 不该白烧一次上游配额（候选也根本写不进清单）。
+    // 存储失败因此从这一路也走响亮那条（路由层的逐次 catch → store_unavailable），不靠预热闩住。
+    const items = await table()
     let envelope
     try {
       envelope = await callFuyao(ENDPOINTS.search, { q, asset_type: SEARCH_ASSET_TYPES, limit: SEARCH_LIMIT }, ['q', 'asset_type', 'limit'])
@@ -233,7 +320,6 @@ export function createWatchlistService(options = {}) {
       const code = watchlistErrorCode(error)
       return { ok: false, code, message: messageFor(code) }
     }
-    const items = await table()
     // 后缀也要收口：实测 `q=宁德时代` 会带回 `885789.TI 宁德时代概念`（同花顺指数），
     // 它既不在本版报价范围、也过不了域 schema——不挡掉就是"添加"那一下 500。
     const rows = fuyaoItems(envelope)
@@ -255,7 +341,12 @@ export function createWatchlistService(options = {}) {
   async function add(input) {
     await ensureSeeded()
     const items = await table()
-    if (items.size >= MAX_ITEMS) return { ok: false, code: 'list_full', message: `自选股最多 ${MAX_ITEMS} 条，先删一条再加` }
+    // `limit` 跟着回包走：客户端那句「最多 N 条，先删一条再加」不许自己抄一份数字（2.5.2 就是
+    // 服务端常量 10 + 中文字典写死"10"两处各写一遍，抬上限只会改红一边）。
+    const full = () => ({ ok: false, code: 'list_full', limit: MAX_ITEMS, message: `自选股最多 ${MAX_ITEMS} 条，先删一条再加` })
+
+    // 先到上限就不出网（一次搜索也是配额）；**这挡不住并发**，锁里还要再验一次，见下。
+    if (items.size >= MAX_ITEMS) return full()
 
     const direct = input?.thscode
     if (direct !== undefined && direct !== null && direct !== '') {
@@ -265,14 +356,21 @@ export function createWatchlistService(options = {}) {
       if (!found.ok) return found
       const hit = found.items.find((row) => row.thscode === thscode)
       if (hit === undefined) return { ok: false, code: 'not_found', message: '该标的不在本版支持范围（沪深 A 股 / 指数 / 场内 ETF）' }
-      return write(hit, items)
+      return serialize(() => {
+        // 出网最长 15 秒，这期间别的窗口可能已经填满：上限必须在"读 size → put"这一段的锁内复查。
+        if (items.size >= MAX_ITEMS) return full()
+        return write(hit, items)
+      })
     }
 
     const found = await search(input?.q)
     if (!found.ok) return found
     if (found.items.length === 0) return { ok: false, code: 'not_found', message: '没有找到该标的' }
     if (found.items.length > 1) return { ok: false, code: 'ambiguous', message: '命中多条，请从候选里选一条', candidates: found.items }
-    return write(found.items[0], items)
+    return serialize(() => {
+      if (items.size >= MAX_ITEMS) return full()
+      return write(found.items[0], items)
+    })
   }
 
   async function write(candidate, items) {
@@ -297,7 +395,7 @@ export function createWatchlistService(options = {}) {
     const items = await table()
     const thscode = normalizeThscode(input?.thscode)
     if (thscode === undefined) return { ok: false, code: 'invalid_query', message: '代码格式不符' }
-    return { ok: true, removed: await items.delete(thscode) }
+    return serialize(async () => ({ ok: true, removed: await items.delete(thscode) }))
   }
 
   /**
@@ -310,23 +408,30 @@ export function createWatchlistService(options = {}) {
     const items = await table()
     const thscode = normalizeThscode(input?.thscode)
     if (thscode === undefined) return { ok: false, code: 'invalid_query', message: '代码格式不符' }
-    const existing = items.get(thscode)
-    if (existing === undefined) return { ok: false, code: 'not_found', message: '该标的不在自选清单里' }
-    await items.put(thscode, { ...existing, pinned_at: now() })
-    return { ok: true, items: rowsOf(items) }
+    // 读 → 改 → 写在同一环里：否则"取到旧记录"与"put 回去"之间正好删了这一行，
+    // 置顶会把刚删掉的标的连同它的旧报价一起写回来（和刷新写回同一族，见 `doRefresh`）。
+    return serialize(async () => {
+      const existing = items.get(thscode)
+      if (existing === undefined) return { ok: false, code: 'not_found', message: '该标的不在自选清单里' }
+      await items.put(thscode, { ...existing, pinned_at: now() })
+      return { ok: true, items: rowsOf(items) }
+    })
   }
 
   /** 一个 asset_type 分组 = 一次快照请求；单组失败只记该组，不拖垮其它组。 */
-  async function fetchGroup(group, failures) {
+  async function fetchGroup(group) {
     const capturedAt = now()
     let envelope
     try {
       envelope = await callFuyao(group.path, group.params, group.allowed)
     } catch (error) {
       const code = watchlistErrorCode(error, { perItem: true })
-      for (const thscode of group.codes) failures.push({ thscode, code })
       const batch = batchLevelCode(error)
-      return { byCode: new Map(), batchError: batch !== undefined ? { code: batch, message: messageFor(batch) } : undefined }
+      return {
+        byCode: new Map(),
+        failures: group.codes.map((thscode) => ({ thscode, code })),
+        batchError: batch !== undefined ? { code: batch, message: messageFor(batch) } : undefined,
+      }
     }
     const sourceTs = fuyaoTimestamp(envelope)
     const byCode = new Map()
@@ -335,10 +440,11 @@ export function createWatchlistService(options = {}) {
       const quote = quoteOf(row, sourceTs, capturedAt)
       if (thscode !== '' && quote !== undefined) byCode.set(thscode, quote)
     }
-    for (const thscode of group.codes) {
-      if (!byCode.has(thscode)) failures.push({ thscode, code: 'quote_unavailable' })
+    return {
+      byCode,
+      failures: group.codes.filter((thscode) => !byCode.has(thscode)).map((thscode) => ({ thscode, code: 'quote_unavailable' })),
+      batchError: undefined,
     }
-    return { byCode, batchError: undefined }
   }
 
   /**
@@ -359,8 +465,9 @@ export function createWatchlistService(options = {}) {
     await ensureSeeded()
     const opened = await domain()
     const items = opened.table('items')
-    const rows = rowsOf(items)
-    if (rows.length === 0) return { ok: true, items: [], refreshed_at: null, failures: [] }
+    // 这份快照**只用来决定这次要问哪些代码**，不是写回的基底（写回逐键重读，见下）。
+    const batch = rowsOf(items)
+    if (batch.length === 0) return { ok: true, items: [], refreshed_at: null, failures: [] }
 
     const groups = []
     for (const [assetType, group] of [
@@ -368,7 +475,7 @@ export function createWatchlistService(options = {}) {
       ['a-share-index', { path: ENDPOINTS.index, allowed: ['thscodes'], batch: true }],
       ['fund-etf', { path: ENDPOINTS.fund, allowed: ['thscode'], batch: false }],
     ]) {
-      const codes = rows.filter((row) => row.asset_type === assetType).map((row) => row.thscode)
+      const codes = batch.filter((row) => row.asset_type === assetType).map((row) => row.thscode)
       if (codes.length === 0) continue
       if (!group.batch) {
         for (const thscode of codes) groups.push({ path: group.path, allowed: group.allowed, params: { thscode }, codes: [thscode] })
@@ -377,24 +484,57 @@ export function createWatchlistService(options = {}) {
       }
     }
 
+    const budgetMs = refreshBudgetMs ?? refreshBudgetFor(batch.length)
+    const startedAt = now()
+    const results = new Array(groups.length)
+    // `cursor` 的自增在单线程里是原子的：每个工作线程领到一个**独占**的组号。
+    let cursor = 0
+    const worker = async () => {
+      for (;;) {
+        const index = cursor
+        cursor += 1
+        if (index >= groups.length) return
+        // 0 号组永远跑（否则一次都刷不动）；之后每领一组先看预算：超了就停在这里，
+        // 剩下的行如实记 refresh_timeout——它们这次没被问过，不是"没有报价"。
+        if (index > 0 && now() - startedAt >= budgetMs) return
+        results[index] = await fetchGroup(groups[index])
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(REFRESH_CONCURRENCY, groups.length) }, () => worker()))
+
+    // 按**组序**归并，不按完成序：回包里的 failures 顺序是断言与面板读法的依赖，
+    // 并发不能把它变成"谁先回来谁在前"。
     const failures = []
     const quotes = new Map()
     let batchError
-    for (const group of groups) {
-      const result = await fetchGroup(group, failures)
+    for (let index = 0; index < groups.length; index += 1) {
+      const result = results[index]
+      if (result === undefined) {
+        for (const thscode of groups[index].codes) failures.push({ thscode, code: 'refresh_timeout' })
+        continue
+      }
       for (const [thscode, quote] of result.byCode) quotes.set(thscode, quote)
+      for (const failure of result.failures) failures.push(failure)
       if (result.batchError !== undefined) batchError = result.batchError
     }
 
-    const current = new Map(rows.map((row) => [row.thscode, row]))
-    for (const [thscode, quote] of quotes) {
-      const row = current.get(thscode)
-      if (row === undefined) continue
-      await items.put(thscode, { ...row, quote })
-    }
+    // 写回整段进串行队列，并且**逐键重读当前记录**，只换 quote 那一格：
+    // 拿批次快照整条覆写会撤销刷新在途期间用户的两个动作——刚删的标的被原样写回来
+    // （还重新占掉一格），刚置顶的被旧记录里的空 pinned_at 盖掉、静默掉回原位。
+    // 面板一打开就自动刷新，所以这扇窗几乎每次都开着；ETF 逐只扇出时它最宽。
+    const written = await serialize(async () => {
+      let count = 0
+      for (const [thscode, quote] of quotes) {
+        const fresh = items.get(thscode)
+        if (fresh === undefined) continue // 在途被删：不复活、不占格。
+        await items.put(thscode, { ...fresh, quote })
+        count += 1
+      }
+      return { count, items: rowsOf(items) }
+    })
     // 一条都没落地就不报"刷新于此刻"：页脚那个时间讲的是最后一次**真取到数**的时刻，
     // 跟着一次全失败的点击往前走，就成了每一行都陈旧、只有页脚是新的（客户端据此保留上一个值）。
-    const result = { ok: true, items: rowsOf(items), refreshed_at: quotes.size > 0 ? now() : null, failures }
+    const result = { ok: true, items: written.items, refreshed_at: written.count > 0 ? now() : null, failures }
     if (batchError !== undefined) result.error = batchError
     return result
   }
@@ -474,11 +614,9 @@ const FAILURE_STATUS = {
  *
  * @param service - `createWatchlistService` 的返回。
  * @param options.authorize - `(req) => 401 | 403 | undefined`，接 `connection.requestRejection`。
- * @param options.storeError - `() => unknown`：域打开失败的记录，非空时所有路由改口
- *   `store_unavailable`（响亮失败，不返回空清单骗用户"没有自选"）。
  */
 export function createRouteHandler(service, options = {}) {
-  const { authorize, storeError } = options
+  const { authorize } = options
 
   return async function handler(req, res) {
     if (typeof authorize === 'function') {
@@ -514,12 +652,6 @@ export function createRouteHandler(service, options = {}) {
       return
     }
 
-    const stored = storeError === undefined ? undefined : storeError()
-    if (stored !== undefined && stored !== null) {
-      send(res, 503, { ok: false, code: 'store_unavailable', message: '自选股存储不可用', cause: String(stored) })
-      return
-    }
-
     let input = {}
     if (method === 'POST') {
       try {
@@ -543,9 +675,18 @@ export function createRouteHandler(service, options = {}) {
       if (method === 'GET' && pathname === '/search') return sendBusiness(res, await service.search(searchParams.get('q') ?? ''))
       send(res, 404, { ok: false, code: 'not_found', message: 'unknown watchlist route' })
     } catch (error) {
-      send(res, 503, { ok: false, code: 'store_unavailable', message: '自选股存储不可用', cause: String(error?.message ?? error) })
+      send(res, 503, { ok: false, code: 'store_unavailable', message: '自选股存储不可用', cause: storeCause(error) })
     }
   }
+}
+
+/**
+ * 存储侧失败的对外一句话：code 与 message 都要留。只留 code 运维看的是天书（实测
+ * `malformed-medium` 单独出现时完全指不出是哪份介质、哪一步），只留 message 又丢掉
+ * `backend-not-found` / `invalid-record` 这类可定位的判据。
+ */
+function storeCause(error) {
+  return [error?.code, error?.message ?? error].filter(Boolean).join('：') || 'unknown'
 }
 
 function sendBusiness(res, result) {
@@ -554,8 +695,6 @@ function sendBusiness(res, result) {
 }
 
 export function apply(ctx) {
-  let storeFailure = null
-
   const service = createWatchlistService({
     openDomain: () => {
       let storage
@@ -580,12 +719,11 @@ export function apply(ctx) {
 
   ctx.provide('capitalWatchlist', service)
 
-  // 预热一次：域打开失败要响亮（所有路由改口 store_unavailable），但不许带崩整个 profile 启动。
-  // cause 里同时留 code 与 message——只有 code 的话，运维时看到的是天书（实测：malformed-medium
-  // 单独出现时完全指不出是哪份介质、哪一步）。
+  // 预热一次只为了把"域打不开"写进启动日志。它**不设闩**：真正的响亮失败在每条路由的逐次
+  // catch 里（`store_unavailable`），而预热跑在装配期，此刻 `storageDomain` 完全可能还没
+  // provide——把这一次失败当结论钉住，就是"抢跑一次锁到进程结束"（见 `domain()`）。
   service.list().catch((error) => {
-    storeFailure = [error?.code, error?.message].filter(Boolean).join('：') || 'domain-open-failed'
-    ctx.logger?.error?.(`capital-watchlist: 域打开失败，功能不可用（${storeFailure}）`)
+    ctx.logger?.error?.(`capital-watchlist: 域预热失败，下一次动作会重试（${storeCause(error)}）`)
   })
 
   /**
@@ -611,7 +749,7 @@ export function apply(ctx) {
         const dispose = webCtx.webServer.register({
           kind: 'prefix',
           path: ROUTE_PATH,
-          handler: createRouteHandler(service, { authorize, storeError: () => storeFailure }),
+          handler: createRouteHandler(service, { authorize }),
         })
         return () => {
           if (typeof dispose === 'function') dispose()

@@ -628,6 +628,34 @@ const probes = [
         : { status: FAIL, detail: `行内菜单依赖的 Menu primitive 契约变了：${missing.join(' / ')}（见账本 L23；capital-watchlist 的行内菜单依赖它）` }
     },
   },
+  {
+    id: 'L24',
+    title: 'session scope 座位的框架标准件：SessionStandardProps 里的 inputActions（captureInsertion / insertText / setDraft / submit），按座位 scope 选',
+    why: '自选股面板每行的「预测」与「复盘」要把一句话**追加**进当前会话的输入框，用的是框架送给每个 session scope 组件的标准件，不是我们自己 inject 的 facility。三条都会**静默**失效：① 座位 scope 从 `session` 变 `session-maybe`（或标准件改名）→ 组件拿到 undefined，点按钮什么都不发生；② `insertText` 的返回值语义变（不再"没插进去就 false"）→ 面板收起来了、话却没进输入框，用户以为发出去了；③ `captureInsertion` 的 revision 守卫消失 → 异步插入会覆盖用户随后敲的内容。',
+    run() {
+      const slotsFile = join(PKG('dsh-client-ui-slots'), 'lib/types/index.d.ts')
+      const slots = readIfPresent(slotsFile)
+      if (slots === undefined) return { status: FAIL, detail: `读不到 ${slotsFile}` }
+      const seatFile = join(PKG('dsh-client-ui-conversation'), 'lib/types/client/contract/slots.d.ts')
+      const seat = readIfPresent(seatFile)
+      if (seat === undefined) return { status: FAIL, detail: `读不到 ${seatFile}` }
+      const inputFile = join(PKG('dsh-client-ui-conversation'), 'lib/types/client/contract/input.d.ts')
+      const input = readIfPresent(inputFile)
+      if (input === undefined) return { status: FAIL, detail: `读不到 ${inputFile}` }
+      const checks = [
+        ['标准件仍按 scope 选（session → SessionStandardProps）', /ScopeStandardProps<S extends SlotScope> = \(S extends 'session' \? SessionStandardProps/, slots, slotsFile],
+        ['标准件的定义仍是"送给每个 session scope 座位组件"', /delivered to every session-scope slot component/, slots, slotsFile],
+        ['conversation 的合并面里 inputActions 是标准件之一', /inputActions: InputActions;/, seat, seatFile],
+        ['我们坐的那一格仍是 session scope（标准件因此才会送达）', /'conversation\.input\.overlay': \{\s*kind: 'list';\s*scope: 'session';/, seat, seatFile],
+        ['公开动作面仍带 captureInsertion（revision 守卫的来源）', /captureInsertion\(\): TokenSpan;/, input, inputFile],
+        ['insertText 仍是"插不进去回 false"（面板收不收全靠它）', /insertText\(text: string, span: TokenSpan\): boolean;/, input, inputFile],
+      ]
+      const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: '标准件送达条件、overlay 座位的 scope 与 insertText / captureInsertion 签名都仍在' }
+        : { status: FAIL, detail: `写输入框的那条面变了：${missing.join(' / ')}（见账本 L24；capital-watchlist 的「预测 / 复盘」依赖它）` }
+    },
+  },
 ]
 
 const results = []

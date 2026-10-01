@@ -124,22 +124,96 @@ test('裸代码与非支持标的被拒；场外基金即便被搜到也进不�
   }
 })
 
-test('清单上限 10 条：第 11 条返回 list_full，不写库、不静默替换', async () => {
+// 六位代码生成器：上限从 10 抬到 30 之后，`60000${index}` 这种拼法会在 index≥10 时变成七位
+// 而被 normalizeThscode 判 invalid_query——那不是被测行为，是夹具的错。
+const codeAt = (index) => `60${String(index).padStart(4, '0')}.SH`
+
+test(`清单上限 ${MAX_ITEMS} 条：再加一条返回 list_full，不写库、不静默替换，回包带 limit`, async () => {
   const stub = stubFuyao()
   const { instance, fake } = service()
   try {
     await instance.list()
     for (let index = 0; index < MAX_ITEMS - SEED_ITEMS.length; index += 1) {
-      const code = `60000${index}.SH`
-      const added = await instance.add({ thscode: code })
-      assert.equal(added.ok, true, `第 ${index + 5} 条应当能加`)
+      const added = await instance.add({ thscode: codeAt(index) })
+      assert.equal(added.ok, true, `第 ${SEED_ITEMS.length + index + 1} 条应当能加`)
     }
     assert.equal(fake.records.size, MAX_ITEMS)
-    const overflow = await instance.add({ thscode: '600099.SH' })
+    const overflow = await instance.add({ thscode: codeAt(900) })
     assert.equal(overflow.ok, false)
     assert.equal(overflow.code, 'list_full')
+    // 「最多 N 条，先删一条再加」那句话的数字必须由服务端给：2.5.2 是服务端常量 + 中文字典
+    // 写死"10"各写一遍，抬上限只会改红一边。
+    assert.equal(overflow.limit, MAX_ITEMS, 'list_full 回包要带 limit，客户端才有单源可读')
     assert.equal(fake.records.size, MAX_ITEMS, '超限不覆盖已有条目')
   } finally {
+    stub.restore()
+  }
+})
+
+test('⛔ 上限不许被并发添加突破：只差一格时两个 /add 只许成一个', async () => {
+  const stub = stubFuyao()
+  const { instance, fake } = service()
+  try {
+    await instance.list()
+    for (let index = 0; index < MAX_ITEMS - SEED_ITEMS.length - 1; index += 1) await instance.add({ thscode: codeAt(index) })
+    assert.equal(fake.records.size, MAX_ITEMS - 1, '先填到只差一格')
+    const two = await Promise.all([instance.add({ thscode: codeAt(700) }), instance.add({ thscode: codeAt(701) })])
+    assert.equal(two.filter((one) => one.ok === true).length, 1, '只差一格就只许进一条')
+    assert.equal(two.filter((one) => one.code === 'list_full').length, 1, '另一条如实报 list_full，不是静默丢弃')
+    assert.equal(
+      fake.records.size,
+      MAX_ITEMS,
+      `清单被并发写成 ${fake.records.size} 条——上限检查写在最长 15 秒的搜索之前等于没写，必须在锁内复查`,
+    )
+  } finally {
+    stub.restore()
+  }
+})
+
+test('⛔ 刷新在途时的删除与置顶，不许被写回撤销', async () => {
+  // 面板一打开就自动刷新，这扇窗几乎每次都开着；ETF 逐只扇出时最宽。
+  // 旧实现拿批次开始时的整表快照做写回基底、整条覆写，于是刷新落地那一刻：刚删的标的被原样
+  // 写回来（还重新占掉一格），刚置顶的被旧记录里的空 pinned_at 盖掉、静默掉回原位——两个动作
+  // 系统都当场回执了"成功"。
+  const stub = stubFuyao()
+  const { instance, fake } = service()
+  const outer = globalThis.fetch
+  let release
+  let gateOn = false
+  const gate = new Promise((resolve) => { release = resolve })
+  globalThis.fetch = async (url, init) => {
+    const pending = outer(url, init)
+    // 闸门只在 refresh 起来之后落下：setup 的 list/add 自己也走 fetch，全程挂着就是死锁。
+    if (gateOn) await gate
+    return pending
+  }
+  try {
+    await instance.list()
+    assert.equal((await instance.add({ thscode: codeAt(800) })).ok, true)
+    gateOn = true
+
+    const running = instance.refresh() // 两组（指数批量 + A 股批量）都卡在 gate 上
+    const removed = await instance.remove({ thscode: '000001.SH' })
+    const pinned = await instance.pin({ thscode: '399006.SZ' })
+    assert.equal(removed.ok, true, '删除当场回执成功')
+    assert.equal(pinned.ok, true, '置顶当场回执成功')
+    assert.equal(fake.records.has('000001.SH'), false, '中间态：真的删掉了')
+    assert.notEqual(fake.records.get('399006.SZ').pinned_at, undefined, '中间态：pinned_at 已落库')
+
+    release()
+    const result = await running
+
+    assert.equal(fake.records.has('000001.SH'), false, '刷新写回把刚删的标的复活了（并重新占掉一格）')
+    assert.equal(result.items.some((item) => item.thscode === '000001.SH'), false, '回包也不许带它')
+    assert.notEqual(
+      fake.records.get('399006.SZ').pinned_at,
+      undefined,
+      '刷新写回用旧快照盖掉了刚写入的 pinned_at，那一行会静默掉回原位',
+    )
+    assert.equal(result.items[0].thscode, '399006.SZ', '置顶行仍然在第一行')
+    assert.ok(result.refreshed_at > 0, '确有报价落地，页脚才报"刷新于此刻"')
+  } finally {
+    globalThis.fetch = outer
     stub.restore()
   }
 })
@@ -318,3 +392,33 @@ test('域名必须过 storage 的 unit name 规则（连字符会被上游拒成
 })
 
 const FIXTURE_RATE_LIMITED = { code: 4001, message: '请求频率超限', data: null }
+
+test('存储装配期抢跑不许锁死功能：第一次打不开、后来能开就必须读得到清单', async () => {
+  // 2026-09-30 review 实测的闩锁：`domainPromise` 连 rejection 一起 memoize，于是"一次装配期
+  // 抢跑"就永久 503——`openDomain` 只被调过一次，之后每一次动作都复用那份失败的 promise。
+  // 这不是假想：`storageDomain` 是 dsh-storage-domain 在自己 `inject(backendServices,…)` 的回调里
+  // 才 provide 的，host 平面的预热完全可能跑在它前面（AGENTS.md §9.7 ⑤ 的同族形状）。
+  const stub = stubFuyao()
+  const fake = createFakeDomain()
+  let attempts = 0
+  const instance = createWatchlistService({
+    openDomain: () => {
+      attempts += 1
+      if (attempts === 1) return Promise.reject(new Error('storageDomain facility is not mounted'))
+      return Promise.resolve(fake.domain)
+    },
+    resolveApiKey: async () => 'test-key',
+    now: () => 1_790_586_000_000,
+  })
+  try {
+    await assert.rejects(instance.list(), /not mounted/)
+    const second = await instance.list()
+    assert.equal(attempts, 2, '下一次动作必须重新尝试开域，而不是复用那份失败的 promise')
+    assert.equal(second.items.length, SEED_ITEMS.length, '恢复之后照常播种、照常读清单')
+    assert.equal(fake.records.size, SEED_ITEMS.length)
+    const refreshed = await instance.refresh()
+    assert.equal(refreshed.items.every((item) => item.quote !== null), true, '刷新这条路也走得通')
+  } finally {
+    stub.restore()
+  }
+})

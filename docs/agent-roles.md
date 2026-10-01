@@ -68,4 +68,4 @@
 
 这些通道全部由上游提供，改名或删行的症状是"起不来"或"静默读不出"。因此每一条都登记在
 [DSH 接口账本](reference/dsh-surface-ledger.md)里并配一支探针，`npm run check:dsh` 逐条核对
-（现 22 条）。升级 DSH 前先跑它。
+（现 24 条）。升级 DSH 前先跑它。

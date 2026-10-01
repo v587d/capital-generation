@@ -94,6 +94,7 @@
 - 新增 capability 时请同步更新 `docs/data-collector-capabilities.md`（可通过 `npm run docs:capabilities` 生成）。
 - 不要硬编码 API Key 或敏感信息。
 - 保持数据隔离原则：原始结构化数据不应直接进入主 Agent 上下文。
+- 改 `README.md` 时写给读者，不写给仓库：首页不出现 `§编号`、`docs/dev/`、`ctx.*` / `*_ref` 这类实现层标识（`npm test` 里的 `test/readme-prose.test.mjs` 会拦）。判断标准是"这句话能不能被一个只装了插件、没读过源码的人看懂"——看不懂的内容请留在 `AGENTS.md` 与 `docs/dev/`。
 
 ## 行为准则
 

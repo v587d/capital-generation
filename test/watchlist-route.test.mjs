@@ -19,7 +19,7 @@ function harness(options = {}) {
     now: () => 1_790_586_000_000,
     ...(options.service ?? {}),
   })
-  const handler = createRouteHandler(service, { authorize: options.authorize, storeError: () => options.storeError })
+  const handler = createRouteHandler(service, { authorize: options.authorize })
   return { service, fake, handler }
 }
 
@@ -197,12 +197,20 @@ test('refresh 回包里 always 有 items / failures / refreshed_at 三件（面�
   }
 })
 
-test('域打不开时所有路径改口 store_unavailable，不返回空清单骗用户', async () => {
+/**
+ * 存储失败的对外形态。**不靠任何"预热时记一笔、之后一律改口"的闩**：那条闩会把一次装配期
+ * 抢跑（`storageDomain` 还没 provide）钉成进程一生的 `store_unavailable`。失败由每条路由
+ * **逐次**从服务拿到，所以下面这些路径的 503 都是从真实调用里出来的。
+ */
+test('域打不开时所有路径改口 store_unavailable，不返回空清单骗用户，也不烧出网配额', async () => {
   const stub = stubFuyao()
-  const { handler } = harness({ storeError: 'backend-not-found' })
+  const broken = () => Promise.reject(Object.assign(new Error('storage backend missing'), { code: 'backend-not-found' }))
+  const { handler } = harness({ service: { openDomain: broken } })
   try {
     for (const input of [
       { method: 'GET', url: '/capital-watchlist/list' },
+      { method: 'GET', url: '/capital-watchlist/search?q=%E5%AE%81%E5%BE%B7%E6%97%B6%E4%BB%A3' },
+      { method: 'POST', url: '/capital-watchlist/add', body: { thscode: '300750.SZ' } },
       { method: 'POST', url: '/capital-watchlist/pin', body: { thscode: '000300.SH' } },
       { method: 'POST', url: '/capital-watchlist/refresh', body: {} },
     ]) {
@@ -210,8 +218,9 @@ test('域打不开时所有路径改口 store_unavailable，不返回空清单�
       assert.equal(res.statusCode, 503)
       assert.equal(res.json().code, 'store_unavailable')
       assert.match(res.json().cause, /backend-not-found/, '上游 code 要透出来，便于定位')
+      assert.equal(res.json().items, undefined, '⛔ 不许把失败渲染成"清单是空的"')
     }
-    assert.equal(stub.calls.length, 0, '存储不可用时不许再花一次出网配额')
+    assert.equal(stub.calls.length, 0, '存储不可用时不许再花一次出网配额（含 /search：它先碰域再出网）')
   } finally {
     stub.restore()
   }
@@ -251,6 +260,50 @@ test('apply()：webServer 已就绪的载体（桌面端形状）当场挂上路
   assert.equal(routes.length, 1, '依赖已就绪时 inject 立刻起子 fiber，路由当场挂上')
   assert.equal(routes[0].kind, 'prefix')
   assert.equal(routes[0].path, ROUTE_PATH)
+})
+
+test('⛔ apply()：认证围栏必须真的接到注册出去的那颗 handler 上', async () => {
+  // 上面那些围栏用例是**自己造 authorize** 喂给 createRouteHandler 的——所以把 apply() 里
+  // 从 `connection` 取 requestRejection、再传进去的那两行删掉，全套测试照样全绿，而真实宿主上
+  // `/capital-watchlist/*` 就退化成"任何本机进程凭路径即可读写用户的自选股"（清单与报价快照是
+  // 跨 workspace 的用户资产）。这条走完整装配：假 connection 说 401，注册出去的 handler 必须拒。
+  const routes = []
+  const fake = createFakeDomain()
+  const asked = []
+  const harness = fakeCtx({
+    webServer: { register: (route) => { routes.push(route); return () => {} } },
+    connection: { requestRejection: (req) => { asked.push(req.url); return 401 } },
+    services: { storageDomain: { open: () => fake.domain } },
+  })
+  apply(harness.ctx)
+  assert.equal(routes.length, 1, 'webServer 就绪 ⇒ 路由当场挂上')
+
+  const { req, res } = httpFixture({ method: 'GET', url: '/capital-watchlist/list' })
+  await routes[0].handler(req, res)
+  assert.deepEqual(asked, ['/capital-watchlist/list'], '每个请求都必须过 connection.requestRejection')
+  assert.equal(res.statusCode, 401, '⛔ connection 判 401 却不生效 = 围栏没接上，这是个无认证端点')
+  assert.equal(res.body, 'unauthorized')
+  assert.equal(res.headers['cache-control'], 'no-store')
+})
+
+test('apply()：connection 判可放行时，围栏不许自己把请求拦死', async () => {
+  const routes = []
+  const fake = createFakeDomain()
+  const stub = stubFuyao()
+  const harness = fakeCtx({
+    webServer: { register: (route) => { routes.push(route); return () => {} } },
+    connection: { requestRejection: () => undefined },
+    services: { storageDomain: { open: () => fake.domain } },
+  })
+  apply(harness.ctx)
+  try {
+    const { req, res } = httpFixture({ method: 'GET', url: '/capital-watchlist/list' })
+    await routes[0].handler(req, res)
+    assert.equal(res.statusCode, 200, 'requestRejection 回 undefined 就是放行')
+    assert.equal(res.json().items.length, SEED_ITEMS.length, '放行之后走的还是同一条服务路径')
+  } finally {
+    stub.restore()
+  }
 })
 
 test('apply()：webServer 缺席的载体（web profile 形状）仍激活，出现后才挂', () => {
