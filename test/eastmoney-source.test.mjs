@@ -37,17 +37,18 @@ const MACRO_CAPABILITIES = [
   'eastmoney_cpi', 'eastmoney_ppi', 'eastmoney_gdp', 'eastmoney_pmi', 'eastmoney_money_supply',
   'eastmoney_rmb_loan', 'eastmoney_customs_trade', 'eastmoney_retail_sales', 'eastmoney_deposit_reserve',
 ]
-const SNAKE_CASE_CAPABILITIES = [...MACRO_CAPABILITIES, 'eastmoney_mutual_flow', 'eastmoney_mutual_quota', 'eastmoney_main_capital_snapshot', 'eastmoney_dividend_plan', 'eastmoney_holder_number_snapshot', 'eastmoney_margin_trading']
+const SNAKE_CASE_CAPABILITIES = [...MACRO_CAPABILITIES, 'eastmoney_mutual_flow', 'eastmoney_mutual_quota', 'eastmoney_main_capital_snapshot', 'eastmoney_dividend_plan', 'eastmoney_holder_number_snapshot', 'eastmoney_margin_trading', 'eastmoney_convertible_bond_list']
 
-test('Eastmoney source：注册二十个 capability 与内部身份', () => {
+test('Eastmoney source：注册二十一个 capability 与内部身份', () => {
   const sources = createEastmoneySources()
   assert.deepEqual(sources.map((source) => source.schema.capability), [
     'eastmoney_top_buy_sell_market', 'eastmoney_top_buy_sell_ticker', 'eastmoney_lockup_expiry',
     'eastmoney_sector_rotation', 'eastmoney_cashflow_rotation', ...MACRO_CAPABILITIES,
     'eastmoney_mutual_flow', 'eastmoney_main_capital_snapshot',
     'eastmoney_dividend_plan', 'eastmoney_holder_number_snapshot', 'eastmoney_mutual_quota', 'eastmoney_margin_trading',
+    'eastmoney_convertible_bond_list',
   ])
-  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 20)
+  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 21)
   for (const source of sources) {
     assert.equal(source.schema.source_label, 'eastmoney')
     assert.match(source.schema.data_key, /^eastmoney\.http\./)
@@ -449,6 +450,159 @@ test('eastmoney_margin_trading：42 列宽表靠字段字典仍在详情预算�
   const withSchema = JSON.stringify({ ...described, output_schema: source.schema.output_schema, output_fields: undefined })
   assert.ok(dictionary.length < 4096, `字典形态详情 ${dictionary.length} 字符，已打穿单能力 4096 预算`)
   assert.ok(withSchema.length > 4096, `schema 直发形态只有 ${withSchema.length} 字符，这条回归失去意义`)
+})
+
+/**
+ * 可转债行的上游形状（2026-10-05 live 复核过）。`BOND_EXPIRE` 上游就是**字符串**，
+ * `*_DATE` 一律带 ` 00:00:00`，行情列整表恒 null——这三点是这张表最容易踩的地方。
+ */
+const bondRaw = (overrides = {}) => ({
+  SECURITY_CODE: '118077', SECUCODE: '118077.SH', TRADE_MARKET: 'CNSESH', SECURITY_NAME_ABBR: '莱特转债',
+  CONVERT_STOCK_CODE: '688150', SECURITY_SHORT_NAME: '莱特光电',
+  PUBLIC_START_DATE: '2026-09-29 00:00:00', VALUE_DATE: '2026-09-29 00:00:00', LISTING_DATE: null,
+  EXPIRE_DATE: '2032-09-29 00:00:00', CEASE_DATE: '2032-09-28 00:00:00', DELIST_DATE: null,
+  TRANSFER_START_DATE: '2027-04-12 00:00:00', TRANSFER_END_DATE: '2032-09-28 00:00:00', BOND_EXPIRE: '6',
+  RATING: 'AA', PARTY_NAME: '中证鹏元资信评估股份有限公司', ACTUAL_ISSUE_SCALE: 5.24779, PAR_VALUE: 100, ISSUE_PRICE: 100,
+  INITIAL_TRANSFER_PRICE: 44.82, TRANSFER_VALUE: 44.82, COUPON_IR: 0.1,
+  IB_START_DATE: '2026-09-29 00:00:00', IB_END_DATE: '2027-09-28 00:00:00', CASHFLOW_DATE: '2027-09-29 00:00:00',
+  PAY_INTEREST_DAY: '09-29', INTEREST_RATE_EXPLAIN: '第一年0.10%、第二年0.30%、第三年0.60%、第四年1.00%、第五年1.50%、第六年2.00%。',
+  FIRST_PER_PREPLACING: 1.313, ONLINE_GENERAL_AAU: 1000, ONLINE_GENERAL_LWR: 0.00118203, IS_CONVERT_STOCK: '否',
+  // 恒 null / 恒占位的行情列与内部编码：live 实测整表如此，必须留在 fixture 里验证"被丢弃"。
+  CONVERT_STOCK_PRICE: null, CURRENT_BOND_PRICE: null, TRANSFER_PRICE: null, TRANSFER_PREMIUM_RATIO: 100,
+  RESALE_TRIG_PRICE: null, REDEEM_TRIG_PRICE: null, PBV_RATIO: null, MARKET: null,
+  ISSUE_TYPE: '1,4', REDEEM_TYPE: '2', PARAM_NAME: '交易所系统网上向社会公众投资者发行', BOND_COMBINE_CODE: '26092900001LTZ',
+  FIRST_PROFIT: 39.3, RESALE_CLAUSE: '回售条款正文……', REDEEM_CLAUSE: '赎回条款正文……', ISSUE_OBJECT: '发行对象……',
+  ...overrides,
+})
+
+test('eastmoney_convertible_bond_list：日期轴是起息日，正股市场只认上游 TRADE_MARKET', async () => {
+  const originalFetch = globalThis.fetch
+  let requested
+  globalThis.fetch = async (url) => {
+    requested = new URL(url)
+    return response({ success: true, code: 0, result: { pages: 1, count: 9, data: [bondRaw()] } })
+  }
+  try {
+    const source = sourceMap().eastmoney_convertible_bond_list
+    const result = await source.execute({ capability: 'eastmoney_convertible_bond_list', params: { start_date: '2026-09-01', end_date: '2026-09-30' }, session }, signal)
+    assert.equal(requested.searchParams.get('sortColumns'), 'PUBLIC_START_DATE')
+    // 过滤列与排序列同为 PUBLIC_START_DATE（实测与 VALUE_DATE 1059/1059 相同且从不为空）：
+    // 换成 LISTING_DATE 就会静默吞掉"已发行未上市"的债。
+    assert.equal(requested.searchParams.get('filter'), `(PUBLIC_START_DATE>='2026-09-01')(PUBLIC_START_DATE<='2026-09-30')`)
+    const [row] = result.data.item
+    assert.deepEqual([row.thscode, row.ticker, row.name, row.market], ['118077.SH', '118077', '莱特转债', 'CNSESH'], '行主体是债券本身')
+    assert.deepEqual([row.stock_ticker, row.stock_name, row.stock_thscode], ['688150', '莱特光电', '688150.SH'], '正股另起一组键，不与债券混用')
+    assert.equal(row.value_date, '2026-09-29')
+    assert.equal(row.value_date_ms, Date.parse('2026-09-29T00:00:00+08:00'))
+    assert.equal(row.listing_date, null, '未上市就是 null，不拿申购日顶替')
+    assert.equal(row.bond_expire_years, 6, 'BOND_EXPIRE 上游是字符串，映射成数值')
+    assert.equal(row.issue_scale_yi, 5.24779, '发行规模按亿元原值给')
+    assert.equal(row.coupon_rate_pct, 0.1, '当年票面利率是百分数原值')
+    assert.deepEqual([row.interest_year_start_date, row.interest_year_end_date, row.next_cashflow_date], ['2026-09-29', '2027-09-28', '2027-09-29'])
+    assert.equal(row.pay_interest_day, '09-29', '付息日原文是 MM-DD，不硬造年份')
+    assert.equal(row.in_conversion_period, '否', '上游 是/否 原文保留')
+    for (const dropped of ['CONVERT_STOCK_PRICE', 'CURRENT_BOND_PRICE', 'TRANSFER_PRICE', 'TRANSFER_PREMIUM_RATIO', 'PBV_RATIO', 'RESALE_TRIG_PRICE', 'REDEEM_TRIG_PRICE', 'MARKET', 'TRANSFER_VALUE', 'PAR_VALUE', 'ISSUE_PRICE', 'ONLINE_GENERAL_AAU', 'ISSUE_TYPE', 'REDEEM_TYPE', 'PARAM_NAME', 'BOND_COMBINE_CODE', 'FIRST_PROFIT', 'RESALE_CLAUSE', 'REDEEM_CLAUSE', 'ISSUE_OBJECT', 'PUBLIC_START_DATE']) {
+      assert.ok(!(dropped in row), `${dropped} 不该出现在行里：恒 null/恒占位的行情列、内部编码与条款正文一律丢弃（§4.3 第 2 条）`)
+    }
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_convertible_bond_list：老三板与 126 段老债都不按代码首位猜市场', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => response({
+    success: true, code: 0,
+    result: {
+      pages: 1, count: 2,
+      data: [
+        // live 实测：404005.NQ 普利退债，TRADE_MARKET=STAS00，正股 400266 是老三板标的。
+        // 按数字首位（4/8/92 → 北交所）会把它写成 400266.BJ——那就是给一只证券编造了市场。
+        bondRaw({ SECUCODE: '404005.NQ', SECURITY_CODE: '404005', TRADE_MARKET: 'STAS00', SECURITY_NAME_ABBR: '普利退债', CONVERT_STOCK_CODE: '400266', SECURITY_SHORT_NAME: 'R普利1' }),
+        // live 实测：126 段沪市老债（分离交易可转债）没有转股期，四列同批为 null。
+        bondRaw({ SECUCODE: '126018.SH', SECURITY_CODE: '126018', TRADE_MARKET: 'CNSESH', SECURITY_NAME_ABBR: '08江铜债', CONVERT_STOCK_CODE: '600362', SECURITY_SHORT_NAME: '江西铜业', TRANSFER_START_DATE: null, TRANSFER_END_DATE: null, INITIAL_TRANSFER_PRICE: null, IS_CONVERT_STOCK: null, COUPON_IR: null, IB_START_DATE: null, IB_END_DATE: null, CASHFLOW_DATE: null }),
+      ],
+    },
+  })
+  try {
+    const source = sourceMap().eastmoney_convertible_bond_list
+    const { data } = await source.execute({ capability: 'eastmoney_convertible_bond_list', params: { start_date: '2008-01-01', end_date: '2026-10-05' }, session }, signal)
+    assert.equal(data.item[0].stock_thscode, null, '未知市场不给后缀，也不给 .BJ')
+    assert.equal(data.item[0].stock_ticker, '400266', '正股代码本身仍然给出去')
+    assert.equal(data.item[0].market, 'STAS00', '市场原文保留，让调用方能自己看出这是老三板')
+    assert.deepEqual([data.item[1].stock_thscode, data.item[1].stock_ticker], ['600362.SH', '600362'], '126 开头照样按上游市场挂沪')
+    for (const key of ['transfer_start_date', 'transfer_end_date', 'initial_transfer_price', 'in_conversion_period', 'coupon_rate_pct', 'interest_year_start_date']) {
+      assert.equal(data.item[1][key], null, `${key} 在分离交易可转债上是真实空缺，不许夹成占位值`)
+    }
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_convertible_bond_list：SECUCODE 丢后缀或起息/到期日畸形就响亮失败', async () => {
+  const originalFetch = globalThis.fetch
+  const source = sourceMap().eastmoney_convertible_bond_list
+  const call = () => source.execute({ capability: 'eastmoney_convertible_bond_list', params: { start_date: '2026-09-01', end_date: '2026-09-30' }, session }, signal)
+  for (const broken of [
+    bondRaw({ SECUCODE: '118077' }),
+    bondRaw({ VALUE_DATE: '' }),
+    bondRaw({ VALUE_DATE: '2026年9月' }),
+    bondRaw({ EXPIRE_DATE: null }),
+    bondRaw({ CONVERT_STOCK_CODE: '68815' }),
+  ]) {
+    globalThis.fetch = async () => response({ success: true, code: 0, result: { pages: 1, count: 1, data: [broken] } })
+    await assert.rejects(call, (error) => error?.code === 'eastmoney_invalid_response', '半截行不能出库：' + JSON.stringify(broken.SECUCODE ?? broken.CONVERT_STOCK_CODE))
+  }
+  // 区间内没有发行是**数据缺口**（上游 code 9201），给空结果而不是错误，免得模型反复重试。
+  globalThis.fetch = async () => response({ success: false, code: 9201, message: '返回数据为空' })
+  const empty = await call()
+  assert.deepEqual([empty.data.item, empty.data.pagination.total], [[], 0])
+})
+
+test('eastmoney_convertible_bond_list：代码参数剥市场后缀，畸形代码在出网前就拒绝', async () => {
+  const originalFetch = globalThis.fetch
+  let requested
+  globalThis.fetch = async (url) => {
+    requested = new URL(url)
+    return response({ success: true, code: 0, result: { pages: 1, count: 1, data: [bondRaw()] } })
+  }
+  try {
+    const source = sourceMap().eastmoney_convertible_bond_list
+    // 后缀只用来收窄：过滤走不带市场的 SECURITY_CODE / CONVERT_STOCK_CODE（债市代码 11/12/13/40 都有）。
+    await source.execute({ capability: 'eastmoney_convertible_bond_list', params: { start_date: '2019-01-01', end_date: '2019-12-31', bond_code: '110059.SH' }, session }, signal)
+    assert.equal(requested.searchParams.get('filter'), `(PUBLIC_START_DATE>='2019-01-01')(PUBLIC_START_DATE<='2019-12-31')(SECURITY_CODE="110059")`)
+    await source.execute({ capability: 'eastmoney_convertible_bond_list', params: { start_date: '2019-01-01', end_date: '2019-12-31', stock_code: '600000' }, session }, signal)
+    assert.equal(requested.searchParams.get('filter'), `(PUBLIC_START_DATE>='2019-01-01')(PUBLIC_START_DATE<='2019-12-31')(CONVERT_STOCK_CODE="600000")`)
+    // 老三板退市债（404005.NQ）也是本表的真实成员，后缀必须认。
+    await source.execute({ capability: 'eastmoney_convertible_bond_list', params: { start_date: '2021-01-01', end_date: '2021-12-31', bond_code: '404005.nq' }, session }, signal)
+    assert.equal(requested.searchParams.get('filter'), `(PUBLIC_START_DATE>='2021-01-01')(PUBLIC_START_DATE<='2021-12-31')(SECURITY_CODE="404005")`)
+    for (const bad of ['11005', 'abc123', '600000.XX', '', '600000.SHX']) {
+      requested = undefined
+      await assert.rejects(
+        () => source.execute({ capability: 'eastmoney_convertible_bond_list', params: { start_date: '2026-01-01', end_date: '2026-10-05', bond_code: bad }, session }, signal),
+        /bond_code/,
+      )
+      assert.equal(requested, undefined, '参数畸形必须在上网之前拒绝')
+    }
+    await assert.rejects(
+      () => source.execute({ capability: 'eastmoney_convertible_bond_list', params: { start_date: '2026-01-01', end_date: '2026-10-05', listing_year: 2026 }, session }, signal),
+      /unsupported parameter/,
+    )
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_convertible_bond_list：72 列表取 29 列，字典形态才装得进详情预算', () => {
+  const source = sourceMap().eastmoney_convertible_bond_list
+  const hub = new DataCollectorHub({ store: { async save() { return {} } } })
+  hub.registerSource(source)
+  const described = hub.describeCapability('eastmoney_convertible_bond_list')
+  const declared = Object.keys(source.schema.output_schema.properties.item.items.properties)
+  assert.equal(declared.length, 29, '转债表列数变了就同步更新这条回归与下面的体积对比')
+  assert.equal(described.output_fields.split('\n').filter((line) => line.startsWith('item[].')).length, declared.length, '投影不能漏列')
+  const dictionary = JSON.stringify(described)
+  const withSchema = JSON.stringify({ ...described, output_schema: source.schema.output_schema, output_fields: undefined })
+  assert.ok(dictionary.length < 4096, `字典形态详情 ${dictionary.length} 字符，已打穿单能力 4096 预算`)
+  assert.ok(withSchema.length > 4096, `schema 直发形态只有 ${withSchema.length} 字符，这条回归失去意义`)
+  // 契约层面必须能读出这三件事，否则丢弃列会被当成取数失败、量纲会被猜错。
+  for (const promise of [/不含行情/, /1059\/1059/, /亿元/, /百分数原值/, /实际存续年数/, /当前计息年度/, /按代码首位/]) {
+    assert.match(described.description, promise, `转债表描述缺少契约承诺 ${promise}`)
+  }
 })
 
 test('eastmoney 宏观表：报告期缺失或畸形一律响亮失败，不产出半截行', async () => {

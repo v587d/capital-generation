@@ -2,7 +2,7 @@
 
 > 本表由 `npm run docs:capabilities` 从 Fuyao、Tencent 与 Eastmoney source 定义生成，并由 `test/data-collector-capabilities.test.mjs` 断言与实现同步：新增端点若忘了重新生成，测试会失败。
 
-当前共 **84 个 capability**：同花顺 Fuyao 61 个，腾讯公开 HTTP 3 个，东方财富 HTTP 20 个。参数后带 **\*** 表示必填。
+当前共 **85 个 capability**：同花顺 Fuyao 61 个，腾讯公开 HTTP 3 个，东方财富 HTTP 21 个。参数后带 **\*** 表示必填。
 
 **复核方式**：Fuyao 能力可用 `npm run smoke:fuyao` 真实复核；Tencent 能力使用最小 smoke fixture 或按需真实请求复核；Eastmoney 能力使用固定 fixture，并按需执行公开网页 JSON smoke。
 
@@ -203,3 +203,4 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 | `eastmoney_dividend_plan` | `/eastmoney/dividend_plan` | `ticker`\* `start_date`\* `end_date`\* `page` `size` | 是 | 东财分红送配方案明细（按个股与除权日） |
 | `eastmoney_holder_number_snapshot` | `/eastmoney/holder_number_snapshot` | `ticker` `sort_field` `sort_order` `page` `size` | 是 | 东财股东户数最新一期截面 |
 | `eastmoney_margin_trading` | `/eastmoney/margin_trading` | `ticker`\* `start_date`\* `end_date`\* `page` `size` | 是 | 个股融资融券明细（按票与交易日） |
+| `eastmoney_convertible_bond_list` | `/eastmoney/convertible_bond_list` | `start_date`\* `end_date`\* `bond_code` `stock_code` `page` `size` | 是 | 东财可转债发行清单与条款要素（按起息日） |

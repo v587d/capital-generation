@@ -2,7 +2,7 @@ import type { DataRequest, DataSource, SchemaDescriptor } from '../data-collecto
 import { buildDataKey } from '../data-collector/hub.js'
 import { getDataTimeContract } from '../time/tools.js'
 import { sharedEastmoneyClient, EastmoneyTransportError } from '../net/eastmoney-client.js'
-import { normalizeEastmoneyAshareIdentity, normalizeEastmoneyBoardIdentity, normalizeEastmoneySecurityIdentity, type EastmoneyBoardIdentity } from './security-identity.js'
+import { normalizeEastmoneyAshareIdentity, normalizeEastmoneyBoardIdentity, normalizeEastmoneySecurityIdentity, type EastmoneyBoardIdentity, type EastmoneyMarket } from './security-identity.js'
 
 type Params = Record<string, unknown>
 type JsonRecord = Record<string, unknown>
@@ -997,6 +997,138 @@ async function executeMargin(params: Params, signal: AbortSignal): Promise<{ dat
   return { data: { item: parsed.rows.map((raw) => parseMarginRow(raw, thscode)), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(marginRow) }
 }
 
+/**
+ * 可转债发行清单（`RPT_BOND_CB_LIST`，实测全库 1059 只、起息日 2007-07-02 起）。
+ *
+ * 72 列里只有**条款与日期**有值：`CONVERT_STOCK_PRICE` / `CURRENT_BOND_PRICE`(_NEW) /
+ * `TRANSFER_PRICE` / `TRANSFER_PREMIUM_RATIO` / `RESALE_TRIG_PRICE` / `REDEEM_TRIG_PRICE` /
+ * `PBV_RATIO` / `MARKET` / `CONVERT_STOCK_PRICEHQ` 实测 **1059/1059 恒为 null**（东财页面上那些
+ * 行情数是另一条接口现算的），`TRANSFER_VALUE` 只是 `INITIAL_TRANSFER_PRICE` 的副本（1051/1059 相同
+ * 却多 8 个 null）。所以这张表**不承诺行情**，也不把那些 null 当成取数失败。
+ */
+const BOND_MARKET_SUFFIX: Record<string, EastmoneyMarket | null> = { CNSESH: 'SH', CNSESZ: 'SZ', STAS00: null }
+
+function bondStockIdentity(raw: JsonRecord): JsonRecord {
+  const digits = String(raw.CONVERT_STOCK_CODE ?? '')
+  if (!/^\d{6}$/.test(digits)) throw sourceError(`Eastmoney convertible bond row has invalid CONVERT_STOCK_CODE ${digits || '(empty)'}`, 'eastmoney_invalid_response')
+  return {
+    stock_ticker: digits,
+    stock_name: String(raw.SECURITY_SHORT_NAME ?? ''),
+    // 正股市场只取上游 TRADE_MARKET，**不按数字首位推**：实测 15 只 2007-2009 沪市老债代码是 126 开头
+    // （首位 1 也不等于沪），老三板退市债（STAS00）的正股 400266 更不是北交所标的——猜错就是把一只证券
+    // 挂到另一个市场名下。未知市场一律不给后缀（`stock_thscode` 为 null），不猜也不报错。
+    stock_thscode: BOND_MARKET_SUFFIX[String(raw.TRADE_MARKET ?? '')] ? `${digits}.${BOND_MARKET_SUFFIX[String(raw.TRADE_MARKET ?? '')]}` : null,
+  } as JsonRecord
+}
+
+const bondRow: object = {
+  type: 'object',
+  properties: {
+    thscode: { type: 'string' }, ticker: { type: 'string' }, name: { type: 'string' }, market: { type: 'string' },
+    stock_ticker: { type: 'string' }, stock_name: { type: 'string' }, stock_thscode: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    value_date: { type: 'string' }, value_date_ms: { type: 'integer' },
+    listing_date: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    cease_date: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    expire_date: { type: 'string' },
+    delist_date: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    transfer_start_date: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    transfer_end_date: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    bond_expire_years: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    rating: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    rating_agency: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    issue_scale_yi: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    initial_transfer_price: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    coupon_rate_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    interest_year_start_date: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    interest_year_end_date: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    next_cashflow_date: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    pay_interest_day: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    interest_rate_explain: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    first_preplace_per_share_yuan: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    online_lottery_ratio_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    in_conversion_period: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+  },
+  additionalProperties: true,
+}
+
+function parseBondRow(raw: JsonRecord): JsonRecord {
+  // 债券身份只认上游给的 SECUCODE（带 .SH/.SZ/.NQ 后缀）：本表 1059/1059 都有值，丢了后缀就是形状变了。
+  if (typeof raw.SECUCODE !== 'string' || !raw.SECUCODE.includes('.')) {
+    throw sourceError('Eastmoney convertible bond row lost its market suffix in SECUCODE', 'eastmoney_invalid_response')
+  }
+  const valueDate = dayValue(raw.VALUE_DATE)
+  if (valueDate === null) throw sourceError('Eastmoney convertible bond row is missing VALUE_DATE', 'eastmoney_invalid_response')
+  const expireDate = dayValue(raw.EXPIRE_DATE)
+  if (expireDate === null) throw sourceError('Eastmoney convertible bond row is missing EXPIRE_DATE', 'eastmoney_invalid_response')
+  return {
+    thscode: raw.SECUCODE,
+    ticker: String(raw.SECURITY_CODE ?? ''),
+    name: String(raw.SECURITY_NAME_ABBR ?? ''),
+    market: String(raw.TRADE_MARKET ?? ''),
+    ...bondStockIdentity(raw),
+    value_date: valueDate,
+    value_date_ms: dateMs(valueDate),
+    listing_date: dayValue(raw.LISTING_DATE),
+    cease_date: dayValue(raw.CEASE_DATE),
+    expire_date: expireDate,
+    delist_date: dayValue(raw.DELIST_DATE),
+    transfer_start_date: dayValue(raw.TRANSFER_START_DATE),
+    transfer_end_date: dayValue(raw.TRANSFER_END_DATE),
+    bond_expire_years: numberOrNull(raw.BOND_EXPIRE),
+    rating: textOrNull(raw.RATING),
+    rating_agency: textOrNull(raw.PARTY_NAME),
+    issue_scale_yi: numberOrNull(raw.ACTUAL_ISSUE_SCALE),
+    initial_transfer_price: numberOrNull(raw.INITIAL_TRANSFER_PRICE),
+    coupon_rate_pct: numberOrNull(raw.COUPON_IR),
+    interest_year_start_date: dayValue(raw.IB_START_DATE),
+    interest_year_end_date: dayValue(raw.IB_END_DATE),
+    next_cashflow_date: dayValue(raw.CASHFLOW_DATE),
+    pay_interest_day: textOrNull(raw.PAY_INTEREST_DAY),
+    interest_rate_explain: textOrNull(raw.INTEREST_RATE_EXPLAIN),
+    first_preplace_per_share_yuan: numberOrNull(raw.FIRST_PER_PREPLACING),
+    online_lottery_ratio_pct: numberOrNull(raw.ONLINE_GENERAL_LWR),
+    in_conversion_period: textOrNull(raw.IS_CONVERT_STOCK),
+  } as JsonRecord
+}
+
+/** 债市代码是 11/12/13/40 等六位数；后缀只用于收窄（实测出现 .SH/.SZ/.NQ），一律剥掉再过滤，不给市场推断留口子。 */
+function bondCode(value: unknown, name: string): string {
+  const raw = String(value).toUpperCase()
+  const digits = raw.replace(/\.[A-Z]{2,3}$/u, '')
+  if (digits !== raw && !/(?:\.SH|\.SZ|\.BJ|\.NQ)$/u.test(raw)) throw new Error(`${name} has an unrecognized market suffix: ${raw}`)
+  if (!/^\d{6}$/.test(digits)) throw new Error(`${name} must be a six-digit code (a market suffix such as .SH is accepted and ignored)`)
+  return digits
+}
+
+function normalizeBondList(params: Params): Params {
+  const normalized = normalizeDateRange(params, ['start_date', 'end_date', 'bond_code', 'stock_code', 'page', 'size'])
+  const result: Params = { ...normalized }
+  if (params.bond_code !== undefined) result.bond_code = bondCode(params.bond_code, 'bond_code')
+  if (params.stock_code !== undefined) result.stock_code = bondCode(params.stock_code, 'stock_code')
+  return result
+}
+
+async function executeBondList(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
+  const url = new URL(DATACENTER_URL)
+  url.searchParams.set('reportName', 'RPT_BOND_CB_LIST')
+  url.searchParams.set('columns', 'ALL')
+  url.searchParams.set('source', 'WEB')
+  url.searchParams.set('client', 'WEB')
+  // sortColumns 与过滤器都用 PUBLIC_START_DATE（实测该列可过滤、可排序，且与 VALUE_DATE 1059/1059 相同）；
+  // 只按其一是因为日期区间过滤实测只有这一列**从不为空**——LISTING_DATE 有 8 只未上市的债会被区间静默吞掉。
+  url.searchParams.set('sortColumns', 'PUBLIC_START_DATE')
+  url.searchParams.set('sortTypes', '-1')
+  url.searchParams.set('pageNumber', String(params.page))
+  url.searchParams.set('pageSize', String(params.size))
+  const filters = [`(PUBLIC_START_DATE>='${params.start_date}')(PUBLIC_START_DATE<='${params.end_date}')`]
+  if (params.bond_code !== undefined) filters.push(`(SECURITY_CODE="${params.bond_code}")`)
+  if (params.stock_code !== undefined) filters.push(`(CONVERT_STOCK_CODE="${params.stock_code}")`)
+  url.searchParams.set('filter', filters.join(''))
+  const result = requireDatacenterResult(await getJson(url.toString(), signal, 'convertible bond list'), 'convertible bond list')
+  const parsed = requireRows(result, 'convertible bond list')
+  return { data: { item: parsed.rows.map(parseBondRow), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(bondRow) }
+}
+
 function createSource(options: { capability: string; name: string; summary: string; description: string; inputSchema: object; outputSchema: object; paginated?: boolean; cacheMaxAgeMs?: number; rowShape: SchemaDescriptor['rowShape']; allowed: string[]; normalize: (params: Params) => Params; execute: (params: Params, signal: AbortSignal) => Promise<{ data: unknown; schema: object }> }): DataSource {
   const schema: SchemaDescriptor = { capability: options.capability, time_contract: getDataTimeContract(options.capability), name: options.name, source: `http:eastmoney.${options.capability}`, data_key: buildDataKey('eastmoney', 'http', options.capability), source_label: 'eastmoney', paginated: options.paginated === true, cacheMaxAgeMs: options.cacheMaxAgeMs, rowShape: options.rowShape, summary: options.summary, description: options.description, input_schema: options.inputSchema, output_schema: options.outputSchema }
   const normalize = (params: Record<string, unknown>): Params => options.normalize(params)
@@ -1063,6 +1195,20 @@ const tickerRangeInput = {
   additionalProperties: false,
 }
 
+const bondListInput = {
+  type: 'object',
+  properties: {
+    start_date: { type: 'string', description: '起息日区间起点 YYYY-MM-DD' },
+    end_date: { type: 'string', description: '起息日区间终点 YYYY-MM-DD' },
+    bond_code: { type: 'string', description: '可转债代码（六位数字，可带市场后缀）；省略则取区间内全部转债' },
+    stock_code: { type: 'string', description: '正股代码（六位数字，可带市场后缀）；与 bond_code 同时给则取交集' },
+    page: { type: 'integer', minimum: 1 },
+    size: { type: 'integer', minimum: 1, maximum: MAX_PAGE_SIZE },
+  },
+  required: ['start_date', 'end_date'],
+  additionalProperties: false,
+}
+
 export function createEastmoneySources(): DataSource[] {
   return [
     createSource({ capability: 'eastmoney_top_buy_sell_market', name: 'get_eastmoney_top_buy_sell_market', summary: '东财全市场龙虎榜汇总', description: '按交易日区间分页获取东方财富龙虎榜上榜股票汇总。金额字段单位为元，CHANGE_RATE/TURNOVERRATE/DEAL_*_RATIO 为东财百分数原值；同一股票同日可能因多个上榜原因返回多行，不去重。上游 HTTP 200 但 success=false、code 非 0 或 result 缺失均视为失败，不转换为空数组。', inputSchema: dateRangeInput, outputSchema: datacenterOutput(topBuySellRow), paginated: true, rowShape: { rowKey: 'item' }, allowed: ['start_date', 'end_date', 'page', 'size'], normalize: (params) => normalizeDateRange(params, ['start_date', 'end_date', 'page', 'size']), execute: (params, signal) => executeBillboard(params, signal) }),
@@ -1112,6 +1258,13 @@ export function createEastmoneySources(): DataSource[] {
       description: '按单只 A 股与交易日区间获取融资融券明细（RPTA_WEB_RZRQ_GGMX，实测 600519 共 3992 个交易日、可翻回约 2010 年）。⛔ **披露新鲜度跨市场不一致**：实测同一天查询沪市（600519）最新到 2026-09-30、深市（000001）最新只有 2026-09-29，深市滞后一个交易日；把两市当天放一起比会得出错误结论，需要同日对齐就自己截到共同日期并写明。金额列单位是元（实测 RZYE=22131853460 即 221 亿元）。余额族：margin_balance 融资余额、short_balance 融券余额、total_balance 两融合计、balance_gap 融资减融券——后两列已用真报文做加减法核对（total=marg…+short、gap=融资-融券，精确成立）。流量族：margin_buy 融资买入额、margin_repay 融资偿还额、margin_net_buy 融资净买入（=买入减偿还，实测精确成立），带 _3d / _5d / _10d 后缀的是**滚动累计而不是日均**，别除以天数。融券流量（short_sell_volume / short_repay_volume / short_net_buy_volume 及其累计）量纲是**股数**，与金额族不可相加。参考列：total_market_cap 总市值（元）、close_price 收盘价（元）、change_pct 当日涨跌幅、change_3d_pct / change_5d_pct / change_10d_pct 区间涨跌幅，均为东财百分数原值；margin_balance_pct 是融资余额占总市值的百分数原值（实测 0.8617 与 RZYE/SZ 一致）。margin_balance_growth_raw 的增长口径未核验，只做同列相对比较。market_segment 是上游市场原文（融资融券_沪证 / 融资融券_深证）。上游的 KCB 标志、TRADE_MARKET(_CODE) 内部编码与不带后缀的 SCODE 不进取；行身份采用请求传入的带市场后缀代码，与上游 SECUCODE 对不上即判 eastmoney_invalid_response。',
       inputSchema: tickerRangeInput, outputSchema: datacenterOutput(marginRow), paginated: true, rowShape: { rowKey: 'item' },
       allowed: ['ticker', 'start_date', 'end_date', 'page', 'size'], normalize: normalizeMargin, execute: executeMargin,
+    }),
+    createSource({
+      capability: 'eastmoney_convertible_bond_list', name: 'get_eastmoney_convertible_bond_list',
+      summary: '东财可转债发行清单与条款要素（按起息日）',
+      description: '按起息日区间分页获取东方财富可转债发行清单（RPT_BOND_CB_LIST，实测全库 1059 只、起息日 2007-07-02 至今，含已摘牌债与老三板退市债）。⛔ **本表不含行情**：转债现价、正股现价、最新转股价、回售/赎回触发价、PBV 一类列实测 1059/1059 恒为 null，转股溢价率恒为占位值 100——东财页面上那些数是另一条行情接口现算的；要现价或溢价率走别的来源，不要把那些 null 当成取数失败。区间过滤的是**起息日**（实测与网上申购日 1059/1059 相同，所以只留 value_date 一列），不是上市日：实测 8 只「已发行未上市」的 listing_date 为 null，按上市日过滤会把它们静默吞掉。行主体是**债券**——thscode / ticker / name 是转债本身（如 110059.SH），正股在 stock_ticker / stock_name / stock_thscode，两者不要混用。⛔ 正股市场只取上游 TRADE_MARKET（CNSESH=沪、CNSESZ=深），**不许按代码首位推**：实测 15 只 2007-2009 沪市老债代码是 126 开头；老三板退市债（TRADE_MARKET=STAS00，如 404005.NQ，正股 400266）与任何未知市场都不给 stock_thscode（该列为 null）。量纲：issue_scale_yi 是发行规模**亿元**（实测浦发转债 500、南药转债 10.81491 精确到元）；面值与发行价恒为 100 元/张，故不收录；initial_transfer_price 与 first_preplace_per_share_yuan（原股东**每股**可获配的债券面值，元/股）单位是元；coupon_rate_pct 与 online_lottery_ratio_pct（网上发行中签率）是**百分数原值**，0.2 就读作 0.2%。⏱ 随查询日移动的一组：coupon_rate_pct 是**当前计息年度**的票面利率（实测所有非空行的计息区间都跨过查询日，且与阶梯原文逐年对得上——起息 2023-07-18 的福蓉转债给 1.5，正对应「第四年1.50%」），interest_year_start_date / interest_year_end_date / next_cashflow_date 是这个计息年度的起止与付息日；已到期或退市的债这四处实测 467/1059 为 null。完整利率阶梯读 interest_rate_explain——它是上游原文，可能是逐年阶梯，也可能是发行前尚未定案的「预设区间」（实测 126 段老债就是这种），别当成交利率用。bond_expire_years 是**实际存续年数**（等于 expire_date 减 value_date；提前赎回的债按实际终止日算——豫光转债合同 6 年、实测 1.3534），不是合同期限。日期列分职：cease_date 停止交易日、expire_date 到期或终止日、delist_date 摘牌日（null=尚未摘牌；实测 4 条是**将来**日期，即已公告待摘牌）、listing_date 上市日、transfer_start_date / transfer_end_date 转股期起止；cease_date 与 transfer_end_date 实测 180/1059 不一致，故两列都保留。实测 15 只 2007-2009 老债（14 只 126 段沪债加 115003.SZ）没有转股期：transfer_start_date / transfer_end_date / initial_transfer_price / in_conversion_period **同批**为 null，那是产品形态（分离交易可转债）或上游未披露，不是取数失败。in_conversion_period 有值时是上游原文「是/否」，含义是**当前是否处于转股期**（未开始或已结束都给「否」，实测 是:270 / 否:774）。rating 是东财列示的评级原文（实测只有 AAA/AA+/AA/AA-/A+/A 六档，未标明主体还是债项、未标明评级时点，不要当风险结论用），rating_agency 是评级机构名。区间内没有发行就是空结果（上游 code 9201），不要重试。未收录：回售/赎回条款正文（每行数百字符，读条款去看募集说明书）、网上申购上限、ISSUE_TYPE / REDEEM_TYPE / PARAM_NAME / BOND_COMBINE_CODE 等内部编码、FIRST_PROFIT（实测 -898~26946，口径推不出）、TRANSFER_VALUE（与 initial_transfer_price 实测相同却多 8 个 null）。',
+      inputSchema: bondListInput, outputSchema: datacenterOutput(bondRow), paginated: true, rowShape: { rowKey: 'item' }, cacheMaxAgeMs: 3_600_000,
+      allowed: ['start_date', 'end_date', 'bond_code', 'stock_code', 'page', 'size'], normalize: normalizeBondList, execute: executeBondList,
     }),
   ]
 }

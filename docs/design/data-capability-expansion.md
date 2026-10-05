@@ -1,7 +1,7 @@
 # 数据补录与能力目录容量（本次迭代聚焦）
 
-> 状态：**已评审通过，正在实现**（§6 第 0、1 步已落地；第 2 步东财补录已到两融，剩可转债；
-> 第 3 步腾讯港美股未开始）。日期 2026-10-05。
+> 状态：**已评审通过，正在实现**（§6 第 0、1、2 步已落地，东财补录净新增 16 条、目录 69 → 85 条；
+> 第 3 步腾讯港美股未开始，第 4 步 Wind 另案）。日期 2026-10-05。
 >
 > **本文只管三件事**：① 还能补录哪些数据；② capability 目录/详情的体积上限怎么解；③ 一条能力该放
 > `data_collector` 还是 `web_retriever`。
@@ -113,6 +113,13 @@ DATE:datetime:交易日(Asia/Shanghai,毫秒)
 ```
 
 实测 72 列：JSON Schema **4699 → 约 1300 字符**，详情总字符 ~5400 → **约 2100**，回到预算内。
+
+> **2026-10-05 实测校订（上面那句预测漏了描述）**：字典与 `description` **共用同一个 4096**。
+> 真把东财转债表 72 列全收（其中 13 列恒 null、没有承诺价值）并把六条陷阱写进描述，详情实测
+> **4995 字符 = 超预算 899**；只取"有值且口径可承诺"的 29 列才落到 3738（预算 91.3%）。
+> 结论要改口径：字典消掉的是**逐列 JSON Schema 那 ~3.4KB 固定开销**，不是"宽表随便加列"的许可证——
+> 一张表要么减列、要么减描述，不能同时要。合成回归钉住了这两面（`test/data-collector-hub.test.mjs`：
+> 72 列 + 一句话描述 < 4096，72 列 + 真实长度描述 > 4096）。
 两种落法：
 
 - **A（推荐先做）**：字典塞进 `description`，`output_schema` 只声明外壳（`item: array` + `pagination`），
@@ -264,7 +271,7 @@ Wind 只在需要 Wind 口径/研报级准确度时花积分**；这条要写进
 | 沪深港通 | `RPT_MUTUAL_DEAL_HISTORY` `RPT_MUTUAL_QUOTA` | 到 2026-09-30 | 17 / 13 | ⛔ 2026-10-05 复核：**不是"全为 null"**。北向三档（沪股通 001 / 深股通 003 / 北向合计 005）的 `BUY_AMT / SELL_AMT / NET_DEAL_AMT / ACCUM_DEAL_AMT` 与 `FUND_INFLOW / QUOTA_BALANCE` 为 null，**南向三档（002 / 004 / 006）四项都有值**；成交额 `DEAL_AMT`、笔数 `DEAL_NUM` 双方都披露。所以能力名与描述里不许出现"北向资金净流入"，但南向可以给净买入。**另发现 `TRADE_QUOTA` 跨方向单位不一致**（北向 52000=520 亿元、南向 42000000000=420 亿元），禁止跨方向比较 |
 | 个股主力资金 | `RPT_DMSK_TS_STOCKNEW` | **只有查询日**：实测 5199 行、TRADE_DATE 单一，带旧日期过滤器返回 9201 | 31 | 补 Fuyao `code=2004` 永久关闭的那块，但只能以**快照**形态补：参数面不给日期，`main_cost`=主力成本价（元/股），比例类列口径未核验（`_raw` 后缀） |
 | 融资融券个股 | ✅ `RPTA_WEB_RZRQ_GGMX` 已注册为 `eastmoney_margin_trading` | 单票 3992 个交易日 | **45 → 42 列取用** | §2.2 的兑现处：字典形态详情 2993 字符（73% 预算），同一份直发 JSON Schema 是 4479 > 4096 |
-| 可转债 | `RPT_BOND_CB_LIST` `RPT_CB_BALLOTNUM` `RPT_CB_IMPORTANTDATE` | 1059 页 / 72 列 | **72** | 同上；**转债行情本次未验**，未验不注册 |
+| 可转债 | ✅ `RPT_BOND_CB_LIST` 已注册为 `eastmoney_convertible_bond_list`；`RPT_CB_BALLOTNUM` `RPT_CB_IMPORTANTDATE` 未验 | 全库 1059 只，起息日 2007-07-02 至今 | **72 → 29 列取用** | ⛔ 2026-10-05 逐列核验：**这张表根本不含行情**——转债现价/正股现价/最新转股价/赎回回售触发价/PBV 实测 1059/1059 恒 null，转股溢价率恒为占位值 100。可承诺的是发行条款与日期；`ACTUAL_ISSUE_SCALE` 单位亿元（浦发 500 对上公开事实、南药 10.81491 精确到元），`BOND_EXPIRE` 是**实际存续年数**而非合同期限（提前赎回按实际终止日） |
 | 股东结构 | ✅ `RPT_HOLDERNUMLATEST` 已注册为 `eastmoney_holder_number_snapshot`；`RPT_F10_EH_FREEHOLDERS` `RPT_SHARE_HOLDER_INCREASE` `RPT_ORG_SURVEY` 未验 | 5568 只截面 | 20 | `END_DATE` 是**报告期不是披露日**（实测茅台 2026-06-30 / 披露 2026-08-15），已分列；**只有最新一期，取不到历史** |
 | 分红送配 | ✅ `RPT_SHAREBONUS_DET` 已注册为 `eastmoney_dividend_plan` | 56976 条，可翻回 1991 | 30 | Fuyao `corporate_actions` 只有除权事件，缺方案全字段；送转与派息是**每 10 股**口径 |
 | 商誉 | `RPT_GOODWILL_STOCKDETAILS` | 3 万页 | 25 | 风险排查类 |
@@ -308,10 +315,11 @@ Wind 只在需要 Wind 口径/研报级准确度时花积分**；这条要写进
 1. ✅ **键名与归属规则已固化**（同一天）：§3 四问 + 终判据进 `capital-orchestration` §5，
    `capital-web-protocol` §1.2、`capital-data-protocol` §1 各一条，`test/persona.test.mjs` 有断言；
    §4.3 键名纪律进 `docs/dev/tool-schema.md` §10.6（研发侧，见该节第 4 条的分层理由）。
-2. **东财 datacenter 补录**，按"窄表先走、宽表后走"排：宏观 → 沪深港通（含 `null` 陷阱的响亮失败）→
-   个股主力 → 分红送配 → 股东结构 → **然后**两融 / 可转债（45/72 列）。
-   每条都要：`npm run docs:capabilities` 同步能力表、真报文先验（§10）、`test/apply-integration.test.mjs`
-   的 capability 总数断言跟着改。
+2. ✅ **东财 datacenter 补录已走完**（2026-10-05）：按"窄表先走、宽表后走"排序落成
+   宏观 9 → 沪深港通 2 → 个股主力 → 分红送配 → 股东户数 → 两融 42 列 → 可转债 29 列（72 列取用），
+   实测记录在 §7.1–§7.6。每条都做了 `npm run docs:capabilities` 同步、真报文先验（§10）与
+   `test/apply-integration.test.mjs` 的 capability 总数跟着改。**下一步不是继续加东财表**：
+   剩下的候选（§7.7）都还欠逐列核验，按"未验不注册"停在这里。
 3. **腾讯港美股四条**。
 4. **Wind 结构化 MCP** 另案：先做键名与可复现性 spike，spike 不过就不注册。
 
@@ -356,7 +364,7 @@ node -e "import('./lib/data-collector/hub.js').then(async ({DataCollectorHub}) =
 - 结论 1：**数值列一律按可空声明**（`oneOf [number, null]`），社零与存准率都实测到 null；
   null 原样保留，不补 0、不删列（删列会让 `query_dataset` 把"没有这列"和"这期没数据"混成一件事）。
 - 结论 2：这批全是**窄表**（≤14 列），字典投影后详情最大 1648 字符（存准率）——§2.2 的收益要到
-  两融 45 列 / 可转债 72 列那批才真正兑现。
+  两融 42 列 / 可转债（72 列取 29）那批才兑现，兑现时带出一条校正：**列数与描述共用 4096**（见 §2.2 校订）。
 - 结论 3：单位口径分级。**亿元**（量级核对）：GDP 累计、M0/M1/M2、新增贷款、社零；
   **百分数原值**：`*_SAME` 同比、`*_SEQUENTIAL` 环比、存准率与次日大盘涨跌；
   **指数**（上年同月=100）：CPI/PPI 的 `_BASE` / `_ACCUMULATE`；PMI 两项是指数（50 为荣枯线）。
@@ -465,12 +473,51 @@ node -e "import('./lib/data-collector/hub.js').then(async ({DataCollectorHub}) =
   不一致就 `eastmoney_invalid_response`——否则就是"把 A 票的两融挂到 B 票名下"。
   融券流量量纲是**股数**（与金额族不可相加）、`_3d/_5d/_10d` 是滚动累计（不是日均），也都写明。
 
-### 7.6 尚未注册（"未验不注册"仍然生效）
+### 7.6 第 2 步·可转债（2026-10-05，注册 `eastmoney_convertible_bond_list`）
+
+`RPT_BOND_CB_LIST` 整表 72 列、1059 只（起息日 2007-07-02 至 2026-09-29，含已摘牌与老三板退市债）。
+逐列核验的结论是**这张表给不了行情**：`CURRENT_BOND_PRICE` / `CONVERT_STOCK_PRICE` / `TRANSFER_PRICE` /
+`RESALE_TRIG_PRICE` / `REDEEM_TRIG_PRICE` / `PBV_RATIO` / `MARKET` / `CONVERT_STOCK_PRICEHQ`
+实测 **1059/1059 恒为 null**，`TRANSFER_PREMIUM_RATIO` 恒为占位值 **100**（东财页面上那些数是另一条
+行情接口现算的）；`TRANSFER_VALUE` 与 `INITIAL_TRANSFER_PRICE` 实测相同却多 8 个 null。所以注册成
+**发行清单与条款要素**，29 列取用，描述里点名的丢弃列就是"这不是取数失败"的凭据。
+
+口径证据（都来自 live 报文，不是记忆）：
+- **发行规模单位是亿元**：浦发转债 500（公开事实）、南药转债 10.81491 有小数五位 = 元级精度写成亿元。
+- **`FIRST_PER_PREPLACING` 是每股获配面值（元/股）**：500 亿 / 浦发银行 293.5 亿股 = 1.703，与上游值
+  逐位相符；若它是"每 10 股"或"张数"都对不上这个除法。
+- **`COUPON_IR` 是当前计息年度的票面利率、百分数原值**：福蓉转债阶梯原文「…第四年1.50%…」，
+  起息 2023-07-18、今天落在第 4 个计息年度，列值给 1.5；且**所有非空行**的 `IB_START…IB_END` 都跨过查询日。
+- **`ONLINE_GENERAL_LWR` 只能读作百分数**：2007 首批 1.33~5.31、2019 浦发 0.30、2026 年 0.0009~0.0033。
+  按小数读会得出 531% 的中签率（不可能），按百分数读才同时成立且年代单调。
+- **`BOND_EXPIRE` 是实际存续年数**：`EXPIRE_DATE − VALUE_DATE` 逐年对上（豫光转债合同 6 年、
+  2025-12-19 提前终止 → 1.3534）。拿它当"合同期限"就会把短存续的债读成六年期品种。
+
+三条真实陷阱写进契约与描述：
+1. **日期轴只能用起息日**。`PUBLIC_START_DATE` 与 `VALUE_DATE` 实测 1059/1059 相同且从不为空；
+   `LISTING_DATE` 有 8 只"已发行未上市"为 null——按上市日过滤会静默吞掉它们（§1.3 那一族：
+   过滤器打在会为空的列上，就是话说错）。`DELIST_DATE` 实测 4 条是**将来**日期（已公告待摘牌），
+   所以描述写"null=尚未摘牌"而不写"有值=已摘牌"。
+2. **正股市场不许按代码首位推**。`TRADE_MARKET` 与代码前缀交叉表实测：`CNSESH/11`:480、`CNSESZ/12`:559、
+   `STAS00/40`:5，另有 **`CNSESH/12`:14 与 `CNSESZ/11`:1**（2007-2009 的 126 段沪市老债）。老三板退市债
+   404005.NQ 的正股是 400266——若走 `marketFromAshareDigits`（4/8/92 → 北交所）就会给它编一个 `.BJ`。
+   所以本能力自带一份按 `TRADE_MARKET` 的映射，未知市场只给 `stock_ticker` 不给后缀。
+3. **15 只老债同批缺四列**（14 只 126 段 + 115003.SZ）：转股起止、初始转股价、`IS_CONVERT_STOCK` 一起为
+   null，那是分离交易可转债的产品形态；`INTEREST_RATE_EXPLAIN` 对它们还是"票面利率预设区间……协商确定"
+   的发行前文本，不能当成交利率——描述都写明了。
+
+容量：85 条目录 3126 字符（50.9%），同一份 JSON 数组编码是 6926 > 6144 自预算。本条是**全仓最大详情**
+3738 字符（91.3%），瓶颈已从列数挪到描述（见 §2.2 的校订）。live 双向复核跑的是注册后的
+`source.execute`（九月新债 9 只、单债 110059、按正股 600000 收窄、老三板 404005、2008 年 126 段 16 只、
+空区间 9201 走空结果），九条断言全过；fixture 回归另覆盖畸形 SECUCODE / 畸形日期 / 畸形代码参数
+（出网前拒绝）与"恒 null 列不得漏进取"。
+
+### 7.7 尚未注册（"未验不注册"仍然生效）
 
 `RPT_MUTUAL_BOARD_HOLDRANK_WEB`（最新记录停在 2024-08-16，先弄清是整表停更还是维度未筛）、
 `RPT_MUTUAL_HOLD_DET`、十大流通股东 `RPT_F10_EH_FREEHOLDERS`、增持 `RPT_SHARE_HOLDER_INCREASE`、
-机构调研 `RPT_ORG_SURVEY`、可转债 `RPT_BOND_CB_LIST`（72 列，下一批）；大宗交易与新股五表在设计阶段
-就标了未验不注册。
+机构调研 `RPT_ORG_SURVEY`、可转债其余三表 `RPT_CB_BALLOTNUM` / `RPT_CB_IMPORTANTDATE` / 转债行情
+（本表不含行情，要现价得先验出另一条端点）；大宗交易与新股五表在设计阶段就标了未验不注册。
 
 
 
