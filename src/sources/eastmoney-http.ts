@@ -918,6 +918,85 @@ async function executeHolder(params: Params, signal: AbortSignal): Promise<{ dat
   return { data: { item: parsed.rows.map(parseHolderRow), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(holderRow) }
 }
 
+/**
+ * 两融个股明细（`RPTA_WEB_RZRQ_GGMX`）。45 列里绝大多数是同一族的"余额 / 买入 / 偿还 / 净买入 ×
+ * 当日 / 3 / 5 / 10 日"，所以按映射表成对声明，不逐列写 JSON Schema。
+ *
+ * 口径靠算术核对，不靠记忆（实测 600519，2026-09-30）：`RZRQYE = RZYE + RQYE`、
+ * `RZRQYECZ = RZYE - RQYE`、`RZJME = RZMRE - RZCHE`、`RQJMG = RQMCL - RQCHL` 四式精确成立，
+ * `RZYEZB = RZYE / SZ`（0.8617% 对得上），所以这几列的含义可以写进契约。
+ * 披露新鲜度**跨市场不一致**：实测沪市已到 2026-09-30，深市（000001）最新只有 2026-09-29。
+ */
+const MARGIN_COLUMNS: Array<[string, string]> = [
+  ['RZYE', 'margin_balance'], ['RQYE', 'short_balance'], ['RZRQYE', 'total_balance'], ['RZRQYECZ', 'balance_gap'],
+  ['RZMRE', 'margin_buy'], ['RZCHE', 'margin_repay'], ['RZJME', 'margin_net_buy'],
+  ['RQMCL', 'short_sell_volume'], ['RQCHL', 'short_repay_volume'], ['RQJMG', 'short_net_buy_volume'],
+  ['RZMRE3D', 'margin_buy_3d'], ['RZMRE5D', 'margin_buy_5d'], ['RZMRE10D', 'margin_buy_10d'],
+  ['RZCHE3D', 'margin_repay_3d'], ['RZCHE5D', 'margin_repay_5d'], ['RZCHE10D', 'margin_repay_10d'],
+  ['RZJME3D', 'margin_net_buy_3d'], ['RZJME5D', 'margin_net_buy_5d'], ['RZJME10D', 'margin_net_buy_10d'],
+  ['RQMCL3D', 'short_sell_volume_3d'], ['RQMCL5D', 'short_sell_volume_5d'], ['RQMCL10D', 'short_sell_volume_10d'],
+  ['RQCHL3D', 'short_repay_volume_3d'], ['RQCHL5D', 'short_repay_volume_5d'], ['RQCHL10D', 'short_repay_volume_10d'],
+  ['RQJMG3D', 'short_net_buy_volume_3d'], ['RQJMG5D', 'short_net_buy_volume_5d'], ['RQJMG10D', 'short_net_buy_volume_10d'],
+  ['SZ', 'total_market_cap'], ['SPJ', 'close_price'], ['ZDF', 'change_pct'],
+  ['RCHANGE3DCP', 'change_3d_pct'], ['RCHANGE5DCP', 'change_5d_pct'], ['RCHANGE10DCP', 'change_10d_pct'],
+  ['RZYEZB', 'margin_balance_pct'], ['FIN_BALANCE_GR', 'margin_balance_growth_raw'],
+]
+
+const marginRow: object = {
+  type: 'object',
+  properties: {
+    thscode: { type: 'string' }, ticker: { type: 'string' }, name: { type: 'string' },
+    trade_date: { type: 'string' }, trade_date_ms: { type: 'integer' },
+    market_segment: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    ...Object.fromEntries(MARGIN_COLUMNS.map(([, to]) => [to, { oneOf: [{ type: 'number' }, { type: 'null' }] }])),
+  },
+  additionalProperties: true,
+}
+
+function parseMarginRow(raw: JsonRecord, requestedThscode: string): JsonRecord {
+  const day = dayValue(raw.DATE)
+  if (day === null) throw sourceError('Eastmoney margin row has invalid DATE', 'eastmoney_invalid_response')
+  // SCODE 不带市场后缀，市场由请求的 ticker 决定：行身份取调用方传入的 canonical 代码，
+  // 再与上游 SECUCODE 对照，对不上就是上游把明细串行了。
+  const secucode = typeof raw.SECUCODE === 'string' ? raw.SECUCODE : ''
+  if (secucode && secucode !== requestedThscode) {
+    throw sourceError(`Eastmoney margin row SECUCODE ${secucode} does not match requested ${requestedThscode}`, 'eastmoney_invalid_response')
+  }
+  const row: JsonRecord = {
+    thscode: requestedThscode,
+    ticker: requestedThscode.replace(/\.(SH|SZ|BJ)$/i, ''),
+    name: String(raw.SECNAME ?? ''),
+    trade_date: day,
+    trade_date_ms: dateMs(day),
+    market_segment: textOrNull(raw.MARKET),
+  }
+  for (const [from, to] of MARGIN_COLUMNS) row[to] = numberOrNull(raw[from])
+  return row
+}
+
+function normalizeMargin(params: Params): Params {
+  const normalized = normalizeDateRange(params, ['start_date', 'end_date', 'ticker', 'page', 'size'])
+  const identity = normalizeEastmoneySecurityIdentity({ secucode: params.ticker })
+  return { ...normalized, thscode: identity.thscode }
+}
+
+async function executeMargin(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
+  const url = new URL(DATACENTER_URL)
+  url.searchParams.set('reportName', 'RPTA_WEB_RZRQ_GGMX')
+  url.searchParams.set('columns', 'ALL')
+  url.searchParams.set('source', 'WEB')
+  url.searchParams.set('client', 'WEB')
+  url.searchParams.set('sortColumns', 'DATE')
+  url.searchParams.set('sortTypes', '-1')
+  url.searchParams.set('pageNumber', String(params.page))
+  url.searchParams.set('pageSize', String(params.size))
+  url.searchParams.set('filter', `(SCODE="${String(params.thscode).replace(/\.(SH|SZ|BJ)$/i, '')}")(DATE>='${params.start_date}')(DATE<='${params.end_date}')`)
+  const result = requireDatacenterResult(await getJson(url.toString(), signal, 'margin detail'), 'margin detail')
+  const parsed = requireRows(result, 'margin detail')
+  const thscode = String(params.thscode)
+  return { data: { item: parsed.rows.map((raw) => parseMarginRow(raw, thscode)), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(marginRow) }
+}
+
 function createSource(options: { capability: string; name: string; summary: string; description: string; inputSchema: object; outputSchema: object; paginated?: boolean; cacheMaxAgeMs?: number; rowShape: SchemaDescriptor['rowShape']; allowed: string[]; normalize: (params: Params) => Params; execute: (params: Params, signal: AbortSignal) => Promise<{ data: unknown; schema: object }> }): DataSource {
   const schema: SchemaDescriptor = { capability: options.capability, time_contract: getDataTimeContract(options.capability), name: options.name, source: `http:eastmoney.${options.capability}`, data_key: buildDataKey('eastmoney', 'http', options.capability), source_label: 'eastmoney', paginated: options.paginated === true, cacheMaxAgeMs: options.cacheMaxAgeMs, rowShape: options.rowShape, summary: options.summary, description: options.description, input_schema: options.inputSchema, output_schema: options.outputSchema }
   const normalize = (params: Record<string, unknown>): Params => options.normalize(params)
@@ -971,7 +1050,7 @@ const holderInput = {
   required: [],
   additionalProperties: false,
 }
-const dividendInput = {
+const tickerRangeInput = {
   type: 'object',
   properties: {
     ticker: { type: 'string', description: '完整证券代码（带市场后缀，如 600519.SH）' },
@@ -1010,7 +1089,7 @@ export function createEastmoneySources(): DataSource[] {
       capability: 'eastmoney_dividend_plan', name: 'get_eastmoney_dividend_plan',
       summary: '东财分红送配方案明细（按个股与除权日）',
       description: '按单只 A 股与除权除息日区间获取东方财富分红送配方案（RPT_SHAREBONUS_DET，实测全库 56976 条、可翻回 1991 年）。一行一个方案；同一报告期可能同时有年度与中期两条方案，用 report_date 加 ex_dividend_date 区分。四个日期口径不同：report_date 是**报告期**（如 2025-12-31），plan_notice_date 是预案公告日，notice_date 是实施公告日，equity_record_date 是股权登记日（实测 12/200 行为 null——方案尚未定登记日，属正常），ex_dividend_date 是除权除息日；只有 ex_dividend_date_ms 提供毫秒时间轴。送转与派息一律是**每 10 股**口径（上游原文 plan_profile 就写成「10派280.2423元(含税)」，照抄即可核对）：pretax_cash_per_10 为每 10 股税前派息（元），bonus_shares_per_10 为每 10 股送股，converted_shares_per_10 为每 10 股转增，bonus_and_converted_per_10 为送转合计；纯派息方案的三个送转列同时为 null，不是缺数。assign_progress 是方案进度（实测「实施分配」/「董事会决议通过」）；ex_dividend_days 是距除权日天数，**未来为负**（实测 -17）。basic_eps / book_value_per_share / capital_reserve_per_share / undistributed_profit_per_share / net_profit_yoy_pct 是东财随附的每股与利润表指标。带 `_raw` 的三列除权前后涨跌幅与 dividend_yield_raw 的复权与比例口径**未经核验**，只做同列相对比较，禁止换算成百分数写进结论。上游的 IS_KCB 与 PUBLISH_DATE 实测全为 null，本能力不收录，不要当成取数失败；SECURITY_INNER_CODE / ORG_CODE / MARKET_TYPE 等内部编码同样不进取。',
-      inputSchema: dividendInput, outputSchema: datacenterOutput(dividendRow), paginated: true, rowShape: { rowKey: 'item' },
+      inputSchema: tickerRangeInput, outputSchema: datacenterOutput(dividendRow), paginated: true, rowShape: { rowKey: 'item' },
       allowed: ['ticker', 'start_date', 'end_date', 'page', 'size'], normalize: normalizeDividend, execute: executeDividend,
     }),
     createSource({
@@ -1026,6 +1105,13 @@ export function createEastmoneySources(): DataSource[] {
       description: '获取四个互连渠道（沪股通 / 深股通 / 港股通(沪) / 港股通(深)）在查询时点当日的额度与开关状态（RPT_MUTUAL_QUOTA，实测全表只有当日四条、没有历史序列）。无参数；Dataset 的 captured_at 才是采集时间，trade_date 是上游给出的日历日。closed_reason 非空表示当日休市（实测 2026-10-05 为「国庆节」）；上游的交易时段字段 start_time / end_time 在实测全部为 null，本能力不收录，不要当成缺口。⛔ trade_quota_raw 的计量口径**跨方向不一致**：北向 52000 对应官方每日额度 520 亿元、南向 42000000000 对应 420 亿元（同一列两种单位），因此两个方向的原值不可直接比较，也不要换算后写进结论；要绝对额度请以交易所官方披露为准。channel 是语义名、channel_label 是上游原文，board 为沪港通/深港通、direction 为 north/south。',
       inputSchema: snapshotInput, outputSchema: datacenterOutput(mutualQuotaRow), paginated: false, rowShape: { rowKey: 'item' },
       allowed: [], normalize: (params) => { assertKnown(params, []); return {} }, execute: executeMutualQuota,
+    }),
+    createSource({
+      capability: 'eastmoney_margin_trading', name: 'get_eastmoney_margin_trading',
+      summary: '个股融资融券明细（按票与交易日）',
+      description: '按单只 A 股与交易日区间获取融资融券明细（RPTA_WEB_RZRQ_GGMX，实测 600519 共 3992 个交易日、可翻回约 2010 年）。⛔ **披露新鲜度跨市场不一致**：实测同一天查询沪市（600519）最新到 2026-09-30、深市（000001）最新只有 2026-09-29，深市滞后一个交易日；把两市当天放一起比会得出错误结论，需要同日对齐就自己截到共同日期并写明。金额列单位是元（实测 RZYE=22131853460 即 221 亿元）。余额族：margin_balance 融资余额、short_balance 融券余额、total_balance 两融合计、balance_gap 融资减融券——后两列已用真报文做加减法核对（total=marg…+short、gap=融资-融券，精确成立）。流量族：margin_buy 融资买入额、margin_repay 融资偿还额、margin_net_buy 融资净买入（=买入减偿还，实测精确成立），带 _3d / _5d / _10d 后缀的是**滚动累计而不是日均**，别除以天数。融券流量（short_sell_volume / short_repay_volume / short_net_buy_volume 及其累计）量纲是**股数**，与金额族不可相加。参考列：total_market_cap 总市值（元）、close_price 收盘价（元）、change_pct 当日涨跌幅、change_3d_pct / change_5d_pct / change_10d_pct 区间涨跌幅，均为东财百分数原值；margin_balance_pct 是融资余额占总市值的百分数原值（实测 0.8617 与 RZYE/SZ 一致）。margin_balance_growth_raw 的增长口径未核验，只做同列相对比较。market_segment 是上游市场原文（融资融券_沪证 / 融资融券_深证）。上游的 KCB 标志、TRADE_MARKET(_CODE) 内部编码与不带后缀的 SCODE 不进取；行身份采用请求传入的带市场后缀代码，与上游 SECUCODE 对不上即判 eastmoney_invalid_response。',
+      inputSchema: tickerRangeInput, outputSchema: datacenterOutput(marginRow), paginated: true, rowShape: { rowKey: 'item' },
+      allowed: ['ticker', 'start_date', 'end_date', 'page', 'size'], normalize: normalizeMargin, execute: executeMargin,
     }),
   ]
 }

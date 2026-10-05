@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createEastmoneySources } from '../lib/sources/eastmoney-http.js'
+import { DataCollectorHub } from '../lib/data-collector/hub.js'
 import { normalizeEastmoneyBoardIdentity, normalizeEastmoneySecurityIdentity } from '../lib/sources/security-identity.js'
 
 const signal = new AbortController().signal
@@ -36,17 +37,17 @@ const MACRO_CAPABILITIES = [
   'eastmoney_cpi', 'eastmoney_ppi', 'eastmoney_gdp', 'eastmoney_pmi', 'eastmoney_money_supply',
   'eastmoney_rmb_loan', 'eastmoney_customs_trade', 'eastmoney_retail_sales', 'eastmoney_deposit_reserve',
 ]
-const SNAKE_CASE_CAPABILITIES = [...MACRO_CAPABILITIES, 'eastmoney_mutual_flow', 'eastmoney_mutual_quota', 'eastmoney_main_capital_snapshot', 'eastmoney_dividend_plan', 'eastmoney_holder_number_snapshot']
+const SNAKE_CASE_CAPABILITIES = [...MACRO_CAPABILITIES, 'eastmoney_mutual_flow', 'eastmoney_mutual_quota', 'eastmoney_main_capital_snapshot', 'eastmoney_dividend_plan', 'eastmoney_holder_number_snapshot', 'eastmoney_margin_trading']
 
-test('Eastmoney source：注册十九个 capability 与内部身份', () => {
+test('Eastmoney source：注册二十个 capability 与内部身份', () => {
   const sources = createEastmoneySources()
   assert.deepEqual(sources.map((source) => source.schema.capability), [
     'eastmoney_top_buy_sell_market', 'eastmoney_top_buy_sell_ticker', 'eastmoney_lockup_expiry',
     'eastmoney_sector_rotation', 'eastmoney_cashflow_rotation', ...MACRO_CAPABILITIES,
     'eastmoney_mutual_flow', 'eastmoney_main_capital_snapshot',
-    'eastmoney_dividend_plan', 'eastmoney_holder_number_snapshot', 'eastmoney_mutual_quota',
+    'eastmoney_dividend_plan', 'eastmoney_holder_number_snapshot', 'eastmoney_mutual_quota', 'eastmoney_margin_trading',
   ])
-  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 19)
+  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 20)
   for (const source of sources) {
     assert.equal(source.schema.source_label, 'eastmoney')
     assert.match(source.schema.data_key, /^eastmoney\.http\./)
@@ -390,6 +391,64 @@ test('eastmoney_holder_number_snapshot：披露日与报告期分列，新股无
     assert.equal(requested.searchParams.get('filter'), '(SECUCODE="001246.SZ")')
     assert.deepEqual(single.data.item.map((row) => row.thscode), ['001246.SZ'], '单票过滤器把截面收窄成一行')
   } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_margin_trading：真实行按加减法映射，行身份与上游 SECUCODE 不符就失败', async () => {
+  const originalFetch = globalThis.fetch
+  let requested
+  const raw = {
+    DATE: '2026-09-30 00:00:00', MARKET: '融资融券_沪证', SCODE: '600519', SECNAME: '贵州茅台', SECUCODE: '600519.SH',
+    RZYE: 22131853460, RQYE: 3139145745, RZRQYE: 25270999205, RZRQYECZ: 18992707715,
+    RZMRE: 715885371, RZCHE: 1000245646, RZJME: -284360275,
+    RQMCL: 21400, RQCHL: 28670, RQJMG: -7270,
+    RZMRE3D: 2559321377, RZCHE10D: 8116247340, RQJMG5D: -41981,
+    SZ: 2568296402100, SPJ: 2044.5, ZDF: 1.767, RCHANGE10DCP: -1.2176, RZYEZB: 0.86173284, FIN_BALANCE_GR: -1.268547304026,
+    KCB: 0, TRADE_MARKET_CODE: '069001001001', TRADE_MARKET: '上交所主板',
+  }
+  globalThis.fetch = async (url) => {
+    requested = new URL(url)
+    return response({ success: true, code: 0, result: { pages: 190, count: 3992, data: [raw] } })
+  }
+  try {
+    const source = sourceMap().eastmoney_margin_trading
+    const result = await source.execute({ capability: 'eastmoney_margin_trading', params: { ticker: '600519.SH', start_date: '2026-09-01', end_date: '2026-09-30' }, session }, signal)
+    assert.equal(requested.searchParams.get('sortColumns'), 'DATE')
+    assert.equal(requested.searchParams.get('filter'), `(SCODE="600519")(DATE>='2026-09-01')(DATE<='2026-09-30')`, '过滤器用不带后缀的 SCODE，日期用 DATE')
+    const [row] = result.data.item
+    assert.deepEqual([row.thscode, row.ticker, row.name], ['600519.SH', '600519', '贵州茅台'])
+    assert.equal(row.trade_date, '2026-09-30')
+    assert.equal(row.margin_balance, 22131853460)
+    assert.equal(row.total_balance, 25270999205)
+    assert.equal(row.margin_net_buy, -284360275, '净买入为负是事实，不夹正')
+    assert.equal(row.short_sell_volume, 21400)
+    assert.equal(row.margin_balance_pct, 0.86173284)
+    assert.equal(row.market_segment, '融资融券_沪证', '市场原文保留')
+    assert.ok(!('KCB' in row) && !('TRADE_MARKET' in row) && !('TRADE_MARKET_CODE' in row) && !('SCODE' in row), '内部编码与裸代码不进取')
+    // 上游把明细串行到别的票上，不能挂到请求的那只下面
+    globalThis.fetch = async () => response({ success: true, code: 0, result: { pages: 1, count: 1, data: [{ ...raw, SECUCODE: '600519.SZ' }] } })
+    await assert.rejects(
+      () => source.execute({ capability: 'eastmoney_margin_trading', params: { ticker: '600519.SH', start_date: '2026-09-01', end_date: '2026-09-30' }, session }, signal),
+      (error) => error?.code === 'eastmoney_invalid_response',
+    )
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_margin_trading：42 列宽表靠字段字典仍在详情预算内（§2.2 的兑现处）', () => {
+  const source = sourceMap().eastmoney_margin_trading
+  const hub = new DataCollectorHub({ store: { async save() { return {} } } })
+  hub.registerSource(source)
+  const described = hub.describeCapability('eastmoney_margin_trading')
+  const declared = Object.keys(source.schema.output_schema.properties.item.items.properties)
+  assert.equal(declared.length, 42, '两融映射表的列数变了就同步更新这条回归与下面的体积对比')
+  assert.equal(declared.filter((key) => /^[a-z][a-z0-9_]*$/.test(key)).length, declared.length, '行键全部 ASCII snake_case')
+  assert.equal(described.output_fields.split('\n').filter((line) => line.startsWith('item[].')).length, declared.length,
+    '映射表每一列都要出现在字典里，投影不能漏列')
+  const dictionary = JSON.stringify(described)
+  // 同一份详情把字典换成逐列 JSON Schema 就越过 4096（实测 4900+）：这条断言钉住"为什么需要投影"，
+  // 也意味着再往这张表加列时先看这里，而不是等运行时静默截断。
+  const withSchema = JSON.stringify({ ...described, output_schema: source.schema.output_schema, output_fields: undefined })
+  assert.ok(dictionary.length < 4096, `字典形态详情 ${dictionary.length} 字符，已打穿单能力 4096 预算`)
+  assert.ok(withSchema.length > 4096, `schema 直发形态只有 ${withSchema.length} 字符，这条回归失去意义`)
 })
 
 test('eastmoney 宏观表：报告期缺失或畸形一律响亮失败，不产出半截行', async () => {

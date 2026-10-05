@@ -1,6 +1,7 @@
 # 数据补录与能力目录容量（本次迭代聚焦）
 
-> 状态：**已评审通过，正在实现**（§6 第 0、1 步已落地，第 2 步待做）。日期 2026-10-05。
+> 状态：**已评审通过，正在实现**（§6 第 0、1 步已落地；第 2 步东财补录已到两融，剩可转债；
+> 第 3 步腾讯港美股未开始）。日期 2026-10-05。
 >
 > **本文只管三件事**：① 还能补录哪些数据；② capability 目录/详情的体积上限怎么解；③ 一条能力该放
 > `data_collector` 还是 `web_retriever`。
@@ -262,7 +263,7 @@ Wind 只在需要 Wind 口径/研报级准确度时花积分**；这条要写进
 | 宏观 CPI/PPI/GDP/PMI/M2/存准/新增贷款/进出口/社零/房价/FDI | `RPT_ECONOMY_CPI` `…_PPI` `…_GDP` `…_PMI` `…_CURRENCY_SUPPLY` `…_DEPOSIT_RESERVE` `…_RMB_LOAN` `…_CUSTOMS` `…_TOTAL_RETAIL` | CPI 112 页 / PPI 248 页 / GDP 82 页 | 少 | **本项目当前最大的整块空白**；Fuyao 全文零命中 |
 | 沪深港通 | `RPT_MUTUAL_DEAL_HISTORY` `RPT_MUTUAL_QUOTA` | 到 2026-09-30 | 17 / 13 | ⛔ 2026-10-05 复核：**不是"全为 null"**。北向三档（沪股通 001 / 深股通 003 / 北向合计 005）的 `BUY_AMT / SELL_AMT / NET_DEAL_AMT / ACCUM_DEAL_AMT` 与 `FUND_INFLOW / QUOTA_BALANCE` 为 null，**南向三档（002 / 004 / 006）四项都有值**；成交额 `DEAL_AMT`、笔数 `DEAL_NUM` 双方都披露。所以能力名与描述里不许出现"北向资金净流入"，但南向可以给净买入。**另发现 `TRADE_QUOTA` 跨方向单位不一致**（北向 52000=520 亿元、南向 42000000000=420 亿元），禁止跨方向比较 |
 | 个股主力资金 | `RPT_DMSK_TS_STOCKNEW` | **只有查询日**：实测 5199 行、TRADE_DATE 单一，带旧日期过滤器返回 9201 | 31 | 补 Fuyao `code=2004` 永久关闭的那块，但只能以**快照**形态补：参数面不给日期，`main_cost`=主力成本价（元/股），比例类列口径未核验（`_raw` 后缀） |
-| 融资融券个股 | `RPTA_WEB_RZRQ_GGMX` | 单票 1331 页 | **45** | 先过 §2.2，否则详情必爆 |
+| 融资融券个股 | ✅ `RPTA_WEB_RZRQ_GGMX` 已注册为 `eastmoney_margin_trading` | 单票 3992 个交易日 | **45 → 42 列取用** | §2.2 的兑现处：字典形态详情 2993 字符（73% 预算），同一份直发 JSON Schema 是 4479 > 4096 |
 | 可转债 | `RPT_BOND_CB_LIST` `RPT_CB_BALLOTNUM` `RPT_CB_IMPORTANTDATE` | 1059 页 / 72 列 | **72** | 同上；**转债行情本次未验**，未验不注册 |
 | 股东结构 | ✅ `RPT_HOLDERNUMLATEST` 已注册为 `eastmoney_holder_number_snapshot`；`RPT_F10_EH_FREEHOLDERS` `RPT_SHARE_HOLDER_INCREASE` `RPT_ORG_SURVEY` 未验 | 5568 只截面 | 20 | `END_DATE` 是**报告期不是披露日**（实测茅台 2026-06-30 / 披露 2026-08-15），已分列；**只有最新一期，取不到历史** |
 | 分红送配 | ✅ `RPT_SHAREBONUS_DET` 已注册为 `eastmoney_dividend_plan` | 56976 条，可翻回 1991 | 30 | Fuyao `corporate_actions` 只有除权事件，缺方案全字段；送转与派息是**每 10 股**口径 |
@@ -446,12 +447,31 @@ node -e "import('./lib/data-collector/hub.js').then(async ({DataCollectorHub}) =
 （无上期可比），保留 null 不写成 0%。`CHANGE_REASON` 是中文原因原文（「发行融资」/「资产重组」），
 照存不改写；`PRE_E_DATE` / `HOLD_N_DATE` 这种 `03/31` 短标签与 `ORG_CODE` 不进取。
 
-### 7.5 尚未注册（"未验不注册"仍然生效）
+### 7.5 第 2 步·两融个股明细（2026-10-05，注册 `eastmoney_margin_trading`）
 
-分红送配与股东户数两条注册后仍欠：`RPT_MUTUAL_BOARD_HOLDRANK_WEB`（最新记录停在 2024-08-16，先弄清
-是整表停更还是维度未筛）、`RPT_MUTUAL_HOLD_DET`、十大流通股东 `RPT_F10_EH_FREEHOLDERS`、
-增持 `RPT_SHARE_HOLDER_INCREASE`、机构调研 `RPT_ORG_SURVEY`、两融 `RPTA_WEB_RZRQ_GGMX`（45 列）、
-可转债 `RPT_BOND_CB_LIST`（72 列）；大宗交易与新股五表在设计阶段就标了未验不注册。
+`RPTA_WEB_RZRQ_GGMX` 实测 45 列、单票 3992 个交易日（约回到 2010）。这一条是 §2.2 的**兑现处**：
+映射后取用 42 列，字典形态详情 **2993 字符 = 预算 73%**，而同一份详情改回逐列 JSON Schema 是
+**4479 > 4096**——不做投影，这张表第一次注册就会把详情预算打穿（回归里两种形态都断言了）。
+
+口径不靠记忆，靠上游自己给出的加减关系（实测 600519 与 000001 都精确成立）：
+`RZRQYE = RZYE + RQYE`、`RZRQYECZ = RZYE - RQYE`、`RZJME = RZMRE - RZCHE`、`RQJMG = RQMCL - RQCHL`、
+`RZYEZB = RZYE / SZ`（0.8617% 对得上）。所以这些列的含义与"元"量纲可以写进契约；
+`FIN_BALANCE_GR` 的增长口径推不出唯一解释，命名带 `_raw` 并只做同列比较。
+
+两条真实陷阱进了描述：
+- **披露新鲜度跨市场不一致**：同日查询沪市（600519）最新 2026-09-30，深市（000001）只有 2026-09-29。
+  两市当天并排比就会得出错误结论，所以时间契约挂 `warning`，描述要求先对齐到共同日期。
+- `SCODE` 不带市场后缀，行身份只能用**请求传入的 canonical 代码**；同时与上游 `SECUCODE` 对照，
+  不一致就 `eastmoney_invalid_response`——否则就是"把 A 票的两融挂到 B 票名下"。
+  融券流量量纲是**股数**（与金额族不可相加）、`_3d/_5d/_10d` 是滚动累计（不是日均），也都写明。
+
+### 7.6 尚未注册（"未验不注册"仍然生效）
+
+`RPT_MUTUAL_BOARD_HOLDRANK_WEB`（最新记录停在 2024-08-16，先弄清是整表停更还是维度未筛）、
+`RPT_MUTUAL_HOLD_DET`、十大流通股东 `RPT_F10_EH_FREEHOLDERS`、增持 `RPT_SHARE_HOLDER_INCREASE`、
+机构调研 `RPT_ORG_SURVEY`、可转债 `RPT_BOND_CB_LIST`（72 列，下一批）；大宗交易与新股五表在设计阶段
+就标了未验不注册。
+
 
 
 

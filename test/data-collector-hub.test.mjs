@@ -387,7 +387,7 @@ test('能力目录体积预算：必须留在 DSH 剪枝阈值（8192）以内�
   const { hub } = makeHub()
   for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources()]) hub.registerSource(dataSource)
   const directory = hub.capabilityDirectory()
-  assert.equal(hub.capabilityNames().length, 83, '端点数量回归：目录预算断言必须覆盖 Fuyao、Tencent 与 Eastmoney 全部已注册能力')
+  assert.equal(hub.capabilityNames().length, 84, '端点数量回归：目录预算断言必须覆盖 Fuyao、Tencent 与 Eastmoney 全部已注册能力')
 
   // 预算的来源（实测本机 dsh 0.1.5-rc.1，不是拍脑袋的数字）：
   // - 真实上限是 dsh-compaction-tool-result-pruner 的 `thresholdChars`（preset 里配 8192）。
@@ -398,9 +398,9 @@ test('能力目录体积预算：必须留在 DSH 剪枝阈值（8192）以内�
   //   即目录**中间段的能力会在发现阶段消失**。
   // - 因此这里取 8192 的 75%（6144），留 2048 字符余量：逼近真实上限时先让测试失败，
   //   而不是运行时静默截断。
-  // - 编码口径（2026-10-05 实测，见 docs/design/data-capability-expansion.md §2.1）：83 条紧凑
-  //   行编码 **3027 字符 = 预算的 49%**、均摊 36 字符/条。同一份 83 条用 JSON 数组是
-  //   **6739 字符——已经越过 6144 这道自预算**：宏观与沪深港通这两批补录正是"不先改编码就先撞墙"
+  // - 编码口径（2026-10-05 实测，见 docs/design/data-capability-expansion.md §2.1）：84 条紧凑
+  //   行编码 **3071 字符 = 预算的 50%**、均摊 36 字符/条。同一份 84 条用 JSON 数组是
+  //   **6827 字符——已经越过 6144 这道自预算**：宏观与沪深港通这两批补录正是"不先改编码就先撞墙"
   //   的实例（编码前的 69 条是 5530 字符，58% 的字节是键名和标点）。
   const DIRECTORY_BUDGET = 6144
   assert.ok(directory.length < DIRECTORY_BUDGET, `能力目录已达 ${directory.length} 字符（预算 ${DIRECTORY_BUDGET}，剪枝阈值 8192）：请精简 summary，或按设计文档 §2.3 讨论分域发现`)
@@ -437,7 +437,7 @@ test('单能力详情体积预算：字典投影后仍不许逼近剪枝阈值',
   const { hub } = makeHub()
   for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources()]) hub.registerSource(dataSource)
   // 详情是逐次调用、单条返回，所以用比目录更紧的 4096 做护栏。体积此前几乎等于 output_schema
-  // 体积（按列数线性增长），字典把它和列数解耦：实测最大 dragon_tiger 2771 字符 = 预算 68%
+  // 体积（按列数线性增长），字典把它和列数解耦：实测最大详情（两融 42 列）2993 字符 = 预算 73%，dragon_tiger 2771 = 68%
   // （逐列 JSON Schema 形态下是 3891 = 95%）。
   const details = hub.capabilityNames().map((capability) => JSON.stringify(hub.describeCapability(capability)))
   const largest = Math.max(...details.map((detail) => detail.length))
