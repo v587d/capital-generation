@@ -62,3 +62,20 @@ plain 对象）即整次失败。正确写法：条件展开（`buildProfile`）
 
 `check:dsh` 与单测只证明逻辑，不证明上游形状（冒烟记录见
 `docs/design/web-retriever-source-expansion.md` 第 9.2 / 9.3 小节）。
+
+## 10.6 行键名一律 ASCII snake_case（上游键名不许原样透传）
+
+`normalizeKeyToken`（`src/data-collector/hub.ts`）只归一**内部 `data_key`**，不碰行字段名：上游键名
+原样进 `raw.json`。而 `query_dataset` 的 `select` / `filters` / `group_by` 用字符串字面量点列名，
+`query_type_conflict` 只在**类型**冲突时才响亮失败——键名里混进全角 `：`、`（）`、`％`（Wind 那类
+带中文与冒号的键是恶劣版本）时，模型下一轮把它复现成半角就**匹配到零行、返回空**，而"空结果"和
+"确实没数据"在回执里长一个样：错了不报错，只是话说错。
+
+1. 进入 `data_collector` 的行键名必须是 ASCII `snake_case`。
+2. 非 ASCII 或含分隔符的上游键名，在 producer 层用**显式映射表**改名。先例：
+   `src/sources/eastmoney-http.ts` 把 `SECUCODE` / `CHANGE_RATE` / `TURNOVERRATE` 改成
+   `thscode` / `change_pct` / `turnover_rate_pct`。
+3. 映射不到的字段**丢弃，并把口径写进该能力的 `description`**，不许原样透传。要在回执里报
+   `omitted` 之类的清单，先把机制实现出来再承诺——人设里写一个不存在的通道，就是「协议鼓励、
+   宿主拒绝」那一类事故（§7 的 `final_report`）。
+4. 全角 / 半角混排先在**真报文**上验过再写映射表（同一判据见 §10.2：猜错全半角等于静默空结果）。

@@ -43,6 +43,8 @@ description: Use when composing or reading a Capital data message — data_reque
 
 - 委派消息只带需求与参数，**不带任何内部数据源键名**，也不携带原始数据行。
 - 能力名一律以 `list_capabilities` 返回的目录为准，不要编造。
+- 本角色只收结构化行集：公告 / 研报 / 新闻**正文**不是数据集的内容，回告主 Agent 改走 `web_retriever`；
+  行上的标题、简称这类标注字段算数据，整篇正文不算。
 - 一次 `request_data` 只请求一个能力，按已发现的依赖与证据价值串行推进；**没有单回合能力数量上限**。先确定问题所需事实与缺口，再按来源、资产类型、时间粒度挑相关能力；不为凑数量遍历目录。遇到 `data_gap` 可继续补数，数据充分或上游不可用时停止。
 - 含义相近的能力不自动互换：例如 Fuyao `history` 仅日线，腾讯 `tencent_kline` 支持近期分钟线；按 `describe_capability` 核对粒度、字段与单位，来源切换须写进回传。
 - `task_id` 由主 Agent 在本轮首次委派前确定；同一用户任务的 data_collector、data_junior 与 visualization 必须原样复用。data_collector 不得自行生成或改写 task_id，缺失时应拒绝请求并回告主 Agent。

@@ -23,7 +23,7 @@
 | `render_chart` 准入与呈现 | `docs/dev/chart-presentation.md`（§6.1 §6.2）|
 | 交付登记与会话事件类型 | `docs/dev/chart-delivery-events.md`（§6.3）|
 | preset 现状、人设落点、「不许改」全表、新增角色六处齐改 | `docs/dev/preset-persona.md`（§8.1 §8.2 §8.4 §8.5）|
-| 工具 schema 全表、数据源验收全表 | `docs/dev/tool-schema.md`（§9.1–§9.6 §10.1–§10.5）|
+| 工具 schema 全表、数据源验收全表 | `docs/dev/tool-schema.md`（§9.1–§9.6 §10.1–§10.6）|
 
 ### ⛔ 硬约束一览
 
@@ -146,5 +146,5 @@ capital-analysis/runs/<analysis_id>/          # 预留（data_analyst）
 
 ## 10. 数据源验收纪律（改 `src/sources/fuyao-rest.ts` 之后）
 
-全表在 `docs/dev/tool-schema.md` §10.1–§10.5。底线：改端点要同步 `npm run docs:capabilities`；**任何新护栏
+全表在 `docs/dev/tool-schema.md` §10.1–§10.6。底线：改端点要同步 `npm run docs:capabilities`；**任何新护栏
 先拿官方示例 / 真报文验过**（护栏拒绝官方示例就是真实取数事故）；`2004` 不注册、`5003` 是数据缺口。

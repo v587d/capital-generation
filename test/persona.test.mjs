@@ -287,6 +287,22 @@ test('capital-web-protocol：WAF 挑战型站点如实报错并改走 Wind（202
   assertRuleAny(text, [/不要把它当成抓取成功/, /不得编造标题或正文/], 'skill 必须禁止把失败当成功')
 })
 
+test('分流判据：进结论的数字走 collector、叙事文本走 retriever（归属要在委派前定死）', () => {
+  const orchestration = readFileSync(`${SKILL_DIR}capital-orchestration/SKILL.md`, 'utf8')
+  const data = readFileSync(`${SKILL_DIR}capital-data-protocol/SKILL.md`, 'utf8')
+  const web = readFileSync(`${SKILL_DIR}capital-web-protocol/SKILL.md`, 'utf8')
+  // 两面失败的样子根本不同：collector 给响亮错误码，retriever 是抓到什么算什么。判据若只写
+  // "像不像数据"，事后迁移等于重写契约，所以四问与终判据都必须在委派前问得出来。
+  assertRule(orchestration, /终判据是\*\*错法\*\*而不是形状/, '路由表必须给出"按错法判归属"这条终判据')
+  assertRule(orchestration, /凡要写进用户结论的数字，一律委派 `data_collector`/, '路由表必须把进结论的数字锁给 collector')
+  assertRuleAny(orchestration, [/每行同构、可分页/, /同参数能复现出同形状/], '路由表必须问得出可复现性')
+  assertRuleAny(orchestration, [/做算术/, /聚合、排序、时序对比/], '路由表必须问得出是否要拿它计算')
+  assertRuleAny(orchestration, [/单位、缺失值含义、时间口径/, /承诺吗/], '路由表必须问得出要不要口径承诺')
+  assertRuleAny(data, [/正文\*\*不是数据集的内容/, /整篇正文不算/], 'collector 必须把叙事文本退回 retriever')
+  assertRuleAny(web, [/遇到结构化数值诉求就停手/, /该走 `data_collector`/], 'retriever 必须对结构化数值诉求停手并回告')
+  assertRuleAny(web, [/花积分的/, /免费能力能不能覆盖/], 'retriever 必须写明 Wind 积分只在免费源覆盖不了时才花')
+})
+
 test('capital-generation-scope 行：插件提供的会话级服务必须全部进 isolate realm', () => {
   const scopeRow = rowById('capital-generation-scope')
   assert.ok(scopeRow, 'preset 必须有 capital-generation-scope 组行')
