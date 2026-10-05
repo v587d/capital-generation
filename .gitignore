@@ -40,6 +40,11 @@ docs/*
 # 接口账本是 scripts/check-dsh-compat.mjs 的操作手册（探针报错会直接指向它），必须入库。
 # 注意：git 不允许重新包含"父目录已被排除"的文件，所以要先放行 docs/reference/ 再逐文件挑选。
 !docs/reference/
+!docs/design/
+docs/design/*
+!docs/design/skill-synergy-product-design.md
+# 新数据补录的设计文档是本轮实现依据（容量闸门测算、路由判据都只在这份里有），随代码入库。
+!docs/design/data-capability-expansion.md
 docs/reference/*
 !docs/reference/dsh-surface-ledger.md
 # docs/dev/ = AGENTS.md 的详情层，整目录都是研发文档（同样要先放行目录再挑文件）。
