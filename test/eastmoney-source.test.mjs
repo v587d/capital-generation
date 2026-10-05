@@ -32,13 +32,18 @@ test('Eastmoney identity：明确市场才归一证券，板块保持独立类�
   assert.throws(() => normalizeEastmoneyBoardIdentity('600519', '贵州茅台', 'industry'), /board_code/)
 })
 
-test('Eastmoney source：注册五个 capability 与内部身份', () => {
+const MACRO_CAPABILITIES = [
+  'eastmoney_cpi', 'eastmoney_ppi', 'eastmoney_gdp', 'eastmoney_pmi', 'eastmoney_money_supply',
+  'eastmoney_rmb_loan', 'eastmoney_customs_trade', 'eastmoney_retail_sales', 'eastmoney_deposit_reserve',
+]
+
+test('Eastmoney source：注册十四个 capability 与内部身份', () => {
   const sources = createEastmoneySources()
   assert.deepEqual(sources.map((source) => source.schema.capability), [
     'eastmoney_top_buy_sell_market', 'eastmoney_top_buy_sell_ticker', 'eastmoney_lockup_expiry',
-    'eastmoney_sector_rotation', 'eastmoney_cashflow_rotation',
+    'eastmoney_sector_rotation', 'eastmoney_cashflow_rotation', ...MACRO_CAPABILITIES,
   ])
-  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 5)
+  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 14)
   for (const source of sources) {
     assert.equal(source.schema.source_label, 'eastmoney')
     assert.match(source.schema.data_key, /^eastmoney\.http\./)
@@ -47,6 +52,112 @@ test('Eastmoney source：注册五个 capability 与内部身份', () => {
   }
 })
 
+test('Eastmoney 宏观表：行键名一律 ASCII snake_case（§10.6 不许透传上游缩写）', () => {
+  for (const capability of MACRO_CAPABILITIES) {
+    const source = sourceMap()[capability]
+    assert.ok(source, `${capability} 必须已注册`)
+    const declared = Object.keys(source.schema.output_schema.properties.item.items.properties)
+    assert.ok(declared.length > 0, `${capability} 必须声明行字段`)
+    for (const key of declared) {
+      assert.match(key, /^[a-z][a-z0-9_]*$/, `${capability} 的行键 ${key} 不是 ASCII snake_case：全半角或中文键名会让 query_dataset 匹配零行`)
+    }
+    // 上游键名（大写缩写）一个都不许出现在行字段里——映射表必须逐字段改名而不是原样透传。
+    for (const key of declared) assert.ok(!/^[A-Z]/.test(key), `${capability} 透传了上游键名 ${key}`)
+    assert.equal(source.schema.paginated, true)
+    assert.deepEqual(source.schema.rowShape, { rowKey: 'item' })
+  }
+})
+
+
+test('eastmoney_cpi：真报文形状映射成 snake_case，未声明的上游键丢弃', async () => {
+  const originalFetch = globalThis.fetch
+  let requested
+  globalThis.fetch = async (url) => {
+    requested = new URL(url)
+    return response({ success: true, code: 0, result: { pages: 1, count: 1, data: [{
+      REPORT_DATE: '2026-08-01 00:00:00', TIME: '2026年08月份',
+      NATIONAL_SAME: 0.8, NATIONAL_BASE: 100.8, NATIONAL_SEQUENTIAL: 0.4, NATIONAL_ACCUMULATE: 100.9,
+      CITY_SAME: 0.8, CITY_BASE: 100.8, CITY_SEQUENTIAL: 0.4, CITY_ACCUMULATE: 100.9,
+      RURAL_SAME: 0.7, RURAL_BASE: 100.7, RURAL_SEQUENTIAL: 0.4, RURAL_ACCUMULATE: 100.7,
+      UPSTREAM_ADDED_COLUMN: '上游改版新增的列，未经核验不入库',
+    }] } })
+  }
+  try {
+    const source = sourceMap().eastmoney_cpi
+    const result = await source.execute({ capability: 'eastmoney_cpi', params: { start_date: '2026-08-01', end_date: '2026-08-31', page: 1, size: 20 }, session }, signal)
+    assert.equal(requested.searchParams.get('reportName'), 'RPT_ECONOMY_CPI')
+    assert.equal(requested.searchParams.get('sortColumns'), 'REPORT_DATE')
+    assert.equal(requested.searchParams.get('filter'), "(REPORT_DATE>='2026-08-01')(REPORT_DATE<='2026-08-31')")
+    const [row] = result.data.item
+    assert.equal(row.report_date, '2026-08-01')
+    assert.equal(row.report_date_ms, Date.parse('2026-08-01T00:00:00+08:00'))
+    assert.equal(row.period_label, '2026年08月份')
+    assert.equal(row.national_yoy_pct, 0.8)
+    assert.equal(row.national_index, 100.8)
+    assert.equal(row.rural_ytd_index, 100.7)
+    assert.ok(!('UPSTREAM_ADDED_COLUMN' in row) && !('NATIONAL_SAME' in row), '映射表之外的上游键必须丢弃，不许原样透传')
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_retail_sales：上游 null 原样保留，不补 0 也不删列（实测 15/200 行为空）', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => response({ success: true, code: 0, result: { pages: 1, count: 1, data: [{
+    REPORT_DATE: '2025-02-01 00:00:00', TIME: '2025年02月份',
+    RETAIL_TOTAL: null, RETAIL_TOTAL_SAME: null, RETAIL_TOTAL_SEQUENTIAL: null,
+    RETAIL_TOTAL_ACCUMULATE: 82657.2, RETAIL_ACCUMULATE_SAME: 4,
+  }] } })
+  try {
+    const source = sourceMap().eastmoney_retail_sales
+    const result = await source.execute({ capability: 'eastmoney_retail_sales', params: { start_date: '2025-02-01', end_date: '2025-02-28' }, session }, signal)
+    const [row] = result.data.item
+    assert.equal(row.total_retail, null)
+    assert.equal(row.total_retail_yoy_pct, null)
+    assert.equal(row.ytd_total_retail, 82657.2)
+    assert.ok(Object.hasOwn(row, 'total_retail'), '空值列要留在行里，query_dataset 才分得清「没有数据」和「没有这列」')
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_deposit_reserve：事件表——区间无调整是空结果，中文公告日归一', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => response({ success: false, code: 9201, message: '返回数据为空' })
+  try {
+    const source = sourceMap().eastmoney_deposit_reserve
+    const empty = await source.execute({ capability: 'eastmoney_deposit_reserve', params: { start_date: '2025-01-01', end_date: '2025-04-30' }, session }, signal)
+    assert.deepEqual(empty.data.item, [], '上游 9201（该窗口确实没有调整）是真实数据缺口，不是取数失败')
+    assert.equal(empty.data.pagination.total, 0)
+  } finally { globalThis.fetch = originalFetch }
+
+  globalThis.fetch = async () => response({ success: true, code: 0, result: { pages: 1, count: 1, data: [{
+    REPORT_DATE: '2025-05-07 00:00:00', PUBLISH_DATE: '2025年05月07日', TRADE_DATE: '2025年05月15日',
+    INTEREST_RATE_BB: 9.5, INTEREST_RATE_BA: 9, CHANGE_RATE_B: -0.5,
+    INTEREST_RATE_SB: 6.5, INTEREST_RATE_SA: 6, CHANGE_RATE_S: -0.5,
+    NEXT_SH_RATE: 0.279139540482, NEXT_SZ_RATE: 0.925667157483, MONTH_DATE: '2025年05月',
+    REMARK: '中国人民银行决定，自2025年5月15日起下调金融机构存款准备金率0.5个百分点。', TRADE_DATE_NEW: '2025-05-15 00:00:00',
+  }] } })
+  try {
+    const source = sourceMap().eastmoney_deposit_reserve
+    const result = await source.execute({ capability: 'eastmoney_deposit_reserve', params: { start_date: '2025-05-01', end_date: '2025-05-31' }, session }, signal)
+    const [row] = result.data.item
+    assert.equal(row.effective_date, '2025-05-15', '生效日取 TRADE_DATE_NEW，与公告日 report_date 不是一回事')
+    assert.equal(row.publish_date, '2025-05-07', '中文公告日必须归一成 YYYY-MM-DD')
+    assert.equal(row.large_change_pct, -0.5)
+    assert.equal(row.announcement, '中国人民银行决定，自2025年5月15日起下调金融机构存款准备金率0.5个百分点。')
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney 宏观表：报告期缺失或畸形一律响亮失败，不产出半截行', async () => {
+  const originalFetch = globalThis.fetch
+  for (const bad of [{}, { REPORT_DATE: '' }, { REPORT_DATE: '2026年8月' }]) {
+    globalThis.fetch = async () => response({ success: true, code: 0, result: { pages: 1, count: 1, data: [{ ...bad, TIME: '2026年08月份', NATIONAL_SAME: 0.8 }] } })
+    const source = sourceMap().eastmoney_cpi
+    await assert.rejects(
+      () => source.execute({ capability: 'eastmoney_cpi', params: { start_date: '2026-08-01', end_date: '2026-08-31' }, session }, signal),
+      (error) => error?.code === 'eastmoney_invalid_response',
+      `畸形报告期 ${JSON.stringify(bad)} 必须报 eastmoney_invalid_response`,
+    )
+  }
+  globalThis.fetch = originalFetch
+})
 
 test('Eastmoney normalizeParams：Hub 与 execute 的双重归一化保持幂等', () => {
   const sources = sourceMap()

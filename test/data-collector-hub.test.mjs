@@ -385,7 +385,7 @@ test('能力目录体积预算：必须留在 DSH 剪枝阈值（8192）以内�
   const { hub } = makeHub()
   for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources()]) hub.registerSource(dataSource)
   const directory = hub.capabilityDirectory()
-  assert.equal(hub.capabilityNames().length, 69, '端点数量回归：目录预算断言必须覆盖 Fuyao、Tencent 与 Eastmoney 全部已注册能力')
+  assert.equal(hub.capabilityNames().length, 78, '端点数量回归：目录预算断言必须覆盖 Fuyao、Tencent 与 Eastmoney 全部已注册能力')
 
   // 预算的来源（实测本机 dsh 0.1.5-rc.1，不是拍脑袋的数字）：
   // - 真实上限是 dsh-compaction-tool-result-pruner 的 `thresholdChars`（preset 里配 8192）。
@@ -396,9 +396,10 @@ test('能力目录体积预算：必须留在 DSH 剪枝阈值（8192）以内�
   //   即目录**中间段的能力会在发现阶段消失**。
   // - 因此这里取 8192 的 75%（6144），留 2048 字符余量：逼近真实上限时先让测试失败，
   //   而不是运行时静默截断。
-  // - 编码口径（2026-10-05 实测，见 docs/design/data-capability-expansion.md §2.1）：69 条紧凑
-  //   行编码 **2435 字符 = 预算的 40%**、均摊 35 字符/条，余量还能再收 ~105 条；同一份信息用
-  //   JSON 数组是 5530 字符（90%、均摊 80），其中 58% 是键名和标点——改编码就是为了让余量成立。
+  // - 编码口径（2026-10-05 实测，见 docs/design/data-capability-expansion.md §2.1）：78 条紧凑
+  //   行编码 **2795 字符 = 预算的 45.5%**、均摊 35.8 字符/条。同一份 78 条用 JSON 数组是
+  //   **6286 字符——已经越过 6144 这道自预算**：这批宏观表正是"不先改编码就先撞墙"的实例
+  //   （编码前的 69 条是 5530 字符，58% 的字节是键名和标点）。
   const DIRECTORY_BUDGET = 6144
   assert.ok(directory.length < DIRECTORY_BUDGET, `能力目录已达 ${directory.length} 字符（预算 ${DIRECTORY_BUDGET}，剪枝阈值 8192）：请精简 summary，或按设计文档 §2.3 讨论分域发现`)
   assert.ok(directory.length < 8192, '目录绝不允许越过剪枝阈值')

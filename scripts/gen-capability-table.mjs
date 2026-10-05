@@ -26,6 +26,10 @@ const pathOf = (source) => source.schema.source_label === 'tencent'
     ? `/eastmoney/${source.schema.capability.replace(/^eastmoney_/, '')}`
     : '/' + source.schema.data_key.replace('fuyao.api.', '').replace(/\./g, '/')
 
+// 宏观指标表与资金/筹码表分成两组：读者挑能力时"看宏观趋势"和"看盘面资金"是两件事。
+// 分组是各自 filter（不互斥），所以通用组必须显式排除宏观路径，否则一行会出现在两张表里。
+const MACRO_PATHS = new Set(['/eastmoney/cpi', '/eastmoney/ppi', '/eastmoney/gdp', '/eastmoney/pmi', '/eastmoney/money_supply', '/eastmoney/rmb_loan', '/eastmoney/customs_trade', '/eastmoney/retail_sales', '/eastmoney/deposit_reserve'])
+
 const GROUPS = [
   ['元数据（代码表与消歧）', (p) => p.startsWith('/api/meta/')],
   ['A 股行情与公司行为', (p) => p.startsWith('/api/a-share/prices/') || p.startsWith('/api/a-share/calendar/') || p.startsWith('/api/a-share/corporate-actions/')],
@@ -41,7 +45,8 @@ const GROUPS = [
   ['基金 · 分红、募集与额度', (p) => p.startsWith('/api/fund/corporate-actions/') || p.startsWith('/api/fund/offerings/') || p.startsWith('/api/fund/quota/')],
   ['基金 · 在线回测', (p) => p.startsWith('/api/fund/backtest/')],
   ['腾讯公开 HTTP（fallback）', (p) => p.startsWith('/tencent/')],
-  ['东方财富 HTTP（资金与筹码）', (p) => p.startsWith('/eastmoney/')],
+  ['东方财富 HTTP（宏观指标）', (p) => MACRO_PATHS.has(p)],
+  ['东方财富 HTTP（资金与筹码）', (p) => p.startsWith('/eastmoney/') && !MACRO_PATHS.has(p)],
 ]
 
 const paramsOf = (source) => {

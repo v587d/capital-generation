@@ -2,7 +2,7 @@
 
 > 本表由 `npm run docs:capabilities` 从 Fuyao、Tencent 与 Eastmoney source 定义生成，并由 `test/data-collector-capabilities.test.mjs` 断言与实现同步：新增端点若忘了重新生成，测试会失败。
 
-当前共 **69 个 capability**：同花顺 Fuyao 61 个，腾讯公开 HTTP 3 个，东方财富 HTTP 5 个。参数后带 **\*** 表示必填。
+当前共 **78 个 capability**：同花顺 Fuyao 61 个，腾讯公开 HTTP 3 个，东方财富 HTTP 14 个。参数后带 **\*** 表示必填。
 
 **复核方式**：Fuyao 能力可用 `npm run smoke:fuyao` 真实复核；Tencent 能力使用最小 smoke fixture 或按需真实请求复核；Eastmoney 能力使用固定 fixture，并按需执行公开网页 JSON smoke。
 
@@ -168,6 +168,20 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 | `tencent_quote` | `/tencent/quote` | `codes`\* | 否 | 腾讯实时行情、估值、涨跌停和 ETF 快照 |
 | `tencent_kline` | `/tencent/kline` | `code`\* `period` `adjust` `start` `end` `count` | 否 | 腾讯日周月复权和分钟 K 线 |
 | `tencent_ticks` | `/tencent/ticks` | `code`\* | 否 | 腾讯最近交易日分笔成交明细 |
+
+## 东方财富 HTTP（宏观指标）
+
+| capability | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|
+| `eastmoney_cpi` | `/eastmoney/cpi` | `start_date`\* `end_date`\* `page` `size` | 是 | CPI 居民消费价格指数（月度，全国/城市/农村） |
+| `eastmoney_ppi` | `/eastmoney/ppi` | `start_date`\* `end_date`\* `page` `size` | 是 | PPI 工业生产者出厂价格指数（月度） |
+| `eastmoney_gdp` | `/eastmoney/gdp` | `start_date`\* `end_date`\* `page` `size` | 是 | GDP 国内生产总值与三次产业（季度累计） |
+| `eastmoney_pmi` | `/eastmoney/pmi` | `start_date`\* `end_date`\* `page` `size` | 是 | PMI 采购经理人指数（制造业与非制造业） |
+| `eastmoney_money_supply` | `/eastmoney/money_supply` | `start_date`\* `end_date`\* `page` `size` | 是 | M0/M1/M2 货币供应量（月度） |
+| `eastmoney_rmb_loan` | `/eastmoney/rmb_loan` | `start_date`\* `end_date`\* `page` `size` | 是 | 新增人民币贷款（月度，含负值） |
+| `eastmoney_customs_trade` | `/eastmoney/customs_trade` | `start_date`\* `end_date`\* `page` `size` | 是 | 海关进出口金额与同比环比（月度） |
+| `eastmoney_retail_sales` | `/eastmoney/retail_sales` | `start_date`\* `end_date`\* `page` `size` | 是 | 社会消费品零售总额（月度） |
+| `eastmoney_deposit_reserve` | `/eastmoney/deposit_reserve` | `start_date`\* `end_date`\* `page` `size` | 是 | 存款准备金率调整事件（历次） |
 
 ## 东方财富 HTTP（资金与筹码）
 

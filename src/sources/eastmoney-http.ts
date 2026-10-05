@@ -288,6 +288,195 @@ async function executeBoard(params: Params, signal: AbortSignal, cashflow: boole
   return { data: { item: data.diff.map((raw) => parseBoardRow(raw, boardType, cashflow)), pagination: pagination(Number(params.page), Number(params.size), Math.ceil(data.total / Number(params.size)), data.total) }, schema: { type: 'object', properties: { item: { type: 'array', items: row }, pagination: { type: 'object', additionalProperties: true } }, required: ['item', 'pagination'], additionalProperties: true } }
 }
 
+/**
+ * 宏观指标表：一行 = 一个报告期。`MacroTable` 里的 `numbers` / `texts` / `dates` 就是
+ * **显式键名映射表**（上游大写缩写 → 行键 snake_case，`docs/dev/tool-schema.md` §10.6）：没列出来的上游键
+ * 一律丢弃。透传 `EXIT_BASE` 这类缩写还能读，透传中文名或全半角混排的键名就会让
+ * `query_dataset` 的字符串列名匹配到零行——那是静默空结果，不是错误。
+ *
+ * 字段口径来自 2026-10-05 的真报文核验（每表 200 行：无缺键；社零有 15/200 行
+ * `RETAIL_TOTAL` 为 null、存准率 30/58 行 `REMARK` 为 null），所以**数值与文本一律按可空声明**，
+ * null 原样保留、不补 0。
+ */
+interface MacroTable {
+  capability: string
+  name: string
+  context: string
+  reportName: string
+  summary: string
+  description: string
+  /** 报告期键 → 行键；`datetime` 是 `2026-08-01 00:00:00`，`chinese` 是 `2025年05月07日`。 */
+  dates: Array<{ from: string; to: string; format: 'datetime' | 'chinese' }>
+  /** 东财原文期间标签（`2026年08月份`），原样存成 `period_label` 供回传引用。 */
+  labelFrom?: string
+  numbers: Array<{ from: string; to: string }>
+  texts?: Array<{ from: string; to: string }>
+}
+
+function macroDate(value: unknown, format: 'datetime' | 'chinese', context: string): string {
+  if (format === 'chinese') {
+    const match = String(value ?? '').match(/(\d{4})年(\d{1,2})月(\d{1,2})日/)
+    if (!match) throw sourceError(`Eastmoney ${context} row has an unparseable Chinese date`, 'eastmoney_invalid_response')
+    return `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`
+  }
+  const text = String(value ?? '').slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) throw sourceError(`Eastmoney ${context} row has invalid ${context} date`, 'eastmoney_invalid_response')
+  return text
+}
+
+const macroRow = (table: MacroTable) => {
+  const properties: Record<string, object> = {}
+  const nullableNumber = { oneOf: [{ type: 'number' }, { type: 'null' }] }
+  for (const date of table.dates) {
+    properties[date.to] = { type: 'string' }
+    properties[`${date.to}_ms`] = { type: 'integer' }
+  }
+  if (table.labelFrom) properties.period_label = { oneOf: [{ type: 'string' }, { type: 'null' }] }
+  for (const column of table.numbers) properties[column.to] = nullableNumber
+  for (const column of table.texts ?? []) properties[column.to] = { oneOf: [{ type: 'string' }, { type: 'null' }] }
+  return { type: 'object', properties, additionalProperties: true }
+}
+
+function parseMacroRow(table: MacroTable, raw: JsonRecord): JsonRecord {
+  const row: JsonRecord = {}
+  for (const date of table.dates) {
+    const text = macroDate(raw[date.from], date.format, table.context)
+    row[date.to] = text
+    row[`${date.to}_ms`] = dateMs(text)
+  }
+  if (table.labelFrom) row.period_label = textOrNull(raw[table.labelFrom])
+  for (const column of table.numbers) row[column.to] = numberOrNull(raw[column.from])
+  for (const column of table.texts ?? []) row[column.to] = textOrNull(raw[column.from])
+  return row
+}
+
+async function executeMacro(table: MacroTable, params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
+  const url = new URL(DATACENTER_URL)
+  url.searchParams.set('reportName', table.reportName)
+  url.searchParams.set('columns', 'ALL')
+  url.searchParams.set('source', 'WEB')
+  url.searchParams.set('client', 'WEB')
+  url.searchParams.set('sortColumns', 'REPORT_DATE')
+  url.searchParams.set('sortTypes', '-1')
+  url.searchParams.set('pageNumber', String(params.page))
+  url.searchParams.set('pageSize', String(params.size))
+  url.searchParams.set('filter', `(REPORT_DATE>='${params.start_date}')(REPORT_DATE<='${params.end_date}')`)
+  const result = requireDatacenterResult(await getJson(url.toString(), signal, table.context), table.context)
+  const parsed = requireRows(result, table.context)
+  return { data: { item: parsed.rows.map((raw) => parseMacroRow(table, raw)), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(macroRow(table)) }
+}
+
+function createMacroSource(table: MacroTable): DataSource {
+  return createSource({
+    capability: table.capability,
+    name: table.name,
+    summary: table.summary,
+    description: table.description,
+    inputSchema: dateRangeInput,
+    outputSchema: datacenterOutput(macroRow(table)),
+    paginated: true,
+    rowShape: { rowKey: 'item' },
+    allowed: ['start_date', 'end_date', 'page', 'size'],
+    normalize: (params) => normalizeDateRange(params, ['start_date', 'end_date', 'page', 'size']),
+    execute: (params, signal) => executeMacro(table, params, signal),
+  })
+}
+
+const MACRO_PERCENT_NOTE = '`_yoy_pct` 是同比、`_mom_pct` 是环比，都是百分数原值（0.8 表示 +0.8%，不是 0.8%×100 的小数形式）；`_ms` 后缀是按 Asia/Shanghai 零点换算的毫秒时间戳。'
+
+const MACRO_TABLES: MacroTable[] = [
+  {
+    capability: 'eastmoney_cpi', name: 'get_eastmoney_cpi', context: 'CPI', reportName: 'RPT_ECONOMY_CPI',
+    summary: 'CPI 居民消费价格指数（月度，全国/城市/农村）',
+    description: `按月获取中国 CPI（东财 datacenter RPT_ECONOMY_CPI，实测 2010-01 起共 224 期，可深翻到 2010 年）。${MACRO_PERCENT_NOTE} \`_index\` 是当月价格指数（上年同月=100，100.8 即同比 +0.8%），\`_ytd_index\` 是本年 1 月至当月的累计指数（上年同期=100）；national / city / rural 三档同口径，实测同期三档同时有值。东财原文月份标签存在 period_label。`,
+    dates: [{ from: 'REPORT_DATE', to: 'report_date', format: 'datetime' }], labelFrom: 'TIME',
+    numbers: [
+      { from: 'NATIONAL_SAME', to: 'national_yoy_pct' }, { from: 'NATIONAL_BASE', to: 'national_index' }, { from: 'NATIONAL_SEQUENTIAL', to: 'national_mom_pct' }, { from: 'NATIONAL_ACCUMULATE', to: 'national_ytd_index' },
+      { from: 'CITY_SAME', to: 'city_yoy_pct' }, { from: 'CITY_BASE', to: 'city_index' }, { from: 'CITY_SEQUENTIAL', to: 'city_mom_pct' }, { from: 'CITY_ACCUMULATE', to: 'city_ytd_index' },
+      { from: 'RURAL_SAME', to: 'rural_yoy_pct' }, { from: 'RURAL_BASE', to: 'rural_index' }, { from: 'RURAL_SEQUENTIAL', to: 'rural_mom_pct' }, { from: 'RURAL_ACCUMULATE', to: 'rural_ytd_index' },
+    ],
+  },
+  {
+    capability: 'eastmoney_ppi', name: 'get_eastmoney_ppi', context: 'PPI', reportName: 'RPT_ECONOMY_PPI',
+    summary: 'PPI 工业生产者出厂价格指数（月度）',
+    description: `按月获取中国 PPI（RPT_ECONOMY_PPI，实测 2010-01 起共 248 期）。${MACRO_PERCENT_NOTE} 本表**只有同比**：monthly_index 是当月同比指数（上年同月=100），yoy_pct 是同比百分数，ytd_index 是累计指数；上游不提供环比，不要拿相邻两月自行当成环比。`,
+    dates: [{ from: 'REPORT_DATE', to: 'report_date', format: 'datetime' }], labelFrom: 'TIME',
+    numbers: [{ from: 'BASE', to: 'monthly_index' }, { from: 'BASE_SAME', to: 'yoy_pct' }, { from: 'BASE_ACCUMULATE', to: 'ytd_index' }],
+  },
+  {
+    capability: 'eastmoney_gdp', name: 'get_eastmoney_gdp', context: 'GDP', reportName: 'RPT_ECONOMY_GDP',
+    summary: 'GDP 国内生产总值与三次产业（季度累计）',
+    description: `按季度获取中国 GDP（RPT_ECONOMY_GDP，实测 2006-Q1 起共 82 期）。${MACRO_PERCENT_NOTE} 金额字段是**年初至报告期的累计值**（如 report_date=2026-06-01 那行是上半年累计），单位按东财标称为亿元——未经逐值核对，只用于量级与趋势比较，不要自行换算成美元或绝对口径写进结论；\`_yoy_pct\` 是同比增长率百分数。primary/secondary/tertiary 为三次产业，gdp_value 与 primary 等字段名里的 ytd 后缀是"累计"而非"同比"。`,
+    dates: [{ from: 'REPORT_DATE', to: 'report_date', format: 'datetime' }], labelFrom: 'TIME',
+    numbers: [
+      { from: 'DOMESTICL_PRODUCT_BASE', to: 'gdp_ytd' }, { from: 'FIRST_PRODUCT_BASE', to: 'primary_ytd' }, { from: 'SECOND_PRODUCT_BASE', to: 'secondary_ytd' }, { from: 'THIRD_PRODUCT_BASE', to: 'tertiary_ytd' },
+      { from: 'SUM_SAME', to: 'gdp_yoy_pct' }, { from: 'FIRST_SAME', to: 'primary_yoy_pct' }, { from: 'SECOND_SAME', to: 'secondary_yoy_pct' }, { from: 'THIRD_SAME', to: 'tertiary_yoy_pct' },
+    ],
+  },
+  {
+    capability: 'eastmoney_pmi', name: 'get_eastmoney_pmi', context: 'PMI', reportName: 'RPT_ECONOMY_PMI',
+    summary: 'PMI 采购经理人指数（制造业与非制造业）',
+    description: `按月获取中国 PMI（RPT_ECONOMY_PMI，实测 2010-02 起共 225 期）。manufacturing_pmi / non_manufacturing_pmi 是指数原值（50 为荣枯线，不是百分数）；\`_yoy_pct\` 是东财给出的**同比变化百分数**（小数位很多，属东财计算口径），${MACRO_PERCENT_NOTE} 本表不含新订单、生产、就业等分项指数，只有综合两项。`,
+    dates: [{ from: 'REPORT_DATE', to: 'report_date', format: 'datetime' }], labelFrom: 'TIME',
+    numbers: [{ from: 'MAKE_INDEX', to: 'manufacturing_pmi' }, { from: 'MAKE_SAME', to: 'manufacturing_yoy_pct' }, { from: 'NMAKE_INDEX', to: 'non_manufacturing_pmi' }, { from: 'NMAKE_SAME', to: 'non_manufacturing_yoy_pct' }],
+  },
+  {
+    capability: 'eastmoney_money_supply', name: 'get_eastmoney_money_supply', context: '货币供应量', reportName: 'RPT_ECONOMY_CURRENCY_SUPPLY',
+    summary: 'M0/M1/M2 货币供应量（月度）',
+    description: `按月获取人民币 M2 / M1 / M0（RPT_ECONOMY_CURRENCY_SUPPLY，实测 2010-01 起共 224 期）。m2/m1/m0 是**存量原值**，单位按东财标称为亿元（未逐值核对，只做量级与趋势比较）；\`_yoy_pct\` 同比、\`_mom_pct\` 环比为百分数，${MACRO_PERCENT_NOTE} 本表没有 M2-M1 剪刀差，需要就自己按两列相减并写明是派生值。`,
+    dates: [{ from: 'REPORT_DATE', to: 'report_date', format: 'datetime' }], labelFrom: 'TIME',
+    numbers: [
+      { from: 'BASIC_CURRENCY', to: 'm2' }, { from: 'BASIC_CURRENCY_SAME', to: 'm2_yoy_pct' }, { from: 'BASIC_CURRENCY_SEQUENTIAL', to: 'm2_mom_pct' },
+      { from: 'CURRENCY', to: 'm1' }, { from: 'CURRENCY_SAME', to: 'm1_yoy_pct' }, { from: 'CURRENCY_SEQUENTIAL', to: 'm1_mom_pct' },
+      { from: 'FREE_CASH', to: 'm0' }, { from: 'FREE_CASH_SAME', to: 'm0_yoy_pct' }, { from: 'FREE_CASH_SEQUENTIAL', to: 'm0_mom_pct' },
+    ],
+  },
+  {
+    capability: 'eastmoney_rmb_loan', name: 'get_eastmoney_rmb_loan', context: '人民币贷款', reportName: 'RPT_ECONOMY_RMB_LOAN',
+    summary: '新增人民币贷款（月度，含负值）',
+    description: `按月获取新增人民币贷款（RPT_ECONOMY_RMB_LOAN，实测 2010-01 起共 224 期）。new_loans 是**当月新增额**、ytd_new_loans 是本年累计，单位按东财标称为亿元（未逐值核对）；当月新增**可以为负**（贷款净减少，实测 2025-07 为 -5896），负值是事实、不是脏数据，不要过滤掉。${MACRO_PERCENT_NOTE} 本表是人民银行口径的人民币贷款，不含外币贷款与社融增量。`,
+    dates: [{ from: 'REPORT_DATE', to: 'report_date', format: 'datetime' }], labelFrom: 'TIME',
+    numbers: [{ from: 'RMB_LOAN', to: 'new_loans' }, { from: 'RMB_LOAN_SAME', to: 'new_loans_yoy_pct' }, { from: 'RMB_LOAN_SEQUENTIAL', to: 'new_loans_mom_pct' }, { from: 'RMB_LOAN_ACCUMULATE', to: 'ytd_new_loans' }, { from: 'LOAN_ACCUMULATE_SAME', to: 'ytd_new_loans_yoy_pct' }],
+  },
+  {
+    capability: 'eastmoney_customs_trade', name: 'get_eastmoney_customs_trade', context: '进出口', reportName: 'RPT_ECONOMY_CUSTOMS',
+    summary: '海关进出口金额与同比环比（月度）',
+    description: `按月获取出口与进口（RPT_ECONOMY_CUSTOMS，实测 2010-01 起共 224 期）。${MACRO_PERCENT_NOTE} ⛔ **金额字段（export_value / import_value / *_ytd）的计量单位未经核验**：同一列按"千美元"或"万元人民币"解释都能与公开量级对上其一，无法据此定档，所以只能用于趋势与同环比比较，**禁止换算成"元"或"美元"写进结论**；export_yoy_pct / export_mom_pct 等百分数字段口径明确（东财原值）。要绝对额请改走 web_retriever 的海关官方统计材料。本表是海关口径，不含贸易差额字段，需要差额就自己按进出口两列相减并标注派生。`,
+    dates: [{ from: 'REPORT_DATE', to: 'report_date', format: 'datetime' }], labelFrom: 'TIME',
+    numbers: [
+      { from: 'EXIT_BASE', to: 'export_value' }, { from: 'IMPORT_BASE', to: 'import_value' },
+      { from: 'EXIT_BASE_SAME', to: 'export_yoy_pct' }, { from: 'IMPORT_BASE_SAME', to: 'import_yoy_pct' },
+      { from: 'EXIT_BASE_SEQUENTIAL', to: 'export_mom_pct' }, { from: 'IMPORT_BASE_SEQUENTIAL', to: 'import_mom_pct' },
+      { from: 'EXIT_ACCUMULATE', to: 'export_ytd' }, { from: 'IMPORT_ACCUMULATE', to: 'import_ytd' },
+      { from: 'EXIT_ACCUMULATE_SAME', to: 'export_ytd_yoy_pct' }, { from: 'IMPORT_ACCUMULATE_SAME', to: 'import_ytd_yoy_pct' },
+    ],
+  },
+  {
+    capability: 'eastmoney_retail_sales', name: 'get_eastmoney_retail_sales', context: '社会消费品零售', reportName: 'RPT_ECONOMY_TOTAL_RETAIL',
+    summary: '社会消费品零售总额（月度）',
+    description: `按月获取社会消费品零售总额（RPT_ECONOMY_TOTAL_RETAIL，实测 2008-10 起共 209 期）。total_retail 是当月额、ytd_total_retail 是本年累计，单位按东财标称为亿元（未逐值核对，只做量级与趋势比较）；${MACRO_PERCENT_NOTE} ⛔ 实测 200 行里有 15 行 total_retail 与 total_retail_yoy_pct 为 **null**、30 行 total_retail_mom_pct 为 null（口径调整与统计口径缺口），null 一律原样保留、不补 0、也不当作 0 增长参与排序。`,
+    dates: [{ from: 'REPORT_DATE', to: 'report_date', format: 'datetime' }], labelFrom: 'TIME',
+    numbers: [{ from: 'RETAIL_TOTAL', to: 'total_retail' }, { from: 'RETAIL_TOTAL_SAME', to: 'total_retail_yoy_pct' }, { from: 'RETAIL_TOTAL_SEQUENTIAL', to: 'total_retail_mom_pct' }, { from: 'RETAIL_TOTAL_ACCUMULATE', to: 'ytd_total_retail' }, { from: 'RETAIL_ACCUMULATE_SAME', to: 'ytd_total_retail_yoy_pct' }],
+  },
+  {
+    capability: 'eastmoney_deposit_reserve', name: 'get_eastmoney_deposit_reserve', context: '存款准备金率', reportName: 'RPT_ECONOMY_DEPOSIT_RESERVE',
+    summary: '存款准备金率调整事件（历次）',
+    description: `获取央行**历次存款准备金率调整**（RPT_ECONOMY_DEPOSIT_RESERVE，实测 2007-01 起共 58 条、最新一条 2025-05）。这是**事件表不是月度序列**：一行一次调整，区间内没有调整就是空结果（实测 2025-01..2025-04 返回上游 9201 空，属真实数据缺口，不重试）。report_date 与 announcement/publish_date 口径不同：report_date 与 publish_date 是公告日，effective_date（TRADE_DATE_NEW）才是**生效日**，回答"什么时候开始降"要用 effective_date。large_* / small_* 分别是大型与中小型金融机构存准率（百分数原值，10 表示 10%），large_change_pct / small_change_pct 是本次变动百分点（-0.5 表示下调 0.5 个百分点）。sse_next_change_pct / szse_next_change_pct 是东财附带的**公告次日**上证/深证涨跌幅（百分数），属派生观察值，不要当成市场长期反应。announcement 是央行公告原文，实测 58 条中 30 条为 null。`,
+    dates: [
+      { from: 'REPORT_DATE', to: 'report_date', format: 'datetime' },
+      { from: 'TRADE_DATE_NEW', to: 'effective_date', format: 'datetime' },
+      { from: 'PUBLISH_DATE', to: 'publish_date', format: 'chinese' },
+    ],
+    labelFrom: 'MONTH_DATE',
+    numbers: [
+      { from: 'INTEREST_RATE_BB', to: 'large_before_pct' }, { from: 'INTEREST_RATE_BA', to: 'large_after_pct' }, { from: 'CHANGE_RATE_B', to: 'large_change_pct' },
+      { from: 'INTEREST_RATE_SB', to: 'small_before_pct' }, { from: 'INTEREST_RATE_SA', to: 'small_after_pct' }, { from: 'CHANGE_RATE_S', to: 'small_change_pct' },
+      { from: 'NEXT_SH_RATE', to: 'sse_next_change_pct' }, { from: 'NEXT_SZ_RATE', to: 'szse_next_change_pct' },
+    ],
+    texts: [{ from: 'REMARK', to: 'announcement' }],
+  },
+]
+
 function createSource(options: { capability: string; name: string; summary: string; description: string; inputSchema: object; outputSchema: object; paginated?: boolean; cacheMaxAgeMs?: number; rowShape: SchemaDescriptor['rowShape']; allowed: string[]; normalize: (params: Params) => Params; execute: (params: Params, signal: AbortSignal) => Promise<{ data: unknown; schema: object }> }): DataSource {
   const schema: SchemaDescriptor = { capability: options.capability, time_contract: getDataTimeContract(options.capability), name: options.name, source: `http:eastmoney.${options.capability}`, data_key: buildDataKey('eastmoney', 'http', options.capability), source_label: 'eastmoney', paginated: options.paginated === true, cacheMaxAgeMs: options.cacheMaxAgeMs, rowShape: options.rowShape, summary: options.summary, description: options.description, input_schema: options.inputSchema, output_schema: options.outputSchema }
   const normalize = (params: Record<string, unknown>): Params => options.normalize(params)
@@ -311,5 +500,6 @@ export function createEastmoneySources(): DataSource[] {
     createSource({ capability: 'eastmoney_lockup_expiry', name: 'get_eastmoney_lockup_expiry', summary: '东财限售解禁日历', description: '按自然日期区间分页获取东方财富限售解禁日历。已验证字段包括解禁日期、解禁股份类型、FREE_SHARES、TOTAL_RATIO、NON_FREE_SHARES、ABLE_FREE_SHARES；TOTAL_RATIO 是小数比例，股份数量字段以 free_shares_raw 等原始数值保存，单位以东财页面口径为准，未擅自标成股。', inputSchema: dateRangeInput, outputSchema: datacenterOutput(lockupRow), paginated: true, rowShape: { rowKey: 'item' }, allowed: ['start_date', 'end_date', 'page', 'size'], normalize: (params) => normalizeDateRange(params, ['start_date', 'end_date', 'page', 'size']), execute: executeLockup }),
     createSource({ capability: 'eastmoney_sector_rotation', cacheMaxAgeMs: 60_000, name: 'get_eastmoney_sector_rotation', summary: '东财板块行情排名快照', description: '获取东方财富行业、概念或地域板块的查询时点排名快照。默认行业、按涨跌幅排序；board_type 映射为东财 m:90+t:2/3/1。不是历史轮动序列，Dataset 的 captured_at 才是采集时间；板块代码使用 board_code，不归一为证券 ticker。', inputSchema: boardInput, outputSchema: { type: 'object', properties: { item: { type: 'array', items: sectorRow }, pagination: { type: 'object', additionalProperties: true } }, required: ['item', 'pagination'], additionalProperties: true }, paginated: true, rowShape: { rowKey: 'item' }, allowed: ['board_type', 'sort_field', 'page', 'size'], normalize: normalizeBoard, execute: (params, signal) => executeBoard(params, signal, false) }),
     createSource({ capability: 'eastmoney_cashflow_rotation', cacheMaxAgeMs: 60_000, name: 'get_eastmoney_cashflow_rotation', summary: '东财板块资金流快照', description: '获取东方财富行业、概念或地域板块当前资金流快照，默认按主力净流入排序。f62/f66/f72/f78/f84 为金额原值（元），f184/f69/f75/f81/f87 为东财原始占比；当前只承诺查询时点快照，不把未确认的 5 日/10 日字段映射为历史序列。', inputSchema: cashflowInput, outputSchema: { type: 'object', properties: { item: { type: 'array', items: cashflowRow }, pagination: { type: 'object', additionalProperties: true } }, required: ['item', 'pagination'], additionalProperties: true }, paginated: true, rowShape: { rowKey: 'item' }, allowed: ['board_type', 'page', 'size'], normalize: normalizeCashflowBoard, execute: (params, signal) => executeBoard(params, signal, true) }),
+    ...MACRO_TABLES.map(createMacroSource),
   ]
 }

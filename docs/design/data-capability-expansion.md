@@ -335,3 +335,38 @@ node -e "import('./lib/data-collector/hub.js').then(async ({DataCollectorHub}) =
 宿主侧事实的出处：`dsh-base/cordis.patch.yml:404-419`（`spill-local` + `spill-policy maxInlineTokens: 12500`
 + `tool-result-pruner`）、`dsh-spill-policy/lib/index.js:237`（`ctx.on("tools/post-execute")`）、
 `dsh-compaction-tool-result-pruner/README.zh.md`（"压缩触发条件满足后…未达到压力阈值的对话保持不变"）。
+
+### 7.1 第 2 步·宏观批次的真报文核验（2026-10-05，已注册）
+
+每表取 200 行（GDP 82 行、存准率 58 行为全量）统计缺键与空值：
+
+| reportName | 期数与深度 | 列数 | 缺键 | null 分布 |
+|---|---|---|---|---|
+| `RPT_ECONOMY_CPI` | 224 期，2010-01..2026-08 | 14 | 0 | 无 |
+| `RPT_ECONOMY_PPI` | 248 期，2010-01..2026-08 | 5 | 0 | 无 |
+| `RPT_ECONOMY_GDP` | 82 期，2006-Q1..2026-Q2 | 10 | 0 | 无 |
+| `RPT_ECONOMY_PMI` | 225 期，2010-02..2026-09 | 6 | 0 | 无 |
+| `RPT_ECONOMY_CURRENCY_SUPPLY` | 224 期，2010-01..2026-08 | 11 | 0 | 无 |
+| `RPT_ECONOMY_RMB_LOAN` | 224 期，2010-01..2026-08 | 7 | 0 | 无（**含负值**：2025-07 为 -5896） |
+| `RPT_ECONOMY_CUSTOMS` | 224 期，2010-01..2026-08 | 12 | 0 | 无 |
+| `RPT_ECONOMY_TOTAL_RETAIL` | 209 期，2008-10..2026-08 | 7 | 0 | **`RETAIL_TOTAL` 15/200、`_SAME` 15/200、`_SEQUENTIAL` 30/200** |
+| `RPT_ECONOMY_DEPOSIT_RESERVE` | 58 条事件，2007-01..2025-05 | 14 | 0 | **`REMARK` 30/58** |
+
+- 结论 1：**数值列一律按可空声明**（`oneOf [number, null]`），社零与存准率都实测到 null；
+  null 原样保留，不补 0、不删列（删列会让 `query_dataset` 把"没有这列"和"这期没数据"混成一件事）。
+- 结论 2：这批全是**窄表**（≤14 列），字典投影后详情最大 1648 字符（存准率）——§2.2 的收益要到
+  两融 45 列 / 可转债 72 列那批才真正兑现。
+- 结论 3：单位口径分级。**亿元**（量级核对）：GDP 累计、M0/M1/M2、新增贷款、社零；
+  **百分数原值**：`*_SAME` 同比、`*_SEQUENTIAL` 环比、存准率与次日大盘涨跌；
+  **指数**（上年同月=100）：CPI/PPI 的 `_BASE` / `_ACCUMULATE`；PMI 两项是指数（50 为荣枯线）。
+  ⛔ **进出口金额单位未核验**：`EXIT_BASE=401440956.924` 与美元、人民币两种口径的量级都只能对上其一，
+  所以 `eastmoney_customs_trade` 的 description 明令"只用于趋势与同环比，禁止换算成元或美元写进结论"。
+  这就是 §5.4"凭印象写的 summary 就是静默说错"的具体形态。
+- 结论 4：`RPT_ECONOMY_DEPOSIT_RESERVE` 是**事件表**，`filter` 窗口 2025-01..2025-04 返回
+  `code=9201`（区间内确实没有降准）→ 走既有 9201 归类：**空结果而非上游故障**，不重试。
+- 复现口径：`GET https://datacenter-web.eastmoney.com/api/data/v1/get`，参数
+  `reportName=<表名>&columns=ALL&source=WEB&client=WEB&sortColumns=REPORT_DATE&sortTypes=-1&pageNumber=1&pageSize=200`，
+  过滤器写法 `(REPORT_DATE>='YYYY-MM-DD')(REPORT_DATE<='YYYY-MM-DD')`。
+- 容量核对：这批注册后 **78 条 = 2795 字符（45.5% 预算）**；同一份 78 条若还走旧的 JSON 数组编码
+  是 **6286 字符，已经越过 6144 自预算**——第 0 步不先落地，这批补录就会把目录撞爆（正是 §2 预判的那件事）。
+
