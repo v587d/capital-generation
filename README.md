@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.5.3-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.5.4-9cf" alt="Version"></a>
 </p>
 
 # Capital Generation
@@ -44,20 +44,20 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 
    安装后重启该 profile。Windows 桌面端在「添加插件」中输入 `https://github.com/v587d/capital-generation`。桌面端自带 DSH 宿主，不需要单独用 npm 安装宿主。本仓库已包含构建产物，普通用户不需要克隆仓库或运行构建命令。
 
-2. **填写密钥。**打开 DSH「插件」→ 已安装的 `@v587d/capital-generation` →「包含的组件」→ `capital-config`，在配置卡片中填写并保存。**入口在「插件」页，不在「设置」页。**
+2. **填写密钥。**打开 DSH「插件」→ 已安装的 **Capital Generation**，页面中的「配置」段即为填写处。**入口在「插件」页，不在「设置」页。**
 
    | 密钥 | 用途 |
    | --- | --- |
-   | [同花顺 Fuyao](https://fuyao.aicubes.cn/docs/)（必填） | 行情、财务数据和自选股报价 |
-   | [AnySearch](https://www.anysearch.com/docs)（必填） | 网页搜索和正文提取 |
-   | [Wind Alice](https://market.windalice.com/#/home)（推荐） | 公告和金融新闻检索 |
-   | [PaddleOCR AIStudio](https://aistudio.baidu.com/paddleocr)（可选） | 解析 PDF 和图片中的文字 |
+   | [同花顺 Fuyao](https://fuyao.aicubes.cn/docs/) | 行情、财务数据和自选股报价 |
+   | [AnySearch](https://www.anysearch.com/docs) | 网页搜索和正文提取 |
+   | [Wind Alice](https://market.windalice.com/#/home) | 公告和金融新闻检索 |
+   | [PaddleOCR AIStudio](https://aistudio.baidu.com/paddleocr) | 解析 PDF 和图片中的文字 |
 
-   这些是第三方服务的密钥，需分别向服务方申请；额度和条款以各服务方为准。没有可选密钥时，对应能力不可用，其他功能仍可使用。保存后**新建 Capital 会话**即可生效，无需重启。也可以将密钥写入 `~/.dsh/.credentials.yaml`，名称依次为 `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`、`PADDLE_OCR_TOKEN`。密钥由 DSH 凭据服务保存，不会显示在会话配置中。
+   这些都是第三方服务的密钥，需分别向服务方申请；额度和条款以各服务方为准。**四个都可以稍后再填**：缺哪个，对应能力就不可用，其他功能照常。保存后**新建 Capital 模式会话**即可生效，无需重启。也可以将密钥写入 `~/.dsh/.credentials.yaml`，名称依次为 `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`、`PADDLE_OCR_TOKEN`。密钥由 DSH 凭据服务保存，不会显示在会话配置中。
 
    <p align="center">
-     <a href="assets/DSH@0.1.7rc2插件设置_3.png">
-       <img src="assets/DSH@0.1.7rc2插件设置_3.png" alt="capital-config 配置卡片" width="520">
+     <a href="assets/DSH@0.2.0rc2插件主页配置.png">
+       <img src="assets/DSH@0.2.0rc2插件主页配置.png" alt="插件主页的「配置」段" width="520">
      </a>
    </p>
 
@@ -90,8 +90,8 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 ## 常见问题
 
 - **安装后找不到 Capital 模式？**确认插件出现在「插件」→ 已安装列表；Web / CLI profile 安装后要重启该 profile，并在新会话选择模式。
-- **配置卡片在哪？**在插件详情的 `capital-config` 组件下，不在 DSH 的普通「设置」页面。保存密钥后新建会话再试。
-- **桌面端升级后仍是旧版？**桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.5.3`。
+- **配置在哪？**打开「插件」→ 已安装的 **Capital Generation**，页面里的「配置」段就是；不在 DSH 的普通「设置」页面，也不用点进「包含的组件」。保存密钥后新建会话再试。
+- **桌面端升级后仍是旧版？**桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.5.4`。
 - **网页抓取失败？**配置卡片中的「允许启动本地提取网页内容」默认开启：AnySearch 提取失败时可尝试本机直连。关闭后，本机直连的具名来源查询也不可用；请检查该开关和网络连接。
 
 目前 Windows 桌面端有一项[已知宿主差异](CHANGELOG.md)：主 Agent 的部分工具限制可能不生效。请特别留意它实际调用了哪些工具；结构化数据的取数限制仍由工具自身执行。

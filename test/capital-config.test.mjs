@@ -15,11 +15,13 @@ const CLIENT_SRC = join(ROOT, 'capital-config', 'client.src.cjs')
 
 /**
  * 0.1.7 的 settings 面里**条目 id 就是命名空间**：host 半边不再有 `settings.register`，
- * 可编辑面是条目 Config 的 `.volatile()` 投影；浏览器半边按 `configForms.get(条目 id)` 读写；
- * Plugins 页按 `<包名>#<行 id>` 寻一行的配置页（`rowConfigKey`）。于是四处字符串必须逐字相同，
- * 而漂移的表现是**卡片静默消失、零报错**（issue #3 那一族）。这里把四处钉在一起。
+ * 可编辑面是条目 Config 的 `.volatile()` 投影；浏览器半边按 `configForms.get(条目 id)` 读写。
+ * 卡片坐的是**组合包自己的页面**：槽 `plugins.bundle.config` 的 key 是组合包的**包名**
+ * （页面 `renderSlot(..., { entryKey: pkg.name })`）。于是两条同字链各自钉住——条目 id 四处
+ * （patch 行 id ≡ host ≡ 主插件 ≡ 浏览器半边）与包名一处（对根 `package.json`）。
+ * 漂移的表现都是**卡片静默消失、零报错**（issue #3 那一族）。
  */
-test('条目 id 四处一致：patch 行 id ≡ host ≡ 主插件 ≡ 浏览器半边（槽 key = `<包名>#<行 id>`）', () => {
+test('条目 id 四处一致 + 槽 key = 组合包包名：settings 命名空间与卡片座位各自同字', () => {
   const patch = yamlLoad(readFileSync(join(ROOT, 'cordis.patch.yml'), 'utf8').replace(/!!js\s+/g, ''))
   const row = patch.flatMap((entry) => entry?.insert ?? []).find((item) => item?.name === './capital-config/index.js')
   assert.ok(row, 'cordis.patch.yml 必须有 capital-config 这颗 host 平面行')
@@ -28,10 +30,12 @@ test('条目 id 四处一致：patch 行 id ≡ host ≡ 主插件 ≡ 浏览器
 
   const source = readFileSync(CLIENT_SRC, 'utf8')
   const entryId = source.match(/^const ENTRY_ID = '([^']+)'/m)?.[1]
-  const slotKey = source.match(/^const SLOT_KEY = '([^']+)'/m)?.[1]
+  const bundleName = source.match(/^const BUNDLE_NAME = '([^']+)'/m)?.[1]
   assert.equal(entryId, SETTINGS_ENTRY_ID, '浏览器半边读的条目 id 必须与 host 一致（漂移 = 卡片静默消失）')
   const bundle = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).name
-  assert.equal(slotKey, `${bundle}#${SETTINGS_ENTRY_ID}`, 'plugins.row.config 的 key 必须是 `<包名>#<行 id>`')
+  assert.equal(bundleName, bundle, 'plugins.bundle.config 的 key 必须逐字等于组合包的包名')
+  assert.ok(!/plugins\.row\.config/.test(codeOnly(source)),
+    '配置坐组合包层，不留行级座位：行详情页要 3 跳，且同包其他行点进去是死路')
 })
 
 /**
@@ -136,11 +140,18 @@ function loadClient({ scope, primitives = {} } = {}) {
           if (typeof type === 'function') return type({ ...props, children: kids })
           return { type, props: { ...props, children: kids }, children: kids }
         },
+        // 假渲染树没有 DOM，portal 目标（官方 head 行）永远找不到 ⇒ useState 恒为 null，
+        // 文档链接走"退回本行末尾"那条降级路，仍然出现在渲染树上。
+        useRef: () => ({ current: null }),
+        useState: (initial) => [initial, () => {}],
+        useEffect: () => {},
       }
+      if (name === 'react-dom') return { createPortal: (node) => node }
       if (name === '@deepseek-ai/dsh-client-ui-primitives') return {
         SettingsForm(props) { return { type: 'SettingsForm', props, children: props.children ?? [] } },
         SettingsSecretField(props) { return { type: 'SettingsSecretField', props, children: props.children ?? [] } },
         Switch(props) { return { type: 'Switch', props, children: props.children ?? [] } },
+        IconRightUpOutlineRegular: () => ({ type: 'icon', props: {}, children: [] }),
         SettingsFormModel: function SettingsFormModel() { return model },
         ...primitives,
       }
@@ -152,8 +163,9 @@ function loadClient({ scope, primitives = {} } = {}) {
 function fakeCtx({ scope, served = true, writes = [] }) {
   const registrations = []
   const servedCalls = []
+  const dictionaries = new Map()
   const ctx = {
-    locale: { bind: (ns) => (key) => `${ns}.${key}`, register: () => () => {} },
+    locale: { bind: (ns) => (key) => `${ns}.${key}`, register: (ns, dict) => { dictionaries.set(ns, dict); return () => {} } },
     configForms: {
       get: (entryId) => {
         assert.equal(entryId, SETTINGS_ENTRY_ID, '浏览器半边必须按条目 id 取表单')
@@ -172,7 +184,7 @@ function fakeCtx({ scope, served = true, writes = [] }) {
     effect: (callback) => { const dispose = callback(); return typeof dispose === 'function' ? dispose : () => {} },
     slots: {
       inject(name, callback) {
-        assert.equal(name, 'plugins.row.config')
+        assert.equal(name, 'plugins.bundle.config')
         callback()
       },
       register(declaration, component) {
@@ -182,7 +194,7 @@ function fakeCtx({ scope, served = true, writes = [] }) {
     },
     logger: { info() {} },
   }
-  return { ctx, registrations, servedCalls, writes }
+  return { ctx, registrations, servedCalls, writes, dictionaries }
 }
 
 const readyScope = (value = {}) => ({
@@ -191,7 +203,7 @@ const readyScope = (value = {}) => ({
   mutate: async () => true,
 })
 
-test('capital-config Client：只依赖 slots/locale/remote/configForms，注册进 plugins.row.config 且用 shell React', () => {
+test('capital-config Client：只依赖 slots/locale/remote/configForms，注册进 plugins.bundle.config 且用 shell React', () => {
   const scope = readyScope()
   const { mod, model } = loadClient({ scope })
   assert.equal(mod.name, 'capital-config')
@@ -203,8 +215,8 @@ test('capital-config Client：只依赖 slots/locale/remote/configForms，注册
   assert.deepEqual(servedCalls, [[SETTINGS_ENTRY_ID]], '必须经 whileServed 门控：Host 不服务该条目时不留痕迹')
   assert.equal(registrations.length, 1)
   const { declaration, component } = registrations[0]
-  assert.equal(declaration.name, 'plugins.row.config')
-  assert.equal(declaration.key, `@v587d/capital-generation#${SETTINGS_ENTRY_ID}`)
+  assert.equal(declaration.name, 'plugins.bundle.config')
+  assert.equal(declaration.key, '@v587d/capital-generation', '组合包级座位按**包名**寻址，不是 `<包名>#<行 id>`')
   assert.equal(typeof declaration.locale, 'string', '卡片文案自registered locale 命名空间')
   assert.equal(typeof component, 'function')
 
@@ -225,7 +237,7 @@ function collect(node, type, out = []) {
   return out
 }
 
-test('capital-config Client：summary 出一句话；page 渲染四个密钥行，回退开关夹在 AnySearch 与 Wind 之间', () => {
+test('capital-config Client：配置段自绘小节标题，四个密钥行按序渲染且回退开关排在最后', () => {
   const scope = readyScope()
   const { mod } = loadClient({ scope })
   const { ctx, registrations } = fakeCtx({ scope })
@@ -241,10 +253,13 @@ test('capital-config Client：summary 出一句话；page 渲染四个密钥行�
     discard: injected.discard,
     toggleLocalFetch: injected.toggleLocalFetch,
   }
-  assert.equal(Card({ ...props, view: 'summary' }), 'description', 'summary 视图就是行的一句话说明')
-
-  const page = Card({ ...props, view: 'page' })
-  assert.equal(page.type, 'SettingsForm', 'page 视图必须走官方表单框（自带只读提示与保存控件）')
+  // 组合包页面只给 `<section data-plugin-config>` 容器，小节标题归卡片自己画。
+  const card = Card({ ...props, view: 'page' })
+  const titles = collect(card, 'h4')
+  assert.equal(titles.length, 1, '配置段要有自己的小节标题：页面这一格不画标题')
+  assert.deepEqual(titles[0].children, ['title'], '标题走卡片字典，不许硬编码文案')
+  const [page] = collect(card, 'SettingsForm')
+  assert.ok(page, '表单必须走官方框（自带只读提示与保存控件）')
   const secrets = collect(page, 'SettingsSecretField').map((node) => node.props.id)
   assert.deepEqual(secrets, [
     'capital-config-fuyao-key',
@@ -255,7 +270,8 @@ test('capital-config Client：summary 出一句话；page 渲染四个密钥行�
   const switches = collect(page, 'Switch')
   assert.equal(switches.length, 1, '只有一颗回退开关')
   assert.equal(switches[0].props.checked, true, '段缺省 ⇒ 默认开（与两处 schema 的 enabled:true 同语义）')
-  // 顺序：AnySearch 密钥 → 开关 → Wind 密钥（需求指定的位置，按渲染树而不是按源码字符串量）。
+  // 顺序（需求指定，按渲染树而不是按源码字符串量）：四个密钥在前、回退开关收尾——
+  // 开关不是密钥，夹在密钥行中间会被读成第五个 Key。
   const order = []
   const walk = (node) => {
     if (node?.type === 'SettingsSecretField') order.push(node.props.id)
@@ -266,10 +282,55 @@ test('capital-config Client：summary 出一句话；page 渲染四个密钥行�
   assert.deepEqual(order, [
     'capital-config-fuyao-key',
     'capital-config-anysearch-key',
-    'switch',
     'capital-config-wind-key',
     'capital-config-paddleocr-key',
+    'switch',
   ])
+})
+
+/**
+ * 文案闸门：钉的是"这类话曾经写错成什么"，不是逐字措辞。
+ * ① 文档链接曾经落在提示下方、还带服务名前缀（占一整行）；② 密钥曾经标"必填 / 选填"，
+ * 而本项目不依赖任何单一数据源，四个 Key 一律选填；③ 生效范围要点名"新 Capital **模式**会话"；
+ * ④ 说明文字曾经写到三四句，用户读不完。
+ */
+test('capital-config Client：文档链接与标签同排且只写"官方文档"；提示不标必填选填、点名 Capital 模式', () => {
+  const scope = readyScope()
+  const { mod } = loadClient({ scope })
+  const { ctx, registrations, dictionaries } = fakeCtx({ scope })
+  mod.apply(ctx)
+  const injected = registrations[0].declaration.inject()
+  const page = registrations[0].component({
+    t: (key) => String(key),
+    view: 'page',
+    useCapitalCard: (selector) => selector(injected.hooks.capitalCard.getSnapshot()),
+    edit: injected.edit, save: injected.save, discard: injected.discard, resetField: injected.resetField,
+    toggleLocalFetch: injected.toggleLocalFetch,
+  })
+  const links = collect(page, 'a')
+  assert.equal(links.length, 4, '四个密钥行各一个文档链接')
+  for (const link of links) {
+    assert.equal(link.props.target, '_blank', '文档链接新标签打开')
+    assert.match(String(link.props.rel), /noopener/, '外链必须切断 opener')
+    assert.equal(link.props['data-capital-config-doc'], 'true', '真机复核按这个属性找 portal 落点')
+    assert.equal(link.children[0], 'openDocs', '链接只写"官方文档"，不带服务名与密钥名')
+    assert.equal(link.children[1]?.type, 'icon', '外链带右上角斜上箭头（官方 primitives 的图标）')
+  }
+
+  const dict = dictionaries.get('settings.capital')
+  assert.ok(dict, '卡片文案来自自己注册的 bilingual 字典')
+  const HINTS = ['fuyaoHint', 'anysearchHint', 'localFetchHint', 'windHint', 'paddleocrHint']
+  for (const locale of ['zh', 'en']) {
+    const hints = HINTS.map((key) => dict[locale][key])
+    assert.ok(!hints.some((h) => /必填|选填|Required|Optional/i.test(h)),
+      '四个 Key 一律选填（项目不依赖任何单一数据源），提示里不许再出现必填 / 选填')
+    for (const hint of hints) {
+      assert.ok(/Capital 模式|Capital mode/.test(hint), `每条提示都要点名生效范围：${hint}`)
+      assert.ok(hint.split(/(?<=[.。])\s+/).length <= 2, `说明文字最多两句：${hint}`)
+      if (locale === 'zh') assert.ok(hint.length <= 60, `中文说明要一眼读完：${hint}`)
+    }
+  }
+  assert.equal(dict.zh.openDocs, '官方文档')
 })
 
 test('capital-config Client：Host 不服务该条目时不注册卡片', () => {
@@ -384,6 +445,6 @@ test('capital-config 包清单：声明运行期 schemastery 依赖，且客户�
   assert.equal(manifest.dsh?.client?.platform, 'web')
   // dsh.client.inject 列的是**模块表**依赖：写一个本机 dsh 里没有的包名，bundle 就加载不了。
   const inject = manifest.dsh.client.inject ?? []
-  assert.ok(inject.includes('@deepseek-ai/dsh-client-ui-plugin-manager'), 'plugins.row.config 槽主在该包里')
+  assert.ok(inject.includes('@deepseek-ai/dsh-client-ui-plugin-manager'), 'plugins.bundle.config 槽主在该包里')
   assert.ok(!inject.includes('@deepseek-ai/dsh-client-ui-settings-plugins'), '0.1.7 的插件页归 plugin-manager 所有')
 })

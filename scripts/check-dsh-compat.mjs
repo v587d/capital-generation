@@ -16,11 +16,15 @@
  */
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { locateDshPackage } from './lib/run-tool.mjs'
 
 const PASS = 'pass'
 const FAIL = 'fail'
 const NA = 'n/a'
+
+/** 本仓根目录：L25 要拿宿主的读元函数核对**我们自己**的显示元数据。 */
+const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
 // 定位 dsh 包根的实现只在 scripts/lib/run-tool.mjs 有一份（smoke-boot 要用同一个包根的
 // lib/bin.js 起进程；两份 finder 迟早分叉，症状是"一端探到了、另一端说找不到"）。
@@ -321,12 +325,13 @@ const probes = [
   },
   {
     id: 'L15',
-    title: 'settings / credentials 扩展面：条目 Config 的 .volatile() 投影（ns = 条目 id）+ configForms.get/whileServed + plugins.row.config(keyed) + credentials remote',
+    title: 'settings / credentials 扩展面：条目 Config 的 .volatile() 投影（ns = 条目 id）+ configForms.get/whileServed + plugins.bundle.config(keyed, key = 包名) + credentials remote',
     why: 'capital-config 是 host 平面 settings 卡片。0.1.7 起命名空间**不再注册**：可编辑面是 profile 条目 Config schema 里 '
       + '.volatile() 字段的投影（`volatileForm` 在一个 volatile 字段都没有时返回 undefined，该条目就**不进** describe 镜像），'
-      + '且 `ns` 恒等于 `entry.options.id`；浏览器半边靠 `ctx.configForms.get(条目 id)` 读写、靠 Plugins 页的 keyed 槽 `plugins.row.config`（'
-      + 'key = `<包名>#<行 id>`）坐落、靠 `remote.credentials.describe/set` 写密钥。条目 id / 行 id / 槽 key 任一处改名都不报错——'
-      + '卡片静默消失或密钥写不进去，用户只会以为"设置里根本没有这个插件"。',
+      + '且 `ns` 恒等于 `entry.options.id`；浏览器半边靠 `ctx.configForms.get(条目 id)` 读写、靠 Plugins 页的 keyed 槽 '
+      + '`plugins.bundle.config`（key = **组合包包名**，页面按 `pkg.name` 渲染且只给 `view: page`）坐落、靠 '
+      + '`remote.credentials.describe/set` 写密钥。条目 id 与包名任一处改名都不报错——卡片静默消失或密钥写不进去，'
+      + '用户只会以为"设置里根本没有这个插件"。',
     run() {
       const hostTypesFile = join(PKG('dsh-settings'), 'lib/types/index.d.ts')
       const hostTypes = readIfPresent(hostTypesFile)
@@ -340,9 +345,6 @@ const probes = [
       const slotFile = join(PKG('dsh-client-ui-plugin-manager'), 'lib/types/client/slot-contract.d.ts')
       const slot = readIfPresent(slotFile)
       if (slot === undefined) return { status: FAIL, detail: `读不到 ${slotFile}` }
-      const ledgerFile = join(PKG('dsh-client-ui-plugin-manager'), 'lib/types/client/config-ledger.d.ts')
-      const ledger = readIfPresent(ledgerFile)
-      if (ledger === undefined) return { status: FAIL, detail: `读不到 ${ledgerFile}` }
       const pmPageFile = join(PKG('dsh-client-ui-plugin-manager'), 'lib/client.js')
       const pmPage = readIfPresent(pmPageFile)
       if (pmPage === undefined) return { status: FAIL, detail: `读不到 ${pmPageFile}` }
@@ -352,6 +354,16 @@ const probes = [
       const fieldsFile = join(PKG('dsh-client-ui-primitives'), 'lib/types/settings-form/fields.d.ts')
       const fields = readIfPresent(fieldsFile)
       if (fields === undefined) return { status: FAIL, detail: `读不到 ${fieldsFile}` }
+      // 文档链接 portal 进官方 head 行、并用元素选择器摆位，所以 head 行的 DOM / CSS 形状是**我们的**依赖。
+      const widgetsFile = join(PKG('dsh-client-ui-primitives'), 'lib/index.js')
+      const widgets = readIfPresent(widgetsFile)
+      if (widgets === undefined) return { status: FAIL, detail: `读不到 ${widgetsFile}` }
+      const iconsFile = join(PKG('dsh-client-ui-primitives'), 'lib/types/icons/index.d.ts')
+      const icons = readIfPresent(iconsFile)
+      if (icons === undefined) return { status: FAIL, detail: `读不到 ${iconsFile}` }
+      const fieldsCssFile = join(PKG('dsh-client-ui-primitives'), 'lib/settings-form/fields.module.css')
+      const fieldsCss = readIfPresent(fieldsCssFile)
+      if (fieldsCss === undefined) return { status: FAIL, detail: `读不到 ${fieldsCssFile}` }
       const eventsFile = join(PKG('dsh-api-remotes'), 'lib/types/remote-events.d.ts')
       const events = readIfPresent(eventsFile)
       if (events === undefined) return { status: FAIL, detail: `读不到 ${eventsFile}` }
@@ -370,13 +382,17 @@ const probes = [
         // ── 浏览器半边：按条目 id 寻表单，按 served 门控注册 ──
         ['ctx.configForms.get(entryId)', /get<T>\(entryId: string\): ConfigForm<T>/, form, formFile],
         ['ctx.configForms.whileServed(namespaces, register)', /whileServed\(namespaces: readonly string\[\], register:/, form, formFile],
-        ["slot plugins.row.config 是 keyed", /'plugins\.row\.config':\s*\{\s*kind:\s*'keyed'/s, slot, slotFile],
-        ['槽 key 由 rowConfigKey(bundle, rowId) 给出', /declare function rowConfigKey\(bundle: string, rowId: string\)/, ledger, ledgerFile],
-        ['槽 key 的分隔符仍是 `<包名>#<行 id>`', /function rowConfigKey\(bundle, rowId\) \{\s*return `\$\{bundle\}#\$\{rowId\}`/, pmPage, pmPageFile],
-        ['Plugins 页按**行 id** 取表单（⇒ 命名空间必须等于行 id）', /form: formFor\(openRow\.rowId\)/, pmPage, pmPageFile],
+        ["slot plugins.bundle.config 是 keyed", /'plugins\.bundle\.config':\s*\{\s*kind:\s*'keyed'/s, slot, slotFile],
+        ['组合包页面按**包名**渲染配置段，且只给 view: page（不给 form）', /renderSlot\("plugins\.bundle\.config", \{ view: "page" \}, \{ entryKey: pkg\.name \}\)/, pmPage, pmPageFile],
+        ['没人按包名注册 ⇒ 整块配置段不出现（座位是注册出来的）', /configured: ledger\.bundles\.has\(openPkg\.name\)/, pmPage, pmPageFile],
+        ['包级座位的 key 进 ledger 投影', /bundles: keysOf\("plugins\.bundle\.config"\)/, pmPage, pmPageFile],
         ['SettingsFormModel（暂存 + revision 围栏写）', /declare class SettingsFormModel/, model, modelFile],
         ['write-only 密钥控件的 spec 形状', /interface SettingsSecretSpec/, model, modelFile],
         ['SettingsSecretField（只报"是否已配置"）', /declare function SettingsSecretField/, fields, fieldsFile],
+        ['head 行仍是 flex（文档链接 portal 进去才摆得对）', /\.head \{[^}]*display: flex/, fieldsCss, fieldsCssFile],
+        ['官方 label 会吃掉整行（我们要收成 0 1 auto 才让链接贴其右）', /\.label \{[^}]*flex: 1/, fieldsCss, fieldsCssFile],
+        ['徽标仍是 label 的同级 span（`label ~ span` 的前提）', /jsx\("label", \{[^}]*\}\), jsx\("span", \{/, widgets, widgetsFile],
+        ['右上角斜上箭头图标仍在导出里', /export declare const IconRightUpOutlineRegular/, icons, iconsFile],
         ['credential 变更事件被转发到客户端', /"credentials\/reference-updated"/, events, eventsFile],
         ['settings 文档更新事件被转发到客户端', /"settings\/document-updated"/, events, eventsFile],
         ['credentials/describe remote', /credentials\/describe/, remote, remoteFile],
@@ -384,7 +400,7 @@ const probes = [
       ]
       const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
       return missing.length === 0
-        ? { status: PASS, detail: '条目 volatile 投影 / 命名空间=条目 id / configForms 读写 / keyed 行配置槽 / credentials remote 都仍在' }
+        ? { status: PASS, detail: '条目 volatile 投影 / 命名空间=条目 id / configForms 读写 / keyed 包级配置槽 / credentials remote 都仍在' }
         : { status: FAIL, detail: `settings 卡片链路的接口变了：${missing.join(' / ')}（见账本 L15；改本仓 adapter，不要改探针）` }
     },
   },
@@ -656,15 +672,80 @@ const probes = [
         : { status: FAIL, detail: `写输入框的那条面变了：${missing.join(' / ')}（见账本 L24；capital-watchlist 的「预测 / 复盘」依赖它）` }
     },
   },
+  {
+    id: 'L25',
+    title: '插件显示名：宿主按 <裸包名>/locale/<语言>.json 读 meta.title / meta.description，icon 读 manifest.icon',
+    why: '「插件」页卡片与详情页主标题的**唯一**来源（`packageText()` 的回落链是 `meta.title ?? 包名`）。'
+      + '三个断点全都静默、没有一条会报错：① 上游改 locale 目录约定或 `meta` 键名 ⇒ 标题回落成 `@v587d/capital-generation`；'
+      + '② 上游不再按**裸包名**解析（改成别的锚点）⇒ 同上；③ 本仓 `exports["./locale/*.json"]` 或 `files` 漏一项'
+      + '⇒ 本地看着对、用户装出去是包名。所以这里除了正则，还**直接调宿主的 readPluginMeta 读我们自己的包**——'
+      + '三种漂移都会在这里点名，而不是等用户发现"插件改名字了"。',
+    async run() {
+      const bootFile = join(PKG('dsh-app-boot'), 'lib/index.js')
+      const boot = readIfPresent(bootFile)
+      if (boot === undefined) return { status: FAIL, detail: `读不到 ${bootFile}` }
+      const pmFile = join(PKG('dsh-plugin-manager'), 'lib/index.js')
+      const pm = readIfPresent(pmFile)
+      if (pm === undefined) return { status: FAIL, detail: `读不到 ${pmFile}` }
+      const pageFile = join(PKG('dsh-client-ui-plugin-manager'), 'lib/client.js')
+      const page = readIfPresent(pageFile)
+      if (page === undefined) return { status: FAIL, detail: `读不到 ${pageFile}` }
+      const manifestTypesFile = join(PKG('dsh-package-manifest'), 'lib/types/types.d.ts')
+      const manifestTypes = readIfPresent(manifestTypesFile)
+      if (manifestTypes === undefined) return { status: FAIL, detail: `读不到 ${manifestTypesFile}` }
+
+      const checks = [
+        ['locale 入口仍是 `<specifier>/locale/en.json`（en 缺失 = 整个目录都不读）', /optionalResourcePath\(`\$\{specifier\}\/locale\/en\.json`, parentURL\)/, boot, bootFile],
+        ['语言文件里取的仍是 `meta.title` / `meta.description`', /title: textOf\(meta\?\.title/, boot, bootFile],
+        ['bundle 侧按**包名** + 包根 package.json 调用', /readPluginMeta\(info\.name \?\? name, pathToFileURL\(join\(dir, "package\.json"\)\)\.href\)/, pm, pmFile],
+        ['卡片标题的回落链仍是 `meta.title ?? 包名`', /title: pkg\.meta\?\.title === void 0 \? pkg\.name : resolveText\(pkg\.meta\.title\)/, page, pageFile],
+        ['`PluginLocalizedMeta.title` 仍是 LocalizedText', /readonly title\?: LocalizedText;/, manifestTypes, manifestTypesFile],
+      ]
+      const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
+      if (missing.length > 0) {
+        return { status: FAIL, detail: `显示名的上游约定变了：${missing.join(' / ')}（见账本 L25；改本仓的 locale/exports，不要改探针）` }
+      }
+
+      // 上游形状对了还不够：本仓这一侧要真的能被读出来（exports / files / 文件名任何一处漏了，
+      // 症状都只是"名字又变回包名"，没有报错）。
+      const bootModule = await import(pathToFileURL(bootFile).href)
+      if (typeof bootModule.readPluginMeta !== 'function') {
+        return { status: FAIL, detail: `dsh-app-boot 不再导出 readPluginMeta（${bootFile}）` }
+      }
+      const own = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
+      const meta = bootModule.readPluginMeta(own.name, pathToFileURL(join(ROOT, 'package.json')).href)
+      if (meta === undefined) {
+        return { status: FAIL, detail: `宿主读不到本包 ${own.name} 的显示元数据：locale/en.json 是否没被 exports 暴露、或没进 files？` }
+      }
+      if (meta.error !== undefined) {
+        return { status: FAIL, detail: `宿主读本包元数据报错（整份 meta 会被丢弃、标题回落成包名）：${meta.error}` }
+      }
+      const zh = JSON.parse(readFileSync(join(ROOT, 'locale/zh.json'), 'utf8')).meta
+      if (meta.title?.zh !== zh.title || meta.description?.zh !== zh.description) {
+        return { status: FAIL, detail: `宿主读到的中文显示名与 locale/zh.json 不一致：${JSON.stringify(meta.title)} / ${JSON.stringify(meta.description)}` }
+      }
+      if (typeof meta.icon !== 'string' || !meta.icon.startsWith('data:')) {
+        return { status: FAIL, detail: `icon 没被读成 data URL（package.json 的 icon 字段或文件本身有问题）：${String(meta.icon).slice(0, 40)}` }
+      }
+      return { status: PASS, detail: `locale/*.json 与 icon 仍按裸包名可读，本包实测标题「${meta.title.zh}」` }
+    },
+  },
 ]
 
 const results = []
 for (const probe of probes) {
   let outcome
   try {
-    outcome = probe.run()
+    // `await` 一个同步探针拿到的就是它本身；有异步探针（L25 要 import 宿主的读元函数）之后，
+    // 这里不能只 catch 同步抛错——promise 的拒绝会以 `outcome === undefined` 的形态静默通过。
+    outcome = await probe.run()
   } catch (error) {
     outcome = { status: FAIL, detail: `探针自身抛错：${error instanceof Error ? error.message : String(error)}` }
+  }
+  // 没有 status 的探针**不算通过**：异步探针忘了 return、或 return 了错形状，都会让
+  // 下面的 FAIL 过滤器一条都不抓到 —— 那正是"账本看起来很全、实际没人探"。
+  if (outcome === undefined || ![PASS, FAIL, NA].includes(outcome.status)) {
+    outcome = { status: FAIL, detail: `探针没有返回 {status, detail}，实际拿到：${JSON.stringify(outcome) ?? String(outcome)}` }
   }
   results.push({ ...probe, ...outcome })
 }

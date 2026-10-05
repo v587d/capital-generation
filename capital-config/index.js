@@ -7,9 +7,10 @@ export const name = 'capital-config'
  * `dsh-settings` 不再接受 `settings.register()`，而是把**活动 profile 条目**的 Config schema 里
  * 声明为 `.volatile()` 的字段投影成表单，`ns` 恒等于 `entry.options.id`。两个事实因此承重：
  *
- *  1. **它是卡片的座位**：浏览器半边 `ctx.configForms.get(条目 id)` 与
- *     `whileServed([条目 id])` 都按它寻址；卡片注册进 `plugins.row.config`，
- *     key 是 `<包名>#<条目 id>`。改名字任何一处不同步，卡片都是**静默消失**（零报错）。
+ *  1. **它是卡片的取数通道**：浏览器半边 `ctx.configForms.get(条目 id)` 与
+ *     `whileServed([条目 id])` 都按它寻址；卡片本身注册进 `plugins.bundle.config`，
+ *     key 是**组合包的包名**（`@v587d/capital-generation`），不是 `<包名>#<行 id>`。
+ *     条目 id 或包名任一处漂移，表现都是**卡片静默消失**（零报错）。
  *  2. **它是取数配置的来源**：主插件 `@v587d/capital-generation` 经
  *     `settings.describe()` 读同一条目的解析值，拿 `fuyaoCredentialRef` /
  *     `retriever.credentialRef` / `retriever.windDocs.credentialRef` /

@@ -30,9 +30,9 @@
 - **§1.1** 省往返靠 `isConcurrencySafe` + 框架并发池；体积闸门只有一道（`SAFE_RESULT_CHARS=7000`
   小回执 + hint）——不合并多份 dataset，也不引入 digest / 裁剪阶梯。
 - **§1.3** 日期串落到数值时间列必须 `query_type_conflict` 响亮失败，不许静默跳过 filter；日期归一
-  （`query-time.ts`）与 session 读取（`src/tool-exec.ts` 的 `exec.agent.session`）各只有一份实现，
-  新增入口必须复用、不提供兜底。
+  （`query-time.ts`）与 session 读取（`src/tool-exec.ts` 的 `exec.agent.session`）各只有一份实现，新增入口必须复用、不提供兜底。
 - **§1.6** bash 闸门不是安全边界（沙箱只拦写），别把它写成边界；guard 刻意不解析命令内容。
+- **§5.1** 可编辑配置只坐 `plugins.bundle.config`（key = 组合包名）一处，不开行级座位：每深一跳就多一次"设置里没这个插件"。
 - **§6.1** 根收敛监听只能挂 `ctx.root`（挂 standing scope 收不到且不报错）；通用 `subagent` 行必须
   带 `toolFilter.deny`，否则通用 child 继承全部工具能自己出图。
 - **§6.1** `/capital-charts` 序列旁路必须接 `connection.requestRejection`，否则是无认证端点。
@@ -97,8 +97,8 @@ capital-analysis/runs/<analysis_id>/          # 预留（data_analyst）
 
 ## 5. settings 配置纪律（`capital-config`，host 平面）
 
-卡片是 host 平面独立嵌套包（`cordis.patch.yml` insert 行）；0.1.7 起可编辑面就是条目 Config 的 `.volatile()` 字段（命名空间 ≡ 条目 id，**四处同字**），密钥只进 credentials 域。
-**卡片座位在「插件」页该 bundle 的 `capital-config` 行详情里，不在「设置」页**（§5.4）——全在 `docs/dev/settings-config.md`。
+卡片是 host 平面独立嵌套包（`cordis.patch.yml` insert 行）；可编辑面就是条目 Config 的 `.volatile()` 字段（命名空间 ≡ 条目 id，**四处同字**），密钥只进 credentials 域；细节全在 `docs/dev/settings-config.md`。
+**⛔ 卡片坐「插件」页该 bundle 自己的「配置」段**（槽 `plugins.bundle.config`，key = 包名），**不在行详情页、不在「设置」页**；条目 id 与包名任一处漂移 = 卡片静默消失（§5.1 §5.4）。
 
 ## 6. 图表呈现纪律（`render_chart`，只有 visualization_specialist 持有）
 

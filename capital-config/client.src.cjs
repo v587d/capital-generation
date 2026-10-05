@@ -1,20 +1,30 @@
-const { createElement: h } = require('react')
+const { createElement: h, useEffect, useRef, useState } = require('react')
+const { createPortal } = require('react-dom')
 const {
   SettingsForm,
   SettingsSecretField,
   SettingsFormModel,
   Switch,
+  IconRightUpOutlineRegular,
 } = require('@deepseek-ai/dsh-client-ui-primitives')
 
 /**
- * 本卡片读的**配置条目 id**。0.1.7 起 settings 命名空间就是 profile 条目 id，而 Plugins 页
- * 按 `<包名>#<行 id>` 寻址一行的配置页（`dsh-client-ui-plugin-manager` 的 `rowConfigKey`）。
- * 于是三处必须同字：`cordis.patch.yml` 的行 id、`capital-config/index.js` 的
- * `SETTINGS_ENTRY_ID`、这里的 `ENTRY_ID`——由 `test/capital-config.test.mjs` 逐一对齐。
- * 漂移的表现不是报错，而是**卡片静默消失**。
+ * 卡片读的是**配置条目 id**，坐的是**组合包自己的页面**——两个不同的字符串，各自钉在不同地方：
+ *
+ *  - `ENTRY_ID` 是 settings 命名空间（0.1.7 起命名空间恒等于 profile 条目 id），四处必须同字：
+ *    `cordis.patch.yml` 的行 id、`capital-config/index.js` 的 `SETTINGS_ENTRY_ID`、主插件
+ *    `src/index.ts` 的 `CAPITAL_CONFIG_ENTRY_ID`、这里。
+ *  - `BUNDLE_NAME` 是槽 `plugins.bundle.config` 的 key：页面按**组合包的包名**取该包的配置段
+ *    （`renderSlot(..., { entryKey: pkg.name })`），所以它必须逐字等于根 `package.json` 的 `name`。
+ *
+ * 漂移的表现都不是报错，而是**卡片静默消失**；两处对齐由 `test/capital-config.test.mjs` 钉住。
+ *
+ * 为什么不用行级槽 `plugins.row.config`（key `<包名>#<行 id>`）：那把座位在「包含的组件」里再往
+ * 下一层，填密钥要点三下；且同包的 `capital-charts` / `preset-capital-generation` 没有表单，
+ * 点进去是死路。配置是「这个插件」的属性，组合包层才是它该坐的层。
  */
 const ENTRY_ID = 'capital-config'
-const SLOT_KEY = '@v587d/capital-generation#capital-config'
+const BUNDLE_NAME = '@v587d/capital-generation'
 /** 文案字典的命名空间（与配置条目 id 是两回事，按官方 settings 页的 `settings.*` 惯例）。 */
 const LOCALE_NS = 'settings.capital'
 
@@ -45,19 +55,18 @@ const freshStatus = () => Object.fromEntries(
 )
 
 const zh = {
-  title: 'Capital 模式',
-  description: '配置 Capital Generation 的服务提供商凭证。',
+  title: '配置',
   fuyaoLabel: 'Fuyao API Key',
-  fuyaoHint: '必填。同花顺 Fuyao 结构化数据接口。保存后新 Capital 会话生效。',
+  fuyaoHint: '同花顺 Fuyao 结构化数据接口。保存后新 Capital 模式会话生效。',
   anysearchLabel: 'AnySearch API Key',
-  anysearchHint: '必填。AnySearch 网页搜索 / 提取接口。保存后新 Capital 会话生效。',
+  anysearchHint: 'AnySearch 网页搜索 / 提取接口。保存后新 Capital 模式会话生效。',
   localFetchLabel: '允许启动本地提取网页内容',
-  localFetchHint: '开启后 AnySearch 抓取失败会自动改由本机直连抓取该页面（回执来源 local-http）；关闭则 AnySearch 失败即回传失败，且具名来源工具（财联社快讯 / 东财资讯等，均需本机直连）调用时返回"已被设置关闭"。改动即时保存，新 Capital 会话生效。',
+  localFetchHint: '开启后本地抓取兜底（回执来源 local-http）。保存后新 Capital 模式会话生效。',
   windLabel: 'Wind Alice API Key',
-  windHint: 'Wind 金融信披类文档检索接口。保存后新 Capital 会话生效。',
+  windHint: 'Wind 金融信披类文档检索接口。保存后新 Capital 模式会话生效。',
   paddleocrLabel: 'PaddleOCR 文档解析 Token',
-  paddleocrHint: '选填。Capital 的 ocr 工具用它把 PDF 研报 / 公告解析成正文，在 AIStudio 申请。密钥只存在凭证域，不写进会话配置；作业按整篇计费，保存后新 Capital 会话生效。',
-  openDocs: '接口文档',
+  paddleocrHint: '配置 Token 后自动解析 PDF、图片。保存后新 Capital 模式会话生效。',
+  openDocs: '官方文档',
   configured: '已配置密钥。',
   notConfigured: '未配置密钥。',
   save: '保存',
@@ -68,19 +77,18 @@ const zh = {
 }
 
 const en = {
-  title: 'Capital mode',
-  description: 'Configure Capital Generation service provider credentials.',
+  title: 'Configuration',
   fuyaoLabel: 'Fuyao API Key',
-  fuyaoHint: 'Required. Tonghuashun Fuyao structured-data API. Takes effect in new Capital sessions.',
+  fuyaoHint: 'Tonghuashun Fuyao structured-data API. Takes effect in new Capital mode sessions.',
   anysearchLabel: 'AnySearch API Key',
-  anysearchHint: 'Required. AnySearch web search / extract interface. Takes effect in new Capital sessions.',
+  anysearchHint: 'AnySearch web search / extract interface. Takes effect in new Capital mode sessions.',
   localFetchLabel: 'Allow local web page extraction',
-  localFetchHint: 'When on, an AnySearch fetch failure falls back to direct local fetching (receipt via: local-http); when off, failures are returned as-is and the named-source tools (e.g. cls_telegraph, eastmoney_724 — all local HTTP) fail with "disabled by settings". Changes save immediately and take effect in new Capital sessions.',
+  localFetchHint: 'When on, a failed fetch falls back to local direct fetching (receipt via: local-http). Takes effect in new Capital mode sessions.',
   windLabel: 'Wind Alice API Key',
-  windHint: 'Wind financial disclosure document retrieval interface. Takes effect in new Capital sessions.',
+  windHint: 'Wind financial disclosure document retrieval interface. Takes effect in new Capital mode sessions.',
   paddleocrLabel: 'PaddleOCR document token',
-  paddleocrHint: 'Optional. The Capital ocr tool uses it to turn PDF research reports / announcements into body text; apply at AIStudio. The secret lives only in the credentials domain, never in session config. Jobs are billed per whole document; takes effect in new Capital sessions.',
-  openDocs: 'API documentation',
+  paddleocrHint: 'Configure the token to parse PDFs and images automatically. Takes effect in new Capital mode sessions.',
+  openDocs: 'Official docs',
   configured: 'A key is configured.',
   notConfigured: 'No key is configured.',
   save: 'Save',
@@ -106,9 +114,15 @@ function installStyles() {
   const style = document.createElement('style')
   style.dataset.capitalConfig = 'true'
   style.textContent = `
+    .capital-config-card { display: flex; flex-direction: column; gap: 12px; }
+    .capital-config-title { margin: 0; font-size: 14px; font-weight: 500; line-height: 20px; }
     .capital-config-secret-row { display: flex; flex-direction: column; gap: 2px; }
-    .capital-config-field { padding: 2px 0; }
-    .capital-config-doc-link { color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; text-decoration: none; }
+    /* 文档链接 portal 进官方 head 行之后靠这两条摆位：官方 label 是 flex:1（会吃掉整行），
+       收成 0 1 auto 才让链接紧贴其右；配置徽标拿 order + margin-left:auto 留在行尾。 */
+    .capital-config-secret-row label { flex: 0 1 auto; }
+    .capital-config-secret-row label ~ span { order: 1; margin-left: auto; }
+    .capital-config-field { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; border-top: 0.5px solid var(--dsw-alias-border-l2); }
+    .capital-config-doc-link { display: inline-flex; align-items: center; gap: 3px; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 20px; white-space: nowrap; text-decoration: none; }
     .capital-config-doc-link:hover { color: var(--dsw-alias-brand-primary); text-decoration: underline; }
     .capital-config-doc-link:focus-visible { border-radius: 3px; outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-brand-primary)); outline-offset: 2px; }
     .capital-config-switch-row { align-items: center; gap: 12px; display: flex; }
@@ -263,11 +277,30 @@ class CapitalCardController {
 }
 
 /**
- * 密钥行 = 官方 `SettingsSecretField`（它自己管"已配置/未配置"与留空不改写）
- * ＋ 一个接口文档链接。0.1.7 的 primitives 删掉了外链图标，所以链接是纯文字。
+ * 密钥行 = 官方 `SettingsSecretField`（它自己管"已配置/未配置"与留空不改写）＋ 一个官方文档链接。
+ *
+ * 链接要落在**标签右边同一行**，而 `SettingsSecretField` 的 `label` 只收字符串（塞不进节点），
+ * 所以挂载后找到官方 head 行（`label` 的父节点）把链接 `createPortal` 进去，摆位见 installStyles
+ * 那两条选择器。head 行是 React 拥有的节点，portal 由 React 负责插拔，不手工 appendChild。
+ * 找不到 head（上游改了 DOM 形状）就退回渲染在本行末尾——位置退化了，但链接不消失。
  */
 function SecretRow({ field, label, hint, docsUrl, state, disabled, onEdit, t }) {
-  return h('div', { className: 'capital-config-secret-row', key: field },
+  const rowRef = useRef(null)
+  const [head, setHead] = useState(null)
+  useEffect(() => {
+    const row = rowRef.current
+    const labelEl = row ? row.querySelector('label') : null
+    if (labelEl && labelEl.parentElement) setHead(labelEl.parentElement)
+  }, [])
+  const link = h('a', {
+    href: docsUrl,
+    target: '_blank',
+    rel: 'noopener noreferrer',
+    'aria-label': `${label} ${t('openDocs')}`,
+    'data-capital-config-doc': 'true',
+    className: 'capital-config-doc-link',
+  }, t('openDocs'), h(IconRightUpOutlineRegular, { size: 12 }))
+  return h('div', { className: 'capital-config-secret-row', key: field, ref: rowRef },
     h(SettingsSecretField, {
       id: `capital-config-${field}-key`,
       label,
@@ -278,21 +311,20 @@ function SecretRow({ field, label, hint, docsUrl, state, disabled, onEdit, t }) 
       disabled,
       onEdit,
     }),
-    h('a', {
-      href: docsUrl,
-      target: '_blank',
-      rel: 'noopener noreferrer',
-      className: 'capital-config-doc-link',
-    }, `${label}: ${t('openDocs')}`),
+    head ? createPortal(link, head) : link,
   )
 }
 
+/**
+ * 组合包页面的配置段：页面只提供 `<section data-plugin-config>` 的容器与间距，小节标题由卡片
+ * 自己画（与页面自绘的「包含的组件」同一字号层级）。`plugins.bundle.config` 只以 `view: 'page'`
+ * 渲染，没有 summary 一说。
+ */
 function CapitalCard(props) {
   const t = props.t
   const state = props.useCapitalCard((snapshot) => snapshot)
-  if (props.view === 'summary') return t('description')
   const disabled = !state.writable
-  return h(SettingsForm, {
+  const form = h(SettingsForm, {
     labels: {
       unavailable: t('unavailable'),
       readOnly: t('readOnly'),
@@ -306,6 +338,9 @@ function CapitalCard(props) {
   },
     h(SecretRow, { field: 'fuyao', label: t('fuyaoLabel'), hint: t('fuyaoHint'), docsUrl: DOC_URLS.fuyao, state: state.fuyao, disabled: disabled || state.saving || !state.fuyao.writable, onEdit: (value) => props.edit('fuyao', value), t }),
     h(SecretRow, { field: 'anysearch', label: t('anysearchLabel'), hint: t('anysearchHint'), docsUrl: DOC_URLS.anysearch, state: state.anysearch, disabled: disabled || state.saving || !state.anysearch.writable, onEdit: (value) => props.edit('anysearch', value), t }),
+    h(SecretRow, { field: 'wind', label: t('windLabel'), hint: t('windHint'), docsUrl: DOC_URLS.wind, state: state.wind, disabled: disabled || state.saving || !state.wind.writable, onEdit: (value) => props.edit('wind', value), t }),
+    h(SecretRow, { field: 'paddleocr', label: t('paddleocrLabel'), hint: t('paddleocrHint'), docsUrl: DOC_URLS.paddleocr, state: state.paddleocr, disabled: disabled || state.saving || !state.paddleocr.writable, onEdit: (value) => props.edit('paddleocr', value), t }),
+    // 回退开关排在四个密钥之后：它不是密钥，夹在密钥行中间会被读成第五个 Key。
     h('div', { className: 'capital-config-field' },
       h('div', { className: 'capital-config-switch-row' },
         h('div', { className: 'capital-config-switch-text' },
@@ -323,8 +358,10 @@ function CapitalCard(props) {
       // 开关没翻转就是事实，但用户需要知道"点了、没落上"而不是以为点错了。
       state.localFetch?.failed ? h('p', { role: 'status', className: 'capital-config-write-failed' }, t('saveFailed')) : null,
     ),
-    h(SecretRow, { field: 'wind', label: t('windLabel'), hint: t('windHint'), docsUrl: DOC_URLS.wind, state: state.wind, disabled: disabled || state.saving || !state.wind.writable, onEdit: (value) => props.edit('wind', value), t }),
-    h(SecretRow, { field: 'paddleocr', label: t('paddleocrLabel'), hint: t('paddleocrHint'), docsUrl: DOC_URLS.paddleocr, state: state.paddleocr, disabled: disabled || state.saving || !state.paddleocr.writable, onEdit: (value) => props.edit('paddleocr', value), t }),
+  )
+  return h('div', { className: 'capital-config-card' },
+    h('h4', { className: 'capital-config-title' }, t('title')),
+    form,
   )
 }
 
@@ -335,9 +372,11 @@ function apply(ctx) {
   ctx.effect(() => () => card.dispose(), 'capital-config: form subscription')
   ctx.effect(() => ctx.remote.$on('credentials/reference-updated', (ref) => card.refresh(ref)), 'capital-config: credential invalidations')
   // 只有 Host 真的在服务这个条目时才注册卡片：没装配 capital-config 的部署里不留痕迹。
-  ctx.effect(() => ctx.configForms.whileServed([ENTRY_ID], () => ctx.slots.inject('plugins.row.config', () => ctx.slots.register({
-    name: 'plugins.row.config',
-    key: SLOT_KEY,
+  // 座位是**组合包自己的页面**，key 是包名而非 `<包名>#<行 id>`——条目 id 与槽 key 因此是两个
+  // 不同的字符串，各自的同字链见文件头。
+  ctx.effect(() => ctx.configForms.whileServed([ENTRY_ID], () => ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
+    name: 'plugins.bundle.config',
+    key: BUNDLE_NAME,
     locale: LOCALE_NS,
     inject: () => card.inject(),
   }, CapitalCard))), 'capital-config: page')

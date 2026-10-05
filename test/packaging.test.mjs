@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { locateNpmCli } from '../scripts/lib/run-tool.mjs'
@@ -114,4 +114,46 @@ test('打包闸门：声明 dsh.client 的包，其客户端 bundle 必须真的
   }
 
   assert.ok(checked >= 1, '至少 chart-ui 应声明 dsh.client；一个都没检查到说明测试失效了')
+})
+
+/**
+ * 插件显示名的闸门（账本 L25）。
+ *
+ * 卡片与详情页主标题的唯一来源是宿主按 `<包名>/locale/<语言>.json` 读到的 `meta.title`，
+ * 而这条链**三个断点全都静默**（症状一律是"又变回 @v587d/capital-generation 了"）：
+ *  1. `en.json` 是宿主扫目录的**入口**——解析不到它就根本不读这个目录（`readPluginMeta` 里
+ *     `englishPath === undefined ? new Map() : dictionariesOf(englishPath, …)`），只加 `zh.json` 等于没加。
+ *  2. 目录里**每一个** `*.json` 都要按语言 id 命名且能解析；多一个无关文件就让整份 meta
+ *     变成 `{ error }`，显示名整体回落且不报错。
+ *  3. 读的是**导出资源**不是磁盘路径：漏 `exports["./locale/*.json"]` 或 `files` 里的 `locale`，
+ *     本地跑得好、装出去就没有。
+ */
+test('插件显示名：根包 locale meta 必须能被宿主读到，且 README 指路的名字跟着它', () => {
+  const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
+  assert.equal(manifest.exports?.['./locale/*.json'], './locale/*.json',
+    '宿主用 ESM 解析器读 <包名>/locale/<语言>.json；exports 漏这条 = 显示名静默回落成 npm 包名')
+  assert.ok((manifest.files ?? []).includes('locale'),
+    'files 里没有 locale：发出去的包不带它，安装侧同样静默回落')
+
+  const files = readdirSync(join(ROOT, 'locale')).filter((name) => name.endsWith('.json'))
+  assert.ok(files.includes('en.json'), '缺 locale/en.json —— 它是宿主扫目录的入口，缺它则所有语言都不生效')
+  for (const name of files) {
+    assert.match(name, /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*\.json$/u,
+      `locale/${name} 的文件名不是语言 id：宿主对整份 meta 抛错并回落到包名`)
+    const meta = JSON.parse(readFileSync(join(ROOT, 'locale', name), 'utf8')).meta
+    assert.ok(typeof meta?.title === 'string' && meta.title.trim() !== '', `locale/${name} 缺少非空 meta.title`)
+    assert.ok(typeof meta?.description === 'string' && meta.description.trim() !== '', `locale/${name} 缺少非空 meta.description`)
+  }
+
+  const paths = packedFilePaths()
+  for (const name of files) {
+    assert.ok(paths.has(`locale/${name}`), `locale/${name} 不在发布清单里（files 是否漏了 locale？）`)
+  }
+
+  // 卡片只画 meta.title，npm 包名从此不再出现在「已安装」列表里 —— README 让用户找包名就是错的路标。
+  const readme = readFileSync(join(ROOT, 'README.md'), 'utf8')
+  assert.ok(!/已安装的\s*`@v587d\/capital-generation`/u.test(readme),
+    'README 还在让用户到「已安装」列表里找 npm 包名，但卡片显示的是 locale meta.title')
+  assert.match(readme, /已安装的 \*\*Capital Generation\*\*/u,
+    'README 的指路措辞要与卡片显示名同源（zh 界面是 meta.title「Capital Generation（证券研究）」的前半）')
 })

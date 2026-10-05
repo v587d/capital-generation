@@ -19,7 +19,8 @@
  *     `pluginManager.listBundles()` 的行清单。0.1.7 起预设由一颗声明行注册，registry 激活失败
  *     只打一行 warn（`agent preset <id>: <原因>`），启动期什么都正常，症状延后到用户打开历史
  *     会话（`Unknown agent preset`）；settings 卡片那条链同理（条目没 `.volatile()` 叶子 →
- *     根本不进 describe 镜像；卡片座位在「插件」页那一行，见 docs/dev/settings-config.md §5.4）。
+ *     根本不进 describe 镜像；卡片坐 bundle 自己的页面，那一行只是取数通道，见
+ *     docs/dev/settings-config.md §5.1 §5.4）。
  *     探针把这三件事提前到 boot。
  *  2. **反向对照**（`badpreset` profile）：故意重复声明同一个预设 id，确认失败特征**真的会触发**。
  *     闸门抓不到的东西看起来就像通过了 —— 上一条事故正是"只复核 bundle 投递"的闸门一路绿。
@@ -206,9 +207,9 @@ function probeSource() {
     `      const bundles = await pluginManager.listBundles()`,
     `      const bundle = bundles.find((item) => item.name === BUNDLE_NAME)`,
     `      result.rows = bundle?.rows?.map((row) => row.rowId) ?? null`,
-    `      if (!bundle) result.problems.push('插件面板里没有 ' + BUNDLE_NAME + ' 这颗 bundle')`,
+    `      if (!bundle) result.problems.push('插件面板里没有 ' + BUNDLE_NAME + ' 这颗 bundle（包级座位按包名寻址，没它就没地方放卡片）')`,
     `      else if (result.rows && !result.rows.includes(ENTRY_ID)) {`,
-    `        result.problems.push('插件面板里该 bundle 没有 ' + ENTRY_ID + ' 行（卡片没有座位，plugins.row.config 的键对不上）')`,
+    `        result.problems.push('插件面板里该 bundle 没有 ' + ENTRY_ID + ' 行（卡片的取数通道没了，whileServed 不放行）')`,
     `      }`,
     `    }`,
     `  } catch (error) {`,
@@ -399,7 +400,7 @@ try {
       console.log(`smoke-boot: ${probe.preset === PRESET_ID && !probe.broken ? '✅' : '❌'} 预设 ${probe.preset}（broken=${probe.broken ?? 'null'}）`)
       console.log(`smoke-boot: ${probe.presetRows?.every((row) => row.state === 2) ? '✅' : '❌'} 关键预设行：${JSON.stringify(probe.presetRows ?? [])}`)
       console.log(`smoke-boot: ${probe.entry === 'present' && typeof probe.localFetchEnabled === 'boolean' ? '✅' : '❌'} settings 条目 ${SETTINGS_ENTRY_ID}：${probe.entry}，retriever.localFetch.enabled=${probe.localFetchEnabled}`)
-      // 卡片座位在**插件页**（0.1.7 起设置页不再托管第三方卡片）：按 bundle 的行清单核对。
+      // 卡片坐 **bundle 自己的页面**（0.1.7 起设置页不再托管第三方卡片）：这里按 bundle 的行清单核取数通道。
       console.log(probe.rows
         ? `smoke-boot: ${probe.rows.includes(SETTINGS_ENTRY_ID) ? '✅' : '❌'} 插件页里 ${PACKAGE_NAME} 的行：${probe.rows.join(', ')}`
         : `smoke-boot: ⚠️  读不到插件页的行清单（${probe.rowReadError ?? '未知原因'}），卡片座位需人工确认`)
