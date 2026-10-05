@@ -36,7 +36,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 > [!NOTE]
 > 适配 DSH`@0.2.0-rc.2`（需要此版本或更新版本）。已在 Linux 的 Web profile 和 Windows 桌面端验证；其他环境尚未充分测试。建议使用 `Deepseek/deepseek-flash` 并开启 High thinking；GPT / Claude 尚未充分测试。
 
-1. **安装插件。**Linux / macOS 的 Web 或 CLI profile 在终端执行：
+1. **安装插件。** Linux / macOS 的 Web 或 CLI profile 在终端执行：
 
    ```bash
    dsh plugin --profile web add github:v587d/capital-generation
@@ -44,7 +44,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 
    安装后重启该 profile。Windows 桌面端在「添加插件」中输入 `https://github.com/v587d/capital-generation`。桌面端自带 DSH 宿主，不需要单独用 npm 安装宿主。本仓库已包含构建产物，普通用户不需要克隆仓库或运行构建命令。
 
-2. **填写密钥。**打开 DSH「插件」→ 已安装的 **Capital Generation**，页面中的「配置」段即为填写处。**入口在「插件」页，不在「设置」页。**
+2. **选填密钥。** 打开 DSH 「插件」 → **Capital Generation** -> 「配置」。
 
    | 密钥 | 用途 |
    | --- | --- |
@@ -53,7 +53,11 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
    | [Wind Alice](https://market.windalice.com/#/home) | 公告和金融新闻检索 |
    | [PaddleOCR AIStudio](https://aistudio.baidu.com/paddleocr) | 解析 PDF 和图片中的文字 |
 
-   这些都是第三方服务的密钥，需分别向服务方申请；额度和条款以各服务方为准。**四个都可以稍后再填**：缺哪个，对应能力就不可用，其他功能照常。保存后**新建 Capital 模式会话**即可生效，无需重启。也可以将密钥写入 `~/.dsh/.credentials.yaml`，名称依次为 `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`、`PADDLE_OCR_TOKEN`。密钥由 DSH 凭据服务保存，不会显示在会话配置中。
+   这些都是第三方服务的密钥，需分别向服务方申请；额度和条款以各服务方为准。
+   **本插件所有密钥均不影响插件核心功能**，即缺哪个密钥，仅表示对应能力就不可用，其他功能照常。
+   保存后**新建 Capital 模式会话**即可生效，无需重启。
+   也可以将密钥写入 `~/.dsh/.credentials.yaml`，名称依次为 `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`、`PADDLE_OCR_TOKEN`。
+   密钥由 DSH 凭据服务保存，不会显示在会话配置中。
 
    <p align="center">
      <a href="assets/DSH@0.2.0rc2插件主页配置.png">
@@ -72,8 +76,9 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 ## 能做什么
 
 - **查数据和资料：**按需获取行情、财务、指数及基金数据，检索公告、新闻和研报。部分公开数据源无需额外密钥；具体覆盖范围见 [数据能力表](docs/data-collector-capabilities.md) 和 [网页检索能力表](docs/web-retriever-capabilities.md)。
-- **整理和画图：**将数据交给不同角色处理，再生成可交互图表。图表会作为本轮交付物出现在会话中，可在侧栏查看或离线打开。了解处理流程可看 [Agent 角色说明](docs/agent-roles.md)。
-- **管理自选股：**在 Capital 会话中输入 `/` 或点击输入框旁的 `+`，从「指令」中打开「自选股」。按代码或中文名添加 A 股、指数、ETF，最多 30 条；满了会提示你先删一条。第一次打开时会先放四条主要指数（上证指数、深证成指、创业板指、沪深300）作为起点，删掉后不会再生成。可置顶、移除，打开面板时会刷新报价，之后可手动点「刷新报价」。清单不会自己进入对话：点击某行的「预测」或「复盘」只会把针对该标的的提问填入输入框，**不会替你发送**，可以修改后再发送。刷新失败时已有报价仍显示为旧快照，并标明时间；请勿当作实时价格。
+- **数据分析：** 所有 Agents 均不直接接触原始结构数据，Agents 按需读取数据、校验数据，并写脚本挖掘数据背后含义。 
+- **可视化：** 将数据交给不同角色处理，再生成可交互图表。图表会作为本轮交付物出现在会话中，可在侧栏查看或离线打开。了解处理流程可看 [Agent 角色说明](docs/agent-roles.md)。
+- **管理自选股：** 在 Capital 会话中输入 `/` 或点击输入框旁的 `+`，从「指令」中打开「自选股」。刷新失败时已有报价仍显示为旧快照，并标明时间；请勿当作实时价格。
 
 会话中的图表效果：
 
