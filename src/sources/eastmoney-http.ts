@@ -669,7 +669,7 @@ function normalizeMainCapital(params: Params): Params {
   const page = params.page === undefined ? 1 : integer(params.page, 'page', 1, Number.MAX_SAFE_INTEGER)
   const size = params.size === undefined ? 100 : integer(params.size, 'size', 1, MAX_PAGE_SIZE)
   if (params.ticker === undefined) return { sort_field, sort_order, page, size }
-  return { sort_field, sort_order, page, size, thscode: normalizeEastmoneySecurityIdentity({ secucode: params.ticker }).thscode }
+  return { sort_field, sort_order, page, size, ticker: normalizeEastmoneySecurityIdentity({ secucode: params.ticker }).thscode }
 }
 
 function parseMainCapitalRow(raw: JsonRecord): JsonRecord {
@@ -722,7 +722,7 @@ async function executeMainCapital(params: Params, signal: AbortSignal): Promise<
   url.searchParams.set('sortTypes', params.sort_order === 'asc' ? '1' : '-1')
   url.searchParams.set('pageNumber', String(params.page))
   url.searchParams.set('pageSize', String(params.size))
-  if (params.thscode) url.searchParams.set('filter', `(SECUCODE="${params.thscode}")`)
+  if (params.ticker) url.searchParams.set('filter', `(SECUCODE="${params.ticker}")`)
   const result = requireDatacenterResult(await getJson(url.toString(), signal, 'main capital snapshot'), 'main capital snapshot')
   const parsed = requireRows(result, 'main capital snapshot')
   return { data: { item: parsed.rows.map(parseMainCapitalRow), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(mainCapitalRow) }
@@ -813,7 +813,7 @@ function parseDividendRow(raw: JsonRecord): JsonRecord {
 function normalizeDividend(params: Params): Params {
   const normalized = normalizeDateRange(params, ['start_date', 'end_date', 'ticker', 'page', 'size'])
   const identity = normalizeEastmoneySecurityIdentity({ secucode: params.ticker })
-  return { ...normalized, thscode: identity.thscode }
+  return { ...normalized, ticker: identity.thscode }
 }
 
 async function executeDividend(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
@@ -826,7 +826,7 @@ async function executeDividend(params: Params, signal: AbortSignal): Promise<{ d
   url.searchParams.set('sortTypes', '-1')
   url.searchParams.set('pageNumber', String(params.page))
   url.searchParams.set('pageSize', String(params.size))
-  url.searchParams.set('filter', `(SECUCODE="${params.thscode}")(EX_DIVIDEND_DATE>='${params.start_date}')(EX_DIVIDEND_DATE<='${params.end_date}')`)
+  url.searchParams.set('filter', `(SECUCODE="${params.ticker}")(EX_DIVIDEND_DATE>='${params.start_date}')(EX_DIVIDEND_DATE<='${params.end_date}')`)
   const result = requireDatacenterResult(await getJson(url.toString(), signal, 'dividend plans'), 'dividend plans')
   const parsed = requireRows(result, 'dividend plans')
   return { data: { item: parsed.rows.map(parseDividendRow), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(dividendRow) }
@@ -899,7 +899,7 @@ function normalizeHolder(params: Params): Params {
   const page = params.page === undefined ? 1 : integer(params.page, 'page', 1, Number.MAX_SAFE_INTEGER)
   const size = params.size === undefined ? 100 : integer(params.size, 'size', 1, MAX_PAGE_SIZE)
   if (params.ticker === undefined) return { sort_field, sort_order, page, size }
-  return { sort_field, sort_order, page, size, thscode: normalizeEastmoneySecurityIdentity({ secucode: params.ticker }).thscode }
+  return { sort_field, sort_order, page, size, ticker: normalizeEastmoneySecurityIdentity({ secucode: params.ticker }).thscode }
 }
 
 async function executeHolder(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
@@ -912,7 +912,7 @@ async function executeHolder(params: Params, signal: AbortSignal): Promise<{ dat
   url.searchParams.set('sortTypes', params.sort_order === 'asc' ? '1' : '-1')
   url.searchParams.set('pageNumber', String(params.page))
   url.searchParams.set('pageSize', String(params.size))
-  if (params.thscode) url.searchParams.set('filter', `(SECUCODE="${params.thscode}")`)
+  if (params.ticker) url.searchParams.set('filter', `(SECUCODE="${params.ticker}")`)
   const result = requireDatacenterResult(await getJson(url.toString(), signal, 'holder count snapshot'), 'holder count snapshot')
   const parsed = requireRows(result, 'holder count snapshot')
   return { data: { item: parsed.rows.map(parseHolderRow), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(holderRow) }
@@ -977,7 +977,7 @@ function parseMarginRow(raw: JsonRecord, requestedThscode: string): JsonRecord {
 function normalizeMargin(params: Params): Params {
   const normalized = normalizeDateRange(params, ['start_date', 'end_date', 'ticker', 'page', 'size'])
   const identity = normalizeEastmoneySecurityIdentity({ secucode: params.ticker })
-  return { ...normalized, thscode: identity.thscode }
+  return { ...normalized, ticker: identity.thscode }
 }
 
 async function executeMargin(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
@@ -990,10 +990,10 @@ async function executeMargin(params: Params, signal: AbortSignal): Promise<{ dat
   url.searchParams.set('sortTypes', '-1')
   url.searchParams.set('pageNumber', String(params.page))
   url.searchParams.set('pageSize', String(params.size))
-  url.searchParams.set('filter', `(SCODE="${String(params.thscode).replace(/\.(SH|SZ|BJ)$/i, '')}")(DATE>='${params.start_date}')(DATE<='${params.end_date}')`)
+  url.searchParams.set('filter', `(SCODE="${String(params.ticker).replace(/\.(SH|SZ|BJ)$/i, '')}")(DATE>='${params.start_date}')(DATE<='${params.end_date}')`)
   const result = requireDatacenterResult(await getJson(url.toString(), signal, 'margin detail'), 'margin detail')
   const parsed = requireRows(result, 'margin detail')
-  const thscode = String(params.thscode)
+  const thscode = String(params.ticker)
   return { data: { item: parsed.rows.map((raw) => parseMarginRow(raw, thscode)), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(marginRow) }
 }
 
@@ -1241,7 +1241,7 @@ export function createEastmoneySources(): DataSource[] {
     createSource({
       capability: 'eastmoney_holder_number_snapshot', cacheMaxAgeMs: 60_000, name: 'get_eastmoney_holder_number_snapshot',
       summary: '东财股东户数最新一期截面',
-      description: '获取东方财富股东户数的**最新一期截面**（RPT_HOLDERNUMLATEST，实测 5568 只、一股一行）。这是截面不是序列：上游只给每股当前最新一期，取不到历史区间，需要历史就如实告知用户现有能力覆盖不了。end_date 是**报告期**（如 2026-06-30），hold_notice_date 才是**披露日**（实测茅台报告期 2026-06-30、披露 2026-08-15），pre_end_date 是上一期报告期（新股为 null）；时间轴用 end_date_ms，不要把披露日当报告期用。holder_num 是股东户数，pre_holder_num 上期户数，holder_num_change 变动户数，holder_num_ratio_pct 变动比例（百分数原值，21.89 表示 +21.89%）——新股实测 pre_holder_num=0 且 holder_num_ratio_pct=null，这是"无上期可比"，不是取数失败。avg_market_cap 户均市值、avg_hold_shares 户均持股数、total_market_cap 总市值、total_a_shares A 股总股本、close_price 收盘价均为东财原值（市值与价格为元级量纲，未逐值核对）；interval_change_pct 是东财给出的区间涨跌幅（百分数原值）；change_shares 与 change_reason 是股本变动数与**中文原因原文**（实测「发行融资」/「资产重组」），原文照存不改写。默认按股东户数降序，可按 holder_num_ratio_pct / total_market_cap / end_date 换排序；ticker 带市场后缀时只返回该只一行。',
+      description: '获取东方财富股东户数的**最新一期截面**（RPT_HOLDERNUMLATEST，实测 5568 只、一股一行）。这是截面不是序列：上游只给每股当前最新一期，取不到历史区间，需要历史就如实告知用户现有能力覆盖不了。end_date 是**报告期**（如 2026-06-30），hold_notice_date 才是**披露日**（实测茅台报告期 2026-06-30、披露 2026-08-15），pre_end_date 是上一期报告期（新股为 null）；时间轴用 end_date_ms，不要把披露日当报告期用。holder_num 是股东户数，pre_holder_num 上期户数，holder_num_change 变动户数，holder_num_ratio_pct 变动比例（百分数原值，21.89 表示 +21.89%）——新股实测 pre_holder_num=0 且 holder_num_ratio_pct=null，这是"无上期可比"，不是取数失败。⛔ 基数极小时比值失真到没有分析价值：实测按 holder_num_ratio_pct 降序前五名上期户数是 60/4/6/7/17（长鑫科技 60 → 3,456,664 户给出 +5,761,006.67%，change_reason 多为「发行融资」即新股上市），比值是东财原值、我们不裁剪，按该列排序或求均值前先剔除这类行。end_date 也只是该股**最新披露的一期**，停更票会停在多年前（实测 601865 停在 2019-02-15），别把"最新一期"读成"最近"。avg_market_cap 户均市值、avg_hold_shares 户均持股数、total_market_cap 总市值、total_a_shares A 股总股本、close_price 收盘价均为东财原值（市值与价格为元级量纲，未逐值核对）；interval_change_pct 是东财给出的区间涨跌幅（百分数原值）；change_shares 与 change_reason 是股本变动数与**中文原因原文**（实测「发行融资」/「资产重组」），原文照存不改写。默认按股东户数降序，可按 holder_num_ratio_pct / total_market_cap / end_date 换排序；ticker 带市场后缀时只返回该只一行。',
       inputSchema: holderInput, outputSchema: datacenterOutput(holderRow), paginated: true, rowShape: { rowKey: 'item' },
       allowed: ['ticker', 'sort_field', 'sort_order', 'page', 'size'], normalize: normalizeHolder, execute: executeHolder,
     }),

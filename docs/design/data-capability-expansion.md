@@ -1,7 +1,9 @@
 # 数据补录与能力目录容量（本次迭代聚焦）
 
-> 状态：**已评审通过，第 0–3 步已全部落地**（东财补录 16 条 + 腾讯港美股 4 条，目录 69 → 89 条 =
-> 预算 53.4%；第 4 步 Wind 结构化 MCP 另案，等 spike 结论再决定注不注册）。日期 2026-10-05。
+> 状态：**已评审通过，第 0–3 步已全部落地并经 Agent 侧实测回评**（东财补录 16 条 + 腾讯港美股 4 条，
+> 目录 69 → 89 条 = 预算 53.4%；实测打出一处阻断缺陷——四条 `ticker` 能力的单票过滤被自己的二次归一化
+> 拒掉，已修并补全量结构性回归，见 §7.8；第 4 步 Wind 结构化 MCP 另案，等 spike 结论再决定注不注册）。
+> 日期 2026-10-05。
 >
 > **本文只管三件事**：① 还能补录哪些数据；② capability 目录/详情的体积上限怎么解；③ 一条能力该放
 > `data_collector` 还是 `web_retriever`。
@@ -557,7 +559,44 @@ count=640 仍回最近 640 条），所以参数层直接拒绝 start/end 而不
 
 容量：89 条目录 3280 字符（53.4%），同一份 JSON 数组编码 7260 > 6144 自预算；最大详情仍是转债表 3738。
 
-### 7.8 尚未注册（"未验不注册"仍然生效）
+### 7.8 验收回评：Agent 侧实测打出的阻断缺陷（2026-10-05 修复）
+
+子 Agent 按 `force_refresh=true` 逐条真实请求本轮 20 条新能力，18 条通过；`eastmoney_dividend_plan`
+与 `eastmoney_margin_trading` 完全不可用，`eastmoney_main_capital_snapshot` 与
+`eastmoney_holder_number_snapshot` 只能取全市场截面、单票过滤失效。报错统一是
+`request_params_invalid: unsupported parameter: thscode`，报告把它归给"宿主把 ticker 归一化成了 thscode"。
+
+**真凶在我们自己**：归一化按设计要跑**两遍**（Hub 入队前一次——merge key 与 digest 用规范化参数；
+`createSource` 的 execute 内再一次——直连调用也要生效，`fuyao-rest.ts` 把这条写成注释"幂等"）。
+Fuyao 的参数名与上游一致，所以天然幂等；本轮新增的四条东财能力在 `normalize` 里把 `ticker`
+**改名**成内部叫法 `thscode`，第二遍 `assertKnown` 只认声明过的 `ticker`，于是自己的护栏拒了
+自己规范化出来的键。本文件里早有正确写法（`normalizeTicker`：键名不动、只把值换成 canonical），
+新代码没沿用。
+
+修的是四条：normalize 就地归一化（`ticker: identity.thscode`），五处 execute 读取点跟着改。
+红绿都验过——把构建产物临时还原成改名形状，Hub 路径逐条复现 `unsupported parameter: thscode`；
+修复后同一走法打到真实上游，四条分别带上 `(SCODE="600519")` 与 `(SECUCODE="600519.SH")`。
+
+**为什么 766 个测试全绿却漏了**：`test/eastmoney-source.test.mjs` 里那条幂等回归是**手抄两条**样例，
+新能力进不了它的覆盖；而所有单测都直接调 `source.execute`（归一化只跑一遍），没有一条走过 Hub。
+新增 `test/source-normalize-contract.test.mjs`，把这条不变量做成结构性的：① 样例表必须覆盖 21 东财
++ 7 腾讯的**全部**注册能力（缺能力即失败，不静默少测，口径与 `scripts/smoke-fuyao.mjs` 的 `PARAMS`
+一致）；② 归一化**不得发明模型没声明的键**（输出键 ⊆ `input_schema.properties`）；③ 双跑幂等；
+④ 走 Hub 的真实入口，断言请求真的带着单票 filter 到达上游。写这条回归的当场就抓出第二处错
+（我给 `tencent_ticks` 的样例带了 `count`，而它只有 `code`）。原来的手抄两用例已删，由这条全量覆盖取代。
+**覆盖边界要说明白**：这条回归扫的是 28 条公开 HTTP 能力；Fuyao 那 61 条不在表内，它的双跑幂等靠的是
+`fuyao-rest.ts` 里那句注释约定与历史上真实走过 Hub 的取数记录——要把它也钉住，得先把
+`scripts/smoke-fuyao.mjs` 的 `PARAMS` 从脚本里提成可导入的一张表（一处样例，两处消费）。
+
+同批报告里另有三条**不是缺陷**，记录以免重复追查：北向四列金额为 null 是已经写进
+`eastmoney_mutual_flow` description 的披露停更边界；"量纲要回 `describe_capability` 读"是 §1.4/§2.2
+的设计（profile 不携带单位）；"tencent 无日期区间"只对港美股两线成立——A 股 `tencent_kline` 支持
+`start`/`end`，港美两线则是刻意不让 `start`/`end` 进 `input_schema` 并在 normalize 里显式拒绝。
+股东户数的极端比值是真数据：已把"基数极小时比值失真（实测降序前五名上期户数 60/4/6/7/17，
+长鑫科技 60 → 3,456,664 户给 +5,761,006.67%）"与"`end_date` 只是**最新披露的一期**，停更票会停在
+多年前（实测 601865 停在 2019-02-15）"补进 description。
+
+### 7.9 尚未注册（"未验不注册"仍然生效）
 
 `RPT_MUTUAL_BOARD_HOLDRANK_WEB`（最新记录停在 2024-08-16，先弄清是整表停更还是维度未筛）、
 `RPT_MUTUAL_HOLD_DET`、十大流通股东 `RPT_F10_EH_FREEHOLDERS`、增持 `RPT_SHARE_HOLDER_INCREASE`、

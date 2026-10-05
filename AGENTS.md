@@ -23,7 +23,7 @@
 | `render_chart` 准入与呈现 | `docs/dev/chart-presentation.md`（§6.1 §6.2）|
 | 交付登记与会话事件类型 | `docs/dev/chart-delivery-events.md`（§6.3）|
 | preset 现状、人设落点、「不许改」全表、新增角色六处齐改 | `docs/dev/preset-persona.md`（§8.1 §8.2 §8.4 §8.5）|
-| 工具 schema 全表、数据源验收全表 | `docs/dev/tool-schema.md`（§9.1–§9.6 §10.1–§10.6）|
+| 工具 schema 全表、数据源验收全表 | `docs/dev/tool-schema.md`（§9.1–§9.6 §10.1–§10.7）|
 
 ### ⛔ 硬约束一览
 
@@ -144,7 +144,7 @@ capital-analysis/runs/<analysis_id>/          # 预留（data_analyst）
 会执行它的入口都接上了吗（`grep` 调用点，不凭记忆）？③ 每个入口有对等断言吗？④ 测试用的是
 **框架真实 exec 形状**（`exec.agent.session`）而非自造简化形状吗？⑤ 注册面有没有押在"装配期读一次的对外部状态"上——2026-09-30 桌面端装配期取凭据失败即静默不注册 61 颗同花顺能力、整场进程不重试，同一进程里走调用期解析的自选股却照样取到数；**外部时刻一律留到调用期，注册只看结构**。⑤ 还有另一半：**失败也要留可重试的余地**——把 rejection memoize 住等于把一次装配期抢跑钉到进程结束（自选股的 `domain()` 曾把 `storageDomain` 未就绪缓存成永久 `store_unavailable`）。
 
-## 10. 数据源验收纪律（改 `src/sources/fuyao-rest.ts` 之后）
+## 10. 数据源验收纪律（改 `src/sources/*.ts` 之后）
 
-全表在 `docs/dev/tool-schema.md` §10.1–§10.6。底线：改端点要同步 `npm run docs:capabilities`；**任何新护栏
+全表在 `docs/dev/tool-schema.md` §10.1–§10.7。底线：改端点要同步 `npm run docs:capabilities`；**任何新护栏
 先拿官方示例 / 真报文验过**（护栏拒绝官方示例就是真实取数事故）；`2004` 不注册、`5003` 是数据缺口。

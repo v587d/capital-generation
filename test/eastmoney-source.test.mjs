@@ -619,21 +619,6 @@ test('eastmoney 宏观表：报告期缺失或畸形一律响亮失败，不产�
   globalThis.fetch = originalFetch
 })
 
-test('Eastmoney normalizeParams：Hub 与 execute 的双重归一化保持幂等', () => {
-  const sources = sourceMap()
-  const cases = [
-    ['eastmoney_top_buy_sell_ticker', { ticker: '600519.SH', start_date: '2026-09-01', end_date: '2026-09-24' }],
-    ['eastmoney_cashflow_rotation', { board_type: 'industry', page: 1, size: 50 }],
-  ]
-  for (const [capability, params] of cases) {
-    const source = sources[capability]
-    const once = source.normalizeParams(params)
-    assert.deepEqual(source.normalizeParams(once), once, `${capability} normalizeParams 必须幂等`)
-    const declared = Object.keys(source.schema.input_schema.properties).sort()
-    assert.deepEqual(Object.keys(once).filter((key) => !declared.includes(key)), [], `${capability} 不得注入未声明参数`)
-  }
-})
-
 test('eastmoney_top_buy_sell_market：解析分页龙虎榜并保留 canonical ticker', async () => {
   const originalFetch = globalThis.fetch
   let requested
