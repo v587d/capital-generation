@@ -264,8 +264,8 @@ Wind 只在需要 Wind 口径/研报级准确度时花积分**；这条要写进
 | 个股主力资金 | `RPT_DMSK_TS_STOCKNEW` | **只有查询日**：实测 5199 行、TRADE_DATE 单一，带旧日期过滤器返回 9201 | 31 | 补 Fuyao `code=2004` 永久关闭的那块，但只能以**快照**形态补：参数面不给日期，`main_cost`=主力成本价（元/股），比例类列口径未核验（`_raw` 后缀） |
 | 融资融券个股 | `RPTA_WEB_RZRQ_GGMX` | 单票 1331 页 | **45** | 先过 §2.2，否则详情必爆 |
 | 可转债 | `RPT_BOND_CB_LIST` `RPT_CB_BALLOTNUM` `RPT_CB_IMPORTANTDATE` | 1059 页 / 72 列 | **72** | 同上；**转债行情本次未验**，未验不注册 |
-| 股东结构 | `RPT_HOLDERNUMLATEST` `RPT_F10_EH_FREEHOLDERS` `RPT_SHARE_HOLDER_INCREASE` `RPT_ORG_SURVEY` | 1856 / 294 万 / 14.7 万 / 334 万页 | 23~47 | `END_DATE` 是**报告期不是披露日**，时间轴必须按 §1.3 归一并区分开 |
-| 分红送配 | `RPT_SHAREBONUS_DET` | 5.7 万页 | 30 | Fuyao `corporate_actions` 只有除权事件，缺方案全字段 |
+| 股东结构 | ✅ `RPT_HOLDERNUMLATEST` 已注册为 `eastmoney_holder_number_snapshot`；`RPT_F10_EH_FREEHOLDERS` `RPT_SHARE_HOLDER_INCREASE` `RPT_ORG_SURVEY` 未验 | 5568 只截面 | 20 | `END_DATE` 是**报告期不是披露日**（实测茅台 2026-06-30 / 披露 2026-08-15），已分列；**只有最新一期，取不到历史** |
+| 分红送配 | ✅ `RPT_SHAREBONUS_DET` 已注册为 `eastmoney_dividend_plan` | 56976 条，可翻回 1991 | 30 | Fuyao `corporate_actions` 只有除权事件，缺方案全字段；送转与派息是**每 10 股**口径 |
 | 商誉 | `RPT_GOODWILL_STOCKDETAILS` | 3 万页 | 25 | 风险排查类 |
 | 大宗交易 / 新股 | `RPT_DATA_BLOCKTRADE` `RPT_BLOCKTRADE_STA` `RPT_IPO_INFOALLNEW` `RPTA_APP_IPOAPPLY` `RPT_IPO_REVIEW` | **未逐条验列** | — | 未验不注册（§10） |
 
@@ -367,9 +367,9 @@ node -e "import('./lib/data-collector/hub.js').then(async ({DataCollectorHub}) =
 - 复现口径：`GET https://datacenter-web.eastmoney.com/api/data/v1/get`，参数
   `reportName=<表名>&columns=ALL&source=WEB&client=WEB&sortColumns=REPORT_DATE&sortTypes=-1&pageNumber=1&pageSize=200`，
   过滤器写法 `(REPORT_DATE>='YYYY-MM-DD')(REPORT_DATE<='YYYY-MM-DD')`。
-- 容量核对：宏观九条注册后是 **78 条 = 2795 字符（45.5% 预算）**；加上沪深港通两条与主力资金快照后
-  **81 条 = 2933 字符（47.7%）**。同一份 81 条若还走编码前的 JSON 数组编码是 **6557 字符，已经越过
-  6144 自预算**——第 0 步不先落地，这几批补录就会把目录撞爆（正是 §2 预判的那件事）。
+- 容量核对：宏观九条注册后是 **78 条 = 2795 字符（45.5% 预算）**；加上沪深港通、主力资金、分红送配与
+  股东户数后 **83 条 = 3027 字符（49.3%）**。同一份 83 条若还走编码前的 JSON 数组编码是 **6739 字符，
+  已经越过 6144 自预算**——第 0 步不先落地，这几批补录就会把目录撞爆（正是 §2 预判的那件事）。
 
 ### 7.2 第 2 步·沪深港通的真报文核验（2026-10-05，已注册两条）
 
@@ -423,10 +423,36 @@ node -e "import('./lib/data-collector/hub.js').then(async ({DataCollectorHub}) =
 - `SECUCODE` 丢市场后缀时直接判 `eastmoney_invalid_response`，**不按代码首位猜市场**——猜错就是把
   一只股票的数据挂到另一只上。
 
-### 7.4 尚未注册（"未验不注册"仍然生效）
+### 7.4 第 2 步·分红送配与股东户数（2026-10-05，注册 `eastmoney_dividend_plan` / `eastmoney_holder_number_snapshot`）
 
-分红送配 `RPT_SHAREBONUS_DET`、股东结构四表、两融 `RPTA_WEB_RZRQ_GGMX`（45 列）、可转债
-`RPT_BOND_CB_LIST`（72 列）尚未逐列核验；大宗交易与新股五表在设计阶段就标了未验不注册。
+`RPT_SHAREBONUS_DET` 取 200 行核验（56,976 条，最早 1991 年）：
+
+- 送转与派息的标度**由上游自己写在原文里**（`IMPL_PLAN_PROFILE="10派280.2423元(含税)"` 配
+  `PRETAX_BONUS_RMB=280.2423`、`"10送4.00派3.00元"` 配 `BONUS_RATIO=4`），所以按"每 10 股"承诺并且
+  保留 `plan_profile` 原文供对照。纯派息方案的三个送转列**同时为 null**，是形态不是缺数。
+- 四个日期各司其职：`report_date`（报告期）/ `plan_notice_date`（预案）/ `notice_date`（实施公告）/
+  `equity_record_date`（登记日，实测 12/200 为 null——方案还没定登记日）/ `ex_dividend_date`（除权日，
+  实测无空值，作为时间轴与区间过滤器）。前三列实测从不缺席，因此按**必填**处理：缺一即
+  `eastmoney_invalid_response`，不悄悄交出 null。
+- `EX_DIVIDEND_DAYS` 对未来除权日是**负数**（实测 -17），原样保留。
+- `IS_KCB` 与 `PUBLISH_DATE` 实测 200/200 全 null → 不收录，并在描述里点名，免得被当成取数失败；
+  `SECURITY_INNER_CODE` / `ORG_CODE` / `MARKET_TYPE` 内部编码同样不进取。
+- `DIVIDENT_RATIO` 与 `D10/BD10/D30_CLOSE_ADJCHRATE` 的比例与复权口径未核验 → 命名带 `_raw`，只允许同列比较。
+
+`RPT_HOLDERNUMLATEST` 实测 5568 只、**一股一行**：这是最新一期**截面**，上游不提供历史序列，所以参数面
+没有日期（给了就 `unsupported parameter` 拒绝），描述写死"要历史就如实说覆盖不了"。
+`END_DATE`（报告期）与 `HOLD_NOTICE_DATE`（披露日）分列——正是 §5.1 当初标的那条陷阱，实测茅台
+报告期 2026-06-30、披露 2026-08-15。新股实测 `PRE_HOLDER_NUM=0` 且 `HOLDER_NUM_RATIO=null`
+（无上期可比），保留 null 不写成 0%。`CHANGE_REASON` 是中文原因原文（「发行融资」/「资产重组」），
+照存不改写；`PRE_E_DATE` / `HOLD_N_DATE` 这种 `03/31` 短标签与 `ORG_CODE` 不进取。
+
+### 7.5 尚未注册（"未验不注册"仍然生效）
+
+分红送配与股东户数两条注册后仍欠：`RPT_MUTUAL_BOARD_HOLDRANK_WEB`（最新记录停在 2024-08-16，先弄清
+是整表停更还是维度未筛）、`RPT_MUTUAL_HOLD_DET`、十大流通股东 `RPT_F10_EH_FREEHOLDERS`、
+增持 `RPT_SHARE_HOLDER_INCREASE`、机构调研 `RPT_ORG_SURVEY`、两融 `RPTA_WEB_RZRQ_GGMX`（45 列）、
+可转债 `RPT_BOND_CB_LIST`（72 列）；大宗交易与新股五表在设计阶段就标了未验不注册。
+
 
 
 

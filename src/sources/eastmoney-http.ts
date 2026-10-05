@@ -728,6 +728,196 @@ async function executeMainCapital(params: Params, signal: AbortSignal): Promise<
   return { data: { item: parsed.rows.map(parseMainCapitalRow), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(mainCapitalRow) }
 }
 
+/**
+ * 分红送配方案：一行一个方案，按除权除息日过滤。`PRETAX_BONUS_RMB` / `BONUS_RATIO` / `IT_RATIO`
+ * 的"每 10 股"标度由上游自己写在 `IMPL_PLAN_PROFILE` 原文里（实测 `10派280.2423元(含税)` 配
+ * `PRETAX_BONUS_RMB=280.2423`、`10送4.00派3.00元` 配 `BONUS_RATIO=4`），所以照原值给出并保留原文。
+ * `IS_KCB` 与 `PUBLISH_DATE` 实测 200/200 全为 null，不收录（描述里点名，免得当成取数失败）。
+ */
+const dividendRow = {
+  type: 'object',
+  properties: {
+    thscode: { type: 'string' }, ticker: { type: 'string' }, name: { type: 'string' },
+    report_date: { type: 'string' }, plan_notice_date: { type: 'string' }, notice_date: { type: 'string' },
+    equity_record_date: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    ex_dividend_date: { type: 'string' }, ex_dividend_date_ms: { type: 'integer' },
+    ex_dividend_days: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    assign_progress: { type: 'string' }, plan_profile: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    pretax_cash_per_10: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    bonus_shares_per_10: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    converted_shares_per_10: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    bonus_and_converted_per_10: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    total_shares: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    basic_eps: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    book_value_per_share: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    capital_reserve_per_share: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    undistributed_profit_per_share: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    net_profit_yoy_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    dividend_yield_raw: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    post_10d_change_raw: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    pre_10d_change_raw: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    post_30d_change_raw: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+  },
+  additionalProperties: true,
+}
+
+/** 日期键归一：`2026-06-26 00:00:00` → `2026-06-26`；空值保留 null（12/200 行没有股权登记日）。 */
+function dayValue(value: unknown): string | null {
+  const text = String(value ?? '').slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null
+}
+
+function parseDividendRow(raw: JsonRecord): JsonRecord {
+  if (typeof raw.SECUCODE !== 'string' || !raw.SECUCODE.includes('.')) {
+    throw sourceError('Eastmoney dividend row lost its market suffix in SECUCODE', 'eastmoney_invalid_response')
+  }
+  const exDate = dayValue(raw.EX_DIVIDEND_DATE)
+  if (exDate === null) throw sourceError('Eastmoney dividend row has invalid EX_DIVIDEND_DATE', 'eastmoney_invalid_response')
+  // 这三列实测 200/200 行都有值（缺了就是上游形状变了），所以按必填处理、缺一就响亮失败；
+  // equity_record_date 实测 12/200 为 null（方案还没定登记日），那一列才允许 null。
+  const requiredDates = (['REPORT_DATE', 'PLAN_NOTICE_DATE', 'NOTICE_DATE'] as const).map((key) => {
+    const day = dayValue(raw[key])
+    if (day === null) throw sourceError(`Eastmoney dividend row is missing ${key}`, 'eastmoney_invalid_response')
+    return day
+  })
+  const [reportDay, planNoticeDay, noticeDay] = requiredDates
+  return {
+    ...normalizeEastmoneySecurityIdentity({ secucode: raw.SECUCODE }),
+    name: String(raw.SECURITY_NAME_ABBR ?? ''),
+    report_date: reportDay,
+    plan_notice_date: planNoticeDay,
+    notice_date: noticeDay,
+    equity_record_date: dayValue(raw.EQUITY_RECORD_DATE),
+    ex_dividend_date: exDate,
+    ex_dividend_date_ms: dateMs(exDate),
+    ex_dividend_days: numberOrNull(raw.EX_DIVIDEND_DAYS),
+    assign_progress: String(raw.ASSIGN_PROGRESS ?? ''),
+    plan_profile: textOrNull(raw.IMPL_PLAN_PROFILE),
+    pretax_cash_per_10: numberOrNull(raw.PRETAX_BONUS_RMB),
+    bonus_shares_per_10: numberOrNull(raw.BONUS_RATIO),
+    converted_shares_per_10: numberOrNull(raw.IT_RATIO),
+    bonus_and_converted_per_10: numberOrNull(raw.BONUS_IT_RATIO),
+    total_shares: numberOrNull(raw.TOTAL_SHARES),
+    basic_eps: numberOrNull(raw.BASIC_EPS),
+    book_value_per_share: numberOrNull(raw.BVPS),
+    capital_reserve_per_share: numberOrNull(raw.PER_CAPITAL_RESERVE),
+    undistributed_profit_per_share: numberOrNull(raw.PER_UNASSIGN_PROFIT),
+    net_profit_yoy_pct: numberOrNull(raw.PNP_YOY_RATIO),
+    dividend_yield_raw: numberOrNull(raw.DIVIDENT_RATIO),
+    post_10d_change_raw: numberOrNull(raw.D10_CLOSE_ADJCHRATE),
+    pre_10d_change_raw: numberOrNull(raw.BD10_CLOSE_ADJCHRATE),
+    post_30d_change_raw: numberOrNull(raw.D30_CLOSE_ADJCHRATE),
+  } as JsonRecord
+}
+
+function normalizeDividend(params: Params): Params {
+  const normalized = normalizeDateRange(params, ['start_date', 'end_date', 'ticker', 'page', 'size'])
+  const identity = normalizeEastmoneySecurityIdentity({ secucode: params.ticker })
+  return { ...normalized, thscode: identity.thscode }
+}
+
+async function executeDividend(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
+  const url = new URL(DATACENTER_URL)
+  url.searchParams.set('reportName', 'RPT_SHAREBONUS_DET')
+  url.searchParams.set('columns', 'ALL')
+  url.searchParams.set('source', 'WEB')
+  url.searchParams.set('client', 'WEB')
+  url.searchParams.set('sortColumns', 'EX_DIVIDEND_DATE')
+  url.searchParams.set('sortTypes', '-1')
+  url.searchParams.set('pageNumber', String(params.page))
+  url.searchParams.set('pageSize', String(params.size))
+  url.searchParams.set('filter', `(SECUCODE="${params.thscode}")(EX_DIVIDEND_DATE>='${params.start_date}')(EX_DIVIDEND_DATE<='${params.end_date}')`)
+  const result = requireDatacenterResult(await getJson(url.toString(), signal, 'dividend plans'), 'dividend plans')
+  const parsed = requireRows(result, 'dividend plans')
+  return { data: { item: parsed.rows.map(parseDividendRow), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(dividendRow) }
+}
+
+/**
+ * 股东户数**最新一期截面**（`RPT_HOLDERNUMLATEST`）：一股一行，`END_DATE` 是**报告期**、
+ * `HOLD_NOTICE_DATE` 才是披露日（实测茅台 END_DATE=2026-06-30 / 披露 2026-08-15），两者必须分开。
+ * 新上市标的 `PRE_HOLDER_NUM=0` 且 `HOLDER_NUM_RATIO=null`（无上期可比），不是数据错误。
+ */
+const holderRow = {
+  type: 'object',
+  properties: {
+    thscode: { type: 'string' }, ticker: { type: 'string' }, name: { type: 'string' },
+    end_date: { type: 'string' }, end_date_ms: { type: 'integer' },
+    hold_notice_date: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    pre_end_date: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    holder_num: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    pre_holder_num: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    holder_num_change: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    holder_num_ratio_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    avg_market_cap: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    avg_hold_shares: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    total_market_cap: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    total_a_shares: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    close_price: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    interval_change_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    change_shares: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    change_reason: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+  },
+  additionalProperties: true,
+}
+
+function parseHolderRow(raw: JsonRecord): JsonRecord {
+  if (typeof raw.SECUCODE !== 'string' || !raw.SECUCODE.includes('.')) {
+    throw sourceError('Eastmoney holder-count row lost its market suffix in SECUCODE', 'eastmoney_invalid_response')
+  }
+  const endDay = dayValue(raw.END_DATE)
+  if (endDay === null) throw sourceError('Eastmoney holder-count row has invalid END_DATE', 'eastmoney_invalid_response')
+  return {
+    ...normalizeEastmoneySecurityIdentity({ secucode: raw.SECUCODE }),
+    name: String(raw.SECURITY_NAME_ABBR ?? ''),
+    end_date: endDay,
+    end_date_ms: dateMs(endDay),
+    hold_notice_date: dayValue(raw.HOLD_NOTICE_DATE),
+    pre_end_date: dayValue(raw.PRE_END_DATE),
+    holder_num: numberOrNull(raw.HOLDER_NUM),
+    pre_holder_num: numberOrNull(raw.PRE_HOLDER_NUM),
+    holder_num_change: numberOrNull(raw.HOLDER_NUM_CHANGE),
+    holder_num_ratio_pct: numberOrNull(raw.HOLDER_NUM_RATIO),
+    avg_market_cap: numberOrNull(raw.AVG_MARKET_CAP),
+    avg_hold_shares: numberOrNull(raw.AVG_HOLD_NUM),
+    total_market_cap: numberOrNull(raw.TOTAL_MARKET_CAP),
+    total_a_shares: numberOrNull(raw.TOTAL_A_SHARES),
+    close_price: numberOrNull(raw.CLOSE_PRICE),
+    interval_change_pct: numberOrNull(raw.INTERVAL_CHRATE),
+    change_shares: numberOrNull(raw.CHANGE_SHARES),
+    change_reason: textOrNull(raw.CHANGE_REASON),
+  } as JsonRecord
+}
+
+const HOLDER_SORTS: Record<string, string> = { holder_num: 'HOLDER_NUM', holder_num_ratio_pct: 'HOLDER_NUM_RATIO', total_market_cap: 'TOTAL_MARKET_CAP', end_date: 'END_DATE' }
+
+function normalizeHolder(params: Params): Params {
+  assertKnown(params, ['ticker', 'sort_field', 'sort_order', 'page', 'size'])
+  const sort_field = params.sort_field === undefined ? 'holder_num' : String(params.sort_field)
+  if (!(sort_field in HOLDER_SORTS)) throw new Error(`sort_field must be one of ${Object.keys(HOLDER_SORTS).join(', ')}`)
+  const sort_order = params.sort_order === undefined ? 'desc' : String(params.sort_order)
+  if (sort_order !== 'desc' && sort_order !== 'asc') throw new Error('sort_order must be desc or asc')
+  const page = params.page === undefined ? 1 : integer(params.page, 'page', 1, Number.MAX_SAFE_INTEGER)
+  const size = params.size === undefined ? 100 : integer(params.size, 'size', 1, MAX_PAGE_SIZE)
+  if (params.ticker === undefined) return { sort_field, sort_order, page, size }
+  return { sort_field, sort_order, page, size, thscode: normalizeEastmoneySecurityIdentity({ secucode: params.ticker }).thscode }
+}
+
+async function executeHolder(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
+  const url = new URL(DATACENTER_URL)
+  url.searchParams.set('reportName', 'RPT_HOLDERNUMLATEST')
+  url.searchParams.set('columns', 'ALL')
+  url.searchParams.set('source', 'WEB')
+  url.searchParams.set('client', 'WEB')
+  url.searchParams.set('sortColumns', HOLDER_SORTS[String(params.sort_field)])
+  url.searchParams.set('sortTypes', params.sort_order === 'asc' ? '1' : '-1')
+  url.searchParams.set('pageNumber', String(params.page))
+  url.searchParams.set('pageSize', String(params.size))
+  if (params.thscode) url.searchParams.set('filter', `(SECUCODE="${params.thscode}")`)
+  const result = requireDatacenterResult(await getJson(url.toString(), signal, 'holder count snapshot'), 'holder count snapshot')
+  const parsed = requireRows(result, 'holder count snapshot')
+  return { data: { item: parsed.rows.map(parseHolderRow), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(holderRow) }
+}
+
 function createSource(options: { capability: string; name: string; summary: string; description: string; inputSchema: object; outputSchema: object; paginated?: boolean; cacheMaxAgeMs?: number; rowShape: SchemaDescriptor['rowShape']; allowed: string[]; normalize: (params: Params) => Params; execute: (params: Params, signal: AbortSignal) => Promise<{ data: unknown; schema: object }> }): DataSource {
   const schema: SchemaDescriptor = { capability: options.capability, time_contract: getDataTimeContract(options.capability), name: options.name, source: `http:eastmoney.${options.capability}`, data_key: buildDataKey('eastmoney', 'http', options.capability), source_label: 'eastmoney', paginated: options.paginated === true, cacheMaxAgeMs: options.cacheMaxAgeMs, rowShape: options.rowShape, summary: options.summary, description: options.description, input_schema: options.inputSchema, output_schema: options.outputSchema }
   const normalize = (params: Record<string, unknown>): Params => options.normalize(params)
@@ -769,6 +959,31 @@ const mainCapitalInput = {
   additionalProperties: false,
 }
 
+const holderInput = {
+  type: 'object',
+  properties: {
+    ticker: { type: 'string', description: '完整证券代码（带市场后缀，如 600519.SH）；省略则取全市场截面' },
+    sort_field: { type: 'string', enum: Object.keys(HOLDER_SORTS), description: '排序列，默认 holder_num' },
+    sort_order: { type: 'string', enum: ['desc', 'asc'] },
+    page: { type: 'integer', minimum: 1 },
+    size: { type: 'integer', minimum: 1, maximum: MAX_PAGE_SIZE },
+  },
+  required: [],
+  additionalProperties: false,
+}
+const dividendInput = {
+  type: 'object',
+  properties: {
+    ticker: { type: 'string', description: '完整证券代码（带市场后缀，如 600519.SH）' },
+    start_date: { type: 'string', description: '除权除息日区间起点 YYYY-MM-DD' },
+    end_date: { type: 'string', description: '除权除息日区间终点 YYYY-MM-DD' },
+    page: { type: 'integer', minimum: 1 },
+    size: { type: 'integer', minimum: 1, maximum: MAX_PAGE_SIZE },
+  },
+  required: ['ticker', 'start_date', 'end_date'],
+  additionalProperties: false,
+}
+
 export function createEastmoneySources(): DataSource[] {
   return [
     createSource({ capability: 'eastmoney_top_buy_sell_market', name: 'get_eastmoney_top_buy_sell_market', summary: '东财全市场龙虎榜汇总', description: '按交易日区间分页获取东方财富龙虎榜上榜股票汇总。金额字段单位为元，CHANGE_RATE/TURNOVERRATE/DEAL_*_RATIO 为东财百分数原值；同一股票同日可能因多个上榜原因返回多行，不去重。上游 HTTP 200 但 success=false、code 非 0 或 result 缺失均视为失败，不转换为空数组。', inputSchema: dateRangeInput, outputSchema: datacenterOutput(topBuySellRow), paginated: true, rowShape: { rowKey: 'item' }, allowed: ['start_date', 'end_date', 'page', 'size'], normalize: (params) => normalizeDateRange(params, ['start_date', 'end_date', 'page', 'size']), execute: (params, signal) => executeBillboard(params, signal) }),
@@ -790,6 +1005,20 @@ export function createEastmoneySources(): DataSource[] {
       description: '获取东方财富个股主力资金**查询时点快照**（RPT_DMSK_TS_STOCKNEW）。⛔ 上游只保留**最近一个交易日**的全市场一行一股（实测 5199 只、TRADE_DATE 只有当天，带旧日期的过滤器返回 9201 空），本能力**没有历史序列**：不要按日期循环请求，需要历史就改走行情类能力或如实告知用户取不到。默认按主力净流入降序分页；ticker 必须带市场后缀（如 600519.SH），省略则取全市场排名。main_net_inflow 与各档 *_inflow / *_outflow 是东财原值（实测 000501 主力净流入 -3822595，量级对应元）；main_cost / main_cost_20d / main_cost_60d 是主力成本价（元/股，用来判断现价高于还是低于主力成本）；change_pct 与 turnover_rate_pct 是东财百分数原值（0.6011 表示 0.6011%），与本仓其他东财能力同口径。带 `_raw` 后缀的比例列（*_ratio_raw、org_participate_raw）**口径未经核验**：0.1198 既可能读作 0.12% 也可能读作 11.98%，只能做同列相对比较，禁止换算成百分数写进结论。rank / rank_up / total_score / focus 是东财自有的主力资金排名与关注度打分，口径归东财、跨日不可比；participate_type 是上游的参与类型码，原文保留未做翻译。实测 200 行里 CHANGE_RATE 与 TURNOVERRATE 各有 2 行为 null（停牌或当日无成交），null 原样保留不补 0。Dataset 的 captured_at 才是采集时间。',
       inputSchema: mainCapitalInput, outputSchema: datacenterOutput(mainCapitalRow), paginated: true, rowShape: { rowKey: 'item' },
       allowed: ['ticker', 'sort_field', 'sort_order', 'page', 'size'], normalize: normalizeMainCapital, execute: executeMainCapital,
+    }),
+    createSource({
+      capability: 'eastmoney_dividend_plan', name: 'get_eastmoney_dividend_plan',
+      summary: '东财分红送配方案明细（按个股与除权日）',
+      description: '按单只 A 股与除权除息日区间获取东方财富分红送配方案（RPT_SHAREBONUS_DET，实测全库 56976 条、可翻回 1991 年）。一行一个方案；同一报告期可能同时有年度与中期两条方案，用 report_date 加 ex_dividend_date 区分。四个日期口径不同：report_date 是**报告期**（如 2025-12-31），plan_notice_date 是预案公告日，notice_date 是实施公告日，equity_record_date 是股权登记日（实测 12/200 行为 null——方案尚未定登记日，属正常），ex_dividend_date 是除权除息日；只有 ex_dividend_date_ms 提供毫秒时间轴。送转与派息一律是**每 10 股**口径（上游原文 plan_profile 就写成「10派280.2423元(含税)」，照抄即可核对）：pretax_cash_per_10 为每 10 股税前派息（元），bonus_shares_per_10 为每 10 股送股，converted_shares_per_10 为每 10 股转增，bonus_and_converted_per_10 为送转合计；纯派息方案的三个送转列同时为 null，不是缺数。assign_progress 是方案进度（实测「实施分配」/「董事会决议通过」）；ex_dividend_days 是距除权日天数，**未来为负**（实测 -17）。basic_eps / book_value_per_share / capital_reserve_per_share / undistributed_profit_per_share / net_profit_yoy_pct 是东财随附的每股与利润表指标。带 `_raw` 的三列除权前后涨跌幅与 dividend_yield_raw 的复权与比例口径**未经核验**，只做同列相对比较，禁止换算成百分数写进结论。上游的 IS_KCB 与 PUBLISH_DATE 实测全为 null，本能力不收录，不要当成取数失败；SECURITY_INNER_CODE / ORG_CODE / MARKET_TYPE 等内部编码同样不进取。',
+      inputSchema: dividendInput, outputSchema: datacenterOutput(dividendRow), paginated: true, rowShape: { rowKey: 'item' },
+      allowed: ['ticker', 'start_date', 'end_date', 'page', 'size'], normalize: normalizeDividend, execute: executeDividend,
+    }),
+    createSource({
+      capability: 'eastmoney_holder_number_snapshot', cacheMaxAgeMs: 60_000, name: 'get_eastmoney_holder_number_snapshot',
+      summary: '东财股东户数最新一期截面',
+      description: '获取东方财富股东户数的**最新一期截面**（RPT_HOLDERNUMLATEST，实测 5568 只、一股一行）。这是截面不是序列：上游只给每股当前最新一期，取不到历史区间，需要历史就如实告知用户现有能力覆盖不了。end_date 是**报告期**（如 2026-06-30），hold_notice_date 才是**披露日**（实测茅台报告期 2026-06-30、披露 2026-08-15），pre_end_date 是上一期报告期（新股为 null）；时间轴用 end_date_ms，不要把披露日当报告期用。holder_num 是股东户数，pre_holder_num 上期户数，holder_num_change 变动户数，holder_num_ratio_pct 变动比例（百分数原值，21.89 表示 +21.89%）——新股实测 pre_holder_num=0 且 holder_num_ratio_pct=null，这是"无上期可比"，不是取数失败。avg_market_cap 户均市值、avg_hold_shares 户均持股数、total_market_cap 总市值、total_a_shares A 股总股本、close_price 收盘价均为东财原值（市值与价格为元级量纲，未逐值核对）；interval_change_pct 是东财给出的区间涨跌幅（百分数原值）；change_shares 与 change_reason 是股本变动数与**中文原因原文**（实测「发行融资」/「资产重组」），原文照存不改写。默认按股东户数降序，可按 holder_num_ratio_pct / total_market_cap / end_date 换排序；ticker 带市场后缀时只返回该只一行。',
+      inputSchema: holderInput, outputSchema: datacenterOutput(holderRow), paginated: true, rowShape: { rowKey: 'item' },
+      allowed: ['ticker', 'sort_field', 'sort_order', 'page', 'size'], normalize: normalizeHolder, execute: executeHolder,
     }),
     createSource({
       capability: 'eastmoney_mutual_quota', cacheMaxAgeMs: 60_000, name: 'get_eastmoney_mutual_quota',

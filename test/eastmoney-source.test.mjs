@@ -36,16 +36,17 @@ const MACRO_CAPABILITIES = [
   'eastmoney_cpi', 'eastmoney_ppi', 'eastmoney_gdp', 'eastmoney_pmi', 'eastmoney_money_supply',
   'eastmoney_rmb_loan', 'eastmoney_customs_trade', 'eastmoney_retail_sales', 'eastmoney_deposit_reserve',
 ]
-const SNAKE_CASE_CAPABILITIES = [...MACRO_CAPABILITIES, 'eastmoney_mutual_flow', 'eastmoney_mutual_quota', 'eastmoney_main_capital_snapshot']
+const SNAKE_CASE_CAPABILITIES = [...MACRO_CAPABILITIES, 'eastmoney_mutual_flow', 'eastmoney_mutual_quota', 'eastmoney_main_capital_snapshot', 'eastmoney_dividend_plan', 'eastmoney_holder_number_snapshot']
 
-test('Eastmoney source：注册十七个 capability 与内部身份', () => {
+test('Eastmoney source：注册十九个 capability 与内部身份', () => {
   const sources = createEastmoneySources()
   assert.deepEqual(sources.map((source) => source.schema.capability), [
     'eastmoney_top_buy_sell_market', 'eastmoney_top_buy_sell_ticker', 'eastmoney_lockup_expiry',
     'eastmoney_sector_rotation', 'eastmoney_cashflow_rotation', ...MACRO_CAPABILITIES,
-    'eastmoney_mutual_flow', 'eastmoney_main_capital_snapshot', 'eastmoney_mutual_quota',
+    'eastmoney_mutual_flow', 'eastmoney_main_capital_snapshot',
+    'eastmoney_dividend_plan', 'eastmoney_holder_number_snapshot', 'eastmoney_mutual_quota',
   ])
-  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 17)
+  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 19)
   for (const source of sources) {
     assert.equal(source.schema.source_label, 'eastmoney')
     assert.match(source.schema.data_key, /^eastmoney\.http\./)
@@ -281,6 +282,113 @@ test('eastmoney_main_capital_snapshot：SECUCODE 丢市场后缀就响亮失败�
       () => source.execute({ capability: 'eastmoney_main_capital_snapshot', params: {}, session }, signal),
       (error) => error?.code === 'eastmoney_invalid_response',
     )
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_dividend_plan：每 10 股口径照原值给、日期四列分职、未定登记日留 null', async () => {
+  const originalFetch = globalThis.fetch
+  let requested
+  globalThis.fetch = async (url) => {
+    requested = new URL(url)
+    return response({ success: true, code: 0, result: { pages: 1, count: 2, data: [
+      { SECUCODE: '600519.SH', SECURITY_CODE: '600519', SECURITY_NAME_ABBR: '贵州茅台', REPORT_DATE: '2025-12-31 00:00:00',
+        PLAN_NOTICE_DATE: '2026-04-17 00:00:00', NOTICE_DATE: '2026-06-22 00:00:00', EQUITY_RECORD_DATE: '2026-06-25 00:00:00',
+        EX_DIVIDEND_DATE: '2026-06-26 00:00:00', ASSIGN_PROGRESS: '实施分配', IMPL_PLAN_PROFILE: '10派280.2423元(含税)',
+        PRETAX_BONUS_RMB: 280.2423, BONUS_RATIO: null, IT_RATIO: null, BONUS_IT_RATIO: null, EX_DIVIDEND_DAYS: 101,
+        TOTAL_SHARES: 1256197800, BASIC_EPS: 65.66, BVPS: 195.355449727901, PNP_YOY_RATIO: -4.532254817208,
+        IS_KCB: null, PUBLISH_DATE: null, SECURITY_INNER_CODE: '1000002162', ORG_CODE: '10002602', MARKET_TYPE: '069001001001' },
+      { SECUCODE: '600519.SH', SECURITY_CODE: '600519', SECURITY_NAME_ABBR: '贵州茅台', REPORT_DATE: '2026-06-30 00:00:00',
+        PLAN_NOTICE_DATE: '2026-08-29 00:00:00', NOTICE_DATE: '2026-09-18 00:00:00', EQUITY_RECORD_DATE: null,
+        EX_DIVIDEND_DATE: '2026-10-23 00:00:00', ASSIGN_PROGRESS: '董事会决议通过', IMPL_PLAN_PROFILE: '10派1.80元(含税)',
+        PRETAX_BONUS_RMB: 1.8, EX_DIVIDEND_DAYS: -17 },
+    ] } })
+  }
+  try {
+    const source = sourceMap().eastmoney_dividend_plan
+    const result = await source.execute({ capability: 'eastmoney_dividend_plan', params: { ticker: '600519.SH', start_date: '2023-01-01', end_date: '2026-10-05' }, session }, signal)
+    assert.equal(requested.searchParams.get('sortColumns'), 'EX_DIVIDEND_DATE')
+    assert.equal(requested.searchParams.get('filter'), `(SECUCODE="600519.SH")(EX_DIVIDEND_DATE>='2023-01-01')(EX_DIVIDEND_DATE<='2026-10-05')`)
+    const [done, pending] = result.data.item
+    assert.deepEqual([done.thscode, done.ticker], ['600519.SH', '600519'])
+    assert.equal(done.report_date, '2025-12-31', 'report_date 是报告期')
+    assert.equal(done.equity_record_date, '2026-06-25')
+    assert.equal(done.ex_dividend_date_ms, Date.parse('2026-06-26T00:00:00+08:00'))
+    assert.equal(done.pretax_cash_per_10, 280.2423, '每 10 股派息按原值给，plan_profile 原文可对照')
+    assert.equal(done.plan_profile, '10派280.2423元(含税)')
+    assert.equal(done.bonus_shares_per_10, null, '纯派息方案的送转列为 null，不补 0')
+    for (const dropped of ['IS_KCB', 'PUBLISH_DATE', 'SECURITY_INNER_CODE', 'ORG_CODE', 'MARKET_TYPE']) {
+      assert.ok(!(dropped in done), `${dropped} 不进取`)
+    }
+    assert.equal(pending.equity_record_date, null, '方案未定登记日是正常状态')
+    assert.equal(pending.ex_dividend_days, -17, '距除权日为负=还没除权，原样保留')
+    assert.equal(pending.assign_progress, '董事会决议通过')
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_dividend_plan：缺市场后缀与畸形除权日都响亮失败', async () => {
+  const originalFetch = globalThis.fetch
+  try {
+    const source = sourceMap().eastmoney_dividend_plan
+    await assert.rejects(
+      () => source.execute({ capability: 'eastmoney_dividend_plan', params: { ticker: '600519', start_date: '2023-01-01', end_date: '2026-10-05' }, session }, signal),
+      /requires an explicit market/,
+    )
+    globalThis.fetch = async () => response({ success: true, code: 0, result: { pages: 1, count: 1, data: [{ SECUCODE: '600519.SH', EX_DIVIDEND_DATE: '2026年6月26日' }] } })
+    await assert.rejects(
+      () => source.execute({ capability: 'eastmoney_dividend_plan', params: { ticker: '600519.SH', start_date: '2023-01-01', end_date: '2026-10-05' }, session }, signal),
+      (error) => error?.code === 'eastmoney_invalid_response',
+    )
+    globalThis.fetch = async () => response({ success: true, code: 0, result: { pages: 1, count: 1, data: [{ SECUCODE: '600519.SH', EX_DIVIDEND_DATE: '2026-06-26 00:00:00', REPORT_DATE: '2025-12-31 00:00:00', PLAN_NOTICE_DATE: '2026-04-17 00:00:00' }] } })
+    await assert.rejects(
+      () => source.execute({ capability: 'eastmoney_dividend_plan', params: { ticker: '600519.SH', start_date: '2023-01-01', end_date: '2026-10-05' }, session }, signal),
+      (error) => error?.code === 'eastmoney_invalid_response',
+      '实施公告日实测从不缺席，缺了就是上游形状变了',
+    )
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_holder_number_snapshot：披露日与报告期分列，新股无上期可比留 null', async () => {
+  const originalFetch = globalThis.fetch
+  let requested
+  globalThis.fetch = async (url) => {
+    requested = new URL(url)
+    const rows = [
+      { SECUCODE: '600519.SH', SECURITY_CODE: '600519', SECURITY_NAME_ABBR: '贵州茅台', HOLDER_NUM: 296404, PRE_HOLDER_NUM: 243159,
+        HOLDER_NUM_CHANGE: 53245, HOLDER_NUM_RATIO: 21.897194839591, INTERVAL_CHRATE: -16.30735947, END_DATE: '2026-06-30 00:00:00',
+        PRE_END_DATE: '2026-03-31 00:00:00', PRE_E_DATE: '03/31', AVG_MARKET_CAP: 4999794.99996454, AVG_HOLD_NUM: 4217.49234490762,
+        TOTAL_MARKET_CAP: 1481959237169.49, TOTAL_A_SHARES: 1250081601, HOLD_NOTICE_DATE: '2026-08-15 00:00:00', HOLD_N_DATE: '08/15',
+        CHANGE_SHARES: -2188614, CHANGE_REASON: '资产重组', CLOSE_PRICE: 1185.49, ORG_CODE: '10002602' },
+      { SECUCODE: '001246.SZ', SECURITY_CODE: '001246', SECURITY_NAME_ABBR: '力勤资源', HOLDER_NUM: 250527, PRE_HOLDER_NUM: 0,
+        HOLDER_NUM_CHANGE: 250527, HOLDER_NUM_RATIO: null, INTERVAL_CHRATE: null, END_DATE: '2026-09-30 00:00:00',
+        PRE_END_DATE: null, HOLD_NOTICE_DATE: '2026-09-29 00:00:00', TOTAL_MARKET_CAP: 76684290270.31, CLOSE_PRICE: 65.09,
+        CHANGE_SHARES: 1178127059, CHANGE_REASON: '发行融资' },
+    ]
+    const filter = requested.searchParams.get('filter')
+    const kept = filter ? rows.filter((row) => filter.includes(row.SECUCODE)) : rows
+    return response({ success: true, code: 0, result: { pages: 1, count: kept.length, data: kept } })
+  }
+  try {
+    const source = sourceMap().eastmoney_holder_number_snapshot
+    const result = await source.execute({ capability: 'eastmoney_holder_number_snapshot', params: {}, session }, signal)
+    assert.equal(requested.searchParams.get('sortColumns'), 'HOLDER_NUM')
+    assert.equal(requested.searchParams.get('filter'), null, '全市场截面不带过滤器')
+    const [moutai, newIssue] = result.data.item
+    assert.equal(moutai.end_date, '2026-06-30', 'end_date 是报告期')
+    assert.equal(moutai.hold_notice_date, '2026-08-15', '披露日是另一列，不能顶替报告期')
+    assert.equal(moutai.end_date_ms, Date.parse('2026-06-30T00:00:00+08:00'))
+    assert.equal(moutai.holder_num_ratio_pct, 21.897194839591)
+    assert.equal(moutai.change_reason, '资产重组', '中文原因原文照存')
+    assert.ok(!('PRE_E_DATE' in moutai) && !('HOLD_N_DATE' in moutai) && !('ORG_CODE' in moutai), '短标签与内部编码不进取')
+    assert.equal(newIssue.holder_num_ratio_pct, null, '新股没有上期：null 而不是 0%')
+    assert.equal(newIssue.pre_end_date, null)
+    await assert.rejects(
+      () => source.execute({ capability: 'eastmoney_holder_number_snapshot', params: { sort_field: 'end_date', start_date: '2026-01-01' }, session }, signal),
+      /unsupported parameter/,
+      '截面能力没有日期参数：给了就拒绝，不能让它以为取得到历史',
+    )
+    const single = await source.execute({ capability: 'eastmoney_holder_number_snapshot', params: { ticker: '001246.SZ' }, session }, signal)
+    assert.equal(requested.searchParams.get('filter'), '(SECUCODE="001246.SZ")')
+    assert.deepEqual(single.data.item.map((row) => row.thscode), ['001246.SZ'], '单票过滤器把截面收窄成一行')
   } finally { globalThis.fetch = originalFetch }
 })
 
