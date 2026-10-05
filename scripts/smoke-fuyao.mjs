@@ -13,24 +13,15 @@
  * 或环境变量 FUYAO_API_KEY。脚本**不打印密钥、不落盘任何响应数据**。
  * 注意：会真实消耗上游配额；顺序执行并留间隔，避免触发限流（code=4001）。
  */
-import { readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { createFuyaoRestSources } from '../lib/sources/fuyao-rest.js'
+import { resolveCredential } from './lib/credentials.mjs'
 
 const args = process.argv.slice(2)
 const only = args.includes('--only') ? args[args.indexOf('--only') + 1] : undefined
 const asJson = args.includes('--json')
 
 function resolveKey() {
-  if (process.env.FUYAO_API_KEY) return process.env.FUYAO_API_KEY
-  try {
-    const text = readFileSync(`${homedir()}/.dsh/.credentials.yaml`, 'utf8')
-    const matched = /^\s*FUYAO_API_KEY:\s*(.+?)\s*$/m.exec(text)
-    if (matched) return matched[1].replace(/^["']|["']$/g, '')
-  } catch {
-    // 凭据文件不可读时走下面的报错分支
-  }
-  return undefined
+  return resolveCredential('FUYAO_API_KEY')
 }
 
 /** 每个 capability 的最小合法请求；键必须覆盖全部已注册端点（缺了就报错，不静默跳过）。 */
