@@ -207,18 +207,14 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
     ),
     tool(
       'list_capabilities',
-      '列出当前已注册的数据能力目录：每项只有 capability（短能力名）、summary（一行用途）与 paginated（是否分页）。目录是发现入口，**一个任务只需调用一次**：同一 session 的历史里已经保有这份目录，重复调用只会白占上下文。目录刻意不含参数与输出结构（完整 schema 约 23KB，会被剪枝截断）；确定要用的能力后，用 describe_capability 单独取那一个能力的 input_schema 后即可 request_data。request_data 的 capability 必须以本目录为准，不要自行编造。',
+      '列出当前已注册的数据能力目录：**纯文本，一行一条** `capability|summary|paginated`，paginated 为 1（分页）/ 0（不分页）。名字或摘要里的 `|`、换行会转义成 `\\|`、`\\n`，所以一行就是一条能力，不要按冒号或空格拆分。目录是发现入口，**一个任务只需调用一次**：同一 session 的历史里已经保有这份目录，重复调用只会白占上下文。目录刻意不含参数与输出结构（完整 schema 约 23KB，会被剪枝截断）；确定要用的能力后，用 describe_capability 单独取那一个能力的 input_schema 后即可 request_data。request_data 的 capability 必须以本目录为准，不要自行编造。',
       jsonObject(),
-      { type: 'array', items: jsonObject({
-        capability: { type: 'string' },
-        summary: { type: 'string' },
-        paginated: { type: 'boolean' },
-      }, ['capability', 'summary', 'paginated']) },
-      async (_args, exec) => { delegatedSession(exec, 'list_capabilities'); return hub.listCapabilities() },
+      { type: 'string' },
+      async (_args, exec) => { delegatedSession(exec, 'list_capabilities'); return hub.capabilityDirectory() },
     ),
     tool(
       'describe_capability',
-      '读取**一个**能力的完整契约：description（单位、null 语义、时间与分页口径）、input_schema（params 的取值与约束）、output_schema（返回字段）与 paginated。request_data 的 params 必须按这里返回的 input_schema 填写；request_data 若返回 request_params_invalid，应回到这里重新读取后再重试。一个能力描述一次即可：结果已在本 session 历史里，重复描述同一个能力只会白占上下文；需要几个能力就分别调用几次，不要用逗号把多个名字塞进一次调用。错误按 code 引导：capability_required（没给名字，先 list_capabilities()）、capability_invalid（不是字符串/超长/含逗号，改为目录中的单个名字）、capability_catalog_empty（数据源未注册，别重试，回告主 Agent）、capability_unknown（名字不存在，错误里会列出全部可用能力名并要求原样复制）。',
+      '读取**一个**能力的完整契约：description（单位、null 语义、时间与分页口径）、input_schema（params 的取值与约束）、output_fields（返回字段的逐行字典 `路径:类型[:说明]`，类型后缀 `?` 为可为 null、`[].` 为数组元素的字段）与 paginated。request_data 的 params 必须按这里返回的 input_schema 填写；request_data 若返回 request_params_invalid，应回到这里重新读取后再重试。一个能力描述一次即可：结果已在本 session 历史里，重复描述同一个能力只会白占上下文；需要几个能力就分别调用几次，不要用逗号把多个名字塞进一次调用。错误按 code 引导：capability_required（没给名字，先 list_capabilities()）、capability_invalid（不是字符串/超长/含逗号，改为目录中的单个名字）、capability_catalog_empty（数据源未注册，别重试，回告主 Agent）、capability_unknown（名字不存在，错误里会列出全部可用能力名并要求原样复制）。',
       jsonObject({ capability: { type: 'string' } }, ['capability']),
       jsonObject({
         capability: { type: 'string' },
@@ -226,8 +222,8 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
         paginated: { type: 'boolean' },
         description: { type: 'string' },
         input_schema: freeObject,
-        output_schema: { oneOf: [{ type: 'object', additionalProperties: true }, { type: 'null' }] },
-      }, ['capability', 'summary', 'paginated', 'description', 'input_schema', 'output_schema']),
+        output_fields: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+      }, ['capability', 'summary', 'paginated', 'description', 'input_schema', 'output_fields']),
       async (args, exec) => {
         delegatedSession(exec, 'describe_capability')
         const capability = resolveCapability(hub, args.capability)

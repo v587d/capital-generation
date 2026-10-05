@@ -51,9 +51,13 @@ description: Use when composing or reading a Capital data message — data_reque
 
 | 步 | 工具 | 得到什么 | 调用纪律 |
 |----|------|----------|----------|
-| ① | `list_capabilities()` | 能力目录：`capability` + 一行 `summary` + `paginated` | **一个任务只调一次**；目录已在本 session 历史里，重复调用只会白占上下文 |
-| ② | `describe_capability({ capability })` | 该能力的完整 `description` / `input_schema` / `output_schema` | 一次只传**一个**名字、**不传逗号**；同一个能力描述一次即可；要几个能力就分别调用几次 |
+| ① | `list_capabilities()` | 纯文本能力目录：**一行一条** `capability\|summary\|paginated`（1=分页、0=不分页） | **一个任务只调一次**；目录已在本 session 历史里，重复调用只会白占上下文 |
+| ② | `describe_capability({ capability })` | 该能力的完整 `description` / `input_schema` / `output_fields`（逐行字段字典） | 一次只传**一个**名字、**不传逗号**；同一个能力描述一次即可；要几个能力就分别调用几次 |
 
+- 读目录时**按行切**：一行就是一条能力，取第一个 `|` 前面的部分当 `capability` 原样复制；摘要里出现的
+  `\|`、`\n` 是转义字符，不是分隔符。
+- `output_fields` 每行是 `字段路径:类型[:说明]`：后缀 `?` 表示上游可能给 `null`，`[].` 表示该字段在数组
+  元素上（`item[].thscode`）。按它写 `query_dataset` 的 `select` / `filters` 列名，大小写与下划线原样照抄。
 - 目录刻意不含参数与输出结构：全量 schema 约 23KB，会被工具结果剪枝器（阈值 8192）截断中间
   部分，导致排在中间的能力在发现阶段不可见。目录只负责"选哪个"，详情负责"怎么填"。
 - **一个任务只调一次 `list_capabilities`**；**同一个能力只描述一次**，重复调用只会白占上下文。

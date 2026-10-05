@@ -60,11 +60,12 @@ export interface CapabilitySummary {
     summary: string;
     paginated: boolean;
 }
-/** 单个能力的完整契约：参数与输出结构，调用前必读。 */
+/** 单个能力的完整契约：参数与输出字段字典，调用前必读。 */
 export interface CapabilityDetail extends CapabilitySummary {
     description: string;
     input_schema: object;
-    output_schema: object | null;
+    /** `output_schema` 的模型可见投影，见 renderOutputFields；声明不出字段时为 null。 */
+    output_fields: string | null;
 }
 export interface DataSource {
     schema: SchemaDescriptor;
@@ -164,8 +165,16 @@ export declare class DataCollectorHub {
     /** 当前已注册的能力名（用于未知名字的引导与诊断）。 */
     capabilityNames(): string[];
     /**
+     * 能力目录的模型可见形态：一行一条 `capability|summary|paginated`（1=分页、0=不分页）。
+     * 同等信息量下 JSON 数组要 5530 字符（69 条实测，其中 58% 是键名与标点），行编码 2435、
+     * 均摊从 80 降到 35 字符——目录余量从 +7 条变成 +105 条。信息量没变、依然一次性全量返回，
+     * §1.1 那条"不分页、不裁剪"的硬约束原样成立。结构化形态仍由 listCapabilities 提供（测试与内部消费）。
+     */
+    capabilityDirectory(): string;
+    /**
      * 单个能力的完整契约；名字未注册时返回 undefined，由工具层分类成可引导的错误。
      * 返回值只含模型可见字段，是新建的普通对象，不回传内部 live data。
+     * `output_fields` 是 `output_schema` 的投影：详情体积按列数增长会被宽表打穿，见 renderOutputFields。
      */
     describeCapability(capability: string): CapabilityDetail | undefined;
     private processNext;

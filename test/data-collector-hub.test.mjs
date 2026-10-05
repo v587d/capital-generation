@@ -342,14 +342,38 @@ test('describeCapability：返回单个能力详情，未知名字返回 undefin
       summary: '行情快照',
       description: '完整说明',
       input_schema: { type: 'object' },
-      output_schema: { type: 'object' },
+      output_schema: {
+        type: 'object',
+        properties: {
+          timestamp: { type: 'integer' },
+          item: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                thscode: { type: 'string' },
+                last_price: { oneOf: [{ type: 'number' }, { type: 'null' }], description: '最新价（元）；停牌为 null' },
+              },
+              additionalProperties: true,
+            },
+          },
+        },
+        additionalProperties: true,
+      },
     },
     execute: async () => ({ data: {} }),
   })
   const detail = hub.describeCapability('quote')
   assert.ok(detail)
-  assert.deepEqual(Object.keys(detail).sort(), ['capability', 'description', 'input_schema', 'output_schema', 'paginated', 'summary'])
+  assert.deepEqual(Object.keys(detail).sort(), ['capability', 'description', 'input_schema', 'output_fields', 'paginated', 'summary'])
   assert.equal(detail.description, '完整说明')
+  // 输出契约以字典投影交出：一行一字段，`?`=可为 null，`[].`=数组元素的字段，第三段是说明。
+  assert.equal(detail.output_fields, [
+    'timestamp:integer',
+    'item:array',
+    'item[].thscode:string',
+    'item[].last_price:number?:最新价（元）；停牌为 null',
+  ].join('\n'))
   assert.equal(hub.describeCapability('nope'), undefined)
   const serialized = JSON.stringify(detail)
   for (const forbidden of ['data_key', 'api:fuyao', 'get_a_share_prices_snapshot']) {
@@ -360,7 +384,7 @@ test('describeCapability：返回单个能力详情，未知名字返回 undefin
 test('能力目录体积预算：必须留在 DSH 剪枝阈值（8192）以内，否则中间能力会被截断', async () => {
   const { hub } = makeHub()
   for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources()]) hub.registerSource(dataSource)
-  const directory = JSON.stringify(hub.listCapabilities())
+  const directory = hub.capabilityDirectory()
   assert.equal(hub.capabilityNames().length, 69, '端点数量回归：目录预算断言必须覆盖 Fuyao、Tencent 与 Eastmoney 全部已注册能力')
 
   // 预算的来源（实测本机 dsh 0.1.5-rc.1，不是拍脑袋的数字）：
@@ -371,12 +395,47 @@ test('能力目录体积预算：必须留在 DSH 剪枝阈值（8192）以内�
   // - 超过 8192 的后果：保留 head 4096 + tail 1024、中间替换为 PRUNE_MARKER，
   //   即目录**中间段的能力会在发现阶段消失**。
   // - 因此这里取 8192 的 75%（6144），留 2048 字符余量：逼近真实上限时先让测试失败，
-  //   而不是运行时静默截断。按当前每端点约 79 字符计，可容纳约 78 个能力。
+  //   而不是运行时静默截断。
+  // - 编码口径（2026-10-05 实测，见 docs/design/data-capability-expansion.md §2.1）：69 条紧凑
+  //   行编码 **2435 字符 = 预算的 40%**、均摊 35 字符/条，余量还能再收 ~105 条；同一份信息用
+  //   JSON 数组是 5530 字符（90%、均摊 80），其中 58% 是键名和标点——改编码就是为了让余量成立。
   const DIRECTORY_BUDGET = 6144
-  assert.ok(directory.length < DIRECTORY_BUDGET, `能力目录 JSON 已达 ${directory.length} 字符（预算 ${DIRECTORY_BUDGET}，剪枝阈值 8192）：请精简 summary、改紧凑编码，或与用户确认是否上调 preset 的剪枝阈值`)
+  assert.ok(directory.length < DIRECTORY_BUDGET, `能力目录已达 ${directory.length} 字符（预算 ${DIRECTORY_BUDGET}，剪枝阈值 8192）：请精简 summary，或按设计文档 §2.3 讨论分域发现`)
   assert.ok(directory.length < 8192, '目录绝不允许越过剪枝阈值')
+  // 一行一条是编码的全部承诺：行数等于注册数，摘要里撞见分隔符也不会多出一条能力。
+  assert.equal(directory.split('\n').length, hub.capabilityNames().length)
+})
 
-  // 单能力详情不随端点数增长（最大约 2.3KB），用更紧的 4096 做回归护栏。
+test('宽表详情预算：字段字典让 72 列的能力留在预算内（直发 output_schema 必爆）', () => {
+  const { hub } = makeHub()
+  const properties = {}
+  for (let index = 0; index < 72; index += 1) properties[`cb_column_${String(index).padStart(3, '0')}`] = { oneOf: [{ type: 'number' }, { type: 'null' }] }
+  const outputSchema = {
+    type: 'object',
+    properties: { item: { type: 'array', items: { type: 'object', properties, additionalProperties: true } }, pagination: { type: 'object', additionalProperties: true } },
+    additionalProperties: true,
+  }
+  hub.registerSource({
+    schema: {
+      capability: 'cb_profile', name: 'get_cb_profile', source: 'http:test', data_key: 'test.cb_profile',
+      paginated: true, summary: '可转债档案（72 列）', description: '宽表契约回归用。',
+      input_schema: { type: 'object' }, output_schema: outputSchema,
+    },
+    execute: async () => ({ data: {} }),
+  })
+  const detail = JSON.stringify(hub.describeCapability('cb_profile'))
+  assert.ok(detail.length < 4096, `宽表详情 ${detail.length} 字符，已打穿单能力 4096 预算：字典投影失效会被剪枝截断`)
+  assert.equal(hub.describeCapability('cb_profile').output_fields.split('\n').filter((line) => line.startsWith('item[].')).length, 72)
+  // 这条断言钉的是"为什么需要字典"：同一份 schema 原样交给模型就超预算（实测 4464 字符）。
+  assert.ok(JSON.stringify(outputSchema).length > 4096, '这份合成 schema 必须真的比字典大，否则回归没有意义')
+})
+
+test('单能力详情体积预算：字典投影后仍不许逼近剪枝阈值', async () => {
+  const { hub } = makeHub()
+  for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources()]) hub.registerSource(dataSource)
+  // 详情是逐次调用、单条返回，所以用比目录更紧的 4096 做护栏。体积此前几乎等于 output_schema
+  // 体积（按列数线性增长），字典把它和列数解耦：实测最大 dragon_tiger 2771 字符 = 预算 68%
+  // （逐列 JSON Schema 形态下是 3891 = 95%）。
   const details = hub.capabilityNames().map((capability) => JSON.stringify(hub.describeCapability(capability)))
   const largest = Math.max(...details.map((detail) => detail.length))
   assert.ok(largest < 4096, `最大的能力详情已达 ${largest} 字符：会被剪枝截断，需要精简或拆分`)

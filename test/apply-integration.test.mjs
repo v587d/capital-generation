@@ -99,11 +99,14 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
     assert.ok(Array.isArray(status.root_tool_policy), 'apply() 必须把 rootPolicy 注入 dc_status')
     assert.deepEqual(status.root_tool_policy, [], '假装配里没有 agent 被创建，记录应为空数组而不是缺字段')
 
-    // 能力目录应可用（两级发现的第一级）
+    // 能力目录应可用（两级发现的第一级）：紧凑行编码，一行一条能力。
     const directory = await toolNamed(tools, 'list_capabilities').execute({}, exec(delegated))
-    assert.equal(directory.length, 69)
+    assert.equal(typeof directory, 'string')
+    assert.equal(directory.split('\n').length, 69, '目录必须一行一条能力，行数等于注册数')
+    assert.ok(directory.split('\n').every((line) => line.split('|').length >= 3), '每行都是 capability|summary|paginated')
     const detail = await toolNamed(tools, 'describe_capability').execute({ capability: 'quote' }, exec(delegated))
     assert.equal(detail.capability, 'quote')
+    assert.ok(typeof detail.output_fields === 'string' && detail.output_fields.includes('item[].'), '详情必须给出字段字典（宽表靠它才不爆预算）')
   } finally {
     if (SAVED_KEY === undefined) delete process.env.FUYAO_API_KEY
     else process.env.FUYAO_API_KEY = SAVED_KEY

@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { registerDataCollectorTools, DATASET_REF_FIELDS } from '../lib/data-collector/tools.js'
 import { DataCollectorHub } from '../lib/data-collector/hub.js'
+import { assertToolOutput } from './output-contract.mjs'
 
 function fakeToolRuntime() {
   const definitions = []
@@ -218,12 +219,12 @@ test('request_data：落盘失败（workspace_not_writable）如实抛出，不�
 test('render 回归：渲染的是返回值而非入参（此前 bug 恒为 {}）', () => {
   const { toolRuntime } = makeHubAndTools()
   const definition = toolRuntime.definitions.find((d) => d.name === 'list_capabilities')
-  const blocks = definition.output.render({ some: 'arg' }, [{ capability: 'quote' }])
+  const blocks = definition.output.render({ some: 'arg' }, 'quote|行情快照|0')
   assert.equal(blocks[0].type, 'text')
-  assert.equal(blocks[0].text, JSON.stringify([{ capability: 'quote' }]), '必须渲染 value 而不是 args')
+  assert.equal(blocks[0].text, JSON.stringify('quote|行情快照|0'), '必须渲染 value 而不是 args')
 })
 
-test('list_capabilities：只返回 capability/summary/paginated 的精简目录', async () => {
+test('list_capabilities：一行一条 capability|summary|paginated，不含内部字段与 schema', async () => {
   const { hub, toolRuntime } = makeHubAndTools()
   hub.registerSource({
     schema: {
@@ -240,14 +241,34 @@ test('list_capabilities：只返回 capability/summary/paginated 的精简目录
     },
     execute: async () => ({ data: {} }),
   })
-  const capabilities = await runTool(toolRuntime, 'list_capabilities', {}, exec(delegatedSession()))
-  assert.equal(capabilities.length, 1)
-  assert.deepEqual(Object.keys(capabilities[0]).sort(), ['capability', 'paginated', 'summary'])
-  assert.equal(capabilities[0].capability, 'quote')
-  assert.equal(capabilities[0].summary, '行情快照')
-  // 目录刻意不带 schema：带上的话 18 个端点约 23KB，会被剪枝器截断中间部分。
+  const directory = await runTool(toolRuntime, 'list_capabilities', {}, exec(delegatedSession()))
   const definition = toolRuntime.definitions.find((d) => d.name === 'list_capabilities')
-  assert.deepEqual(Object.keys(definition.output.schema.items.properties).sort(), ['capability', 'paginated', 'summary'])
+  assert.equal(directory, 'quote|行情快照|1')
+  assert.deepEqual(definition.output.schema, { type: 'string' })
+  assertToolOutput(definition, directory)
+  // 目录只负责"选哪个"：带 schema 的话全量约 23KB，会被剪枝器截断中间部分。
+  for (const forbidden of ['data_key', 'source_label', 'api:fuyao', 'get_a_share_prices_snapshot', 'input_schema']) {
+    assert.ok(!directory.includes(forbidden), `目录不应出现 ${forbidden}`)
+  }
+})
+
+test('list_capabilities：摘要撞上行分隔符仍保持"一行 = 一条能力"', async () => {
+  const { hub, toolRuntime } = makeHubAndTools()
+  hub.registerSource({
+    schema: {
+      capability: 'odd',
+      name: 'src_odd',
+      source: 'api:test',
+      data_key: 'test.odd',
+      summary: '含竖线 | 、反斜杠 \\ 与换行\n的摘要',
+      input_schema: { type: 'object' },
+    },
+    execute: async () => ({ data: {} }),
+  })
+  const directory = await runTool(toolRuntime, 'list_capabilities', {}, exec(delegatedSession()))
+  assert.equal(directory, 'odd|含竖线 \\| 、反斜杠 \\\\ 与换行\\n的摘要|0')
+  assert.equal(directory.split('\n').length, 1, '转义失效的后果是一条能力被读成两条，目录行数必须等于注册数')
+  assertToolOutput(toolRuntime.definitions.find((d) => d.name === 'list_capabilities'), directory)
 })
 
 test('list_capabilities：无 summary 时退回描述首句（第三方数据源兜底）', async () => {
@@ -263,17 +284,39 @@ test('list_capabilities：无 summary 时退回描述首句（第三方数据源
     },
     execute: async () => ({ data: {} }),
   })
-  const capabilities = await runTool(toolRuntime, 'list_capabilities', {}, exec(delegatedSession()))
-  assert.equal(capabilities[0].summary, '第一句用途')
+  const directory = await runTool(toolRuntime, 'list_capabilities', {}, exec(delegatedSession()))
+  assert.equal(directory, 'legacy|第一句用途|0')
 })
 
 test('describe_capability：返回单个能力的完整契约，一次一个', async () => {
   const { hub, toolRuntime } = makeHubAndTools()
-  hub.registerSource(source('quote'))
+  hub.registerSource({
+    schema: {
+      capability: 'quote',
+      name: 'src_quote',
+      source: 'api:test',
+      data_key: 'test.quote',
+      summary: '行情快照',
+      description: '单位与 null 语义。',
+      input_schema: { type: 'object', properties: { thscode: { type: 'string' } }, required: ['thscode'] },
+      output_schema: {
+        type: 'object',
+        properties: {
+          timestamp: { type: 'integer' },
+          item: { type: 'array', items: { type: 'object', properties: { thscode: { type: 'string' }, last_price: { oneOf: [{ type: 'number' }, { type: 'null' }] } }, additionalProperties: true } },
+        },
+        additionalProperties: true,
+      },
+    },
+    execute: async () => ({ data: {} }),
+  })
   const detail = await runTool(toolRuntime, 'describe_capability', { capability: 'quote' }, exec(delegatedSession()))
-  assert.deepEqual(Object.keys(detail).sort(), ['capability', 'description', 'input_schema', 'output_schema', 'paginated', 'summary'])
+  assert.deepEqual(Object.keys(detail).sort(), ['capability', 'description', 'input_schema', 'output_fields', 'paginated', 'summary'])
   assert.equal(detail.capability, 'quote')
   assert.ok(detail.input_schema, '详情必须带 input_schema（params 填写依据）')
+  // 输出契约交字典不交 JSON Schema：逐列 schema 让详情体积随列数增长，宽表第一次注册就打穿预算。
+  assert.equal(detail.output_fields, 'timestamp:integer\nitem:array\nitem[].thscode:string\nitem[].last_price:number?')
+  assertToolOutput(toolRuntime.definitions.find((d) => d.name === 'describe_capability'), detail)
 })
 
 test('describe_capability：四类错误都有稳定 code 与恢复指引', async () => {
@@ -324,6 +367,8 @@ test('describe_capability：与 list_capabilities 一致地只暴露模型可见
     execute: async () => ({ data: {} }),
   })
   const detail = await runTool(toolRuntime, 'describe_capability', { capability: 'quote' }, exec(delegatedSession()))
+  assert.equal(detail.output_fields, null, 'schema 声明不出字段时交 null，不交空串（§9.5：undefined 不许带出）')
+  assertToolOutput(toolRuntime.definitions.find((d) => d.name === 'describe_capability'), detail)
   const serialized = JSON.stringify(detail)
   for (const forbidden of ['data_key', 'source_label', 'api:fuyao', 'get_a_share_prices_snapshot']) {
     assert.ok(!serialized.includes(forbidden), `详情不应泄露内部字段 ${forbidden}`)
