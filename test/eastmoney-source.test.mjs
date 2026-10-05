@@ -36,14 +36,16 @@ const MACRO_CAPABILITIES = [
   'eastmoney_cpi', 'eastmoney_ppi', 'eastmoney_gdp', 'eastmoney_pmi', 'eastmoney_money_supply',
   'eastmoney_rmb_loan', 'eastmoney_customs_trade', 'eastmoney_retail_sales', 'eastmoney_deposit_reserve',
 ]
+const SNAKE_CASE_CAPABILITIES = [...MACRO_CAPABILITIES, 'eastmoney_mutual_flow', 'eastmoney_mutual_quota']
 
-test('Eastmoney source：注册十四个 capability 与内部身份', () => {
+test('Eastmoney source：注册十六个 capability 与内部身份', () => {
   const sources = createEastmoneySources()
   assert.deepEqual(sources.map((source) => source.schema.capability), [
     'eastmoney_top_buy_sell_market', 'eastmoney_top_buy_sell_ticker', 'eastmoney_lockup_expiry',
     'eastmoney_sector_rotation', 'eastmoney_cashflow_rotation', ...MACRO_CAPABILITIES,
+    'eastmoney_mutual_flow', 'eastmoney_mutual_quota',
   ])
-  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 14)
+  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 16)
   for (const source of sources) {
     assert.equal(source.schema.source_label, 'eastmoney')
     assert.match(source.schema.data_key, /^eastmoney\.http\./)
@@ -53,7 +55,7 @@ test('Eastmoney source：注册十四个 capability 与内部身份', () => {
 })
 
 test('Eastmoney 宏观表：行键名一律 ASCII snake_case（§10.6 不许透传上游缩写）', () => {
-  for (const capability of MACRO_CAPABILITIES) {
+  for (const capability of SNAKE_CASE_CAPABILITIES) {
     const source = sourceMap()[capability]
     assert.ok(source, `${capability} 必须已注册`)
     const declared = Object.keys(source.schema.output_schema.properties.item.items.properties)
@@ -63,7 +65,7 @@ test('Eastmoney 宏观表：行键名一律 ASCII snake_case（§10.6 不许透�
     }
     // 上游键名（大写缩写）一个都不许出现在行字段里——映射表必须逐字段改名而不是原样透传。
     for (const key of declared) assert.ok(!/^[A-Z]/.test(key), `${capability} 透传了上游键名 ${key}`)
-    assert.equal(source.schema.paginated, true)
+    assert.equal(source.schema.paginated, capability === 'eastmoney_mutual_quota' ? false : true, '额度表是当日四条快照，不分页')
     assert.deepEqual(source.schema.rowShape, { rowKey: 'item' })
   }
 })
@@ -142,6 +144,84 @@ test('eastmoney_deposit_reserve：事件表——区间无调整是空结果，�
     assert.equal(row.publish_date, '2025-05-07', '中文公告日必须归一成 YYYY-MM-DD')
     assert.equal(row.large_change_pct, -0.5)
     assert.equal(row.announcement, '中国人民银行决定，自2025年5月15日起下调金融机构存款准备金率0.5个百分点。')
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_mutual_flow：北向金额列上游不披露，原样保留 null 而不是编造成交', async () => {
+  const originalFetch = globalThis.fetch
+  let requested
+  globalThis.fetch = async (url) => {
+    requested = new URL(url)
+    return response({ success: true, code: 0, result: { pages: 1, count: 1, data: [{
+      MUTUAL_TYPE: '005', TRADE_DATE: '2026-09-30 00:00:00', FUND_INFLOW: null, NET_DEAL_AMT: null, QUOTA_BALANCE: null,
+      ACCUM_DEAL_AMT: null, BUY_AMT: null, SELL_AMT: null, LEAD_STOCKS_CODE: '301190.SZ', LEAD_STOCKS_NAME: '善水科技',
+      LS_CHANGE_RATE: -9.99, INDEX_CLOSE_PRICE: 3842.19, INDEX_CHANGE_RATE: 0.31, HOLD_MARKET_CAP: 0,
+      DEAL_AMT: 207941.62, QUOTA_BALANCE_TEXT: '额度充足', DEAL_NUM: 5269396,
+    }] } })
+  }
+  try {
+    const source = sourceMap().eastmoney_mutual_flow
+    const result = await source.execute({ capability: 'eastmoney_mutual_flow', params: { start_date: '2026-09-01', end_date: '2026-09-30' }, session }, signal)
+    assert.equal(requested.searchParams.get('filter'), "(TRADE_DATE>='2026-09-01')(TRADE_DATE<='2026-09-30')(MUTUAL_TYPE=\"005\")", '缺省渠道必须是北向合计')
+    const [row] = result.data.item
+    assert.equal(row.channel, 'north_total')
+    assert.equal(row.channel_code, '005')
+    assert.equal(row.deal_amt_raw, 207941.62)
+    assert.equal(row.buy_amt_raw, null, '交易所已停披露北向每日买入：null 是事实，不许补 0')
+    assert.equal(row.net_deal_amt_raw, null)
+    assert.equal(row.hold_market_cap_raw, 0, '北向合计的市值列上游给占位 0，原样保留、由描述负责说清')
+    assert.equal(row.lead_thscode, '301190.SZ')
+    assert.ok(!('FUND_INFLOW' in row) && !('LS_CHANGE_RATE' in row), '映射表外的上游键必须丢弃')
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_mutual_flow：渠道枚举在发请求之前就拒绝，南向四档金额有值', async () => {
+  const originalFetch = globalThis.fetch
+  let called = false
+  globalThis.fetch = async () => {
+    called = true
+    return response({ success: true, code: 0, result: { pages: 1, count: 1, data: [{
+      MUTUAL_TYPE: '006', TRADE_DATE: '2026-09-30 00:00:00', BUY_AMT: 38395.24, SELL_AMT: 31531.63, NET_DEAL_AMT: 6863.61,
+      ACCUM_DEAL_AMT: 5537700.9, DEAL_AMT: 69926.87, DEAL_NUM: 1000, HOLD_MARKET_CAP: 11999836484848, QUOTA_BALANCE_TEXT: '额度充足',
+    }] } })
+  }
+  try {
+    const source = sourceMap().eastmoney_mutual_flow
+    await assert.rejects(
+      () => source.execute({ capability: 'eastmoney_mutual_flow', params: { start_date: '2026-09-01', end_date: '2026-09-30', channel: 'north_net_buy' }, session }, signal),
+      /channel must be one of/,
+    )
+    assert.equal(called, false, '非法渠道属于参数错误：本地报错，不发请求、不落盘')
+    const result = await source.execute({ capability: 'eastmoney_mutual_flow', params: { start_date: '2026-09-01', end_date: '2026-09-30', channel: 'south_total' }, session }, signal)
+    const [row] = result.data.item
+    assert.equal(row.channel_code, '006')
+    assert.equal(row.buy_amt_raw, 38395.24)
+    assert.equal(row.net_deal_amt_raw, 6863.61)
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_mutual_quota：当日四条快照、休市原因与跨方向额度口径', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => response({ success: true, code: 0, result: { pages: 1, count: 4, data: [
+    { TRADE_DATE: '2026-10-05 00:00:00', MUTUAL_TYPE: '001', TRADE_QUOTA: 52000, CLOSED_REASON: '国庆节', BOARD_TYPE: '沪港通', MUTUAL_TYPE_NAME: '沪股通', FUNDS_DIRECTION: '北向', INDEX_CODE: '000001', INDEX_NAME: '上证指数', START_TIME: null, END_TIME: null, BOARD_CODE: 'BK0707' },
+    { TRADE_DATE: '2026-10-05 00:00:00', MUTUAL_TYPE: '002', TRADE_QUOTA: 42000000000, CLOSED_REASON: '国庆节', BOARD_TYPE: '沪港通', MUTUAL_TYPE_NAME: '港股通(沪)', FUNDS_DIRECTION: '南向', INDEX_CODE: 'HSI', INDEX_NAME: '恒生指数', START_TIME: null, END_TIME: null, BOARD_CODE: 'HK32' },
+    { TRADE_DATE: '2026-10-05 00:00:00', MUTUAL_TYPE: '003', TRADE_QUOTA: 52000, CLOSED_REASON: '国庆节', BOARD_TYPE: '深港通', MUTUAL_TYPE_NAME: '深股通', FUNDS_DIRECTION: '北向', INDEX_CODE: '399001', INDEX_NAME: '深证成指', START_TIME: null, END_TIME: null, BOARD_CODE: 'BK0804' },
+    { TRADE_DATE: '2026-10-05 00:00:00', MUTUAL_TYPE: '004', TRADE_QUOTA: 42000000000, CLOSED_REASON: '国庆节', BOARD_TYPE: '深港通', MUTUAL_TYPE_NAME: '港股通(深)', FUNDS_DIRECTION: '南向', INDEX_CODE: 'HSI', INDEX_NAME: '恒生指数', START_TIME: null, END_TIME: null, BOARD_CODE: 'HK31' },
+  ] } })
+  try {
+    const source = sourceMap().eastmoney_mutual_quota
+    const result = await source.execute({ capability: 'eastmoney_mutual_quota', params: {}, session }, signal)
+    assert.deepEqual(result.data.item.map((row) => row.channel), ['sh_stock_connect', 'hk_connect_sh', 'sz_stock_connect', 'hk_connect_sz'])
+    const [north, south] = result.data.item
+    assert.equal(north.direction, 'north')
+    assert.equal(north.closed_reason, '国庆节')
+    assert.equal(south.channel_label, '港股通(沪)', '上游原文留着，便于与东财页面对照')
+    assert.equal(south.trade_quota_raw, 42000000000, '额度原值跨方向口径不一致，由描述负责禁止直接比较')
+    assert.ok(!('START_TIME' in north), '全为 null 的交易时段字段不收录')
+    await assert.rejects(
+      () => source.execute({ capability: 'eastmoney_mutual_quota', params: { page: 2 }, session }, signal),
+      /unsupported parameter/,
+    )
   } finally { globalThis.fetch = originalFetch }
 })
 

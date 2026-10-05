@@ -59,7 +59,8 @@ description: Use when composing or reading a Capital data message — data_reque
 - 读目录时**按行切**：一行就是一条能力，取第一个 `|` 前面的部分当 `capability` 原样复制；摘要里出现的
   `\|`、`\n` 是转义字符，不是分隔符。
 - `output_fields` 每行是 `字段路径:类型[:说明]`：后缀 `?` 表示上游可能给 `null`，`[].` 表示该字段在数组
-  元素上（`item[].thscode`）。按它写 `query_dataset` 的 `select` / `filters` 列名，大小写与下划线原样照抄。
+  元素上（`item[].thscode`），说明段写 `取值 a/b` 时该字段只允许这几个值。按它写 `query_dataset` 的
+  `select` / `filters` 列名，大小写与下划线原样照抄。
 - 目录刻意不含参数与输出结构：全量 schema 约 23KB，会被工具结果剪枝器（阈值 8192）截断中间
   部分，导致排在中间的能力在发现阶段不可见。目录只负责"选哪个"，详情负责"怎么填"。
 - **一个任务只调一次 `list_capabilities`**；**同一个能力只描述一次**，重复调用只会白占上下文。

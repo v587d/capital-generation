@@ -477,6 +477,145 @@ const MACRO_TABLES: MacroTable[] = [
   },
 ]
 
+/**
+ * 沪深港通六个渠道（`docs/dev/tool-schema.md` §10.6：上游给的是 `001`…`006` 这种数字码，
+ * 模型侧只认语义名）。渠道身份由上游自己标注的 `MUTUAL_TYPE_NAME` 核对，并用同日的
+ * `DEAL_AMT` 加法复核过：`001+003=005`（北向合计）、`002+004=006`（南向合计），实测 2026-09-30
+ * 两条等式都精确成立。
+ */
+const MUTUAL_CHANNELS: Record<string, string> = {
+  sh_stock_connect: '001',
+  hk_connect_sh: '002',
+  sz_stock_connect: '003',
+  hk_connect_sz: '004',
+  north_total: '005',
+  south_total: '006',
+}
+const MUTUAL_CHANNEL_NAMES = Object.keys(MUTUAL_CHANNELS)
+
+const mutualFlowRow = {
+  type: 'object',
+  properties: {
+    trade_date: { type: 'string' }, trade_date_ms: { type: 'integer' },
+    channel: { enum: MUTUAL_CHANNEL_NAMES }, channel_code: { type: 'string' },
+    deal_amt_raw: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    buy_amt_raw: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    sell_amt_raw: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    net_deal_amt_raw: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    accum_deal_amt_raw: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    deal_num: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    hold_market_cap_raw: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    quota_balance_text: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    index_close_price: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    index_change_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    lead_thscode: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    lead_stock_name: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+  },
+  additionalProperties: true,
+}
+
+function normalizeMutualFlow(params: Params): Params {
+  const normalized = normalizeDateRange(params, ['start_date', 'end_date', 'channel', 'page', 'size'])
+  const channel = params.channel === undefined ? 'north_total' : String(params.channel)
+  if (!(channel in MUTUAL_CHANNELS)) throw new Error(`channel must be one of ${MUTUAL_CHANNEL_NAMES.join(', ')}`)
+  return { ...normalized, channel }
+}
+
+function parseMutualFlowRow(raw: JsonRecord, channel: string): JsonRecord {
+  const tradeDate = String(raw.TRADE_DATE ?? '').slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(tradeDate)) throw sourceError('Eastmoney mutual flow row has invalid TRADE_DATE', 'eastmoney_invalid_response')
+  return {
+    trade_date: tradeDate,
+    trade_date_ms: dateMs(tradeDate),
+    channel,
+    channel_code: String(raw.MUTUAL_TYPE ?? MUTUAL_CHANNELS[channel]),
+    deal_amt_raw: numberOrNull(raw.DEAL_AMT),
+    buy_amt_raw: numberOrNull(raw.BUY_AMT),
+    sell_amt_raw: numberOrNull(raw.SELL_AMT),
+    net_deal_amt_raw: numberOrNull(raw.NET_DEAL_AMT),
+    accum_deal_amt_raw: numberOrNull(raw.ACCUM_DEAL_AMT),
+    deal_num: numberOrNull(raw.DEAL_NUM),
+    hold_market_cap_raw: numberOrNull(raw.HOLD_MARKET_CAP),
+    quota_balance_text: textOrNull(raw.QUOTA_BALANCE_TEXT),
+    index_close_price: numberOrNull(raw.INDEX_CLOSE_PRICE),
+    index_change_pct: numberOrNull(raw.INDEX_CHANGE_RATE),
+    lead_thscode: textOrNull(raw.LEAD_STOCKS_CODE),
+    lead_stock_name: textOrNull(raw.LEAD_STOCKS_NAME),
+  }
+}
+
+async function executeMutualFlow(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
+  const url = new URL(DATACENTER_URL)
+  url.searchParams.set('reportName', 'RPT_MUTUAL_DEAL_HISTORY')
+  url.searchParams.set('columns', 'ALL')
+  url.searchParams.set('source', 'WEB')
+  url.searchParams.set('client', 'WEB')
+  url.searchParams.set('sortColumns', 'TRADE_DATE')
+  url.searchParams.set('sortTypes', '-1')
+  url.searchParams.set('pageNumber', String(params.page))
+  url.searchParams.set('pageSize', String(params.size))
+  url.searchParams.set('filter', `(TRADE_DATE>='${params.start_date}')(TRADE_DATE<='${params.end_date}')(MUTUAL_TYPE="${MUTUAL_CHANNELS[String(params.channel)]}")`)
+  const result = requireDatacenterResult(await getJson(url.toString(), signal, 'mutual flow'), 'mutual flow')
+  const parsed = requireRows(result, 'mutual flow')
+  const channel = String(params.channel)
+  return { data: { item: parsed.rows.map((raw) => parseMutualFlowRow(raw, channel)), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(mutualFlowRow) }
+}
+
+const mutualQuotaRow = {
+  type: 'object',
+  properties: {
+    trade_date: { type: 'string' }, trade_date_ms: { type: 'integer' },
+    channel: { enum: MUTUAL_CHANNEL_NAMES }, channel_code: { type: 'string' },
+    channel_label: { type: 'string' }, board: { type: 'string' }, direction: { type: 'string' },
+    trade_quota_raw: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    closed_reason: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    index_code: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    index_name: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    board_code: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+  },
+  additionalProperties: true,
+}
+/** 上游 `MUTUAL_TYPE_NAME` → 我们的渠道名（额度表只给单渠道，没有合计档）。 */
+const MUTUAL_QUOTA_CHANNELS: Record<string, string> = { 沪股通: 'sh_stock_connect', 深股通: 'sz_stock_connect', '港股通(沪)': 'hk_connect_sh', '港股通(深)': 'hk_connect_sz' }
+const MUTUAL_QUOTA_CODE_CHANNELS: Record<string, string> = { '001': 'sh_stock_connect', '002': 'hk_connect_sh', '003': 'sz_stock_connect', '004': 'hk_connect_sz' }
+
+function parseMutualQuotaRow(raw: JsonRecord): JsonRecord {
+  const tradeDate = String(raw.TRADE_DATE ?? '').slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(tradeDate)) throw sourceError('Eastmoney mutual quota row has invalid TRADE_DATE', 'eastmoney_invalid_response')
+  const code = String(raw.MUTUAL_TYPE ?? '')
+  const channel = MUTUAL_QUOTA_CODE_CHANNELS[code] ?? MUTUAL_QUOTA_CHANNELS[String(raw.MUTUAL_TYPE_NAME ?? '')]
+  if (!channel) throw sourceError(`Eastmoney mutual quota row has unknown MUTUAL_TYPE ${code || '(blank)'}`, 'eastmoney_invalid_response')
+  return {
+    trade_date: tradeDate,
+    trade_date_ms: dateMs(tradeDate),
+    channel,
+    channel_code: code,
+    channel_label: String(raw.MUTUAL_TYPE_NAME ?? ''),
+    board: String(raw.BOARD_TYPE ?? ''),
+    direction: raw.FUNDS_DIRECTION === '南向' ? 'south' : raw.FUNDS_DIRECTION === '北向' ? 'north' : String(raw.FUNDS_DIRECTION ?? ''),
+    trade_quota_raw: numberOrNull(raw.TRADE_QUOTA),
+    closed_reason: textOrNull(raw.CLOSED_REASON),
+    index_code: textOrNull(raw.INDEX_CODE),
+    index_name: textOrNull(raw.INDEX_NAME),
+    board_code: textOrNull(raw.BOARD_CODE),
+  }
+}
+
+async function executeMutualQuota(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
+  const url = new URL(DATACENTER_URL)
+  url.searchParams.set('reportName', 'RPT_MUTUAL_QUOTA')
+  url.searchParams.set('columns', 'ALL')
+  url.searchParams.set('source', 'WEB')
+  url.searchParams.set('client', 'WEB')
+  url.searchParams.set('sortColumns', 'MUTUAL_TYPE')
+  url.searchParams.set('sortTypes', '1')
+  url.searchParams.set('pageNumber', '1')
+  url.searchParams.set('pageSize', '10')
+  const result = requireDatacenterResult(await getJson(url.toString(), signal, 'mutual quota'), 'mutual quota')
+  const parsed = requireRows(result, 'mutual quota')
+  return { data: { item: parsed.rows.map(parseMutualQuotaRow), pagination: pagination(1, 10, parsed.pages, parsed.total) }, schema: datacenterOutput(mutualQuotaRow) }
+}
+
 function createSource(options: { capability: string; name: string; summary: string; description: string; inputSchema: object; outputSchema: object; paginated?: boolean; cacheMaxAgeMs?: number; rowShape: SchemaDescriptor['rowShape']; allowed: string[]; normalize: (params: Params) => Params; execute: (params: Params, signal: AbortSignal) => Promise<{ data: unknown; schema: object }> }): DataSource {
   const schema: SchemaDescriptor = { capability: options.capability, time_contract: getDataTimeContract(options.capability), name: options.name, source: `http:eastmoney.${options.capability}`, data_key: buildDataKey('eastmoney', 'http', options.capability), source_label: 'eastmoney', paginated: options.paginated === true, cacheMaxAgeMs: options.cacheMaxAgeMs, rowShape: options.rowShape, summary: options.summary, description: options.description, input_schema: options.inputSchema, output_schema: options.outputSchema }
   const normalize = (params: Record<string, unknown>): Params => options.normalize(params)
@@ -492,6 +631,19 @@ const boardInput = {
 const cashflowInput = {
   type: 'object', properties: { board_type: { type: 'string', enum: [...BOARD_TYPES] }, page: { type: 'integer', minimum: 1 }, size: { type: 'integer', minimum: 1, maximum: MAX_PAGE_SIZE } }, required: [], additionalProperties: false,
 }
+const mutualFlowInput = {
+  type: 'object',
+  properties: {
+    start_date: { type: 'string', description: '起始自然日 YYYY-MM-DD' },
+    end_date: { type: 'string', description: '截止自然日 YYYY-MM-DD' },
+    channel: { type: 'string', enum: MUTUAL_CHANNEL_NAMES, description: '渠道，默认 north_total（北向合计）' },
+    page: { type: 'integer', minimum: 1 },
+    size: { type: 'integer', minimum: 1, maximum: MAX_PAGE_SIZE },
+  },
+  required: ['start_date', 'end_date'],
+  additionalProperties: false,
+}
+const snapshotInput = { type: 'object', properties: {}, required: [], additionalProperties: false }
 
 export function createEastmoneySources(): DataSource[] {
   return [
@@ -501,5 +653,19 @@ export function createEastmoneySources(): DataSource[] {
     createSource({ capability: 'eastmoney_sector_rotation', cacheMaxAgeMs: 60_000, name: 'get_eastmoney_sector_rotation', summary: '东财板块行情排名快照', description: '获取东方财富行业、概念或地域板块的查询时点排名快照。默认行业、按涨跌幅排序；board_type 映射为东财 m:90+t:2/3/1。不是历史轮动序列，Dataset 的 captured_at 才是采集时间；板块代码使用 board_code，不归一为证券 ticker。', inputSchema: boardInput, outputSchema: { type: 'object', properties: { item: { type: 'array', items: sectorRow }, pagination: { type: 'object', additionalProperties: true } }, required: ['item', 'pagination'], additionalProperties: true }, paginated: true, rowShape: { rowKey: 'item' }, allowed: ['board_type', 'sort_field', 'page', 'size'], normalize: normalizeBoard, execute: (params, signal) => executeBoard(params, signal, false) }),
     createSource({ capability: 'eastmoney_cashflow_rotation', cacheMaxAgeMs: 60_000, name: 'get_eastmoney_cashflow_rotation', summary: '东财板块资金流快照', description: '获取东方财富行业、概念或地域板块当前资金流快照，默认按主力净流入排序。f62/f66/f72/f78/f84 为金额原值（元），f184/f69/f75/f81/f87 为东财原始占比；当前只承诺查询时点快照，不把未确认的 5 日/10 日字段映射为历史序列。', inputSchema: cashflowInput, outputSchema: { type: 'object', properties: { item: { type: 'array', items: cashflowRow }, pagination: { type: 'object', additionalProperties: true } }, required: ['item', 'pagination'], additionalProperties: true }, paginated: true, rowShape: { rowKey: 'item' }, allowed: ['board_type', 'page', 'size'], normalize: normalizeCashflowBoard, execute: (params, signal) => executeBoard(params, signal, true) }),
     ...MACRO_TABLES.map(createMacroSource),
+    createSource({
+      capability: 'eastmoney_mutual_flow', name: 'get_eastmoney_mutual_flow',
+      summary: '沪深港通成交额与额度状态（按渠道日频）',
+      description: '按交易日区间与渠道获取沪深港通成交数据（RPT_MUTUAL_DEAL_HISTORY，实测单渠道日频、可翻到多年前）。channel 六档：北向 sh_stock_connect（沪股通）/ sz_stock_connect（深股通）/ north_total（北向合计，默认），南向 hk_connect_sh / hk_connect_sz / south_total；渠道身份由上游 MUTUAL_TYPE_NAME 自标，实测同一交易日 001+003=005、002+004=006 的成交额加法精确成立。⛔ **北向三档的 buy_amt_raw / sell_amt_raw / net_deal_amt_raw / accum_deal_amt_raw 上游一律为 null**（交易所自 2024-08 起停止披露北向每日买卖明细，实测 2026-09 仍为 null），本能力**不提供"北向净买入"**，谁问就只能给成交额；成交额 deal_amt_raw、成交笔数 deal_num、额度状态 quota_balance_text 与当日领涨股仍披露，南向四档金额字段都有值。金额一律是东财原值（`_raw` 后缀）且**跨渠道计量口径不一致**（配套的额度表里北向 52000 对应官方 520 亿元、南向 42000000000 对应 420 亿元，即同一列两种单位），所以只能在同一渠道内做趋势与相对比较，禁止跨渠道相加、禁止换算成亿元或元写进结论。hold_market_cap_raw 在北向单渠道为 null、北向合计为 0（上游占位，不是"市值为零"）。index_change_pct 是东财附带的相关指数涨跌幅（百分数原值），lead_thscode 带市场后缀。',
+      inputSchema: mutualFlowInput, outputSchema: datacenterOutput(mutualFlowRow), paginated: true, rowShape: { rowKey: 'item' },
+      allowed: ['start_date', 'end_date', 'channel', 'page', 'size'], normalize: normalizeMutualFlow, execute: executeMutualFlow,
+    }),
+    createSource({
+      capability: 'eastmoney_mutual_quota', cacheMaxAgeMs: 60_000, name: 'get_eastmoney_mutual_quota',
+      summary: '北上南下当日额度与休市状态快照',
+      description: '获取四个互连渠道（沪股通 / 深股通 / 港股通(沪) / 港股通(深)）在查询时点当日的额度与开关状态（RPT_MUTUAL_QUOTA，实测全表只有当日四条、没有历史序列）。无参数；Dataset 的 captured_at 才是采集时间，trade_date 是上游给出的日历日。closed_reason 非空表示当日休市（实测 2026-10-05 为「国庆节」）；上游的交易时段字段 start_time / end_time 在实测全部为 null，本能力不收录，不要当成缺口。⛔ trade_quota_raw 的计量口径**跨方向不一致**：北向 52000 对应官方每日额度 520 亿元、南向 42000000000 对应 420 亿元（同一列两种单位），因此两个方向的原值不可直接比较，也不要换算后写进结论；要绝对额度请以交易所官方披露为准。channel 是语义名、channel_label 是上游原文，board 为沪港通/深港通、direction 为 north/south。',
+      inputSchema: snapshotInput, outputSchema: datacenterOutput(mutualQuotaRow), paginated: false, rowShape: { rowKey: 'item' },
+      allowed: [], normalize: (params) => { assertKnown(params, []); return {} }, execute: executeMutualQuota,
+    }),
   ]
 }

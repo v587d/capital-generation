@@ -2,7 +2,7 @@
 
 > 本表由 `npm run docs:capabilities` 从 Fuyao、Tencent 与 Eastmoney source 定义生成，并由 `test/data-collector-capabilities.test.mjs` 断言与实现同步：新增端点若忘了重新生成，测试会失败。
 
-当前共 **78 个 capability**：同花顺 Fuyao 61 个，腾讯公开 HTTP 3 个，东方财富 HTTP 14 个。参数后带 **\*** 表示必填。
+当前共 **80 个 capability**：同花顺 Fuyao 61 个，腾讯公开 HTTP 3 个，东方财富 HTTP 16 个。参数后带 **\*** 表示必填。
 
 **复核方式**：Fuyao 能力可用 `npm run smoke:fuyao` 真实复核；Tencent 能力使用最小 smoke fixture 或按需真实请求复核；Eastmoney 能力使用固定 fixture，并按需执行公开网页 JSON smoke。
 
@@ -168,6 +168,13 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 | `tencent_quote` | `/tencent/quote` | `codes`\* | 否 | 腾讯实时行情、估值、涨跌停和 ETF 快照 |
 | `tencent_kline` | `/tencent/kline` | `code`\* `period` `adjust` `start` `end` `count` | 否 | 腾讯日周月复权和分钟 K 线 |
 | `tencent_ticks` | `/tencent/ticks` | `code`\* | 否 | 腾讯最近交易日分笔成交明细 |
+
+## 东方财富 HTTP（沪深港通）
+
+| capability | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|
+| `eastmoney_mutual_flow` | `/eastmoney/mutual_flow` | `start_date`\* `end_date`\* `channel` `page` `size` | 是 | 沪深港通成交额与额度状态（按渠道日频） |
+| `eastmoney_mutual_quota` | `/eastmoney/mutual_quota` | 无参数 | 否 | 北上南下当日额度与休市状态快照 |
 
 ## 东方财富 HTTP（宏观指标）
 

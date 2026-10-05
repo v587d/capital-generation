@@ -260,7 +260,7 @@ Wind 只在需要 Wind 口径/研报级准确度时花积分**；这条要写进
 | 数据 | reportName | 实测 | 列数 | 必写的约束 |
 |---|---|---|---|---|
 | 宏观 CPI/PPI/GDP/PMI/M2/存准/新增贷款/进出口/社零/房价/FDI | `RPT_ECONOMY_CPI` `…_PPI` `…_GDP` `…_PMI` `…_CURRENCY_SUPPLY` `…_DEPOSIT_RESERVE` `…_RMB_LOAN` `…_CUSTOMS` `…_TOTAL_RETAIL` | CPI 112 页 / PPI 248 页 / GDP 82 页 | 少 | **本项目当前最大的整块空白**；Fuyao 全文零命中 |
-| 沪深港通 | `RPT_MUTUAL_DEAL_HISTORY` `RPT_MUTUAL_QUOTA` `RPT_MUTUAL_BOARD_HOLDRANK_WEB` `RPT_MUTUAL_HOLD_DET` | 到 2026-09-30 | 17 | ⛔ 实测 `NET_DEAL_AMT / FUND_INFLOW / BUY_AMT / SELL_AMT / ACCUM_DEAL_AMT / QUOTA_BALANCE / HOLD_MARKET_CAP` **全为 `null`**（交易所已停披露每日净买入）。**能力名与描述里不许出现"北向资金净流入"**，只能承诺成交额；`null` 不许补成 `0` |
+| 沪深港通 | `RPT_MUTUAL_DEAL_HISTORY` `RPT_MUTUAL_QUOTA` | 到 2026-09-30 | 17 / 13 | ⛔ 2026-10-05 复核：**不是"全为 null"**。北向三档（沪股通 001 / 深股通 003 / 北向合计 005）的 `BUY_AMT / SELL_AMT / NET_DEAL_AMT / ACCUM_DEAL_AMT` 与 `FUND_INFLOW / QUOTA_BALANCE` 为 null，**南向三档（002 / 004 / 006）四项都有值**；成交额 `DEAL_AMT`、笔数 `DEAL_NUM` 双方都披露。所以能力名与描述里不许出现"北向资金净流入"，但南向可以给净买入。**另发现 `TRADE_QUOTA` 跨方向单位不一致**（北向 52000=520 亿元、南向 42000000000=420 亿元），禁止跨方向比较 |
 | 个股主力资金 | `RPT_DMSK_TS_STOCKNEW` | 1733 页 | 31 | 补 Fuyao `code=2004` 永久关闭的那块；`PRIME_COST`=主力成本口径要在描述里说清 |
 | 融资融券个股 | `RPTA_WEB_RZRQ_GGMX` | 单票 1331 页 | **45** | 先过 §2.2，否则详情必爆 |
 | 可转债 | `RPT_BOND_CB_LIST` `RPT_CB_BALLOTNUM` `RPT_CB_IMPORTANTDATE` | 1059 页 / 72 列 | **72** | 同上；**转债行情本次未验**，未验不注册 |
@@ -367,6 +367,36 @@ node -e "import('./lib/data-collector/hub.js').then(async ({DataCollectorHub}) =
 - 复现口径：`GET https://datacenter-web.eastmoney.com/api/data/v1/get`，参数
   `reportName=<表名>&columns=ALL&source=WEB&client=WEB&sortColumns=REPORT_DATE&sortTypes=-1&pageNumber=1&pageSize=200`，
   过滤器写法 `(REPORT_DATE>='YYYY-MM-DD')(REPORT_DATE<='YYYY-MM-DD')`。
-- 容量核对：这批注册后 **78 条 = 2795 字符（45.5% 预算）**；同一份 78 条若还走旧的 JSON 数组编码
-  是 **6286 字符，已经越过 6144 自预算**——第 0 步不先落地，这批补录就会把目录撞爆（正是 §2 预判的那件事）。
+- 容量核对：宏观九条注册后是 **78 条 = 2795 字符（45.5% 预算）**；加上沪深港通两条后 **80 条 = 2880 字符
+  （46.9%）**。同一份 80 条若还走编码前的 JSON 数组编码是 **6460 字符，已经越过 6144 自预算**——
+  第 0 步不先落地，这两批补录就会把目录撞爆（正是 §2 预判的那件事）。
+
+### 7.2 第 2 步·沪深港通的真报文核验（2026-10-05，已注册两条）
+
+`RPT_MUTUAL_DEAL_HISTORY` 取 500 行按 `MUTUAL_TYPE` 分组，并用同一交易日的金额做加法核对：
+
+| MUTUAL_TYPE | 上游自标名称 | 成交额 DEAL_AMT（2026-09-30） | BUY/SELL/NET/ACCUM |
+|---|---|---|---|
+| `001` | 沪股通（北向） | 101257.88 | **null** |
+| `003` | 深股通（北向） | 106683.74 | **null** |
+| `005` | 北向合计 | 207941.62 = 001+003 ✓ | **null** |
+| `002` | 港股通(沪)（南向） | 46015.39 | 有值 |
+| `004` | 港股通(深)（南向） | 23911.48 | 有值 |
+| `006` | 南向合计 | 69926.87 = 002+004 ✓ | 有值 |
+
+- **纠正 §5.1 的原判断**："北向净买入停止披露"是真的，但**南向仍披露**，所以不能整表按"只有成交额"
+  设计。落地成一条 `eastmoney_mutual_flow`，用 `channel` 六档枚举选渠道，行里带 `channel` 语义名与
+  `channel_code` 原值；描述里明写"本能力不提供北向净买入"（§7 那类"协议鼓励、宿主拒绝"的错误不能再犯）。
+- 渠道身份不靠记忆：由上游 `MUTUAL_TYPE_NAME` 自标 + 同日成交额加法核对（两条等式精确成立）确认。
+- `HOLD_MARKET_CAP`：北向单渠道 null、**北向合计给 0**（占位而非真实市值）——原样保留 0，
+  由描述负责说明，不在 producer 里改成 null（那与"把 null 补成 0"是同一类擅自改数）。
+- `RPT_MUTUAL_QUOTA` 是**当日四条快照**（实测全表 count=4、无历史），因此注册成不分页、`cacheMaxAgeMs`
+  60 秒的快照能力，`captured_at` 才是采集时间；`START_TIME / END_TIME` 实测全为 null，不收录。
+- ⛔ 新发现的口径陷阱：同一列 `TRADE_QUOTA` 在两个方向单位不同（北向 52000 对应官方 520 亿元、
+  南向 42000000000 对应 420 亿元）。这类"同列不同单位"无法由 producer 判定，只能在 description 里
+  禁止跨方向比较——与 §7.1 结论 3 的进出口金额同一族。
+- **本批未注册**：`RPT_MUTUAL_BOARD_HOLDRANK_WEB`（35 列、579 万行，但实测 `sortColumns=TRADE_DATE&sortTypes=-1`
+  返回的最新记录停在 **2024-08-16**；先要弄清它是整表停更还是某个 `INTERVAL_TYPE` 维度未筛，未弄清不注册）、
+  `RPT_MUTUAL_HOLD_DET`（个股持股明细，未逐列核验）。两条留作下一批。
+
 
