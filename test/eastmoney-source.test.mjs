@@ -36,16 +36,16 @@ const MACRO_CAPABILITIES = [
   'eastmoney_cpi', 'eastmoney_ppi', 'eastmoney_gdp', 'eastmoney_pmi', 'eastmoney_money_supply',
   'eastmoney_rmb_loan', 'eastmoney_customs_trade', 'eastmoney_retail_sales', 'eastmoney_deposit_reserve',
 ]
-const SNAKE_CASE_CAPABILITIES = [...MACRO_CAPABILITIES, 'eastmoney_mutual_flow', 'eastmoney_mutual_quota']
+const SNAKE_CASE_CAPABILITIES = [...MACRO_CAPABILITIES, 'eastmoney_mutual_flow', 'eastmoney_mutual_quota', 'eastmoney_main_capital_snapshot']
 
-test('Eastmoney source：注册十六个 capability 与内部身份', () => {
+test('Eastmoney source：注册十七个 capability 与内部身份', () => {
   const sources = createEastmoneySources()
   assert.deepEqual(sources.map((source) => source.schema.capability), [
     'eastmoney_top_buy_sell_market', 'eastmoney_top_buy_sell_ticker', 'eastmoney_lockup_expiry',
     'eastmoney_sector_rotation', 'eastmoney_cashflow_rotation', ...MACRO_CAPABILITIES,
-    'eastmoney_mutual_flow', 'eastmoney_mutual_quota',
+    'eastmoney_mutual_flow', 'eastmoney_main_capital_snapshot', 'eastmoney_mutual_quota',
   ])
-  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 16)
+  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 17)
   for (const source of sources) {
     assert.equal(source.schema.source_label, 'eastmoney')
     assert.match(source.schema.data_key, /^eastmoney\.http\./)
@@ -221,6 +221,65 @@ test('eastmoney_mutual_quota：当日四条快照、休市原因与跨方向额�
     await assert.rejects(
       () => source.execute({ capability: 'eastmoney_mutual_quota', params: { page: 2 }, session }, signal),
       /unsupported parameter/,
+    )
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_main_capital_snapshot：全市场快照，只有查询日、不接受日期参数', async () => {
+  const originalFetch = globalThis.fetch
+  let requested
+  const row = (over = {}) => ({
+    SECURITY_CODE: '000501', SECUCODE: '000501.SZ', SECURITY_NAME_ABBR: '武商集团', TRADE_DATE: '2026-09-30 00:00:00',
+    CLOSE_PRICE: 7.14, CHANGE_RATE: 1.1331, TURNOVERRATE: 0.6011, PE_DYNAMIC: 20.93650625,
+    PRIME_INFLOW: -3822595, SUPERDEAL_INFLOW: 0, SUPERDEAL_OUTFLOW: 0, BIGDEAL_INFLOW: 3924900, BIGDEAL_OUTFLOW: 7747495,
+    PRIME_COST: 7.097213452002, PRIME_COST_20DAYS: 7.422605499561, PRIME_COST_60DAYS: 7.229456356095,
+    BUY_SUPERDEAL_RATIO: 0, BUY_BIGDEAL_RATIO: 0.1198, RATIO: 0.1198, RATIO_3DAYS: 0.1126, RATIO_50DAYS: 0.206178,
+    ORG_PARTICIPATE: 0.1349156, PARTICIPATE_TYPE: '1', TOTALSCORE: 62.5918564, RANK: 2319, RANK_UP: 552, FOCUS: 75.2,
+    ...over,
+  })
+  globalThis.fetch = async (url) => {
+    requested = new URL(url)
+    const filtered = requested.searchParams.get('filter')
+    const rows = filtered ? [row({ SECUCODE: '600519.SH', SECURITY_CODE: '600519', SECURITY_NAME_ABBR: '贵州茅台', CLOSE_PRICE: 1258.62 })] : [row(), row({ SECUCODE: '000501.SZ', SECURITY_CODE: '000501', CHANGE_RATE: null, TURNOVERRATE: null })]
+    return response({ success: true, code: 0, result: { pages: filtered ? 1 : 52, count: filtered ? 1 : 5199, data: rows } })
+  }
+  try {
+    const source = sourceMap().eastmoney_main_capital_snapshot
+    const result = await source.execute({ capability: 'eastmoney_main_capital_snapshot', params: {}, session }, signal)
+    assert.equal(requested.searchParams.get('sortColumns'), 'PRIME_INFLOW', '缺省按主力净流入排序')
+    assert.equal(requested.searchParams.get('sortTypes'), '-1')
+    assert.equal(requested.searchParams.get('filter'), null, '全市场快照不带过滤器')
+    const [first, suspended] = result.data.item
+    assert.deepEqual([first.thscode, first.ticker, first.name], ['000501.SZ', '000501', '武商集团'])
+    assert.equal(first.main_net_inflow, -3822595)
+    assert.equal(first.main_cost, 7.097213452002)
+    assert.equal(first.trade_date, '2026-09-30')
+    assert.equal(suspended.change_pct, null, '停牌行原样保留 null')
+    assert.ok(!('SECURITY_INNER_CODE' in first) && !('TRADE_MARKET_CODE' in first), '内部编码不进取')
+    // 排序列与方向的枚举在发请求前把关
+    await assert.rejects(
+      () => source.execute({ capability: 'eastmoney_main_capital_snapshot', params: { sort_field: 'trade_date' }, session }, signal),
+      /sort_field must be one of/,
+    )
+    await assert.rejects(
+      () => source.execute({ capability: 'eastmoney_main_capital_snapshot', params: { start_date: '2026-09-01' }, session }, signal),
+      /unsupported parameter/,
+      '快照能力没有日期参数：给了就要拒绝，不能让模型以为取得到历史',
+    )
+    const single = await source.execute({ capability: 'eastmoney_main_capital_snapshot', params: { ticker: '600519.SH' }, session }, signal)
+    assert.equal(requested.searchParams.get('filter'), '(SECUCODE="600519.SH")', '单票过滤器用带市场的 SECUCODE')
+    assert.equal(single.data.item.length, 1)
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_main_capital_snapshot：SECUCODE 丢市场后缀就响亮失败，不按代码首位猜市场', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => response({ success: true, code: 0, result: { pages: 1, count: 1, data: [{ SECUCODE: '000501', SECURITY_CODE: '000501', SECURITY_NAME_ABBR: '武商集团', TRADE_DATE: '2026-09-30 00:00:00' }] } })
+  try {
+    const source = sourceMap().eastmoney_main_capital_snapshot
+    await assert.rejects(
+      () => source.execute({ capability: 'eastmoney_main_capital_snapshot', params: {}, session }, signal),
+      (error) => error?.code === 'eastmoney_invalid_response',
     )
   } finally { globalThis.fetch = originalFetch }
 })

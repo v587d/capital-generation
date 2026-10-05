@@ -79,7 +79,7 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
     const hub = services.get('dataCollectorHub')
     assert.ok(hub, 'apply 必须提供 dataCollectorHub 服务')
     assert.ok(services.get('datasetStore'), 'apply 必须提供 datasetStore 服务')
-    assert.equal(hub.capabilityNames().length, 80, '装配后应注册 61 个 Fuyao、3 个 Tencent 与 16 个 Eastmoney capability')
+    assert.equal(hub.capabilityNames().length, 81, '装配后应注册 61 个 Fuyao、3 个 Tencent 与 17 个 Eastmoney capability')
 
     for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status', 'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'prepare_chart_source', 'get_local_datetime', 'resolve_data_time_range', 'anysearch_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'ocr', 'render_chart']) {
       assert.ok(toolNamed(tools, name), `装配后应注册工具 ${name}`)
@@ -92,7 +92,7 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
     const status = await toolNamed(tools, 'dc_status').execute({}, exec(delegated))
     assert.equal(status.api_key.present, true)
     assert.equal(status.api_key.source, 'env(FUYAO_API_KEY)')
-    assert.equal(status.registered_capabilities.length, 80)
+    assert.equal(status.registered_capabilities.length, 81)
     // ⛔ 生产装配也必须把根收敛的现场记录接进 dc_status：单元测试里手工注入 diagnostics
     // 会全绿，而 `src/index.ts` 忘传 `rootPolicy` 的表现是"桌面端又查不出来"——正是这次
     // 事故缺的那双眼睛（§9.7：每个入口都要有对等断言）。
@@ -102,7 +102,7 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
     // 能力目录应可用（两级发现的第一级）：紧凑行编码，一行一条能力。
     const directory = await toolNamed(tools, 'list_capabilities').execute({}, exec(delegated))
     assert.equal(typeof directory, 'string')
-    assert.equal(directory.split('\n').length, 80, '目录必须一行一条能力，行数等于注册数')
+    assert.equal(directory.split('\n').length, 81, '目录必须一行一条能力，行数等于注册数')
     assert.ok(directory.split('\n').every((line) => line.split('|').length >= 3), '每行都是 capability|summary|paginated')
     const detail = await toolNamed(tools, 'describe_capability').execute({ capability: 'quote' }, exec(delegated))
     assert.equal(detail.capability, 'quote')
@@ -136,7 +136,7 @@ test('apply()：装配期凭据尚未装载时同花顺源照常注册，失败�
     await Promise.all(effectResults)
 
     const hub = services.get('dataCollectorHub')
-    assert.equal(hub.capabilityNames().length, 80,
+    assert.equal(hub.capabilityNames().length, 81,
       '⛔ 61 个同花顺能力不得因"装配期没读到 key"缺席（桌面端实测：整场进程只剩 8 项且无重试）')
 
     const unloaded = await toolNamed(tools, 'dc_status').execute({}, exec(delegated))

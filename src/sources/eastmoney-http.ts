@@ -616,6 +616,118 @@ async function executeMutualQuota(params: Params, signal: AbortSignal): Promise<
   return { data: { item: parsed.rows.map(parseMutualQuotaRow), pagination: pagination(1, 10, parsed.pages, parsed.total) }, schema: datacenterOutput(mutualQuotaRow) }
 }
 
+/**
+ * 个股主力资金快照。上游 `RPT_DMSK_TS_STOCKNEW` 实测**只保留最近一个交易日**的全市场一行一股
+ * （count=5199、TRADE_DATE 单一；带旧日期过滤器返回 9201 空），所以这不是时序能力：
+ * 契约里必须写死"按日期循环取不到历史"，否则模型会拿它当序列反复请求。
+ */
+const MAIN_CAPITAL_SORTS: Record<string, string> = {
+  main_net_inflow: 'PRIME_INFLOW',
+  change_pct: 'CHANGE_RATE',
+  turnover_rate_pct: 'TURNOVERRATE',
+  total_score: 'TOTALSCORE',
+}
+
+const mainCapitalRow = {
+  type: 'object',
+  properties: {
+    thscode: { type: 'string' }, ticker: { type: 'string' }, name: { type: 'string' },
+    trade_date: { type: 'string' }, trade_date_ms: { type: 'integer' },
+    close_price: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    change_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    turnover_rate_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    pe_dynamic: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    main_net_inflow: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    super_large_inflow: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    super_large_outflow: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    large_inflow: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    large_outflow: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    main_cost: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    main_cost_20d: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    main_cost_60d: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    super_large_buy_ratio_raw: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    large_buy_ratio_raw: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    prime_ratio_raw: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    prime_ratio_3d_raw: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    prime_ratio_50d_raw: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    org_participate_raw: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    total_score: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    rank: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    rank_up: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    focus: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    participate_type: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+  },
+  additionalProperties: true,
+}
+
+function normalizeMainCapital(params: Params): Params {
+  assertKnown(params, ['ticker', 'sort_field', 'sort_order', 'page', 'size'])
+  const sort_field = params.sort_field === undefined ? 'main_net_inflow' : String(params.sort_field)
+  if (!(sort_field in MAIN_CAPITAL_SORTS)) throw new Error(`sort_field must be one of ${Object.keys(MAIN_CAPITAL_SORTS).join(', ')}`)
+  const sort_order = params.sort_order === undefined ? 'desc' : String(params.sort_order)
+  if (sort_order !== 'desc' && sort_order !== 'asc') throw new Error('sort_order must be desc or asc')
+  const page = params.page === undefined ? 1 : integer(params.page, 'page', 1, Number.MAX_SAFE_INTEGER)
+  const size = params.size === undefined ? 100 : integer(params.size, 'size', 1, MAX_PAGE_SIZE)
+  if (params.ticker === undefined) return { sort_field, sort_order, page, size }
+  return { sort_field, sort_order, page, size, thscode: normalizeEastmoneySecurityIdentity({ secucode: params.ticker }).thscode }
+}
+
+function parseMainCapitalRow(raw: JsonRecord): JsonRecord {
+  const tradeDate = String(raw.TRADE_DATE ?? '').slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(tradeDate)) throw sourceError('Eastmoney main capital row has invalid TRADE_DATE', 'eastmoney_invalid_response')
+  // SECUCODE 自带市场后缀（实测 200/200 行都有），不做"按代码首位猜市场"的兜底：猜错就是把一只
+  // 股票的数据挂到另一只上。缺了就说明上游形状变了，响亮失败。
+  if (typeof raw.SECUCODE !== 'string' || !raw.SECUCODE.includes('.')) {
+    throw sourceError('Eastmoney main capital row lost its market suffix in SECUCODE', 'eastmoney_invalid_response')
+  }
+  const identity = normalizeEastmoneySecurityIdentity({ secucode: raw.SECUCODE })
+  return {
+    ...identity,
+    name: String(raw.SECURITY_NAME_ABBR ?? ''),
+    trade_date: tradeDate,
+    trade_date_ms: dateMs(tradeDate),
+    close_price: numberOrNull(raw.CLOSE_PRICE),
+    change_pct: numberOrNull(raw.CHANGE_RATE),
+    turnover_rate_pct: numberOrNull(raw.TURNOVERRATE),
+    pe_dynamic: numberOrNull(raw.PE_DYNAMIC),
+    main_net_inflow: numberOrNull(raw.PRIME_INFLOW),
+    super_large_inflow: numberOrNull(raw.SUPERDEAL_INFLOW),
+    super_large_outflow: numberOrNull(raw.SUPERDEAL_OUTFLOW),
+    large_inflow: numberOrNull(raw.BIGDEAL_INFLOW),
+    large_outflow: numberOrNull(raw.BIGDEAL_OUTFLOW),
+    main_cost: numberOrNull(raw.PRIME_COST),
+    main_cost_20d: numberOrNull(raw.PRIME_COST_20DAYS),
+    main_cost_60d: numberOrNull(raw.PRIME_COST_60DAYS),
+    super_large_buy_ratio_raw: numberOrNull(raw.BUY_SUPERDEAL_RATIO),
+    large_buy_ratio_raw: numberOrNull(raw.BUY_BIGDEAL_RATIO),
+    prime_ratio_raw: numberOrNull(raw.RATIO),
+    prime_ratio_3d_raw: numberOrNull(raw.RATIO_3DAYS),
+    prime_ratio_50d_raw: numberOrNull(raw.RATIO_50DAYS),
+    org_participate_raw: numberOrNull(raw.ORG_PARTICIPATE),
+    total_score: numberOrNull(raw.TOTALSCORE),
+    rank: numberOrNull(raw.RANK),
+    rank_up: numberOrNull(raw.RANK_UP),
+    focus: numberOrNull(raw.FOCUS),
+    participate_type: textOrNull(raw.PARTICIPATE_TYPE),
+  }
+}
+
+async function executeMainCapital(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
+  const url = new URL(DATACENTER_URL)
+  url.searchParams.set('reportName', 'RPT_DMSK_TS_STOCKNEW')
+  url.searchParams.set('columns', 'ALL')
+  url.searchParams.set('source', 'WEB')
+  url.searchParams.set('client', 'WEB')
+  url.searchParams.set('sortColumns', MAIN_CAPITAL_SORTS[String(params.sort_field)])
+  url.searchParams.set('sortTypes', params.sort_order === 'asc' ? '1' : '-1')
+  url.searchParams.set('pageNumber', String(params.page))
+  url.searchParams.set('pageSize', String(params.size))
+  if (params.thscode) url.searchParams.set('filter', `(SECUCODE="${params.thscode}")`)
+  const result = requireDatacenterResult(await getJson(url.toString(), signal, 'main capital snapshot'), 'main capital snapshot')
+  const parsed = requireRows(result, 'main capital snapshot')
+  return { data: { item: parsed.rows.map(parseMainCapitalRow), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(mainCapitalRow) }
+}
+
 function createSource(options: { capability: string; name: string; summary: string; description: string; inputSchema: object; outputSchema: object; paginated?: boolean; cacheMaxAgeMs?: number; rowShape: SchemaDescriptor['rowShape']; allowed: string[]; normalize: (params: Params) => Params; execute: (params: Params, signal: AbortSignal) => Promise<{ data: unknown; schema: object }> }): DataSource {
   const schema: SchemaDescriptor = { capability: options.capability, time_contract: getDataTimeContract(options.capability), name: options.name, source: `http:eastmoney.${options.capability}`, data_key: buildDataKey('eastmoney', 'http', options.capability), source_label: 'eastmoney', paginated: options.paginated === true, cacheMaxAgeMs: options.cacheMaxAgeMs, rowShape: options.rowShape, summary: options.summary, description: options.description, input_schema: options.inputSchema, output_schema: options.outputSchema }
   const normalize = (params: Record<string, unknown>): Params => options.normalize(params)
@@ -644,6 +756,18 @@ const mutualFlowInput = {
   additionalProperties: false,
 }
 const snapshotInput = { type: 'object', properties: {}, required: [], additionalProperties: false }
+const mainCapitalInput = {
+  type: 'object',
+  properties: {
+    ticker: { type: 'string', description: '完整证券代码（带市场后缀，如 600519.SH）；省略则取全市场排名' },
+    sort_field: { type: 'string', enum: Object.keys(MAIN_CAPITAL_SORTS), description: '排序列，默认 main_net_inflow' },
+    sort_order: { type: 'string', enum: ['desc', 'asc'] },
+    page: { type: 'integer', minimum: 1 },
+    size: { type: 'integer', minimum: 1, maximum: MAX_PAGE_SIZE },
+  },
+  required: [],
+  additionalProperties: false,
+}
 
 export function createEastmoneySources(): DataSource[] {
   return [
@@ -659,6 +783,13 @@ export function createEastmoneySources(): DataSource[] {
       description: '按交易日区间与渠道获取沪深港通成交数据（RPT_MUTUAL_DEAL_HISTORY，实测单渠道日频、可翻到多年前）。channel 六档：北向 sh_stock_connect（沪股通）/ sz_stock_connect（深股通）/ north_total（北向合计，默认），南向 hk_connect_sh / hk_connect_sz / south_total；渠道身份由上游 MUTUAL_TYPE_NAME 自标，实测同一交易日 001+003=005、002+004=006 的成交额加法精确成立。⛔ **北向三档的 buy_amt_raw / sell_amt_raw / net_deal_amt_raw / accum_deal_amt_raw 上游一律为 null**（交易所自 2024-08 起停止披露北向每日买卖明细，实测 2026-09 仍为 null），本能力**不提供"北向净买入"**，谁问就只能给成交额；成交额 deal_amt_raw、成交笔数 deal_num、额度状态 quota_balance_text 与当日领涨股仍披露，南向四档金额字段都有值。金额一律是东财原值（`_raw` 后缀）且**跨渠道计量口径不一致**（配套的额度表里北向 52000 对应官方 520 亿元、南向 42000000000 对应 420 亿元，即同一列两种单位），所以只能在同一渠道内做趋势与相对比较，禁止跨渠道相加、禁止换算成亿元或元写进结论。hold_market_cap_raw 在北向单渠道为 null、北向合计为 0（上游占位，不是"市值为零"）。index_change_pct 是东财附带的相关指数涨跌幅（百分数原值），lead_thscode 带市场后缀。',
       inputSchema: mutualFlowInput, outputSchema: datacenterOutput(mutualFlowRow), paginated: true, rowShape: { rowKey: 'item' },
       allowed: ['start_date', 'end_date', 'channel', 'page', 'size'], normalize: normalizeMutualFlow, execute: executeMutualFlow,
+    }),
+    createSource({
+      capability: 'eastmoney_main_capital_snapshot', cacheMaxAgeMs: 60_000, name: 'get_eastmoney_main_capital_snapshot',
+      summary: '东财个股主力资金快照（仅最近交易日）',
+      description: '获取东方财富个股主力资金**查询时点快照**（RPT_DMSK_TS_STOCKNEW）。⛔ 上游只保留**最近一个交易日**的全市场一行一股（实测 5199 只、TRADE_DATE 只有当天，带旧日期的过滤器返回 9201 空），本能力**没有历史序列**：不要按日期循环请求，需要历史就改走行情类能力或如实告知用户取不到。默认按主力净流入降序分页；ticker 必须带市场后缀（如 600519.SH），省略则取全市场排名。main_net_inflow 与各档 *_inflow / *_outflow 是东财原值（实测 000501 主力净流入 -3822595，量级对应元）；main_cost / main_cost_20d / main_cost_60d 是主力成本价（元/股，用来判断现价高于还是低于主力成本）；change_pct 与 turnover_rate_pct 是东财百分数原值（0.6011 表示 0.6011%），与本仓其他东财能力同口径。带 `_raw` 后缀的比例列（*_ratio_raw、org_participate_raw）**口径未经核验**：0.1198 既可能读作 0.12% 也可能读作 11.98%，只能做同列相对比较，禁止换算成百分数写进结论。rank / rank_up / total_score / focus 是东财自有的主力资金排名与关注度打分，口径归东财、跨日不可比；participate_type 是上游的参与类型码，原文保留未做翻译。实测 200 行里 CHANGE_RATE 与 TURNOVERRATE 各有 2 行为 null（停牌或当日无成交），null 原样保留不补 0。Dataset 的 captured_at 才是采集时间。',
+      inputSchema: mainCapitalInput, outputSchema: datacenterOutput(mainCapitalRow), paginated: true, rowShape: { rowKey: 'item' },
+      allowed: ['ticker', 'sort_field', 'sort_order', 'page', 'size'], normalize: normalizeMainCapital, execute: executeMainCapital,
     }),
     createSource({
       capability: 'eastmoney_mutual_quota', cacheMaxAgeMs: 60_000, name: 'get_eastmoney_mutual_quota',

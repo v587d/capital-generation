@@ -261,7 +261,7 @@ Wind 只在需要 Wind 口径/研报级准确度时花积分**；这条要写进
 |---|---|---|---|---|
 | 宏观 CPI/PPI/GDP/PMI/M2/存准/新增贷款/进出口/社零/房价/FDI | `RPT_ECONOMY_CPI` `…_PPI` `…_GDP` `…_PMI` `…_CURRENCY_SUPPLY` `…_DEPOSIT_RESERVE` `…_RMB_LOAN` `…_CUSTOMS` `…_TOTAL_RETAIL` | CPI 112 页 / PPI 248 页 / GDP 82 页 | 少 | **本项目当前最大的整块空白**；Fuyao 全文零命中 |
 | 沪深港通 | `RPT_MUTUAL_DEAL_HISTORY` `RPT_MUTUAL_QUOTA` | 到 2026-09-30 | 17 / 13 | ⛔ 2026-10-05 复核：**不是"全为 null"**。北向三档（沪股通 001 / 深股通 003 / 北向合计 005）的 `BUY_AMT / SELL_AMT / NET_DEAL_AMT / ACCUM_DEAL_AMT` 与 `FUND_INFLOW / QUOTA_BALANCE` 为 null，**南向三档（002 / 004 / 006）四项都有值**；成交额 `DEAL_AMT`、笔数 `DEAL_NUM` 双方都披露。所以能力名与描述里不许出现"北向资金净流入"，但南向可以给净买入。**另发现 `TRADE_QUOTA` 跨方向单位不一致**（北向 52000=520 亿元、南向 42000000000=420 亿元），禁止跨方向比较 |
-| 个股主力资金 | `RPT_DMSK_TS_STOCKNEW` | 1733 页 | 31 | 补 Fuyao `code=2004` 永久关闭的那块；`PRIME_COST`=主力成本口径要在描述里说清 |
+| 个股主力资金 | `RPT_DMSK_TS_STOCKNEW` | **只有查询日**：实测 5199 行、TRADE_DATE 单一，带旧日期过滤器返回 9201 | 31 | 补 Fuyao `code=2004` 永久关闭的那块，但只能以**快照**形态补：参数面不给日期，`main_cost`=主力成本价（元/股），比例类列口径未核验（`_raw` 后缀） |
 | 融资融券个股 | `RPTA_WEB_RZRQ_GGMX` | 单票 1331 页 | **45** | 先过 §2.2，否则详情必爆 |
 | 可转债 | `RPT_BOND_CB_LIST` `RPT_CB_BALLOTNUM` `RPT_CB_IMPORTANTDATE` | 1059 页 / 72 列 | **72** | 同上；**转债行情本次未验**，未验不注册 |
 | 股东结构 | `RPT_HOLDERNUMLATEST` `RPT_F10_EH_FREEHOLDERS` `RPT_SHARE_HOLDER_INCREASE` `RPT_ORG_SURVEY` | 1856 / 294 万 / 14.7 万 / 334 万页 | 23~47 | `END_DATE` 是**报告期不是披露日**，时间轴必须按 §1.3 归一并区分开 |
@@ -367,9 +367,9 @@ node -e "import('./lib/data-collector/hub.js').then(async ({DataCollectorHub}) =
 - 复现口径：`GET https://datacenter-web.eastmoney.com/api/data/v1/get`，参数
   `reportName=<表名>&columns=ALL&source=WEB&client=WEB&sortColumns=REPORT_DATE&sortTypes=-1&pageNumber=1&pageSize=200`，
   过滤器写法 `(REPORT_DATE>='YYYY-MM-DD')(REPORT_DATE<='YYYY-MM-DD')`。
-- 容量核对：宏观九条注册后是 **78 条 = 2795 字符（45.5% 预算）**；加上沪深港通两条后 **80 条 = 2880 字符
-  （46.9%）**。同一份 80 条若还走编码前的 JSON 数组编码是 **6460 字符，已经越过 6144 自预算**——
-  第 0 步不先落地，这两批补录就会把目录撞爆（正是 §2 预判的那件事）。
+- 容量核对：宏观九条注册后是 **78 条 = 2795 字符（45.5% 预算）**；加上沪深港通两条与主力资金快照后
+  **81 条 = 2933 字符（47.7%）**。同一份 81 条若还走编码前的 JSON 数组编码是 **6557 字符，已经越过
+  6144 自预算**——第 0 步不先落地，这几批补录就会把目录撞爆（正是 §2 预判的那件事）。
 
 ### 7.2 第 2 步·沪深港通的真报文核验（2026-10-05，已注册两条）
 
@@ -398,5 +398,35 @@ node -e "import('./lib/data-collector/hub.js').then(async ({DataCollectorHub}) =
 - **本批未注册**：`RPT_MUTUAL_BOARD_HOLDRANK_WEB`（35 列、579 万行，但实测 `sortColumns=TRADE_DATE&sortTypes=-1`
   返回的最新记录停在 **2024-08-16**；先要弄清它是整表停更还是某个 `INTERVAL_TYPE` 维度未筛，未弄清不注册）、
   `RPT_MUTUAL_HOLD_DET`（个股持股明细，未逐列核验）。两条留作下一批。
+
+### 7.3 第 2 步·个股主力资金（2026-10-05，注册为 `eastmoney_main_capital_snapshot`）
+
+`RPT_DMSK_TS_STOCKNEW` 31 列，取 200 行核验：`SECUCODE / TRADE_DATE / PRIME_*` 零缺键，
+`CHANGE_RATE` 与 `TURNOVERRATE` 各 2/200 为 null（停牌或当日无成交）。**关键形状事实**：返回的
+5199 行只对应**一个** `TRADE_DATE`，带 `(TRADE_DATE='2026-09-25')` 过滤器返回 `9201` 空——上游只滚动
+保留最近一个交易日的全市场截面。
+
+所以这条注册成**快照能力**而不是序列表：参数面**没有日期**（给了就 `unsupported parameter` 响亮拒绝），
+默认按主力净流入降序、可用带市场后缀的 `ticker` 收窄到单票、`cacheMaxAgeMs=60_000`。描述里写死
+"不要按日期循环请求"，否则模型会把 9201 当成取数失败反复重试。它补的正是 Fuyao `code=2004`
+永久关闭的那块盘面数据。
+
+字段口径分两级写进 `description`：
+
+- 有承诺：`main_cost*` 是主力成本价（元/股，与 `close_price` 同量纲，用于判断现价在主力成本上方还是
+  下方）；`change_pct` / `turnover_rate_pct` 是东财百分数原值，与本仓既有东财能力同口径；金额列
+  （`main_net_inflow` 与各档 `*_inflow` / `*_outflow`）实测量级对应元（茅台 5.3 亿、小盘股 -382 万）。
+- 无承诺：`*_ratio_raw`、`org_participate_raw` 的比例口径未核验（0.1198 可读作 0.12% 也可能读作
+  11.98%），只允许同列相对比较；`rank / rank_up / total_score / focus` 是东财自有打分、跨日不可比；
+  `participate_type` 是上游类型码原文，未做翻译。`SECURITY_INNER_CODE` / `TRADE_MARKET_CODE` 这类
+  内部编码不取进行。
+- `SECUCODE` 丢市场后缀时直接判 `eastmoney_invalid_response`，**不按代码首位猜市场**——猜错就是把
+  一只股票的数据挂到另一只上。
+
+### 7.4 尚未注册（"未验不注册"仍然生效）
+
+分红送配 `RPT_SHAREBONUS_DET`、股东结构四表、两融 `RPTA_WEB_RZRQ_GGMX`（45 列）、可转债
+`RPT_BOND_CB_LIST`（72 列）尚未逐列核验；大宗交易与新股五表在设计阶段就标了未验不注册。
+
 
 
