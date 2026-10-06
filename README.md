@@ -34,7 +34,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 ## 开始使用
 
 > [!NOTE]
-> 适配 DSH`@0.2.0-rc.2`（需要此版本或更新版本）。已在 Linux 的 Web profile 和 Windows 桌面端验证；其他环境尚未充分测试。建议使用 `Deepseek/deepseek-flash` 并开启 High thinking；GPT / Claude 尚未充分测试。
+> 适配 DSH`@0.2.0-rc.2`。已在 Linux 的 Web profile 和 Windows 桌面端验证；其他环境尚未充分测试。建议使用 `Deepseek/deepseek-flash` ，思考推理能力为 High ；GPT / Claude 尚未充分测试。
 
 1. **安装插件。** Linux / macOS 的 Web 或 CLI profile 在终端执行：
 
@@ -61,7 +61,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 
    <p align="center">
      <a href="assets/DSH@0.2.0rc2插件主页配置.png">
-       <img src="assets/DSH@0.2.0rc2插件主页配置.png" alt="插件主页的「配置」段" width="520">
+       <img src="assets/DSH@0.2.0rc2插件主页配置.png" alt="插件主页的「配置」段" width="800">
      </a>
    </p>
 
@@ -69,7 +69,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 
    <p align="center">
      <a href="assets/mode_selector.png">
-       <img src="assets/mode_selector.png" alt="新会话选择 Capital 模式" width="640">
+       <img src="assets/mode_selector.png" alt="新会话选择 Capital 模式" width="800">
      </a>
    </p>
 
