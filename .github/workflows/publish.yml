@@ -1,0 +1,86 @@
+# 发版通道：推 v<X.Y.Z> tag → 构建 + 测试 + 发 npm。
+#
+# 身份是 npm 的 Trusted Publishing（OIDC），仓库里**不存 npm token**。理由不是"少配一个 secret"：
+# 临时 token 七天到期，到期的表现是发版当夜红一条谁都发不动的构建；granular token 是可外带的
+# 凭据，泄露即任何人可发版。OIDC 两样都不要。npm 侧仍允许 token 发布（Package access 那组选项
+# 与 trusted publisher 兼容），所以本机手动发布没被关掉——但手动发出去的不带 provenance，事后
+# 答不上"这个 tarball 是哪次构建产生的"。
+#
+# `id-token: write` 删不掉：它是取 OIDC 令牌的权限，缺了它 npm 报 401，不是"少一条警告"。
+# `--provenance` 同理——Trusted Publishing 要求发布带 attestation。
+#
+# 为什么这里还要再跑一次 npm test：test.yml 只在 push 到 master 时触发，**打 tag 不重跑**。tag
+# 可以打在 CI 没测过的 commit 上（hotfix、cherry-pick），发版前最后一道闸门只能落在本文件里。
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# 接连推两个 tag 时排队，且不 cancel：两个 publish 并发抢同一个包，输的那个必然 E409。
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # npm 认证没配好时不会干净报错，而是走交互式 web 认证：打印一个 URL 然后一直轮询等浏览器。
+    # CI 里没人去点，这条构建能挂满默认 6 小时。15 分钟够跑完测试 + 发布，超时就当配错了。
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24' # 使用者那台 Windows 实测的版本；取版本的理由见 test.yml 顶部
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+
+      - run: npm ci
+
+      - name: 测试
+        run: npm test
+
+      # 下面两道闸门不能并进 npm publish：tag 说 v2.7.0 而 package.json 还是 2.6.0 时 registry
+      # 不报错——发出去的是 2.6.0 的代码，而按 `#v2.7.0` 安装的用户拿到的就是它。
+      # 版本读 `npm pkg get`：本包 package.json 是 "type": "module"，`node -p "require(...)"`
+      # 能不能跑取决于 eval 按 CJS 还是 ESM 解析，那是 node 版本语义，不该让发版去赌。
+      - name: tag 与 package.json 的 version 必须同值
+        run: |
+          version=$(npm pkg get version | tr -d '"')
+          case "${GITHUB_REF_NAME:-}" in
+            v*) tag="${GITHUB_REF_NAME#v}" ;;
+            *) tag="" ;;
+          esac
+          if [ -n "$tag" ] && [ "$tag" != "$version" ]; then
+            echo "::error::tag 是 v${tag}，package.json 是 ${version}——先对齐两边再发"
+            exit 1
+          fi
+          echo "发布 ${version}（${tag:+来自 tag v${tag}}${tag:-按 package.json 发，本次没有 tag}）"
+
+      # 幂等：已在 registry 上的版本直接跳过。缺这道闸门时，"手动发过再跑 CI"和任何一次 rerun
+      # 都会撞 `E409 cannot publish over previously published version`，而且红得看不出原因。
+      - name: 该版本是否已在 registry
+        id: gate
+        run: |
+          version=$(npm pkg get version | tr -d '"')
+          name=$(npm pkg get name | tr -d '"')
+          if npm view "${name}@${version}" version >/dev/null 2>&1; then
+            echo skip=false >> "$GITHUB_OUTPUT"
+            echo "::notice::${name}@${version} 已发布，跳过 publish"
+          else
+            echo skip=true >> "$GITHUB_OUTPUT"
+            echo "${name}@${version} 未发布，继续"
+          fi
+
+      - name: 发布
+        if: steps.gate.outputs.skip == 'true'
+        run: npm publish --access public --provenance
