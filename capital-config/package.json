@@ -1,6 +1,6 @@
 {
   "name": "@v587d/capital-config",
-  "version": "2.6.0",
+  "version": "2.6.1",
   "description": "Capital 模式的取数凭据与偏好配置行：卡片坐在 @v587d/capital-generation 插件主页的「配置」段，点这一行本身没有表单。",
   "license": "MIT",
   "type": "module",
