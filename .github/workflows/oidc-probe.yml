@@ -1,0 +1,30 @@
+name: OIDC probe（临时，验完即删）
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 环境
+        run: |
+          echo "node=$(node -v) npm=$(npm -v)"
+          echo "registry=$(npm config get registry)"
+          echo "ACTIONS_ID_TOKEN_REQUEST_URL 存在? $([ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] && echo YES || echo NO)"
+          echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN 存在? $([ -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ] && echo YES || echo NO)"
+          echo "URL=${ACTIONS_ID_TOKEN_REQUEST_URL:-<none>}"
+
+      - name: 真的去换一个 id token（只报成败，不打印令牌）
+        run: |
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "没有 URL，跳过"; exit 0
+          fi
+          body=$(curl -sS -N -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://registry.npmjs.org/")
+          len=$(printf '%s' "$body" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);console.log(j.value?j.value.length:('no value field: '+s.slice(0,200)))}catch(e){console.log('unparsable: '+s.slice(0,200))}})")
+          echo "换到的 id token 长度 / 结果: $len"
