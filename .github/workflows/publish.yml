@@ -41,8 +41,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24' # 使用者那台 Windows 实测的版本；取版本的理由见 test.yml 顶部
-          registry-url: 'https://registry.npmjs.org'
           cache: npm
+          # 刻意**不写** registry-url。它是公网 registry 的默认值，写下来的唯一效果是让
+          # setup-node 生成 `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}`——而它的
+          # `token` 输入默认是 github.token，一个 GitHub 的凭据被当成 npm 凭据写进配置。
+          # 真发版时这行会抢在 OIDC 之前送出去，registry 回 401，npm 随即转去走交互式 web
+          # 认证并一直挂着等浏览器（上面 timeout-minutes 兜的就是这一种挂法）。
 
       - run: npm ci
 
