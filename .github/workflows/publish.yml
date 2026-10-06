@@ -85,31 +85,6 @@ jobs:
             echo "${name}@${version} 未发布，继续"
           fi
 
-      # 临时诊断（验完删）：照 npm 的做法走两步交换，读 registry 给的原话。npm 在交换失败时
-      # 只打一行 log.verbose 就静默返回，于是发布时报 ENEEDAUTH 而看不出原因。必须在
-      # publish.yml 内部跑——TP 校验的是 job_workflow_ref，换成别的 workflow 文件名必然不匹配。
-      - name: 诊断 OIDC 两步交换
-        run: |
-          PKG='@v587d%2fcapital-generation' # npa 的 escapedName：只转义 /，@ 原样留在路径段里
-          REG='https://registry.npmjs.org/'
-          url="${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org"
-          id_token=$(curl -sS -N -H "Accept: application/json" \
-            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$url" \
-            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(JSON.parse(s).value||'')}catch(e){}})")
-          if [ -z "$id_token" ]; then echo "第 1 步就没换到 id token"; exit 0; fi
-          echo "第 1 步 OK：id token 长度 ${#id_token}"
-          code=$(curl -sS -o /tmp/exchange.json -w '%{http_code}' -X POST \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $id_token" \
-            "${REG}-/npm/v1/oidc/token/exchange/package/${PKG}")
-          echo "第 2 步 HTTP ${code}"
-          node -e "
-            const b = require('fs').readFileSync('/tmp/exchange.json','utf8')
-            let j; try { j = JSON.parse(b) } catch { console.log('响应不是 JSON：' + b.slice(0, 300)); process.exit(0) }
-            if (j.token) console.log('第 2 步成功：拿到短期发布令牌，长度 ' + j.token.length)
-            else console.log('第 2 步失败，registry 原话：' + JSON.stringify(j).slice(0, 500))
-          "
-
       - name: 发布
-        if: false && steps.gate.outputs.skip == 'true' # 临时：诊断期间不放行真发布
+        if: steps.gate.outputs.skip == 'true'
         run: npm publish --access public --provenance
