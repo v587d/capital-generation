@@ -11,20 +11,32 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: 环境
+      - name: 照 npm 的做法走一遍两步交换，只报状态与原因
         run: |
-          echo "node=$(node -v) npm=$(npm -v)"
-          echo "registry=$(npm config get registry)"
-          echo "ACTIONS_ID_TOKEN_REQUEST_URL 存在? $([ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] && echo YES || echo NO)"
-          echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN 存在? $([ -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ] && echo YES || echo NO)"
-          echo "URL=${ACTIONS_ID_TOKEN_REQUEST_URL:-<none>}"
+          PKG='%40v587d%2fcapital-generation'
+          REG='https://registry.npmjs.org/'
 
-      - name: 真的去换一个 id token（只报成败，不打印令牌）
-        run: |
-          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
-            echo "没有 URL，跳过"; exit 0
+          url="${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org"
+          id_token=$(curl -sS -N -H "Accept: application/json" \
+            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$url" \
+            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(JSON.parse(s).value||'')}catch(e){}})")
+
+          if [ -z "$id_token" ]; then
+            echo "第 1 步就没换到 id token"; exit 0
           fi
-          body=$(curl -sS -N -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://registry.npmjs.org/")
-          len=$(printf '%s' "$body" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);console.log(j.value?j.value.length:('no value field: '+s.slice(0,200)))}catch(e){console.log('unparsable: '+s.slice(0,200))}})")
-          echo "换到的 id token 长度 / 结果: $len"
+          echo "第 1 步 OK：id token 长度 ${#id_token}"
+          printf '%s' "$id_token" | cut -d. -f2 | base64 -d 2>/dev/null \
+            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);console.log('claims: aud='+j.aud+' repository='+j.repository+' ref='+j.ref+' event='+j.event_name)})"
+
+          # 第 2 步：npm 用的就是这个端点，把 id token 当 Bearer 递上去换短期发布令牌
+          code=$(curl -sS -o /tmp/exchange.json -w '%{http_code}' -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $id_token" \
+            "${REG}-/npm/v1/oidc/token/exchange/package/${PKG}")
+          echo "第 2 步 HTTP ${code}"
+          node -e "
+            const b = require('fs').readFileSync('/tmp/exchange.json','utf8')
+            let j; try { j = JSON.parse(b) } catch { console.log('响应不是 JSON：', b.slice(0, 300)); process.exit(0) }
+            if (j.token) { console.log('第 2 步成功：拿到短期令牌，长度 ' + j.token.length + '（内容不打印）') }
+            else { console.log('第 2 步失败，registry 原话：' + JSON.stringify(j).slice(0, 500)) }
+          "
