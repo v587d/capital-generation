@@ -5,6 +5,7 @@ import { DatasetStoreError } from '../lib/data-collector/store.js'
 import { createFuyaoRestSources } from '../lib/sources/fuyao-rest.js'
 import { createTencentSources } from '../lib/sources/tencent-http.js'
 import { createEastmoneySources } from '../lib/sources/eastmoney-http.js'
+import { createWindSources } from '../lib/sources/wind-mcp.js'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const SESSION = { id: 'session-1', header: { cwd: '/workspace/proj' } }
@@ -385,9 +386,9 @@ test('describeCapability：返回单个能力详情，未知名字返回 undefin
 
 test('能力目录体积预算：必须留在 DSH 剪枝阈值（8192）以内，否则中间能力会被截断', async () => {
   const { hub } = makeHub()
-  for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources()]) hub.registerSource(dataSource)
+  for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources(), ...createWindSources(async () => 'key')]) hub.registerSource(dataSource)
   const directory = hub.capabilityDirectory()
-  assert.equal(hub.capabilityNames().length, 89, '端点数量回归：目录预算断言必须覆盖 Fuyao、Tencent 与 Eastmoney 全部已注册能力')
+  assert.equal(hub.capabilityNames().length, 92, '端点数量回归：目录预算断言必须覆盖 Fuyao、Tencent、Eastmoney 与 Wind 全部已注册能力')
 
   // 预算的来源（实测本机 dsh 0.1.5-rc.1，不是拍脑袋的数字）：
   // - 真实上限是 dsh-compaction-tool-result-pruner 的 `thresholdChars`（preset 里配 8192）。
@@ -402,6 +403,8 @@ test('能力目录体积预算：必须留在 DSH 剪枝阈值（8192）以内�
   //   行编码 **3280 字符 = 预算的 53.4%**、均摊 37 字符/条。同一份 89 条用 JSON 数组是
   //   **7260 字符——已经越过 6144 这道自预算**：宏观与沪深港通这两批补录正是"不先改编码就先撞墙"
   //   的实例（编码前的 69 条是 5530 字符，58% 的字节是键名和标点）。
+  // - 2026-10-06 加 Wind 三条后实测 **3434 字符 = 预算的 55.9%**（均摊仍是 37 字符/条）：
+  //   摘要写得住就几乎不涨，逼近上限的是"能力数"不是"描述长度"。
   const DIRECTORY_BUDGET = 6144
   assert.ok(directory.length < DIRECTORY_BUDGET, `能力目录已达 ${directory.length} 字符（预算 ${DIRECTORY_BUDGET}，剪枝阈值 8192）：请精简 summary，或按设计文档 §2.3 讨论分域发现`)
   assert.ok(directory.length < 8192, '目录绝不允许越过剪枝阈值')
@@ -449,7 +452,7 @@ test('宽表详情预算：字段字典让 72 列的能力留在预算内（直�
 
 test('单能力详情体积预算：字典投影后仍不许逼近剪枝阈值', async () => {
   const { hub } = makeHub()
-  for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources()]) hub.registerSource(dataSource)
+  for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources(), ...createWindSources(async () => 'key')]) hub.registerSource(dataSource)
   // 详情是逐次调用、单条返回，所以用比目录更紧的 4096 做护栏。体积此前几乎等于 output_schema
   // 体积（按列数线性增长），字典把它和列数解耦：2026-10-05 实测最大详情是可转债表
   // （29 列 + 2081 字符描述）= 3738 字符 = 预算 91.3%；两融 42 列 2993 = 73%，dragon_tiger 2771 = 68%

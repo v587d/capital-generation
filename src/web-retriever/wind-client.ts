@@ -12,6 +12,28 @@ export const WIND_REQUEST_TIMEOUT_MS = 60_000
 export const WIND_MAX_CONTENT_CHARS = 20_000
 
 /**
+ * 七台托管 MCP server 的端点（`server_type` → URL）。
+ *
+ * 这里是**事实**（端点常量），不是代码搬运：上游仓库未声明 LICENSE，蓝本
+ * （官方 CLI 的 `SERVERS` 表）按惯例只作本地参考副本、不入库，见
+ * `docs/design/wind-market-source.md` §1.1。
+ *
+ * `analytics_data` 一并列出是为了记下"它存在但不可用"：2026-10-05 实测连 `initialize`
+ * 都挂满 60 秒（同文档 §6.1），所以数据源侧不接它。
+ */
+export const WIND_SERVER_ENDPOINTS = {
+  stock_data: 'https://mcp.wind.com.cn/vserver_stock_data/mcp/',
+  fund_data: 'https://mcp.wind.com.cn/vserver_fund_data/mcp/',
+  index_data: 'https://mcp.wind.com.cn/vserver_index_data/mcp/',
+  bond_data: 'https://mcp.wind.com.cn/vserver_bond_data/mcp/',
+  financial_docs: DEFAULT_WIND_ENDPOINT,
+  economic_data: 'https://mcp.wind.com.cn/vserver_economic_data/mcp/',
+  analytics_data: 'https://mcp.wind.com.cn/vserver_analytics_data/mcp/',
+} as const
+
+export type WindServerType = keyof typeof WIND_SERVER_ENDPOINTS
+
+/**
  * 错误分类（persona/主 Agent 依据它决定 fallback）：
  * AUTH=Key 缺失或无效；RATE_LIMIT=429；NETWORK=网络错误/5xx/超时；
  * BACKEND=接口层与业务错误；INVALID=响应不可解析。
@@ -36,7 +58,7 @@ export interface WindCallResult {
  * `test/chart-composition.test.mjs` 守着（会因漂移而失败），这里原本是写死的第二处，
  * 一次发版就得记得改两遍。所以本常量由测试一并核对（见 `test/wind-client.test.mjs`）。
  */
-export const WIND_CLIENT_VERSION = '2.5.4'
+export const WIND_CLIENT_VERSION = '2.6.0'
 
 export interface WindClient {
   callTool(toolName: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<WindCallResult>

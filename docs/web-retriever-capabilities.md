@@ -30,7 +30,7 @@
 | `anysearch_search` | AnySearch | 需要 | `query`* `max_results` | 全网检索，发现候选来源与线索（一次一个查询，1~20 条） |
 | `web_retriever_fetch` | AnySearch → 本机直连 | 需要 | `url`* | 取一个 http(s) 页面的正文；AnySearch 失败且回退开关开启时自动改本机直连，回执 `via` 标明实际来源。证券任务的官方归属核验只能经本工具完成 |
 | `wind_docs_announcements` | Wind Alice | 需要 | `query`* `top_k` | 上市公司公告、年报、季报、招股书等**官方文件**正文（query 必须一次带齐公司实体 + 文件类型 + 时间范围三要素；消耗积分，按需少量调用） |
-| `wind_docs_news` | Wind Alice | 需要 | `query`* `top_k` | 权威财经新闻（同上三要素；不含发行人官方公告与券商研报） |
+| `wind_docs_news` | Wind Alice | 需要 | `query`* `top_k` | 权威财经新闻（同上三要素；不含发行人官方公告与券商研报；同样按次消耗积分） |
 
 ## 来源查询面（9）
 
@@ -67,6 +67,11 @@
 
 ## 边界与纪律
 
+- **数值序列不在本面**：本表里 Wind 只有公告与新闻两个检索工具；宏观 / 行业 / 汇率指标与按日期区间
+  取的历史 K 线住在 [data_collector 能力表](data-collector-capabilities.md)（`wind_edb_search` /
+  `wind_edb_query` / `wind_stock_kline`）。要一个数值序列就停手回告主 Agent，**不要从新闻正文里抄数**
+  ——正文里的数字没有可核对的口径与时间轴。Wind 那五个工具**都按次消耗上游积分**：免费覆盖
+  （Fuyao 61 条 + 腾讯 7 条 + 东财 21 张）打不到的东西才值得花。
 - **深沪不可互换**：互动易只覆盖深市、上证e互动只覆盖沪市，实测沪市公司查互动易返回 0 条；
   **北交所两个平台都没有**。
 - **空结果是真事实**：来源查询面回 0 条且 `note` 未报风控，就是"确实没有"，不是缺口、不必重试。

@@ -45,7 +45,12 @@ test('web_retriever 能力表：每个工具都带上游、密钥口径与非空
   }
 })
 
-test('web_retriever 能力表：README 必须链接到它', () => {
+test('web_retriever 能力表：README 必须链接到它，写了工具总数就得与实现一致', () => {
   const readme = readFileSync(fileURLToPath(new URL('../README.md', import.meta.url)), 'utf8')
   assert.ok(readme.includes('docs/web-retriever-capabilities.md'), 'README 必须链接 docs/web-retriever-capabilities.md')
+  // 与数据面同一族：首页那句「共计 14 个网页检索能力」随工具增减漂移。没写就不核，写了才核。
+  const stated = readme.match(/(\d+)[\s*]*个\s*网页检索能力/)
+  if (stated === null) return
+  assert.equal(Number(stated[1]), registered.length,
+    'README 首页写的「网页检索能力」数量与实现注册的工具数不一致——增删工具后两处要一起改（或把首页那个数字去掉）')
 })

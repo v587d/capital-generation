@@ -8,6 +8,7 @@ import {
   DEFAULT_WIND_ENDPOINT,
   WIND_CLIENT_VERSION,
   WIND_MAX_CONTENT_CHARS,
+  WIND_SERVER_ENDPOINTS,
 } from '../lib/web-retriever/wind-client.js'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -221,5 +222,27 @@ test('超时归 NETWORK；调用方取消时不重试', async () => {
     assert.equal(cancelStub.calls.length, 0, '已取消的调用不应发出任何请求')
   } finally {
     cancelStub.restore()
+  }
+})
+
+/**
+ * 七台 server 的端点表是数据源侧唯一的路由真值（`src/sources/wind-mcp.ts` 按 server_type 取）。
+ * 这里钉的是**事实**：拼错的端点不会报错，只会让上游回一个看不懂的 404/BACKEND。
+ */
+test('WIND_SERVER_ENDPOINTS：七台齐全、逐台对号，financial_docs 仍是同一个默认端点', async () => {
+  assert.deepEqual(Object.keys(WIND_SERVER_ENDPOINTS), [
+    'stock_data', 'fund_data', 'index_data', 'bond_data', 'financial_docs', 'economic_data', 'analytics_data',
+  ])
+  for (const [server, endpoint] of Object.entries(WIND_SERVER_ENDPOINTS)) {
+    assert.equal(endpoint, `https://mcp.wind.com.cn/vserver_${server}/mcp/`)
+  }
+  assert.equal(WIND_SERVER_ENDPOINTS.financial_docs, DEFAULT_WIND_ENDPOINT)
+
+  const stub = stubFetch(() => ({ ok: true, status: 200, text: async () => rpcResponse({}) }))
+  try {
+    await createWindClient({ endpoint: WIND_SERVER_ENDPOINTS.economic_data, resolveApiKey: okKey, retryDelaysMs: [0, 0] }).callTool('query_economic_indicator_data', { question: 'M0000612' })
+    assert.equal(stub.calls[0].url, 'https://mcp.wind.com.cn/vserver_economic_data/mcp/')
+  } finally {
+    stub.restore()
   }
 })

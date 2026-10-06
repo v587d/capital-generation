@@ -104,8 +104,13 @@ function dumpTables(value, path = '$', out = []) {
       const cellTypes = new Set(rows.flat().map(typeTag))
       out.push(`\n表 ${path}  ${rows.length} 行 × ${names.length} 列  列名宽=[${widths.has(names.length) ? '与行数一致' : `不一致：${[...widths]}`}]  空格/INVALID 每行=${nulls.join(',') || 0}  单元类型=${[...cellTypes].join('/')}`)
       out.push(`  列名: ${names.map((name) => `${name}${keyFlags(name).length ? `⚠️[${keyFlags(name).join('+')}]` : ''}`).join(' | ')}`)
-      out.push(`  首行: ${JSON.stringify(rows[0]).slice(0, 260)}`)
-      if (rows.length > 1) out.push(`  末行: ${JSON.stringify(rows[rows.length - 1]).slice(0, 260)}`)
+      // 空表（非交易日/无数据）是合法成功，别在这里把探针自己打崩——那会把"上游回了空"
+      // 误记成"探针挂了"，而这两种结论在实现里走的是完全不同的分支。
+      if (rows.length === 0) out.push('  （0 行：columns 仍给出，unit 见下）')
+      else {
+        out.push(`  首行: ${JSON.stringify(rows[0]).slice(0, 260)}`)
+        if (rows.length > 1) out.push(`  末行: ${JSON.stringify(rows[rows.length - 1]).slice(0, 260)}`)
+      }
       const unit = value.unit
       if (unit && typeof unit === 'object') {
         const entries = Object.entries(unit)

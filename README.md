@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.5.4-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.6.0-9cf" alt="Version"></a>
 </p>
 
 # Capital Generation
@@ -50,7 +50,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
    | --- | --- |
    | [同花顺 Fuyao](https://fuyao.aicubes.cn/docs/) | 行情、财务数据和自选股报价 |
    | [AnySearch](https://www.anysearch.com/docs) | 网页搜索和正文提取 |
-   | [Wind Alice](https://market.windalice.com/#/home) | 公告和金融新闻检索 |
+   | [Wind Alice](https://market.windalice.com/#/home) | 公告与新闻检索，以及宏观/行业/汇率指标与按日期区间取的历史 K 线 |
    | [PaddleOCR AIStudio](https://aistudio.baidu.com/paddleocr) | 解析 PDF 和图片中的文字 |
 
    这些都是第三方服务的密钥，需分别向服务方申请；额度和条款以各服务方为准。
@@ -75,7 +75,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 
 ## 能做什么
 
-- **查数据和资料：** 按需获取行情、财务、指数及基金数据，检索公告、新闻和研报。部分公开数据源无需额外密钥；具体覆盖范围见 [数据能力表](docs/data-collector-capabilities.md) 和 [网页检索能力表](docs/web-retriever-capabilities.md)。
+- **查数据和资料：** 覆盖A股、港股、美股，按需获取行情、财务、指数、基金与宏观行业数据，检索公告、新闻和研报。共计 **92** 个数据收集能力和 **14** 个网页检索能力，部分公开数据源无需额外密钥；具体覆盖范围见 [数据收集能力表](docs/data-collector-capabilities.md) 和 [网页检索能力表](docs/web-retriever-capabilities.md)。
 - **数据分析：** 所有 Agents 均不直接接触原始结构数据，Agents 按需读取数据、校验数据，并写脚本挖掘数据背后含义。 
 - **可视化：** 将数据交给不同角色处理，再生成可交互图表。图表会作为本轮交付物出现在会话中，可在侧栏查看或离线打开。了解处理流程可看 [Agent 角色说明](docs/agent-roles.md)。
 - **管理自选股：** 在 Capital 会话中输入 `/` 或点击输入框旁的 `+`，从「指令」中打开「自选股」。刷新失败时已有报价仍显示为旧快照，并标明时间；请勿当作实时价格。
@@ -96,8 +96,9 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 
 - **安装后找不到 Capital 模式？** 确认插件出现在「插件」→ 已安装列表；Web / CLI profile 安装后要重启该 profile，并在新会话选择模式。
 - **配置在哪？** 打开「插件」→ 已安装的 **Capital Generation**，页面里的「配置」段就是；不在 DSH 的普通「设置」页面，也不用点进「包含的组件」。保存密钥后新建会话再试。
-- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.5.4`。
+- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.6.0`。
 - **网页抓取失败？** 配置卡片中的「允许启动本地提取网页内容」默认开启：AnySearch 提取失败时可尝试本机直连。关闭后，本机直连的具名来源查询也不可用；请检查该开关和网络连接。
+- **Wind 那部分会消耗积分？** 会。公告与新闻检索、宏观 / 行业 / 汇率指标、按日期区间取的历史 K 线都按次消耗你在 Wind 侧的额度；额度与条款以 Wind 为准，插件不做用量封顶。没配 `WIND_API_KEY` 时这几类不可用，其余功能照常。
 
 目前 Windows 桌面端有一项[已知宿主差异](CHANGELOG.md)：主 Agent 的部分工具限制可能不生效。请特别留意它实际调用了哪些工具；结构化数据的取数限制仍由工具自身执行。
 

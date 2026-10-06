@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { createFuyaoRestSources } from '../lib/sources/fuyao-rest.js'
 import { createTencentSources } from '../lib/sources/tencent-http.js'
 import { createEastmoneySources } from '../lib/sources/eastmoney-http.js'
+import { createWindSources } from '../lib/sources/wind-mcp.js'
 import { DataCollectorHub } from '../lib/data-collector/hub.js'
 
 /**
@@ -22,7 +23,7 @@ const documented = [...table.matchAll(/^\|\s`([a-z0-9_]+)`\s\|/gm)].map((match) 
 
 function registered() {
   const hub = new DataCollectorHub({ store: { async save() { throw new Error('unused') } } })
-  for (const source of [...createFuyaoRestSources(async () => 'unused'), ...createTencentSources(), ...createEastmoneySources()]) hub.registerSource(source)
+  for (const source of [...createFuyaoRestSources(async () => 'unused'), ...createTencentSources(), ...createEastmoneySources(), ...createWindSources(async () => 'unused')]) hub.registerSource(source)
   return hub
 }
 
@@ -43,7 +44,7 @@ test('能力总表：每个 capability 都带端点路径、参数列与非空�
     const row = table.split('\n').find((line) => line.startsWith(`| \`${capability}\` |`))
     assert.ok(row, `${capability} 缺少表格行`)
     const cells = row.split('|').map((cell) => cell.trim())
-    assert.ok(cells[2].startsWith('`/api/') || cells[2].startsWith('`/tencent/') || cells[2].startsWith('`/eastmoney/'), `${capability} 的端点列应为 Fuyao、Tencent 或 Eastmoney 路径`)
+    assert.ok(cells[2].startsWith('`/api/') || cells[2].startsWith('`/tencent/') || cells[2].startsWith('`/eastmoney/') || cells[2].startsWith('`/wind/'), `${capability} 的端点列应为 Fuyao、Tencent、Eastmoney 或 Wind 路径`)
     assert.ok(cells[3].length > 0, `${capability} 的参数列不应为空（无参数写「无参数」）`)
     assert.equal(cells[4], hub.describeCapability(capability).paginated ? '是' : '否', `${capability} 的分页列与实现不一致`)
     assert.ok(cells[5].length > 0, `${capability} 的用途列不应为空`)
@@ -55,7 +56,13 @@ test('能力总表：每个 capability 都带端点路径、参数列与非空�
   }
 })
 
-test('能力总表：README 必须链接到它', () => {
+test('能力总表：README 必须链接到它，写了能力总数就得与实现一致', () => {
   const readme = readFileSync(fileURLToPath(new URL('../README.md', import.meta.url)), 'utf8')
   assert.ok(readme.includes('docs/data-collector-capabilities.md'), 'README 必须链接 docs/data-collector-capabilities.md')
+  // 首页那句「共计 N 个数据收集能力」是随扩容漂移的形状：数字与实现不同步时用户照着首页那个数去问
+  // 一个已经不存在（或还没上）的能力。没写数量就不核，写了才核——不逼首页必须放一个数字。
+  const stated = readme.match(/(\d+)[\s*]*个\s*数据收集能力/)
+  if (stated === null) return
+  assert.equal(Number(stated[1]), registered().capabilityNames().length,
+    'README 首页写的「数据收集能力」数量与实现注册的条数不一致——扩容或收敛之后两处要一起改（或把首页那个数字去掉）')
 })

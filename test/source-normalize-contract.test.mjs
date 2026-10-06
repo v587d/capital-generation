@@ -2,13 +2,14 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createEastmoneySources } from '../lib/sources/eastmoney-http.js'
 import { createTencentSources } from '../lib/sources/tencent-http.js'
+import { createWindSources } from '../lib/sources/wind-mcp.js'
 import { DataCollectorHub } from '../lib/data-collector/hub.js'
 
 const signal = new AbortController().signal
 const session = { id: 'normalize-contract', header: { cwd: '/workspace/project' } }
 
 /**
- * 公开 HTTP 面每条能力的最小合法参数（Fuyao 那 61 条的同一张表在
+ * 公开 HTTP 与 MCP 面每条能力的最小合法参数（Fuyao 那 61 条的同一张表在
  * `scripts/smoke-fuyao.mjs` 的 `PARAMS`，两边口径一致：缺了就失败，不静默跳过）。
  */
 const SAMPLES = {
@@ -40,9 +41,12 @@ const SAMPLES = {
   tencent_us_quote: { codes: ['AAPL'] },
   tencent_hk_kline: { code: '00700', period: 'day', adjust: 'none', count: 5 },
   tencent_us_kline: { code: 'AAPL.OQ', period: 'day', adjust: 'none', count: 5 },
+  wind_edb_search: { question: '中国GDP相关指标' },
+  wind_edb_query: { indicator: 'M5567876', start_date: '2025-01-01', end_date: '2025-12-31' },
+  wind_stock_kline: { code: '600519.SH', start_date: '2026-08-01', end_date: '2026-08-15' },
 }
 
-const sources = [...createEastmoneySources(), ...createTencentSources()]
+const sources = [...createEastmoneySources(), ...createTencentSources(), ...createWindSources(async () => 'secret')]
 
 test('参数样例表必须覆盖全部已注册的公开 HTTP 能力：新增没登记就失败，不静默少测', () => {
   const registered = sources.map((source) => source.schema.capability).sort()
@@ -57,7 +61,7 @@ test('参数样例表必须覆盖全部已注册的公开 HTTP 能力：新增�
  *   （2026-10-05 实测：融资融券/分红/主力资金/股东户数四条的单票过滤全因此失效）；
  * ② 幂等——第二遍的输入就是第一遍的输出，必须原样返回。
  */
-test('公开 HTTP 归一化：不发明未声明的键，且双跑幂等', () => {
+test('公开 HTTP 与 MCP 归一化：不发明未声明的键，且双跑幂等', () => {
   for (const source of sources) {
     const capability = source.schema.capability
     const declared = Object.keys(source.schema.input_schema.properties ?? {}).sort()
