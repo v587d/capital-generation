@@ -90,7 +90,7 @@ jobs:
       # publish.yml 内部跑——TP 校验的是 job_workflow_ref，换成别的 workflow 文件名必然不匹配。
       - name: 诊断 OIDC 两步交换
         run: |
-          PKG='%40v587d%2fcapital-generation'
+          PKG='@v587d%2fcapital-generation' # npa 的 escapedName：只转义 /，@ 原样留在路径段里
           REG='https://registry.npmjs.org/'
           url="${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org"
           id_token=$(curl -sS -N -H "Accept: application/json" \
