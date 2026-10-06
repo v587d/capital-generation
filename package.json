@@ -5,6 +5,14 @@
   "icon": "assets/cg-icon.png",
   "author": "v587d",
   "license": "MIT",
+  "homepage": "https://github.com/v587d/capital-generation#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/v587d/capital-generation.git"
+  },
+  "bugs": {
+    "url": "https://github.com/v587d/capital-generation/issues"
+  },
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",

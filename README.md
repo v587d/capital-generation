@@ -24,7 +24,7 @@
 
 Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 里的证券研究插件，面向关注 A 股（近期开放港美股）的个人用户。安装后，在新会话中选择 **Capital 模式**，就可以用自然语言查行情、财务数据、公告和新闻，整理分析并生成图表。它不是独立应用，需要先安装 DSH。
 
-**视频演示：**[安装、配置与使用](https://www.bilibili.com/video/BV1fzaZ6CE9J/)。
+**🎞️视频演示：**[安装、配置与使用](https://www.bilibili.com/video/BV1fzaZ6CE9J/)。
 
 例如，你可以问：「复盘 XXXX 最近 20 个交易日的走势，结合公告和财务数据说明主要变化，并画一张量价图。」[查看报告样例](docs/sample/指南针复盘和预测报告.md)。
 
@@ -36,12 +36,14 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 > [!NOTE]
 > 适配 DSH`@0.2.0-rc.2`。已在 Linux 的 Web profile 和 Windows 桌面端验证；其他环境尚未充分测试。建议使用 `Deepseek/deepseek-flash` ，思考推理能力为 High ；GPT / Claude 尚未充分测试。
 
-1. **安装插件。** Linux / macOS 的 Web 或 CLI profile 在终端执行：
+1. **安装插件。** Linux / macOS 的 Web 或 CLI profile 在终端执行，下面两条任选一条：
 
    ```bash
+   dsh plugin --profile web add @v587d/capital-generation
    dsh plugin --profile web add github:v587d/capital-generation
    ```
 
+   两条装完的功能一样：前者取 npm 上已发布的版本，后者取本仓库当前的代码。
    安装后重启该 profile。Windows 桌面端在「添加插件」中输入 `https://github.com/v587d/capital-generation`。桌面端自带 DSH 宿主，不需要单独用 npm 安装宿主。本仓库已包含构建产物，普通用户不需要克隆仓库或运行构建命令。
 
 2. **选填密钥。** 打开 DSH 「插件」 → **Capital Generation** -> 「配置」。
