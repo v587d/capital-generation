@@ -86,5 +86,33 @@ jobs:
           fi
 
       - name: 发布
+        id: publish
         if: steps.gate.outputs.skip == 'true'
         run: npm publish --access public --provenance
+
+      # 桌面端内置的默认 registry 是 npmmirror 镜像（`node_modules/.modules.yaml` 里
+      # `registries.default`），而镜像同步是异步的：2.6.1 那次实测镜像恰好在官方源出现新版本
+      # **前两秒**完成过一次同步，于是国内桌面端连续 19 小时只装得到 2.6.0。发完踢一次同步，
+      # 实测约 25 秒生效。这个端点是 owner 的标准动作，无需鉴权。
+      #
+      # 同步失败**不算发版失败**：包在官方源上已经可用，镜像晚点追上只是延迟，不该把绿色变红，
+      # 所以 continue-on-error + 只打印结论。
+      - name: 通知 npmmirror 同步
+        if: steps.publish.outcome == 'success'
+        continue-on-error: true
+        run: |
+          name=$(npm pkg get name | tr -d '"')
+          version=$(npm pkg get version | tr -d '"')
+          escaped="${name//\//%2f}"
+          curl -fsS -m 60 -X PUT "https://registry.npmmirror.com/${escaped}/sync" || {
+            echo "::warning::npmmirror 同步请求失败，镜像将按自己的节奏追上（官方源已可安装）"
+            exit 0
+          }
+          for i in 1 2 3 4 5 6; do
+            sleep 10
+            got=$(curl -fsS -m 20 "https://registry.npmmirror.com/${escaped}" \
+              | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s)['dist-tags'].latest)}catch(e){console.log('')}})")
+            echo "第 ${i} 次探测：镜像 latest = ${got:-未知}"
+            [ "$got" = "$version" ] && { echo "镜像已同步到 ${version}"; exit 0; }
+          done
+          echo "::warning::60 秒内镜像 latest 仍未变成 ${version}，稍后它会自行同步"
