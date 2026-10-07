@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.6.1-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.6.2-9cf" alt="Version"></a>
 </p>
 
 # Capital Generation
@@ -26,7 +26,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 
 **🎞️视频演示：**[安装、配置与使用](https://www.bilibili.com/video/BV1fzaZ6CE9J/)。
 
-例如，你可以问：「复盘 XXXX 最近 20 个交易日的走势，结合公告和财务数据说明主要变化，并画一张量价图。」[查看报告样例](docs/sample/指南针复盘和预测报告.md)。
+例如，你可以问：「复盘 XXXX 最近 20 个交易日的走势，结合公告和财务数据说明主要变化，并画一张量价图。」[假期后研判报告（20261007）](docs/sample/假期后研判报告.md)。
 
 > [!IMPORTANT]
 > 本项目仍在探索中，不提供金融服务或投资建议，不保证数据完整、及时或准确，也不承诺投资回报。请自行核对来源并承担投资风险。
@@ -36,7 +36,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 > [!NOTE]
 > 适配 DSH`@0.2.0-rc.2`。已在 Linux 的 Web profile 和 Windows 桌面端验证；其他环境尚未充分测试。建议使用 `Deepseek/deepseek-flash` ，思考推理能力为 High ；GPT / Claude 尚未充分测试。
 
-1. **安装插件。** Linux / macOS 的 Web 或 CLI profile 在终端执行，下面两条任选一条：
+1. **安装插件。** Linux / macOS 的 Web 或 CLI profile 在终端执行，下面两条 **任选一条** ：
 
    ```bash
    dsh plugin --profile web add @v587d/capital-generation
@@ -44,7 +44,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
    ```
 
    两条装完的功能一样：前者取 npm 上已发布的版本，后者取本仓库当前的代码。
-   安装后重启该 profile。Windows 桌面端在「添加插件」中输入 `https://github.com/v587d/capital-generation`。桌面端自带 DSH 宿主，不需要单独用 npm 安装宿主。本仓库已包含构建产物，普通用户不需要克隆仓库或运行构建命令。
+   安装后重启该 profile。 Windows 桌面端在「添加插件」中输入 `https://github.com/v587d/capital-generation` 或 `v587d/capital-generation`。桌面端自带 DSH 宿主，不需要单独用 npm 安装宿主。本仓库已包含构建产物，普通用户不需要克隆仓库或运行构建命令。
 
 2. **选填密钥。** 打开 DSH 「插件」 → **Capital Generation** -> 「配置」。
 
@@ -98,8 +98,8 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 
 - **安装后找不到 Capital 模式？** 确认插件出现在「插件」→ 已安装列表；Web / CLI profile 安装后要重启该 profile，并在新会话选择模式。
 - **配置在哪？** 打开「插件」→ 已安装的 **Capital Generation**，页面里的「配置」段就是；不在 DSH 的普通「设置」页面，也不用点进「包含的组件」。保存密钥后新建会话再试。
-- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.6.1`。
-- **刚发布的新版本装不到？** 桌面端经国内镜像取 npm 包，镜像同步有延迟，发版后一小段时间内可能仍解析到上一个版本。装不到时把版本号写全（`@v587d/capital-generation@2.6.1`）比写 `@latest` 可靠，或改用仓库地址安装。
+- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.6.1` 或 `@2.6.1`。
+- **刚发布的新版本装不到？** 桌面端取包时会跳过**刚发布不久**的版本（宿主侧包管理器的发布冷却策略，实测会静默装成上一个版本），国内镜像的同步也可能滞后一段时间。急着用最新代码，改用仓库地址安装最直接。
 - **网页抓取失败？** 配置卡片中的「允许启动本地提取网页内容」默认开启：AnySearch 提取失败时可尝试本机直连。关闭后，本机直连的具名来源查询也不可用；请检查该开关和网络连接。
 - **Wind 那部分会消耗积分？** 会。公告与新闻检索、宏观 / 行业 / 汇率指标、按日期区间取的历史 K 线都按次消耗你在 Wind 侧的额度；额度与条款以 Wind 为准，插件不做用量封顶。没配 `WIND_API_KEY` 时这几类不可用，其余功能照常。
 
