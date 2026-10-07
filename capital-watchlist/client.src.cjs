@@ -65,7 +65,7 @@ const zh = {
   'command.description': '添加 / 查看 / 删除自选股',
   title: '自选股',
   close: '关闭',
-  searchPlaceholder: '输入证券代码或中文名，支持A股/指数/ETF',
+  searchPlaceholder: '输入证券代码或名称，支持A股/港股/美股',
   add: '添加',
   added: '已添加',
   refreshing: '刷新中…',
@@ -79,11 +79,33 @@ const zh = {
   notRefreshed: '未刷新',
   /** 陈旧值的 tooltip：「……限流，请稍后再试 · 上一次快照 09-29 19:04」。 */
   stale: '上一次快照',
+  /**
+   * 港美股回包带的是**交易所当地时间**（HKT / 美东），与页脚那个"我们几点取的数"是两件事。
+   * 只写进 tooltip，不做时区换算（换算要用到我们没有的偏移表与夏令时口径）。
+   */
+  exchangeTime: '交易所时间',
   /** 有最新价、但没有涨跌（停牌 / 未开盘）时 tooltip 说的那件事。 */
   noChangePct: '暂无涨跌数据',
-  typeStock: '股票',
-  typeIndex: '指数',
-  typeEtf: 'ETF',
+  /**
+   * 徽标说**市场**（2026-10-07 用户点名：「股票」这一档要拆成 A股 / 港股 / 美股，指数三档跟着拆）。
+   * 六档一字典，场内 ETF 不单列——它的报价同样是二级市场行情，归 A股那一档（"这是 ETF"那一层
+   * 留在递进输入框那句话里，见下面 `kindStock` 一族）。
+   */
+  typeAShare: 'A股',
+  typeHkStock: '港股',
+  typeUsStock: '美股',
+  typeAIndex: 'A指',
+  typeHkIndex: '港指',
+  typeUsIndex: '美指',
+  /**
+   * ⛔ 这一族**不是徽标**：它只进「预测」「复盘」递进输入框的那句话，说的是**取数端点那一族**。
+   * 徽标按市场配色之后就不说"股票 / 指数 / ETF"了，而 Agent 恰恰靠这三档选端点
+   * （A 股股票、A 股指数、场内基金是三个不同上游端点，港美股又各两档）。
+   * 市场不在这儿重复：中间那段 thscode 自己带（`.SZ` / `.HK` / `.US`）。
+   */
+  kindStock: '股票',
+  kindIndex: '指数',
+  kindEtf: 'ETF',
   remove: '移除',
   more: '更多',
   pin: '置顶',
@@ -109,8 +131,10 @@ const zh = {
   confirmDescSuffix: ' 从自选中移除吗？',
   confirmCancel: '取消',
   confirmOk: '确认移除',
-  truncated: '候选超过 10 条，请输入准确证券代码或名称。',
-  noHit: '没有匹配的标的（支持沪深 A 股 / 指数 / 场内 ETF）。',
+  /** 故意不写"超过 N 条"里那个 N：它上游是宿主的一个常量，抄进两套字典就迟早只改红一边
+   *  （`error.list_full` 那条教训）。用户下一步要做的动作跟数字无关。 */
+  truncated: '候选不止这些，请输入更准确的证券代码或名称。',
+  noHit: '没有匹配的标的（A股 / 港股 / 美股，含指数与场内基金）。',
   'error.invalid_query': '输入不被接受',
   'error.not_found': '没有找到该标的',
   'error.ambiguous': '命中多条，请从候选里选一条',
@@ -122,14 +146,22 @@ const zh = {
    */
   'error.list_full': '自选股最多 {max} 条，先删一条再加',
   'error.list_full_noMax': '自选股已达上限，先删一条再加',
-  'error.credential_missing': '未配置 Fuyao 密钥：在「插件」页的 Capital 模式卡片里填 API Key',
+  'error.credential_missing': '未配置 Fuyao 密钥：在「插件」页的 Capital 模式卡片里填 API Key（只影响 A 股那一路，港美股照常用）',
   'error.rate_limited': '行情服务限流，请稍后再试',
-  'error.fuyao_unavailable': '行情服务暂时不可用，请稍后再试',
+  'error.fuyao_unavailable': 'A 股行情暂时取不到，请稍后再试',
+  'error.tencent_unavailable': '港美股行情暂时取不到，请稍后再试',
   'error.quote_unavailable': '该标的没有可用报价',
   'error.refresh_timeout': '刷新超时，请稍后再试',
   'error.store_unavailable': '自选股存储不可用',
   'error.unauthorized': '登录状态已失效：请先回到宿主窗口重新登录',
   errorSuffix: '（其他标的仍是上一次成功快照）',
+  /**
+   * 某一路检索挂了：候选照常给其余路，这一句说**挂掉的那一路**（R12 / 设计文档 §5.4）。
+   * 值自带冒号，中英文各按各的标点；接的是同一份 `error.*` 文案，不另起一套说法。
+   */
+  'partial.a-share': 'A 股检索不可用：',
+  'partial.hk': '港股检索不可用：',
+  'partial.us': '美股检索不可用：',
 }
 
 const en = {
@@ -137,7 +169,7 @@ const en = {
   'command.description': 'Add / view / remove watched symbols',
   title: 'Watchlist',
   close: 'Close',
-  searchPlaceholder: 'Symbol code or Chinese name — A-share / index / ETF',
+  searchPlaceholder: 'Symbol code or name — A-share / HK / US',
   add: 'Add',
   added: 'Added',
   refreshing: 'Refreshing…',
@@ -150,10 +182,17 @@ const en = {
   updated: 'Updated',
   notRefreshed: 'Not refreshed',
   stale: 'last snapshot',
+  exchangeTime: 'exchange time',
   noChangePct: 'No change data yet',
-  typeStock: 'Stock',
-  typeIndex: 'Index',
-  typeEtf: 'ETF',
+  typeAShare: 'A-Share',
+  typeHkStock: 'HK',
+  typeUsStock: 'US',
+  typeAIndex: 'A-Index',
+  typeHkIndex: 'HK-Index',
+  typeUsIndex: 'US-Index',
+  kindStock: 'stock',
+  kindIndex: 'index',
+  kindEtf: 'ETF',
   remove: 'Remove',
   more: 'More',
   pin: 'Pin to top',
@@ -175,34 +214,75 @@ const en = {
   confirmDescSuffix: ' from your watchlist?',
   confirmCancel: 'Cancel',
   confirmOk: 'Remove',
-  truncated: 'More than 10 candidates — enter the exact code or name.',
-  noHit: 'No matching symbol (A-share / index / on-exchange ETF).',
+  truncated: 'More candidates exist than shown — enter a more exact code or name.',
+  noHit: 'No matching symbol (A-share / HK / US, including indices and listed funds).',
   'error.invalid_query': 'Input not accepted',
   'error.not_found': 'Symbol not found',
   'error.ambiguous': 'Multiple hits — pick one candidate',
   'error.list_full': 'Watchlist holds at most {max} symbols — remove one first',
   'error.list_full_noMax': 'Watchlist is full — remove one first',
-  'error.credential_missing': 'No Fuyao API key: set it on the Capital card in the Plugins page',
+  'error.credential_missing': 'No Fuyao API key: set it on the Capital card in the Plugins page (A-share quotes only — HK and US keep working)',
   'error.rate_limited': 'Quote service is rate limited — try again later',
-  'error.fuyao_unavailable': 'Quote service unavailable — try again later',
+  'error.fuyao_unavailable': 'A-share quotes unavailable — try again later',
+  'error.tencent_unavailable': 'HK / US quotes unavailable — try again later',
   'error.quote_unavailable': 'No quote for this symbol',
   'error.refresh_timeout': 'Refresh timed out — try again later',
   'error.store_unavailable': 'Watchlist storage unavailable',
   'error.unauthorized': 'Session expired — sign back in to the host first',
   errorSuffix: ' (other symbols still show their last good snapshot)',
+  'partial.a-share': 'A-share search unavailable: ',
+  'partial.hk': 'HK search unavailable: ',
+  'partial.us': 'US search unavailable: ',
 }
 
 /**
  * `asset_type` → 类型徽标文案的**字典键**。文案本身住两套字典里（2.5.2 是在这里写死中文，
- * 英文界面于是画着「股票 / 指数」，还绕过了"两套语言 key 必须齐平"那道闸门）；
- * 「预测」「复盘」递进输入框的那句话也读同一份，英文句子中间不再夹中文类型词。
+ * 英文界面于是画着「股票 / 指数」，还绕过了"两套语言 key 必须齐平"那道闸门）。
+ *
+ * 六档只说**市场**（2026-10-07 用户点名：「股票」拆成 A股 / 港股 / 美股，指数跟着拆三档，
+ * 三市三种底色）。两件事因此从徽标上退场，各自另有落点：
+ * ① "这是 ETF / 这是股票还是指数"进递进输入框那句话（`KIND_LABEL_KEYS`，Agent 按它选端点）；
+ * ② 港股 ETF 在检索阶段本来就分不出与个股的差别（实测 `03037` 搜索给 `GP`、快照给 `GP-FUND`），
+ *    所以 `港股` 那一档同时盖住两者是**如实**，不是合并出了错。
  */
-const TYPE_LABEL_KEYS = { 'a-share': 'typeStock', 'a-share-index': 'typeIndex', 'fund-etf': 'typeEtf' }
+const TYPE_LABEL_KEYS = {
+  'a-share': 'typeAShare',
+  'hk-stock': 'typeHkStock',
+  'us-stock': 'typeUsStock',
+  'a-share-index': 'typeAIndex',
+  'hk-index': 'typeHkIndex',
+  'us-index': 'typeUsIndex',
+  // 场内 ETF 归 A股那一档：徽标说市场，而它交易的就是 A 股二级市场的价格。
+  'fund-etf': 'typeAShare',
+}
+/** 递进输入框那句话里的"这一族走哪个端点"，与徽标各管各的（见字典里 `kindStock` 一族的注释）。 */
+const KIND_LABEL_KEYS = {
+  'a-share': 'kindStock',
+  'hk-stock': 'kindStock',
+  'us-stock': 'kindStock',
+  'a-share-index': 'kindIndex',
+  'hk-index': 'kindIndex',
+  'us-index': 'kindIndex',
+  'fund-etf': 'kindEtf',
+}
 /** 未知类型（上游哪天多一档）照原样画出来，比硬套一个错的中文标签诚实。 */
 function typeLabel(assetType, t) {
   const key = TYPE_LABEL_KEYS[assetType]
   return key === undefined ? String(assetType ?? '') : t(key)
 }
+function kindLabel(assetType, t) {
+  const key = KIND_LABEL_KEYS[assetType]
+  return key === undefined ? String(assetType ?? '') : t(key)
+}
+
+/**
+ * 面板**不画币种**（2026-10-07 用户两次点名：先不要 ISO 码、再不要 `¥` / `$`——"正常人都 get
+ * 货币单元的问题"）。落点只有这一处：`quote.currency` 照旧取、照旧入库、照旧过 schema，
+ * 只是不进 DOM。要恢复显示，只需要在这一处重新读它，上游与宿主都不必动。
+ * ⚠️ 已知代价（记录在 `docs/design/watchlist-hk-us.md` R9 与 P10）：`80700` 这类 `-R` 柜台是
+ * **港币市场、人民币计价**，同一屏里它与 `00700`(HKD) 现在长得一样。用户按市场读币种，
+ * 在这一类标的上会读错——这是这一版接受了的取舍，不是没看见。
+ */
 
 /**
  * 上游（同花顺搜索结果）的标的名在进面板、进 tooltip、进输入框之前，先剥掉不可见与双向控制字符。
@@ -222,8 +302,19 @@ function scrubInvisible(value) {
 function cleanRows(rows) {
   return Array.isArray(rows) ? rows.map((row) => (row === null || typeof row !== 'object' ? row : { ...row, name: scrubInvisible(row.name) })) : rows
 }
-/** 类型徽标的配色：股票=橙、指数=蓝、ETF=绿，与候选行共用同一组类。 */
-const TYPE_TONES = { 'a-share': 'capital-watchlist-tag-stock', 'a-share-index': 'capital-watchlist-tag-index', 'fund-etf': 'capital-watchlist-tag-etf' }
+/**
+ * 类型徽标的配色：**一色只说一件事 = 市场**（2026-10-07 用户点名：A 股 / 港股 / 美股三种底色；
+ * 此前 A 股与港股共用同一支琥珀色，三市在色上分不开）。同一市场里股票与指数同色，
+ * 品种那一层只由文字给（`A股` / `A指`）——颜色不再同时表达市场与品种两件事。
+ */const TYPE_TONES = {
+  'a-share': 'capital-watchlist-tag-cn',
+  'a-share-index': 'capital-watchlist-tag-cn',
+  'fund-etf': 'capital-watchlist-tag-cn',
+  'hk-stock': 'capital-watchlist-tag-hk',
+  'hk-index': 'capital-watchlist-tag-hk',
+  'us-stock': 'capital-watchlist-tag-us',
+  'us-index': 'capital-watchlist-tag-us',
+}
 
 /**
  * 面板几何。
@@ -310,9 +401,15 @@ const CSS = `
 /* 类型徽标 = 官方状态徽标那对写法：底色用 state-*-tertiary（主题包为"状态色的底"准备的实心档，
    自己 color-mix 出来的透明档压在白卡片上等于没混），文字用同色系 primary；
    amber 例外走 warn-label——warn-primary 压白底只有 2:1，官方"状态色当文字"另有 label 一档。 */
-.capital-watchlist-tag-index { color: var(--dsw-alias-state-business-primary); background: var(--dsw-alias-state-business-tertiary); }
-.capital-watchlist-tag-stock { color: var(--dsw-alias-state-warn-label); background: var(--dsw-alias-state-warn-tertiary); }
-.capital-watchlist-tag-etf { color: var(--dsw-alias-state-success-primary); background: var(--dsw-alias-state-success-tertiary); }
+/* 三档徽标按**市场**配色，取的是"钞票的主色"这把直觉：人民币=红、港币=金琥珀、美元=绿
+   （2026-10-07 用户点名，并明确绿那一档"和美元很像"）。股票与指数同市同色，品种只由文字分。
+   ⚠️ 红档与"红涨"那颗红是两种东西：徽标是整行固定的底，价格只在涨跌时上色。
+   state-*-tertiary 是主题包给状态色准备的**实心底**；error 那一族的 tertiary 本仓从未用过、
+   无法在此确认存在，于是给一条 color-mix 兜底——猜错 token 的症状是"底色没了"，不会报错。
+   ⚠️ 这段 CSS 住在模板字符串里：注释里不许出现反引号，出现就把整段样式截断（本轮踩过）。 */
+.capital-watchlist-tag-cn { color: var(--dsw-alias-state-error-primary); background: var(--dsw-alias-state-error-tertiary, color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent)); }
+.capital-watchlist-tag-hk { color: var(--dsw-alias-state-warn-label); background: var(--dsw-alias-state-warn-tertiary); }
+.capital-watchlist-tag-us { color: var(--dsw-alias-state-success-primary); background: var(--dsw-alias-state-success-tertiary); }
 /* 表头与数据行共用同一个 grid 定义：宽度只在这一处，两处各自排版就会串行（实机踩过）。
    三列：名称（第二行是「代码 · 徽标」）/ 报价 / 「操作」那一簇（「预测」「复盘」「更多」三枚）。
    92px 与 84px 必须是**定值**：表头与数据行是两个独立的 grid 容器，只有定值才让两行的列边线对齐；
@@ -334,8 +431,8 @@ const CSS = `
 .capital-watchlist-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .capital-watchlist-namewrap { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .capital-watchlist-name { font-size: 14px; font-weight: 500; color: var(--dsw-alias-label-primary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-/* 代码与类型徽标同处第二行：gap 是这一对唯一的间距来源，徽标自带内边距，别再各写 margin。 */
-.capital-watchlist-codeline { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* 代码与类型徽标同处第二行（2026-10-07 起这一行就这两样，币种不进面板）：gap 是这一对唯一的间距来源，徽标自带内边距，别再各写 margin。10px 与候选行 capital-watchlist-option 那条 gap 同值——同一件事的两种排法，不该一处紧一处松；6px 在实机上读起来是"贴着"（2026-10-07 用户点名）。 */
+.capital-watchlist-codeline { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .capital-watchlist-code { font-size: 11px; color: var(--dsw-alias-label-tertiary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 /* 最新价在上、涨跌幅在下，右对齐：两行都同一列里排，列宽才不需要跟着涨跌位数抖。
    padding-right 是**数字与动作区之间那口气的唯一来源**（2026-10-01 用户点名：报价和预测/复盘太近，
@@ -508,6 +605,8 @@ const blank = () => ({
    * 与 `addError` **分开两个字段**是刻意的——两者清空的时机不同（见 `onQueryChange`）。
    */
   searchError: null,
+  /** 某一路检索挂了：候选照常给其余路，这一句只说挂掉的那一路（R12）。 */
+  searchPartial: null,
   /** 添加动作的失败（list_full / ambiguous）：与输入无关，显示在搜索区下方，改字不清它。 */
   addError: null,
   /**
@@ -691,7 +790,7 @@ class WatchlistSurface {
     if (this.searchController !== null) this.searchController.abort()
     const controller = new AbortController()
     this.searchController = controller
-    this.patch({ searching: true, searchError: null })
+    this.patch({ searching: true, searchError: null, searchPartial: null })
     // 回包落地前再看一眼输入框：从发出到返回这段时间里用户可能已经改字（新词只排了个防抖
     // 定时器，还没出网）。那一串候选属于**上一个词**，画出来就是能被点错的那一行——丢掉，
     // 让新词的定时器自己去查。
@@ -703,7 +802,7 @@ class WatchlistSurface {
         this.patch({ searching: false })
         return
       }
-      this.patch({ candidates: cleanRows(payload.items) ?? [], truncated: payload.truncated === true, searching: false, pendingSearch: false })
+      this.patch({ candidates: cleanRows(payload.items) ?? [], truncated: payload.truncated === true, searching: false, pendingSearch: false, searchPartial: Array.isArray(payload.partial) && payload.partial.length > 0 ? payload.partial : null })
     } catch (error) {
       if (error.name === 'AbortError') return
       // 失败不记在"这个词查过了"的账上：同样几个字重打一遍还得能再出网。
@@ -711,7 +810,7 @@ class WatchlistSurface {
       if (!stillCurrent()) return
       // 走 `searchError` 而不是 `addError`：它占下拉的 hint 位，替换掉「没有匹配的标的」——
       // 同一屏不许一边说"没有这个票"、一边说"服务限流"（候选清空了，noHit 本来就会亮起来）。
-      this.patch({ candidates: [], truncated: false, searching: false, pendingSearch: false, searchError: { code: error.code ?? 'fuyao_unavailable' } })
+      this.patch({ candidates: [], truncated: false, searching: false, pendingSearch: false, searchError: { code: error.code ?? 'fuyao_unavailable' }, searchPartial: null })
     }
   }
 
@@ -728,7 +827,7 @@ class WatchlistSurface {
     // try 里：`/add` 已经落库、紧接着清单读回来 503，面板就报"自选股已达上限"式的黄字，
     // 用户照着再点一次——同一个标的被加了第二遍）。读清单的失败归 `loadError`（列表那
     // 一片），刷报价的失败归 `error`（页脚那条红字），各自有位置，都不占添加这句话。
-    this.patch({ addError: null, candidates: [], query: '', dropdownOpen: false, pendingSearch: false })
+    this.patch({ addError: null, candidates: [], query: '', dropdownOpen: false, pendingSearch: false, searchError: null, searchPartial: null })
     this.lastQuery = null
     await this.load().catch(() => {})
     // 添加是一次完整动作：读完清单顺手刷一次报价，新行当场就有价。停在「未刷新」
@@ -809,18 +908,19 @@ function formatTime(value) {
 
 /** 类型徽标：候选行与数据行共用同一支笔（文案与配色都在这两处一次对齐）。 */
 function TypeTag({ assetType, t }) {
-  return h('span', { className: `capital-watchlist-tag ${TYPE_TONES[assetType] ?? 'capital-watchlist-tag-stock'}` }, typeLabel(assetType, t))
+  return h('span', { className: `capital-watchlist-tag ${TYPE_TONES[assetType] ?? 'capital-watchlist-tag-cn'}` }, typeLabel(assetType, t))
 }
 
 /**
- * 「预测」与「复盘」共用的**形状**：`<前缀>名称 (thscode · 类型)<后缀>`。
+ * 「预测」与「复盘」共用的**形状**：`<前缀>名称 (thscode · 品种)<后缀>`。
  * 括号、空格与中点是结构，写死在这里（中英文同一形状）；句子两半住字典的
  * `<kind>PromptPrefix` / `<kind>PromptSuffix`（kind 是 `predict` / `review`），改文案去那儿改。
- * 类型词读字典（2.5.3 起）：英文句子中间不许再夹「股票 / 指数」这种中文标签。
+ * 中间那个品种词读 `KIND_LABEL_KEYS`，**不是徽标那套市场词**：Agent 靠它选端点
+ * （股票 / 指数 / 场内基金是三个不同上游），市场由 thscode 自己带。
  */
 function promptOf(item, t, kind) {
   const name = scrubInvisible(item.name)
-  return `${t(`${kind}PromptPrefix`)}${name} (${item.thscode} · ${typeLabel(item.asset_type, t)})${t(`${kind}PromptSuffix`)}`
+  return `${t(`${kind}PromptPrefix`)}${name} (${item.thscode} · ${kindLabel(item.asset_type, t)})${t(`${kind}PromptSuffix`)}`
 }
 
 /**
@@ -856,11 +956,20 @@ function QuoteCell({ quote, failureCode, refreshing, t }) {
     : !hasPct
       ? 'capital-watchlist-nodata'
       : quote.change_pct > 0 ? 'capital-watchlist-up' : quote.change_pct < 0 ? 'capital-watchlist-down' : 'capital-watchlist-flat'
+  /**
+   * tooltip 的三句话按本次状态拼：失败原因 + 上一次快照时刻（陈旧行）、"暂无涨跌数据"（价有涨跌没有）、
+   * 交易所当地时间（**只有港美股那一路带 `source_time`**，A 股那一路没有这格就不画、不编一句）。
+   */
+  const exchange = typeof quote.source_time === 'string' && quote.source_time.length > 0
+    ? `${t('exchangeTime')} ${quote.source_time}`
+    : ''
+  const tips = []
+  if (stale) tips.push(`${t(`error.${failureCode}`)} · ${t('stale')} ${formatTime(quote.captured_at)}`)
+  else if (!hasPct) tips.push(t('noChangePct'))
+  if (exchange.length > 0) tips.push(exchange)
   return h('div', {
     className: 'capital-watchlist-quote',
-    title: stale
-      ? `${t(`error.${failureCode}`)} · ${t('stale')} ${formatTime(quote.captured_at)}`
-      : hasPct ? undefined : t('noChangePct'),
+    title: tips.length === 0 ? undefined : tips.join(' · '),
   },
     h('div', { className: stale ? 'capital-watchlist-price capital-watchlist-stale' : 'capital-watchlist-price' }, quote.price.toFixed(2)),
     h('div', { className: `capital-watchlist-change ${tone}` }, pct))
@@ -953,8 +1062,11 @@ function WatchlistDialog({ useDialog, surface, t, inputActions }) {
       },
         h('span', { className: 'capital-watchlist-optionmain' },
           h('span', { className: 'capital-watchlist-optionname' }, candidate.name),
+          // ⛔ 候选第二行画**完整 canonical 代码**，不是裸码：`00700` 一次同时命中港个股与
+          // `000700.SZ` 模塑科技，搜「恒生指数」还会同时回 `HSI` / `HSIGTR` / `HSINTR` 三条真指数——
+          // 裸码并列时用户没有可核对的信息，点错就是加错票。
           h('span', { className: 'capital-watchlist-optioncode' },
-            candidate.in_list === true ? `${candidate.ticker} · ${t('added')}` : candidate.ticker)),
+            candidate.in_list === true ? `${candidate.thscode} · ${t('added')}` : candidate.thscode)),
         h(TypeTag, { assetType: candidate.asset_type, t }))),
       state.composing === true
         // ⛔ 合成期（拼音还没上屏）不许报「没有匹配的标的」：那是把"还没查"说成"查了，没有"，
@@ -971,6 +1083,15 @@ function WatchlistDialog({ useDialog, surface, t, inputActions }) {
             : state.candidates.length === 0
               ? h('div', { className: 'capital-watchlist-hint' }, t('noHit'))
               : null,
+      // 某一路挂了而其余路照常给候选：这一行说的是**那一路**（R12）。它与上面的 hint 各说
+      // 各的事——上面那句讲"这一屏有没有匹到"，这句讲"有一路今天没参与"，不互相顶替。
+      ...(state.searchPartial ?? []).map((branch) => h('div', {
+        key: `partial-${branch.market}`,
+        className: 'capital-watchlist-hint capital-watchlist-searcherror',
+        role: 'status',
+        'data-market': branch.market,
+        'data-code': branch.code,
+      }, `${t(`partial.${branch.market}`)}${t(`error.${branch.code}`)}`)),
       state.truncated ? h('div', { className: 'capital-watchlist-hint' }, t('truncated')) : null)
 
   const head = state.items.length === 0
@@ -1002,7 +1123,7 @@ function WatchlistDialog({ useDialog, surface, t, inputActions }) {
       },
         h('span', { className: 'capital-watchlist-namewrap' },
           h('span', { className: 'capital-watchlist-name', title: `${item.name} ${item.ticker}` }, item.name),
-          // 代码与类型徽标同处第二行（用户反馈：类型单占一列太累赘）。
+          // 代码与市场徽标同处第二行（2026-10-07 起这一行只有这两样：币种不进面板，见上面那一族注释）。
           h('span', { className: 'capital-watchlist-codeline' },
             h('span', { className: 'capital-watchlist-code' }, item.ticker),
             h(TypeTag, { assetType: item.asset_type, t }))),

@@ -39,6 +39,8 @@ const SAMPLES = {
   tencent_ticks: { code: '600519.SH' },
   tencent_hk_quote: { codes: ['00700'] },
   tencent_us_quote: { codes: ['AAPL'] },
+  tencent_hk_index_quote: { codes: ['HSI'] },
+  tencent_us_index_quote: { codes: ['IXIC'] },
   tencent_hk_kline: { code: '00700', period: 'day', adjust: 'none', count: 5 },
   tencent_us_kline: { code: 'AAPL.OQ', period: 'day', adjust: 'none', count: 5 },
   wind_edb_search: { question: '中国GDP相关指标' },

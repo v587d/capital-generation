@@ -1,13 +1,23 @@
 /**
  * 自选股测试的共用夹具（不是 *.test.mjs，`node --test` 不会把它当用例）。
  *
- * 两件事必须仿真到位，否则断言只会证明"代码和自己造的假件一致"：
+ * 三件事必须仿真到位，否则断言只会证明"代码和自己造的假件一致"：
  *  1. **KvTable 的真实面**：只有 `get/entries/keys/size/put/delete/update`，**没有 `values()`**；
  *     `update` 对缺失键抛 `missing-key`；写入要过域 schema（真域在持久边界逐条校验）。
  *  2. **Fuyao 的真报文形态**：下面的 fixture 抄自 2026-09-28 实测响应（含 ETF 批量被
  *     `code=1002 (only one code per request)` 拒绝那条），不是按想象造的字段。
+ *  3. **腾讯公开端点的真回包形态**（2026-10-07 实测）：smartbox 逐字照抄（含 `N` 哨兵与
+ *     `\uXXXX` 转义），快照按实测列位填数（名称用 ASCII——GBK 解码由 `tencent-source.test.mjs`
+ *     与真机冒烟覆盖，位序错了这里也一样会红）。
+ *
+ * `stubFuyao` 现在挡的是**两路上游**（A 股 Fuyao + 港美股腾讯）：自选股一次搜索要打三笔，
+ * 只 stub 一家等于让单测碰真网络。默认回"上游正常但这一路没有这个票"（smartbox 的 `N` 哨兵、
+ * 快照的 `v_pv_none_match`），要港美股候选或报价的用例自己传 fixture。
  */
 import { domainSpec } from '../capital-watchlist/index.js'
+import { SMARTBOX_ROWS, tencentSnapshotText } from './tencent-fixtures.mjs'
+
+export { SMARTBOX_ROWS, tencentSnapshotText } from './tencent-fixtures.mjs'
 
 export function createFakeDomain() {
   const records = new Map()
@@ -120,19 +130,39 @@ export const FIXTURES = {
   noData: { code: 0, data: { timestamp: null, item: [] } },
 }
 
+/** 一次输入三路并发：Fuyao 一笔 + smartbox `t=hk` / `t=us` 各一笔（见 `search` 的注释）。 */
+export function upstreamCalls(calls, needle) {
+  return calls.filter((call) => call.url.includes(needle))
+}
+
 /**
  * 按 URL 分派 fixture，并把每次出网都记下来（断言"参数里必须带白名单与 limit"
  * 与"刷新只发生了一次"都靠这份记录）。
  *
- * @param overrides - `{ 'api/a-share/prices/snapshot': payload | (() => payload) }` 形式的定制。
+ * @param overrides - `{ 'api/a-share/prices/snapshot': payload | (() => payload) }` 形式的定制；
+ *   键撞不中就走默认路由。腾讯那两家的值是**文本**（不是 JSON 信封），函数形态收 `(url) => text`。
  */
 export function stubFuyao(overrides = {}) {
   const calls = []
   const previous = globalThis.fetch
-  const route = (url) => {
+  const overrideFor = (url) => {
     for (const [needle, payload] of Object.entries(overrides)) {
       if (url.includes(needle)) return typeof payload === 'function' ? payload(url) : payload
     }
+    return undefined
+  }
+  const routeTencent = (url) => {
+    if (url.includes('smartbox.gtimg.cn')) {
+      const market = /[?&]t=([^&]+)/.exec(url)?.[1] ?? ''
+      const query = decodeURIComponent(/[?&]q=([^&]*)/.exec(url)?.[1] ?? '')
+      return SMARTBOX_ROWS[`${market}|${query}`] ?? 'v_hint="N";'
+    }
+    // 快照的查询串是 `…/q=hk00700,hkHSI` 这种**路径形态**（`QUOTE_URL` 自己就带着 `q=`），
+    // 用 `[?&]` 找它会一条都找不到。
+    const symbols = (/q=([^&]*)/u.exec(url)?.[1] ?? '').split(',').filter(Boolean)
+    return tencentSnapshotText(symbols)
+  }
+  const route = (url) => {
     if (url.includes('/api/meta/tickers/search')) {
       const requested = /[?&]q=([^&]+)/.exec(url)?.[1] ?? ''
       const decoded = decodeURIComponent(requested)
@@ -161,11 +191,24 @@ export function stubFuyao(overrides = {}) {
     return { code: 0, data: { timestamp: null, item: [] } }
   }
   globalThis.fetch = async (url, init = {}) => {
-    calls.push({ url: String(url), headers: init.headers, signal: init.signal })
-    const envelope = route(String(url))
-    const status = envelope?.status ?? 200
-    if (status !== 200) return { ok: false, status, json: async () => envelope.body ?? {} }
-    return { ok: true, status, json: async () => envelope }
+    const text = String(url)
+    calls.push({ url: text, headers: init.headers, signal: init.signal })
+    const tencent = text.includes('gtimg.cn')
+    const payload = overrideFor(text) ?? (tencent ? routeTencent(text) : route(text))
+    const status = payload?.status ?? 200
+    if (!tencent) {
+      if (status !== 200) return { ok: false, status, json: async () => payload.body ?? {} }
+      return { ok: true, status, json: async () => payload }
+    }
+    // 腾讯这两条都是**文本**响应：快照要 GBK 解，smartbox 全 ASCII（名称是 `\uXXXX` 字面转义）。
+    // 夹具的正文是 ASCII，UTF-8 字节与 GBK 字节逐位相同，所以这里不必真造一份 GBK 编码。
+    const bytes = Buffer.from(String(payload), 'utf-8')
+    return {
+      ok: true,
+      status,
+      arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+      text: async () => String(payload),
+    }
   }
   return {
     calls,

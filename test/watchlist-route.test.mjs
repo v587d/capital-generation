@@ -160,13 +160,14 @@ test('POST /pin：置顶那条排到最前；不在清单 404、裸代码 400，
   const stub = stubFuyao()
   const { handler } = harness()
   try {
-    const pinned = await call(handler, { method: 'POST', url: '/capital-watchlist/pin', body: { thscode: '000300.SH' } })
+    // 置顶一条**港美股键**：`remove` / `pin` 这一路零出网，只换 `normalizeThscode` 的接受形状（§4.2）。
+    const pinned = await call(handler, { method: 'POST', url: '/capital-watchlist/pin', body: { thscode: 'INX.US' } })
     assert.equal(pinned.statusCode, 200)
-    assert.equal(pinned.json().items[0].thscode, '000300.SH', '回包里就是新顺序（客户端照它贴）')
+    assert.equal(pinned.json().items[0].thscode, 'INX.US', '回包里就是新顺序（客户端照它贴）')
     assert.equal(typeof pinned.json().items[0].pinned_at, 'number')
 
     const again = await call(handler, { method: 'GET', url: '/capital-watchlist/list' })
-    assert.equal(again.json().items[0].thscode, '000300.SH', '再读清单仍是置顶顺序')
+    assert.equal(again.json().items[0].thscode, 'INX.US', '再读清单仍是置顶顺序')
 
     const missing = await call(handler, { method: 'POST', url: '/capital-watchlist/pin', body: { thscode: '600000.SH' } })
     assert.equal(missing.statusCode, 404)
@@ -320,4 +321,48 @@ test('apply()：webServer 缺席的载体（web profile 形状）仍激活，出
   })
   assert.equal(routes.length, 1)
   assert.equal(routes[0].path, ROUTE_PATH)
+})
+
+test('tencent_unavailable 的 HTTP 映射与 scope：两路上游的错误码各有各的状态位', async () => {
+  // 闭集里新增的那一条必须有独立文案位与独立状态码：混进 `fuyao_unavailable` 就叫用户去配
+  // 一个本来不需要的密钥（港美股那一路无密钥可查）。
+  const failing = (result) => createRouteHandler({ search: async () => result }, {})
+  for (const [code, expected] of [['tencent_unavailable', 502], ['fuyao_unavailable', 502], ['rate_limited', 429], ['credential_missing', 503], ['invalid_query', 400]]) {
+    const res = await call(failing({ ok: false, code, message: code, scope: 'all' }), { method: 'GET', url: '/capital-watchlist/search?q=腾讯' })
+    assert.equal(res.statusCode, expected, `${code} 的对外状态位`)
+    assert.equal(res.json().code, code)
+    assert.equal(res.headers['cache-control'], 'no-store', '每条映射都要带 no-store：自选股回包不许缓存')
+  }
+})
+
+test('refresh 即使半边失败也回 200 + items：error.scope 说清是哪一路（面板据此不占居中位）', async () => {
+  const stub = stubFuyao({ '/api/a-share-index/prices/snapshot': { code: 4001, message: '请求频率超限', data: null } })
+  const { handler, service } = harness()
+  try {
+    await service.add({ thscode: '00700.HK' })
+    const res = await call(handler, { method: 'POST', url: '/capital-watchlist/refresh', body: {} })
+    assert.equal(res.statusCode, 200, '整批失败也不清空列表、不换状态码：行还在，画上一次成功的值')
+    const payload = res.json()
+    assert.equal(payload.error.code, 'rate_limited')
+    assert.equal(payload.error.scope, 'a-share', '⛔ 港美股这次是好的，回包不许说成整块不可用')
+    assert.ok(payload.items.some((item) => item.thscode === '00700.HK' && item.quote !== null), '港那一路照常落地')
+    assert.deepEqual(payload.failures.map((failure) => failure.thscode), ['000001.SH'])
+  } finally {
+    stub.restore()
+  }
+})
+
+test('search 的回包带 partial 时状态码仍是 200：一路挂了不是"查询失败"', async () => {
+  const stub = stubFuyao({ '/api/meta/tickers/search': { status: 503, body: {} } })
+  const { handler } = harness()
+  try {
+    const res = await call(handler, { method: 'GET', url: '/capital-watchlist/search?q=%E8%85%BE%E8%AE%AF' })
+    assert.equal(res.statusCode, 200)
+    const payload = res.json()
+    assert.equal(payload.ok, true)
+    assert.deepEqual(payload.partial, [{ market: 'a-share', code: 'fuyao_unavailable' }])
+    assert.ok(payload.items.some((item) => item.exchange === 'HK'), '候选照常给其余两路')
+  } finally {
+    stub.restore()
+  }
 })

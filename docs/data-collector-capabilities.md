@@ -2,7 +2,7 @@
 
 > 本表由 `npm run docs:capabilities` 从 Fuyao、Tencent、Eastmoney 与 Wind source 定义生成，并由 `test/data-collector-capabilities.test.mjs` 断言与实现同步：新增端点若忘了重新生成，测试会失败。
 
-当前共 **92 个 capability**：同花顺 Fuyao 61 个，腾讯公开 HTTP 7 个，东方财富 HTTP 21 个，Wind 金融数据服务 3 个。参数后带 **\*** 表示必填。
+当前共 **94 个 capability**：同花顺 Fuyao 61 个，腾讯公开 HTTP 9 个，东方财富 HTTP 21 个，Wind 金融数据服务 3 个。参数后带 **\*** 表示必填。
 
 **复核方式**：Fuyao 能力可用 `npm run smoke:fuyao` 真实复核；Tencent 能力使用最小 smoke fixture 或按需真实请求复核；Eastmoney 能力使用固定 fixture，并按需执行公开网页 JSON smoke；Wind 能力用 `npm run smoke:wind` 真实复核（需要 `WIND_API_KEY`，**按次消耗上游积分**）。
 
@@ -175,6 +175,8 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 | `tencent_ticks` | `/tencent/ticks` | `code`\* | 否 | 腾讯最近交易日分笔成交明细 |
 | `tencent_hk_quote` | `/tencent/hk_quote` | `codes`\* | 否 | 腾讯港股实时快照（港元，无涨跌停） |
 | `tencent_us_quote` | `/tencent/us_quote` | `codes`\* | 否 | 腾讯美股快照（美元，交易所当地时间） |
+| `tencent_hk_index_quote` | `/tencent/hk_index_quote` | `codes`\* | 否 | 腾讯港股指数实时点位（无量纲，不含成交与市值） |
+| `tencent_us_index_quote` | `/tencent/us_index_quote` | `codes`\* | 否 | 腾讯美股指数点位（无量纲，收盘值为真值） |
 | `tencent_hk_kline` | `/tencent/hk_kline` | `code`\* `period` `adjust` `count` | 否 | 腾讯港股日周月 K 线（成交量以股计） |
 | `tencent_us_kline` | `/tencent/us_kline` | `code`\* `period` `adjust` `count` | 否 | 腾讯美股日周月 K 线（前复权或不复权） |
 

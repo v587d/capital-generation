@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.6.2-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.6.3-9cf" alt="Version"></a>
 </p>
 
 # Capital Generation
@@ -67,7 +67,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
      </a>
    </p>
 
-3. **新建会话。** 在 Agent Preset 选择器中选 **Capital**，然后直接描述研究问题。也可以到「设置」→「Agent 预设」把它设为默认模式。
+3. **新建会话。** 在 Agent Preset 选择器中选 **Capital 模式**，然后直接描述研究问题。也可以到「设置」→「Agent 预设」把它设为默认模式。
 
    <p align="center">
      <a href="assets/mode_selector.png">
@@ -77,10 +77,10 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 
 ## 能做什么
 
-- **查数据和资料：** 覆盖A股、港股、美股，按需获取行情、财务、指数、基金与宏观行业数据，检索公告、新闻和研报。共计 **92** 个数据收集能力和 **14** 个网页检索能力，部分公开数据源无需额外密钥；具体覆盖范围见 [数据收集能力表](docs/data-collector-capabilities.md) 和 [网页检索能力表](docs/web-retriever-capabilities.md)。
+- **查数据和资料：** 覆盖A股、港股、美股，按需获取行情、财务、指数、基金与宏观行业数据，检索公告、新闻和研报。共计 **94** 个数据收集能力和 **14** 个网页检索能力，部分公开数据源无需额外密钥；具体覆盖范围见 [数据收集能力表](docs/data-collector-capabilities.md) 和 [网页检索能力表](docs/web-retriever-capabilities.md)。
 - **数据分析：** 所有 Agents 均不直接接触原始结构数据，Agents 按需读取数据、校验数据，并写脚本挖掘数据背后含义。 
 - **可视化：** 将数据交给不同角色处理，再生成可交互图表。图表会作为本轮交付物出现在会话中，可在侧栏查看或离线打开。了解处理流程可看 [Agent 角色说明](docs/agent-roles.md)。
-- **管理自选股：** 在 Capital 会话中输入 `/` 或点击输入框旁的 `+`，从「指令」中打开「自选股」。刷新失败时已有报价仍显示为旧快照，并标明时间；请勿当作实时价格。
+- **管理自选股：** 在 Capital 会话中输入 `/` 或点击输入框旁的 `+`，从「指令」中打开「自选股」。A股、港股、美股共用这一个入口：直接敲代码或名称，候选列表会写清它属于哪个市场；清单里每一行都带市场标注，指数另标一行。某一个市场取数失败时，其余市场照常刷新，页面会说明失败的是哪一路；整体刷新失败时已有报价仍显示为旧快照，并标明时间，请勿当作实时价格。
 
 会话中的图表效果：
 

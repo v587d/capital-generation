@@ -1,10 +1,25 @@
 import type { DataRequest, DataSource, SchemaDescriptor } from '../data-collector/hub.js'
 import { buildDataKey } from '../data-collector/hub.js'
 import { getDataTimeContract } from '../time/tools.js'
-import { createRequestThrottle } from '../net/throttle.js'
 import { isLikelyIndex, normalizeSecurityCodes, parseSecurityCode, requireTencentSecurity, type SecurityCode } from './security-code.js'
+// 港美股快照、smartbox 与那条**唯一的**出口节流链都在内核里；本文件只留能力定义与 K 线 / 分笔编排。
+// 为什么必须共用：两条独立节流等于没有限流，两份字段位序表迟早只会修好一份（AGENTS.md §9.7）。
+import {
+  QUOTE_URL,
+  fetchOffshoreIndexQuotes,
+  fetchOffshoreQuotes,
+  isRecord,
+  normalizeHkCode,
+  normalizeOffshoreIndexCode,
+  normalizeUsCode,
+  numberOrNull,
+  requiredNumber,
+  resolveUsKlineSymbol,
+  sourceError,
+  tencentGetText as getText,
+  type JsonRecord,
+} from './tencent-public-core.js'
 
-const QUOTE_URL = 'https://qt.gtimg.cn/q='
 const TICK_URL = 'https://stock.gtimg.cn/data/index.php'
 const KLINE_HOSTS = [
   'https://web.ifzq.gtimg.cn',
@@ -19,18 +34,7 @@ const MAX_TICK_PAGES = 300
 const TICK_SESSION_END = '15:00:59'
 const hostDownUntil = new Map<string, number>()
 
-/**
- * 腾讯出口的**唯一**节流链（进程级）。三个端点都按 IP 风控（429 / 空 data / 静默限流），
- * 而模型一次并发多个 quote / kline 调用会把请求成倍打出去。此前只有 `tencent_ticks` 翻页里
- * 有一处 100ms 本地 sleep——并发调用各自 sleep，请求仍同时到达，等于没有 pacing；
- * 现在所有出口（行情、分笔每一页、K 线的每一次换机）都过这一条链，见 `src/net/throttle.ts`。
- * 间隔取 120ms：与原来翻页的节奏同量级，不会因为把风控间隔"调保守"而拖慢 300 页分笔下载。
- */
-const TENCENT_MIN_INTERVAL_MS = 120
-const tencentThrottle = createRequestThrottle(TENCENT_MIN_INTERVAL_MS)
-
 type Params = Record<string, unknown>
-type JsonRecord = Record<string, unknown>
 type FetchLike = typeof globalThis.fetch
 
 const quoteOutput = {
@@ -115,25 +119,8 @@ const ticksOutput = {
   additionalProperties: true,
 }
 
-function isRecord(value: unknown): value is JsonRecord {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
 function assertKnown(values: Params, allowed: string[]): void {
   for (const key of Object.keys(values)) if (!allowed.includes(key)) throw new Error(`unsupported parameter: ${key}`)
-}
-
-function numberOrNull(value: unknown): number | null {
-  if (value === undefined || value === null || value === '') return null
-  if (typeof value === 'boolean') throw new Error('source returned boolean where a number was expected')
-  const number = typeof value === 'number' ? value : Number(String(value).replaceAll(',', '').trim())
-  return Number.isFinite(number) ? number : null
-}
-
-function requiredNumber(value: unknown, field: string): number {
-  const number = numberOrNull(value)
-  if (number === null) throw new Error(`source returned an invalid ${field}`)
-  return number
 }
 
 function strictDate(value: unknown, name: string): string {
@@ -146,32 +133,6 @@ function strictDate(value: unknown, name: string): string {
 function integer(value: unknown, name: string, min: number, max: number): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min || value > max) throw new Error(`parameter ${name} must be an integer from ${min} to ${max}`)
   return value
-}
-
-function sourceError(message: string, code = 'tencent_source_error'): Error {
-  const error = new Error(message)
-  ;(error as Error & { code?: string }).code = code
-  return error
-}
-
-async function readResponse(response: Response, encoding: 'utf-8' | 'gbk'): Promise<string> {
-  const bytes = await response.arrayBuffer()
-  return new TextDecoder(encoding).decode(bytes)
-}
-
-async function getText(url: string, signal: AbortSignal, encoding: 'utf-8' | 'gbk' = 'utf-8', init: RequestInit = {}): Promise<string> {
-  // 取消不排队：队首那个请求挂住时，把这次取消塞进队列等于把它吞掉（docs/dev/web-retriever.md §4.2「取消原样抛出」）。
-  signal.throwIfAborted()
-  return tencentThrottle(async () => {
-    const response = await fetch(url, {
-      ...init,
-      headers: { 'User-Agent': 'Mozilla/5.0', ...(init.headers ?? {}) },
-      signal,
-    })
-    const text = await readResponse(response, encoding)
-    if (!response.ok) throw sourceError(`Tencent HTTP ${response.status} for ${url}`, response.status === 429 ? 'tencent_rate_limit' : 'tencent_http_error')
-    return text
-  })
 }
 
 function parseJson(text: string, context: string): JsonRecord {
@@ -511,151 +472,9 @@ async function executeTicks(params: Params, signal: AbortSignal): Promise<{ data
  * 港美股快照与 A 股快照**不能共用一份字段表**：实测腾讯在同一个 `~` 分隔串里换了列位——
  * 币种 A 股根本没有、港股在第 75 位、美股在第 35 位；换手率港股在第 59 位（分母是**总股本**）、
  * 美股在第 38 位（分母是**流通股本**）；成交额在港股**指数行**是万元级而个股行是元级。
- * 所以这两张表各自映射，并且只收能用算术或量级证明的列（§10.2：口径猜错就是话说错）。
+ * 所以两张表各自映射（都在 `tencent-public-core.ts`，host 半边与这里共用），
+ * 并且只收能用算术或量级证明的列（§10.2：口径猜错就是话说错）。
  */
-const HK_QUOTE_FIELDS = 78
-const US_QUOTE_FIELDS = 73
-
-/** 腾讯港美股时间戳是**交易所当地时间**，实测同一份响应里 `2026-10-05 16:08:09` 与 `2026-10-05 16:08:10` 并存：分隔符按行漂移，两种都得吃。 */
-function offshoreQuoteTime(value: unknown): string | null {
-  const match = /^(\d{4})[-/](\d{2})[-/](\d{2}) (\d{2}:\d{2}:\d{2})$/.exec(String(value ?? '').trim())
-  return match ? `${match[1]}-${match[2]}-${match[3]} ${match[4]}` : null
-}
-
-/** 逐行拆出 `v_<symbol>="…"`；symbol 就是请求里写出去的那串，所以请求与回执能一对一核对。 */
-function snapshotRows(text: string, requested: Set<string>): Array<{ symbol: string; fields: string[] }> {
-  const rows: Array<{ symbol: string; fields: string[] }> = []
-  for (const line of text.split(';')) {
-    const match = /^v_([\w.]+)="([^"]*)"/.exec(line.trim())
-    if (!match) continue
-    if (!requested.has(match[1].toLowerCase())) continue
-    rows.push({ symbol: match[1], fields: match[2].split('~') })
-  }
-  return rows
-}
-
-function parseHkQuoteRows(text: string, requested: Set<string>): JsonRecord[] {
-  const rows: JsonRecord[] = []
-  for (const { symbol, fields } of snapshotRows(text, requested)) {
-    if (fields.length < HK_QUOTE_FIELDS) throw sourceError(`Tencent HK quote ${symbol} returned ${fields.length} fields, expected at least ${HK_QUOTE_FIELDS}`, 'tencent_invalid_response')
-    // 只收个股：指数行的第 6/37 位在实测里既不是"股"也不是"港元"（hkHSI 两列相等、量级像万元），
-    // 两种量纲不许进同一列；参数层已经拒掉字母指数，这里再核对一次上游没把行串错。
-    if (!/^\d{5}$/.test(fields[2] ?? '')) throw sourceError(`Tencent HK quote ${symbol} is not a five-digit stock code (got ${JSON.stringify(fields[2] ?? '')})`, 'tencent_invalid_response')
-    const quoteTime = offshoreQuoteTime(fields[30])
-    if (quoteTime === null) throw sourceError(`Tencent HK quote ${symbol} has an unreadable timestamp ${JSON.stringify(fields[30] ?? '')}`, 'tencent_invalid_response')
-    const value = (index: number): number | null => numberOrNull(fields[index])
-    const row: JsonRecord = {
-      code: fields[2],
-      tencent_symbol: `hk${fields[2]}`,
-      name: fields[1] ?? '',
-      english_name: fields[46] ?? '',
-      currency: fields[75] ?? '',
-      price: value(3),
-      last_close: value(4),
-      open: value(5),
-      high: value(33),
-      low: value(34),
-      change_amt: value(31),
-      change_pct: value(32),
-      amplitude_pct: value(43),
-      volume_shares: value(6),
-      amount_hkd: value(37),
-      avg_price: value(73),
-      turnover_pct: value(59),
-      total_shares: value(69),
-      market_cap_yi_hkd: value(45),
-      board_lot_shares: value(60),
-      quote_time: quoteTime,
-    }
-    const stale = row.amount_hkd === 0 && row.price !== null && row.price === row.last_close
-    row.is_stale = stale
-    row.stale_reason = stale ? 'zero turnover and price equals previous close' : null
-    rows.push(row)
-  }
-  return rows
-}
-
-function parseUsQuoteRows(text: string, requested: Set<string>): Array<{ symbol: string; row: JsonRecord }> {
-  const rows: Array<{ symbol: string; row: JsonRecord }> = []
-  for (const { symbol, fields } of snapshotRows(text, requested)) {
-    if (fields.length < US_QUOTE_FIELDS) throw sourceError(`Tencent US quote ${symbol} returned ${fields.length} fields, expected at least ${US_QUOTE_FIELDS}`, 'tencent_invalid_response')
-    // 上游在 2 号位回交易所后缀（AAPL.OQ / BABA.N），这是 K 线入口要用的身份，缺了就无法核对。
-    // 交易所后缀实测有**一个字母**的（NYSE：BABA.N / BRK.B.N），把下限写成 2 会把真代码判成畸形。
-    if (!/^[A-Z][A-Z.]{0,9}\.[A-Z]{1,3}$/.test(fields[2] ?? '')) throw sourceError(`Tencent US quote ${symbol} has an unexpected code ${JSON.stringify(fields[2] ?? '')}`, 'tencent_invalid_response')
-    const quoteTime = offshoreQuoteTime(fields[30])
-    if (quoteTime === null) throw sourceError(`Tencent US quote ${symbol} has an unreadable timestamp ${JSON.stringify(fields[30] ?? '')}`, 'tencent_invalid_response')
-    const value = (index: number): number | null => numberOrNull(fields[index])
-    const row: JsonRecord = {
-      code: fields[2],
-      tencent_symbol: `us${fields[2]}`,
-      exchange_code: fields[2].slice(fields[2].lastIndexOf('.') + 1),
-      name: fields[1] ?? '',
-      english_name: fields[46] ?? '',
-      currency: fields[35] ?? '',
-      price: value(3),
-      last_close: value(4),
-      open: value(5),
-      high: value(33),
-      low: value(34),
-      change_amt: value(31),
-      change_pct: value(32),
-      amplitude_pct: value(43),
-      volume_shares: value(6),
-      amount_usd: value(37),
-      avg_price: value(67),
-      turnover_pct: value(38),
-      total_shares: value(62),
-      float_shares: value(63),
-      float_market_cap_yi_usd: value(44),
-      market_cap_yi_usd: value(45),
-      quote_time: quoteTime,
-    }
-    const stale = row.amount_usd === 0 && row.price !== null && row.price === row.last_close
-    row.is_stale = stale
-    row.stale_reason = stale ? 'zero turnover and price equals previous close' : null
-    // symbol 是"哪个写法换来了这一行"，只给上面的重试判定用，不出现在行里。
-    rows.push({ symbol, row })
-  }
-  return rows
-}
-
-/** 港美股代码：HK 是 5 位数字（实测 `hk700`/`hk0700` 被上游静默丢掉，必须左补零），指数别名一律拒收。 */
-function normalizeHkCode(value: unknown, name: string): string {
-  const raw = String(value ?? '').trim().toUpperCase()
-  const digits = /^(?:HK)?(\d{1,5})(?:\.HK)?$/.exec(raw)?.[1]
-  if (!digits) throw new Error(`parameter ${name} must be a five-digit Hong Kong stock code (for example 00700, hk00700 or 700); HK index codes such as HSI/HSTECH are not supported here`)
-  return digits.padStart(5, '0')
-}
-
-/**
- * 美股写法照原样收下（`AAPL` / `BRK.B` / `BABA.N` / `AAPL.OQ` 都是真实存在的说法），
- * 消歧交给上游（见 `usSymbolVariants`）：实测腾讯**快照只认不带后缀的写法**（`usBABA.N` 整行不回，
- * `usBABA` 认），而 K 线只认**带正确后缀**的写法（`usAAPL` 回一列 2011 年的陌生序列、
- * `usAAPL.NS` 静默 0 行）。点号既可能是级别码（BRK.B / BF.B）也可能是交易所后缀（.N / .OQ），
- * 从字面上分不出来——所以不猜。
- */
-function normalizeUsCode(value: unknown, name: string): string {
-  const raw = String(value ?? '').trim().toUpperCase()
-  const match = /^(?:US)?([A-Z]{1,6}(?:\.[A-Z]{1,3}){0,2})$/.exec(raw)
-  if (!match) throw new Error(`parameter ${name} must be a US equity ticker such as AAPL, BRK.B or BABA.N (a Tencent exchange suffix like .OQ is accepted and re-resolved from the snapshot)`)
-  // 两位以上的点号尾段（.OQ/.AM/.NS）在腾讯那里一定是交易所后缀，直接剥掉，于是 AAPL 与 AAPL.OQ
-  // 是同一只票、只请求一次。**单字母尾段**（BRK.B 的级别码 vs BABA.N 的交易所码）字面上分不开，
-  // 就照原样留着，交给上游逐个写法裁决——猜错一次只是多一轮请求，猜错第二次就是把数据挂错标的。
-  return match[1].replace(/\.[A-Z]{2,3}$/u, '')
-}
-
-/** 依次尝试的写法：原样 → 每次剥掉最后一段点号，最多剥两段（BRK.B.N → BRK.B → BRK）。 */
-function usSymbolVariants(ticker: string): string[] {
-  const variants = [`us${ticker}`]
-  let current = ticker
-  for (let depth = 0; depth < 2; depth += 1) {
-    const dot = current.lastIndexOf('.')
-    if (dot <= 0) break
-    current = current.slice(0, dot)
-    variants.push(`us${current}`)
-  }
-  return variants
-}
 
 function normalizeOffshoreCodes(params: unknown, name: string, perCode: (value: unknown, name: string) => string): Params {
   if (!isRecord(params)) throw new Error('params must be an object')
@@ -671,53 +490,17 @@ function normalizeOffshoreCodes(params: unknown, name: string, perCode: (value: 
 }
 
 async function executeOffshoreQuote(params: Params, signal: AbortSignal, market: 'hk' | 'us'): Promise<{ data: JsonRecord[]; schema: object }> {
-  const codes = params.codes as string[]
-  if (market === 'hk') {
-    const symbols = codes.map((code) => `hk${code}`)
-    const text = await getText(`${QUOTE_URL}${symbols.join(',')}`, signal, 'gbk')
-    const rows = parseHkQuoteRows(text, new Set(symbols.map((symbol) => symbol.toLowerCase())))
-    if (rows.length === 0) throw sourceError(`Tencent returned no HK quote rows for ${symbols.join(',')}`, 'tencent_empty_response')
-    return { data: rows, schema: hkQuoteOutput }
-  }
-  // 一轮把所有首选写法一起问出去；只有**没回行**的那几只才用剥掉后缀的写法再问一轮，
-  // 所以正常路径（纯字母 ticker）一次请求都不多花。
-  const pending = codes.map((ticker) => usSymbolVariants(ticker))
-  const rows: JsonRecord[] = []
-  const tried = new Set<string>()
-  for (let round = 0; round < 3 && pending.some((list) => list.length > 0); round += 1) {
-    const symbols = pending.map((list) => list.shift()).filter((symbol): symbol is string => Boolean(symbol))
-    for (const symbol of symbols) tried.add(symbol.toLowerCase())
-    const text = await getText(`${QUOTE_URL}${symbols.join(',')}`, signal, 'gbk')
-    const found = parseUsQuoteRows(text, new Set(symbols.map((symbol) => symbol.toLowerCase())))
-    const hit = new Set(found.map((item) => item.symbol))
-    rows.push(...found.map((item) => item.row))
-    for (let index = 0; index < symbols.length; index += 1) {
-      if (hit.has(symbols[index])) { pending[index] = []; continue }
-      // 快照没认这个写法：剥一段点号再看；剥无可剥就只能认定腾讯不认识这只（不编造身份）。
-      const next = pending[index].find((variant) => !tried.has(variant.toLowerCase()))
-      if (next !== undefined) pending[index] = [next, ...pending[index].filter((variant) => variant !== next)]
-    }
-  }
-  if (rows.length === 0) throw sourceError(`Tencent returned no US quote rows for ${codes.join(',')}`, 'tencent_empty_response')
-  return { data: rows, schema: usQuoteOutput }
+  // 取数编排（含美股"没回行就剥一段后缀重问"）在内核里，与自选股面板共用一份。
+  const rows = await fetchOffshoreQuotes(market, params.codes as string[], signal)
+  return { data: rows, schema: market === 'hk' ? hkQuoteOutput : usQuoteOutput }
 }
 
-/**
- * 美股 K 线的入口需要**带交易所后缀**的符号（实测 `usAAPL` 会返回一列 2011 年的陌生序列，
- * `usAAPL.NS` 直接 0 行——都不报错）。所以先从快照取上游自己的 2 号位身份再打 K 线：
- * 消歧发生在调用期、由上游回答，不靠模型记、也不靠猜（§9.7）。
- */
-async function resolveUsKlineSymbol(ticker: string, signal: AbortSignal): Promise<string> {
-  for (const symbol of usSymbolVariants(ticker)) {
-    const text = await getText(`${QUOTE_URL}${symbol}`, signal, 'gbk')
-    const [row] = snapshotRows(text, new Set([symbol.toLowerCase()]))
-    if (!row || row.fields.length < US_QUOTE_FIELDS) continue
-    const code = row.fields[2]
-    if (!/^[A-Z][A-Z.]{0,9}\.[A-Z]{1,3}$/.test(code)) throw sourceError(`Tencent returned an unreadable US code ${JSON.stringify(code)}`, 'tencent_invalid_response')
-    return `us${code}`
-  }
-  throw new Error(`Tencent does not recognize US ticker ${ticker}; no spelling of it returned a snapshot to resolve an exchange`)
+async function executeOffshoreIndexQuote(params: Params, signal: AbortSignal, market: 'hk' | 'us'): Promise<{ data: JsonRecord[]; schema: object }> {
+  // 指数只收点位那一族可证明的列；写法来自检索，身份形状由内核核对（猜写法会静默拿到别的标的）。
+  const rows = await fetchOffshoreIndexQuotes(market, params.codes as string[], signal)
+  return { data: rows, schema: market === 'hk' ? hkIndexQuoteOutput : usIndexQuoteOutput }
 }
+
 
 const offshoreKlinePaths: Record<'hk' | 'us', Record<string, string>> = {
   hk: { qfq: '/appstock/app/hkfqkline/get', hfq: '/appstock/app/hkfqkline/get', none: '/appstock/app/kline/kline' },
@@ -875,6 +658,40 @@ const usQuoteOutput = {
   },
 }
 
+/**
+ * 港美股**指数**快照的输出表：只有点位那一族，且**刻意不收**任何量纲列与币种列。
+ *
+ * 为什么不收（2026-10-07 真报文）：港股指数行的第 6 / 36 / 37 位两列相等且量级像万元，
+ * 美股指数行的第 37 位给了 2.1e14、第 38 / 44 / 45 / 62 / 63 位为空——口径推不出来，
+ * 声明一列我们没有把握的东西比少给一列更糟（docs/dev/tool-schema.md §10.2）。
+ * 为什么不收币种：上游确实在第 75 / 35 位塞了 `HKD` / `USD`，但指数是无量纲的数。
+ */
+const offshoreIndexQuoteProperties = (symbolLabel: string) => ({
+  code: { type: 'string' },
+  tencent_symbol: { type: 'string' },
+  name: { type: 'string' },
+  english_name: { type: 'string' },
+  price: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+  last_close: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+  open: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+  high: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+  low: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+  change_amt: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+  change_pct: { oneOf: [{ type: 'number' }, { type: 'null' }], description: '涨跌百分比原值（点位变化 ÷ 前收，与个股同一口径）' },
+  amplitude_pct: { oneOf: [{ type: 'number' }, { type: 'null' }], description: '振幅（百分数原值）=（最高 − 最低）÷ 前收' },
+  quote_time: { type: 'string', description: `${symbolLabel}当地时间，不是北京时间` },
+})
+
+const hkIndexQuoteOutput = {
+  type: 'array',
+  items: { type: 'object', properties: offshoreIndexQuoteProperties('香港'), additionalProperties: true },
+}
+
+const usIndexQuoteOutput = {
+  type: 'array',
+  items: { type: 'object', properties: offshoreIndexQuoteProperties('美东'), additionalProperties: true },
+}
+
 /** 港美股 K 线的公共列：`[日期, 开, 收, 高, 低, 量]`，量纲是**股**。 */
 const offshoreKlineProperties = () => ({
   code: { type: 'string' }, tencent_symbol: { type: 'string' }, adjust: { type: 'string' },
@@ -1015,6 +832,34 @@ export function createTencentSources(): DataSource[] {
       allowed: ['codes'],
       normalize: (params) => normalizeOffshoreCodes(params, 'codes', normalizeUsCode),
       execute: (params, signal) => executeOffshoreQuote(params, signal, 'us'),
+    }),
+    createSource({
+      capability: 'tencent_hk_index_quote',
+      cacheMaxAgeMs: 60_000,
+      name: 'get_tencent_hk_index_quote',
+      summary: '腾讯港股指数实时点位（无量纲，不含成交与市值）',
+      description: '批量获取港股**指数**的腾讯快照点位（一次最多 50 条）。代码是字母指数码，实测可用：HSI 恒生指数、HSTECH 恒生科技指数、HSCEI 国企指数、VHSI 恒指波动率指数（实测 24151.9 / 4184.74 / 8075.59 / 18.13，盘中逐秒在动）。⛔ **写法只能来自检索**（ticker_search 或自选股那一路），不许凭猜：猜错时上游可能静默回别的标的且不报错。⛔ 与 tencent_hk_quote 互斥——五位数字代码属于个股那一路，这里一律拒绝；个股表里也不接受字母指数，因为实测指数行的第 6/36/37 位两列相等且量级像万元，与个股的"股 / 港元"不是同一量纲。本表因此**只声明点位那一族可证明的列**：price / last_close / open / high / low / change_amt / change_pct / amplitude_pct / quote_time；成交量、成交额、换手率、市值**不收录**（口径推不出来，声明一列没把握的东西比少给一列更糟）。**也没有 currency 列**：上游在第 75 位确实给了 HKD，但指数点位是无量纲的数，给它标货币单位是替上游说话。quote_time 是**交易所当地时间（HKT）**。不标 is_stale——个股那条判据（成交额 0 且现价等于昨收）在指数行上不可用；要判断市场此刻开不开盘请看行情快照内嵌的市场状态或对照 tencent_*_quote 的个股行。不存在的代码被上游静默丢弃（实测 hkZVHSI 不回行），行数少于请求数即那几个代码无效，不是取数失败。',
+      inputSchema: { type: 'object', properties: { codes: { type: 'array', minItems: 1, maxItems: 50, items: { type: 'string', description: '港股指数代码，如 HSI 或 HSTECH' } } }, required: ['codes'], additionalProperties: false },
+      outputSchema: hkIndexQuoteOutput,
+      paginated: false,
+      rowShape: { rootArray: true },
+      allowed: ['codes'],
+      normalize: (params) => normalizeOffshoreCodes(params, 'codes', (value, name) => normalizeOffshoreIndexCode(value, name, 'hk')),
+      execute: (params, signal) => executeOffshoreIndexQuote(params, signal, 'hk'),
+    }),
+    createSource({
+      capability: 'tencent_us_index_quote',
+      cacheMaxAgeMs: 60_000,
+      name: 'get_tencent_us_index_quote',
+      summary: '腾讯美股指数点位（无量纲，收盘值为真值）',
+      description: '批量获取美股**指数**的腾讯快照点位（一次最多 50 条）。请求写法是**不带前导点的字母码**，实测可用三只：IXIC 纳斯达克（回 .IXIC 27599.89）、DJI 道琼斯（回 .DJI 51521.28）、INX 标普500（回 .INX 7818.93）；返回的 code 已剥掉那个前导点（IXIC / DJI / INX），tencent_symbol 原样回显上游写法供核对。⛔ **标普500 在这里的写法是 INX，不是 SPX**：实测 usSPX / usNDQ / usSOX / usRUT 都不回行，而 usSSPX 会静默回一只 ETF（SSPX.AM，价 31.47）——所以写法必须来自检索，猜写法不仅可能拿不到数，还可能拿到**别人的**数且不报错；本能力靠回显形状（点号在开头）把 ETF 那一类挡在行外。⛔ 与 tencent_us_quote 互斥：AAPL / AAPL.OQ 这类个股写法（点号在中间）在这里一律拒绝。本表只声明点位那一族可证明的列，成交量 / 成交额 / 换手率 / 市值不收录（实测指数行第 37 位给了 2.1e14、第 38/44/45/62/63 位为空）；**也没有 currency 列**（上游第 35 位给了 USD，但点位无量纲）。⛔ **同批指数的 quote_time 彼此不同**：实测同一份响应里 IXIC 是 18:34:12、DJI 是 16:42:37、INX 是 16:40:07——指数的收盘值在各成分结算后才定，晚的时刻不是"更新的数据"。quote_time 是**交易所当地时间（美东）**，与北京时间差 12/13 小时，跨市场同日比较前先对齐。不标 is_stale（判据依赖的成交列在本表不可用）。不认识的代码被上游静默丢弃，行数少于请求数即那几个代码无效。',
+      inputSchema: { type: 'object', properties: { codes: { type: 'array', minItems: 1, maxItems: 50, items: { type: 'string', description: '美股指数代码，如 IXIC、DJI、INX（不带前导点）' } } }, required: ['codes'], additionalProperties: false },
+      outputSchema: usIndexQuoteOutput,
+      paginated: false,
+      rowShape: { rootArray: true },
+      allowed: ['codes'],
+      normalize: (params) => normalizeOffshoreCodes(params, 'codes', (value, name) => normalizeOffshoreIndexCode(value, name, 'us')),
+      execute: (params, signal) => executeOffshoreIndexQuote(params, signal, 'us'),
     }),
     createSource({
       capability: 'tencent_hk_kline',

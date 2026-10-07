@@ -58,21 +58,24 @@ test('security code normalization preserves exchange and rejects ambiguous bare 
   assert.deepEqual(normalizeSecurityCodes(['600519.SH', '600519.XSHG', '000001.SZ']).map((code) => code.canonical), ['600519.SH', '000001.SZ'])
 })
 
-test('Tencent source registry uses seven non-conflicting capabilities and source label', () => {
+test('Tencent source registry uses nine non-conflicting capabilities and source label', () => {
   const sources = createTencentSources()
   assert.deepEqual(sources.map((source) => source.schema.capability), [
     'tencent_quote', 'tencent_kline', 'tencent_ticks',
-    'tencent_hk_quote', 'tencent_us_quote', 'tencent_hk_kline', 'tencent_us_kline',
+    'tencent_hk_quote', 'tencent_us_quote',
+    'tencent_hk_index_quote', 'tencent_us_index_quote',
+    'tencent_hk_kline', 'tencent_us_kline',
   ])
   assert.deepEqual(new Set(sources.map((source) => source.schema.source_label)), new Set(['tencent']))
-  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 7)
+  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 9)
   for (const source of sources) {
     assert.ok(source.schema.input_schema)
     assert.ok(source.schema.output_schema)
     assert.match(source.schema.description, /腾讯/)
   }
-  // 港美股是**独立能力**，不是把 A 股的 quote/kline 换个参数：三张表的字段位序互不通用。
-  assert.equal(sources.filter((source) => /_(hk|us)_/.test(source.schema.capability)).length, 4)
+  // 港美股是**独立能力**，不是把 A 股的 quote/kline 换个参数：各表的字段位序互不通用。
+  // 六条 = 港个股快照 / 美个股快照 / 港指数点位 / 美指数点位 / 港 K 线 / 美 K 线。
+  assert.equal(sources.filter((source) => /_(hk|us)_/.test(source.schema.capability)).length, 6)
 })
 
 /**
@@ -366,6 +369,21 @@ test('港美股与 A 股快照不共用字段表：同一位序在两个市场�
   assert.deepEqual(declared('tencent_us_kline'), ['code', 'tencent_symbol', 'adjust', 'period', 'date', 'open', 'high', 'low', 'close', 'volume'])
   assert.ok(declared('tencent_hk_kline').includes('amount_wan_hkd'), '成交额列名带单位，避免与美股/ A 股跨表相加')
   assert.equal(declared('tencent_hk_kline').includes('amount_usd'), false)
+  // 指数表只声明点位那一族：实测指数行的量纲列不可读（港第 6/36/37 位两列相等且万元级、
+  // 美第 37 位给了 2.1e14、第 38/44/45/62/63 位为空），声明一列没把握的东西比少给一列更糟。
+  for (const capability of ['tencent_hk_index_quote', 'tencent_us_index_quote']) {
+    const columns = declared(capability)
+    for (const forbidden of ['volume_shares', 'amount_hkd', 'amount_usd', 'turnover_pct', 'market_cap_yi_hkd', 'market_cap_yi_usd', 'float_shares', 'is_stale', 'currency']) {
+      assert.equal(columns.includes(forbidden), false, `${capability} 不许声明 ${forbidden}：指数行上这一列的口径没有被证明过`)
+    }
+    for (const required of ['price', 'last_close', 'change_pct', 'quote_time']) {
+      assert.ok(columns.includes(required), `${capability} 必须给出 ${required}`)
+    }
+  }
+  assert.equal(
+    JSON.stringify(declared('tencent_hk_index_quote')) === JSON.stringify(declared('tencent_hk_quote')),
+    false, '指数表不得与原样照抄个股表',
+  )
 })
 
 test('tencent_quote parses GBK-text-compatible snapshot fields and preserves stale signal', async () => {

@@ -508,7 +508,7 @@ test('⛔「其他标的仍是上一次成功快照」只在确实还有别的�
   resetHooks()
   const treeC = dead.ctx.registrations[0].component({ ...injectedC, useDialog: (selector) => selector(injectedC.hooks.dialog.getSnapshot()), t: (key) => dead.ctx.dictionaries['capital.watchlist'].zh[key] ?? key })
   const saidC = textOf(classNodes(treeC, 'capital-watchlist-notice')[0])
-  assert.match(saidC, /行情服务暂时不可用/)
+  assert.match(saidC, /A 股行情暂时取不到/, '⛔ 服务名字要说清是哪一路：2.6 起 `fuyao_unavailable` 只管 A 股那一路')
   assert.equal(saidC.includes('上一次成功快照'), false, '⛔ 一行旧值都没有，"上一次成功快照"就是编的')
 })
 
@@ -628,7 +628,7 @@ test('200 但不是一份 {ok:true}：一段 HTML / 一个空对象都不许当�
   assert.equal(state.loadError.code, 'fuyao_unavailable', '成功判据是正文里的 ok:true，不是 HTTP 状态')
 })
 
-test('401 / 403 有自己的文案位：登录失效不许说成「行情服务暂时不可用」', async () => {
+test('401 / 403 有自己的文案位：登录失效不许说成「行情暂时取不到」', async () => {
   // host 侧被围栏挡下时回的是 text/plain（没有 JSON code），状态码是唯一的判据。
   for (const status of [401, 403]) {
     const { ctx } = mount({ fetch: async () => ({ ok: false, status, text: async () => 'unauthorized' }) })
@@ -642,7 +642,7 @@ test('401 / 403 有自己的文案位：登录失效不许说成「行情服务�
     resetHooks()
     const tree = ctx.registrations[0].component({ ...injected, useDialog: (selector) => selector(injected.hooks.dialog.getSnapshot()), t })
     assert.match(textOf(classNodes(tree, 'capital-watchlist-notice')[0]), /登录状态已失效/)
-    assert.equal(textOf(tree).includes('行情服务暂时不可用'), false, '⛔ 把认证失效说成服务不可用 = 让用户等一个不会自己恢复的错误')
+    assert.equal(/行情暂时取不到/.test(textOf(tree)), false, '⛔ 把认证失效说成服务不可用 = 让用户等一个不会自己恢复的错误（两路的句子都不许出现）')
   }
 })
 
@@ -715,15 +715,15 @@ test('面板排版：headless 官方卡片 + 420 宽 + 类型徽标 + 两位小�
   assert.equal(text.includes('12858.7532'), false, '原始位数不许漏出来')
   assert.match(text, /-3\.44%/, '涨跌幅两位小数')
   assert.equal(classNodes(tree, 'capital-watchlist-down').length, 1, '跌是绿（A 股口径：红涨绿跌）')
-  assert.ok(text.includes('指数'), '类型徽标：指数 / 股票 / ETF')
-  assert.equal(classNodes(tree, 'capital-watchlist-tag-index').length, 1, '类型画成徽标')
+  assert.ok(text.includes('A指'), '徽标说市场 × 品种：六档（A股 / 港股 / 美股 + A指 / 港指 / 美指），场内 ETF 并入 A股')
+  assert.equal(classNodes(tree, 'capital-watchlist-tag-cn').length, 1, '类型画成徽标（A 股那一档）')
   // 类型从独立一列并进名称列第二行（2026-09-29 用户反馈"类型这一列挺累赘"）：
   // 代码与徽标同处一个 codeline，间距由 CSS 的 gap 负责；行内只此一处徽标。
   const codeline = classNodes(tree, 'capital-watchlist-codeline')
   assert.equal(codeline.length, 1, '代码与徽标同行（一行数据一个 codeline）')
   assert.match(textOf(codeline[0]), /399001/, '代码在 codeline 里')
-  assert.match(textOf(codeline[0]), /指数/, '徽标在代码右侧（同一行容器）')
-  assert.equal(classNodes(codeline[0], 'capital-watchlist-tag-index').length, 1, '徽标就住在 codeline 里，不再单占一列')
+  assert.match(textOf(codeline[0]), /A指/, '徽标在代码右侧（同一行容器）')
+  assert.equal(classNodes(codeline[0], 'capital-watchlist-tag-cn').length, 1, '徽标就住在 codeline 里，不再单占一列')
   assert.equal(text.includes('种子'), false, '不再区分种子与自选')
   assert.equal(text.includes('复制清单'), false, '复制清单不进面板（只留 surface 后门）')
   assert.equal(source.includes('window.confirm'), false, '⛔ 不用系统级 confirm 做二次确认')
@@ -1401,10 +1401,10 @@ test('行内「预测」与「复盘」：各追加自己那句话、不发送�
   predictButton.props.onClick()
   assert.equal(inserted.length, 1)
   // 句子归文案（字典 `<kind>PromptPrefix` / `<kind>PromptSuffix`），这里只钉**形状**：
-  // 名称 (thscode · 类型) 三段齐全、顺序如此、前后缀逐字取自字典——改措辞不许惊动这条用例。
-  assert.equal(inserted[0].text, `${zh.predictPromptPrefix}深证成指 (399001.SZ · 指数)${zh.predictPromptSuffix}`)
+  // 名称 (thscode · 品种) 三段齐全、顺序如此、前后缀逐字取自字典——改措辞不许惊动这条用例。
+  assert.equal(inserted[0].text, `${zh.predictPromptPrefix}深证成指 (399001.SZ · ${zh.kindIndex})${zh.predictPromptSuffix}`)
   assert.match(inserted[0].text, /399001\.SZ/, 'thscode 必须在句子里：Agent 靠它认标的')
-  assert.match(inserted[0].text, /· 指数\)/, '类型必须在句子里：股票 / 指数 / ETF 是三个不同的上游端点')
+  assert.match(inserted[0].text, new RegExp(`· ${zh.kindIndex}\\)`), '⛔ 句子中间是**品种**那一族，不是徽标的市场词：Agent 靠它选端点（股票 / 指数 / 场内基金是三个上游），市场由 thscode 自己带')
   assert.deepEqual(inserted[0].span, { start: 4, end: 4, draftRev: 7 }, 'captureInsertion 的 span 必须原样交回（revision 守卫在官方那边）')
   assert.equal(injected.hooks.dialog.getSnapshot().open, false, '写进去了就收面板，让用户在输入框里看这句话、自己点发送')
 
@@ -1415,7 +1415,7 @@ test('行内「预测」与「复盘」：各追加自己那句话、不发送�
   assert.equal(reviewButton.props['aria-label'], `${zh.review} ${QUOTED.name}`, '读屏标签 = 动作 + 标的名')
   reviewButton.props.onClick()
   assert.equal(inserted.length, 2)
-  assert.equal(inserted[1].text, `${zh.reviewPromptPrefix}深证成指 (399001.SZ · 指数)${zh.reviewPromptSuffix}`)
+  assert.equal(inserted[1].text, `${zh.reviewPromptPrefix}深证成指 (399001.SZ · ${zh.kindIndex})${zh.reviewPromptSuffix}`)
   assert.notEqual(inserted[1].text, inserted[0].text, '⛔ 预测与复盘不许插同一句话')
   assert.equal(injected.hooks.dialog.getSnapshot().open, false)
 
@@ -1430,5 +1430,166 @@ test('行内「预测」与「复盘」：各追加自己那句话、不发送�
 test('⛔ 客户端不碰被禁的通道：turn-tail 卡片、自造会话事件、报告旁路、typed remote', () => {
   for (const forbidden of ['turnTail', 'capital/chart-rendered', 'capital-reports', 'final_report', 'deliverables/presented', 'dsh-api-remotes', 'ctx.remote']) {
     assert.equal(source.includes(forbidden), false, `客户端不应出现 ${forbidden}`)
+  }
+})
+
+/**
+ * 展示归一（设计文档 §5 / R9）。这一组用例是 R9 唯一能被证伪的形态：币种**只跟着钱走**，
+ * 而喂给指数行一份带币种的真实回包时，那一格必须根本不存在（不是画个空、不是画灰）。
+ */
+const MARKET_ROWS = [
+  { thscode: '00700.HK', ticker: '00700', name: '腾讯控股', exchange: 'HK', asset_type: 'hk-stock', added_at: 1, source: 'user', quote: { price: 420.8, change_pct: -1.73, captured_at: 1790589000000, source_ts: null, source_time: '2026-10-07 14:06:13', currency: 'HKD' } },
+  { thscode: '80700.HK', ticker: '80700', name: '腾讯控股r', exchange: 'HK', asset_type: 'hk-stock', added_at: 1, source: 'user', quote: { price: 359.4, change_pct: -1.53, captured_at: 1790589000000, source_ts: null, source_time: '2026-10-07 14:03:39', currency: 'CNY' } },
+  { thscode: 'AAPL.OQ', ticker: 'AAPL', name: '苹果', exchange: 'US', asset_type: 'us-stock', added_at: 1, source: 'user', quote: { price: 333.63, change_pct: 0.22, captured_at: 1790589000000, source_ts: null, source_time: '2026-10-06 16:00:01', currency: 'USD' } },
+  { thscode: '300750.SZ', ticker: '300750', name: '宁德时代', exchange: 'SZ', asset_type: 'a-share', added_at: 1, source: 'user', quote: { price: 291.99, change_pct: -0.51, captured_at: 1790589000000, source_ts: 1790586416000, currency: 'CNY' } },
+  { thscode: '510300.SH', ticker: '510300', name: '沪深300ETF', exchange: 'SH', asset_type: 'fund-etf', added_at: 1, source: 'user', quote: { price: 4.417, change_pct: -2.17, captured_at: 1790589000000, source_ts: 1790586418000, currency: 'CNY' } },
+  // 两条指数行**都带着上游真的给的币种**（实测第 75 / 35 位就是 HKD / USD）：这一格必须不画。
+  { thscode: 'HSI.HK', ticker: 'HSI', name: '恒生指数', exchange: 'HK', asset_type: 'hk-index', added_at: 1, source: 'seed', quote: { price: 24163.05, change_pct: -0.48, captured_at: 1790589000000, source_ts: null, source_time: '2026-10-07 14:06:21', currency: 'HKD' } },
+  { thscode: 'IXIC.US', ticker: 'IXIC', name: '纳斯达克', exchange: 'US', asset_type: 'us-index', added_at: 1, source: 'seed', quote: { price: 27599.89, change_pct: 0.45, captured_at: 1790589000000, source_ts: null, source_time: '2026-10-06 18:34:12', currency: 'USD' } },
+]
+
+function mountRows(rows, key) {
+  const body = `{"ok":true,"items":${JSON.stringify(rows)},"seeded_at":1}`
+  const { ctx } = mount({ fetch: async () => ({ ok: true, status: 200, text: async () => body }) })
+  const injected = ctx.registrations[0].declaration.inject(key)
+  injected.surface.open()
+  return { ctx, injected }
+}
+
+test('⛔ 面板不画币种（喂带 HKD / USD / CNY 的回包），三市徽标各一色', async () => {
+  const { ctx, injected } = mountRows(MARKET_ROWS, 's-currency')
+  for (let round = 0; round < 5; round += 1) await new Promise((resolve) => setTimeout(resolve, 0))
+  const zh = ctx.dictionaries['capital.watchlist'].zh
+  const t = (key) => zh[key] ?? key
+  resetHooks()
+  const tree = ctx.registrations[0].component({ ...injected, useDialog: (selector) => selector(injected.hooks.dialog.getSnapshot()), t })
+
+  // 币种不进面板（2026-10-07 用户两次点名：先撤 ISO 码、再撤符号）。这条现在只钉"没有"：
+  // 数据照旧入库（由 watchlist-quote 那族用例守），要恢复显示只需在 client 里重新读它。
+  assert.equal(classNodes(tree, 'capital-watchlist-currency').length, 0, '⛔ 一个币种格都不许有（个股、ETF、指数都没有）')
+  const drawn = textOf(tree)
+  for (const marker of ['HKD', 'USD', 'CNY', '¥', '$']) {
+    assert.equal(drawn.includes(marker), false, `面板上不许出现 ${marker}：币种由用户按市场读，不由面板标注`)
+  }
+  assert.equal(drawn.includes('24163.05'), true, '点位照画')
+  assert.equal(drawn.includes('420.80'), true, '价格照画——去掉币种不等于去掉报价')
+
+  // 徽标六档说市场，色调按**市场**三档（同市的股票与指数同色，品种只由文字分）。
+  assert.equal(classNodes(tree, 'capital-watchlist-tag-cn').length, 2, 'A股 + 场内 ETF 同属 A 股那一档（ETF 的报价就是二级市场价格）')
+  assert.equal(classNodes(tree, 'capital-watchlist-tag-hk').length, 3, '两只港股个股 + 恒生指数共用港那一档')
+  assert.equal(classNodes(tree, 'capital-watchlist-tag-us').length, 2, '一只美股个股 + 纳斯达克共用美那一档')
+  for (const label of ['港股', '美股', 'A股', '港指', '美指']) {
+    assert.ok(drawn.includes(label), `徽标文字要落字：${label}`)
+  }
+  assert.equal(classNodes(tree, 'capital-watchlist-tag').some((node) => textOf(node).includes('ETF')), false,
+    '⛔ ETF 不再是一档徽标：它并进 A股，品种那一层只进递进输入框那句话（那行名字里本来就带 ETF，所以判据只看徽标节点）')
+
+  // 三档底色必须来自三个不同的 state 族（A=红 / 港=琥珀 / 美=绿，用户按"钞票主色"点的名）：
+  // 两档撞回同一个族就回到"分不开"那一症，而色值本身归主题包，源码里能判的只有族的归属。
+  const css = readFileSync(new URL('../capital-watchlist/client.src.cjs', import.meta.url), 'utf8')
+  const families = ['cn', 'hk', 'us'].map((market) => {
+    const rule = css.split('\n').find((line) => line.startsWith('.capital-watchlist-tag-' + market + ' {'))
+    assert.ok(rule, '底色规则 .capital-watchlist-tag-' + market + ' 不见了（徽标会退化成没有底的字）')
+    const family = /state-([a-z]+)-(?:primary|label|tertiary)/u.exec(rule)
+    assert.ok(family, '.capital-watchlist-tag-' + market + ' 没走 state-* token：自造色值要过颜色字面量白名单那道闸门')
+    return family[1]
+  })
+  assert.deepEqual(families, ['error', 'warn', 'success'], 'A=error(红) / 港=warn(琥珀) / 美=success(绿)')
+  assert.equal(new Set(families).size, 3, '⛔ 三个市场三个色族：撞族就是用户点名的那一症')
+})
+
+test('交易所当地时间进 tooltip，A 股那一路不画这一句（没有就不编）', async () => {
+  const { ctx, injected } = mountRows(MARKET_ROWS, 's-exchange-time')
+  for (let round = 0; round < 5; round += 1) await new Promise((resolve) => setTimeout(resolve, 0))
+  const zh = ctx.dictionaries['capital.watchlist'].zh
+  const t = (key) => zh[key] ?? key
+  resetHooks()
+  const tree = ctx.registrations[0].component({ ...injected, useDialog: (selector) => selector(injected.hooks.dialog.getSnapshot()), t })
+  const quotes = classNodes(tree, 'capital-watchlist-quote')
+  const titles = quotes.map((node) => node.props.title ?? '')
+  assert.ok(titles.some((title) => title.includes('交易所时间 2026-10-06 16:00:01')), '美股行说得出美东那个时刻')
+  assert.ok(titles.some((title) => title.includes('交易所时间 2026-10-07 14:06:13')), '港股行说得出 HKT 那个时刻')
+  assert.equal(titles.filter((title) => title.includes('交易所时间')).length, 5,
+    '⛔ 只有带 source_time 的行画这一句：A 股那两路（个股 / ETF）没有原串，不换算、不编一句')
+  assert.equal(titles.some((title) => /T.*[+-]\d\d:\d\d/.test(title)), false, '不许把当地时间改写成带时区偏移的样子（那是换算）')
+})
+
+test('候选行画完整 canonical 代码：`00700.HK` 与 `000700.SZ` 并列时用户点得对', async () => {
+  const candidates = [
+    { thscode: '00700.HK', ticker: '00700', name: '腾讯控股', exchange: 'HK', asset_type: 'hk-stock', in_list: false },
+    { thscode: '000700.SZ', ticker: '000700', name: '模塑科技', exchange: 'SZ', asset_type: 'a-share', in_list: true },
+    { thscode: 'TCEHY.PS', ticker: 'TCEHY', name: '腾讯控股(ADR)', exchange: 'US', asset_type: 'us-stock', in_list: false },
+    { thscode: 'HSI.HK', ticker: 'HSI', name: '恒生指数', exchange: 'HK', asset_type: 'hk-index', in_list: false },
+  ]
+  const { ctx } = mount({
+    fetch: async (url) => ({ ok: true, status: 200, text: async () => (String(url).includes('/search') ? `{"ok":true,"items":${JSON.stringify(candidates)},"truncated":false}` : '{"ok":true,"items":[]}') }),
+  })
+  const injected = ctx.registrations[0].declaration.inject('s-candcode')
+  const surface = injected.surface
+  const zh = ctx.dictionaries['capital.watchlist'].zh
+  const t = (key) => zh[key] ?? key
+  const render = () => {
+    resetHooks()
+    return ctx.registrations[0].component({ ...injected, useDialog: (selector) => selector(injected.hooks.dialog.getSnapshot()), t })
+  }
+  surface.open()
+  for (let round = 0; round < 5; round += 1) await new Promise((resolve) => setTimeout(resolve, 0))
+  surface.onQueryChange('00700')
+  await new Promise((resolve) => setTimeout(resolve, SEARCH_WAIT_MS))
+  const tree = render()
+  const codes = classNodes(tree, 'capital-watchlist-optioncode').map((node) => textOf(node).trim())
+  assert.deepEqual(codes, ['00700.HK', '000700.SZ · 已添加', 'TCEHY.PS', 'HSI.HK'],
+    '⛔ 第二行是完整 canonical 代码，不是裸 ticker：搜「恒生指数」会同时回 HSI / HSIGTR / HSINTR 三条真指数，只有代码列能核对')
+})
+
+test('某一路检索挂了：候选照常给其余路，下拉那一行点名挂掉的那一路', async () => {
+  const candidates = [{ thscode: '00700.HK', ticker: '00700', name: '腾讯控股', exchange: 'HK', asset_type: 'hk-stock', in_list: false }]
+  const { ctx } = mount({
+    fetch: async (url) => ({
+      ok: true,
+      status: 200,
+      text: async () => (String(url).includes('/search')
+        ? `{"ok":true,"items":${JSON.stringify(candidates)},"truncated":false,"partial":[{"market":"a-share","code":"credential_missing"}]}`
+        : '{"ok":true,"items":[]}'),
+    }),
+  })
+  const injected = ctx.registrations[0].declaration.inject('s-partial')
+  const surface = injected.surface
+  const zh = ctx.dictionaries['capital.watchlist'].zh
+  const t = (key) => zh[key] ?? key
+  const render = () => {
+    resetHooks()
+    return ctx.registrations[0].component({ ...injected, useDialog: (selector) => selector(injected.hooks.dialog.getSnapshot()), t })
+  }
+  surface.open()
+  for (let round = 0; round < 5; round += 1) await new Promise((resolve) => setTimeout(resolve, 0))
+  surface.onQueryChange('腾讯')
+  await new Promise((resolve) => setTimeout(resolve, SEARCH_WAIT_MS))
+  const tree = render()
+  assert.equal(classNodes(tree, 'capital-watchlist-option').length, 1, 'R12：A 股那一路挂了不没收港美股的候选')
+  const hint = classNodes(tree, 'capital-watchlist-searcherror')
+  assert.equal(hint.length, 1)
+  assert.equal(hint[0].props['data-market'], 'a-share')
+  assert.equal(hint[0].props.role, 'status', '半边失败不占 alert（那是留给"这一屏说不了话"的那一档）')
+  assert.match(textOf(hint[0]), /A 股检索不可用：未配置 Fuyao 密钥/)
+  assert.equal(classNodes(tree, 'capital-watchlist-notice').length, 0, '⛔ 居中/页脚那一条整块失败的红字不许亮')
+})
+
+test('placeholder 与 noHit 不再写死"沪深 A 股 / 指数 / ETF"三口', () => {
+  const { ctx } = mount()
+  const dictionaries = ctx.dictionaries['capital.watchlist']
+  for (const locale of ['zh', 'en']) {
+    const dict = dictionaries[locale]
+    for (const key of ['searchPlaceholder', 'noHit']) {
+      assert.match(dict[key], /A.?股|A-share/iu, `${locale}.${key} 要说清支持 A 股`)
+      assert.match(dict[key], /港股|美股|HK|US/u, `${locale}.${key} 要带上港美股（入口统一的那句话）`)
+    }
+    // 六档徽标 + 三档品种词 = 中英语各九条；齐平由上面那条 key 对齐用例保证，这里钉的是"不许只落中文"。
+    for (const key of ['typeAShare', 'typeHkStock', 'typeUsStock', 'typeAIndex', 'typeHkIndex', 'typeUsIndex',
+      'kindStock', 'kindIndex', 'kindEtf']) {
+      assert.equal(typeof dict[key], 'string', `${locale} 缺徽标/品种文案 ${key}`)
+      if (locale === 'en') assert.equal(/[\u4e00-\u9fff]/.test(dict[key]), false, `英文界面的 ${key} 不许夹中文`)
+    }
+    assert.equal(dict.typeEtf, undefined, '⛔ ETF 不再是徽标那一族（场内 ETF 并入 A股）；它只该活在 kindEtf 里')
   }
 })
