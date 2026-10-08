@@ -44,7 +44,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
    ```
 
    两条装完的功能一样：前者取 npm 上已发布的版本，后者取本仓库当前的代码。
-   安装后重启该 profile。 Windows 桌面端在「添加插件」中输入 `https://github.com/v587d/capital-generation` 或 `v587d/capital-generation`。桌面端自带 DSH 宿主，不需要单独用 npm 安装宿主。本仓库已包含构建产物，普通用户不需要克隆仓库或运行构建命令。
+   安装后重启该 profile。 Windows 桌面端在「添加插件」中输入 `https://github.com/v587d/capital-generation` 或 `@v587d/capital-generation`。桌面端自带 DSH 宿主，不需要单独用 npm 安装宿主。本仓库已包含构建产物，普通用户不需要克隆仓库或运行构建命令。
 
 2. **选填密钥。** 打开 DSH 「插件」 → **Capital Generation** -> 「配置」。
 
