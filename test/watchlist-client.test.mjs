@@ -796,9 +796,30 @@ test('🔴 浅色模式闸门：面板 CSS 只准用"两套主题都读得出"�
   assert.match(css, /--dsh-scrollbar-thumb:\s*var\(--dsw-alias-scrollbar-bg-l2\)/)
   // 键盘焦点：官方变量表达式（宿主按主题与输入模态管环色），每个可聚焦控件都要覆盖到。
   assert.match(css, /outline:\s*var\(--dsw-focus-ring-width\) solid var\(--dsw-focus-ring-color/)
-  for (const control of ['close', 'clear', 'option', 'more', 'predict', 'review', 'refresh', 'confirmbtn']) {
+  for (const control of ['close', 'clear', 'option', 'filterbtn', 'more', 'predict', 'review', 'refresh', 'confirmbtn']) {
     assert.match(css, new RegExp(`\\.capital-watchlist-${control}:focus-visible`), `${control} 缺键盘焦点环`)
   }
+  // 筛选头要"锁得住"：下拉是 flex 列、**只有选项那一层**滚，头与 hint 都是 flex: none。
+  // 滚动层换成别的（或头落进滚动区）就会出现"滚着滚着筛选头跟着跑了"。
+  assert.match(css, /\.capital-watchlist-dropdown \{[^}]*display: flex;[^}]*overflow: hidden/, '下拉本体不再自己滚，改成列容器')
+  assert.match(css, /\.capital-watchlist-filter \{[^}]*flex: none;/, '⛔ 筛选头必须 flex: none（钉在顶）')
+  assert.match(css, /\.capital-watchlist-options \{[^}]*overflow-y: auto;/, '滚动的只有选项那一层')
+  assert.match(css, /\.capital-watchlist-hint \{[^}]*flex: none;/, '⛔ hint 也不许被压扁（它没有 overflow，压扁就是文字被裁）')
+  // 一屏行数（2026-10-08 用户点名"一屏只能显示 3 个标的"）：浮层与清单那格**同值**抬高，
+  // 同时把候选行压到约 47px（padding 6 + 名称 18 + 间隙 1 + 代码 15）。这两个数是配套的：
+  // 只抬浮层不压行高，多出来的空间被行高吃掉；只压行高不抬浮层，一屏还是 3 行。
+  const dropdownMax = /\.capital-watchlist-dropdown \{[^}]*max-height: (\d+)px/.exec(css)?.[1]
+  const listMin = /\.capital-watchlist-list-open \{[^}]*min-height: (\d+)px/.exec(css)?.[1]
+  assert.equal(dropdownMax, listMin, '⛔ 下拉 max-height 与 list-open min-height 必须同值：不等就被卡片 overflow:hidden 裁掉一截')
+  assert.ok(Number(dropdownMax) > 246, '浮层要比旧的 246px 高，否则一屏行数上不去')
+  assert.match(css, /\.capital-watchlist-option \{[^}]*padding: 6px 12px;/, '⛔ 候选行压到一屏能装 5~6 行的高度')
+  // 胶囊两态（2026-10-08 第三轮点名）：「添加」醒目（verb 按钮那套淡底）、「已添加」暗（透明底）。
+  // ⛔ 行的降档必须读 aria-disabled：真 :disabled 会把焦点踢到 body ⇒ onBlur 判"点到框外"收起下拉，
+  // 那正是"点一下添加、下拉就没了"的根因。
+  assert.match(css, /\.capital-watchlist-addbtn \{[^}]*color-mix\(in srgb, var\(--dsw-alias-state-business-primary\) 12%/u, '⛔ 「添加」要醒目：沿用「刷新报价」那颗 verb 按钮的淡底配方')
+  assert.match(css, /\.capital-watchlist-addbtn\[data-state="added"\] \{[^}]*background: transparent;/u, '⛔ 「已添加」要暗：透明底 + tertiary 字')
+  assert.match(css, /\.capital-watchlist-option\[aria-disabled="true"\] \{[^}]*opacity:/u, '⛔ 候选行降档读 aria-disabled')
+  assert.equal(css.includes('.capital-watchlist-option:disabled'), false, '⛔ 候选行不许再用真 :disabled（用了就会收起下拉）')
   // 正圆 / 胶囊必须配 corner-shape: round，否则被全局超级椭圆平滑拧变形（官方 corner-shape spec 强制配对）。
   assert.equal((css.match(/border-radius:\s*(?:50%|999px)/g) ?? []).length, (css.match(/corner-shape:\s*round/g) ?? []).length)
   // 骨架条：浅色下 bg-skeleton 只有 4%，官方同款是配呼吸动画一起用的。
@@ -844,17 +865,22 @@ test('输入 → 下拉候选：整行就是"添加"，已在清单的那条标�
   const text = textOf(tree)
   assert.match(text, /宁德时代/)
   assert.match(text, /已添加/, '已在清单的候选标已添加（幂等，不重复写库）')
-  assert.equal(classNodes(tree, 'capital-watchlist-option')[1].props.disabled, true, '已添加那条整行禁用')
-  assert.equal(classNodes(tree, 'capital-watchlist-option')[0].props.disabled, false)
+  assert.equal(classNodes(tree, 'capital-watchlist-option')[1].props['aria-disabled'], true, '已添加那条整行不可点（⛔ 用 aria-disabled：真 disabled 会把焦点踢到 body ⇒ onBlur 判点到框外、收起下拉）')
+  assert.equal(classNodes(tree, 'capital-watchlist-option')[0].props['aria-disabled'], false)
   // 半透明菜单材质的深色描边（l3）由宿主的 [data-menu-material] 规则翻——功能 CSS 不许写主题选择器，
   // 属性没挂上就等于深色下只剩浅得看不见的 l1 描边。
   assert.equal(classNodes(tree, 'capital-watchlist-dropdown')[0].props['data-menu-material'], 'translucent', '下拉要挂官方半透明菜单材质属性')
 
-  // 点候选 = 添加：打 /add，随后收起下拉并重新读清单。
+  // 点候选 = 添加：打 /add。⛔ **下拉不许收起、输入框不许清空**（2026-10-08 用户点名"连续添加"，
+  // 收起 = 每加一条都要重敲一遍词）：这一行当场变「已添加」并禁用，词还在、`lastQuery` 也还在。
   classNodes(tree, 'capital-watchlist-option')[0].props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.ok(calls.some((url) => url.includes('/add')), `点候选要走 /add（实际请求：${calls.join(' ')}）`)
-  assert.equal(injected.hooks.dialog.getSnapshot().dropdownOpen, false, '添加完收起下拉（输入框也已清空）')
+  await new Promise((resolve) => setTimeout(resolve, SEARCH_WAIT_MS))
+  tree = render()
+  assert.equal(injected.hooks.dialog.getSnapshot().dropdownOpen, true, '⛔ 添加完下拉还开着：不然"连续添加"根本无从谈起')
+  assert.equal(injected.hooks.dialog.getSnapshot().query, '宁德', '输入框里的词不动（同一个词也因此不会被重发）')
+  assert.equal(classNodes(tree, 'capital-watchlist-option')[0].props['aria-disabled'], true, '刚加的这条当场标已添加、不可点（幂等，点不进第二次）')
 
   // 点到框外：blur 落在搜索段之外 → 收起，但候选不清空。
   surface.onQueryChange('宁德')
@@ -1537,9 +1563,23 @@ test('候选行画完整 canonical 代码：`00700.HK` 与 `000700.SZ` 并列时
   surface.onQueryChange('00700')
   await new Promise((resolve) => setTimeout(resolve, SEARCH_WAIT_MS))
   const tree = render()
+  // ⛔ 根因回归（2026-10-08 第三轮："点一下添加、下拉就没了"）：候选行**不许**用真 `disabled`。
+  // 真 disabled 会让浏览器把焦点从这一行踢到 body，搜索段的 onBlur 拿到 relatedTarget: null
+  // 就判"点到框外" → 收起下拉，连续添加被这一下打断。状态一律走 aria-disabled + onClick guard。
+  for (const row of classNodes(tree, 'capital-watchlist-option')) {
+    assert.equal(row.props.disabled, undefined, '⛔ 候选行不许用真 disabled：它会踢掉焦点 → onBlur 收起下拉')
+  }
   const codes = classNodes(tree, 'capital-watchlist-optioncode').map((node) => textOf(node).trim())
-  assert.deepEqual(codes, ['00700.HK', '000700.SZ · 已添加', 'TCEHY.PS', 'HSI.HK'],
+  assert.deepEqual(codes, ['00700.HK', '000700.SZ', 'TCEHY.PS', 'HSI.HK'],
     '⛔ 第二行是完整 canonical 代码，不是裸 ticker：搜「恒生指数」会同时回 HSI / HSIGTR / HSINTR 三条真指数，只有代码列能核对')
+  // 类型徽标挪到代码右边（`codeline` 复用清单第一列那个类 ⇒ 排法同款），右侧腾出来放动词胶囊。
+  assert.deepEqual(classNodes(tree, 'capital-watchlist-tag').map((node) => textOf(node).trim()), ['港股', 'A股', '美股', '港指'],
+    '徽标贴在代码右边，与自选股清单第一列同一套排法')
+  assert.deepEqual(classNodes(tree, 'capital-watchlist-addbtn').map((node) => textOf(node).trim()), ['添加', '已添加', '添加', '添加'],
+    '⛔ 右侧是动词胶囊：在清单里那条写「已添加」——「已添加」不再塞进代码行（代码 + 徽标才是第二行要读的两样）')
+  // hover 出来的是**证券全称**，不是"添加"：美股长名会被 CSS 截断，全称只有这个原生 tooltip 给得全。
+  assert.deepEqual(classNodes(tree, 'capital-watchlist-option').map((node) => node.props.title), ['腾讯控股', '模塑科技', '腾讯控股(ADR)', '恒生指数'],
+    '⛔ title 一律是证券全称（旧版写「添加」，那句 affordance 已经由右侧胶囊说了）')
 })
 
 test('某一路检索挂了：候选照常给其余路，下拉那一行点名挂掉的那一路', async () => {
@@ -1592,4 +1632,174 @@ test('placeholder 与 noHit 不再写死"沪深 A 股 / 指数 / ETF"三口', ()
     }
     assert.equal(dict.typeEtf, undefined, '⛔ ETF 不再是徽标那一族（场内 ETF 并入 A股）；它只该活在 kindEtf 里')
   }
+})
+
+test('下拉筛选头：默认「全部」、按市场切档只改显示（不出网）、计数说清三市各多少条', async () => {
+  const candidates = [
+    { thscode: '300750.SZ', ticker: '300750', name: '宁德时代', exchange: 'SZ', asset_type: 'a-share', in_list: false },
+    { thscode: '600519.SH', ticker: '600519', name: '贵州茅台', exchange: 'SH', asset_type: 'a-share', in_list: false },
+    { thscode: '00700.HK', ticker: '00700', name: '腾讯控股', exchange: 'HK', asset_type: 'hk-stock', in_list: false },
+    { thscode: 'AAPL.OQ', ticker: 'AAPL', name: '苹果', exchange: 'US', asset_type: 'us-stock', in_list: false },
+  ]
+  const calls = []
+  const { ctx } = mount({
+    fetch: async (url) => {
+      calls.push(String(url))
+      return { ok: true, status: 200, text: async () => (String(url).includes('/search') ? `{"ok":true,"items":${JSON.stringify(candidates)},"truncated":false}` : '{"ok":true,"items":[]}') }
+    },
+  })
+  const injected = ctx.registrations[0].declaration.inject('s-filter')
+  const surface = injected.surface
+  const zh = ctx.dictionaries['capital.watchlist'].zh
+  const t = (key) => zh[key] ?? key
+  const render = () => {
+    resetHooks()
+    return ctx.registrations[0].component({ ...injected, useDialog: (selector) => selector(injected.hooks.dialog.getSnapshot()), t })
+  }
+  surface.open()
+  for (let round = 0; round < 5; round += 1) await new Promise((resolve) => setTimeout(resolve, 0))
+  surface.onQueryChange('x')
+  await new Promise((resolve) => setTimeout(resolve, SEARCH_WAIT_MS))
+
+  // 默认「全部」：四条候选一条不少，四颗档位带上各自的计数（用户那句"港股美股呢"，答案在数字里）。
+  let tree = render()
+  assert.equal(classNodes(tree, 'capital-watchlist-option').length, 4, '默认全部 ⇒ 三市都画出来')
+  const buttons = classNodes(tree, 'capital-watchlist-filterbtn')
+  assert.deepEqual(buttons.map((node) => textOf(node).replace(/\s+/gu, '')), ['全部4', 'CN2', 'HK1', 'US1'], '计数是各市场的真实条数')
+  assert.deepEqual(buttons.map((node) => node.props['aria-pressed']), [true, false, false, false], '选中态只写在 aria-pressed 上')
+  assert.equal(classNodes(tree, 'capital-watchlist-filter').length, 1, '筛选头是一行 group')
+  const searchesAfterFirst = calls.filter((url) => url.includes('/search')).length
+
+  // 切档只改显示：不出网、不收下拉。
+  buttons[2].props.onClick()
+  tree = render()
+  assert.deepEqual(textOf(tree).match(/00700\.HK|300750\.SZ|600519\.SH|AAPL\.OQ/g), ['00700.HK'], 'HK 档只留港股那一行')
+  assert.equal(injected.hooks.dialog.getSnapshot().marketFilter, 'hk', '档位住 store（面板重开会回「全部」）')
+  assert.equal(injected.hooks.dialog.getSnapshot().dropdownOpen, true, '切档不收下拉')
+  assert.equal(calls.filter((url) => url.includes('/search')).length, searchesAfterFirst, '⛔ 切档不出网：候选是一次拿全的')
+
+  // 切到空档：这句要说"这个市场下没有"，不许说成"没有匹配的标的"（票是有的，只是不在这一档）。
+  // 上面四条里没有 A 股指数…这里用美档先清掉：把候选换成只有 A 股的回包更绕，直接切到一个
+  // 没有候选的档——用 CN 档有货、HK 档有货，所以这里临时把清单换成 0 条是不可能的；
+  // 改走"HK 档 → 只有 HK 一条"之外的路径：把 `marketFilter` 直接设成越界值被忽略（见下），
+  // 真正的空档由下面这条用单独的回包覆盖。
+  const empty = mount({
+    fetch: async (url) => ({ ok: true, status: 200, text: async () => (String(url).includes('/search') ? `{"ok":true,"items":${JSON.stringify(candidates.slice(0, 2))},"truncated":false}` : '{"ok":true,"items":[]}') }),
+  })
+  const injectedB = empty.ctx.registrations[0].declaration.inject('s-filter-empty')
+  const tB = (key) => empty.ctx.dictionaries['capital.watchlist'].zh[key] ?? key
+  injectedB.surface.open()
+  for (let round = 0; round < 5; round += 1) await new Promise((resolve) => setTimeout(resolve, 0))
+  injectedB.surface.onQueryChange('x')
+  await new Promise((resolve) => setTimeout(resolve, SEARCH_WAIT_MS))
+  injectedB.surface.setMarketFilter('hk')
+  resetHooks()
+  const treeB = empty.ctx.registrations[0].component({ ...injectedB, useDialog: (selector) => selector(injectedB.hooks.dialog.getSnapshot()), t: tB })
+  assert.equal(classNodes(treeB, 'capital-watchlist-option').length, 0, 'HK 档下这两条 A 股都不可见')
+  assert.match(textOf(treeB), /这个市场下没有匹配的标的/, '⛔ 空档说的是"这一档没有"，不是"没有匹配"')
+  assert.equal(textOf(treeB).includes('没有匹配的标的（A股'), false, 'noHit 那句不许同时出现')
+
+  // 未知档位被忽略：拼错的值不许把下拉变成空白。
+  injectedB.surface.setMarketFilter('zz')
+  assert.equal(injectedB.hooks.dialog.getSnapshot().marketFilter, 'hk')
+})
+
+test('⛔ 连续添加：加完一条下拉不收起、输入不动，在途只禁它自己那一条', async () => {
+  const candidates = [
+    { thscode: '300750.SZ', ticker: '300750', name: '宁德时代', exchange: 'SZ', asset_type: 'a-share', in_list: false },
+    { thscode: '000905.SH', ticker: '000905', name: '中证500', exchange: 'SH', asset_type: 'a-share-index', in_list: false },
+  ]
+  const calls = []
+  const { ctx } = mount({
+    fetch: async (url) => {
+      const target = String(url)
+      calls.push(target)
+      if (target.includes('/add')) return { ok: true, status: 200, text: async () => '{"ok":true,"item":{}}' }
+      if (target.includes('/search')) return { ok: true, status: 200, text: async () => `{"ok":true,"items":${JSON.stringify(candidates)},"truncated":false}` }
+      return { ok: true, status: 200, text: async () => '{"ok":true,"items":[],"refreshed_at":null,"failures":[]}' }
+    },
+  })
+  const injected = ctx.registrations[0].declaration.inject('s-continuous')
+  const surface = injected.surface
+  const t = (key) => ctx.dictionaries['capital.watchlist'].zh[key] ?? key
+  const render = () => {
+    resetHooks()
+    return ctx.registrations[0].component({ ...injected, useDialog: (selector) => selector(injected.hooks.dialog.getSnapshot()), t })
+  }
+  const adds = () => calls.filter((url) => url.includes('/add')).length
+  surface.open()
+  for (let round = 0; round < 5; round += 1) await new Promise((resolve) => setTimeout(resolve, 0))
+  surface.onQueryChange('x')
+  await new Promise((resolve) => setTimeout(resolve, SEARCH_WAIT_MS))
+
+  // 第一条点下去：**只禁它自己那一条**——全禁的话，连续添加会被每一次在途请求打断。
+  let tree = render()
+  classNodes(tree, 'capital-watchlist-option')[0].props.onClick()
+  tree = render()
+  const inflight = classNodes(tree, 'capital-watchlist-option')
+  assert.equal(inflight[0].props['aria-disabled'], true, '在途那一条先拦住自己（防双击同一行）')
+  assert.equal(inflight[1].props['aria-disabled'], false, '⛔ 其余候选不禁：连续添加的窗口就在这一刻')
+
+  await new Promise((resolve) => setTimeout(resolve, SEARCH_WAIT_MS))
+  tree = render()
+  assert.equal(injected.hooks.dialog.getSnapshot().dropdownOpen, true, '⛔ 加完下拉不收起（收起就得重敲一遍词）')
+  assert.equal(injected.hooks.dialog.getSnapshot().query, 'x', '输入框的词不动')
+  assert.equal(adds(), 1)
+  assert.equal(classNodes(tree, 'capital-watchlist-option')[0].props['aria-disabled'], true, '第一条已标「已添加」（幂等）')
+  assert.equal(classNodes(tree, 'capital-watchlist-option')[1].props['aria-disabled'], false, '第二条还点得进去')
+  // 胶囊两态：已添加那条暗下来（data-state），下一条还是「添加」。
+  assert.deepEqual(classNodes(tree, 'capital-watchlist-addbtn').map((node) => node.props['data-state']), ['added', 'idle'],
+    '两态写在 data-state 上，样式读它')
+  // ⛔ "禁止点击"是真的不出网：再点一次已添加的那条，不许多出一笔 /add。
+  const before = adds()
+  classNodes(tree, 'capital-watchlist-option')[0].props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(adds(), before, '⛔ 已添加那条点多少次都不再出网（guard 在渲染处，aria-disabled 只管视觉）')
+  assert.equal(injected.hooks.dialog.getSnapshot().dropdownOpen, true, '点已添加那条也不许把下拉弄没')
+
+  // 第二条 → 另一笔 /add
+  classNodes(tree, 'capital-watchlist-option')[1].props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, SEARCH_WAIT_MS))
+  assert.equal(adds(), 2, '⛔ 连续两次添加：是两笔 /add，不是同一条点了两次')
+  const snapshot = injected.hooks.dialog.getSnapshot()
+  assert.equal(snapshot.dropdownOpen, true, '两次都加完，下拉始终开着')
+  assert.equal(snapshot.candidates.every((row) => row.in_list === true), true, '两条都标已添加')
+})
+
+test('⛔ "没有更多"住在滚动区末尾（跟着内容滚），文案里不再有"候选不止这些"', async () => {
+  const candidates = [
+    { thscode: '300750.SZ', ticker: '300750', name: '宁德时代', exchange: 'SZ', asset_type: 'a-share', in_list: false },
+    { thscode: '000905.SH', ticker: '000905', name: '中证500', exchange: 'SH', asset_type: 'a-share-index', in_list: false },
+  ]
+  const { ctx } = mount({
+    fetch: async (url) => ({ ok: true, status: 200, text: async () => (String(url).includes('/search') ? `{"ok":true,"items":${JSON.stringify(candidates)},"truncated":true}` : '{"ok":true,"items":[]}') }),
+  })
+  const injected = ctx.registrations[0].declaration.inject('s-endhint')
+  const surface = injected.surface
+  const t = (key) => ctx.dictionaries['capital.watchlist'].zh[key] ?? key
+  const render = () => {
+    resetHooks()
+    return ctx.registrations[0].component({ ...injected, useDialog: (selector) => selector(injected.hooks.dialog.getSnapshot()), t })
+  }
+  surface.open()
+  for (let round = 0; round < 5; round += 1) await new Promise((resolve) => setTimeout(resolve, 0))
+  surface.onQueryChange('x')
+  await new Promise((resolve) => setTimeout(resolve, SEARCH_WAIT_MS))
+  const tree = render()
+
+  const dropdown = classNodes(tree, 'capital-watchlist-dropdown')[0]
+  const options = classNodes(tree, 'capital-watchlist-options')[0]
+  const hints = classNodes(tree, 'capital-watchlist-endhint')
+  assert.equal(hints.length, 1, 'truncated=true 就要画这一句')
+  assert.equal(classNodes(options, 'capital-watchlist-endhint').length, 1, '⛔ 它是滚动区的子节点 ⇒ 滚到底才看得见（不冻结）')
+  assert.equal(childrenOf(dropdown).includes(hints[0]), false, '⛔ 不许是浮层的直接子节点：那就等于钉在底部的常驻横幅')
+  const text = textOf(hints[0]).replace(/\s+/gu, '')
+  assert.equal(text, '没有更多，请输入准确的证券代码或名称。', '文案按 2026-10-08 的改写：不再说"候选不止这些"（此刻一行都没藏）')
+  assert.equal(textOf(tree).includes('候选不止这些'), false, '旧文案一个字都不许留下')
+
+  // 筛选档里一行都不剩时不说它：那一格是 filterNoHit 的事（票是有的，只是不在这一档）。
+  surface.setMarketFilter('hk')
+  const filtered = render()
+  assert.equal(classNodes(filtered, 'capital-watchlist-endhint').length, 0, '空档不画"没有更多"')
+  assert.match(textOf(filtered), /这个市场下没有匹配的标的/)
 })

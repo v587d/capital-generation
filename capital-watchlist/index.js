@@ -50,15 +50,20 @@ export const DOMAIN_NAME = 'capital_watchlist'
 export const MAX_ITEMS = 30
 /** ETF 扇出的并发路数：30 个单只请求压成约 8 波，正常网络一次刷新几秒内落地。 */
 export const REFRESH_CONCURRENCY = 4
-/** 搜索候选上限（一屏给这么多，倒逼用户缩小输入，不做分页）。 */
-export const SEARCH_LIMIT = 20
 /**
- * 每一路自己能拿到几条——`truncated` 那句"还有更多"按这一表判，不是按 `SEARCH_LIMIT` 判：
- * Fuyao `ticker_search` 的 `limit` 官方取值 1~50（默认 10），这里取到与显示上限齐平；
- * smartbox 实测**硬顶 10 条**（`&n=` / `&count=` / `&size=` / `&limit=` / `&max=` / `&hits=` 六种写法
- * 全无效，2026-10-07 逐条实测），多要也不会多给。所以某一路回满自己那一档，就是上游那侧被砍了。
+ * 每一路自己能拿到几条——**这就是候选池的全部**（2026-10-08 起不再做显示切片：上游没有第二页，
+ * 用户点名"既然翻不了页，就直接放出来"）：`50 + 10 + 10 = 70` 是三路上游硬顶之和，天然有界，
+ * 不会出现"搜个词回几千行"。
+ *
+ * `truncated` 那句"还有更多"**只按这一表判**：某一路回满自己那一档，就是上游那侧被砍了；
+ * 我们这边一行都没藏，所以那句 tip 里也不再有"候选不止这些"（只留下"请输入更准确的…"那半句）。
+ *
+ * 数字的来路：Fuyao `ticker_search` 的 `limit` 官方取值 1~50（默认 10），这里取到**官方上限**；
+ * smartbox 实测**硬顶 10 条**（`n=` / `count=` / `size=` / `limit=` / `max=` / `hits=` / `num=` /
+ * `rows=` 八种抬条数的写法全无效，分页的 `p=` / `page=` / `offset=` / `start=` / `from=` / `pn=` /
+ * `o=` 七种回包与基线**逐字节相同**；2026-10-07 与 10-08 两轮实测），多要也不会多给。
  */
-export const SEARCH_BRANCH_LIMITS = { 'a-share': 20, hk: 10, us: 10 }
+export const SEARCH_BRANCH_LIMITS = { 'a-share': 50, hk: 10, us: 10 }
 /** A 股那一路的搜索白名单（Fuyao 与报价端点双端都有可靠支撑）；场外基金 / 北交所不进候选。
  * 港美股那两路各有自己的白名单（`SMARTBOX_STOCK_TYPES` + `SMARTBOX_INDEX_TYPE`），互不通用。 */
 export const SEARCH_ASSET_TYPES = 'a-share,a-share-index,fund-etf'
@@ -570,8 +575,10 @@ export function createWatchlistService(options = {}) {
   }
 
   /**
-   * 一次输入三路并发：Fuyao `ticker_search` 一笔（`asset_type` 白名单照旧，`limit` 随显示上限抬到
-   * 20——官方参数面 1~50，不是我们自己放宽的）\+ smartbox 两笔（`t=hk` / `t=us`，各硬顶 10 条）。
+   * 一次输入三路并发：Fuyao `ticker_search` **一笔**（`asset_type` 白名单照旧，`limit` 取**官方上限
+   * 50**——参数面 1~50，不是我们自己放宽的）\+ smartbox 两笔（`t=hk` / `t=us`，各硬顶 10 条）。
+   * 例外在 `searchAShare`：`q` 含 ASCII 小写字母时 A 股那一路**问两笔**（原样 + 全大写），
+   * 因为上游对 `q` 是区分大小写的子串匹配——那是"三路"之外唯一会多出一笔的地方。
    * 为什么 smartbox 不共用一次 `t=all`：实测 `t=all&q=富通`
    * 回 9 条 A 股 + 1 条 hk + **0 条 us**，`q=00700` 只回 1 条 hk——共用一次会让"美股这一档根本没进
    * 候选"从偶发变成常态，那是"入口统一"最直接的反面（设计文档 P17 / §3.2）。
@@ -598,32 +605,76 @@ export function createWatchlistService(options = {}) {
     const merged = mergeCandidates(branches.filter((branch) => branch.ok === true).flatMap((branch) => branch.rows), q)
     const result = {
       ok: true,
-      items: merged.slice(0, SEARCH_LIMIT).map((row) => ({ ...row, in_list: items.get(row.thscode) !== undefined })),
-      // 两种"还有更多"都要说实话：某一路自己回满了**它那一档**的上限（上游那侧被砍），或合并后
-      // 超过一屏（我们这一侧被砍）。两档数字不同，所以逐路按 `SEARCH_BRANCH_LIMITS` 判。
-      truncated: merged.length > SEARCH_LIMIT || branches.some((branch) => branch.ok === true && branch.rows.length >= SEARCH_BRANCH_LIMITS[branch.market]),
+      // **一行不落地全画出来**（2026-10-08 用户点名"既然没有翻页就直接放出来"）：候选池的上界
+      // 由三路上游各自的硬顶定死（A 股 50 + 港 10 + 美 10 = 70），不需要再切一刀给"一屏"。
+      items: merged.map((row) => ({ ...row, in_list: items.get(row.thscode) !== undefined })),
+      // "还有更多"只剩一种 truthful 形态：**某一路回满了它自己那一档**（上游那侧被砍）。
+      // 合并后的总条数不再参与判断——我们一行没藏，条数多不等于还有没显示的；
+      // "回满自己那档"由每一路在**它自己的那一笔**上算好带回来（A 股可能问了两笔，两笔各 50
+      // 合起来 100 时我们只留 50，那也算被砍，`saturated` 里已经记了）。
+      truncated: branches.some((branch) => branch.ok === true && branch.saturated === true),
     }
     if (failures.length > 0) result.partial = failures.map((failure) => ({ market: failure.market, code: failure.code }))
     return result
   }
 
-  /** A 股那一路。⛔ 不许拿港美股那两条白名单顺手再过滤一遍：这边已有 `asset_type` + 键形状两道闸。 */
+  /**
+   * A 股那一路。⛔ 不许拿港美股那两条白名单顺手再过滤一遍：这边已有 `asset_type` + 键形状两道闸。
+   *
+   * **大小写要问两遍**（2026-10-08 真上游实测）：Fuyao 的 `q` 是区分大小写的子串匹配——
+   * `q=tcl` 0 条而 `q=TCL` 3 条、`q=etf` 0 条而 `q=ETF` 50 条、`q=a50` 0 条而 `q=A50` 50 条、
+   * `q=600519.sh` 0 条而 `q=600519.SH` 1 条。而全量 8708 条 A 股 / 指数 / ETF 名称里含**小写**
+   * 拉丁字母的只有 8 条、且全是 `.TI` 概念指数（下一行就过滤掉），含大写的 2092 条——
+   * 所以大写那一支是现实的主力，原样那一支是"不丢小写专有命中"的保险：`q` 与 `q.toUpperCase()`
+   * 不同时**两笔并发**，按 canonical 键去重、原样那份排前面（保持"上游顺序"的既有口径）；
+   * 两者相同（数字 / 中文 / 已经全大写）就只发一笔，不白烧一次配额。
+   *
+   * `saturated` 讲的是"**这一路被砍在自己那一档**"，按笔 + 按并集一起判：某一笔回满 50 是上游
+   * 砍的；两笔并起来超过 50 时我们自己也会砍一刀（见下），那同样是"还有没显示的"。反过来说，
+   * 两笔各 15 条、并起来 30 条并不说明上游还有货——按合并后的条数判就会凭空给一句假 tip。
+   *
+   * 半边失败：**拿到候选就算这一路答上了**——`partial` 那行的文案是"A股搜索不可用"，
+   * 与同屏的 A 股候选并排是自相矛盾；一支候选都没拿到时才走整路失败，绝不把"这一支没答上来"
+   * 说成"查无此票"（大写那支挂掉时，我们并不知道该词在 A 股到底有没有票）。
+   */
   async function searchAShare(q) {
-    try {
-      const envelope = await callFuyao(ENDPOINTS.search, { q, asset_type: SEARCH_ASSET_TYPES, limit: SEARCH_BRANCH_LIMITS['a-share'] }, ['q', 'asset_type', 'limit'])
-      // 后缀也要收口：实测 `q=宁德时代` 会带回 `885789.TI 宁德时代概念`（同花顺指数），
-      // 它既不在本版报价范围、也过不了域 schema——不挡掉就是"添加"那一下 500。
-      return { ok: true, market: 'a-share', rows: fuyaoItems(envelope).map(candidateOf).filter((row) => ASSET_TYPES.includes(row.asset_type) && normalizeThscode(row.thscode) !== undefined) }
-    } catch (error) {
-      return { ok: false, market: 'a-share', code: watchlistErrorCode(error) }
+    const variants = [q, q.toUpperCase()].filter((value, index, all) => all.indexOf(value) === index)
+    const limit = SEARCH_BRANCH_LIMITS['a-share']
+    const outcomes = await Promise.all(variants.map(async (variant) => {
+      try {
+        const envelope = await callFuyao(ENDPOINTS.search, { q: variant, asset_type: SEARCH_ASSET_TYPES, limit }, ['q', 'asset_type', 'limit'])
+        // 后缀也要收口：实测 `q=宁德时代` 会带回 `885789.TI 宁德时代概念`（同花顺指数），
+        // 它既不在本版报价范围、也过不了域 schema——不挡掉就是"添加"那一下 500。
+        const rows = fuyaoItems(envelope).map(candidateOf).filter((row) => ASSET_TYPES.includes(row.asset_type) && normalizeThscode(row.thscode) !== undefined)
+        return { rows, saturated: rows.length >= limit, code: undefined }
+      } catch (error) {
+        return { rows: [], saturated: false, code: watchlistErrorCode(error) }
+      }
+    }))
+    const union = []
+    const seen = new Set()
+    for (const outcome of outcomes) {
+      for (const row of outcome.rows) {
+        if (seen.has(row.thscode)) continue
+        seen.add(row.thscode)
+        union.push(row)
+      }
     }
+    const codes = outcomes.filter((outcome) => outcome.code !== undefined).map((outcome) => outcome.code)
+    if (union.length === 0 && codes.length > 0) return { ok: false, market: 'a-share', code: worstErrorCode(codes) }
+    // 并集也只留这一档的量：两笔各 50、几乎不重叠时 A 股这一路最多画 50 行，候选池上界因此是
+    // 50 + 10 + 10 = 70（`SEARCH_BRANCH_LIMITS` 那条注释里的算法）。自己砍掉的那几行同样算"被砍"，
+    // 否则 truncated 会在还有没显示的行时说"就这些"。
+    const saturated = outcomes.some((outcome) => outcome.saturated) || union.length > limit
+    return { ok: true, market: 'a-share', rows: union.slice(0, limit), saturated }
   }
 
   /** smartbox 那两路之一：类型白名单 + 键形状一起收，衍生品（窝轮 `QZ`）不进候选。 */
   async function searchOffshore(q, market) {
     try {
       const found = await fetchSmartbox(q, market, AbortSignal.timeout(timeoutMs))
-      return { ok: true, market, rows: found.map((row) => offshoreCandidateOf(row, market)).filter((row) => row !== undefined) }
+      const rows = found.map((row) => offshoreCandidateOf(row, market)).filter((row) => row !== undefined)
+      return { ok: true, market, rows, saturated: rows.length >= SEARCH_BRANCH_LIMITS[market] }
     } catch (error) {
       return { ok: false, market, code: watchlistErrorCode(error, { source: 'tencent' }) }
     }

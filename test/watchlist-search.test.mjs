@@ -7,7 +7,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { SEARCH_ASSET_TYPES, SEARCH_BRANCH_LIMITS, SEARCH_LIMIT, createWatchlistService, keyFormOf, normalizeThscode } from '../capital-watchlist/index.js'
+import { SEARCH_ASSET_TYPES, SEARCH_BRANCH_LIMITS, createWatchlistService, keyFormOf, normalizeThscode } from '../capital-watchlist/index.js'
 import { fetchSmartbox, parseSmartbox } from '../lib/sources/tencent-public-core.js'
 import { FIXTURES, SMARTBOX_ROWS, createFakeDomain, stubFuyao } from './watchlist-harness.mjs'
 
@@ -25,7 +25,7 @@ function run(searchStub, options = {}) {
   return { service, fake, stub: searchStub }
 }
 
-test('出网参数里必须带 asset_type 白名单与 limit=20（断参数，不只断解析）', async () => {
+test('出网参数里必须带 asset_type 白名单与那一档 limit（断参数，不只断解析）', async () => {
   const stub = stubFuyao()
   const { service } = run(stub)
   try {
@@ -73,8 +73,10 @@ test('白名单之外的 asset_type 在路由层就被丢掉（场外基金没�
   }
 })
 
-test('一屏给到 20 条；两种"还有更多"都要报 truncated', async () => {
-  // 合并后撞显示上限：A 股那一路一次给满 20 条（Fuyao `limit` 官方取值 1~50，这里取到与显示上限齐平）。
+test('候选池全量返回（⛔ 不再切 20）；两种"还有更多"各自都要报 truncated', async () => {
+  // A 股那一路一次给满它自己那一档（Fuyao `limit` 官方上限 50）：**一行不落地全回给面板**。
+  // 上游没有第二页（smartbox 硬顶 10、Fuyao 没有 offset），切一刀不是"倒逼缩小输入"，
+  // 是把本来能给的行藏起来——2026-10-08 用户点名"既然翻不了页就直接放出来"。
   const many = {
     code: 0,
     data: {
@@ -92,21 +94,21 @@ test('一屏给到 20 条；两种"还有更多"都要报 truncated', async () =
   const { service } = run(stub)
   try {
     const result = await service.search('ETF')
-    assert.equal(result.items.length, SEARCH_LIMIT)
-    assert.equal(result.truncated, true, '撞上限要告诉用户"缩小输入"，而不是让他以为只有这些')
+    assert.equal(result.items.length, SEARCH_BRANCH_LIMITS['a-share'], '⛔ 回多少画多少：50 条一条都不许切')
+    assert.equal(result.truncated, true, '回满自己那一档 ⇒ 上游那侧被砍了，要提示"请输入更准确的…"')
   } finally {
     stub.restore()
   }
 
-  // 另一种更隐蔽：合并后**不到** 20 条，但港那一路回满了它自己那一档（smartbox 实测硬顶 10 条，
-  // 多要也不会多给）。这一路的"还有更多"只看它自己的预算——按 `SEARCH_LIMIT` 判就会静默说"就这些"。
+  // 另一种更隐蔽：合并后**远不到**池子上界，但港那一路回满了它自己那一档（smartbox 实测硬顶 10 条，
+  // 多要也不会多给）。这一路的"还有更多"只看它自己的预算——按合并后的总条数判就会静默说"就这些"。
   const tenHk = `v_hint="${Array.from({ length: 10 }, (unused, index) => `hk~${String(1000 + index)}~\u6e2f\u80a1${index}~gg${index}~GP`).join('^')}";`
   const narrow = stubFuyao({ 'smartbox.gtimg.cn': (url) => (url.includes('t=hk') ? tenHk : 'v_hint="N";') })
   const second = run(narrow)
   try {
     const result = await second.service.search('测试')
-    assert.equal(result.items.length, 10, '一屏没满')
-    assert.equal(result.truncated, true, '⛔ 港那一路被上游砍在自己那一档，同样要告诉用户"缩小输入"')
+    assert.equal(result.items.length, 10, 'A 股空手 + 港 10 条，全给')
+    assert.equal(result.truncated, true, '⛔ 港那一路被上游砍在自己那一档，同样要提示"请输入更准确的…"')
   } finally {
     narrow.restore()
   }
@@ -323,6 +325,174 @@ test('⛔ 直加 canonical 键必须先剥成 stem：smartbox 认不下 `00700.H
     const asked = callsTo(stub.calls, 'smartbox.gtimg.cn').map((call) => decodeURIComponent(/q=([^&]*)/.exec(call.url)[1]))
     assert.deepEqual(asked.slice(0, 10), ['00700', '00700', 'HSI', 'HSI', 'TCEHY', 'TCEHY', 'IXIC', 'IXIC', 'BRK.B', 'BRK.B'],
       '问出去的是 stem；每只两次是"搜索 + 入库前核对"各一次，不是重试')
+  } finally {
+    stub.restore()
+  }
+})
+
+/**
+ * 大小写（2026-10-08 真上游实测）：Fuyao 的 `q` 是**区分大小写**的子串匹配——
+ * `q=tcl` 0 条而 `q=TCL` 3 条、`q=etf` 0 条而 `q=ETF` 50 条、`q=600519.sh` 0 条而 `q=600519.SH` 1 条；
+ * 而港美股那两路（smartbox）实测**不区分大小写**（`aapl` / `AAPL` / `apple` 回包逐字节相同）。
+ * 所以"多问一笔"只许做在 A 股那一路，且只在 `q` 真的含 ASCII 小写字母时发生。
+ */
+const envelope = (items) => ({ code: 0, data: { timestamp: 1, item: items } })
+const aRow = (code) => ({ thscode: `${code}.SZ`, ticker: code, name: `标的${code}`, exchange: 'SZ', asset_type: 'a-share' })
+/** 按 `q` 分岔的 Fuyao 夹具：小写那一支照真上游回 0 条，大写那一支回给定行。 */
+const fuyaoByCase = (upperRows, lowerRows = []) => ({
+  '/api/meta/tickers/search': (url) => {
+    const asked = new URL(url).searchParams.get('q')
+    return envelope(asked === asked.toUpperCase() ? upperRows : lowerRows)
+  },
+})
+
+test('⛔ 小写查询要问两笔（原样 + 全大写）：大写那一支把 A 股候选救回来', async () => {
+  const rows = [aRow('000100'), aRow('002129'), aRow('002668')]
+  const stub = stubFuyao(fuyaoByCase(rows))
+  const { service } = run(stub)
+  try {
+    const result = await service.search('tcl')
+    assert.equal(result.ok, true)
+    assert.deepEqual(result.items.map((item) => item.thscode), ['000100.SZ', '002129.SZ', '002668.SZ'],
+      '原样那一笔 0 条（真上游就是这个行为），候选只能由全大写那一笔带回')
+    assert.equal(result.partial, undefined, '原样那笔**正常回了 0 条**不是"哪一路挂了"')
+
+    const asked = callsTo(stub.calls, 'fuyao.aicubes.cn').map((call) => new URL(call.url).searchParams.get('q')).sort()
+    assert.deepEqual(asked, ['TCL', 'tcl'], '⛔ 两笔都要出网：只发大写会丢小写专有命中，只发原样等于复现这个 bug')
+    for (const call of callsTo(stub.calls, 'fuyao.aicubes.cn')) {
+      const url = new URL(call.url)
+      assert.equal(url.searchParams.get('asset_type'), SEARCH_ASSET_TYPES, '白名单两笔都得带')
+      assert.equal(url.searchParams.get('limit'), String(SEARCH_BRANCH_LIMITS['a-share']), '两笔都是同一档 limit')
+    }
+    assert.equal(callsTo(stub.calls, 'smartbox.gtimg.cn').length, 2, '港美股那两路照旧各一笔，不跟着多问')
+  } finally {
+    stub.restore()
+  }
+})
+
+test('不含 ASCII 小写就不多发：全大写 / 纯数字 / 中文各只问 Fuyao 一笔', async () => {
+  const stub = stubFuyao()
+  const { service } = run(stub)
+  try {
+    for (const query of ['ETF', '300750', '宁德时代']) {
+      stub.calls.length = 0
+      await service.search(query)
+      assert.equal(callsTo(stub.calls, 'fuyao.aicubes.cn').length, 1, `${query} 的原样与大写是同一个词，发两笔就是白烧一次配额`)
+      assert.equal(callsTo(stub.calls, 'smartbox.gtimg.cn').length, 2, '腾讯那两路不受影响')
+    }
+  } finally {
+    stub.restore()
+  }
+})
+
+test('两笔按 canonical 键去重，原样那一份排前面（同一只票不许出现两行）', async () => {
+  const stub = stubFuyao(fuyaoByCase([aRow('000002'), aRow('000003')], [aRow('000001'), aRow('000002')]))
+  const { service } = run(stub)
+  try {
+    const result = await service.search('abc')
+    assert.deepEqual(result.items.map((item) => item.thscode), ['000001.SZ', '000002.SZ', '000003.SZ'],
+      '两笔的并集去重；重叠的 000002 由原样那一笔先给出（上游顺序口径不变）')
+  } finally {
+    stub.restore()
+  }
+})
+
+test('半边失败：拿到候选就算这一路答上了；一支候选都没拿到才进 partial', async () => {
+  // 原样那一笔 503、大写那一笔正常 → 候选照给、不许同时说"A股搜索不可用"（同屏自相矛盾）。
+  const half = stubFuyao({
+    '/api/meta/tickers/search': (url) => {
+      const asked = new URL(url).searchParams.get('q')
+      return asked === asked.toUpperCase() ? envelope([aRow('000100')]) : { status: 503, body: {} }
+    },
+  })
+  const { service } = run(half)
+  try {
+    const result = await service.search('tcl')
+    assert.equal(result.ok, true)
+    assert.deepEqual(result.items.map((item) => item.thscode), ['000100.SZ'])
+    assert.equal(result.partial, undefined, '⛔ 有候选就别再说这一路"不可用"')
+  } finally {
+    half.restore()
+  }
+
+  // 两笔都挂 → 仍然是"A股这一路没参与"，而不是"这个票不存在"。
+  const down = stubFuyao({ '/api/meta/tickers/search': { status: 503, body: {} } })
+  const second = run(down)
+  try {
+    const result = await second.service.search('tcl')
+    assert.equal(result.ok, true, '港美股那两路还活着，整块不算失败')
+    assert.deepEqual(result.partial, [{ market: 'a-share', code: 'fuyao_unavailable' }])
+    assert.deepEqual(result.items, [])
+  } finally {
+    down.restore()
+  }
+})
+
+test('"回满自己那一档"按**笔**算：两笔各 15 条、并起来 20 条不许说还有更多', async () => {
+  // 上游两笔都没被砍（各 15 < limit 50），只是去重后并起来 20 条——按合并后的条数判就会凭空
+  // 给用户一句 tip，而那句话说的是"上游还有货、我们藏了"，假的比没有更糟。
+  const lower = Array.from({ length: 15 }, (unused, index) => aRow(String(100001 + index)))
+  const upper = Array.from({ length: 15 }, (unused, index) => aRow(String(100006 + index)))
+  const stub = stubFuyao(fuyaoByCase(upper, lower))
+  const { service } = run(stub)
+  try {
+    const result = await service.search('abc')
+    assert.equal(result.items.length, 20, '并集 20 条（15 + 15，重叠 10），一条不切')
+    assert.equal(result.truncated, false, '⛔ 没有一笔被上游砍过，就不许说"还有更多"')
+  } finally {
+    stub.restore()
+  }
+
+  // 反向对照一：其中一笔真被砍在 limit 上（回满 50），也要说还有更多。
+  const cut = stubFuyao(fuyaoByCase(Array.from({ length: SEARCH_BRANCH_LIMITS['a-share'] }, (unused, index) => aRow(String(200001 + index)))))
+  const second = run(cut)
+  try {
+    const result = await second.service.search('abc')
+    assert.equal(result.truncated, true, '⛔ 另一支空手、这一支回满自己那一档 ⇒ 上游那侧确实被砍了')
+  } finally {
+    cut.restore()
+  }
+})
+
+test('⛔ 两笔并起来超过这一档时自己砍的那一刀也算"被砍"：items 正好 50、truncated 为真', async () => {
+  // 40 + 40 不重叠 = 80 > limit 50：单看每一笔都没回满（40 < 50），但我们只留 50 行，
+  // 剩下 30 行是**被我们藏起来的**——这时候不说"还有更多"就是把"我们砍的"说成"上游就这些"。
+  const lower = Array.from({ length: 40 }, (unused, index) => aRow(String(500001 + index)))
+  const upper = Array.from({ length: 40 }, (unused, index) => aRow(String(500041 + index)))
+  const stub = stubFuyao(fuyaoByCase(upper, lower))
+  const { service } = run(stub)
+  try {
+    const result = await service.search('abc')
+    assert.equal(result.items.length, SEARCH_BRANCH_LIMITS['a-share'], '并集 80 → 只留这一档的 50')
+    assert.equal(result.truncated, true, '⛔ 自己砍掉 30 行就必须说还有更多')
+  } finally {
+    stub.restore()
+  }
+})
+
+test('⛔ 候选池上界 = 三路上游硬顶之和（50 + 10 + 10 = 70），顺序仍是 A 股 → 港 → 美', async () => {
+  // 2026-10-08 用户拍板：不翻页就直接放出来，上限交给上游硬顶；排序**维持 A → 港 → 美不变**
+  // （"让用户自己筛"走下拉顶部那颗筛选头，不在合并顺序上做文章）。
+  const aRows = Array.from({ length: SEARCH_BRANCH_LIMITS['a-share'] }, (unused, index) => aRow(String(600001 + index)))
+  const hkRows = Array.from({ length: SEARCH_BRANCH_LIMITS.hk }, (unused, index) => `hk~${String(10000 + index)}~港股${index}~gg${index}~GP`)
+  const usRows = Array.from({ length: SEARCH_BRANCH_LIMITS.us }, (unused, index) => `us~TK${String.fromCharCode(65 + index)}.OQ~美股${index}~usg${index}~GP`)
+  const stub = stubFuyao({
+    '/api/meta/tickers/search': { code: 0, data: { timestamp: 1, item: aRows } },
+    'smartbox.gtimg.cn': (url) => {
+      const market = /[?&]t=([^&]+)/.exec(url)[1]
+      return `v_hint="${(market === 'hk' ? hkRows : usRows).join('^')}";`
+    },
+  })
+  const { service } = run(stub)
+  try {
+    const result = await service.search('ETF')
+    assert.equal(result.ok, true)
+    assert.equal(result.items.length, 70, '⛔ 50 + 10 + 10 = 70，一条不许切（上游没有第二页）')
+    assert.deepEqual(
+      [result.items[0].exchange, result.items[SEARCH_BRANCH_LIMITS['a-share'] - 1].exchange, result.items[SEARCH_BRANCH_LIMITS['a-share']].exchange, result.items.at(-1).exchange],
+      ['SZ', 'SZ', 'HK', 'US'],
+      '顺序仍是 A 股 → 港 → 美（筛选交给下拉顶部的筛选头，不改合并顺序）')
+    assert.equal(result.truncated, true, '三路各自回满自己那一档 ⇒ 上游那侧都被砍了')
   } finally {
     stub.restore()
   }

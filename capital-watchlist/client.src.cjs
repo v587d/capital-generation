@@ -131,9 +131,21 @@ const zh = {
   confirmDescSuffix: ' 从自选中移除吗？',
   confirmCancel: '取消',
   confirmOk: '确认移除',
-  /** 故意不写"超过 N 条"里那个 N：它上游是宿主的一个常量，抄进两套字典就迟早只改红一边
-   *  （`error.list_full` 那条教训）。用户下一步要做的动作跟数字无关。 */
-  truncated: '候选不止这些，请输入更准确的证券代码或名称。',
+  /**
+   * `truncated`：候选已经**一行不落地全画出来了**（服务端不切片），所以这句里没有"候选不止这些"
+   * ——那半句说的是"还有没显示的"，此刻是假话。2026-10-08 用户改写成"没有更多"：它讲的是
+   * **上游那一路回满了自己那一档**（A 股 50 / 港 10 / 美 10），而它自己就住在滚动区末尾，
+   * 滚到底才看得见（不做成钉在底部的常驻条）。也**故意不写 N**：数字的上游是宿主常量，
+   * 抄进两套字典就迟早只改红一边（`error.list_full` 那条教训）。
+   */
+  truncated: '没有更多，请输入准确的证券代码或名称。',
+  /**
+   * 候选下拉的筛选头（全部 / CN / HK / US，默认全部）：**只在客户端筛已经拿全的候选**，
+   * 不重新出网、也不改变上游入参（`asset_type` 白名单那条纪律讲的是入参收窄，不是这里的显示筛选）。
+   */
+  filterAll: '全部',
+  filterLabel: '按市场筛选候选',
+  filterNoHit: '这个市场下没有匹配的标的。',
   noHit: '没有匹配的标的（A股 / 港股 / 美股，含指数与场内基金）。',
   'error.invalid_query': '输入不被接受',
   'error.not_found': '没有找到该标的',
@@ -214,7 +226,10 @@ const en = {
   confirmDescSuffix: ' from your watchlist?',
   confirmCancel: 'Cancel',
   confirmOk: 'Remove',
-  truncated: 'More candidates exist than shown — enter a more exact code or name.',
+  truncated: 'No more candidates — enter an accurate code or name.',
+  filterAll: 'All',
+  filterLabel: 'Filter candidates by market',
+  filterNoHit: 'No matching symbol in this market.',
   noHit: 'No matching symbol (A-share / HK / US, including indices and listed funds).',
   'error.invalid_query': 'Input not accepted',
   'error.not_found': 'Symbol not found',
@@ -317,6 +332,16 @@ function cleanRows(rows) {
 }
 
 /**
+ * 候选筛选头的四档（2026-10-08 用户点名：**默认「全部」**，三市都摆出来让用户自己筛）。
+ * 只在客户端筛**已经拿全的候选**：A 股 50 + 港 10 + 美 10 一次回包，切换不重新出网，
+ * 也不碰上游入参（`asset_type` 白名单那条纪律讲的是入参收窄，与这里的显示筛选是两件事）。
+ * `marketIdOf` 是这一层唯一的判据：候选的 `exchange` 存的是**市场**（`SH`/`SZ`/`HK`/`US`，
+ * 美股的具体交易所留在 canonical 代码里），所以 A 股那一档由"不是 HK 也不是 US"给出。
+ */
+const MARKET_FILTERS = [{ id: 'all' }, { id: 'cn', label: 'CN' }, { id: 'hk', label: 'HK' }, { id: 'us', label: 'US' }]
+const marketIdOf = (candidate) => (candidate.exchange === 'HK' ? 'hk' : candidate.exchange === 'US' ? 'us' : 'cn')
+
+/**
  * 面板几何。
  *
  * 官方 `Modal` 的 `.dialog` / `.header` / `.body` 是 CSS Module 的**散列类**（本机
@@ -380,23 +405,54 @@ const CSS = `
    直接透视上来（官方滚动浮层 .media 面板与 MenuSurface .material 都是这一对）。border: 0 +
    elevation-prominent 分离；描边浅色重绑 l1，深色由宿主 [data-menu-material] 规则翻成 l3。 */
 /* 候选下拉是**卡片内**的浮层，而卡片 overflow: hidden（圆角与清单滚动都靠它）：浮层一旦比
-   卡片剩余的空间高，多出来的部分就被无声裁掉——实测默认播种 4 行裁掉约 50px，1 行时只剩两三条
-   可见，用户既看不到"下面还有"，也够不着最后一条。所以最大高度收到 246px，并由下面
-   capital-watchlist-list-open 在打开下拉时把清单那一格撑到同一高度：卡片因此总是够高，
-   超出 246px 的候选在这层自己的盒子里滚（SEARCH_LIMIT 是 10 条，滚得到底）。 */
-.capital-watchlist-dropdown { position: absolute; top: calc(100% - 8px); left: 20px; right: 20px; z-index: 20; max-height: 246px; overflow-y: auto; background: var(--dsw-specific-menu); backdrop-filter: var(--dsw-menu-backdrop-filter); border: 0; border-radius: 12px; --dsw-elevation-stroke-color: var(--dsw-alias-border-l1); box-shadow: var(--dsw-elevation-prominent); animation: capital-watchlist-drop .18s var(--ds-ease-in-out); }
+   卡片剩余的空间高，多出来的部分就被无声裁掉。所以它的 max-height 必须与下面
+   capital-watchlist-list-open 那格的 min-height **同值**（下拉正好铺满清单那一格：够高，又压不到
+   页脚）——246px → **320px**（2026-10-08 用户点名"一屏只能显示 3 个标的"：行高压到约 47px、
+   浮层抬到 320，一屏 5~6 行；这两个数一改必须一起改，测试里有同值断言）。
+   这一层自己不滚：里面 .capital-watchlist-options 才是滚动区——筛选头钉在顶上（"锁定这个头"），
+   "没有更多"那句住在**滚动区末尾**（滚到底才看得见，不冻结在底部），其余 hint 贴在选项之后。
+   候选池是 50+10+10=70 行（三路上游硬顶之和，服务端不切片）。 */
+.capital-watchlist-dropdown { position: absolute; top: calc(100% - 8px); left: 20px; right: 20px; z-index: 20; display: flex; flex-direction: column; max-height: 320px; overflow: hidden; background: var(--dsw-specific-menu); backdrop-filter: var(--dsw-menu-backdrop-filter); border: 0; border-radius: 12px; --dsw-elevation-stroke-color: var(--dsw-alias-border-l1); box-shadow: var(--dsw-elevation-prominent); animation: capital-watchlist-drop .18s var(--ds-ease-in-out); }
+/* 筛选头与那几句"此刻怎么了"的 hint 都是 flex: none，只有选项层 flex: 0 1 auto 可收缩、可滚：
+   头永远在顶，hint 在选项之后（内容短时紧贴最后一行，内容长时也不会被挤没）。 */
+.capital-watchlist-filter { flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: .5px solid var(--dsw-alias-border-l2); }
+.capital-watchlist-options { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
+.capital-watchlist-filterbtn { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border: none; border-radius: 999px; corner-shape: round; background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-secondary); font-family: inherit; font-size: 12px; line-height: 16px; cursor: pointer; }
+.capital-watchlist-filterbtn:hover { background: var(--dsw-alias-interactive-bg-hover-accent); color: var(--dsw-alias-label-primary); }
+/* 选中态读 aria-pressed：状态住在属性里，样式只是它的投影（读屏也听得见"已选中"）。
+   压在半透明菜单材质上用 color-mix 的透明淡染——它不写背景实底，底下的菜单模糊照常透上来。 */
+.capital-watchlist-filterbtn[aria-pressed="true"] { background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent); color: var(--dsw-alias-label-primary); }
+.capital-watchlist-filtercount { font-size: 11px; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }
 @keyframes capital-watchlist-drop { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes capital-watchlist-breathe { 0% { opacity: 1; } 40% { opacity: .6; } 80%, 100% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .capital-watchlist-dropdown { animation: none; } .capital-watchlist-skeleton { animation: none; } }
-.capital-watchlist-option { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border: none; border-bottom: .5px solid var(--dsw-alias-border-l2); background: transparent; color: inherit; font-family: inherit; text-align: left; cursor: pointer; }
+/* 候选行高度（2026-10-08 用户点名"减少每个标的展示高度"）：padding 6 + 名称 18 + 间隙 1 + 代码行 15
+   ≈ 47px。与上面那条"浮层 320px"一起算：(320 − 筛选头约 32) ÷ 47 ≈ 6 行一屏（改前是 3 行）。
+   两个数是一对——只抬浮层不压行高，多出来的空间会被行高吃掉；只压行高不抬浮层，一屏还是 3 行。 */
+.capital-watchlist-option { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 12px; border: none; border-bottom: .5px solid var(--dsw-alias-border-l2); background: transparent; color: inherit; font-family: inherit; text-align: left; cursor: pointer; }
 .capital-watchlist-option:last-of-type { border-bottom: none; }
-.capital-watchlist-option:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent); }
-.capital-watchlist-option:disabled { opacity: .45; cursor: not-allowed; }
+/* 「已添加」与"在途"这一档读的是 **aria-disabled 而不是 :disabled**（真 disabled 会把焦点踢到
+   body，搜索段的 onBlur 就判"点到框外"收起下拉 —— 见渲染处那段），所以视觉降档也跟着读它：
+   整行 opacity .45、指针 not-allowed，焦点照旧留在这一行。 */
+.capital-watchlist-option:hover:not([aria-disabled="true"]) { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent); }
+.capital-watchlist-option[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
 /* 键盘焦点走官方表达式：环色由宿主按主题与输入模态管好（指针模态自动透明），不自己造环。 */
-.capital-watchlist-close:focus-visible, .capital-watchlist-clear:focus-visible, .capital-watchlist-option:focus-visible, .capital-watchlist-more:focus-visible, .capital-watchlist-predict:focus-visible, .capital-watchlist-review:focus-visible, .capital-watchlist-refresh:focus-visible, .capital-watchlist-confirmbtn:focus-visible { outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: 1px; }
-.capital-watchlist-optionmain { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.capital-watchlist-optionname { font-size: 14px; font-weight: 500; color: var(--dsw-alias-label-primary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.capital-watchlist-optioncode { font-size: 12px; color: var(--dsw-alias-label-tertiary); }
+.capital-watchlist-close:focus-visible, .capital-watchlist-clear:focus-visible, .capital-watchlist-option:focus-visible, .capital-watchlist-filterbtn:focus-visible, .capital-watchlist-more:focus-visible, .capital-watchlist-predict:focus-visible, .capital-watchlist-review:focus-visible, .capital-watchlist-refresh:focus-visible, .capital-watchlist-confirmbtn:focus-visible { outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: 1px; }
+.capital-watchlist-optionmain { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.capital-watchlist-optionname { font-size: 14px; line-height: 18px; font-weight: 500; color: var(--dsw-alias-label-primary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.capital-watchlist-optioncode { font-size: 12px; line-height: 15px; color: var(--dsw-alias-label-tertiary); }
+/* 右侧那颗「添加」是**整行这个 button 的可见动词**，不是第二个可聚焦控件（button 里套 button
+   是非法 HTML）：所以它只是一颗胶囊——常态灰底、hover 跟着整行加深；「已添加」那档由整行 disabled
+   的 opacity 统一降下去，不再往代码行里塞「· 已添加」（代码 + 徽标才是第二行要读的两样）。 */
+/* 右侧那颗「添加」是**整行这个 button 的可见动词**，不是第二个可聚焦控件（button 里套 button
+   是非法 HTML）。两态（2026-10-08 第三轮用户点名）：
+   - **添加 = 醒目**：沿用「刷新报价」那颗 verb 按钮的配方（state 色 12% 淡底 + 25% 描边 + 同色字），
+     整行里唯一带色的元素就是它，一眼知道点哪儿；
+   - **已添加 = 暗**：透明底 + l1 描边 + tertiary 字（data-state="added"），跟整行的 aria-disabled
+     一起降下去，并且点了也不再出网（guard 在渲染处）。 */
+.capital-watchlist-addbtn { flex: none; padding: 3px 9px; border: 1px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 25%, transparent); border-radius: 999px; corner-shape: round; background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent); color: var(--dsw-alias-state-business-primary); font-size: 12px; line-height: 15px; font-weight: 500; }
+.capital-watchlist-option:hover:not([aria-disabled="true"]) .capital-watchlist-addbtn { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 20%, transparent); }
+.capital-watchlist-addbtn[data-state="added"] { border-color: var(--dsw-alias-border-l1); background: transparent; color: var(--dsw-alias-label-tertiary); font-weight: 400; }
 .capital-watchlist-tag { flex: none; display: inline-block; padding: 2px 7px; border-radius: 6px; font-size: 11px; line-height: 14px; font-weight: 500; }
 /* 类型徽标 = 官方状态徽标那对写法：底色用 state-*-tertiary（主题包为"状态色的底"准备的实心档，
    自己 color-mix 出来的透明档压在白卡片上等于没混），文字用同色系 primary；
@@ -424,9 +480,13 @@ const CSS = `
    这一格装着这一行的三个动作：「预测」「复盘」与「更多」，表头贴的就是它们共同那条右缘。 */
 .capital-watchlist-headaction { text-align: right; }
 .capital-watchlist-list { max-height: 300px; padding: 0 12px 8px; overflow-y: auto; }
-/* 下拉打开时把这一格撑到浮层的最大高度（见上面 capital-watchlist-dropdown 那一段的理由）。
-   只在打开时撑：平时 1-2 行的短清单不该平白多出一截空白。 */
-.capital-watchlist-list-open { min-height: 246px; }
+/* 下拉打开时把这一格撑到浮层的最大高度（见上面 capital-watchlist-dropdown 那一段的理由）：
+   **这两个数必须同值**——一个改了另一个不改，下拉就会被卡片裁掉一截（或者清单被顶出卡片外）。
+   2026-10-08 一起从 246 抬到 320（用户点名"一屏只能显示 3 个标的"），测试里有同值断言。
+   只在打开时撑：平时 1-2 行的短清单不该平白多出一截空白。
+   ⚠️ 打开时 min-height(320) > 上面那条 max-height(300)，而 CSS 里 min 恒胜 max ⇒ 这一格此时按
+   320 高、内部照旧 overflow-y: auto 自己滚；收起后 max-height 300 恢复生效。 */
+.capital-watchlist-list-open { min-height: 320px; }
 .capital-watchlist-row { padding: 11px 8px; border-radius: 10px; transition: background .15s var(--ds-ease-in-out); }
 .capital-watchlist-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .capital-watchlist-namewrap { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
@@ -490,7 +550,9 @@ const CSS = `
 .capital-watchlist-refresh:disabled { opacity: .45; cursor: not-allowed; }
 /* 34px = 刷新按钮的高度：与它同一行的时间按按钮高度行高居中，左列多出失败行也不受影响。 */
 .capital-watchlist-updated { font-size: 12px; line-height: 34px; color: var(--dsw-alias-label-tertiary); }
-.capital-watchlist-hint { padding: 8px 14px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }
+/* flex: none：2026-10-08 起 hint 是下拉这个 flex 列的直接子元素（滚动区只剩选项那一层），
+   不钉住的话空间一紧它就会被压扁——hint 没有 overflow，压扁就是文字被裁。 */
+.capital-watchlist-hint { flex: none; padding: 8px 14px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }
 /* 黄 = 动作没成。两条黄字都用 warn-label：官方"状态色用作文字"给的是 label 那一档，
    warn-primary 压在浅底上只有 2:1，报错文字反而是最不该看不见的一行。 */
 /* 搜索失败：占下拉的 hint 位（与「搜索中…」「没有匹配的标的」同一个槽，替换而非并列）。
@@ -581,6 +643,12 @@ const blank = () => ({
   items: [],
   candidates: [],
   truncated: false,
+  /**
+   * 候选筛选头（`all` / `cn` / `hk` / `us`，**默认 `all`**）。住 store 而不是组件 `useState`：
+   * 两条复位路径各归各的——面板重开（`open()` 的 `...blank()`）回到「全部」；换词**不**掰回
+   * （用户筛了港，下一个词他还想看港），清空输入也留着（下拉收起时它本来看不见）。
+   */
+  marketFilter: 'all',
   query: '',
   /** 下拉是否盖在清单上：由输入打开、由选中/点到框外收起（Esc 也收，见组件的 onKeyDown）。 */
   dropdownOpen: false,
@@ -770,6 +838,16 @@ class WatchlistSurface {
     this.patch({ dropdownOpen: false })
   }
 
+  /**
+   * 筛选头（全部 / CN / HK / US）：只换**显示**哪几行，不出网——候选是一次拿全的，
+   * 切档也不该把下拉收起（它就在下拉顶上）。
+   * 未知档名直接忽略：这一格的取值只有 `MARKET_FILTERS` 那四个，拼错的值不许让下拉变空白。
+   */
+  setMarketFilter(filter) {
+    if (!MARKET_FILTERS.some((entry) => entry.id === filter)) return
+    this.patch({ marketFilter: filter })
+  }
+
   /** 行内「更多」键：再点一次就收起（同一个键既开又关，不用去别处找关闭入口）。 */
   toggleRowMenu(thscode) {
     this.patch({ rowMenu: this.snapshot.rowMenu === thscode ? null : thscode })
@@ -827,8 +905,16 @@ class WatchlistSurface {
     // try 里：`/add` 已经落库、紧接着清单读回来 503，面板就报"自选股已达上限"式的黄字，
     // 用户照着再点一次——同一个标的被加了第二遍）。读清单的失败归 `loadError`（列表那
     // 一片），刷报价的失败归 `error`（页脚那条红字），各自有位置，都不占添加这句话。
-    this.patch({ addError: null, candidates: [], query: '', dropdownOpen: false, pendingSearch: false, searchError: null, searchPartial: null })
-    this.lastQuery = null
+    // ⛔ 成功之后**不再收下拉、不清输入**（2026-10-08 用户点名"能在下拉框里连续添加"）：
+    // 收起 = 每加一条都得重敲一遍词，"连续添加"根本无从谈起。这一行当场标 `已添加` 并随行禁用
+    // （幂等，点不进第二次），其余候选、筛选档与输入框里的词都原样留着。`lastQuery` 因此保持原值
+    // ⇒ 同一个词不会被重发（三条闸里"同一个词不重发"那条正是靠它）。
+    // ⛔ `searchError` / `searchPartial` 也**不清**：它们说的是"这次搜索有一路没参与"，下拉还开着，
+    // 把真话擦掉就是让它失效。
+    this.patch({
+      addError: null,
+      candidates: this.snapshot.candidates.map((row) => (row.thscode === candidate.thscode ? { ...row, in_list: true } : row)),
+    })
     await this.load().catch(() => {})
     // 添加是一次完整动作：读完清单顺手刷一次报价，新行当场就有价。停在「未刷新」
     // 等于把用户刚加的东西留成半成品——开面板那一步本来就是同一套 load→refresh。
@@ -991,6 +1077,12 @@ function WatchlistDialog({ useDialog, surface, t, inputActions }) {
   const state = useDialog((value) => value)
   const [busy, setBusy] = useState(false)
   /**
+   * 在途的那一次「添加」落在哪一行（null = 没有）。⛔ 与 `busy` 分开：`busy` 关的是**清单那半边**
+   * （预测 / 复盘 / 更多 / 刷新按钮），候选行只许禁它自己那一条——全禁的话，"连续添加"会被每一次
+   * 在途请求打断（第二条正灰着、点不进去）。并发添加是安全的：服务端把清单读写串在一条队列上。
+   */
+  const [addingThscode, setAddingThscode] = useState(null)
+  /**
    * 待移除的那一行，走面板内的二次确认层——不是 `window.confirm`：那是宿主窗口级别的系统弹窗，
    * 样式与语言都不归插件管，而且会把"从自选中移除"这件事从面板里搬出去。
    * 这一格住 store 而不是 `useState`：`if (!state.open) return null` 是**收起**不是卸载
@@ -1046,28 +1138,84 @@ function WatchlistDialog({ useDialog, surface, t, inputActions }) {
     surface.close()
   }
 
+  /**
+   * 筛选头只筛**已经拿全**的候选（A 股 50 + 港 10 + 美 10 一次回包）：切档不出网、也不收下拉。
+   * 计数按市场算，「全部」那一档是三市之和——用户那句"怎么全是 A 股，港股美股呢"，答案就写在
+   * 这三个数字里（港 10 / 美 10，不是 0），不用他逐档点过去找。档名 `CN` / `HK` / `US` 中英文同一套。
+   */
+  const visibleCandidates = state.marketFilter === 'all'
+    ? state.candidates
+    : state.candidates.filter((candidate) => marketIdOf(candidate) === state.marketFilter)
+  const filterCounts = { all: state.candidates.length, cn: 0, hk: 0, us: 0 }
+  for (const candidate of state.candidates) filterCounts[marketIdOf(candidate)] += 1
+  const filterBar = state.candidates.length === 0
+    ? null
+    : h('div', { className: 'capital-watchlist-filter', role: 'group', 'aria-label': t('filterLabel') },
+      MARKET_FILTERS.map((entry) => h('button', {
+        key: entry.id,
+        type: 'button',
+        className: 'capital-watchlist-filterbtn',
+        // 选中态只写在 `aria-pressed` 上、样式读它：状态先进属性，读屏也听得见"已选中"。
+        'aria-pressed': state.marketFilter === entry.id,
+        onClick: () => surface.setMarketFilter(entry.id),
+      },
+        h('span', { className: 'capital-watchlist-filterlabel' }, entry.id === 'all' ? t('filterAll') : entry.label),
+        h('span', { className: 'capital-watchlist-filtercount' }, String(filterCounts[entry.id])))))
+
   const dropdown = !showDropdown
     ? null
-    : h('div', { className: 'capital-watchlist-dropdown', role: 'listbox', 'aria-label': t('title'), 'data-menu-material': 'translucent' },
-      state.candidates.map((candidate) => h('button', {
-        key: candidate.thscode,
-        type: 'button',
-        role: 'option',
-        className: 'capital-watchlist-option',
-        // 整行就是"添加"这个动词（点行选中），title 把这个 affordance 说出来；
-        // 已在清单里的候选标 `已添加`（幂等）并整行禁用。
-        title: candidate.in_list === true ? t('added') : t('add'),
-        disabled: candidate.in_list === true || busy,
-        onClick: () => { setBusy(true); surface.add(candidate).finally(() => setBusy(false)) },
-      },
-        h('span', { className: 'capital-watchlist-optionmain' },
-          h('span', { className: 'capital-watchlist-optionname' }, candidate.name),
-          // ⛔ 候选第二行画**完整 canonical 代码**，不是裸码：`00700` 一次同时命中港个股与
-          // `000700.SZ` 模塑科技，搜「恒生指数」还会同时回 `HSI` / `HSIGTR` / `HSINTR` 三条真指数——
-          // 裸码并列时用户没有可核对的信息，点错就是加错票。
-          h('span', { className: 'capital-watchlist-optioncode' },
-            candidate.in_list === true ? `${candidate.thscode} · ${t('added')}` : candidate.thscode)),
-        h(TypeTag, { assetType: candidate.asset_type, t }))),
+    : h('div', { className: 'capital-watchlist-dropdown', 'aria-label': t('title'), 'data-menu-material': 'translucent' },
+      // 筛选头**不进滚动区**：`role="listbox"` 因此跟着选项搬到里面那层（列表框里只许摆 option，
+      // 头自己是 group），滚动的也只有选项那一层——头由 CSS 钉在下拉顶部，即用户要的"锁定这个头"。
+      filterBar,
+      h('div', { className: 'capital-watchlist-options', role: 'listbox', 'aria-label': t('title') },
+        visibleCandidates.map((candidate) => h('button', {
+          key: candidate.thscode,
+          type: 'button',
+          role: 'option',
+          className: 'capital-watchlist-option',
+          // hover 出来的是**证券全称**（2026-10-08 用户点名）：旧版这一格写的是 `添加`，那句
+          // "这个按钮能干嘛"已经由右侧那颗「添加」说了；美股长名会被 CSS 截断，全称只有这个
+          // 原生 tooltip 给得全。
+          title: candidate.name,
+          // ⛔ 这一格用 `aria-disabled` 而不是真 `disabled`（2026-10-08 第三轮用户点名"点一下添加、
+          // 下拉就没了"）：真 `disabled` 会让浏览器**立刻把焦点从这一行踢到 body**，搜索段的 onBlur
+          // 于是拿到 `relatedTarget: null` → 判"点到框外" → 收起下拉，连续添加被这一下打断。
+          // `aria-disabled` 不动焦点（行照样可聚焦，读屏也听得见"不可用"），"禁止点击"由下面的 guard 承担。
+          'aria-disabled': candidate.in_list === true || addingThscode === candidate.thscode,
+          onClick: () => {
+            // 幂等 + 防在途双击：已添加的那条点多少次都不再出网，在途那条也拦掉。
+            if (candidate.in_list === true || addingThscode === candidate.thscode) return
+            setBusy(true)
+            setAddingThscode(candidate.thscode)
+            surface.add(candidate).finally(() => { setBusy(false); setAddingThscode(null) })
+          },
+        },
+          h('span', { className: 'capital-watchlist-optionmain' },
+            h('span', { className: 'capital-watchlist-optionname' }, candidate.name),
+            // ⛔ 第二行画**完整 canonical 代码**，不是裸码：`00700` 一次同时命中港个股与
+            // `000700.SZ` 模塑科技，搜「恒生指数」还会同时回 `HSI` / `HSIGTR` / `HSINTR` 三条真指数——
+            // 裸码并列时用户没有可核对的信息，点错就是加错票。
+            // 类型徽标挪到代码右边（`codeline` 直接复用清单第一列那个类 ⇒ 排法与清单同款，用户
+            // 2026-10-08 点名"类似自选股列表第一列的样式"），右侧因此腾出来放「添加」。
+            h('span', { className: 'capital-watchlist-codeline' },
+              h('span', { className: 'capital-watchlist-optioncode' }, candidate.thscode),
+              h(TypeTag, { assetType: candidate.asset_type, t }))),
+          // 右侧那颗「添加」是**整行这个 button 的可见动词**，不是第二个可聚焦控件（button 里再
+          // 套 button 是非法 HTML）；已在清单里就换 `已添加`，随行一起禁用（点了也不会重复写库）。
+          // 两态（2026-10-08 第三轮用户点名）：**添加 = 醒目**（沿用「刷新报价」那颗 verb 按钮的配方，
+          // 整行里唯一带色的就是它 ⇒ 一眼知道点哪儿）、**已添加 = 暗**（透明底 + l1 描边 + tertiary 字，
+          // 配合整行 aria-disabled 的 opacity 一起降）。状态只写在 `data-state` 上，样式读它。
+          h('span', { className: 'capital-watchlist-addbtn', 'data-state': candidate.in_list === true ? 'added' : 'idle' },
+            candidate.in_list === true ? t('added') : t('add')))),
+        // ⛔ "没有更多"那句住在**滚动区末尾**（2026-10-08 用户点名"不要冻结"）：它跟着内容一起滚，
+        // 滚到底才看得见——钉在浮层底部就成了一条常驻横幅，还挡着最后一行候选。
+        // 筛选档里一行都不剩时不说它（那一格由下面的 `filterNoHit` 负责）。
+        state.truncated === true && visibleCandidates.length > 0
+          ? h('div', { className: 'capital-watchlist-hint capital-watchlist-endhint' }, t('truncated'))
+          : null),
+      // 下面这几句 hint **不进滚动区**：它们说的是"这一屏此刻怎么了"（正在查 / 查不到 / 有路挂了），
+      // 被内容滚走就等于没人看见——所以留在浮层里、贴在选项之后。
       state.composing === true
         // ⛔ 合成期（拼音还没上屏）不许报「没有匹配的标的」：那是把"还没查"说成"查了，没有"，
         // 用户会以为自己的输入法打错了字。这一格说的是下一步会发生什么。
@@ -1082,7 +1230,11 @@ function WatchlistDialog({ useDialog, surface, t, inputActions }) {
             ? h('div', { className: 'capital-watchlist-hint capital-watchlist-searcherror', role: 'alert', 'data-code': state.searchError.code }, t(`error.${state.searchError.code}`))
             : state.candidates.length === 0
               ? h('div', { className: 'capital-watchlist-hint' }, t('noHit'))
-              : null,
+              : visibleCandidates.length === 0
+                // 筛选把候选滤空了（总数 > 0）：这句与 noHit 说的是两件事——票是有的，只是不在
+                // 这一档里。说成"没有匹配"就是把用户的筛选说成他查错了。
+                ? h('div', { className: 'capital-watchlist-hint', 'data-filter': state.marketFilter }, t('filterNoHit'))
+                : null,
       // 某一路挂了而其余路照常给候选：这一行说的是**那一路**（R12）。它与上面的 hint 各说
       // 各的事——上面那句讲"这一屏有没有匹到"，这句讲"有一路今天没参与"，不互相顶替。
       ...(state.searchPartial ?? []).map((branch) => h('div', {
@@ -1091,8 +1243,7 @@ function WatchlistDialog({ useDialog, surface, t, inputActions }) {
         role: 'status',
         'data-market': branch.market,
         'data-code': branch.code,
-      }, `${t(`partial.${branch.market}`)}${t(`error.${branch.code}`)}`)),
-      state.truncated ? h('div', { className: 'capital-watchlist-hint' }, t('truncated')) : null)
+      }, `${t(`partial.${branch.market}`)}${t(`error.${branch.code}`)}`)))
 
   const head = state.items.length === 0
     ? null
