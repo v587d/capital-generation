@@ -129,6 +129,7 @@ plain 对象）即整次失败。正确写法：条件展开（`buildProfile`）
 | 少打几次 | `tier: 'daily'` → `'weekly'`（只有北京周六那档全量打它）|
 | 照打、不进结论也不开单 | 加 `shadow: { since, verdict, evidence, revisit }` |
 | 本仓刻意不测 | 换成 `out()` / `dsOut()`（`excluded`，**不许带 tier**）|
+| **这条能力被删了** | 生产与注册表**两边一起删**——覆盖闸门按注册数算分母；只删生产会红在"注册表指向不存在的能力"，正确答案是删掉那一行，**不是把能力补回去**。同时 `npm run docs:capabilities` 重生成总表（另有 `data-collector-capabilities` 守）；删空某家族要顺手从 `PROBE_FAMILIES` 摘掉 |
 
 ```js
 ds('eastmoney', 'eastmoney_sector_rotation', 'daily', { page: 1, size: 3 }, {

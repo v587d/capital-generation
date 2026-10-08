@@ -48,7 +48,11 @@ test('注册表覆盖住每一颗已注册能力：漏一行就红，且不许�
   const missing = [...registered.keys()].filter((c) => !covered.includes(c))
   assert.deepEqual(missing, [], `这些已注册能力没有巡检条目（新增端点要同时补一行，四态取一）：${missing.join(', ')}`)
   const unknown = covered.filter((c) => !registered.has(c))
-  assert.deepEqual(unknown, [], `注册表指向不存在的能力（改名了还是删了？）：${unknown.join(', ')}`)
+  // 删能力是合法动作，所以这里不许把话只说一半：正确答案通常是**把注册表这一行一起删掉**，
+  // 而不是"补一颗能力回去"——只报"多了行"不报往哪修，AI 就会去救错的那一侧。
+  assert.deepEqual(unknown, [], `注册表指向不存在的能力：${unknown.join(', ')}。三选一——`
+    + `① 改名了：把这一行的 capability 同步成新名；② 这条能力被删了：把这一行一起删掉（两边同时消失才对，`
+    + `不要为了变绿把能力补回生产）；③ 想留下这条记录：改成 out() / dsOut() 的 excluded 并写理由与 since。`)
 })
 
 test('每条恰好落进一个状态：shadow 是叠在 tier 上的，excluded 不许带 tier', () => {
@@ -109,7 +113,11 @@ test('参数能过生产自己的 normalizeParams——拼错键名在 CI 就红
 
 test('归一化必须幂等：第二遍的输入就是第一遍的输出（§10.7）', () => {
   for (const entry of liveSourceEntries) {
+    // 覆盖闸门已经把"指向不存在的能力"点名报红了；这里再解引用就只会剩一条
+    // `Cannot read properties of undefined` 的裸 TypeError——删了能力的人会被它带偏去"修测试"，
+    // 而正确答案是删掉注册表那一行。缺席由上面那条负责，这里直接跳过。
     const source = registered.get(entry.capability)
+    if (!source) continue
     if (typeof source.normalizeParams !== 'function') continue
     const params = entry.requires ? { ...entry.params, [entry.requires]: 'PLACEHOLDER_ID' } : entry.params
     const once = source.normalizeParams(params)
