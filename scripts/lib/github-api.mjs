@@ -11,9 +11,14 @@
 const API = 'https://api.github.com'
 
 export class GitHubApiError extends Error {
-  constructor(message, readonly status, readonly body) {
+  // ⚠️ 这里是 .mjs 不是 .ts：`constructor(message, readonly status, …)` 那种 TS 参数属性写法
+  // 在 JS 里是语法错，而**只有 CI 会跑到这一份代码**（本地没有任何测试 import 它），
+  // 表现是巡检全绿、发单那一步炸——所以别在这里写类型语法。
+  constructor(message, status, body) {
     super(message)
     this.name = 'GitHubApiError'
+    this.status = status
+    this.body = body
   }
 }
 
