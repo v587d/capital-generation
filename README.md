@@ -42,6 +42,9 @@ Linux / macOS 的 Web 或 CLI profile 在终端执行，下面两条 **任选一
 
    ```bash
    dsh plugin --profile web add @v587d/capital-generation
+   ```
+
+   ```bash
    dsh plugin --profile web add github:v587d/capital-generation
    ```
 
@@ -51,6 +54,9 @@ Linux / macOS 的 Web 或 CLI profile 在终端执行，下面两条 **任选一
 DSH 桌面端在 「添加插件」 中输入：
 `https://github.com/v587d/capital-generation` 或 `@v587d/capital-generation` 
 桌面端自带 DSH 宿主，不需要单独用 npm 安装宿主。本仓库已包含构建产物，普通用户不需要克隆仓库或运行构建命令。
+
+> [!NOTE]
+> 本插件所有自带密钥均免费申请、免费日常使用且不影响插件核心功能，即缺哪个密钥，仅表示对应能力就不可用，其他功能照常。
 
 2. **选填密钥。** 打开 DSH 「插件」 → **Capital Generation** -> 「配置」。
 
@@ -62,10 +68,6 @@ DSH 桌面端在 「添加插件」 中输入：
    | [PaddleOCR AIStudio](https://aistudio.baidu.com/paddleocr) | 解析 PDF 和图片中的文字 |
 
    这些都是第三方服务的密钥，需分别向服务方申请；额度和条款以各服务方为准。
-
-   > [!NOTE]
-   > **本插件所有密钥均不影响插件核心功能**，即缺哪个密钥，仅表示对应能力就不可用，其他功能照常。
-   
    保存后**新建 Capital 模式会话**即可生效，无需重启。
    也可以将密钥写入 `~/.dsh/.credentials.yaml`，名称依次为 `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`、`PADDLE_OCR_TOKEN`。
    密钥由 DSH 凭据服务保存，不会显示在会话配置中。
