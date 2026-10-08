@@ -118,3 +118,30 @@ plain 对象）即整次失败。正确写法：条件展开（`buildProfile`）
 4. 加新端点时顺手判一次它的失败**归哪类**：上游业务码（`2004` / `5003` 按 §10.4，不进 Issue）还是
    视角差异（机房 IP 被 WAF 挡，走 `shadow`）。两类混成一类，报出来的话就不可信。
 
+
+## 10.9 改巡检状态怎么动手：一次提交就够，不用发版
+
+三个旋钮都住在 `scripts/lib/contract-registry.mjs` 那一行里，**改它 = commit + push**：抬版本、打 tag、
+发 npm 都不需要——巡检在 runner 上 `checkout` 仓库 master，而 `package.json` 的 `files` 里没有 `scripts/`。
+
+| 想要的效果 | 怎么改 |
+|---|---|
+| 少打几次 | `tier: 'daily'` → `'weekly'`（只有北京周六那档全量打它）|
+| 照打、不进结论也不开单 | 加 `shadow: { since, verdict, evidence, revisit }` |
+| 本仓刻意不测 | 换成 `out()` / `dsOut()`（`excluded`，**不许带 tier**）|
+
+```js
+ds('eastmoney', 'eastmoney_sector_rotation', 'daily', { page: 1, size: 3 }, {
+  shadow: { since: '2026-10-08', verdict: 'HTTP_STATUS 502', revisit: '2026-12-01',
+    evidence: 'hosted(Azure) 2/2 秒拒 502；国内出口同日曾 PASS——视角差异不是上游故障' } }),
+```
+
+`revisit` 是**到期日，不是"重置"**：闸门断言它不早于今天，到期就把 `npm test` 跑红，逼你回来定性
+（转 active / 补新证据再续期 / 转 `excluded` 三选一），所以默默续期是违例。同一份测试还拦：`shadow`
+缺 `revisit`；理由或证据写"同上"（短于 8 字被拒）；`excluded` 带 `tier`；`params` 过不了生产
+`normalizeParams`；以及**删行**——覆盖闸门按注册数算分母，漏一行就红（§10.8 第 1 条同源）。
+
+顺序：改 → `npm test` → `npm run contract:probe -- --only <子串>` 本地看判据落在哪 → `git push`。
+下次 07:00（北京）自动生效，想立刻验：`gh workflow run data-source-contract.yml --ref master -f tier=daily`。
+**别为了"少报几条"标影子**：`TRANSPORT` / `SLOW` / `EMPTY` 本来就不开单（`ISSUE_VERDICTS` 只认
+`GUARD` / `ENVELOPE` / `HTTP_STATUS`），影子的定义域是**这个视角测不准**——定性前先换个出口重打一次。

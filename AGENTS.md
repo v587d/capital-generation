@@ -23,7 +23,7 @@
 | `render_chart` 准入与呈现 | `docs/dev/chart-presentation.md`（§6.1 §6.2）|
 | 交付登记与会话事件类型 | `docs/dev/chart-delivery-events.md`（§6.3）|
 | preset 现状、人设落点、「不许改」全表、新增角色六处齐改 | `docs/dev/preset-persona.md`（§8.1 §8.2 §8.4 §8.5）|
-| 工具 schema 全表、数据源验收全表 | `docs/dev/tool-schema.md`（§9.1–§9.6 §10.1–§10.8）|
+| 工具 schema 全表、数据源验收全表 | `docs/dev/tool-schema.md`（§9.1–§9.6 §10.1–§10.9）|
 
 ### ⛔ 硬约束一览
 
@@ -146,5 +146,5 @@ capital-analysis/runs/<analysis_id>/          # 预留（data_analyst）
 
 ## 10. 数据源验收纪律（改 `src/sources/*.ts` 之后）
 
-全表在 `docs/dev/tool-schema.md` §10.1–§10.8。底线：**注册新能力要同时补巡检条目**（§10.8 四态之一）；
+全表在 `docs/dev/tool-schema.md` §10.1–§10.9。底线：**注册新能力要同时补巡检条目**（§10.8 四态之一，改法 §10.9）；
 改端点同步 `npm run docs:capabilities`；新护栏先拿官方示例 / 真报文验过；`2004` 不注册、`5003` 是数据缺口。
