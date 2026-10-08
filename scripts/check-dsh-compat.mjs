@@ -730,6 +730,38 @@ const probes = [
       return { status: PASS, detail: `locale/*.json 与 icon 仍按裸包名可读，本包实测标题「${meta.title.zh}」` }
     },
   },
+  {
+    id: 'L26',
+    title: '详情页标题右侧的 badges 座位：plugins.detail.badge（list, root, owner = { subject }）+ 包页在版本标签之后渲染它',
+    why: 'capital-config 往这一格注册 GitHub / npm 两枚外链。两条漂移方向都不报错：① 槽改名或页面不再渲染它'
+      + ' ⇒ 链接整组静默消失；② `subject` 的形状变（`kind` 取值改名、`pkg.name` 改名）⇒ 我们的"只认本包"闸门判不出来，'
+      + '于是把本插件的链接挂到**别人的**包页 / 行页 / 官方插件页上——同一格座位由这三类详情页共用，越界比消失严重。'
+      + '另：list 座位缺 `options.id` 上游直接抛，注册形状也在这里钉住。',
+    run() {
+      const slotFile = join(PKG('dsh-client-ui-plugin-manager'), 'lib/types/client/slot-contract.d.ts')
+      const slot = readIfPresent(slotFile)
+      if (slot === undefined) return { status: FAIL, detail: `读不到 ${slotFile}` }
+      const pageFile = join(PKG('dsh-client-ui-plugin-manager'), 'lib/client.js')
+      const page = readIfPresent(pageFile)
+      if (page === undefined) return { status: FAIL, detail: `读不到 ${pageFile}` }
+      const slotsImplFile = join(PKG('dsh-client-ui-slots'), 'lib/index.js')
+      const slotsImpl = readIfPresent(slotsImplFile)
+      if (slotsImpl === undefined) return { status: FAIL, detail: `读不到 ${slotsImplFile}` }
+      const checks = [
+        ['座位仍是 list + root + owner = PluginDetailProps', /'plugins\.detail\.badge': \{\s*kind: 'list';\s*scope: 'root';\s*owner: PluginDetailProps;/, slot, slotFile],
+        ['owner 送的仍是 subject 一个字段', /readonly subject: PluginsSubject;/, slot, slotFile],
+        ['bundle 那一支仍带 pkg，且 pkg 有 name（我们的闸门就读它）', /readonly kind: 'bundle';\s*readonly pkg: PluginPackageRef;/, slot, slotFile],
+        ['PluginPackageRef.name 仍是包名', /readonly name: string;/, slot, slotFile],
+        ['包页仍渲染这一格，且拿到的是 { subject }', /renderSlot\("plugins\.detail\.badge", \{ subject \}\)/, page, pageFile],
+        ['这一格画在版本标签之后（不是另起一行）', /versionTag[\s\S]{0,600}renderSlot\("plugins\.detail\.badge"/, page, pageFile],
+        ['list 注册仍强制要求 id（缺了当场抛，不是静默）', /list slot "\$\{options\.name\}" requires options\.id/, slotsImpl, slotsImplFile],
+      ]
+      const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: 'badges 座位的契约、包页渲染点与 list 注册的 id 要求都仍在' }
+        : { status: FAIL, detail: `标题右侧那格变了：${missing.join(' / ')}（见账本 L26；capital-config 的两枚外链依赖它）` }
+    },
+  },
 ]
 
 const results = []

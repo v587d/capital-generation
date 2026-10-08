@@ -163,6 +163,7 @@ function loadClient({ scope, primitives = {} } = {}) {
 function fakeCtx({ scope, served = true, writes = [] }) {
   const registrations = []
   const servedCalls = []
+  const injectedSlots = []
   const dictionaries = new Map()
   const ctx = {
     locale: { bind: (ns) => (key) => `${ns}.${key}`, register: (ns, dict) => { dictionaries.set(ns, dict); return () => {} } },
@@ -183,10 +184,7 @@ function fakeCtx({ scope, served = true, writes = [] }) {
     },
     effect: (callback) => { const dispose = callback(); return typeof dispose === 'function' ? dispose : () => {} },
     slots: {
-      inject(name, callback) {
-        assert.equal(name, 'plugins.bundle.config')
-        callback()
-      },
+      inject(name, callback) { injectedSlots.push(name); callback(); return () => {} },
       register(declaration, component) {
         registrations.push({ declaration, component })
         return () => {}
@@ -194,8 +192,11 @@ function fakeCtx({ scope, served = true, writes = [] }) {
     },
     logger: { info() {} },
   }
-  return { ctx, registrations, servedCalls, writes, dictionaries }
+  return { ctx, registrations, servedCalls, injectedSlots, writes, dictionaries }
 }
+
+/** 一页两格（配置段 + 标题外链）都注册在同一份 registrations 上，按槽名取。 */
+const registrationFor = (registrations, slotName) => registrations.find((item) => item.declaration.name === slotName)
 
 const readyScope = (value = {}) => ({
   getSnapshot: () => ({ status: 'ready', writable: true, value, user: {}, base: {}, revision: 0 }),
@@ -210,11 +211,13 @@ test('capital-config Client：只依赖 slots/locale/remote/configForms，注册
   assert.deepEqual([...mod.inject], ['slots', 'locale', 'remote', 'remote.credentials', 'configForms'],
     '0.1.7 的卡片不再注入 settingsScope；多了少了都要先对齐上游契约（账本 L15）')
 
-  const { ctx, registrations, servedCalls } = fakeCtx({ scope })
+  const { ctx, registrations, servedCalls, injectedSlots } = fakeCtx({ scope })
   mod.apply(ctx)
   assert.deepEqual(servedCalls, [[SETTINGS_ENTRY_ID]], '必须经 whileServed 门控：Host 不服务该条目时不留痕迹')
-  assert.equal(registrations.length, 1)
-  const { declaration, component } = registrations[0]
+  assert.deepEqual(injectedSlots, ['plugins.bundle.config', 'plugins.detail.badge'],
+    '同一页两格：配置段 + 标题右侧外链，都要真的 inject 过座位服务')
+  assert.equal(registrations.length, 2)
+  const { declaration, component } = registrationFor(registrations, 'plugins.bundle.config')
   assert.equal(declaration.name, 'plugins.bundle.config')
   assert.equal(declaration.key, '@v587d/capital-generation', '组合包级座位按**包名**寻址，不是 `<包名>#<行 id>`')
   assert.equal(typeof declaration.locale, 'string', '卡片文案自registered locale 命名空间')
@@ -242,8 +245,8 @@ test('capital-config Client：配置段自绘小节标题，四个密钥行按�
   const { mod } = loadClient({ scope })
   const { ctx, registrations } = fakeCtx({ scope })
   mod.apply(ctx)
-  const injected = registrations[0].declaration.inject()
-  const Card = registrations[0].component
+  const injected = registrationFor(registrations, 'plugins.bundle.config').declaration.inject()
+  const Card = registrationFor(registrations, 'plugins.bundle.config').component
   const props = {
     t: (key) => String(key),
     useCapitalCard: (selector) => selector(injected.hooks.capitalCard.getSnapshot()),
@@ -299,8 +302,8 @@ test('capital-config Client：文档链接与标签同排且只写"官方文档"
   const { mod } = loadClient({ scope })
   const { ctx, registrations, dictionaries } = fakeCtx({ scope })
   mod.apply(ctx)
-  const injected = registrations[0].declaration.inject()
-  const page = registrations[0].component({
+  const injected = registrationFor(registrations, 'plugins.bundle.config').declaration.inject()
+  const page = registrationFor(registrations, 'plugins.bundle.config').component({
     t: (key) => String(key),
     view: 'page',
     useCapitalCard: (selector) => selector(injected.hooks.capitalCard.getSnapshot()),
@@ -338,7 +341,10 @@ test('capital-config Client：Host 不服务该条目时不注册卡片', () => 
   const { mod } = loadClient({ scope })
   const { ctx, registrations } = fakeCtx({ scope, served: false })
   mod.apply(ctx)
-  assert.equal(registrations.length, 0, 'whileServed 没放行就不许出现卡片（部署没装配本行 ⇒ 页面上不留痕迹）')
+  assert.equal(registrationFor(registrations, 'plugins.bundle.config'), undefined,
+    'whileServed 没放行就不许出现卡片（部署没装配本行 ⇒ 页面上不留痕迹）')
+  assert.ok(registrationFor(registrations, 'plugins.detail.badge'),
+    '外链不进 whileServed：它是插件的属性，与配置条目有没有被服务无关')
 })
 
 test('capital-config Client：回退开关即时写嵌套路径，写被拒不翻转且给出提示；只读存储不发写', async () => {
@@ -358,7 +364,7 @@ test('capital-config Client：回退开关即时写嵌套路径，写被拒不�
   const { mod } = loadClient({ scope })
   const { ctx, registrations } = fakeCtx({ scope })
   mod.apply(ctx)
-  const injected = registrations[0].declaration.inject()
+  const injected = registrationFor(registrations, 'plugins.bundle.config').declaration.inject()
   const store = injected.hooks.capitalCard
   assert.equal(store.getSnapshot().localFetch.on, true)
 
@@ -375,7 +381,7 @@ test('capital-config Client：回退开关即时写嵌套路径，写被拒不�
   await injected.toggleLocalFetch(true)
   assert.equal(store.getSnapshot().localFetch.on, false, '写失败时开关不得显示成已切换')
   assert.equal(store.getSnapshot().localFetch.failed, true)
-  const page = registrations[0].component({
+  const page = registrationFor(registrations, 'plugins.bundle.config').component({
     t: (key) => String(key),
     view: 'page',
     useCapitalCard: (selector) => selector(store.getSnapshot()),
@@ -431,6 +437,54 @@ test('capital-config Host：localFetch 默认值两处一致且消费点独立�
   assert.equal(resolveLocalFetchConfig({ enabled: false }).enabled, false, 'enabled:false 必须能关掉回退')
   assert.equal(resolveLocalFetchConfig({ timeoutMs: 1000 }).timeoutMs, 1000, '显式配置覆盖默认值')
   assert.equal(resolveLocalFetchConfig({ userAgent: 'custom/1' }).userAgent, 'custom/1', '显式 UA 覆盖版本号')
+})
+
+/**
+ * 标题右侧的两枚外链（槽 `plugins.detail.badge`）。钉三件事：
+ * ① **只在**本组合包的详情页出现——同一格座位在行详情页与官方插件页也会渲染，判错就是在
+ *    别人的页面上挂我们的链接，且不报错；
+ * ② list 座位的注册必须带 `id`（上游 `SlotCore.register` 对 list 缺 id 直接抛，同 id 二次注册也抛）；
+ * ③ 两个地址与根 `package.json` 同字：仓库地址 = `repository.url` 去掉 `git+` 与 `.git`，
+ *    npm 地址由包名拼出。改了包名而不改这里，链接就指向别人的仓库。
+ */
+test('capital-config Client：详情页外链只认本包，两枚图标各去 GitHub 与 npm', () => {
+  const scope = readyScope()
+  const { mod } = loadClient({ scope })
+  const { ctx, registrations, dictionaries } = fakeCtx({ scope })
+  mod.apply(ctx)
+  const { declaration, component } = registrationFor(registrations, 'plugins.detail.badge')
+  assert.equal(declaration.name, 'plugins.detail.badge')
+  assert.equal(typeof declaration.id, 'string', 'list 座位按 id 占位：缺 id 上游直接抛')
+  assert.equal(declaration.locale, 'settings.capital', '文案走卡片同一份 bilingual 字典')
+
+  const t = (key) => String(key)
+  const own = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
+  const bundle = (name) => ({ kind: 'bundle', pkg: { name, rows: [] } })
+  assert.equal(component({ subject: bundle('@deepseek-ai/dsh-tool-web'), t }), null,
+    '别的包的详情页不许出现本插件的链接')
+  assert.equal(component({ subject: { kind: 'row', pkg: bundle(own.name), row: { rowId: 'capital-config' } }, t }), null,
+    '行详情页共用同一格座位：链接是包级属性，只出现在包页')
+  assert.equal(component({ subject: { kind: 'item', id: 'capital' }, t }), null, '官方插件页同理')
+
+  const links = collect(component({ subject: bundle(own.name), t }), 'a')
+  assert.deepEqual(links.map((node) => node.props['data-capital-plugin-link']), ['github', 'npm'],
+    '顺序固定：GitHub 在前、npm 收尾')
+  for (const link of links) {
+    assert.equal(link.props.target, '_blank', '外链新标签打开')
+    assert.match(String(link.props.rel), /noopener/, '外链必须切断 opener')
+    assert.ok(link.props['aria-label'], '纯图标没有可读文本，去处全靠 aria-label 说')
+    assert.equal(link.props.title, link.props['aria-label'], '悬停提示与无障碍名同一句')
+    assert.equal(link.children[0]?.type, 'svg', '图标是内联 SVG（官方图标表里没有 GitHub / npm 字形）')
+  }
+  const [github, npm] = links
+  const repoUrl = own.repository.url.replace(/^git\+/, '').replace(/\.git$/, '')
+  assert.equal(github.props.href, repoUrl, 'GitHub 图标必须逐字跟着 package.json 的 repository.url')
+  assert.equal(npm.props.href, `https://www.npmjs.com/package/${own.name}`, 'npm 地址由包名拼出')
+
+  const dict = dictionaries.get('settings.capital')
+  assert.deepEqual(Object.keys(dict.zh).sort(), Object.keys(dict.en).sort(), '两份字典的键必须同集合')
+  const labels = ['githubLabel', 'npmLabel'].map((key) => dict.zh[key])
+  assert.equal(new Set(labels).size, 2, '两枚图标的中文提示各不相同（纯图标全靠它区分去处）')
 })
 
 test('capital-config 包清单：声明运行期 schemastery 依赖，且客户端 bundle 会随包发布', () => {

@@ -28,6 +28,21 @@ const BUNDLE_NAME = '@v587d/capital-generation'
 /** 文案字典的命名空间（与配置条目 id 是两回事，按官方 settings 页的 `settings.*` 惯例）。 */
 const LOCALE_NS = 'settings.capital'
 
+/**
+ * 详情页标题旁那两枚外链坐的是槽 `plugins.detail.badge`（list，`scope: root`）：页面把它渲染在
+ * `.titleRow` 里**官方自己画的版本 / beta / 问题标签之后**，正是标题右侧那一格。座位是 list，
+ * 注册必须带 `id`（同 id 二次注册直接抛错），且组件收到的是 owner props `subject`——
+ * 同一格在**行详情页**与**官方插件页**也会渲染，所以 `subject.kind` 与包名两道都要过，
+ * 否则会在别人的页面上挂自己的链接。
+ *
+ * 两个地址的真值各只有一处：`REPO_URL` 逐字等于根 `package.json` 的 `repository.url`（去掉
+ * `git+` 前缀与 `.git` 后缀），`NPM_URL` 由 `BUNDLE_NAME` 拼出。两条同字链由
+ * `test/capital-config.test.mjs` 钉住。
+ */
+const BADGE_SLOT = 'plugins.detail.badge'
+const REPO_URL = 'https://github.com/v587d/capital-generation'
+const NPM_URL = `https://www.npmjs.com/package/${BUNDLE_NAME}`
+
 const FUYAO_DEFAULT_REF = 'FUYAO_API_KEY'
 const ANYSEARCH_DEFAULT_REF = 'ANYSEARCH_API_KEY'
 const WIND_DEFAULT_REF = 'WIND_API_KEY'
@@ -74,6 +89,8 @@ const zh = {
   readOnly: '本部署的设置为只读。',
   saveFailed: '本部署没有接受这些值，已保留供你修改。',
   unavailable: '该插件当前未加载，暂时无法配置。',
+  githubLabel: 'GitHub 仓库',
+  npmLabel: 'npm 包页面',
 }
 
 const en = {
@@ -96,6 +113,8 @@ const en = {
   readOnly: 'This deployment stores settings read-only.',
   saveFailed: 'The deployment did not accept these values; they were left for you to correct.',
   unavailable: 'This plugin is not loaded, so it cannot be configured right now.',
+  githubLabel: 'GitHub repository',
+  npmLabel: 'npm package page',
 }
 
 function text(value, fallback) {
@@ -130,6 +149,12 @@ function installStyles() {
     .capital-config-switch-label { color: var(--dsw-alias-label-primary); font-size: 13px; font-weight: 500; line-height: 20px; }
     .capital-config-hint { margin: 0; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
     .capital-config-write-failed { margin: 0; color: var(--dsw-alias-label-error); font-size: 12px; line-height: 18px; }
+    /* 标题右侧的两枚外链：官方那一格是 flex-wrap + gap:8px，整组自己收成一个 inline-flex 项，
+       免得标题变长时被换行拆成两截。颜色只走 --dsw-* 变量，明暗两套都跟着宿主。 */
+    .capital-config-plugin-links { flex: none; align-items: center; gap: 2px; display: inline-flex; }
+    .capital-config-plugin-link { border-radius: var(--dsw-radius-sm); width: 24px; height: 24px; color: var(--dsw-alias-label-tertiary); justify-content: center; align-items: center; display: inline-flex; text-decoration: none; }
+    .capital-config-plugin-link:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+    .capital-config-plugin-link:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-brand-primary)); outline-offset: 1px; }
   `
   document.head.appendChild(style)
   return () => style.remove()
@@ -365,6 +390,47 @@ function CapitalCard(props) {
   )
 }
 
+/**
+ * 官方 primitives 的图标表里没有 GitHub / npm 字形（整表核过），所以两枚图标自带 path 数据，
+ * 取 simple-icons（CC0）。`fill="currentColor"` + 外层 `color: var(--dsw-*)` ⇒ 明暗两套都跟
+ * 宿主，功能 CSS 不写主题选择器。
+ */
+const GLYPHS = {
+  github: 'M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12',
+  npm: 'M1.763 0C.786 0 0 .786 0 1.763v20.474C0 23.214.786 24 1.763 24h20.474c.977 0 1.763-.786 1.763-1.763V1.763C24 .786 23.214 0 22.237 0zM5.13 5.323l13.837.019-.009 13.836h-3.464l.01-10.382h-3.456L12.04 19.17H5.113z',
+}
+
+function PluginLink({ kind, href, label }) {
+  return h('a', {
+    className: 'capital-config-plugin-link',
+    href,
+    target: '_blank',
+    rel: 'noopener noreferrer',
+    'aria-label': label,
+    title: label,
+    'data-capital-plugin-link': kind,
+  }, h('svg', {
+    viewBox: '0 0 24 24',
+    width: 16,
+    height: 16,
+    fill: 'currentColor',
+    'aria-hidden': 'true',
+    focusable: 'false',
+  }, h('path', { d: GLYPHS[kind] })))
+}
+
+/**
+ * 标题右侧的外链组。同一格座位在**行详情页**与**官方插件页**也会渲染，所以 `subject.kind`
+ * 与包名两道闸门都要过；不匹配就 `return null`（list 座位的"我对这个主题没话说"）。
+ */
+function PluginLinks({ subject, t }) {
+  if (subject?.kind !== 'bundle' || subject.pkg?.name !== BUNDLE_NAME) return null
+  return h('span', { className: 'capital-config-plugin-links' },
+    h(PluginLink, { kind: 'github', href: REPO_URL, label: t('githubLabel') }),
+    h(PluginLink, { kind: 'npm', href: NPM_URL, label: t('npmLabel') }),
+  )
+}
+
 function apply(ctx) {
   ctx.effect(installStyles, 'capital-config: styles')
   ctx.effect(() => ctx.locale.register(LOCALE_NS, { zh, en }), 'capital-config: dictionaries')
@@ -380,7 +446,14 @@ function apply(ctx) {
     locale: LOCALE_NS,
     inject: () => card.inject(),
   }, CapitalCard))), 'capital-config: page')
-  ctx.logger?.info?.('capital-config: settings card mounted')
+  // 外链与配置段是同一页面的两格，但**门控不同**：链接是这个插件的属性，Host 有没有在服务
+  // `capital-config` 这条配置条目与它无关，所以不进 whileServed。
+  ctx.effect(() => ctx.slots.inject(BADGE_SLOT, () => ctx.slots.register({
+    name: BADGE_SLOT,
+    id: `${ENTRY_ID}-plugin-links`,
+    locale: LOCALE_NS,
+  }, PluginLinks)), 'capital-config: plugin links')
+  ctx.logger?.info?.('capital-config: settings card + 标题外链 mounted')
 }
 
 exports.name = 'capital-config'
