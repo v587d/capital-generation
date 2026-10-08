@@ -1,0 +1,36 @@
+# 巡检看门狗：检查 data-source-contract 今天到底跑没跑。
+#
+# 为什么必须是**另一个** workflow：调度被 GitHub 静默停用（仓库 60 天无 commit/push）时，
+# 写在同一个文件里的自查步骤也跟着不跑。两个独立调度器，其中一个才发现另一个死了。
+# 「探针没跑」和「探针全绿」在 Actions 列表里长得一模一样——这是 AGENTS.md §9.7 那一族
+# （注册面押在一次性的外部状态上、失败即静默）的运维版。
+#
+# 判据是**运行记录**，不是"有没有发 Issue"：巡检全绿本来就不发单，拿 Issue 当心跳会把正常判成故障。
+name: data-source-contract-watchdog
+
+on:
+  schedule:
+    - cron: '30 1 * * *'   # UTC 01:30 = 北京 09:30，给 07:00 那次留出调度延迟的余量
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: 看门狗自检
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # 脚本零依赖（只打 api.github.com），所以这里不 npm ci、不 build。
+        # 每次跑都往 step summary 写一行"我活着"：看门狗自己停摆时，这是唯一能事后对账的痕迹。
+        run: node scripts/contract-watchdog.mjs --workflow data-source-contract.yml --slackHours 26

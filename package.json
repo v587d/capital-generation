@@ -61,6 +61,7 @@
     "smoke:fuyao": "node scripts/smoke-fuyao.mjs",
     "smoke:wind": "node scripts/smoke-wind.mjs",
     "smoke:local-fetch": "node scripts/smoke-local-fetch.mjs",
+    "contract:probe": "node scripts/contract-probe.mjs",
     "docs:capabilities": "npm run build && node scripts/gen-capability-table.mjs",
     "verify:sessions": "node scripts/verify-sessions.mjs",
     "audit:tool-errors": "node scripts/audit-tool-errors.mjs"

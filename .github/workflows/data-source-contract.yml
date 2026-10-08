@@ -1,0 +1,82 @@
+# 数据源每日契约巡检：把每个上游端点各打一次最小请求，按「状态 / 响应时间 / 核心字段」判结论，
+# 不合格就发一张当日汇总 Issue。设计在 docs/design/data-source-contract-probe.md。
+#
+# 为什么只用 ubuntu-latest：这是**网络视角**的选择，不是操作系统的选择。国内 self-hosted 能抓到
+# "只有国内出口才看得见的故障"，但没有那样的机器，接 Gitee 的复杂度也不成比例。代价写死在报告里
+# （每次运行打印出口 IP/ASN，正文固定一句"本结论仅代表上述网络视角"），不偷偷看不见。
+#
+# 退出码分工：红 = 我方工具有问题（缺凭据 / 注册表与 runner 对不上）；Issue = 上游有问题。
+# 两个信道混过一次，之后所有红都会被当成"又是上游抖了"。
+name: data-source-contract
+
+on:
+  schedule:
+    # GitHub cron 只认 UTC，**星期字段也是 UTC**：北京 07:00 = 前一天 23:00 UTC，
+    # 所以"周一到周五"写作 0-4（日一到四）、"北京周六"写作 UTC 周五。日期与星期都退一天。
+    # 真正的档位判定不在这里，在 resolveTier()（按 Asia/Shanghai 换算，有回归测试钉着）。
+    - cron: '0 23 * * 0-4'
+    - cron: '0 23 * * 5'
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: '档位（auto = 按北京时区判）'
+        type: choice
+        options: [auto, daily, full]
+        default: full
+
+permissions:
+  contents: read
+  issues: write
+
+# 接连触发时排队且不 cancel：两个巡检并发打同一个出口 IP，等于自己制造限流。
+concurrency:
+  group: data-source-contract
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    # 无重试意味着一条挂住的探针吃掉自己整份预算：daily ~73 条、weekly ~100 条，
+    # 单条上限最大的那条是 90 s（sseinfo 单公司分支），其余 20–60 s。25 分钟够全量最坏情形，
+    # 超了就是 harness 挂了——那本来也该红。
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'   # 与 test.yml / publish.yml 同版本，取版本理由见 test.yml 顶部
+          cache: npm
+
+      # 巡检 import 的是 lib/ 里生产的 DataSource（契约的唯一来源），所以必须先构建。
+      - run: npm ci
+      - run: npm run build
+
+      - name: 巡检
+        env:
+          TIER: ${{ inputs.tier }}
+          # repository secrets **不会**自动进环境：必须逐条显式映射，否则 assertCredentials()
+          # 在发出任何请求之前就把 job 判红（daily 缺前三条，full 还缺 PADDLE）。名字必须与
+          # FAMILY_SECRET 逐字相同——resolveCredential() 用的就是 process.env[ref]，两边漂移
+          # 的对称症状是"CI 天天红、本地怎么跑都好"。
+          FUYAO_API_KEY: ${{ secrets.FUYAO_API_KEY }}
+          ANYSEARCH_API_KEY: ${{ secrets.ANYSEARCH_API_KEY }}
+          WIND_API_KEY: ${{ secrets.WIND_API_KEY }}
+          PADDLE_OCR_TOKEN: ${{ secrets.PADDLE_OCR_TOKEN }}
+        run: npm run contract:probe -- --tier "${TIER:-auto}" --json contract-report.json --markdown contract-report.md
+
+      # 明细留 90 天（Actions 默认保留期）。跨天趋势从 Issue 历史读，这里只是"当天到底返回了什么"的存照。
+      - name: 上传明细
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: contract-report-${{ github.run_number }}
+          path: contract-report.*
+          if-no-files-found: warn
+
+      # 只在巡检自己跑完了才发单：红（缺凭据等）是修 harness 的事，不该顺手开一张"上游故障"。
+      - name: 发布 Issue
+        if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/publish-contract-issue.mjs --report contract-report.json --body contract-report.md

@@ -96,3 +96,25 @@ plain 对象）即整次失败。正确写法：条件展开（`buildProfile`）
 必须等于注册数，新能力不补一行就失败）。它存在的理由是：原先那条幂等回归只手抄两条样例，而所有单测
 都直接调 `source.execute`（只跑一遍），没有一条走过 Hub——所以 766 个测试全绿仍放过了真缺陷（§9.7
 同一族：本地测试只覆盖了"接好的那个入口"）。
+
+## 10.8 新增能力必须同时补巡检条目：四态之一，不许留空
+
+> 落地物：`scripts/lib/contract-registry.mjs`（注册表）+ `test/contract-registry.test.mjs`（覆盖闸门）
+> + `npm run contract:probe`（ runner，CI 在 `.github/workflows/data-source-contract.yml`）。
+> 判据与取舍的论证在 `docs/design/data-source-contract-probe.md`；本节只放每次动手都要过的闸门。
+
+`src/sources/*.ts` 里注册一条新能力，**同一次改动**就要在 `scripts/lib/contract-registry.mjs` 给它一行，
+四态取一：`tier: 'daily'`（行情类、日频会变的）· `tier: 'weekly'`（基金档案 / 经理 / 回测这类静态面）·
+`shadow`（已知从巡检视角测不了：照跑、留痕、不报警）· `excluded`（本仓刻意不接的东西）。
+
+
+1. **由 `test/contract-registry.test.mjs` 钉，不靠人记**（与 §10.7 同一个先例）：注册数 == 覆盖数、
+   每条恰好落进一个状态、`params` 能过该 source 的 `normalizeParams`、每条带 `budgetMs`。
+   **漏一行就 `npm test` 红**——静默的缺席看起来像存在，还是 §9.7 那一族。
+2. **`shadow` / `excluded` / 已知红白名单三类都必须带 `since` + 理由**，`shadow` 还要带 `revisit` 日期。
+   没有出处的排除会一路烂到某天有人以为它正在被保护。
+3. **巡检的字段判据复用 `validateOutput`，不许在巡检里重写第二份字段清单**（§9.6 是同一件事的另一半）。
+   `GUARD` 失败 = 上游改了结构 = 改本仓映射表，这是整套巡检唯一真正值钱的信号。
+4. 加新端点时顺手判一次它的失败**归哪类**：上游业务码（`2004` / `5003` 按 §10.4，不进 Issue）还是
+   视角差异（机房 IP 被 WAF 挡，走 `shadow`）。两类混成一类，报出来的话就不可信。
+
