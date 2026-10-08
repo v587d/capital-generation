@@ -286,6 +286,20 @@ export function resolveTier(date = new Date()) {
   return weekday === 'Sat' ? 'full' : 'daily'
 }
 
+/**
+ * 最近一个**本该跑**的时刻：北京周一~周六 07:00 = UTC 周日~周五 23:00（北京周日刻意不排程）。
+ * 与 workflow 里那两条 cron 严格同构，所以由 `test/contract-registry.test.mjs` 钉住两边一致。
+ * 看门狗拿它判"调度漏没漏"——**不能拿"若干小时内跑过"当心跳**：一次手动 dispatch 就能把整周的
+ * 调度停摆遮过去，而手动跑恰恰不是调度器还活着的证据（2026-10-09 第一次遇到 schedule 静默没跑）。
+ */
+export function lastScheduledDue(now = new Date()) {
+  const due = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23))
+  if (now < due) due.setUTCDate(due.getUTCDate() - 1)
+  // UTC 周六 = 北京周日，那一档不存在；往前一天。
+  while (due.getUTCDay() === 6) due.setUTCDate(due.getUTCDate() - 1)
+  return due
+}
+
 /** 本次要真打的条目（含影子——影子照打，只是不计入结论）。
  * `tier: 'daily'` 只打日档；`tier: 'full'`（北京周六）打日档 + 周档。 */
 export function probesForTier(tier) {

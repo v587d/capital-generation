@@ -20,6 +20,7 @@ import { createTencentSources } from '../lib/sources/tencent-http.js'
 import { createWindSources } from '../lib/sources/wind-mcp.js'
 import {
   CONTRACT_PROBES, KNOWN_GAP_CODES, PROBE_FAMILIES, stateOf, secretRefOf, probesForTier, resolveTier,
+  lastScheduledDue,
 } from '../scripts/lib/contract-registry.mjs'
 
 /** 生产里真注册出来的 DataSource 能力全集——覆盖数的分母，不数注册表自己。 */
@@ -230,3 +231,34 @@ function expandCronDay(day, field) {
     return day >= from && day <= to
   })
 }
+
+test('lastScheduledDue：北京周一~周六 07:00 才该跑，周日那一档不存在', () => {
+  const iso = (d) => d.toISOString()
+  // UTC 周四 23:30 = 北京周五 07:30，就是这一档自己。
+  assert.equal(iso(lastScheduledDue(new Date('2026-10-08T23:30:00Z'))), '2026-10-08T23:00:00.000Z')
+  // UTC 周五 01:30 = 北京周五 09:30（看门狗的实际时刻）→ 回看昨晚那一档。
+  assert.equal(iso(lastScheduledDue(new Date('2026-10-09T01:30:00Z'))), '2026-10-08T23:00:00.000Z')
+  // UTC 周六 23:30 = 北京周日 07:30：这一档不该跑，最近应跑是 UTC 周五 23:00（北京周六 07:00）。
+  assert.equal(iso(lastScheduledDue(new Date('2026-10-10T23:30:00Z'))), '2026-10-09T23:00:00.000Z')
+  // UTC 周日 01:30 = 北京周日 09:30：仍然只欠到北京周六那一档，不许误报"今天没跑"。
+  assert.equal(iso(lastScheduledDue(new Date('2026-10-11T01:30:00Z'))), '2026-10-09T23:00:00.000Z')
+})
+
+test('lastScheduledDue 与 workflow 里那两条 cron 必须同构', () => {
+  // 看门狗判"漏跑"的依据是这份推算，而排程的真值是 workflow 文件。两边一旦分叉，
+  // 要么天天误报、要么整周静默遮丑——所以这里把两个载体逐个星期对一遍。
+  const crons = [...workflow.matchAll(/- cron:\s*'([^']+)'/g)].map((m) => m[1])
+  const dueDays = new Set()
+  for (const cron of crons) {
+    const [, hour, , , dow] = cron.split(' ')
+    assert.equal(hour, '23', `cron ${cron} 的小时字段不是 23，lastScheduledDue 里的 23 要一起改`)
+    for (let d = 0; d < 7; d += 1) if (expandCronDay(d, dow)) dueDays.add(d)
+  }
+  // 2026-10-04 是 UTC 周日：4 + d 那天的小时 23:30 就落在那一"档"的窗口里。
+  for (let d = 0; d < 7; d += 1) {
+    const slot = Date.UTC(2026, 9, 4 + d, 23)
+    const isDue = lastScheduledDue(new Date(slot + 30 * 60_000)).getTime() === slot
+    assert.equal(isDue, dueDays.has(d), `UTC 星期 ${d}：cron 判${dueDays.has(d) ? '该跑' : '不跑'}，`
+      + `lastScheduledDue 判${isDue ? '该跑' : '不跑'}——两边必须一起改`)
+  }
+})

@@ -33,4 +33,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # 脚本零依赖（只打 api.github.com），所以这里不 npm ci、不 build。
         # 每次跑都往 step summary 写一行"我活着"：看门狗自己停摆时，这是唯一能事后对账的痕迹。
-        run: node scripts/contract-watchdog.mjs --workflow data-source-contract.yml --slackHours 26
+        run: node scripts/contract-watchdog.mjs --workflow data-source-contract.yml
