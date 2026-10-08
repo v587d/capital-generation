@@ -37,13 +37,16 @@ async function openIssues() {
 
 const opens = await openIssues()
 const todayIssue = opens.find((issue) => issue.body.includes(`run-date ${runDate}`))
+/** 历史 = 别的日子的单。**必须排掉今天那张**：schedule + 手动 dispatch + 失败重跑会撞同一天，
+ * 拿当天自己的单去数"连续第 N 天"，第二次跑就把同一天念成第二天，正文从此不说真话。 */
+const history = opens.filter((issue) => issue !== todayIssue)
 
-/** 某个能力已经被几张未关闭的巡检单提到 = 连续第几天。 */
-const streakOf = (capability) => opens.filter((issue) => issue.body.includes(`\`${capability}\``)).length
+/** 某个能力已经被几张**往日**未关闭的巡检单提到 = 连续第几天（今天这张不算）。 */
+const streakOf = (capability) => history.filter((issue) => issue.body.includes(`\`${capability}\``)).length
 const withStreak = report.failing.map((row) => ({ ...row, days: streakOf(row.capability) + 1 }))
 
 /** 过去有单、今天通过 = 已恢复。只认 active 条目：影子项本来就不算结论。 */
-const mentioned = new Set(opens.flatMap((issue) => (issue.body.match(/`([a-z0-9_]+)`/gu) ?? []).map((t) => t.slice(1, -1))))
+const mentioned = new Set(history.flatMap((issue) => (issue.body.match(/`([a-z0-9_]+)`/gu) ?? []).map((t) => t.slice(1, -1))))
 const recovered = [...mentioned].filter((capability) =>
   !withStreak.some((row) => row.capability === capability)
   && report.results.some((row) => row.capability === capability && row.state === 'active' && ['PASS', 'SLOW'].includes(row.verdict)))
