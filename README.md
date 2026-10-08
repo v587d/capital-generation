@@ -27,6 +27,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 **🎞️视频演示：**[安装、配置与使用](https://www.bilibili.com/video/BV1fzaZ6CE9J/)。
 
 例如，你可以问：「复盘 XXXX 最近 20 个交易日的走势，结合公告和财务数据说明主要变化，并画一张量价图。」
+
 [样例：假期后研判报告（20261007）](docs/sample/假期后研判报告.md)。
 
 > [!IMPORTANT]
@@ -51,12 +52,18 @@ Linux / macOS 的 Web 或 CLI profile 在终端执行，下面两条 **任选一
    两条装完的功能一样：前者取 npm 上已发布的版本，后者取本仓库当前的代码。
    安装后重启该 profile。
 
-DSH 桌面端在 「添加插件」 中输入：
-`https://github.com/v587d/capital-generation` 或 `@v587d/capital-generation` 
-桌面端自带 DSH 宿主，不需要单独用 npm 安装宿主。本仓库已包含构建产物，普通用户不需要克隆仓库或运行构建命令。
+DSH 桌面端在 「添加插件」 中输入，下面两条 **任选一条**：
+   ```input
+   https://github.com/v587d/capital-generation
+   ```
+
+   ```input
+   @v587d/capital-generation
+   ``` 
+   桌面端自带 DSH 宿主，不需要单独用 npm 安装宿主。本仓库已包含构建产物，普通用户不需要克隆仓库或运行构建命令。
 
 > [!NOTE]
-> 本插件所有自带密钥均免费申请、免费日常使用且不影响插件核心功能，即缺哪个密钥，仅表示对应能力就不可用，其他功能照常。
+> 本插件所有自带密钥均可免费申请、免费日常使用。 哪怕所有密钥留空也不影响插件核心功能，即缺哪个密钥，仅表示对应能力就不可用，其他功能照常。
 
 2. **选填密钥。** 打开 DSH 「插件」 → **Capital Generation** -> 「配置」。
 
