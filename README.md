@@ -39,28 +39,30 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 > 适配 DSH`@0.2.0-rc.2`。已在 Linux 的 Web profile 和 Windows 桌面端验证；其他环境尚未充分测试。建议使用 `Deepseek/deepseek-flash` ，思考推理能力为 High ；GPT / Claude 尚未充分测试。
 
 1. **安装插件。** 
+
 Linux / macOS 的 Web 或 CLI profile 在终端执行，下面两条 **任选一条** ：
 
-   ```bash
-   dsh plugin --profile web add @v587d/capital-generation
-   ```
+```bash
+dsh plugin --profile web add @v587d/capital-generation
+```
+或
+```bash
+dsh plugin --profile web add github:v587d/capital-generation
+```
 
-   ```bash
-   dsh plugin --profile web add github:v587d/capital-generation
-   ```
-
-   两条装完的功能一样：前者取 npm 上已发布的版本，后者取本仓库当前的代码。
-   安装后重启该 profile。
+两条装完的功能一样：前者取 npm 上已发布的版本，后者取本仓库当前的代码。装后重启该 profile。
 
 DSH 桌面端在 「添加插件」 中输入，下面两条 **任选一条**：
-   ```input
-   https://github.com/v587d/capital-generation
-   ```
 
-   ```input
-   @v587d/capital-generation
-   ``` 
-   桌面端自带 DSH 宿主，不需要单独用 npm 安装宿主。本仓库已包含构建产物，普通用户不需要克隆仓库或运行构建命令。
+```input
+https://github.com/v587d/capital-generation
+```
+或
+```input
+@v587d/capital-generation
+``` 
+桌面端自带 DSH 宿主，不需要单独用 npm 安装宿主。本仓库已包含构建产物，普通用户不需要克隆仓库或运行构建命令。
+
 
 > [!NOTE]
 > 本插件所有自带密钥均可免费申请、免费日常使用。 哪怕所有密钥留空也不影响插件核心功能，即缺哪个密钥，仅表示对应能力就不可用，其他功能照常。
