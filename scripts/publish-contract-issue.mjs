@@ -12,7 +12,8 @@
  */
 import { readFileSync } from 'node:fs'
 import { parseArgs } from 'node:util'
-import { ISSUE_VERDICTS } from './lib/contract-registry.mjs'
+import { CONTRACT_PROBES, stateOf } from './lib/contract-registry.mjs'
+import { closeDecision } from './lib/contract-report.mjs'
 import { createGitHubApi, requireGitHubEnv } from './lib/github-api.mjs'
 
 const LABEL = 'data-source-contract'
@@ -65,12 +66,19 @@ const finalBody = sections.join('\n\n').slice(0, 90_000)
 
 if (report.failing.length === 0) {
   console.log(`本次全部通过，不开单。`)
-  // 全绿那天把仍未恢复的旧单关掉——否则「持续第 N 天」会一直累加，历史也就不可信了。
+  // 全绿那天把**本次真复核过的**旧单关掉——否则「持续第 N 天」会一直累加，历史也就不可信了。
+  // 但"没出现在失败里"不等于"复核过"：weekly 能力在日档那天根本不会被打，看门狗告警单提的是
+  // 文件名而不是能力名。判据放进 lib（`closeDecision`）才能离线钉住，见 §10.9。
+  const activeCapabilities = new Set(CONTRACT_PROBES.filter((entry) => stateOf(entry) === 'active').map((e) => e.capability))
   for (const issue of opens) {
-    const stillFailing = report.results.some((row) => row.state === 'active' && ISSUE_VERDICTS.includes(row.verdict)
-      && issue.body.includes(`\`${row.capability}\``))
-    if (stillFailing) continue
-    await api.post(`/repos/${api.repo}/issues/${issue.number}/comments`, { body: `本次巡检（${runDate}）该单涉及的能力已通过，关闭。` })
+    const decision = closeDecision(issue.body, report.results, activeCapabilities)
+    if (decision.action !== 'close') {
+      console.log(`保留 #${issue.number}：${decision.reason}`)
+      continue
+    }
+    await api.post(`/repos/${api.repo}/issues/${issue.number}/comments`, {
+      body: `本次巡检（${runDate}）逐条复核了 ${decision.mentioned.join(' / ')}，均通过，关闭。`,
+    })
     await api.patch(`/repos/${api.repo}/issues/${issue.number}`, { state: 'closed', state_reason: 'completed' })
     console.log(`关闭 #${issue.number}`)
   }

@@ -9,6 +9,8 @@
  * ⛔ 不输出响应正文、不输出 query string、不输出密钥；只有键名与 code。
  */
 
+import { ISSUE_VERDICTS } from './contract-registry.mjs'
+
 const cell = (text) => String(text ?? '-').replace(/\|/gu, '\\|').replace(/\r?\n/gu, ' ')
 const row = (...cells) => `| ${cells.map(cell).join(' | ')} |`
 
@@ -56,4 +58,33 @@ export function renderReport(report) {
     for (const item of noisy) out.push(`- ${item.verdict} \`${item.capability}\` ${item.ms}ms${item.detail ? ` — ${item.detail}` : ''}`)
   }
   return out.join('\n')
+}
+
+/**
+ * 要不要关一张旧的巡检单：**只有这一单提到的、当前真在巡检的能力，本次全部真打过且都没判不合格，才关**。
+ *
+ * 不能只看"本次没有不合格"：`report.results` 只装**本档位真打过**的那些条目。日档那天，周六才打的
+ * weekly 能力根本不在里面——按"没出现在失败里"就关单，等于给没复核过的东西发通过证明，还顺手把
+ * 「连续第 N 天」的历史清零。看门狗那张告警单同理：它提的是 workflow 文件名、一个能力都不提，
+ * 照旧逻辑会在任何一个全绿早晨被偷偷收掉——那正是把"调度没跑"的警报关掉。
+ * `SKIPPED`（id 没解析出来所以没真打）也不算复核过。
+ *
+ * 关单的判据住在 lib 而不是脚本里：脚本只在 CI 跑，lib 才能被离线测试钉住。
+ */
+export function closeDecision(issueBody, results, activeCapabilities) {
+  const mentioned = [...new Set((issueBody.match(/`([a-z0-9_]+)`/gu) ?? []).map((token) => token.slice(1, -1)))]
+    .filter((capability) => activeCapabilities.has(capability))
+  if (mentioned.length === 0) {
+    return { action: 'keep', mentioned, reason: '本单没提到任何在巡检的能力（看门狗告警就是这种），巡检结果无权关它' }
+  }
+  const byCap = new Map(results.map((row) => [row.capability, row]))
+  const verdictOf = (capability) => (byCap.get(capability)?.state === 'active' ? byCap.get(capability).verdict : undefined)
+  const failing = mentioned.filter((capability) => ISSUE_VERDICTS.includes(verdictOf(capability)))
+  const unverified = mentioned.filter((capability) => !failing.includes(capability)
+    && (!byCap.has(capability) || verdictOf(capability) === 'SKIPPED'))
+  if (failing.length > 0) return { action: 'keep', mentioned, reason: `${failing.join(' / ')} 本次仍不合格` }
+  if (unverified.length > 0) {
+    return { action: 'keep', mentioned, reason: `${unverified.join(' / ')} 本次没真打（不在本档位，或 id 没解析出来），没复核就不关` }
+  }
+  return { action: 'close', mentioned, reason: `${mentioned.join(' / ')} 本次全部通过` }
 }

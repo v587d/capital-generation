@@ -8,7 +8,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { renderReport } from '../scripts/lib/contract-report.mjs'
+import { renderReport, closeDecision } from '../scripts/lib/contract-report.mjs'
 
 function report(overrides = {}) {
   return {
@@ -79,4 +79,45 @@ test('详情里的竖线被转义，不把表格劈开', () => {
   assert.ok(line, '没找到那条失败的行')
   assert.match(line, /a \\\| b/)
   assert.equal(line.split(/(?<!\\)\|/u).length - 1, 7, '表格行必须恰好 6 列')
+})
+
+/**
+ * 关单判据。**只有"本单提到的能力，本次都真打过且都没判不合格"才关**。
+ * 这一组用例存在的理由是一个真实的误关形状：日档那天 weekly 能力根本不在 `report.results` 里，
+ * 按"没出现在失败中"就关单，等于给没复核过的东西发通过证明，还顺手清零「连续第 N 天」。
+ */
+const ACTIVE = new Set(['quote', 'fund_manager'])
+const passed = [{ capability: 'quote', family: 'fuyao', state: 'active', verdict: 'PASS', ms: 90 }]
+
+test('提到的能力本次真打且通过 → 关，并列出复核了哪几条', () => {
+  const d = closeDecision('不合格清单里有 `quote` 一条。', passed, ACTIVE)
+  assert.equal(d.action, 'close')
+  assert.deepEqual(d.mentioned, ['quote'])
+})
+
+test('其中一条本次仍不合格 → 不关，理由点名是哪条', () => {
+  const rows = [...passed, { capability: 'fund_manager', family: 'fuyao', state: 'active', verdict: 'ENVELOPE', ms: 300 }]
+  const d = closeDecision('`quote` 与 `fund_manager` 不合格', rows, ACTIVE)
+  assert.equal(d.action, 'keep')
+  assert.match(d.reason, /fund_manager 本次仍不合格/)
+})
+
+test('日档那天 weekly 能力没真打 → 不许当成"已通过"关单', () => {
+  // 旧逻辑在这里会把单关掉：results 里根本没有 fund_manager，"没出现在失败里"被当成了通过。
+  const d = closeDecision('上周六 `fund_manager` 报 5003', passed, ACTIVE)
+  assert.equal(d.action, 'keep')
+  assert.match(d.reason, /没真打/)
+})
+
+test('SKIPPED（id 没解析出来所以没发请求）也不算复核过', () => {
+  const rows = [{ capability: 'fund_manager', family: 'fuyao', state: 'active', verdict: 'SKIPPED', ms: 0 }]
+  const d = closeDecision('`fund_manager` 报 5003', rows, ACTIVE)
+  assert.equal(d.action, 'keep')
+})
+
+test('看门狗告警单只提文件名，巡检结果无权关它', () => {
+  // 它带同一个 label，会被 `opens` 捞进来；旧逻辑在任何全绿早晨都会把"调度没跑"的警报偷偷收掉。
+  const d = closeDecision('`data-source-contract.yml` 没有 schedule 记录', passed, ACTIVE)
+  assert.equal(d.action, 'keep')
+  assert.deepEqual(d.mentioned, [])
 })
