@@ -143,7 +143,8 @@ https://github.com/v587d/capital-generation
 | :---: | :---: |
 | <a href="assets/watchlist-popup.png"><img src="assets/watchlist-popup.png" alt="管理自选股" width="400"></a> | <a href="assets/watchlist-more.png"><img src="assets/watchlist-more.png" alt="标记持仓" width="400"></a> |
 
-- **精选 Skills：** 当前收录三个开源项目：[The Investment Skills Lexicon](https://github.com/finterm-ai/investment-skills)（Buffett Investment Framework）、[China Stock Research Skills](https://github.com/spikeHongg/china-stock-research-skills)（六个 A 股研究模块）与 [InvestSkill](https://github.com/yennanliu/InvestSkill)（28 个美股模块：逐条主张核验、空头反方、披露文件与内部人追踪、压力测试等）。上游自带的整套流程编排不会覆盖 Capital 的会话路由。可在「插件」→ **Capital Generation** →「精选 Skills」这一格按需开启（格名后面标着「已开启 / 收录总数」）：左边按能力筛选，按项数从多到少排，往下翻时这一列一直跟着；**已经开启的那几项排在清单最前面**（下次进入这一格时生效，刚拨完不会当场抽走行）。每一项可以先点**详情**，摊开那份 `SKILL.md` 原文读一遍再决定要不要开（按 `Esc` 或点外面收起），开起来之后那一行会多出一个**复制技能名**。开启后新建 Capital 会话生效，默认关闭。
+- **精选 Skills：** 当前收录三个开源项目：[The Investment Skills Lexicon](https://github.com/finterm-ai/investment-skills)（Buffett Investment Framework）、[China Stock Research Skills](https://github.com/spikeHongg/china-stock-research-skills)（六个 A 股研究模块）与 [InvestSkill](https://github.com/yennanliu/InvestSkill)（28 个美股模块：逐条主张核验、空头反方、披露文件与内部人追踪、压力测试等）。
+
 <p align="center">
   <a href="assets/selected-skills配置.png">
     <img src="assets/selected-skills配置.png" alt="selected-skills配置" width="800">
@@ -177,7 +178,7 @@ npm run smoke:boot  # 检查插件装配
 
 ## 致谢
 
-- 「精选 Skills」的研究流程按固定 commit **快照收录**自 [finterm-ai/investment-skills](https://github.com/finterm-ai/investment-skills)、[spikeHongg/china-stock-research-skills](https://github.com/spikeHongg/china-stock-research-skills) 与 [yennanliu/InvestSkill](https://github.com/yennanliu/InvestSkill)（均 MIT License），全部默认关闭。上游那些流程是写给"什么工具都在手边"的助手的，成规模地要求它自己去搜实时行情、搜不到就凭印象估一个；本助手的取数只有一条路（交给负责取数的角色），所以这几处**按合规清单改写过**，改了什么、影响几篇都记在快照内的 `UPSTREAM.md`。分析方法、评分表与结论一字未改，其中的观点仍属原作者，不构成对本插件结论的背书。
+- 「精选 Skills」的研究流程按固定 commit **快照收录**自 [finterm-ai/investment-skills](https://github.com/finterm-ai/investment-skills)、[spikeHongg/china-stock-research-skills](https://github.com/spikeHongg/china-stock-research-skills) 与 [yennanliu/InvestSkill](https://github.com/yennanliu/InvestSkill)（均 MIT License）。
 - 会话里的可交互图表由 [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts)（Apache-2.0）渲染。
 - 行情、财务、公告与网页材料来自同花顺 Fuyao、Wind Alice、AnySearch、PaddleOCR 以及东方财富、腾讯等公开或申请制接口；数据版权归各服务方，额度与条款以服务方为准，本项目不重新分发原始数据。
 
