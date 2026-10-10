@@ -46,9 +46,9 @@ DSH`@0.2.0-rc.2` 带的 `dsh-skill` 与 `dsh-skill-filesystem`（两颗精确版
 - **社区 Skill 自选实验目录，默认全部关闭**。里面是两份 MIT 协议的固定快照：
   `finterm-ai/investment-skills`（commit `7235d34`）与 `spikeHongg/china-stock-research-skills`
   （commit `d49f1f3`），共 7 条可选。开关在「插件」→ **Capital Generation** → 「配置」页新增的
-  「选用 Skill」段：可按能力标签筛选，每一格旁边写着来源与仓库、状态、最近提交、下次复查日期和风险提示。
-  状态只有两种说法：`experimental`（能用，但按美股语境写，不能直接当 A 股规则）与 `watchlist`（上游
-  九十天内没有提交，启用前请自己复核内容和出处）。能力标签只说明"这条能帮上什么"，不代表推荐或背书。
+  「精选 Skills」段：每格给技能名、一句话简述、上游仓库链接与开关，可按能力标签筛选。成熟度记在
+  catalog 里、当前不在设置页显示：`experimental`（能用，但按美股语境写，不能直接当 A 股规则）与
+  `watchlist`（上游九十天内没有提交，启用前请自己复核内容和出处）。能力标签只说明"这条能帮上什么"，不代表推荐或背书。
   开启后**只对之后新建的 Capital 根会话生效，子 Agent 不继承**；上游自带的编排 skill 被排除，因为它和
   本插件既有的角色路由冲突；上游脚本只作为材料保留，一条都不会被执行。
   体积说清楚：装出去的是**运行时正文与溯源**——每颗 skill 的正文、references 与脚本，加上两份 `LICENSE`

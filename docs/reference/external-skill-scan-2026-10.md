@@ -6,7 +6,7 @@
 
 ## 结论
 
-当前固定版本都进入默认关闭的显式实验 catalog，设置页按能力标签展示和筛选；状态只提示成熟度和维护风险，不代表推荐或背书：
+当前固定版本都进入默认关闭的显式实验 catalog，设置页按能力标签展示和筛选；`status` 是记在 catalog 与本文里的成熟度/维护风险信号，不在设置页显示，也不代表推荐或背书：
 
 1. [`spikeHongg/china-stock-research-skills`](https://github.com/spikeHongg/china-stock-research-skills)：内容可作为 A 股财务健康、风险监控、估值、战略转型、行业竞争和订单质量的实验模块；截至 2026-10-08，最后提交为 2026-03-09，状态为 `watchlist`，用户可按模块自行开启。其 orchestrator 仍因与 Capital 路由冲突排除。
 2. [`finterm-ai/investment-skills`](https://github.com/finterm-ai/investment-skills)：最后提交为 2026-07-22，状态为 `experimental`，可作为 Buffett-inspired 商业分析、现金流、估值和风险框架显式实验，仍默认关闭。它主要源于美股/伯克希尔语境，不能直接当作 A 股规则。

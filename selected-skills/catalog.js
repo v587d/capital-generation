@@ -1,18 +1,6 @@
 // Selected-skill metadata owned by Capital Generation. Upstream snapshots remain unchanged.
-export const SELECTED_SKILL_TAGS = Object.freeze([
-  'a-share',
-  'business-analysis',
-  'cash-flow',
-  'competition',
-  'financial-health',
-  'monitoring',
-  'orders',
-  'perspective',
-  'risk',
-  'strategy',
-  'valuation',
-])
-
+// 能力标签的词表就是下面 SELECTED_SKILL_TAG_LABELS 的键：卡片按条目实际用到的标签现算筛选条，
+// 少一套语言的显示名就会露出英文原词（test/capital-config.test.mjs 钉着）。
 export const SELECTED_SKILL_CATALOG = Object.freeze([
   {
     key: 'buffettFramework',

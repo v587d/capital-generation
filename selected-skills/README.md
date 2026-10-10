@@ -19,8 +19,10 @@ for the user to review the source and decide whether it fits the task.
 - `catalog.js`: Capital-owned stable keys, labels, capability tags, and maturity notes.
 
 Tags describe what a skill helps with, not whether it is trustworthy or recommended.
-Status, last commit, review date, source owner, and risk notes remain visible beside
-the toggle. A tag is not a guarantee of financial validity.
+`status`, `lastCommit`, `reviewBy` and `riskNote` are review metadata for this repository:
+they drive the quarterly review cadence and the scan record, and they are deliberately not
+rendered in the settings card, which shows the skill name, summary, capability tags and the
+upstream repository link. A tag is not a guarantee of financial validity.
 
 ## Operating posture
 

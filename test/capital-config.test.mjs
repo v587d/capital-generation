@@ -8,7 +8,7 @@ import { load as yamlLoad } from 'js-yaml'
 import { apply as hostApply, Config as CapitalConfig, SETTINGS_ENTRY_ID } from '../capital-config/index.js'
 import { CAPITAL_CONFIG_ENTRY_ID, Config as MainConfig, LOCAL_FETCH_DEFAULTS, resolveLocalFetchConfig } from '../lib/index.js'
 import { LOCAL_FETCH_CLIENT_VERSION } from '../lib/web-retriever/local-fetch.js'
-import { SELECTED_SKILL_CATALOG } from '../selected-skills/catalog.js'
+import { SELECTED_SKILL_CATALOG, SELECTED_SKILL_TAG_LABELS } from '../selected-skills/catalog.js'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const CLIENT = join(ROOT, 'capital-config', 'client.js')
@@ -316,6 +316,23 @@ test('capital-config Client：四个密钥按序渲染，本机回退与 selecte
     'local-fetch',
     ...SELECTED_SKILL_CATALOG.map(() => 'selected-skill'),
   ])
+})
+
+test('capital-config Client：catalog 用到的每个能力标签都有中英两套显示名', () => {
+  // 筛选条是从各条目实际用到的 tags 现算的，显示名靠 `TAG_LABELS[locale][tag] ?? tag` 兜底：
+  // 少一套名字不会报错，只会在中文界面上直接画出 `cash-flow` 这种原词——控件对自己的状态说谎。
+  // 词表就是 TAG_LABELS 的键，所以新标签必须同时补 zh 与 en。
+  const used = [...new Set(SELECTED_SKILL_CATALOG.flatMap((entry) => entry.tags))].sort()
+  assert.ok(used.length >= 3, `catalog 只用到 ${used.length} 个能力标签，这条闸门多半被架空了`)
+  for (const locale of ['zh', 'en']) {
+    const labels = SELECTED_SKILL_TAG_LABELS[locale]
+    assert.ok(labels, `SELECTED_SKILL_TAG_LABELS 缺少 ${locale} 那一套`)
+    const missing = used.filter((tag) => typeof labels[tag] !== 'string' || labels[tag].trim() === '')
+    assert.deepEqual(missing, [], `${locale} 界面缺这些能力标签的显示名：${missing.join(', ')}`)
+  }
+  assert.deepEqual(Object.keys(SELECTED_SKILL_TAG_LABELS.en).sort(), Object.keys(SELECTED_SKILL_TAG_LABELS.zh).sort(),
+    'zh 与 en 的标签表键不齐：切语言时会有标签露出英文原词')
+  for (const locale of ['zh', 'en']) assert.ok(SELECTED_SKILL_TAG_LABELS[locale].all, `${locale} 的筛选条缺「全部」`)
 })
 
 /**
