@@ -1,0 +1,1034 @@
+/* Reference copy for the argument-map spike, from the metaproc repo:
+ * metaproc/src/metaproc/metabrowser_plugin/plugin/viz.css — unmodified. */
+/*
+ * Visualization-plane stylesheet (Phase 2).
+ *
+ * Rule: this file contains NO literal color values — every color must
+ * resolve through `var(--viz-*)` or an existing shared token. See the
+ * `--viz-*` palette supplied by the MetaBrowser host for the source of truth.
+ * A unit test enforces the rule; adding a hex/rgb/hsl literal here will fail
+ * CI (see tests/test_viz_css_no_literal_colors.py).
+ */
+
+.ft-md-process {
+  --ft-color: var(--ft-md-process);
+  --ft-bg: var(--ft-md-process-bg);
+  --ft-border: var(--ft-md-process-border);
+}
+
+.tree-item-icon.ft-md-process {
+  color: var(--ft-color);
+}
+
+.viz-canvas {
+  position: relative;
+  color: var(--viz-text-meta);
+  transform-origin: top left;
+}
+
+/* Mount-fade animation.
+   Every element that appears as the canvas re-renders (node cards,
+   process frames, edge strokes, alert banner) runs this fade on mount
+   so that filter toggles, expand/collapse, and any re-layout feel
+   gently animated rather than a hard pop. Position and size continue
+   to transition via --viz-layout-transition (see .viz-node and
+   .viz-frame below), so a node that shifts during re-layout gets
+   smooth movement; a node that was not present in the previous render
+   gets the fade-in.
+   Translate: 3px upward offset alongside opacity — pure-opacity fades
+   on dense graphs read as a flicker rather than motion on modern
+   fast-refresh displays, so a tiny positional nudge gives the eye
+   something to track.
+   animation-fill-mode: backwards — without it, the element paints at
+   its final state (opacity 1, translate 0) for one frame between DOM
+   insertion and the first animation frame, defeating the fade. See
+   each `.viz-*` rule below that applies the animation — every one
+   pairs `animation:` with `animation-fill-mode: backwards`.
+   Exits are instant — a two-phase remove would require holding
+   elements in the DOM during a fade-out; the mount fade alone already
+   smooths the common cases the reader cares about. */
+@keyframes viz-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* SVG edges animate opacity only — `transform` on an SVG <path> inside
+   an <svg> would move it relative to its parent, distorting arrow
+   geometry. Paths inherit the `--viz-fade-duration` timing from the
+   design-token scale. */
+@keyframes viz-edge-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* View Transitions API tuning. The browser default duration (250ms ease)
+   feels a touch quick for graphs where the eye needs to track a node
+   morphing into a new position. 320ms with a soft ease-out keeps the
+   motion readable without dragging. Targets every named element + the
+   root crossfade so the chrome and the named viz nodes/edges stay in
+   sync. */
+::view-transition-old(*),
+::view-transition-new(*) {
+  animation-duration: 320ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Stacking inside the view-transition pseudo layer.
+
+   The browser paints named groups in document-paint order, which puts
+   the morphing viz nodes above the root snapshot. That's correct for
+   nodes that morph fully inside the canvas, but the snapshot bbox can
+   extend beyond the viewport and paint over chrome elements (header,
+   drawer) that ARE in the root. Naming each chrome element that the
+   morph might overlap and giving it a high z-index keeps it pinned
+   above. We do not raise the root itself, since the root snapshot is
+   a rasterized image of the whole old/new page minus named elements
+   and would cover the morphing nodes everywhere except their
+   captured holes. */
+::view-transition-group(viz-header) {
+  z-index: 100;
+}
+::view-transition-group(viz-drawer) {
+  z-index: 100;
+}
+
+/* Edge layer is one rasterized SVG; morphing it as a single bbox
+   stretches every line, even ones whose endpoints did not actually
+   move. SVG path data cannot be smoothly interpolated by view
+   transitions either way, so suppress the morph and let the new
+   edges land on the next frame. The named layer still participates
+   in the transition lifecycle (so it rejoins the page atomically),
+   it just stays invisible during the morph. */
+::view-transition-old(viz-edges),
+::view-transition-new(viz-edges) {
+  animation: none;
+  opacity: 0;
+}
+
+.viz-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  margin: 6px 8px 0 8px;
+  background: var(--viz-surface-raised);
+  border: 1px solid var(--viz-border);
+  border-radius: 3px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--viz-text-meta);
+}
+
+.viz-tool-btn {
+  font: inherit;
+  font-weight: var(--weight-bold);
+  padding: 3px 8px;
+  border: 1px solid var(--viz-border-strong);
+  background: var(--viz-surface);
+  border-radius: 3px;
+  cursor: pointer;
+  min-width: 24px;
+  color: var(--viz-text-meta);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  line-height: 1;
+  transition: var(--viz-hover-transition);
+}
+
+/* Uniform hover: darken the current color (works regardless of whether the
+   button is in its off state or toggled-on). See --viz-hover-filter. */
+.viz-tool-btn:hover {
+  filter: var(--viz-hover-filter);
+}
+
+/* Toggle on/off differ by color only — NOT font weight — so the label's
+   measured width stays constant and buttons don't jitter as they toggle. */
+.viz-tool-toggle-on {
+  background: var(--viz-toggle-on-bg);
+  border-color: var(--viz-toggle-on-border);
+  color: var(--viz-toggle-on-text);
+}
+
+.viz-tool-btn-label {
+  display: inline-block;
+}
+
+.viz-tool-btn .viz-kind-icon {
+  width: 12px;
+  height: 12px;
+}
+
+.viz-tool-divider {
+  display: inline-block;
+  width: 1px;
+  height: 18px;
+  background: var(--viz-border-strong);
+  margin: 0 4px;
+}
+
+.viz-tool-label {
+  min-width: 36px;
+  margin: 0 -2px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--viz-text-muted);
+}
+
+.viz-tool-spacer {
+  flex: 1;
+}
+
+.viz-tool-hint {
+  color: var(--viz-text-dim);
+  font-size: 10px;
+}
+
+.viz-stage {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin: 6px 8px;
+  min-height: 300px;
+}
+
+.viz-stage > .viz-viewport {
+  flex: 1 1 auto;
+  margin: 0;
+}
+
+.viz-viewport {
+  position: relative;
+  margin: 6px 8px;
+  overflow: auto;
+  background: var(--viz-surface);
+  max-height: calc(100vh - 220px);
+  min-height: 300px;
+  /* Match the nav-tree scrollbar treatment so both panes feel like the
+     same surface. Geometry tokens come from styles.css :root; the track
+     color uses --viz-surface so the bar disappears into the canvas. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--viz-surface);
+}
+.viz-viewport::-webkit-scrollbar {
+  width: var(--scrollbar-width);
+  height: var(--scrollbar-width);
+  background: var(--viz-surface);
+}
+.viz-viewport::-webkit-scrollbar-track {
+  background: var(--viz-surface);
+  border: none;
+  box-shadow: none;
+}
+.viz-viewport::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border: var(--scrollbar-thumb-border-width) solid var(--viz-surface);
+  border-radius: var(--scrollbar-thumb-radius);
+}
+.viz-viewport::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+.viz-viewport::-webkit-scrollbar-corner {
+  background: var(--viz-surface);
+}
+
+/* ── Side panel (B7 click-to-inspect) ─────────────────────────── */
+
+.viz-side-panel {
+  flex: 0 0 0;
+  width: 0;
+  max-width: 360px;
+  overflow: hidden;
+  transition:
+    flex-basis 180ms ease,
+    width 180ms ease;
+  border: 1px solid transparent;
+  background: var(--viz-surface-raised);
+  border-radius: 3px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--viz-text);
+}
+
+.viz-side-panel-open {
+  flex: 0 0 320px;
+  width: 320px;
+  border-color: var(--viz-border);
+  overflow: auto;
+  max-height: calc(100vh - 220px);
+}
+
+.viz-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--viz-surface-sunken);
+  border-bottom: 1px solid var(--viz-border-subtle);
+  position: sticky;
+  top: 0;
+}
+
+.viz-panel-head .viz-kind-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.viz-panel-title {
+  flex: 1;
+  font-weight: var(--weight-bold);
+  font-size: 13px;
+  color: inherit;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.viz-panel-close {
+  font: inherit;
+  border: 1px solid var(--viz-border-strong);
+  background: var(--viz-surface);
+  color: var(--viz-text-muted);
+  width: 22px;
+  height: 22px;
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  transition: var(--viz-hover-transition);
+}
+
+.viz-panel-close:hover {
+  background: var(--viz-surface-sunken);
+  color: var(--viz-text);
+}
+
+.viz-panel-content {
+  padding: 8px 10px 12px 10px;
+}
+
+.viz-panel-section {
+  margin-top: 10px;
+}
+
+.viz-panel-section-title {
+  font-size: 9px;
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.06em;
+  color: var(--viz-text-muted);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+
+.viz-panel-section-body {
+  padding: 4px 6px;
+  background: var(--viz-surface);
+  border: 1px solid var(--viz-border-subtle);
+  border-radius: 3px;
+}
+
+.viz-panel-row {
+  display: flex;
+  gap: 8px;
+  line-height: 1.5;
+}
+
+/* Label/value design-system pair: every "field row" in the drawer uses
+   muted-grey normal-weight label + black medium-weight value so values
+   (the data the user cares about) read as primary and labels fade to
+   reference text. Shared by _row() on process / step / dep panels. */
+.viz-panel-key {
+  min-width: 90px;
+  color: var(--viz-text-muted);
+  font-weight: var(--weight-normal);
+}
+
+.viz-panel-val {
+  color: var(--viz-text);
+  font-weight: var(--weight-medium);
+  word-break: break-word;
+  overflow-wrap: break-word;
+  flex: 1;
+}
+
+.viz-panel-desc {
+  margin: 2px 0 4px;
+  font-size: 11px;
+  color: var(--viz-panel-desc);
+  line-height: 1.4;
+}
+
+.viz-panel-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+}
+
+.viz-panel-table th {
+  text-align: left;
+  color: var(--viz-text-muted);
+  font-weight: var(--weight-bold);
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--viz-border-subtle);
+}
+
+.viz-panel-table td {
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--viz-panel-row-muted);
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.viz-panel-table td.viz-panel-type,
+.viz-panel-table td.viz-panel-prod {
+  color: var(--viz-chip-type-text);
+}
+
+.viz-panel-link {
+  color: var(--viz-panel-link);
+  text-decoration: none;
+}
+
+.viz-panel-link:hover {
+  text-decoration: underline;
+}
+
+.viz-panel-json {
+  margin: 0;
+  padding: 6px 8px;
+  background: var(--viz-surface-card);
+  border: 1px solid var(--viz-border-subtle);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.viz-panel-body-md {
+  white-space: pre-wrap;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--viz-chip-type-text);
+}
+
+.viz-panel-body-details > summary {
+  cursor: pointer;
+  list-style: revert;
+}
+
+.viz-sizer {
+  position: relative;
+}
+
+/* ── Header panel ─────────────────────────────────────────────── */
+
+/* Container only; inner rows reuse the drawer's viz-panel-* classes
+   (rendered via _section + _processIdentityRows in viz.js) so the
+   top-of-page Identity and the drawer's process Identity are visually
+   identical and driven by one render path. */
+.viz-header-panel {
+  margin: 6px 8px 0 8px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* ── Edges ────────────────────────────────────────────────────── */
+
+.viz-edges {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  color: var(--viz-edge-default);
+}
+
+.viz-edge {
+  fill: none;
+  stroke: var(--viz-edge-default);
+  stroke-width: 1.4;
+  animation: viz-edge-fade-in var(--viz-fade-duration) var(--viz-fade-ease) backwards;
+}
+
+/* All edges use a plain triangle head so every arrow reads as "information
+   flows this way"; color alone carries the kind distinction. Strokes are
+   intentionally uniform-width + lighter so arrows read as connective
+   tissue rather than emphasis. */
+.viz-edge-needs {
+  marker-end: url(#viz-arrow-needs);
+}
+
+.viz-edge-produces {
+  stroke: var(--viz-edge-produces);
+  marker-end: url(#viz-arrow-produces);
+}
+
+.viz-edge-consumes {
+  stroke: var(--viz-edge-consumes);
+  marker-end: url(#viz-arrow-consumes);
+}
+
+/* ── Node cards ───────────────────────────────────────────────── */
+
+.viz-node {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 2px 8px;
+  border: 1px solid var(--viz-border-strong);
+  border-radius: 3px;
+  background: var(--viz-surface-card);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--viz-text);
+  box-shadow: var(--viz-shadow-card);
+  user-select: none;
+  line-height: 1.2;
+  display: flex;
+  flex-direction: column;
+  /* Shared hover transition + layout transition (expand/collapse). Listed
+     separately from position/size because hover props need the hover
+     duration, not the longer layout duration. */
+  transition:
+    left var(--viz-layout-transition),
+    top var(--viz-layout-transition),
+    width var(--viz-layout-transition),
+    height var(--viz-layout-transition),
+    var(--viz-hover-transition);
+  animation: viz-fade-in var(--viz-fade-duration) var(--viz-fade-ease) backwards;
+}
+
+.viz-node-step {
+  background: var(--viz-accent-step-bg);
+  border-color: var(--viz-accent-step-border);
+}
+/* Dep cards read --ft-bg / --ft-border from whatever ft-<name> class
+   the node carries (see :root tokens + .ft-* declarations in
+   styles.css). Falls back to the generic dep accent when no subtype
+   class is present. One rule — all file types systematic. */
+.viz-node-dep {
+  background: var(--ft-bg, var(--viz-accent-dep-bg));
+  border-color: var(--ft-border, var(--viz-accent-dep-border));
+}
+/* Process in collapsed/composite-node form matches the expanded frame —
+   same warm-tan bg + same neutral border, so the kind reads identically
+   whether expanded or collapsed. */
+.viz-node-process {
+  background: var(--viz-accent-process-bg);
+  border-color: var(--viz-accent-process-border);
+}
+.viz-node-file {
+  background: var(--viz-accent-file-bg);
+  border-color: var(--viz-accent-file-border);
+}
+
+/* Every card is a side-panel trigger, so `:hover` on the base class shows
+   the click affordance. Cards with an on-disk path additionally carry the
+   `viz-node-clickable` class for the pointer cursor from legacy Phase-1
+   behavior; both hover states resolve to the same elevation. */
+.viz-node {
+  cursor: pointer;
+}
+.viz-node:hover {
+  box-shadow: var(--viz-shadow-hover);
+}
+.viz-node-clickable {
+  cursor: pointer;
+}
+
+.viz-node-header {
+  font-size: 8px;
+  color: var(--viz-text-muted);
+  font-weight: var(--weight-bold);
+  overflow-wrap: break-word;
+  word-break: break-word;
+  line-height: 1.2;
+}
+
+.viz-node-label {
+  margin-top: 1px;
+  font-weight: var(--weight-bold);
+  overflow-wrap: break-word;
+  word-break: break-word;
+  line-height: 1.2;
+}
+
+.viz-node-badge {
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  font-size: 8px;
+  font-weight: var(--weight-bold);
+  color: var(--viz-text-meta);
+  background: var(--viz-chip-bg);
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--viz-border-strong);
+  line-height: 1.3;
+}
+
+/* Kind icon — one visual per kind (step / process / dep), rendered in every
+   header (step card title, process frame header, side panel, toolbar). The
+   color is a darker variant of the kind's accent so it reads as the same
+   family as the card/frame it labels without getting lost in the fill. */
+.viz-kind-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+}
+
+/* Icons inherit color (via currentColor on stroke) from their wrapping
+   .viz-kind-header-<kind> so icon + label stay in lock-step. The fallback
+   outside a kind-header is simply currentColor of the surrounding text. */
+
+/* Focused node / frame (side-panel target) — blue ring + glow so the user
+   can match the panel contents to the box in the diagram. No z-index on
+   either: composite step cards and process frames both contain DOM-sibling
+   inner children rendered after them, and elevating the focused container
+   above those siblings would swallow their hover/click and, worse, paint
+   the container's own background over the nested process/leaves. The
+   outline is drawn outside the border via outline-offset so the focus
+   indicator stays visible without needing stacking tricks. */
+.viz-node-focused,
+.viz-frame-focused {
+  outline: 2px solid var(--viz-accent-focus);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--viz-accent-focus-glow);
+}
+
+/* ── Enclosing process frame ──────────────────────────────────── */
+
+.viz-frame {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid var(--viz-accent-process-border);
+  border-radius: 3px;
+  /* Logical per-kind background: very-light warm off-white — same
+     brightness as step-cards but a different hue so the frame reads as a
+     subtle container around its children. Also opaque (not transparent)
+     so it masks step/dep cards that ELK overlaps underneath. */
+  background: var(--viz-accent-process-bg);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--viz-text);
+  user-select: none;
+  pointer-events: auto;
+  transition:
+    left var(--viz-layout-transition),
+    top var(--viz-layout-transition),
+    width var(--viz-layout-transition),
+    height var(--viz-layout-transition),
+    var(--viz-hover-transition);
+  animation: viz-fade-in var(--viz-fade-duration) var(--viz-fade-ease) backwards;
+}
+
+.viz-frame-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 4px 10px 4px 6px;
+  font-size: var(--viz-header-font-size);
+  font-weight: var(--weight-bold);
+  /* Explicit bg matching the frame body — visually flush at rest, but
+     solid enough that the standard hover-filter (brightness) darkens
+     *this exact shade* instead of revealing a different color through a
+     transparent surface. Keeps the hover feedback hue-neutral. */
+  background: var(--viz-accent-process-bg);
+  border-top-left-radius: 3px;
+  border-top-right-radius: 3px;
+  line-height: 1.25;
+  cursor: pointer;
+  user-select: none;
+  transition: var(--viz-hover-transition);
+}
+
+/* Hover darkens the header's own shade (filter: brightness(0.94)) rather
+   than swapping to a different background — keeps the hue stable and
+   matches the uniform darken-on-hover used everywhere else. Works only
+   because the header has an explicit (non-transparent) rest-state bg. */
+.viz-frame-header:hover {
+  filter: var(--viz-hover-filter);
+}
+
+/* Root frame has no toggle — disable the affordance so the header doesn't
+   invite a click that does nothing. */
+.viz-frame-header-root {
+  cursor: default;
+}
+.viz-frame-header-root:hover {
+  filter: none;
+}
+
+/* Chevron lives directly inside .viz-frame-header and reuses the file-tree
+   rotating-chevron UX (see browser/styles.css .toggle-chevron). Rotation is
+   driven by the frame's .viz-frame-expanded / .viz-frame-collapsed class so
+   there's no JS toggling beyond re-render. Collapsed → points right (0°),
+   expanded → points down (90°). */
+.viz-frame-expanded .toggle-chevron {
+  transform: rotate(90deg);
+}
+.viz-frame-collapsed .toggle-chevron {
+  transform: rotate(0deg);
+}
+.viz-frame-header .toggle-chevron {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--viz-text-muted);
+  stroke-width: 2.5;
+  transition: transform var(--transition-fast, 120ms) ease;
+}
+
+/* Chevron wrapper carries data-toggle-expand so only clicks on the chevron
+   (not the rest of the header) toggle expand/collapse. Padding gives a
+   comfortable hit target around the 12×12 SVG. */
+.viz-frame-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  margin: -4px 2px -4px -4px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.viz-frame-chevron:hover {
+  filter: var(--viz-hover-filter);
+}
+
+.viz-frame-label {
+  color: inherit;
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Match the optical lift used on .viz-card-title icons so the kind icon's
+   glyph center aligns with the label's lowercase x-height instead of the
+   line-box midpoint. */
+.viz-frame-header .viz-kind-icon {
+  margin-top: 1px;
+}
+
+.viz-frame-summary {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  font-size: 10px;
+  padding-left: 8px;
+  line-height: 1;
+}
+
+/* Numbers inherit the header weight so they read as primary; unit labels
+   stay muted + lighter like every other label in the design system. */
+.viz-frame-summary-num {
+  color: var(--viz-text);
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+.viz-frame-summary-label {
+  color: var(--viz-text-muted);
+  font-weight: var(--weight-normal);
+}
+
+.viz-frame-summary-sep {
+  color: var(--viz-text-muted);
+  margin: 0 2px;
+}
+
+/* Collapsed frames keep the opaque process bg — when a process sits inside
+   a step (parent), transparency would let the step's gray bleed through
+   and the process would read as "step-colored". Opaque = kind reads
+   correctly whether nested or top-level. */
+.viz-frame-collapsed .viz-frame-header {
+  border-radius: 3px;
+}
+
+/* ── Shared kind-header tint ───────────────────────────────────
+   Only the kind icon carries the accent color; the label text stays
+   the standard near-black (inherited from the card/frame) so all
+   headings read as the same weight of text and the color doesn't
+   compete with the label copy. The icon is the visual carrier of
+   kind / file-type identity.
+   single darker-accent hue per kind. Target .viz-kind-icon directly
+   (not the wrapper) so the label text is unaffected. */
+.viz-kind-header-step .viz-kind-icon {
+  color: var(--viz-accent-step-icon);
+}
+.viz-kind-header-process .viz-kind-icon {
+  color: var(--viz-accent-process-icon);
+}
+.viz-kind-header-dep .viz-kind-icon {
+  color: var(--viz-accent-dep-icon);
+}
+/* File-type subtype override for dep nodes — a dep header with any
+   ft-<name> class picks up the matching --ft-color automatically (per
+   the .ft-<name> declarations in styles.css). One rule, all subtypes;
+   stays after the generic .viz-kind-header-dep rule so ft-* wins via
+   later-in-source cascade. */
+.viz-kind-header-dep.ft-md .viz-kind-icon,
+.viz-kind-header-dep.ft-md-runbook .viz-kind-icon,
+.viz-kind-header-dep.ft-md-template .viz-kind-icon,
+.viz-kind-header-dep.ft-md-process .viz-kind-icon,
+.viz-kind-header-dep.ft-text .viz-kind-icon,
+.viz-kind-header-dep.ft-yaml .viz-kind-icon,
+.viz-kind-header-dep.ft-config .viz-kind-icon,
+.viz-kind-header-dep.ft-jsonl .viz-kind-icon,
+.viz-kind-header-dep.ft-code .viz-kind-icon,
+.viz-kind-header-dep.ft-csv .viz-kind-icon {
+  color: var(--ft-color);
+}
+
+/* ── Card inner content (B5 auto-sized cards) ─────────────────── */
+
+.viz-card-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  font-weight: var(--weight-bold);
+  font-size: var(--viz-header-font-size);
+  line-height: 1.25;
+}
+
+.viz-card-title-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.viz-card-title .viz-kind-icon {
+  margin-top: 1px;
+}
+
+.viz-card-id {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--viz-text-muted);
+  margin-top: 0;
+}
+
+.viz-card-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.viz-chip {
+  display: inline-block;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: var(--weight-medium);
+  background: var(--viz-chip-bg);
+  border: 1px solid var(--viz-chip-border);
+  color: var(--viz-text-meta);
+  line-height: 1.4;
+}
+
+.viz-chip-mode {
+  background: var(--viz-chip-mode-bg);
+  border-color: var(--viz-chip-mode-border);
+  color: var(--viz-chip-mode-text);
+}
+.viz-chip-adapter {
+  background: var(--viz-chip-adapter-bg);
+  border-color: var(--viz-chip-adapter-border);
+  color: var(--viz-chip-adapter-text);
+}
+.viz-chip-model {
+  background: var(--viz-chip-model-bg);
+  border-color: var(--viz-chip-model-border);
+  color: var(--viz-chip-model-text);
+}
+.viz-chip-fan {
+  background: var(--viz-chip-fan-bg);
+  border-color: var(--viz-chip-fan-border);
+  color: var(--viz-chip-fan-text);
+  font-variant-numeric: tabular-nums;
+}
+.viz-chip-variant {
+  background: var(--viz-chip-variant-bg);
+  border-color: var(--viz-chip-variant-border);
+  color: var(--viz-chip-variant-text);
+}
+.viz-chip-role {
+  background: var(--viz-chip-role-bg);
+  border-color: var(--viz-chip-role-border);
+  color: var(--viz-chip-role-text);
+}
+.viz-chip-type {
+  background: var(--viz-chip-type-bg);
+  border-color: var(--viz-chip-type-border);
+  color: var(--viz-chip-type-text);
+}
+
+.viz-card-io {
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--viz-text);
+  overflow-wrap: break-word;
+  word-break: break-word;
+  line-height: 1.3;
+}
+
+.viz-card-io-label {
+  color: var(--viz-text-muted);
+  font-weight: var(--weight-normal);
+}
+
+/* ── Errors + warnings ────────────────────────────────────────── */
+
+.viz-error {
+  padding: 20px;
+  color: var(--viz-error-title);
+  font-family: var(--font-sans);
+}
+
+.viz-error-panel {
+  margin: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--viz-error-border);
+  background: var(--viz-error-bg);
+  border-radius: 3px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--viz-error-text);
+}
+
+.viz-error-title {
+  font-weight: var(--weight-bold);
+  font-size: 13px;
+  color: var(--viz-error-title);
+  margin-bottom: 8px;
+}
+
+.viz-error-detail {
+  margin: 0 0 10px 0;
+  padding: 8px 10px;
+  background: var(--viz-error-detail-bg);
+  border: 1px solid var(--viz-error-border);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--viz-error-text);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.viz-error-hint {
+  color: var(--viz-error-hint);
+}
+
+/* Alert banner (used for both hard errors and soft "rendered without
+   full validation" warnings).
+   Design-system rule: this is a message box, NOT a graph container.
+   Distinguished from step cards / process frames by:
+     - left-accent stripe (3px) instead of a full 1px frame — the
+       silhouette reads as a notification/callout
+     - soft pink fill + alert icon — meaning is carried by hue + icon,
+       not by card styling
+     - no box-shadow, no hover state — it isn't interactive graph content
+   Copy distinguishes error vs. warning; the visual palette is shared.
+   See --viz-error-* tokens. */
+.viz-warning-banner {
+  margin: 6px 8px 0 8px;
+  padding: 10px 12px;
+  background: var(--viz-error-bg);
+  border: 1px solid var(--viz-error-border);
+  border-left-width: 3px;
+  border-radius: 2px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--viz-error-text);
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  animation: viz-fade-in var(--viz-fade-duration) var(--viz-fade-ease) backwards;
+}
+
+.viz-alert-icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--viz-error-title);
+  margin-top: 1px;
+}
+
+.viz-warning-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.viz-warning-title {
+  font-weight: var(--weight-bold);
+  color: var(--viz-error-title);
+  margin-bottom: 6px;
+}
+
+.viz-warning-detail {
+  margin: 4px 0 0 0;
+  padding: 6px 8px;
+  background: var(--viz-error-detail-bg);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  color: var(--viz-error-text);
+}
+
+/* ── Legend ──────────────────────────────────────────────────── */
+
+.viz-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 14px;
+  margin-top: 10px;
+  font-size: 10px;
+  color: var(--viz-text-muted);
+  background: var(--viz-surface-sunken);
+  border: 1px solid var(--viz-border-subtle);
+  border-radius: 3px;
+}
+
+.viz-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.viz-legend-item .viz-kind-icon {
+  width: 12px;
+  height: 12px;
+}
+
+.viz-legend-arrow {
+  width: 40px;
+  height: 10px;
+  flex-shrink: 0;
+}
+
+.viz-legend-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--viz-border-subtle);
+}

@@ -8,6 +8,7 @@ import { resolveUserCustomizationSection } from '../lib/index.js'
 import { RETRIEVAL_DENIED_TOOLS } from '../lib/agents/root-tool-policy.js'
 import { SOURCE_OUTPUT_BUDGET_CHARS } from '../lib/web-retriever/tools.js'
 import { PRESET_PATCH_TEXT, presetRows } from './preset-rows.mjs'
+import { SELECTED_SKILL_CATALOG } from '../selected-skills/catalog.js'
 
 // 预设装配行的读取（含 `!!js` 剥离）只在 test/preset-rows.mjs 有一份。
 const COMPOSITION_TEXT = PRESET_PATCH_TEXT
@@ -123,6 +124,8 @@ const PLUGIN_TOOLS = [
   'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile', 'prepare_chart_source', 'render_chart',
   'get_local_datetime',
   'resolve_data_time_range',
+  // 用户自选股（含自报持仓）：只读、只给主 Agent，通用 child 必须 deny（见下面的 deny 闸门）。
+  'get_watchlist',
   'anysearch_search', 'web_retriever_fetch', 'ocr',
   'wind_docs_announcements', 'wind_docs_news',
   // 具名来源查询面（provider + operation 命名，见 src/web-retriever/sources.ts）：
@@ -220,7 +223,7 @@ test('persona 行字段：跟随本机 harness 版本，用 prefix 承载人设�
   assertMatches(types.text, /prefix\s*:\s*string/, `${types.file} 中不再存在 prefix 字段：人设字段契约已变，请同步 preset 与 persona 测试`)
 })
 
-test('skills：两行组合式注册（skill-filesystem + tool-skill），不靠插件代码注册 provider', () => {
+test('skills：内置 skills 由组合行承载，selected skill 只注册到 Capital 主 Agent scope', () => {
   const fsRow = rowById('skill-filesystem')
   assert.ok(fsRow, 'preset 必须有 skill-filesystem 行，否则 skills/ 不会被发现')
   assert.equal(fsRow.name, '@deepseek-ai/dsh-skill-filesystem')
@@ -242,15 +245,36 @@ test('skills：两行组合式注册（skill-filesystem + tool-skill），不靠
   assert.ok(toolSkillRow, 'preset 必须有 tool-skill 行：没有它模型既看不到也加载不了 skill')
   assert.equal(toolSkillRow.name, '@deepseek-ai/dsh-tool-skill')
 
-  // 官方形状是组合行，不是插件里的 registerProvider（那会引入额外依赖、ESM 路径与分发问题）。
-  assertNotMatches(INDEX_SOURCE, /ctx\.skills|FileSystemSkillProvider|registerProvider/, 'src/index.ts 不应自行注册 skill provider')
+  const selectedProvider = readFileSync(fileURLToPath(new URL('../src/agents/selected-skills-provider.ts', import.meta.url)), 'utf8')
+  assertMatches(INDEX_SOURCE, /registerRootSelectedSkills\(ctx/, '主插件必须接入按设置选择的 provider')
+  assertMatches(selectedProvider, /agent\/created/, 'provider 必须在 Agent 建立后按需注册')
+  assertMatches(selectedProvider, /isRootAgent\(agent\)/, '子 Agent 不得注册 selected skills provider')
+  assertMatches(selectedProvider, /strictCapitalPreset\(ctx, agent\)/, '其他 preset 不得注册 selected skills provider')
+  assertMatches(selectedProvider, /inject\(\['skills'\][\s\S]*injectedCtx\.effect/, 'provider 生命周期必须绑定到 inject 后的 Agent context')
+  assertMatches(selectedProvider, /unregister\(\)[\s\S]*dispose\(\)/, 'Agent scope 关闭时必须注销 provider 并停止 watcher')
+  assertNotMatches(INDEX_SOURCE, /ctx\.skills|FileSystemSkillProvider|registerProvider/, 'provider 实现不得散落在主装配入口')
+  assert.ok(SELECTED_SKILL_CATALOG.some(({ name }) => name === 'buffett-investment-framework'), 'catalog 必须包含 Buffett 实验')
+  assert.ok(SELECTED_SKILL_CATALOG.some(({ name }) => name === 'financial-health'), 'catalog 必须包含可拆分的 China 模块')
+   assert.ok(SELECTED_SKILL_CATALOG.every(({ tags, status }) => tags.length > 0 && ['experimental', 'watchlist'].includes(status)), '每个 catalog 条目都必须带状态和能力标签')
+   assert.ok(!SELECTED_SKILL_CATALOG.some(({ name }) => name === 'china-stock-research-orchestrator'), '与 Capital 路由冲突的 orchestrator 不得进入 catalog')
 
   // skills/ 必须随包分发：preset 目录已在 package.json 的 files 里。
   assert.ok(pkg.files.includes('preset'), 'package.json 的 files 必须包含 preset（skills/ 在其中）')
+  // selected-skills 按仓库逐个登记，不是整目录：新接一份快照忘了加这一行时，装出去的包里 catalog
+  // 仍有条目、SKILL.md 却不在。这里比 npm pack 那侧的逐文件断言更早一步点名缺哪颗仓库。
+  for (const repository of new Set(SELECTED_SKILL_CATALOG.map(({ repository }) => repository))) {
+    assert.ok(pkg.files.includes(`selected-skills/${repository}`),
+      `package.json 的 files 缺 selected-skills/${repository}（catalog 登记了它的 skill）`)
+  }
+  assert.ok(pkg.files.includes('selected-skills/catalog.js'),
+    'provider 与 settings 卡片都静态 import selected-skills/catalog.js，它必须随包发布')
+  assert.ok(!pkg.files.includes('selected-skills'),
+    'files 不许退回整目录：上游 README 用的成图与它自己的 viz 站点（2.3 MB）不该装给用户')
+  assert.ok(!pkg.files.includes('external-skills'), 'package.json 不得保留旧目录名')
 })
 
-test('skills：四个 skill 文件存在且 frontmatter 合法，persona 指向它们', () => {
-  for (const name of ['capital-orchestration', 'capital-data-protocol', 'capital-chart-protocol', 'capital-visualization-protocol', 'capital-web-protocol']) {
+test('skills：协议与任务 skill 文件存在且 frontmatter 合法，persona 指向它们', () => {
+  for (const name of ['capital-orchestration', 'capital-data-protocol', 'capital-chart-protocol', 'capital-visualization-protocol', 'capital-web-protocol', 'capital-equity-research', 'capital-event-impact', 'capital-portfolio-review']) {
     const file = `${SKILL_DIR}${name}/SKILL.md`
     assert.ok(existsSync(file), `缺少 skill 文件：skills/${name}/SKILL.md`)
     const text = readFileSync(file, 'utf8')
@@ -265,6 +289,12 @@ test('skills：四个 skill 文件存在且 frontmatter 合法，persona 指向�
   }
   assertRule(MAIN_PERSONA, /skill capital-orchestration/)
   assertRule(MAIN_PERSONA, /skill capital-data-protocol/)
+  assertRule(MAIN_PERSONA, /单一上市公司完整投研报告或综合风险审阅时，先加载 skill capital-equity-research/)
+  assertRule(MAIN_PERSONA, /公告或事件的影响分析时先加载 skill capital-event-impact/)
+  assertRule(MAIN_PERSONA, /只查公告事实不套分析流程/)
+  assertRule(MAIN_PERSONA, /实际持仓或投资组合复盘时先加载 skill capital-portfolio-review/)
+  assertRule(MAIN_PERSONA, /自选股不等于持仓/)
+  assertRule(MAIN_PERSONA, /重叠请求以主问题为准/)
   // 载荷示例与 JSON 协议必须已经迁出 persona。
   assertNoRule(MAIN_PERSONA, /"type":\s*"data_request"/, '主 persona 不应再内联 data_request JSON 示例')
   assertNoRule(MAIN_PERSONA, /"type":\s*"profile_request"/, '主 persona 不应再内联 profile_request JSON 示例')
@@ -272,6 +302,60 @@ test('skills：四个 skill 文件存在且 frontmatter 合法，persona 指向�
   const presetReadme = `${SKILL_DIR}../README.md`
   assert.ok(existsSync(presetReadme), 'preset 目录必须有 README.md 承接设计理由')
   assertMatches(readFileSync(presetReadme, 'utf8'), /isolate|realm/, 'preset README 应说明 realm 纪律')
+})
+
+test('capital-equity-research：完整报告覆盖证据、降级与角色边界，不恢复独立报告通道', () => {
+  const text = readFileSync(`${SKILL_DIR}capital-equity-research/SKILL.md`, 'utf8')
+  for (const pattern of [
+    /公司与业务/, /经营与财务/, /估值/, /价格与技术/, /事件与环境/, /风险与反方/,
+    /capital-orchestration/, /capital-data-protocol/, /capital-web-protocol/,
+    /capital-visualization-protocol/, /data_collector/, /data_junior/, /web_retriever/,
+    /不转原始 rows/, /报告就是最终答复正文/, /data_analyst.*未启用/,
+    /负盈利时不解释 PE 为有效倍数/, /搜索摘要仅是线索/,
+    /子 Agent 未结算/, /缺关键证据就降低结论强度/, /不承诺收益/,
+  ]) assertRule(text, pattern, `投资研究 skill 缺少边界或证据门：${pattern}`)
+  assertNoRule(text, /final_report|capital-final-report-protocol|prepareTurnComposition/, '不应恢复已删除的报告工具或假设未实现的轮次 Resolver')
+})
+
+test('capital-equity-research：核心数字先勾稽，弱证据不升级为硬结论', () => {
+  const text = readFileSync(`${SKILL_DIR}capital-equity-research/SKILL.md`, 'utf8')
+  for (const pattern of [
+    /本期累计减上期累计推单季/, /profile validation=pass.*不证明跨来源数字一致/,
+    /不能勾稽的数值不得进入核心判断/, /冲突先于结论/,
+    /销售费用不能直接解释毛利率变化/, /合同负债余额下降也不能单独解释经营现金流增长/,
+    /不能直接当成确定的价格底线/, /在已检索范围内未查到/,
+    /取得足以支持或限制核心判断的证据后停止扩展检索/,
+    /不逐项堆砌原始序列/,
+  ]) assertRule(text, pattern, `投资研究 skill 缺少完整报告防错规则：${pattern}`)
+})
+
+test('capital-event-impact：事件时间线、版本与归因边界', () => {
+  const text = readFileSync(`${SKILL_DIR}capital-event-impact/SKILL.md`, 'utf8')
+  for (const pattern of [
+    /capital-orchestration/, /capital-data-protocol/, /capital-web-protocol/,
+    /data_collector/, /data_junior/, /web_retriever/, /data_analyst.*未启用/,
+    /首次披露、补充\/更正、审议通过、生效和实际实施/,
+    /首个可交易时点/, /公告披露金额不是已兑现利润/,
+    /相关性不是公告导致涨跌的证明/, /在已检索范围内未查到/,
+    /用户只问.*核实事实并简答/, /不传原始 rows/, /不自动下单/,
+  ]) assertRule(text, pattern, `事件 skill 缺少证据门或角色边界：${pattern}`)
+  assertNoRule(text, /final_report|capital-final-report-protocol|prepareTurnComposition/, '事件 skill 不得依赖已删除的报告通道')
+})
+
+test('capital-portfolio-review：用户持仓不等于自选股，快照不等于收益史', () => {
+  const text = readFileSync(`${SKILL_DIR}capital-portfolio-review/SKILL.md`, 'utf8')
+  for (const pattern of [
+    /capital-orchestration/, /capital-data-protocol/, /capital-web-protocol/,
+    /data_collector/, /data_junior/, /web_retriever/, /data_analyst.*未启用/,
+    /先调 `get_watchlist`/, /只能经这条只读工具/, /券商账户仍读不到/,
+    /未标持仓的关注条目.*都不算用户仓位/, /holding_marked_age_days.*向用户复述确认/,
+    /这是.*自报值/, /不写回持仓/, /不调用自选股面板的宿主路由/, /不假设等权/,
+    /不把用户的数量、成本、账户信息发送给/,
+    /当前持仓快照不包含历史买卖和出入金/, /无完整交易与现金流，不报期间总收益率/,
+    /不同币种未取得同一时点可靠汇率时不强行折算/,
+    /用户仅给代码而无仓位/, /不传原始 rows/, /不自动下单/,
+  ]) assertRule(text, pattern, `组合 skill 缺少隐私或计算边界：${pattern}`)
+  assertNoRule(text, /final_report|capital-final-report-protocol|prepareTurnComposition/, '组合 skill 不得依赖已删除的报告通道')
 })
 
 test('capital-web-protocol：WAF 挑战型站点如实报错并改走 Wind（2026-09 实测教训）', () => {
@@ -578,7 +662,7 @@ test('子 Agent 委派行：continuable、persona 覆盖、toolFilter 收敛工�
   }
 })
 
-test('通用 subagent 行：必须 deny Capital 数据/出图管线、十四个联网工具与专用角色创建工具', () => {
+test('通用 subagent 行：必须 deny Capital 数据/出图管线、十四个联网工具、用户自选股与专用角色创建工具', () => {
   const genericRow = rowById('tool-subagent')
   assert.ok(genericRow, 'preset 必须有通用 subagent 行')
   assert.equal(genericRow.name, '@deepseek-ai/dsh-tool-subagent')
@@ -605,6 +689,8 @@ test('通用 subagent 行：必须 deny Capital 数据/出图管线、十四个�
     'render_chart', 'prepare_chart_source',
     'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile',
     'request_data', 'list_capabilities', 'describe_capability', 'dc_status',
+    // 用户自选股与自报持仓：只有主 Agent 读它。这条 deny 是"仓位不下发子 Agent"的结构件。
+    'get_watchlist',
     ...NETWORK_TOOLS,
     // `ocr` 不在 NETWORK_TOOLS 里（主 Agent 刻意保留它的本地形态，见 root-tool-policy.ts），
     // 但通用 child 连本地形态都不该有：它不是任何角色的正当能力，多一个名字就多一个出网口子。
@@ -613,14 +699,16 @@ test('通用 subagent 行：必须 deny Capital 数据/出图管线、十四个�
   ]) {
     assert.ok(deny.includes(name), `通用 subagent 的 child 不得拿到 ${name}`)
   }
-  // 出网只有一个入口：deny 的覆盖面就是上面这份名单，多写名字 = 砍掉通用 child 的正当能力。
+  // 出网只有一个入口、用户级私有数据只有一个读者：deny 的覆盖面就是上面这份名单，
+  // 多写名字 = 砍掉通用 child 的正当能力，少写一个 = 通用 child 自己读得到用户的仓位。
   assert.deepEqual(
     [...deny].sort(),
     [SHELL_SLOT, 'render_chart', 'prepare_chart_source', 'describe_dataset', 'inspect_dataset', 'profile_dataset',
       'query_dataset', 'write_profile', 'request_data', 'list_capabilities', 'describe_capability', 'dc_status',
+      'get_watchlist',
       ...NETWORK_TOOLS, 'ocr', 'subagent_data_collector', 'subagent_data_junior', 'subagent_visualization_specialist',
       'subagent_web_retriever'].sort(),
-    '通用 subagent 的 deny 必须恰好是「数据/出图管线 + 十四个联网工具 + 专用角色创建工具 + shell」',
+    '通用 subagent 的 deny 必须恰好是「数据/出图管线 + 十四个联网工具 + 用户自选股 + 专用角色创建工具 + shell」',
   )
 })
 

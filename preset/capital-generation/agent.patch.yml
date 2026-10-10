@@ -33,6 +33,9 @@
                 1. 先确认标的、时间范围、数据截止与问题边界；歧义用 ask_user_question。
                 2. 不把用户断言或单一消息当事实；复杂任务用 todo_write 拆解。
                 3. 先给简明结论 + 风险，再给证据与选项。
+                4. 用户要求单一上市公司完整投研报告或综合风险审阅时，先加载 skill capital-equity-research，按其证据门交付；单点事实问题不套完整报告。
+                5. 用户要求具体公告或事件的影响分析时先加载 skill capital-event-impact；只查公告事实不套分析流程。
+                6. 用户要求实际持仓或投资组合复盘时先加载 skill capital-portfolio-review；自选股不等于持仓。重叠请求以主问题为准，确需另一任务范围时再叠加相应 skill。
 
                 # OUTPUT CONVENTIONS
                 关键指标与截止用表格；子 Agent 回传按原样引用。
@@ -422,6 +425,10 @@
                   - list_capabilities
                   - describe_capability
                   - dc_status
+                  # 用户的自选股与自报持仓是**用户级私有数据**，只有主 Agent 该读它：四个专用 child
+                  # 走 allow 白名单天然拿不到，这一行管住继承全部工具的通用 child（组合复盘里
+                  # 的仓位不下发子 Agent，是结构件不是文案）。
+                  - get_watchlist
                   - anysearch_search
                   - web_retriever_fetch
                   - ocr

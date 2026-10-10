@@ -1,0 +1,4 @@
+interface:
+  display_name: "Buffett Investment Framework"
+  short_description: "Evidence-bounded business and investment analysis"
+  default_prompt: "Review this investment memo and tell me which claims hold up."

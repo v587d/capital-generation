@@ -59,6 +59,12 @@ export declare function periodInputOf(value: unknown): string | {
 export declare function dateParts(value: string): DateParts;
 export declare function shiftDate(value: string, unit: 'day' | 'week' | 'month' | 'quarter' | 'year', amount: number): string;
 /**
+ * 两个日历日之间相差的天数（同区间的 `YYYY-MM-DD` 对，按 UTC 午夜算，不受时区与夏令时影响）。
+ * 对外只有一份：`get_watchlist` 报"这条持仓标了几天"用的就是它，不许在消费方再写一遍
+ * `Date.parse(...)/86_400_000`（AGENTS.md §9.7①）。
+ */
+export declare function dayDistance(start: string, end: string): number;
+/**
  * 单窗口解析（**共享**入口）：`resolve_data_time_range`（能力参数那个模式）与
  * `time-axis.ts`（Dataset 时间轴模式）都用它，避免两处对同一个 period 词表给出不同答案。
  *

@@ -1,0 +1,645 @@
+/* Reference copy for the argument-map spike: design tokens extracted verbatim from
+ * MetaBrowser (github.com/jlevy/metabrowser) src/metabrowser/static/styles.css
+ * (:root light block + [data-theme="dark"] overrides). Do not edit; re-extract. */
+:root {
+  color-scheme: light;
+
+  /* Layout */
+  /* Interface font sets. The gear-menu dropdown writes the chosen set's value to
+     [data-app-font] on <html> (cookie metabrowser.interfaceFont); the option
+     list is the server's _FONT_SETS registry. Two sets today:
+       clean  - KPress's vendored faces everywhere: Source Sans 3 for chrome +
+                embedded UI, PT Serif for embedded prose. The @font-face rules
+                come from KPress's style-tokens.css, linked once in <head>, so
+                the woff2 files download a single time and are shared by the
+                chrome and the embedded document (no second copy, no FOUT once
+                preloaded).
+       system - the platform UI sans + platform serif (macOS: system-ui and
+                ui-serif "New York"); no web fonts are fetched.
+     Clean is the default and lives in this :root base; each additional set is a
+     `html[data-app-font="<value>"]` block below (see "system"). To add a set:
+     add a _FONT_SETS entry (server) and one such block here. */
+  --app-sans-clean:
+    "Source Sans 3 Variable", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    sans-serif;
+  --app-sans-system: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --app-serif-system: ui-serif, Georgia, "Times New Roman", serif;
+  --font-sans: var(--app-sans-clean);
+  --font-mono: "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+
+  /* KPress host bridge tokens. Metabrowser owns shell tokens; KPress owns
+     document rendering. KPress style-tokens.css declares each --kpress-doc-*
+     as var(--kpress-host-*, <default>), so setting --kpress-host-* on :root
+     lets the host's palette flow into the embedded document scope.
+     In the default "clean" font set only COLOR tokens are bridged: the
+     document keeps KPress's vendored faces (PT Serif prose / Source Sans UI),
+     so the host font tokens are left unset and fall back to KPress's vendored
+     stacks. `[data-app-font="system"]` (below) additionally bridges the font
+     tokens to the platform stacks; `data-prose-font="sans"` bridges just
+     --kpress-host-font-prose to --prose-sans-font (also below). */
+  --kpress-measure: 48rem;
+  --kpress-host-bg: var(--bg);
+  --kpress-host-text: var(--text);
+  --kpress-host-muted: var(--muted);
+  --kpress-host-border: var(--border);
+  --kpress-host-link: var(--link);
+  --kpress-print-page-margin: 0.65in;
+  --kpress-print-font-size: 11pt;
+  /* Sans face for the "sans" reading mode. Points at the interface sans
+     palette (--app-sans-clean, repointed to system under [data-app-font=
+     "system"]) rather than var(--font-sans): KPress redeclares --font-sans
+     inside its own `.kpress` scope, so a reference would resolve to KPress's
+     scoped Source Sans at the document, not the host token. --app-sans-* are
+     host-only and never redeclared by KPress, so they resolve correctly when
+     bridged into the embedded scope. */
+  --prose-sans-font: var(--app-sans-clean);
+
+  /* Font sizes are px (not rem/em) by deliberate choice: the app does
+     not scale with the browser's default font-size preference, and any
+     change to that policy should be a coordinated migration of every
+     token below — never a one-off rem at a single use site. Use these
+     tokens at use sites; do not inline pixel literals in rules. */
+  --body-font-size: 14px;
+  --mono-block-font-size: 12px;
+
+  --tree-pane-width: 300px;
+
+  /* Font weights — three-weight system: normal (body), medium (pills /
+     chips only), bold (headings + emphasis). Use these tokens everywhere
+     rather than hard-coded numeric weights. Medium is reserved for pill
+     text so the labels inside chips feel a touch heavier than body copy
+     without competing with header-level bold. */
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-bold: 700;
+
+  /* Small-caps label style (shared by table headers, stat labels, section labels) */
+  --label-font-size: 11px;
+  --label-font-weight: var(--weight-bold);
+  --label-letter-spacing: 0.05em;
+  --label-text-transform: uppercase;
+  --label-color: var(--muted);
+
+  /* "Panel" envelope — the bordered, rounded frame shared by markdown
+     tables and frontmatter blocks (and any future similar surface).
+     Putting these on :root keeps the visual treatment consistent across
+     every prose-embedded panel and avoids repeating the same shorthand
+     literals at each site. */
+  --panel-border: 1px solid var(--border);
+  --panel-header-bg: var(--sidebar-bg);
+  --panel-cell-padding: 0.35rem 0.6rem;
+
+  /* Border-radius tokens — split into "chrome" (interactive UI:
+     buttons, badges, chips, bars, controls, tooltips, log rows)
+     and "document" (content surfaces: cards, panels, code blocks,
+     inline code, tables, frontmatter). Both default to 0 (square)
+     so corners can be re-introduced by editing one var; the split
+     lets chrome and document diverge — e.g. square chrome on softly
+     rounded content panels. Pills and circles have their own tokens
+     because their shape is semantic, not a stylistic knob. The
+     scrollbar thumb has its own --scrollbar-thumb-radius below. */
+  --radius-chrome: 0;
+  --radius-document: 0;
+  --radius-pill: 999px;
+  --radius-circle: 50%;
+
+  /* Z-index scale — the named stacking layers. Use these tokens at use
+     sites rather than ad-hoc integers so the relative order of panes,
+     floating overlays (menus, dropdowns), and tooltips is defined in one
+     place. --z-overlay covers any summoned floating surface (the header
+     theme menu today; a future right-click context menu next); it sits
+     above the panes but below tooltips, the topmost hint layer. */
+  --z-pane: 1;
+  --z-resize-handle: 2;
+  --z-overlay: 100;
+  --z-tooltip: 1000;
+
+  /* Transitions */
+  --transition-fast: 150ms ease;
+  /* Theme crossfade — applied to the major page surfaces so flipping
+     light↔dark glides instead of snapping. Gated behind html.theme-anim
+     (added by app.js one frame after first paint) so it never fires on
+     initial load, only on a user theme change. */
+  --theme-transition:
+    background-color 0.4s ease-in-out, color 0.4s ease-in-out, border-color 0.4s ease-in-out;
+
+  /* Click/drag/toggle targets can suppress accidental selection.
+     Informational text must stay selectable; never apply this token to
+     a broad container such as .tree-pane. */
+  --toggle-user-select: none;
+
+  /* Content spacing */
+  --content-padding-x: 24px;
+  --content-padding-y: 16px;
+  --pane-header-padding-x: 16px;
+  --pane-header-padding-y: 8px;
+  --file-header-padding-y: var(--pane-header-padding-y);
+  --file-tab-padding-x: 12px;
+  --file-tab-padding-y: 8px;
+  --file-tab-align-adjust: 3px;
+  --file-tab-padding-top: calc(var(--file-tab-padding-y) + var(--file-tab-align-adjust));
+  --file-tab-padding-bottom: var(--file-tab-padding-y);
+
+  /* Shared tab visual — used by both the file-preview tab bar and
+     the nav-pane tab bar (Files / Recent). Promoting these to root
+     vars so active-state hue and border thickness stay locked in
+     step across every tab in the UI; change here to retheme
+     everywhere. */
+  --tab-active-color: hsl(216 98% 52%);
+  --tab-active-border-width: 2px;
+
+  /* Colors — light theme */
+  --bg: hsl(0 0% 100%);
+  --text: hsl(0 0% 10%);
+  --border: hsl(0 0% 90%);
+  /* Top bar — light surface matching the sidebar, dark-grey text. The
+     bar reads as another content pane rather than an inverse-styled
+     banner. The nav tab bar (which sits below the header and above the
+     scrollable tree) carries the drop shadow so the shadow falls onto
+     the scrolling content rather than onto a fixed strip. */
+  --header-bg: var(--sidebar-bg);
+  --header-text: hsl(0 0% 20%);
+  --sidebar-bg: hsl(210 17% 98%);
+  --hover-bg: hsl(0 0% 94%);
+  --link: hsl(205 80% 40%);
+  --muted: hsl(208 7% 46%);
+
+  /* Selection highlight — the "current item" indicator shared by the
+     file-tree nav and the embedded KPress document TOC, so both read the
+     same. Both derive from the one accent (--link, which is also bridged to
+     KPress as --kpress-host-link), so the colors are provably identical:
+     --highlight-bg matches KPress's --color-bg-selected (a 10% accent tint)
+     and --highlight-bar matches its TOC indicator (--kpress-doc-link).
+     Defined once here; they track --link automatically per theme. Set
+     --highlight-bar to transparent to drop the left bar. */
+  --highlight-bg: color-mix(in srgb, var(--link) 10%, transparent);
+  --highlight-bar: var(--link);
+
+  /* Code block backgrounds */
+  --code-bg: hsl(210 29% 97%);
+
+  /* Syntax-color tokens for the structured (JSON/YAML) tree view.
+     Light values have matching [data-theme="dark"] variants. Hues line up
+     with the existing palette
+     so colors don't drift between the structured tree and any other
+     code-coloring surface a future plugin might introduce. */
+  --color-syntax-string: hsl(140 50% 32%);
+  --color-syntax-number: hsl(28 75% 42%);
+  --color-syntax-bool: hsl(265 55% 50%);
+  --color-syntax-null: hsl(0 0% 55%);
+  --color-syntax-key: hsl(208 60% 35%);
+  --color-syntax-punct: hsl(0 0% 45%);
+  --color-syntax-summary: hsl(0 0% 60%);
+
+  /* Row height for the structured plugin's virtualized list. Read at
+     render time from --tree-row-height (parseFloat → px); changing
+     this rebalances the windowed list automatically. */
+  --tree-row-height: 18px;
+
+  /* Filter active border — gentle low-saturation green, applied to the
+     "Go to file" filter input and the tree content when any filter
+     (keyword / suffix / recency) is active, signaling a restricted view
+     in the spirit of Google Sheets filter views. */
+  --filter-active-border: hsl(140 35% 60%);
+
+  /* Scrollbar — shared geometry consumed by every scroll container
+     in the app via the global rules near the bottom of this file.
+     The thumb-border-width creates visual padding inside the track
+     so the visible thumb reads narrower than the track footprint,
+     which is what makes the bar feel subtle. --scrollbar-bg is the
+     per-site override: containers that sit on a non-default surface
+     (sidebar, code blocks) set it to their own background so the
+     scrollbar disappears into whatever surface it sits on. */
+  --scrollbar-thumb: hsl(0 0% 75%);
+  --scrollbar-thumb-hover: hsl(0 0% 65%);
+  --scrollbar-width: 10px;
+  --scrollbar-thumb-border-width: 2px;
+  --scrollbar-thumb-radius: 5px;
+  --scrollbar-bg: var(--bg);
+
+  /* Skeleton cells — rendered when the InventoryIndex walker
+     has not yet finalized a dir's aggregate. The slow opacity
+     pulse signals "loading" without the noise of a spinner.
+     applyCellPatch() in app.js replaces these in place once a
+     ``fs.change`` op arrives on /api/events. */
+  --tally-skeleton-bg: hsl(0 0% 88%);
+
+  /* Live-update row flash. Applied by app.js when the SPA inserts
+     a freshly-created row (`.tree-item-flash-in`) or starts the
+     animated removal of a deleted row (`.tree-item-flash-out`).
+     Pale yellow that fades to transparent — visible enough to
+     draw the eye, calm enough not to flicker on a burst of
+     changes. */
+  --row-flash-bg: hsl(50 95% 86%);
+
+  /* ── Viz palette (process-visualization plane) ─────────────── */
+  /* Design-system rules (shared by steps / processes / deps, viz + drawer):
+     - Labels: muted grey (--viz-text-muted) + --weight-normal — reference
+       text, never primary.
+     - Values: near-black (--viz-text) + --weight-medium — the data the
+       user cares about, reads as primary against the label.
+     - Strong/meta are reserved for headings and tertiary metadata.
+     Keeping labels muted + values emphasized is the single rule that
+     makes field rows and field pairs readable at a glance. */
+  --viz-text: hsl(0 0% 7%);
+  --viz-text-muted: hsl(220 9% 46%);
+  --viz-text-dim: hsl(218 11% 65%);
+  --viz-text-strong: hsl(244 47% 20%);
+  --viz-text-meta: hsl(217 19% 27%);
+
+  /* Surfaces */
+  --viz-surface: hsl(0 0% 100%);
+  --viz-surface-raised: hsl(0 0% 98%);
+  --viz-surface-toolbar: hsl(0 0% 97%);
+  --viz-surface-sunken: hsl(220 14% 96%);
+  --viz-surface-card: hsl(210 20% 98%);
+  --viz-surface-hover: hsl(0 0% 94%);
+  --viz-border: hsl(0 0% 89%);
+  --viz-border-strong: hsl(216 12% 84%);
+  --viz-border-subtle: hsl(220 13% 91%);
+
+  /* Kind accents (step / dep / process / file)
+     Design-system rule: each kind gets a light, logically-distinct bg so
+     nested graph levels are visually distinguishable without chroma
+     fighting — they share brightness but differ in hue.
+       - Steps:    cool near-white gray (hsl(210 20% 98%)) — intentionally the
+                   lightest surface so step cards read as the primary
+                   "leaf" content; slightly brighter than the process
+                   frame so nested process bg stays distinguishable
+       - Process:  very-light neutral-warm gray (hsl(45 18% 96%)) — darker than
+                   steps by a hair and in a different (warm) hue, so a
+                   process frame reads as a subtle container around its
+                   step children and doesn't blend into them
+       - Deps:     pale peach (hsl(25 90% 96%)) — represent user-visible artifact
+                   files. Kept in a warm hue distinct from warnings
+                   (which are yellow) so the two don't collide visually,
+                   and distinct from errors (which are red) so they
+                   don't read as a problem.
+     Icon + header text are always near-black so the kind label reads the
+     same across cards and drawer. */
+  --viz-accent-step-bg: hsl(45 20% 96%);
+  --viz-accent-step-border: hsl(45 12% 84%);
+  --viz-accent-step-icon: hsl(0 0% 7%);
+  --viz-accent-dep-bg: hsl(25 90% 96%);
+  --viz-accent-dep-border: hsl(30 72% 83%);
+  --viz-accent-dep-icon: hsl(29 50% 36%);
+  --viz-accent-file-bg: hsl(210 40% 96%);
+  --viz-accent-file-border: hsl(213 27% 84%);
+
+  /* Focus indicator (side-panel target). Desaturated blue keeps the
+     ring noticeable without reading as an alert against near-white
+     card surfaces. The hue remains in the same family as --link. */
+  --viz-accent-focus: hsl(217 55% 55%);
+  --viz-accent-focus-glow: hsl(217 55% 55% / 0.25);
+
+  /* Edge strokes — design-system rule: every arrow is a uniform-width
+     1.4px stroke (set in viz.css). Kind is carried by color alone, not
+     stroke-weight, so no arrow "outweighs" another visually. Colors are
+     kept light + desaturated because arrows are connective tissue, not
+     emphasis. */
+  --viz-edge-default: hsl(220 18% 65%);
+  /* Data-flow arrow colors — light + desaturated so arrows read as
+     connective tissue between boxes, not emphasis. Produces (blue) =
+     step→artifact; consumes (green) = artifact→step. */
+  --viz-edge-produces: hsl(199 65% 74%);
+  --viz-edge-consumes: hsl(102 18% 75%); /* muted sage — lighter sibling of the
+                                       sky-blue produces stroke; both are
+                                       low-chroma so neither outshouts the
+                                       kind accents on the nodes they link */
+
+  /* Chips — muted pastel palette.
+     Design-system rules:
+     - Each chip category (mode / adapter / model / fan / variant / role /
+       type) gets a dedicated hue so the reader can identify the field
+       from color alone, at a glance.
+     - Chroma is kept low so no chip reads as error/alert (no red, no
+       bright lime, no saturated orange).
+     - Related chips share a hue family with different saturations:
+       adapter + model both sea-green (adapter stronger = primary fact,
+       model softer = sub-facet of adapter).
+     - Pill text uses --weight-medium — slightly heavier than body but
+       not bold — set centrally on .viz-chip.
+     Chip tokens below pair -bg / -border / -text per category. */
+  --viz-chip-bg: hsl(0 0% 100% / 0.75);
+  --viz-chip-border: hsl(0 0% 0% / 0.08);
+  --viz-chip-mode-bg: hsl(228 100% 94%);
+  --viz-chip-mode-border: hsl(228 96% 89%);
+  --viz-chip-mode-text: hsl(228 55% 41%);
+  /* Adapter — sea-green, dialed back from a vivid teal so the pill reads as
+     a tag, not a status/alert. Still the strongest of the green pills
+     (adapter = primary fact, model = sub-facet). */
+  --viz-chip-adapter-bg: hsl(162 47% 85%);
+  --viz-chip-adapter-border: hsl(162 38% 74%);
+  --viz-chip-adapter-text: hsl(162 57% 24%);
+  /* Model — same sea-green hue as adapter, just lightened a few steps so
+     the two chips read as "primary + secondary facet" of the same fact
+     (adapter = runtime, model = which model that runtime is running).
+     Keep the hue identical; vary only lightness so they stay in lockstep. */
+  --viz-chip-model-bg: hsl(191 46% 91%);
+  --viz-chip-model-border: hsl(191 33% 80%);
+  --viz-chip-model-text: hsl(191 44% 30%);
+  --viz-chip-fan-bg: hsl(60 52% 70%);
+  --viz-chip-fan-border: hsl(60 52% 42%);
+  --viz-chip-fan-text: hsl(60 88% 20%);
+  --viz-chip-variant-bg: hsl(250 91% 95%);
+  --viz-chip-variant-border: hsl(250 95% 92%);
+  --viz-chip-variant-text: hsl(263 69% 42%);
+  --viz-chip-role-bg: hsl(48 96% 89%);
+  --viz-chip-role-border: hsl(48 97% 77%);
+  --viz-chip-role-text: hsl(48 81% 29%);
+  --viz-chip-type-bg: hsl(220 14% 96%);
+  --viz-chip-type-border: hsl(220 13% 91%);
+  --viz-chip-type-text: hsl(221 13% 28%);
+
+  /* Typography — shared header size for graph cards and frame headers. */
+  --viz-header-font-size: 11px;
+
+  /* Hover design system — every hoverable viz surface (toolbar button,
+     legend item, frame header, node card, toggle) shares the same ease
+     + duration so hover feels consistent across the plane. Filter-darken
+     is used where the element has a solid rest-color; background swap is
+     used where the rest-state is transparent. */
+  --viz-hover-duration: 120ms;
+  --viz-hover-ease: ease;
+  --viz-hover-filter: brightness(0.94);
+  --viz-hover-transition:
+    filter var(--viz-hover-duration) var(--viz-hover-ease),
+    background-color var(--viz-hover-duration) var(--viz-hover-ease),
+    box-shadow var(--viz-hover-duration) var(--viz-hover-ease);
+
+  /* Motion design system.
+     Two motion scales in the viz plane:
+       - layout: size/position shifts (expand/collapse, re-layout on
+         filter change, drawer open/close). ~180ms feels continuous but
+         not sluggish; the reader's eye tracks the movement.
+       - fade: appearance of elements (nodes, edges, banners) after a
+         re-render. 240ms is long enough to read as intentional motion
+         without feeling sluggish across a dense graph.
+     Both use a plain `ease` curve — easings should feel neutral across
+     a dense graph UI; no bounce or spring.
+     Mount-fade rule: the `viz-fade-in` keyframe uses a small upward
+     translate *plus* opacity so the fade is perceptible even when
+     visual density already fills the viewport (an opacity-only fade
+     can read as a flicker on modern fast-refresh displays). See
+     @keyframes viz-fade-in in viz.css. */
+  --viz-layout-transition: 180ms ease;
+  --viz-fade-duration: 240ms;
+  --viz-fade-ease: ease;
+
+  /* Side panel */
+  --viz-panel-badge-bg: hsl(226 100% 94%);
+  --viz-panel-badge-text: hsl(242 47% 34%);
+  --viz-panel-link: hsl(224 66% 48%);
+  --viz-panel-row-muted: hsl(220 14% 96%);
+  --viz-panel-desc: hsl(217 19% 27%);
+
+  /* Toolbar toggle */
+  --viz-toggle-on-bg: hsl(214 95% 93%);
+  --viz-toggle-on-border: hsl(213 74% 68%);
+  --viz-toggle-on-text: hsl(224 64% 33%);
+
+  /* Alert banners (errors + validation warnings).
+     Design-system rule: every "this isn't right" callout shares the same
+     warm-red palette so the reader sees one problem color, not two. Both
+     the hard-error panel and the soft "rendered without full validation"
+     banner use these tokens — distinction is in icon + copy, not hue. The
+     bg is intentionally very light so the callout informs without
+     dominating. */
+  --viz-error-bg: hsl(0 69% 97%); /* very-light warm red */
+  --viz-error-border: hsl(0 59% 86%); /* desaturated rose */
+  --viz-error-title: hsl(0 41% 38%); /* muted dark red — heading weight */
+  --viz-error-text: hsl(0 41% 25%); /* body text, deeper than title */
+  --viz-error-hint: hsl(0 31% 36%); /* tertiary hint text */
+  --viz-error-detail-bg: hsl(0 0% 100% / 0.6); /* nested detail box */
+
+  /* Elevation — three semantic stops. See the design-system header
+     for picking rules. Every box-shadow in the app MUST resolve to
+     one of these (directly via var(--shadow-*) or via a semantic
+     alias like --viz-shadow-card that points at them). */
+  --shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.04);
+  --shadow-md: 0 2px 6px hsl(0 0% 0% / 0.12);
+  --shadow-pane-right: 2px 0 6px hsl(0 0% 0% / 0.12);
+  --shadow-pane-left: -2px 0 6px hsl(0 0% 0% / 0.12);
+  --shadow-lg: 0 4px 12px hsl(0 0% 0% / 0.12);
+  /* Viz aliases — keep existing viz-* names so consumers there don't
+     care which primitive backs "card" vs "hover". */
+  --viz-shadow-card: var(--shadow-sm);
+  --viz-shadow-hover: var(--shadow-md);
+
+  /* File-size hue — every byte count in the app (.size / .size-large,
+     applied by sizeHtml()) shares this hue family so "this number is
+     a size" reads as a single visual category. Two L/S stops so small
+     sizes recede and big sizes stand out while staying in the same
+     hue. To retune the overall feel, shift L/S here; keep hue 205. */
+  --size-color: hsl(225 30% 50%);
+  --size-color-bold: hsl(225 42% 40%);
+
+  /* Status palette — shared by stats, tally tree, badges, progress bars.
+     Pair -bg / -text variants where the text sits on the tinted surface. */
+  --status-success: hsl(142 76% 36%);
+  --status-success-bg: hsl(141 84% 93%);
+  --status-success-soft-bg: hsl(134 41% 88%);
+  --status-success-soft-text: hsl(134 61% 21%);
+  --status-success-dot: hsl(134 61% 41%);
+  --status-warning: hsl(32 95% 44%);
+  --status-warning-strong: hsl(21 90% 48%);
+  --status-error: hsl(0 72% 51%);
+  --status-error-strong: hsl(0 84% 60%);
+  --status-info: hsl(217 81% 60%);
+  --status-info-bg: hsl(214 95% 93%);
+  --status-info-text: hsl(224 56% 48%);
+
+  /* Secondary muted tone (slate) for metadata/labels on charts & stats.
+     Distinct from --muted which is the warmer bootstrap grey. */
+  --muted-slate: hsl(215 16% 47%);
+
+  /* Spinner tokens — all progress spinners use a light grey track with
+     a darker grey rotating segment. Do not use brand, link, status, or
+     file-age hues for spinner rings; those colors are too loud for
+     ambient background work. */
+  --spinner-track: hsl(0 0% 90%);
+  --spinner-accent: hsl(0 0% 55%);
+  --spinner-mini-track: hsl(0 0% 87%);
+  --spinner-mini-accent: hsl(0 0% 55%);
+
+  /* File-age design system (used by the file-tree ".age-*" classes).
+     Rationale: the primary affordance of the file browser is "where did
+     something *just happen*?" — when runs write new files, the user's
+     eye should land on them without scanning names. Color is the
+     primary signal (warm/red = seconds, cooling to grey = old); weight
+     is a secondary boost for the very-recent tiers (seconds, minutes)
+     so they also read as bold. Every ".age-*" class pulls from these
+     tokens — do not add literal hex values inline. */
+  --file-age-weight: var(--weight-medium); /* base — 11px labels read */
+  /* as light at normal 400, */
+  /* so medium (500) is the */
+  /* legibility floor */
+  --file-age-weight-recent: var(--weight-bold); /* seconds + minutes pop */
+
+  /* Freshness ramp (red → orange → dim yellow). Single-family encoding:
+     hue walks monotonically from red to yellow as age grows, saturation
+     drops from loud to quiet, and lightness stays in the mid-40s so
+     contrast against the page background is roughly constant. The
+     reading is "warmer + louder = newer; cooler + quieter = older"
+     without ever crossing into a different color family. */
+  --file-age-sec: hsl(8 85% 52%); /* < 1 min — saturated red */
+  --file-age-min: hsl(22 78% 48%); /* < 1 hour — red-orange */
+  --file-age-hr: hsl(34 68% 46%); /* < 1 day — orange */
+  --file-age-day: hsl(44 55% 44%); /* < 1 week — amber */
+  --file-age-wk: hsl(50 35% 42%); /* < 1 month — dim yellow */
+  --file-age-old: hsl(52 18% 40%); /* ≥ 1 month — desaturated khaki */
+
+  /* File-type design system (used everywhere a filename shows up —
+     file tree, viz dep icons, drawer path rows).
+     Rule: icon = major type (doc / list / code / grid / activity),
+           color = subtype (--ft-* token below).
+     Single source of truth; to add a subtype split, introduce a new
+     --ft-<name> token here and point the FILE_TYPES matcher in app.js
+     at a matching `ft-<name>` class. The declarative FILE_TYPES table
+     encodes both icon + color class; do not inline literal hex values
+     in rules below. */
+  /* Markdown family — one hue per role so a reader classifies a doc by
+     color before reading the name:
+       - .md               → blue   (canonical prose — reference doc)
+       - .runbook.md       → green  (procedural / "go run this" doc)
+       - .template.md /
+         .form.md          → yellow (fill-in-the-blank scaffolds)
+     Distinct hues rather than L-steps because the roles are different
+     *kinds* of document, not severity levels. */
+  --ft-md: hsl(220 35% 50%); /* regular .md — blue (canonical docs) */
+  --ft-md-runbook: hsl(142 45% 50%); /* .runbook.md — green (procedural) */
+  --ft-md-template: hsl(45 52% 46%); /* .template.md / .form.md — yellow (fill-in) */
+  --ft-text: var(--muted); /* .txt / .pid / .pdf — muted grey */
+  /* YAML: orange (not red) — data/config files are common, and a red
+     icon reads as "error" at a glance, colliding with the status-error
+     hue used by failure badges, threshold lines, and annotation
+     callouts. Orange keeps data visually distinct from code without
+     pretending to be a warning. */
+  --ft-yaml: hsl(28 65% 53%); /* .yaml / .yml / .json — orange (data/config) */
+  --ft-config: var(--muted); /* .cfg / .ini — muted grey */
+  --ft-jsonl: hsl(247 40% 55%); /* .jsonl — indigo (log stream, distinct from md blue) */
+  --ft-code: hsl(162 40% 38%); /* .py / .sh / .ts / .toml — teal-green (non-purple) */
+  --ft-csv: hsl(60 52% 52%); /* .csv — yellow green (tabular) */
+
+  /* Surface + border stops derived from the same hue as each --ft-<name>
+     icon color. One design rule: bg ≈ hue at S≈40%, L≈94% (light wash);
+     border ≈ hue at S≈28%, L≈80% (mid-tone divider). These let any
+     consumer (dep card bg, chip, swatch) render a surface whose hue
+     family matches the subtype's icon. Consumers read them via
+     var(--ft-bg) / var(--ft-border) — the per-class rules below map
+     each ft-<name> to its own triplet, so adding a new subtype means
+     declaring one new class rule, not editing every consumer. */
+  --ft-md-bg: hsl(210 45% 95%);
+  --ft-md-border: hsl(210 30% 82%);
+  --ft-md-runbook-bg: hsl(142 40% 94%);
+  --ft-md-runbook-border: hsl(142 28% 80%);
+  --ft-md-template-bg: hsl(43 80% 94%);
+  --ft-md-template-border: hsl(43 58% 80%);
+  --ft-text-bg: hsl(208 10% 96%);
+  --ft-text-border: hsl(208 8% 85%);
+  --ft-yaml-bg: hsl(28 65% 94%);
+  --ft-yaml-border: hsl(28 45% 80%);
+  --ft-config-bg: hsl(208 10% 96%);
+  --ft-config-border: hsl(208 8% 85%);
+  --ft-jsonl-bg: hsl(247 45% 95%);
+  --ft-jsonl-border: hsl(247 30% 82%);
+  --ft-code-bg: hsl(162 35% 94%);
+  --ft-code-border: hsl(162 24% 80%);
+  --ft-csv-bg: hsl(41 70% 94%);
+  --ft-csv-border: hsl(41 48% 80%);
+
+  /* Chart palette — used by Chart.js configs emitted from Python
+     and resolved
+     at canvas-draw time by cssVar()/colorWithAlpha() in charts.js.
+     Rule: chart series/threshold/annotation colors live here, not
+     inline in Python or JS. Hues align with --status-* so a
+     threshold line and a status badge read as the same concept.
+     Canvas rendering cannot resolve var(--foo) itself; Python emits
+     "var(--chart-series-info)" as a sentinel and charts.js substitutes
+     the computed value before handing to Chart.js. */
+  --chart-grid: var(--viz-surface-sunken); /* chart gridlines */
+  --chart-label-text: var(--viz-text-meta); /* annotation label fg */
+  --chart-annotation-default: var(--status-error-strong);
+  --chart-series-info: var(--status-info); /* primary blue */
+  --chart-series-info-soft: hsl(213 94% 68%); /* secondary blue */
+  --chart-series-warning: hsl(38 92% 50%); /* amber */
+  --chart-series-error: var(--status-error-strong); /* red */
+  --chart-series-success: hsl(142 71% 45%); /* green */
+  --chart-series-result: hsl(160 84% 39%); /* emerald */
+  --chart-series-thinking: hsl(255 92% 76%); /* violet */
+  --chart-series-init: var(--viz-text-muted); /* neutral grey */
+  --chart-series-system: var(--viz-text-dim); /* neutral grey-dim */
+
+  /* Standalone-viz palette — used by viz/render_svg.py and
+     render_html.py when they emit self-contained documents (no
+     browser runtime). The generated doc inlines these tokens into
+     its own :root so the same naming works offline. */
+  --standalone-bg: hsl(0 0% 98%);
+  --standalone-surface: hsl(0 0% 100%);
+  --standalone-border: hsl(0 0% 87%);
+  --standalone-text: hsl(0 0% 7%);
+  --standalone-text-muted: hsl(0 0% 33%);
+  --standalone-node-fill: hsl(0 0% 97%);
+  --standalone-node-stroke: hsl(0 0% 20%);
+  --standalone-node-step-fill: hsl(210 100% 95%);
+  --standalone-node-dep-fill: hsl(40 100% 93%);
+  --standalone-label-kind: hsl(0 0% 40%);
+  --standalone-label-badge: hsl(0 0% 27%);
+  --standalone-edge: hsl(0 0% 33%);
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: hsl(225 18% 10%);
+  --text: hsl(210 20% 92%);
+  --border: hsl(220 13% 25%);
+  --header-bg: hsl(224 18% 13%);
+  --header-text: hsl(210 20% 90%);
+  --sidebar-bg: hsl(222 18% 15%);
+  --hover-bg: hsl(222 16% 22%);
+  --link: hsl(204 88% 66%);
+  --muted: hsl(215 12% 68%);
+  --code-bg: hsl(220 18% 14%);
+
+  --panel-header-bg: hsl(222 17% 18%);
+  --scrollbar-thumb: hsl(220 10% 36%);
+  --scrollbar-thumb-hover: hsl(220 10% 46%);
+  --tally-skeleton-bg: hsl(220 10% 31%);
+  --row-flash-bg: hsl(45 75% 28%);
+
+  --viz-text: var(--text);
+  --viz-text-muted: hsl(215 12% 68%);
+  --viz-text-dim: hsl(215 10% 52%);
+  --viz-text-strong: hsl(220 35% 88%);
+  --viz-text-meta: hsl(217 15% 76%);
+  --viz-surface: hsl(225 18% 10%);
+  --viz-surface-raised: hsl(222 18% 15%);
+  --viz-surface-toolbar: hsl(222 18% 16%);
+  --viz-surface-sunken: hsl(223 19% 12%);
+  --viz-surface-card: hsl(222 18% 15%);
+  --viz-surface-hover: var(--hover-bg);
+  --viz-border: var(--border);
+  --viz-border-strong: hsl(218 13% 33%);
+  --viz-border-subtle: hsl(218 13% 24%);
+  --viz-chip-bg: hsl(222 18% 15% / 0.8);
+  --viz-chip-border: hsl(0 0% 100% / 0.12);
+  --viz-error-detail-bg: hsl(225 18% 10% / 0.65);
+  --shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.3);
+  --shadow-md: 0 2px 8px hsl(0 0% 0% / 0.35);
+  --shadow-pane-right: 2px 0 8px hsl(0 0% 0% / 0.35);
+  --shadow-pane-left: -2px 0 8px hsl(0 0% 0% / 0.35);
+  --shadow-lg: 0 8px 24px hsl(0 0% 0% / 0.4);
+  --size-color: hsl(211 42% 70%);
+  --size-color-bold: hsl(207 80% 78%);
+  --spinner-track: hsl(220 10% 30%);
+  --spinner-accent: hsl(220 10% 70%);
+  --spinner-mini-track: hsl(220 10% 30%);
+  --spinner-mini-accent: hsl(220 10% 70%);
+
+  --ft-text-bg: hsl(220 12% 18%);
+  --ft-text-border: hsl(220 10% 30%);
+  --ft-config-bg: hsl(220 12% 18%);
+  --ft-config-border: hsl(220 10% 30%);
+  --chart-grid: hsl(220 13% 24%);
+  --chart-label-text: var(--viz-text-meta);
+}

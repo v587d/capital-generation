@@ -1,0 +1,377 @@
+<!doctype html>
+<!-- Skills-layout canvas: the metaproc ELK canvas over the Buffett skill's
+     file layout, stripped to one card type with no argument semantics.
+     Fully self-contained: every asset lives in ./vendor (run
+     vendor/fetch-elk.sh once if elk.bundled.js is missing), data is the
+     hand-authored mock in data.js. Open directly from disk. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Buffett skill — layout map</title>
+<link rel="stylesheet" href="vendor/tokens.css">
+<link rel="stylesheet" href="vendor/viz.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: var(--font-sans); background: var(--viz-surface);
+         color: var(--viz-text); }
+  header { display: flex; align-items: center; gap: 1rem; padding: .55rem .9rem;
+           border-bottom: 1px solid var(--viz-border); font-size: .85rem; }
+  header h1 { font-size: .95rem; margin: 0; flex: 1; font-weight: var(--weight-bold); }
+  header a, header button { font: inherit; color: var(--viz-text-muted);
+           background: none; border: 1px solid var(--viz-border); border-radius: 6px;
+           padding: .2rem .6rem; cursor: pointer; text-decoration: none; }
+  header a:hover, header button:hover { color: var(--viz-text); }
+  #viz { height: calc(100vh - 44px); overflow: auto; }
+  .harness-note { color: var(--viz-text-dim); font-size: .78rem; }
+
+  /* Same condensed-canvas overrides as the argument-map spike: wrap all
+     labels so ELK sizes boxes for the wrapped text. The renderer's natural-
+     width pass collapses flex titles to min-content (the 140px floor), which
+     stacks 65 two-line cards into a very tall column; a wider measurement
+     floor puts most card titles on one line, shortening the map and widening
+     its layers toward the tall-poster aspect the README capture wants. */
+  .viz-node { max-width: 400px !important; }
+  .viz-node.viz-measure { min-width: 300px !important; }
+  /* Poster typography: much larger text with tighter box padding, so the map
+     stays readable when the whole poster is scaled down. Card titles and
+     frame headers both size from --viz-header-font-size (tokens.css sets it
+     to 11px), so the token is the one true knob — element-level font-size
+     on .viz-node never reaches the title row. */
+  :root { --viz-header-font-size: 16px; }
+  .viz-node { font-size: 16px !important; line-height: 1.25 !important; padding: 3px 9px !important; }
+  .viz-kind-icon { width: 16px !important; height: 16px !important; }
+  .viz-frame-label {
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    line-height: 1.25;
+  }
+  /* Frame titles appear exactly once: collapsed groups read as plain list
+     rows; expanded groups hand the title to the card inside and shrink the
+     header to a slim chevron strip. */
+  .viz-frame-header {
+    align-items: flex-start;
+    padding: 3px 8px 3px 6px !important;
+  }
+  .viz-frame-expanded > .viz-frame-header .viz-frame-label { display: none; }
+  .viz-frame-expanded > .viz-frame-header { padding: 2px 4px 2px 4px !important; }
+  /* Collapsed groups keep their type icon next to the label; the expanded
+     header hides it along with the label (the title card inside carries both). */
+  .viz-frame-expanded > .viz-frame-header .viz-kind-icon { display: none; }
+  /* The compact measurement body mirrors the collapsed header's padding plus
+     the width of the type icon it now carries, so ELK sizes collapsed frames
+     for icon + label without clipping. */
+  .viz-node.viz-measure[data-compact="1"] { padding: 3px 8px 3px 30px !important; }
+  .viz-frame-collapsed { overflow: hidden; }
+  /* Containers: colorless, hairline border, no fill; the border only shows
+     when a group is expanded and actually encloses children. */
+  .viz-frame {
+    background: transparent !important;
+    border: 1px solid var(--viz-border) !important;
+    box-shadow: none !important;
+  }
+  .viz-frame.viz-frame-collapsed { border-color: transparent !important; }
+  /* One box type, no legend/summary chrome, no plane toggles — kind is
+     always the same card, so the toggles are no-ops. */
+  .viz-legend, .viz-frame-summary { display: none !important; }
+  .viz-toolbar .viz-tool-toggle, .viz-toolbar .viz-tool-divider { display: none !important; }
+  /* The page header already names the map; drop the Identity metadata panel. */
+  .viz-header-panel { display: none !important; }
+  /* tokens.css defines the step-card accents only for light; without these
+     the cards stay cream in dark mode under light text. */
+  [data-theme="dark"] {
+    --viz-accent-step-bg: var(--viz-surface-card);
+    --viz-accent-step-border: var(--viz-border-strong);
+    --viz-accent-step-icon: var(--viz-text);
+  }
+  /* One color family per node type: a saturated icon hue plus a subtle box
+     tint and border derived from the same hue. Identity is never color-alone —
+     the icon glyph and label carry it; the tint only reinforces. Text keeps
+     the normal ink tokens. Dark-theme steps are selected, not auto-flipped. */
+  :root {
+    --type-skill: hsl(262 55% 40%);
+    --type-group: hsl(38 80% 32%);
+    --type-module: hsl(38 80% 32%);
+    --type-workflow: hsl(160 70% 26%);
+    --type-file: hsl(45 10% 38%);
+    --type-card: hsl(213 75% 38%);
+    --type-skill-bg: hsl(262 60% 96%);   --type-skill-bd: hsl(262 40% 84%);
+    --type-group-bg: hsl(38 75% 93%);    --type-group-bd: hsl(38 45% 78%);
+    --type-workflow-bg: hsl(160 45% 93%); --type-workflow-bd: hsl(160 30% 74%);
+    --type-file-bg: hsl(45 25% 93%);     --type-file-bd: hsl(45 15% 78%);
+    --type-card-bg: hsl(213 80% 96%);    --type-card-bd: hsl(213 45% 82%);
+  }
+  [data-theme="dark"] {
+    --type-skill: hsl(262 70% 78%);
+    --type-group: hsl(42 70% 66%);
+    --type-module: hsl(42 70% 66%);
+    --type-workflow: hsl(160 45% 64%);
+    --type-file: hsl(45 12% 70%);
+    --type-card: hsl(213 75% 72%);
+    --type-skill-bg: hsl(262 30% 22%);   --type-skill-bd: hsl(262 25% 42%);
+    --type-group-bg: hsl(38 35% 17%);    --type-group-bd: hsl(40 30% 36%);
+    --type-workflow-bg: hsl(160 30% 15%); --type-workflow-bd: hsl(160 25% 32%);
+    --type-file-bg: hsl(45 14% 17%);     --type-file-bd: hsl(45 10% 34%);
+    --type-card-bg: hsl(213 40% 19%);    --type-card-bd: hsl(213 32% 40%);
+  }
+  /* Box tints: every leaf/title card, and collapsed groups (which render as
+     single rows). Expanded frames stay hairline — the title card inside
+     carries the group's tint. Modules share the group (folder) family. */
+  .viz-node[data-type="skill"] { background: var(--type-skill-bg) !important; border-color: var(--type-skill-bd) !important; }
+  .viz-node[data-type="group"], .viz-node[data-type="module"] { background: var(--type-group-bg) !important; border-color: var(--type-group-bd) !important; }
+  .viz-node[data-type="workflow"] { background: var(--type-workflow-bg) !important; border-color: var(--type-workflow-bd) !important; }
+  .viz-node[data-type="file"] { background: var(--type-file-bg) !important; border-color: var(--type-file-bd) !important; }
+  .viz-node[data-type="card"] { background: var(--type-card-bg) !important; border-color: var(--type-card-bd) !important; }
+  .viz-frame.viz-frame-collapsed[data-type="group"],
+  .viz-frame.viz-frame-collapsed[data-type="module"] { background: var(--type-group-bg) !important; border-color: var(--type-group-bd) !important; }
+  .viz-frame.viz-frame-collapsed[data-type="workflow"] { background: var(--type-workflow-bg) !important; border-color: var(--type-workflow-bd) !important; }
+  .viz-frame.viz-frame-collapsed[data-type="skill"] { background: var(--type-skill-bg) !important; border-color: var(--type-skill-bd) !important; }
+  .viz-node[data-type="skill"] .viz-kind-icon { color: var(--type-skill) !important; }
+  .viz-node[data-type="group"] .viz-kind-icon { color: var(--type-group) !important; }
+  .viz-node[data-type="module"] .viz-kind-icon { color: var(--type-module) !important; }
+  .viz-node[data-type="workflow"] .viz-kind-icon { color: var(--type-workflow) !important; }
+  .viz-node[data-type="file"] .viz-kind-icon { color: var(--type-file) !important; }
+  .viz-node[data-type="card"] .viz-kind-icon { color: var(--type-card) !important; }
+  .viz-frame[data-type="group"] > .viz-frame-header .viz-kind-icon { color: var(--type-group) !important; }
+  .viz-frame[data-type="module"] > .viz-frame-header .viz-kind-icon { color: var(--type-module) !important; }
+  .viz-frame[data-type="workflow"] > .viz-frame-header .viz-kind-icon { color: var(--type-workflow) !important; }
+  /* Capture mode (?capture or ?capture=all): just the map at 100% zoom on a
+     plain surface — no header, no toolbar — for exact-size PNG export. */
+  [data-capture] header { display: none !important; }
+  [data-capture] .viz-toolbar { display: none !important; }
+  /* Chevrons are expand/collapse affordances — meaningless in a static
+     extraction, so captures drop them from group headers. */
+  [data-capture] [data-toggle-expand] { display: none !important; }
+  /* Grow the whole chain to the content instead of viewport-relative sizing:
+     the renderer's percentage heights clip tall maps otherwise. */
+  [data-capture] #viz,
+  [data-capture] #viz .viz-viewport { height: auto !important; overflow: visible !important; }
+  [data-capture] #viz .viz-viewport { padding: 16px !important; }
+  [data-capture] ::-webkit-scrollbar { display: none; }
+  /* PDF export path: no mid-animation states, exact colors, and the map kept
+     on one unclipped page (the @page size is injected per-render below). */
+  [data-capture] * { animation: none !important; transition: none !important; }
+  [data-capture] body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title"></h1>
+  <span class="harness-note">titles and chevrons expand groups · Expand all in the toolbar</span>
+  <button id="theme">dark</button>
+  <button id="reset">reset view</button>
+</header>
+<div id="viz"></div>
+<script src="data.js"></script>
+<script src="vendor/icons.js"></script>
+<script src="vendor/elk.bundled.js"></script>
+<script src="vendor/viz.js"></script>
+<script>
+  (function () {
+    var data = window.SKILLMAP;
+    document.getElementById("title").textContent = data.meta.title;
+    document.title = data.meta.title;
+
+    // Capture mode: ?capture renders the default view, ?capture=all the fully
+    // expanded map — chrome hidden, zoom pinned at 100%, saved state ignored,
+    // and the content size reported via the document title so a headless
+    // browser can be sized to the exact map dimensions.
+    var captureMatch = location.search.match(/[?&]capture(?:=([^&]*))?/);
+    var capture = captureMatch ? (captureMatch[1] || "default") : null;
+    if (capture) document.documentElement.setAttribute("data-capture", "");
+    var captureZoom = parseFloat((location.search.match(/[?&]zoom=([\d.]+)/) || [])[1]) || 1;
+
+    // Extra Lucide glyphs for the type vocabulary (same contract as the
+    // vendored registry; icon ids noted beside each).
+    var SA = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+      + 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+    MetabrowserIcons.sparkle = // Lucide `sparkle` — the skill itself.
+      "<svg " + SA + '><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>';
+    MetabrowserIcons.folder = // Lucide `folder` — directories and card modules.
+      "<svg " + SA + '><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>';
+    MetabrowserIcons.workflow = // Lucide `workflow` — the routed task intents.
+      "<svg " + SA + '><rect width="8" height="8" x="3" y="3" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13" rx="2"/></svg>';
+    MetabrowserIcons["file-text"] = // Lucide `file-text` — plain files.
+      "<svg " + SA + '><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>';
+    MetabrowserIcons.list = // Lucide `list` — the 65 cards (bulleted text).
+      "<svg " + SA + '><path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/></svg>';
+
+    // One icon per node type.
+    var TYPE_ICON = {
+      skill: "sparkle",
+      group: "folder",
+      module: "folder",
+      workflow: "workflow",
+      file: "file-text",
+      card: "list",
+    };
+    function applyTypeIcons() {
+      document.querySelectorAll("#viz .viz-node[data-id], #viz .viz-frame[data-id]").forEach(function (el) {
+        var t = data.types[el.getAttribute("data-id")];
+        if (!t || el.getAttribute("data-type")) return;
+        el.setAttribute("data-type", t);
+        var name = TYPE_ICON[t];
+        if (!name) return;
+        var iconEl = el.classList.contains("viz-frame")
+          ? el.querySelector(":scope > .viz-frame-header .viz-kind-icon")
+          : el.querySelector(".viz-kind-icon");
+        if (!iconEl) return;
+        var replacement = MetabrowserIcons.withClass(name, iconEl.getAttribute("class"));
+        if (replacement) iconEl.outerHTML = replacement;
+      });
+    }
+
+    // Theme toggle (tokens.css carries the [data-theme="dark"] overrides).
+    var themeBtn = document.getElementById("theme");
+    function applyTheme(t) {
+      if (t === "dark") { document.documentElement.setAttribute("data-theme", "dark"); themeBtn.textContent = "light"; }
+      else { document.documentElement.removeAttribute("data-theme"); themeBtn.textContent = "dark"; }
+      localStorage.setItem("skillmap-theme", t);
+    }
+    var themeParam = (location.search.match(/[?&]theme=(dark|light)/) || [])[1];
+    applyTheme(themeParam || localStorage.getItem("skillmap-theme") || "light");
+    themeBtn.onclick = function () {
+      applyTheme(document.documentElement.hasAttribute("data-theme") ? "light" : "dark");
+    };
+
+    function defaultViewState() {
+      return {
+        expanded_nodes: capture === "all"
+          ? data.viz.nodes.filter(function (n) { return n.kind === "process"; })
+              .map(function (n) { return n.id; })
+          : data.expanded.slice(),
+        planes: { steps: true, artifacts: true, files: false },
+        // A numeric zoom suppresses the renderer's first-load fit-to-width;
+        // captures render at exactly 100% unless &zoom= asks for a crisper
+        // multiple (the harness scales the window to match).
+        zoom: capture ? captureZoom : null,
+      };
+    }
+    var saved = capture ? null : MetaprocViz.loadViewState(data.viz.header.source_path);
+    var viewState = saved && saved.expanded_nodes && saved.expanded_nodes.length
+      ? saved
+      : defaultViewState();
+    if (!viewState.planes) viewState.planes = defaultViewState().planes;
+
+    // Sticky fit-to-view: the argument-map spike re-fit width only; here the
+    // LEFT flow grows down the page, so after each structural re-render zoom
+    // out (bounded) until the whole map fits both axes. Zoom clicks are
+    // style-only, so this cannot loop with the observer.
+    var fitScheduled = false;
+    function toolbarBtn(label) {
+      var btns = document.querySelectorAll("#viz .viz-toolbar button");
+      for (var i = 0; i < btns.length; i++) {
+        if (btns[i].textContent.trim() === label) return btns[i];
+      }
+      return null;
+    }
+    function autoFit() {
+      if (fitScheduled) return;
+      fitScheduled = true;
+      requestAnimationFrame(function () {
+        fitScheduled = false;
+        var vp = document.querySelector("#viz .viz-viewport");
+        if (!vp) return;
+        var out = toolbarBtn("−");
+        for (var i = 0; i < 8 && out; i++) {
+          if (vp.scrollWidth <= vp.clientWidth + 8 && vp.scrollHeight <= vp.clientHeight + 8) return;
+          out.click();
+        }
+      });
+    }
+    // Capture mode renders at exactly 100% (the zoom:1 view state above),
+    // reports the content extent through the title so a headless browser can
+    // match its window to it, and declares a matching single @page so
+    // --print-to-pdf emits the whole map as one unclipped vector page
+    // (screenshot rasterization silently cuts off very tall canvases).
+    var pageStyle = null;
+    function reportSize() {
+      requestAnimationFrame(function () {
+        var canvas = document.querySelector("#viz .viz-canvas");
+        if (!canvas) return;
+        var w = Math.ceil(canvas.offsetWidth * captureZoom) + 32;
+        var h = Math.ceil(canvas.offsetHeight * captureZoom) + 32;
+        document.title = "capture " + w + "x" + h;
+        if (!pageStyle) {
+          pageStyle = document.createElement("style");
+          document.head.appendChild(pageStyle);
+        }
+        pageStyle.textContent = "@page { size: " + w + "px " + h + "px; margin: 0; }";
+      });
+    }
+    // Re-fit only on structural changes (expand/collapse re-renders swap
+    // element subtrees). Zoom clicks mutate only the toolbar's "%" text
+    // label; treating that as a re-render would snap the zoom right back
+    // to fit, leaving the + button apparently dead whenever the map
+    // overflows (always, just after Expand all).
+    new MutationObserver(function (mutations) {
+      var structural = mutations.some(function (m) {
+        function hasElement(list) {
+          for (var i = 0; i < list.length; i++) {
+            if (list[i].nodeType === 1) return true;
+          }
+          return false;
+        }
+        return hasElement(m.addedNodes) || hasElement(m.removedNodes);
+      });
+      if (!structural) return;
+      applyTypeIcons();
+      if (capture) reportSize(); else autoFit();
+    }).observe(document.getElementById("viz"), { childList: true, subtree: true });
+
+    // Clicking a group's title toggles it, same as the chevron; clicking a
+    // card does nothing (the vendor drawer stays retired here too).
+    document.getElementById("viz").addEventListener("click", function (ev) {
+      var label = ev.target.closest(".viz-frame-label");
+      if (label) {
+        var frame = label.closest(".viz-frame[data-id]");
+        var chevron = frame && frame.querySelector("[data-toggle-expand]");
+        if (chevron) {
+          ev.stopPropagation();
+          ev.preventDefault();
+          chevron.click();
+        }
+        return;
+      }
+      if (ev.target.closest("[data-toggle-expand]")) return;
+      if (ev.target.closest(".viz-node[data-id], .viz-frame[data-id]")) {
+        ev.stopPropagation();
+        ev.preventDefault();
+      }
+    }, true);
+
+    // Collapsed frames hug their measured title height (SPIKE PATCH in the
+    // shared vendor/viz.js); these are only the missing-measurement fallback.
+    MetaprocViz.DEFAULT_NODE_DIMS.process_collapsed.width = 230;
+    MetaprocViz.DEFAULT_NODE_DIMS.process_collapsed.height = 48;
+    // LEFT flow: the skill root sits leftmost with its files and modules
+    // fanning out rightward, edges pointing back into the group they belong to.
+    var LAYOUT_OVERRIDES = {
+      "elk.direction": "LEFT",
+      "elk.spacing.nodeNode": "6",
+      "elk.spacing.edgeNode": "6",
+      "elk.spacing.edgeEdge": "3",
+      "elk.layered.spacing.nodeNodeBetweenLayers": "22",
+      "elk.layered.spacing.edgeNodeBetweenLayers": "8",
+      "elk.padding": "[top=20,left=6,bottom=6,right=6]",
+      // Siblings keep data.js order (00-source-key first, modules 01–08,
+      // cards D01–D09 …) instead of crossing-minimized shuffling.
+      "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+      "elk.layered.crossingMinimization.forceNodeModelOrder": "true",
+    };
+
+    function render(vs) {
+      MetaprocViz.renderViz(document.getElementById("viz"), data.viz, {
+        viewState: vs,
+        layoutOptions: LAYOUT_OVERRIDES,
+      });
+    }
+    document.getElementById("reset").onclick = function () {
+      localStorage.removeItem("viz-view-state:" + data.viz.header.source_path);
+      render(defaultViewState());
+    };
+    render(viewState);
+  })();
+</script>
+</body>
+</html>

@@ -25,8 +25,11 @@
  * 行内「更多」菜单用官方 `Menu` primitive（`portal: true`）：清单区是滚动容器，就地渲染的浮层
  * 会被它裁掉；portal 模式把菜单挂到 `document.body`（官方 `.portal` = `z-index: 1100`，压在
  * 模态的 1000 之上），Escape / Tab / 焦点归还 / 点到外面收起全归它自己，且它按官方的模态层
- * 契约在 capture 阶段吃掉 Escape——弹窗本体因此不会跟着一起关。我们只提供锚点按钮与
- * `items`（置顶 / 删除），不自己写浮层几何。
+ * 契约在 capture 阶段吃掉 Escape——弹窗本体因此不会跟着一起关。我们只提供锚点按钮、
+ * `items` 只放「置顶」，持仓那一簇（勾选行 / 比例行 / 移除）全在 `children` 里，不自己写浮层几何。
+ * ⚠️ 菜单是 portal 出去的：它**读不到**本文件挂在 `.capital-watchlist-card` 上的自定义属性
+ * （自定义属性只随 DOM 树继承，而列表在 `document.body` 下）。菜单里的样式一律走
+ * `--dsw-alias-*` 与裸类选择器，别指望 `--capital-watchlist-up` 那一对透进去。
  *
  * 失败显示：**两档颜色、五个落点，位置跟着 cause 走**（2026-09-29 用户点名：整批刷新的红字飘在
  * 输入框下方、离它指的按钮隔了一整张表，而同样是"没成"的两个通道一个红一个黄）：
@@ -50,7 +53,22 @@ const { createSnapshotStore } = require('@deepseek-ai/dsh-client-store')
 // 里面没有 Star / Bookmark 类收藏图标——收藏语义靠 IconChecklistOutlineRegular）。
 // 不用 primitives 的 Button：面板里的每个动作都有自带几何（圆形关闭、描边刷新、行内省略号），
 // 套官方 Button 反而要对抗它的 sm/md 高度与 variant 调色。
-const { IconChecklistOutlineRegular, IconCloseOutlineRegular, IconEllipsisOutlineRegular, IconGoalOutlineRegular, IconListPenOutlineRegular, IconPinOutlineRegular, IconRefreshOutlineRegular, IconSearchOutlineRegular, IconTrashOutlineRegular, Menu, Modal } = require('@deepseek-ai/dsh-client-ui-primitives')
+// `MenuItemButton` 是官方给"组件行"用的那一颗（与数据行走同一套 markup、同一条键盘走位）：
+// 「移除」走它，才能带着 `separatorBefore` 的发丝线排在持仓那一簇之后。
+// `Switch` 也是官方件（`role="switch"` + `aria-checked`，视觉状态与读屏状态同一个来源）：
+// 「持仓」那一行的开关就是它，我们不再自己画勾选态。
+// 持仓那一行的图标用 Database（一摞圆盘）。这一支不是按名字猜的：把 24 支候选从安装态里连 SVG
+// 一起抽出来、排成深色菜单的对照表按眼睛比过——Archive 那只箱子在 14px 下糊成一坨，Plan /
+// Checklist 读起来是"单子"不是"仓位"，Data 带齿轮太忙，Folder 是"文件"；这摞圆盘在小尺寸下
+// 像一摞硬币，几何最干净。官方集里**没有**钱包 / 饼图 / 公文包 / 硬币这类金融图标（对着安装态的
+// export 表把全部 Icon* 逐名核过），也没有 minus——所以步进键是文本 −/+ 一对，不混用 IconPlus
+// 组件与文本减号。⛔ 也不用 `IconCheckCircle*`：那两支圆心里都画着东西，未勾选挂着它就像已经被
+// 选中（2026-10-09 实机点名的正是这个错觉）。
+const { IconChecklistOutlineRegular, IconCloseOutlineRegular, IconDatabaseOutlineRegular, IconEllipsisOutlineRegular, IconGoalOutlineRegular, IconListPenOutlineRegular, IconPinOutlineRegular, IconRefreshOutlineRegular, IconSearchOutlineRegular, IconTrashOutlineRegular, Menu, MenuItemButton, Modal, Switch } = require('@deepseek-ai/dsh-client-ui-primitives')
+// 「哪些标的可以是一个仓位」与「占比合计封顶多少」都来自 `capital-watchlist/holding-rules.js`
+// （构建期由 esbuild 内联进来）：面板画不画那一行、`+` 什么时候置灰，与 `/holding` 收不收这一格
+// 不许各说一套。
+const { isHoldable, weightCeiling } = require('./holding-rules.js')
 
 const ENTRY_NAME = 'capital-watchlist'
 const NS = 'capital.watchlist'
@@ -58,6 +76,12 @@ const SLOT = 'conversation.input.overlay'
 const ROUTE = '/capital-watchlist'
 const PRESET = 'capital-generation'
 const SEARCH_DEBOUNCE_MS = 300
+/**
+ * 持仓比例的步进幅度（百分点）。用户点名"步长 10、不设默认值"：勾选那一刻是"持有、比例还没填"，
+ * 第一次按 `+` 才落 10。⛔ 这是**几何参数**不是文案，所以住在这里而不是字典里。
+ * 不吸附：域里存着 37.5（旧版自由文本填的）就照它 ±10，不替用户把一个他写过的数掰正。
+ */
+const HOLDING_STEP = 10
 const STYLE_TAG = 'capital-watchlist-css'
 
 const zh = {
@@ -109,6 +133,22 @@ const zh = {
   remove: '移除',
   more: '更多',
   pin: '置顶',
+  /**
+   * 持仓标记这一族（2026-10-09 起，主 Agent 经 `get_watchlist` 读的就是它）。
+   * ⚠️ 文案说的始终是**用户自报**的标记，不是券商账上的事实。
+   *
+   * 这一族只有五行：行标签与开关的可达名共用 `holdingName`（「持仓」两个字，名词——
+   * 状态由那颗开关说，不需要"标记 / 取消标记"两个动词各写一份），其余四行是比例那一簇。
+   * 比例读数里那句 `0~85` 不在这里：它是**数字**（这一格的剩余额度，随其余持仓变），
+   * 不是措辞，所以在代码里拼。旧的 `holdingMenu`（标记持仓）与 `holdingUnset`（未填）都删了
+   * ——用户点名"改成持仓两个字"与"未填不用显示，用 0~100 这种 placeholder 提示"。
+   */
+  holdingWeightLabel: '持仓比例',
+  holdingStepper: '持仓比例（每档 10 个百分点）',
+  holdingStepUp: '增加持仓比例',
+  holdingStepDown: '减少持仓比例',
+  /** 行标签、开关的 aria-label，以及名称标红之外那句非颜色通道（红名与"红涨"同色）共用这一个词。 */
+  holdingName: '持仓',
   predict: '预测',
   predictTip: 'AI预测该证券标的',
   review: '复盘',
@@ -208,6 +248,12 @@ const en = {
   remove: 'Remove',
   more: 'More',
   pin: 'Pin to top',
+  // 持仓那一族：五个 key，理由与"行标签与开关共用同一个名词"都写在 zh 那一处（两套语言必须同时改）。
+  holdingWeightLabel: 'Holding weight',
+  holdingStepper: 'Holding weight, in steps of 10 percentage points',
+  holdingStepUp: 'Increase holding weight',
+  holdingStepDown: 'Decrease holding weight',
+  holdingName: 'Holding',
   /** ⚠️ 这两条标签受**格宽预算**约束：动作列是定值 52px（见 CSS 里 grid 那一处），
    *  12px/500 下八个字符就顶到边。要改名先量长度，别让它溢出描边。 */
   predict: 'Predict',
@@ -373,13 +419,16 @@ const marketIdOf = (candidate) => (candidate.exchange === 'HK' ? 'hk' : candidat
  * 只有 A 股口径的**红涨绿跌**两个色是字面量——涨跌语义不在宿主调色板里，宿主也没逐元素声明
  * `color-scheme`（`light-dark()` 用不了），所以浅深两套共用一对值：#d1493f / #17a063 在
  * 「浅卡 / 深卡」四种组合里最差的一档是 3.14:1（涨 on 深卡），已是最优折中。
+ * 这一对写在 `.capital-watchlist-card` 的两个自定义属性上、由规则去 `var()` 它们：
+ * "持仓的那一行名称标红"用的就是**同一个红**（用户点名），而字面量闸门只许这一对存在一次。
+ * ⛔ 也因此这两个变量只覆盖卡片子树——portal 出去的菜单读不到（见文件头那条）。
  */
 const CSS = `
 /* 宽 420 / 圆角 18 / 无内边距（内边距住在各段自己头上，好让表头与分隔线对齐）。
    限高按官方口径走 max-height: 100%（对 .root 的 padding box），不自己算 vh。 */
 .capital-watchlist-dialog.capital-watchlist-dialog { width: min(420px, 92vw); max-height: 100%; padding: 0; gap: 0; border-radius: 18px; }
 /* 底色与投影归官方 .dialog；滚动条按官方契约只在容器上重绑 l2 那一对，不自己写 scrollbar-* 选择器。 */
-.capital-watchlist-card { position: relative; display: flex; flex-direction: column; min-height: 0; overflow: hidden; border-radius: 18px; --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); }
+.capital-watchlist-card { position: relative; display: flex; flex-direction: column; min-height: 0; overflow: hidden; border-radius: 18px; --capital-watchlist-up: #d1493f; --capital-watchlist-down: #17a063; --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); }
 .capital-watchlist-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 18px 20px 14px; }
 .capital-watchlist-title { margin: 0; font-size: 17px; line-height: 24px; font-weight: 600; letter-spacing: .3px; color: var(--dsw-alias-label-primary); }
 /* 圆形灰底键：灰底 bg-module-platform + glyph label-secondary，两套主题都拉得开；正圆须配 corner-shape: round。 */
@@ -437,7 +486,7 @@ const CSS = `
 .capital-watchlist-option:hover:not([aria-disabled="true"]) { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent); }
 .capital-watchlist-option[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
 /* 键盘焦点走官方表达式：环色由宿主按主题与输入模态管好（指针模态自动透明），不自己造环。 */
-.capital-watchlist-close:focus-visible, .capital-watchlist-clear:focus-visible, .capital-watchlist-option:focus-visible, .capital-watchlist-filterbtn:focus-visible, .capital-watchlist-more:focus-visible, .capital-watchlist-predict:focus-visible, .capital-watchlist-review:focus-visible, .capital-watchlist-refresh:focus-visible, .capital-watchlist-confirmbtn:focus-visible { outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: 1px; }
+.capital-watchlist-close:focus-visible, .capital-watchlist-clear:focus-visible, .capital-watchlist-option:focus-visible, .capital-watchlist-filterbtn:focus-visible, .capital-watchlist-more:focus-visible, .capital-watchlist-predict:focus-visible, .capital-watchlist-review:focus-visible, .capital-watchlist-refresh:focus-visible, .capital-watchlist-confirmbtn:focus-visible, .capital-watchlist-stepperbtn:focus-visible { outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: 1px; }
 .capital-watchlist-optionmain { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .capital-watchlist-optionname { font-size: 14px; line-height: 18px; font-weight: 500; color: var(--dsw-alias-label-primary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .capital-watchlist-optioncode { font-size: 12px; line-height: 15px; color: var(--dsw-alias-label-tertiary); }
@@ -491,6 +540,10 @@ const CSS = `
 .capital-watchlist-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .capital-watchlist-namewrap { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .capital-watchlist-name { font-size: 14px; font-weight: 500; color: var(--dsw-alias-label-primary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* 用户在这条面板上亲手标过持仓的那一行：名称标红（2026-10-09 用户点名，替代原先那枚徽标）。
+   ⚠️ 颜色不是这条标记的唯一通道——它与"红涨"同色，所以 title 里同时写着"持仓 20%"，
+   读屏与鼠标悬停都拿得到同一句话（见 nameTitle）。 */
+.capital-watchlist-name-held { color: var(--capital-watchlist-up); }
 /* 代码与类型徽标同处第二行（2026-10-07 起这一行就这两样，币种不进面板）：gap 是这一对唯一的间距来源，徽标自带内边距，别再各写 margin。10px 与候选行 capital-watchlist-option 那条 gap 同值——同一件事的两种排法，不该一处紧一处松；6px 在实机上读起来是"贴着"（2026-10-07 用户点名）。 */
 .capital-watchlist-codeline { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .capital-watchlist-code { font-size: 11px; color: var(--dsw-alias-label-tertiary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -502,8 +555,8 @@ const CSS = `
 .capital-watchlist-quote { min-width: 0; padding-right: 12px; text-align: right; font-variant-numeric: tabular-nums; }
 .capital-watchlist-price { font-size: 14px; font-weight: 500; color: var(--dsw-alias-label-primary); white-space: nowrap; }
 .capital-watchlist-change { margin-top: 1px; font-size: 12px; font-weight: 500; white-space: nowrap; }
-.capital-watchlist-up { color: #d1493f; }
-.capital-watchlist-down { color: #17a063; }
+.capital-watchlist-up { color: var(--capital-watchlist-up); }
+.capital-watchlist-down { color: var(--capital-watchlist-down); }
 .capital-watchlist-flat { color: var(--dsw-alias-label-secondary); }
 /* 第四档：价有、涨跌还没有（停牌 / 未开盘）。刻意比 flat 再浅一档——flat 那一档说的是"今日平盘"
    这个结论，借用它就把"没这个数"画成了一个投资判断。 */
@@ -587,6 +640,43 @@ const CSS = `
 .capital-watchlist-confirmbtn:hover { background: var(--dsw-alias-interactive-bg-hover-accent); }
 .capital-watchlist-confirmdanger { border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 25%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 15%, transparent); color: var(--dsw-alias-state-error-primary); }
 .capital-watchlist-confirmdanger:hover { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 25%, transparent); }
+/* 持仓这一簇住在「更多」菜单里（勾一下才长出比例那一行）。⛔ 这些选择器必须是**裸类**：菜单是
+   portal 到 document.body 的，".capital-watchlist-card …" 那种后代选择器够不到它，挂在那儿
+   的规则会静默不生效。颜色也一律走 --dsw-alias-*：card 上那对涨跌变量同样透不进去。
+   行的几何照官方 .item 抄（min-height 34 / padding 6px 8px / gap 6 / radius md / 13px 20px）：
+   自己发明的行高会在同一张菜单里长出三种节奏。 */
+.capital-watchlist-checkrow { box-sizing: border-box; display: flex; align-items: center; gap: 6px; width: 100%; min-height: 34px; padding: 6px 8px; border-radius: var(--dsw-radius-md); font-family: inherit; font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary); text-align: left; }
+/* 行首图标照官方 .itemIcon 的几何（14x14、flex: none、menu-icon 色）：与「置顶」「移除」那两行
+   同一支位，图标大小一不一列才不抖。 */
+.capital-watchlist-checkicon { display: inline-flex; flex: none; width: 14px; height: 14px; align-items: center; justify-content: center; color: var(--dsw-alias-menu-icon); }
+.capital-watchlist-checklabel { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 比例那一行：标题在左、−/读数/+ 在同一行的右边（2026-10-09 用户点名"和标记持仓一个级别"）。 */
+.capital-watchlist-stepper { box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 34px; padding: 6px 8px; border-radius: var(--dsw-radius-md); font-size: 13px; line-height: 20px; color: var(--dsw-alias-label-primary); }
+.capital-watchlist-stepperlabel { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.capital-watchlist-stepperline { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: none; }
+/* 步进键：小方键，描边与底面照搜索框那一条口径（中性描边 0.5px，状态色才 1px）。
+   半径刻意写 8px 而不是 999px / 50%：面板有一条"正圆与胶囊必须配 corner-shape: round"的
+   计数闸门，为一颗按键多配一对没有意义。 */
+.capital-watchlist-stepperbtn { flex: none; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: 0.5px solid var(--dsw-alias-border-l1); border-radius: 8px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-secondary); font-family: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
+.capital-watchlist-stepperbtn:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover-accent); }
+.capital-watchlist-stepperbtn:disabled { opacity: .45; cursor: not-allowed; }
+/* 读数：min-width 让 0~100 / 10% / 100% 这几种写法都不把两边的键推走（数字用 tabular-nums）。
+   没填的时候显示的就是这一格的**剩余额度**（0~N），不再写"未填"（用户点名用 placeholder 提示）；
+   placeholder 降一档颜色，免得"没这个数"读起来像一个数。 */
+.capital-watchlist-stepperreadout { min-width: 46px; text-align: center; font-size: 13px; line-height: 18px; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-primary); }
+.capital-watchlist-stepperplaceholder { color: var(--dsw-alias-label-tertiary); }
+/* ⛔ 这张菜单必须**固定宽度**，不能按内容长。官方 .list 只给 min-width（收缩到内容宽），
+   而我们是 align:'end' 贴右缘开的——比例那一行一出现就把列表撑宽几十像素，左缘整块跳一下
+   （2026-10-09 实机："点击标记后整个 div 严重位移"）。同一处内容超出还会长出横向滚动条：
+   .scrollable .viewport 写了 overflow-y:auto，按 CSS 口径 overflow-x 就计算成 auto。
+   256 = 列表自身 4px padding × 2 + 最宽那一行的内容（图标行与比例行都在 205 上下），
+   中英两套语言都不截断。 */
+.capital-watchlist-rows { width: 256px; }
+/* 行内的每一颗按钮都按 border-box 算宽：官方 .item 是 width:100% + padding 6px 8px 而**没有**
+   声明 box-sizing（这套主题没有全局 border-box 重置，只有 .list / .root 自己声明了），于是它天然
+   比列表内容盒宽 16px——那 16px 就是上面那条横向滚动条的另一半。
+   选择器根在我们自己挂在 portal 列表上的类，所以够得着（后代链没有离开这张列表）。 */
+.capital-watchlist-rows button { box-sizing: border-box; }
 `
 
 function installStyles() {
@@ -664,6 +754,12 @@ const blank = () => ({
    * 第一屏就是「确定将上一轮那只票移除吗？」，顺手一按就删掉了这次根本没打算动的标的。
    */
   pendingRemove: null,
+  /**
+   * 持仓**没有**自己的 store 格（2026-10-09 由"另开一层表单 + 一格草稿"改成菜单内勾选）：
+   * 标没标、比例多少都在那一行的 `holding` 上，步进器开在哪一行就是 `rowMenu`。
+   * 这是 2.5.3 那条 blocker（座位常驻、组件不卸载 ⇒ 表单跨开合活下来）的**结构性**解法——
+   * 没有一份"只活在表单里"的状态，就没有一份能活过关面板的草稿。
+   */
   /** 整批共用的一次刷新时刻（底部那一行就报它）。 */
   refreshed_at: null,
   /** 整批级失败：红字跟在「刷新报价」下面（数据不可信那一档）。 */
@@ -708,6 +804,15 @@ class WatchlistSurface {
     this.pending = null
     /** 上一次**真正发出去**的查询词（去重用；`composing` 期间的拼音片段不算发过）。 */
     this.lastQuery = null
+    /**
+     * 在途的持仓写：`thscode → { seq, baseline }`。
+     *
+     * 为什么要有这一格：勾选之后用户可以连按 `+`，每一次都是一条 `/holding`，而**HTTP 回包的先后
+     * 顺序不由服务端的写锁决定**（锁排的是写入，不是响应到达）。没有这一格，早先那一次的回包会
+     * 晚到并把行改回旧比例——下一次 `+` 从那个旧值起步，用户看到的是"按了不动"。
+     * `baseline` 是最近一次**宿主确认过**的那一行，失败时只回滚这一行到它（⛔ 不复原整张数组）。
+     */
+    this.holdingOps = new Map()
   }
 
   get state() {
@@ -734,12 +839,17 @@ class WatchlistSurface {
     this.lastQuery = null
     // 合成状态跟着一起归零：面板关在半个拼音上（用户直接点遮罩），`composing` 留在 true 的话，
     // 下次打开时输入框里那几个字母会照常发 `input`，而搜索被一条再没人复位的状态永久闩死。
+    // `rowMenu: null` 现在也管着持仓：菜单收了，比例步进器就跟着没地方画（它住在菜单那一格里）。
     this.patch({ open: false, rowMenu: null, composing: false, pendingSearch: false })
+    // 在途的持仓写一并作废：清单是重开的，那一次回执说的已经不是眼前这一屏了。
+    this.holdingOps.clear()
   }
 
   async load() {
     try {
       const payload = await call('/list')
+      // 整张清单换掉 = 宿主说了为准：任何在途的持仓回执都不许再落回行上（见 `holdingOps`）。
+      this.holdingOps.clear()
       this.patch({ items: cleanRows(payload.items) ?? [], seeded_at: payload.seeded_at, loading: false, loadError: null })
     } catch (error) {
       this.patch({ loading: false, loadError: { code: error.code ?? 'fuyao_unavailable' } })
@@ -756,7 +866,12 @@ class WatchlistSurface {
       .then((payload) => {
         const failures = {}
         for (const item of payload.failures ?? []) failures[item.thscode] = item.code
-        const items = cleanRows(payload.items) ?? this.snapshot.items
+        const landed = cleanRows(payload.items)
+        const items = landed ?? this.snapshot.items
+        // 刷新整张换掉清单（宿主的写回带着 `holding`，见 store 那条"刷新写回不许抹掉刚标的持仓"）：
+        // 在途的持仓回执就此作废——让它去改一张已经不是眼前这一屏的表，会把刚落地或刚撤销的
+        // 标记又画回来。落不下来的那一次（回包没有 items）不动这份账，屏上还是原来那张表。
+        if (landed !== null) this.holdingOps.clear()
         this.patch({
           items,
           // 整批一条都没落地时宿主回 `null`：底部那行时间讲的是"最后一次真取到数"，
@@ -863,6 +978,16 @@ class WatchlistSurface {
     this.patch({ pendingRemove: item ?? null })
   }
 
+  /**
+   * 用宿主回包那一条覆盖这一行：标记时刻归服务端（浏览器钟不比它准），名字再走一遍
+   * `cleanRows`——显示、tooltip、aria-label 与递进输入框那句话因此还是同一个名字。
+   */
+  replaceRow(row) {
+    const [clean] = cleanRows([row])
+    if (clean === undefined || typeof clean?.thscode !== 'string') return
+    this.patch({ items: this.snapshot.items.map((entry) => (entry.thscode === clean.thscode ? clean : entry)) })
+  }
+
   async search(query) {
     this.lastQuery = query
     if (this.searchController !== null) this.searchController.abort()
@@ -957,8 +1082,80 @@ class WatchlistSurface {
       const payload = await call('/pin', { body: { thscode } })
       if (Array.isArray(payload.items)) this.patch({ items: cleanRows(payload.items) })
     } catch {
-      this.patch({ items: before })
+      // ⛔ 失败只复原**顺序**，不复原每一行的内容：整张数组复原会把这一段时间里落地的其它改动
+      // （刚标上的持仓、刚加进来的行）一起倒回点击前——那些是别的动作的成功回执，域里也已经有了。
+      // 期间被移除的行不补回，末尾接上期间新到的行。
+      const current = this.snapshot.items
+      const ordered = before.map((row) => current.find((entry) => entry.thscode === row.thscode)).filter(Boolean)
+      const known = new Set(ordered.map((row) => row.thscode))
+      this.patch({ items: [...ordered, ...current.filter((row) => !known.has(row.thscode))] })
     }
+  }
+
+  /**
+   * 持仓这一格的**唯一**写路径：乐观改那一行 → 恰好一次 `/holding` → 用宿主那一条覆盖，
+   * 失败只把那一行弹回最近一次宿主确认的值。
+   *
+   * 两道闸都是为"连点"存在的（见 `holdingOps`）：
+   *  - 回执只认最新那一次意图（`op.seq`），晚到的旧回包直接丢弃——否则用户看到的是"按了不动"；
+   *  - 回滚逐行，不整张复原——否则一次失败的 `+` 会把**别的行**刚落地的一切一起抹掉。
+   * ⛔ 这里也不碰 `rowMenu`：改比例是"在这一行里继续操作"，收起菜单就是把用户刚点的东西拿走。
+   */
+  async writeHolding(thscode, body, nextRow) {
+    const target = this.snapshot.items.find((row) => row.thscode === thscode)
+    if (target === undefined) return
+    const op = this.holdingOps.get(thscode) ?? { seq: 0, baseline: target }
+    this.holdingOps.set(thscode, op)
+    const seq = ++op.seq
+    this.patch({ items: this.snapshot.items.map((row) => (row.thscode === thscode ? nextRow(row) : row)) })
+    const stale = () => this.holdingOps.get(thscode) !== op || op.seq !== seq
+    try {
+      const payload = await call('/holding', { body })
+      if (stale()) return
+      this.replaceRow(payload.item)
+      op.baseline = payload.item ?? nextRow(target)
+      this.holdingOps.delete(thscode)
+    } catch {
+      if (stale()) return
+      this.replaceRow(op.baseline)
+      this.holdingOps.delete(thscode)
+    }
+  }
+
+  /**
+   * 标记持仓 = 恰好一次 `/holding`。`weightPct` 传 `null` 是"标了持仓、比例没填"，与 0 是两句话
+   * （域 schema 同一条口径：没有这个数 ≠ 这个数是零）——勾选那一刻发的就是这一档。
+   */
+  markHolding(thscode, weightPct) {
+    return this.writeHolding(thscode, { thscode, weight_pct: weightPct },
+      (row) => ({ ...row, holding: { weight_pct: weightPct, marked_at: Date.now() } }))
+  }
+
+  /** 取消持仓 = 只抹那一格，**关注条目本身不动**（它不是"移除"，也不该有任何位移）。 */
+  clearHolding(thscode) {
+    return this.writeHolding(thscode, { thscode, clear: true }, (row) => {
+      const next = { ...row }
+      delete next.holding
+      return next
+    })
+  }
+
+  /**
+   * 比例 ± 一档。⛔ 不吸附：域里存着 `37.5`（旧版自由文本填的）就 ±10 得 `47.5 / 27.5`——
+   * 把一个用户亲手写过的数掰成 10 的整数倍，等于替他说了一句他没说的话（与工具侧
+   * "自报值原样引用"同一条线）。"未填"没有数值起点：第一次 `+` 落 10，那一档的 `−` 是置灰的。
+   *
+   * 顶上封的是 `weightCeiling`（单只 100 与"120 减掉其余持仓"取小的）：面板把 `+` 置灰与这里
+   * 夹住用的是同一个减法，宿主 `/holding` 拒绝用的也是它（AGENTS.md §9.7）。这里夹住是必需的，
+   * 不只是"按钮已经灰了"：调用点还有一颗 `+` 之外的入口（键盘连按时屏幕上的额度是上一帧的）。
+   */
+  stepHolding(thscode, delta) {
+    const rows = this.snapshot.items
+    const current = rows.find((entry) => entry.thscode === thscode)?.holding?.weight_pct
+    if (typeof current !== 'number' && delta < 0) return
+    const next = Math.min(weightCeiling(rows, thscode), Math.max(0, (typeof current === 'number' ? current : 0) + delta))
+    if (next === current) return
+    return this.markHolding(thscode, next)
   }
 
   /**
@@ -1073,6 +1270,26 @@ function addErrorText(t, addError) {
   return t('error.list_full').replace('{max}', String(limit))
 }
 
+/**
+ * 持仓那句话：没填比例就是光秃秃两个字，填了就跟着数字。
+ * 数字是**用户自报**的占比、不是这里算出来的，所以原样给——补成 `20.00%` 会像一位从市值
+ * 除出来的数，而面板从来没有市值。
+ *
+ * 2026-10-09 起它不再是一枚徽标，而是**名称的 tooltip**（`nameTitle`）：行上改成名称标红，
+ * 而红与"红涨"同色，所以这句话必须还有一条不靠颜色的通道。
+ */
+function holdingLabel(holding, t) {
+  const weight = holding?.weight_pct
+  if (weight === null || weight === undefined) return t('holdingName')
+  return `${t('holdingName')} ${weight}%`
+}
+
+/** 名称那一格 tooltip：`名称 代码`，标过持仓的再跟着那一句自报的标记。 */
+function nameTitle(item, t) {
+  const base = `${item.name} ${item.ticker}`
+  return item.holding === null || item.holding === undefined ? base : `${base} · ${holdingLabel(item.holding, t)}`
+}
+
 function WatchlistDialog({ useDialog, surface, t, inputActions }) {
   const state = useDialog((value) => value)
   const [busy, setBusy] = useState(false)
@@ -1096,8 +1313,10 @@ function WatchlistDialog({ useDialog, surface, t, inputActions }) {
   const showDropdown = state.dropdownOpen === true
   const confirming = pendingRemove !== null
 
-  // Esc 的归属：确认层 > 下拉 > 整个弹窗（最后一个是官方 Modal 自己的 document 监听）。
+  // Esc 的归属：移除确认层 > 下拉 > 整个弹窗（最后一个是官方 Modal 自己的 document 监听）。
   // stopPropagation 让事件不再走到那一层，写法照官方 headless 对话框（directory-picker-browse）。
+  // 「更多」菜单（连带里面的比例步进）不在这一串里：官方 `Menu` 自己在 **capture 阶段**吃掉
+  // Escape 并 `preventDefault`（账本 L23 探的就是这一条），所以它收起时弹窗本体不跟着关。
   const onKeyDown = (event) => {
     if (event.key !== 'Escape') return
     if (confirming) {
@@ -1267,64 +1486,160 @@ function WatchlistDialog({ useDialog, surface, t, inputActions }) {
     ? h('p', { className: 'capital-watchlist-empty' }, t('loading'))
     : state.items.length === 0
       ? emptyState
-      : h('div', { className: showDropdown ? 'capital-watchlist-list capital-watchlist-list-open' : 'capital-watchlist-list' }, state.items.map((item, index) => h('div', {
-        key: item.thscode,
-        className: 'capital-watchlist-grid capital-watchlist-row',
-        'data-thscode': item.thscode,
-      },
-        h('span', { className: 'capital-watchlist-namewrap' },
-          h('span', { className: 'capital-watchlist-name', title: `${item.name} ${item.ticker}` }, item.name),
-          // 代码与市场徽标同处第二行（2026-10-07 起这一行只有这两样：币种不进面板，见上面那一族注释）。
-          h('span', { className: 'capital-watchlist-codeline' },
-            h('span', { className: 'capital-watchlist-code' }, item.ticker),
-            h(TypeTag, { assetType: item.asset_type, t }))),
-        h(QuoteCell, { quote: item.quote, failureCode: state.failures[item.thscode], refreshing: state.refreshing, t }),
-        // 三个动作同住「操作」那一列（2026-10-01 用户点名）：图标键在前、菜单在最后，整簇贴右缘。
-        h('span', { className: 'capital-watchlist-rowactions' },
-          h('button', {
-            type: 'button',
-            className: 'capital-watchlist-predict',
-            disabled: busy,
-            title: t('predictTip'),
-            'aria-label': `${t('predict')} ${item.name}`,
-            onClick: () => appendPrompt(item, 'predict'),
-          }, h(IconGoalOutlineRegular, { size: 14 })),
-          h('button', {
-            type: 'button',
-            className: 'capital-watchlist-review',
-            disabled: busy,
-            title: t('reviewTip'),
-            'aria-label': `${t('review')} ${item.name}`,
-            onClick: () => appendPrompt(item, 'review'),
-          }, h(IconListPenOutlineRegular, { size: 14 })),
-          // 行内「更多」收进官方 Menu（portal）：就地在滚动容器里画会被裁掉，见文件头。
-          h(Menu, {
-            open: state.rowMenu === item.thscode,
-            anchor: h('button', {
+      : h('div', { className: showDropdown ? 'capital-watchlist-list capital-watchlist-list-open' : 'capital-watchlist-list' }, state.items.map((item, index) => {
+        const held = item.holding !== null && item.holding !== undefined
+        const weight = item.holding?.weight_pct
+        // 勾选出不出现在这一行的菜单里，归 `isHoldable` 那**一份**判定管（与宿主 `/holding` 的闸门同源）。
+        // `|| held` 是给改判前的遗留记录（或手改出来的 JSON）留的退路：只按类型画，那一格就再也
+        // 取消不掉，而主 Agent 会一直把一句用户早就不认的话当成他的仓位。
+        const markable = isHoldable(item) || held
+        // 这一格最多还能填到多少：单只上限与"120% 减掉其余持仓"取小的那一个（与宿主同一份判据）。
+        const ceiling = weightCeiling(state.items, item.thscode)
+        // 「未填」与 0 是两句话：没填过的那一档 `−` 置灰（按它得不到"未填"，只会得到一个假的 0%）。
+        const atFloor = !held || weight === null || weight === undefined || weight <= 0
+        // `+` 置灰 = 再上一档就出额度了：额度可能是单只的 100，也可能只剩 20（其余持仓占掉了 100）。
+        const atCeil = (typeof weight === 'number' ? weight : 0) + HOLDING_STEP > ceiling
+        return h('div', {
+          key: item.thscode,
+          className: 'capital-watchlist-grid capital-watchlist-row',
+          'data-thscode': item.thscode,
+        },
+          h('span', { className: 'capital-watchlist-namewrap' },
+            // 标过持仓的行：名称标红（2026-10-09 用户点名，替代原先那枚徽标）。 颜色不是唯一
+            // 通道——它与"红涨"同色，所以 `title` 里同时写着"持仓 20%"，悬停与读屏都拿得到同一句。
+            h('span', {
+              className: held ? 'capital-watchlist-name capital-watchlist-name-held' : 'capital-watchlist-name',
+              title: nameTitle(item, t),
+            }, item.name),
+            // 第二行只有代码与市场徽标两样：币种不进面板（2026-10-07），持仓也不再在这儿占一格
+            // （那一族徽标按市场配色，且有闸门按它的节点数列档位——多一枚进去就是替它改口径）。
+            h('span', { className: 'capital-watchlist-codeline' },
+              h('span', { className: 'capital-watchlist-code' }, item.ticker),
+              h(TypeTag, { assetType: item.asset_type, t }))),
+          h(QuoteCell, { quote: item.quote, failureCode: state.failures[item.thscode], refreshing: state.refreshing, t }),
+          // 三个动作同住「操作」那一列（2026-10-01 用户点名）：图标键在前、菜单在最后，整簇贴右缘。
+          h('span', { className: 'capital-watchlist-rowactions' },
+            h('button', {
               type: 'button',
-              className: 'capital-watchlist-more',
+              className: 'capital-watchlist-predict',
               disabled: busy,
-              title: t('more'),
-              'aria-label': `${t('more')} ${item.name}`,
-              'aria-haspopup': 'menu',
-              'aria-expanded': state.rowMenu === item.thscode,
-              onClick: () => surface.toggleRowMenu(item.thscode),
-            }, h(IconEllipsisOutlineRegular, { size: 14 })),
-            items: [
-              // 已经在第一行就没有可置顶的位移：这一条置灰，菜单不长出一堆 "取消置顶" 的反向动作。
-              { id: 'pin', label: t('pin'), icon: h(IconPinOutlineRegular, { size: 14 }), disabled: index === 0 },
-              { id: 'remove', label: t('remove'), icon: h(IconTrashOutlineRegular, { size: 14 }), danger: true },
-            ],
-            onSelect: (id) => {
-              surface.closeRowMenu()
-              if (id === 'pin') surface.pin(item.thscode)
-              else surface.setPendingRemove(item)
-            },
-            onClose: () => surface.closeRowMenu(),
-            align: 'end',
-            portal: true,
-            className: 'capital-watchlist-actions',
-          })))))
+              title: t('predictTip'),
+              'aria-label': `${t('predict')} ${item.name}`,
+              onClick: () => appendPrompt(item, 'predict'),
+            }, h(IconGoalOutlineRegular, { size: 14 })),
+            h('button', {
+              type: 'button',
+              className: 'capital-watchlist-review',
+              disabled: busy,
+              title: t('reviewTip'),
+              'aria-label': `${t('review')} ${item.name}`,
+              onClick: () => appendPrompt(item, 'review'),
+            }, h(IconListPenOutlineRegular, { size: 14 })),
+            // 行内「更多」收进官方 Menu（portal）：就地在滚动容器里画会被裁掉，见文件头。
+            // 持仓这件事**全部**发生在这一格里（2026-10-09 由"另开一层表单"改过来）：勾一下就是
+            // 持仓、再勾一下取消，勾上之后紧跟一行 `− 值 +` 按 10 个百分点调档，没有第二层弹窗。
+            // ⛔ 摆法只有一种：官方把 `children` 排在**所有** `items` 之后。置顶是一次性位移、
+            // 做完就收起，所以它住 items；勾选行、比例行与"带发丝线的移除"彼此要贴着并按这个顺序长，
+            // 就都得住 children（items 里放不进带键的行，也不能在它中间插一条分隔线）。
+            h(Menu, {
+              open: state.rowMenu === item.thscode,
+              anchor: h('button', {
+                type: 'button',
+                className: 'capital-watchlist-more',
+                disabled: busy,
+                title: t('more'),
+                'aria-label': `${t('more')} ${item.name}`,
+                'aria-haspopup': 'menu',
+                'aria-expanded': state.rowMenu === item.thscode,
+                onClick: () => surface.toggleRowMenu(item.thscode),
+              }, h(IconEllipsisOutlineRegular, { size: 14 })),
+              items: [
+                // 已经在第一行就没有可置顶的位移：这一条置灰，菜单不长出一堆 "取消置顶" 的反向动作。
+                { id: 'pin', label: t('pin'), icon: h(IconPinOutlineRegular, { size: 14 }), disabled: index === 0 },
+              ],
+              children: [
+                // 持仓那一行：图标 + 名词 + 一颗官方 `Switch`（2026-10-09 第四轮，用户点名）。
+                // ⛔ 整行**不是**按钮，标记与取消都只能碰那颗开关。上一版是"未标时整行可点、已标时
+                // 只剩圆圈可点"——两态的 DOM 形状不同，实机看就是"点一下标记，整块浮层跳了一下"。
+                // 这一行用 role="group"（`menu` 允许的合法子角色）而不是裸容器：那颗 `role="switch"`
+                // 本身不是菜单项，挂在 group 里才不冒充 menuitem。开关的视觉状态读 aria-checked
+                // （官方 Switch 自己画），我们不再画任何勾选态图标。
+                ...(markable ? [h('div', {
+                  key: 'holding-check',
+                  role: 'group',
+                  'aria-label': t('holdingName'),
+                  className: 'capital-watchlist-checkrow',
+                },
+                  h('span', { className: 'capital-watchlist-checkicon', 'aria-hidden': 'true' }, h(IconDatabaseOutlineRegular, { size: 14 })),
+                  h('span', { className: 'capital-watchlist-checklabel' }, t('holdingName')),
+                  h(Switch, {
+                    checked: held,
+                    disabled: busy,
+                    label: t('holdingName'),
+                    onChange: (next) => (next ? surface.markHolding(item.thscode, null) : surface.clearHolding(item.thscode)),
+                  }))] : []),
+                // 比例那一行只在"已标且这个类型能持有"时出现：遗留的指数持仓有取消出口，但没有调档。
+                ...(held && isHoldable(item) ? [h('div', {
+                  key: 'holding-step',
+                  className: 'capital-watchlist-stepper',
+                  role: 'group',
+                  'aria-label': t('holdingStepper'),
+                },
+                  h('span', { className: 'capital-watchlist-stepperlabel' }, t('holdingWeightLabel')),
+                  h('span', { className: 'capital-watchlist-stepperline' },
+                    h('button', {
+                      type: 'button',
+                      className: 'capital-watchlist-stepperbtn',
+                      'aria-label': t('holdingStepDown'),
+                      disabled: atFloor,
+                      onClick: () => surface.stepHolding(item.thscode, -HOLDING_STEP),
+                    }, '−'),
+                    // role=status：读数改档时这是唯一会被播报出来的地方。没填就显示**剩余额度**
+                    // （`0~N` 是数字不是文案，所以不住在字典里），不再写"未填"那一档。
+                    h('span', {
+                      className: typeof weight === 'number' ? 'capital-watchlist-stepperreadout' : 'capital-watchlist-stepperreadout capital-watchlist-stepperplaceholder',
+                      role: 'status',
+                    }, typeof weight === 'number' ? `${weight}%` : `0~${ceiling}`),
+                    h('button', {
+                      type: 'button',
+                      className: 'capital-watchlist-stepperbtn',
+                      'aria-label': t('holdingStepUp'),
+                      // 置灰的那一颗自己说为什么点不动：这一格的上限是"单只 100"还是"只剩 20"，
+                      // 用户对着一个灰键无从猜起。挂在键上而不是读数上——读数那里是播报值的地方。
+                      title: `0~${ceiling}`,
+                      disabled: atCeil,
+                      onClick: () => surface.stepHolding(item.thscode, HOLDING_STEP),
+                    }, '+')))] : []),
+                // 移除排在最后，且带一条官方发丝线：它离持仓那一簇太近就会有点错的机会，
+                // 而这一颗是不可撤销的（清单里少一行）。
+                // ⛔ 它要点掉菜单：确认层住在卡片里（z 50），菜单是 portal 出去的（z 1100），
+                // 不收起就会压在自家确认框上面。
+                h(MenuItemButton, {
+                  key: 'remove',
+                  danger: true,
+                  separatorBefore: true,
+                  icon: h(IconTrashOutlineRegular, { size: 14 }),
+                  onSelect: () => {
+                    surface.closeRowMenu()
+                    surface.setPendingRemove(item)
+                  },
+                }, t('remove')),
+              ],
+              onSelect: (id) => {
+                // 这一路现在**只有置顶**会进来（勾选与比例两行各自带 onClick，住在 children 里）。
+                // 置顶做完就该回到清单；其余动作都不许收这张菜单——收起等于把用户刚点开的东西
+                // 从他手上拿走，而"改比例"紧接着就要再按一次 `+`。
+                if (id !== 'pin') return
+                surface.closeRowMenu()
+                surface.pin(item.thscode)
+              },
+              onClose: () => surface.closeRowMenu(),
+              align: 'end',
+              portal: true,
+              listClassName: 'capital-watchlist-rows',
+              className: 'capital-watchlist-actions',
+            })))
+      }))
   const confirm = h('div', {
     className: confirming ? 'capital-watchlist-confirm capital-watchlist-confirm-open' : 'capital-watchlist-confirm',
     'aria-hidden': confirming ? undefined : 'true',
@@ -1347,6 +1662,8 @@ function WatchlistDialog({ useDialog, surface, t, inputActions }) {
           },
         }, t('confirmOk')))))
 
+  // 面板里**只有一层**常驻遮罩（上面那颗移除确认）。持仓不再有自己那一层：
+  // 它整个住在「更多」菜单里，勾一下标、再勾一下取消，比例就贴在勾选行下面调。
   return h(Modal, {
     open: true,
     onClose: () => surface.close(),

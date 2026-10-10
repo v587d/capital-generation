@@ -123,15 +123,16 @@ Gotcha 默认只存用户本地，不自动上传、不自动同步、不自动�
 
 ## 6. Owner 搜寻和引入外部项目
 
-Owner 按月进行能力缺口扫描，按季度评估 Framework Blueprint。候选项目应记录：
+Owner 按能力缺口持续寻找项目，按当前资源进行轻量复查和阶段性评估。候选项目应记录：
 
-- upstream URL、commit / release、作者和维护状态。
+- upstream URL、owner/repository、commit / release、作者和维护状态。
+- 稳定 catalog key、能力标签、适用市场/任务范围和用户可见风险提示。
 - 许可证、依赖和再分发条件。
 - 实际工具 / 脚本入口、网络行为、文件行为和凭据行为。
 - 能填补的 Framework slot、与现有 skill 的关系和适配成本。
-- benchmark、回归、安全检查和预期收益。
+- benchmark、回归、安全检查和预期收益（尚未完成的项目要明确标为冷启动实验）。
 
-外部项目必须通过 provenance、许可证、提示注入、敏感信息、路径和权限审查。引入的是经过适配的能力，不是直接复制外部项目的 Agent 架构、系统提示词或默认权限。
+外部项目必须通过 provenance、许可证、提示注入、敏感信息、路径和权限审查。引入的是可追溯、默认关闭的实验能力，不是直接复制上游项目的 Agent 架构、系统提示词或默认权限。Owner 欢迎通过 PR 提交新的固定快照、catalog 标签和复查记录；维护频率、评分和 benchmark 在冷启动阶段主要用于风险提示与排序，不单独阻止通过硬门槛的用户自选实验。候选硬门槛、阶段状态和未来收紧路径见[社区 Skill 引入与选用手册](docs/design/external-skill-intake.md)；本轮 GitHub 评估结果见[社区金融 Skill 候选扫描（2026-10）](docs/reference/external-skill-scan-2026-10.md)。
 
 ## 7. Issue 与 PR 流程
 

@@ -12,10 +12,12 @@ import { createWindSources } from './sources/wind-mcp.js'
 import { registerDataCollectorTools, type DataCollectorDiagnostics } from './data-collector/tools.js'
 import { registerDatasetTools } from './data-collector/dataset-tools.js'
 import { registerTimeTool } from './time/tools.js'
+import { registerWatchlistTool } from './watchlist/tools.js'
 import { registerChartTool } from './chart/tool.js'
 import { createChartEventPublisher, type ChartEventContext } from './chart/events.js'
-import { registerRootToolPolicy, rootPolicyProbes } from './agents/root-tool-policy.js'
+import { registerRootToolPolicy, rootPolicyProbes, type PolicyContext } from './agents/root-tool-policy.js'
 import { registerBashGuard } from './agents/bash-guard.js'
+import { registerRootSelectedSkills, type SelectedSkillSelection } from './agents/selected-skills-provider.js'
 import { ChartSourceTokenStore, registerChartSourceTool } from './chart/source-token.js'
 import { ChartArtifactRegistry } from './chart/artifact-ref.js'
 import { WebRetriever } from './web-retriever/retriever.js'
@@ -188,17 +190,38 @@ const RetrieverSchema = z.object({
 export interface Config {
   /** Optional additive persona override; core safety guidance is preserved. */
   customPersona?: string
+  /** Community experiments explicitly selected for the Capital root Agent only. */
+  selectedSkills?: SelectedSkillSelection
   /** Fuyao credentials 引用名；空值回退到 FUYAO_API_KEY。 */
   fuyaoCredentialRef?: string
   /** web_retriever 配置（可选；缺省使用 AnySearch 默认地址与凭据名）。 */
   retriever?: RetrieverConfig
 }
 
+const SelectedSkillsSchema = z.object({
+  buffettFramework: z.boolean().default(false).description('Enable the Finterm Buffett framework experiment for the Capital root Agent'),
+  financialHealth: z.boolean().default(false).description('Enable the China-stock financial health experiment for the Capital root Agent'),
+  riskWarningCatalysts: z.boolean().default(false).description('Enable the China-stock risk and catalyst monitoring experiment for the Capital root Agent'),
+  valuationInvestmentStrategy: z.boolean().default(false).description('Enable the China-stock valuation experiment for the Capital root Agent'),
+  strategyBusinessTransition: z.boolean().default(false).description('Enable the China-stock business transition experiment for the Capital root Agent'),
+  industryCompetitionMoat: z.boolean().default(false).description('Enable the China-stock industry and competition experiment for the Capital root Agent'),
+  businessDecompositionOrderQuality: z.boolean().default(false).description('Enable the China-stock order quality experiment for the Capital root Agent'),
+}).default({
+  buffettFramework: false,
+  financialHealth: false,
+  riskWarningCatalysts: false,
+  valuationInvestmentStrategy: false,
+  strategyBusinessTransition: false,
+  industryCompetitionMoat: false,
+  businessDecompositionOrderQuality: false,
+})
+
 /** DSH 0.1.2-rc.1 configuration schema. */
 export const Config = z.object({
   customPersona: z.string()
     .default('')
     .description('Capital 模式 的附加人设文本（独立 section，非 deployment:persona）；核心安全约束始终保留'),
+  selectedSkills: SelectedSkillsSchema.description('Community selected-skill experiments; default off and visible only to the Capital root Agent'),
   fuyaoCredentialRef: z.string()
     .default('FUYAO_API_KEY')
     .description('Fuyao credentials 引用名，空 = FUYAO_API_KEY'),
@@ -247,15 +270,25 @@ export function apply(ctx: Context, config: Config) {
   // `.volatile()` 声明，`describe()` 按条目 id 返回解析后的值。所以我们按随包的
   // `capital-config` **条目 id** 找那一行，而不是按自造的命名空间。
   const settings = ctx.get('settings') as { describe?: () => ReadonlyArray<{ ns: string; value: unknown }> } | undefined
-  let effectiveConfig = config
-  try {
-    const resolved = settings?.describe?.().find((entry) => entry.ns === CAPITAL_CONFIG_ENTRY_ID)?.value
-    // 这里再用本插件的 Config 过一遍：既补默认值，也把 schema 漂移变成可查的错误，
-    // 而不是把 capital-config schema 里的未知/缺失字段静默带进运行期配置。
-    if (resolved && typeof resolved === 'object') effectiveConfig = Config(resolved as Config)
-  } catch {
-    // 条目未注册或解析失败时沿用 preset 配置。
+  const readEffectiveConfig = (): Config => {
+    let resolvedConfig = config
+    try {
+      const resolved = settings?.describe?.().find((entry) => entry.ns === CAPITAL_CONFIG_ENTRY_ID)?.value
+      // 这里再用本插件的 Config 过一遍：既补默认值，也把 schema 漂移变成可查的错误，
+      // 而不是把 capital-config schema 里的未知/缺失字段静默带进运行期配置。
+      if (resolved && typeof resolved === 'object') resolvedConfig = Config(resolved as Config)
+    } catch {
+      // 条目未注册或解析失败时沿用 preset 配置。
+    }
+    return resolvedConfig
   }
+  const effectiveConfig = readEffectiveConfig()
+  // selectedSkills 是 live 的 settings 偏好：按 root Agent 创建时重读；无 settings
+  // 服务时沿用 preset 配置，避免为静态关闭配置额外挂一个永远空转的监听器。
+  const selectedSkills = typeof settings?.describe === 'function'
+    ? () => readEffectiveConfig().selectedSkills ?? {}
+    : effectiveConfig.selectedSkills ?? {}
+  registerRootSelectedSkills(ctx as unknown as PolicyContext, selectedSkills)
 
   // ── data_collector 域：宿主侧 Dataset 落盘 + 取数执行器 ─────────────────────
   // 落盘通过 DSH 官方 fs/sandbox 服务完成，根目录恒为调用方 session 的
@@ -298,6 +331,10 @@ export function apply(ctx: Context, config: Config) {
   // store 只用于 resolve_data_time_range 的 Dataset 形态（按该 Dataset 时间列的偏移
   // 解析窗口边界）——data_junior 因此不必自己把日期换算成毫秒。
   registerTimeTool(ctx, store)
+  // 用户的自选股（含他自己在面板里标的持仓与占比）：只读，数据归 host 平面的 capitalWatchlist 服务。
+  // 主 Agent 是它的消费者，所以不进 ROOT_AGENT_DENIED_TOOLS；通用 subagent 行必须显式 deny
+  // （这一格里有用户的仓位），四个专用 child 走 allow 白名单、天然拿不到。
+  registerWatchlistTool(ctx)
   // 呈现层图表工具：只有 data_junior 创建的 visualization_specialist 能调用它
   // （主 Agent 的入口由 registerRootToolPolicy 在它自己的 agent scope 上 deny 掉）。
   // 只回小回执、不回原始行；序列落在 workspace 产物里，

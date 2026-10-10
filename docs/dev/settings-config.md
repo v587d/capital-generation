@@ -32,26 +32,21 @@
   `view: 'page'`。本卡片本来就只消费自己 `inject()` 出来的 hooks 与动作，不碰页面注入，所以
   搬迁不需要补任何服务面。
 
-## 5.2 存储边界：密钥、回退开关、两处 schema 一致
+## 5.2 存储边界：密钥、选用开关、两处 schema 一致
 
 - **密钥进 credentials 域，不进 settings 文档**：Key 经 `ctx.remote.credentials.set` 写入，
   settings 里只存 **ref 名**（`fuyaoCredentialRef` / `retriever.*.credentialRef`）。卡片把四个
   密钥声明成 `SettingsFormModel` 的 write-only secrets：值从不随响应出网，控件只报"已配置/未配置"。
-- **唯一写进配置的偏好**是回退开关 `retriever.localFetch.enabled`：点即保存，走
-  `scope.mutate([{ op: 'set', path: ['retriever', 'localFetch', 'enabled'], value }])`
-  （`set(field)` 只支持顶层字段）。开关严格由条目快照渲染 ⇒ 写被拒（revision 冲突等）时**不翻转**，
-  并自己补一句 `role="status"` 提示；它不进草稿流，所以不影响密钥的保存/放弃。0.1.7 的
-  `applies` 恒为 `live`，"生效"仍是**新 Capital 模式会话**（主插件在 `apply()` 时读一次）。
+- **即时写入的偏好**包括回退开关 `retriever.localFetch.enabled` 和 catalog 中每个选用 Skill 的开关（例如 `selectedSkills.buffettFramework`、`selectedSkills.financialHealth`）：都走 `scope.mutate([{ op: 'set', path, value }])`（`set(field)` 只支持顶层字段），并由条目快照渲染；写被拒时不翻转并显示提示。设置页按 `selected-skills/catalog.js` 的能力标签筛选，并展示技能名称、可复制的 skill id、简述和上游仓库链接；不展示状态、维护者、提交/复查日期或风险提示。开启后生效于之后新建的 Capital root Agent；selected skill provider 只注册到 Agent 自己的 scope，子 Agent 不继承。
 - **主插件读回**：`src/index.ts` 经 `settings.describe()` 按条目 id 取解析值，再用自己的
   `Config(...)` 过一遍——**两处 schema（`src/index.ts` 与 `capital-config/index.js`）默认值必须
   逐字一致**，否则字段在边界被静默改写。回归：`test/capital-config.test.mjs`（deepEqual +
   按上游 `plainConfig` 摊平取值单元）与 `test/apply-integration.test.mjs`（条目值真的驱动装配、
   条目缺席/抛错时回落 preset 配置）。
 - **文案与排布口径**（改动要有对应用户诉求，别顺手加回）：四个 Key **一律不写"必填 / 选填"**——本项目
-  不依赖任何单一数据源；每条提示都点名"新 Capital **模式**会话生效"；本机直连与 PaddleOCR 的说明
+  不依赖任何单一数据源；每条 Key 提示都点名"新 Capital **模式**会话生效"；本机直连与 PaddleOCR 的说明
   各不超过两句；文档链接只写"官方文档"＋右上角斜上箭头，落在标签右边同一行。回退开关排在四个密钥
-  **之后**（它不是密钥，夹在中间会被读成第五个 Key），且与官方 `.field` 同一套间距（`padding: 12px 0`
-  ＋ 顶部 0.5px 分隔线）。回归 `test/capital-config.test.mjs` 的文案闸门与渲染顺序断言。
+  **之后**，随后是默认关闭的精选 Skills catalog、能力标签筛选与简述；标题使用与卡片主标题一致的字号和行高；回归 `test/capital-config.test.mjs` 的文案、筛选和渲染顺序断言。
 
 ## 5.3 改完之后
 

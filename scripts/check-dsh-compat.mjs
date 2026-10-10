@@ -617,8 +617,8 @@ const probes = [
   },
   {
     id: 'L23',
-    title: '行内「更多」菜单用官方 Menu primitive：props 面（open / anchor / items / onSelect / onClose / align / side / portal）、条目字段（id / label / icon / danger / disabled）、portal 列表压在模态之上、Escape 在 capture 阶段被菜单吃掉',
-    why: '自选股每行的「置顶 / 移除」菜单就是它。三件事都不会抛错、只会用起来不对：① 清单区是 overflow:auto 的滚动容器，非 portal 的就地浮层会被裁掉（最后几行点开什么都看不见）；② 官方 Modal 的 Escape 是 document 上的层栈监听，菜单若不在 capture 阶段 preventDefault，按 Esc 会把整个面板关掉；③ portal 列表的 z-index 掉到模态遮罩之下时，菜单画在遮罩里——看得见影子、点不着。',
+    title: '行内「更多」菜单用官方 Menu primitive：props 面（open / anchor / items / children / selectedIds / onSelect / onClose / align / side / portal / listClassName）、条目字段（id / label / icon / danger / disabled）、组件行 MenuItemButton（danger / separatorBefore）、portal 列表压在模态之上、Escape 在 capture 阶段被菜单吃掉',
+    why: '自选股每行的「置顶 / 标记持仓 / 移除」菜单就是它。这些事都不会抛错、只会用起来不对：① 清单区是 overflow:auto 的滚动容器，非 portal 的就地浮层会被裁掉（最后几行点开什么都看不见）；② 官方 Modal 的 Escape 是 document 上的层栈监听，菜单若不在 capture 阶段 preventDefault，按 Esc 会把整个面板关掉；③ portal 列表的 z-index 掉到模态遮罩之下时，菜单画在遮罩里——看得见影子、点不着；④ 持仓的比例步进行靠的是**组件行排在数据行之后**这一条（官方把 `children` 接在 `items.map(...)` 后面），换成"children 在前"或"不渲染 children"，步进器就会掉到「移除」下面，或者干脆没了座位；⑤ 勾选态靠 `selectedIds` + 尾部那道勾，破坏行靠 `MenuItemButton` 的 `separatorBefore` 发丝线。',
     run() {
       const file = join(PKG('dsh-client-ui-primitives'), 'lib/index.js')
       const text = readIfPresent(file)
@@ -630,11 +630,19 @@ const probes = [
       const modalZ = Number(/\n\.root \{[^}]*z-index:\s*(\d+)/.exec(modalCss)?.[1])
       const checks = [
         ['Menu 仍带 open / anchor / items / onSelect / onClose / align / side / portal 这组 props', /function Menu\(\{ open, anchor, items = \[\],[\s\S]{0,400}?align = "start",[\s\S]{0,200}?portal = false/, text],
-        ['数据行仍是 role="menuitem" 的 button（id / label / icon / danger / disabled 由 items 驱动）', /entry\.danger === true && css\$\d+\.danger/, text],
+        ['数据行仍是 role="menuitem" 的 button（id / label / icon / danger / disabled 由 items 驱动）', /entry\.danger === true && css\$\w+\.danger/, text],
         ['portal 模式仍把列表挂到 document.body（否则被清单的 overflow 裁掉）', /portal \? list !== false && createPortal\(list, document\.body\)/, text],
         ['Escape 仍由菜单在 capture 阶段处理（Modal 的层栈检查 event.defaultPrevented）', /document\.addEventListener\("keydown", onEscape, true\)/, text],
         ['外点收起仍是 pointerdown（点别的行/弹窗内容即关，不用我们补监听）', /document\.addEventListener\("pointerdown", onPointerDown\)/, text],
-        ['条目里的 disabled 仍会禁用整行（第一行的「置顶」靠它置灰）', /disabled: entry\.disabled/, text],
+        ['条目里的 disabled 仍会禁用整行（第一行的「置顶」与步进到界的 −/+ 靠它置灰）', /disabled: entry\.disabled/, text],
+        // ── 2026-10-09：持仓改到菜单里之后新依赖的四条 ──────────────────────────────
+        ['组件行仍排在数据行**之后**（步进行贴着「标记持仓」、发丝线在「移除」上，靠的就是这一条）', /\[\s*items\.map\(renderEntry\),\s*children\s*\]/, text],
+        ['selectedIds 仍能点亮多行，选中行仍带尾部那道勾（selection 默认 check）', /const selected = entry\.id === selectedId \|\| selectedIds\?\.includes\(entry\.id\) === true/, text],
+        ['勾选态仍是渲染 IconCheckOutlineRegular（改名或换成 fill 就是"标没标"看不出来）', /selected && selection === "check" && jsx\(IconCheckOutlineRegular/, text],
+        ['MenuItemButton 仍导出、仍吃 separatorBefore / danger / onSelect（「移除」那一颗就是它）', /function MenuItemButton\(\{[\s\S]{0,220}?separatorBefore = false[\s\S]{0,80}?\}\)/, text],
+        ['separatorBefore 仍画一条 role="separator" 的发丝线（掉了「移除」就又贴回持仓那一簇）', /role: "separator"/, text],
+        ['方向键走位仍只跳过 disabled（步进键置灰后不该把焦点踢出列表）', /list\.querySelectorAll\("button:not\(:disabled\)"\)/, text],
+        ['listClassName 仍被接受（菜单是 portal 出去的，卡片作用域的选择器够不到它）', /function Menu\(\{[\s\S]{0,900}?listClassName \}\)/, text],
       ]
       const missing = checks.filter(([, pattern, source]) => !pattern.test(source)).map(([label]) => label)
       if (!Number.isFinite(menuZ) || !Number.isFinite(modalZ)) missing.push('取不到 .portal / .root 的 z-index')
@@ -760,6 +768,37 @@ const probes = [
       return missing.length === 0
         ? { status: PASS, detail: 'badges 座位的契约、包页渲染点与 list 注册的 id 要求都仍在' }
         : { status: FAIL, detail: `标题右侧那格变了：${missing.join(' / ')}（见账本 L26；capital-config 的两枚外链依赖它）` }
+    },
+  },
+  {
+    id: 'L27',
+    title: '官方 Switch primitive：props 面（checked / onChange / label / disabled / title / className）、它是 button[role="switch"] 且**视觉状态读 aria-checked**、onChange 收到的是下一个状态',
+    why: '自选股每行那颗「持仓」开关就是它（住在 capital-watchlist 的 Menu children 里，见 L23）。四种漂移都不报错：'
+      + '① 改成非受控、或 onChange 改收事件对象 ⇒ 我们那句 `next ? markHolding : clearHolding` 点错方向，'
+      + '开关自己动了而域里什么都没写；② 视觉不再跟着 aria-checked 走（改用平行 class 或内部 state）⇒ 读屏与屏上'
+      + '各说一套，而这一行我们**不画任何勾选态图标**，状态只有它一处能说；③ 换成非 button 元素或 role 改名 ⇒ '
+      + '菜单那条 `querySelectorAll("button:not(:disabled)")` 的键盘走位不再包含它，键盘上 Tab 出去就回不来；'
+      + '④ 导出名漂出 primitives ⇒ 组件拿到 undefined，那一整行不渲染。',
+    run() {
+      const file = join(PKG('dsh-client-ui-primitives'), 'lib/index.js')
+      const text = readIfPresent(file)
+      if (text === undefined) return { status: FAIL, detail: `读不到 ${file}` }
+      const cssFile = join(PKG('dsh-client-ui-primitives'), 'lib/Switch.module.css')
+      const css = readIfPresent(cssFile)
+      if (css === undefined) return { status: FAIL, detail: `读不到 ${cssFile}` }
+      const checks = [
+        ['Switch 仍从包根导出（我们 require 的就是包根）', /export \{[^}]*\bSwitch\b[^}]*\}/, file],
+        ['props 面仍是 checked / onChange / label / disabled / title / className 这六个', /function Switch\(\{ checked, onChange, label, disabled = false, title, className \}\)/, file],
+        ['它仍是 button[role="switch"]，可达名走 aria-label（菜单的键盘走位靠 button 这一条）', /jsx\("button", \{\s*type: "button",\s*role: "switch",\s*"aria-checked": checked,\s*"aria-label": label,\s*title,\s*disabled,/, file],
+        ['onChange 收到的仍是**下一个**状态（不是事件、不是当前值）', /onClick: \(\) => \{\s*onChange\(!checked\);/, file],
+        ['开与关的配色仍读 aria-checked（不是平行 class、不是内部 state）', /\.switch\[aria-checked='true'\] \{\s*background: var\(--dsw-alias-brand-primary\)/, cssFile],
+        ['滑块位移同样读 aria-checked：视觉状态与读屏状态同一个来源', /\.switch\[aria-checked='true'\] \.thumb \{\s*transform: translateX\(16px\)/, cssFile],
+        ['焦点环由它自己声明（我们不替它补，也不该再挂一条同名规则）', /\.switch:focus-visible \{\s*outline: var\(--dsw-focus-ring-width\)/, cssFile],
+      ]
+      const missing = checks.filter(([, pattern, source]) => !pattern.test(readIfPresent(source) ?? '')).map(([label]) => label)
+      return missing.length === 0
+        ? { status: PASS, detail: 'Switch 的 props 面 / role+aria-checked 驱动视觉 / onChange(next) / 自带焦点环都仍在（36×20 那颗胶囊）' }
+        : { status: FAIL, detail: `官方 Switch 契约变了：${missing.join(' / ')}（见账本 L27；capital-watchlist 的「持仓」开关依赖它）` }
     },
   },
 ]

@@ -8,6 +8,7 @@ import { load as yamlLoad } from 'js-yaml'
 import { apply as hostApply, Config as CapitalConfig, SETTINGS_ENTRY_ID } from '../capital-config/index.js'
 import { CAPITAL_CONFIG_ENTRY_ID, Config as MainConfig, LOCAL_FETCH_DEFAULTS, resolveLocalFetchConfig } from '../lib/index.js'
 import { LOCAL_FETCH_CLIENT_VERSION } from '../lib/web-retriever/local-fetch.js'
+import { SELECTED_SKILL_CATALOG } from '../selected-skills/catalog.js'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const CLIENT = join(ROOT, 'capital-config', 'client.js')
@@ -75,6 +76,19 @@ test('capital-config Host：可编辑面全靠 Config 的 .volatile() 字段，�
     assert.ok(flags.includes(path), `${path} 必须 .volatile()，否则卡片改不动它（条目甚至不进 describe 镜像）`)
   }
 
+  const selectedSkillPaths = [
+    'buffettFramework',
+    'financialHealth',
+    'riskWarningCatalysts',
+    'valuationInvestmentStrategy',
+    'strategyBusinessTransition',
+    'industryCompetitionMoat',
+    'businessDecompositionOrderQuality',
+  ]
+  for (const key of selectedSkillPaths) {
+    assert.ok(flags.includes(`selectedSkills.${key}`), `selectedSkills.${key} 必须 .volatile()`)
+  }
+
   const hostSource = codeOnly(readFileSync(join(ROOT, 'capital-config', 'index.js'), 'utf8'))
   assert.doesNotMatch(hostSource, /settings\.register|settingsScope|SETTINGS_NAMESPACE/,
     '0.1.7 已删除 settings.register / settingsScope；代码里再出现就是把卡片改回了退休的旧面')
@@ -125,12 +139,17 @@ function fakeModel(scope) {
 
 function loadClient({ scope, primitives = {} } = {}) {
   let entry
-  const sandbox = { window: { __ModuleLoader__: { load(value) { entry = value } } } }
+  const clipboardWrites = []
+  const sandbox = {
+    window: { __ModuleLoader__: { load(value) { entry = value } } },
+    navigator: { clipboard: { writeText: async (value) => { clipboardWrites.push(value) } } },
+  }
   runInNewContext(readFileSync(CLIENT, 'utf8'), sandbox)
   assert.ok(entry)
   const model = fakeModel(scope)
   return {
     model,
+    clipboardWrites,
     mod: entry.factory((name) => {
       if (name === 'react') return {
         // 测试里把函数组件就地展开成它自己返回的节点：渲染顺序与字段 id 要从**渲染树**上读，
@@ -148,7 +167,10 @@ function loadClient({ scope, primitives = {} } = {}) {
       }
       if (name === 'react-dom') return { createPortal: (node) => node }
       if (name === '@deepseek-ai/dsh-client-ui-primitives') return {
-        SettingsForm(props) { return { type: 'SettingsForm', props, children: props.children ?? [] } },
+        SettingsForm(props) {
+          const footer = { type: 'SettingsFormFooter', props: {}, children: [{ type: 'SaveButton', props: {}, children: [] }] }
+          return { type: 'SettingsForm', props, children: [...(props.children ?? []), footer] }
+        },
         SettingsSecretField(props) { return { type: 'SettingsSecretField', props, children: props.children ?? [] } },
         Switch(props) { return { type: 'Switch', props, children: props.children ?? [] } },
         IconRightUpOutlineRegular: () => ({ type: 'icon', props: {}, children: [] }),
@@ -240,7 +262,7 @@ function collect(node, type, out = []) {
   return out
 }
 
-test('capital-config Client：配置段自绘小节标题，四个密钥行按序渲染且回退开关排在最后', () => {
+test('capital-config Client：四个密钥按序渲染，本机回退与 selected skill 开关依次收尾', () => {
   const scope = readyScope()
   const { mod } = loadClient({ scope })
   const { ctx, registrations } = fakeCtx({ scope })
@@ -255,6 +277,7 @@ test('capital-config Client：配置段自绘小节标题，四个密钥行按�
     save: injected.save,
     discard: injected.discard,
     toggleLocalFetch: injected.toggleLocalFetch,
+    toggleSelectedSkill: injected.toggleSelectedSkill,
   }
   // 组合包页面只给 `<section data-plugin-config>` 容器，小节标题归卡片自己画。
   const card = Card({ ...props, view: 'page' })
@@ -270,24 +293,28 @@ test('capital-config Client：配置段自绘小节标题，四个密钥行按�
     'capital-config-wind-key',
     'capital-config-paddleocr-key',
   ], '四个密钥行的顺序与 CREDENTIAL_FIELDS 一致')
-  const switches = collect(page, 'Switch')
-  assert.equal(switches.length, 1, '只有一颗回退开关')
-  assert.equal(switches[0].props.checked, true, '段缺省 ⇒ 默认开（与两处 schema 的 enabled:true 同语义）')
-  // 顺序（需求指定，按渲染树而不是按源码字符串量）：四个密钥在前、回退开关收尾——
-  // 开关不是密钥，夹在密钥行中间会被读成第五个 Key。
+  const switches = collect(card, 'Switch')
+  assert.equal(switches.length, SELECTED_SKILL_CATALOG.length + 1, '本机回退一颗开关，catalog 每项各一颗')
+  assert.equal(switches[0].props.checked, true, '段缺省 ⇒ 本机回退默认开')
+  assert.ok(switches.slice(1).every((node) => node.props.checked === false), 'selected skills 必须全部默认关闭')
+  assert.equal(collect(card, 'button').filter((button) => button.props.className === 'capital-config-skill-copy').length, 0,
+    '未启用技能不渲染复制技能按钮')
   const order = []
   const walk = (node) => {
     if (node?.type === 'SettingsSecretField') order.push(node.props.id)
-    if (node?.type === 'Switch') order.push('switch')
+    if (node?.type === 'SettingsFormFooter') order.push('save')
+    if (node?.type === 'Switch') order.push(node.props.label === 'localFetchLabel' ? 'local-fetch' : 'selected-skill')
     for (const child of node?.children ?? []) walk(child)
   }
-  walk(page)
+  walk(card)
   assert.deepEqual(order, [
     'capital-config-fuyao-key',
     'capital-config-anysearch-key',
     'capital-config-wind-key',
     'capital-config-paddleocr-key',
-    'switch',
+    'save',
+    'local-fetch',
+    ...SELECTED_SKILL_CATALOG.map(() => 'selected-skill'),
   ])
 })
 
@@ -297,9 +324,9 @@ test('capital-config Client：配置段自绘小节标题，四个密钥行按�
  * 而本项目不依赖任何单一数据源，四个 Key 一律选填；③ 生效范围要点名"新 Capital **模式**会话"；
  * ④ 说明文字曾经写到三四句，用户读不完。
  */
-test('capital-config Client：文档链接与标签同排且只写"官方文档"；提示不标必填选填、点名 Capital 模式', () => {
-  const scope = readyScope()
-  const { mod } = loadClient({ scope })
+test('capital-config Client：精选 Skills 展示可复制 id 与仓库箭头链接，不展示维护元信息', async () => {
+  const scope = readyScope({ selectedSkills: { buffettFramework: true } })
+  const { mod, clipboardWrites } = loadClient({ scope })
   const { ctx, registrations, dictionaries } = fakeCtx({ scope })
   mod.apply(ctx)
   const injected = registrationFor(registrations, 'plugins.bundle.config').declaration.inject()
@@ -309,30 +336,46 @@ test('capital-config Client：文档链接与标签同排且只写"官方文档"
     useCapitalCard: (selector) => selector(injected.hooks.capitalCard.getSnapshot()),
     edit: injected.edit, save: injected.save, discard: injected.discard, resetField: injected.resetField,
     toggleLocalFetch: injected.toggleLocalFetch,
+    toggleSelectedSkill: injected.toggleSelectedSkill,
   })
   const links = collect(page, 'a')
-  assert.equal(links.length, 4, '四个密钥行各一个文档链接')
-  for (const link of links) {
+  const docsLinks = links.filter((link) => link.props['data-capital-config-doc'] === 'true')
+  assert.equal(docsLinks.length, 4, '四个密钥行各一个文档链接')
+  for (const link of docsLinks) {
     assert.equal(link.props.target, '_blank', '文档链接新标签打开')
     assert.match(String(link.props.rel), /noopener/, '外链必须切断 opener')
-    assert.equal(link.props['data-capital-config-doc'], 'true', '真机复核按这个属性找 portal 落点')
-    assert.equal(link.children[0], 'openDocs', '链接只写"官方文档"，不带服务名与密钥名')
-    assert.equal(link.children[1]?.type, 'icon', '外链带右上角斜上箭头（官方 primitives 的图标）')
+    assert.equal(link.children[0], 'openDocs', '链接只写“官方文档”，不带服务名与密钥名')
+    assert.equal(link.children[1]?.type, 'icon', '外链带右上角斜上箭头')
   }
+  const repoLinks = links.filter((link) => link.props.title === 'selectedSkillsOpenRepo')
+  assert.equal(repoLinks.length, SELECTED_SKILL_CATALOG.length, '每个 skill 都展示对应上游仓库链接')
+  for (const [index, link] of repoLinks.entries()) {
+    const entry = SELECTED_SKILL_CATALOG[index]
+    assert.equal(link.props.href, `https://github.com/${entry.owner}/${entry.repository}`)
+    assert.equal(link.props.children[0], `${entry.owner}/${entry.repository}`, '来源链接显示 owner/project')
+    assert.equal(link.children[1]?.type, 'icon', '仓库链接带右上角斜上箭头')
+    assert.match(String(link.props.rel), /noopener/)
+  }
+  const names = collect(page, 'code')
+  assert.deepEqual(names.map((node) => node.children[0]), SELECTED_SKILL_CATALOG.map((entry) => entry.name))
+  const copyButtons = collect(page, 'button').filter((button) => button.props.className === 'capital-config-skill-copy')
+  assert.equal(copyButtons.length, 1, '只为已启用的技能渲染复制按钮')
+  assert.equal(copyButtons[0].children[0], 'selectedSkillsCopyAction', '按钮文案为“复制技能”')
+  await copyButtons[0].props.onClick()
+  assert.deepEqual(clipboardWrites, [SELECTED_SKILL_CATALOG[0].name], '复制按钮写入 skill id')
+  assert.ok(collect(page, 'button').some((button) => button.props['aria-pressed'] === 'true'), '能力标签筛选有可见选中态')
+  assert.equal(collect(page, 'Switch').length, SELECTED_SKILL_CATALOG.length + 1)
+  assert.equal(collect(page, 'h5')[0].children[0], 'selectedSkillsTitle')
+  assert.ok(collect(page, 'h5')[0].props.className === 'capital-config-title')
+  assert.equal(collect(page, 'p').filter((node) => node.props.className === 'capital-config-skill-description').length,
+    SELECTED_SKILL_CATALOG.length, '只展示技能简述，不渲染额外风险提示')
+  assert.equal(collect(page, 'p').some((node) => /实验中|观察中|最近提交|下次复查/.test(JSON.stringify(node.children))), false)
 
   const dict = dictionaries.get('settings.capital')
   assert.ok(dict, '卡片文案来自自己注册的 bilingual 字典')
-  const HINTS = ['fuyaoHint', 'anysearchHint', 'localFetchHint', 'windHint', 'paddleocrHint']
-  for (const locale of ['zh', 'en']) {
-    const hints = HINTS.map((key) => dict[locale][key])
-    assert.ok(!hints.some((h) => /必填|选填|Required|Optional/i.test(h)),
-      '四个 Key 一律选填（项目不依赖任何单一数据源），提示里不许再出现必填 / 选填')
-    for (const hint of hints) {
-      assert.ok(/Capital 模式|Capital mode/.test(hint), `每条提示都要点名生效范围：${hint}`)
-      assert.ok(hint.split(/(?<=[.。])\s+/).length <= 2, `说明文字最多两句：${hint}`)
-      if (locale === 'zh') assert.ok(hint.length <= 60, `中文说明要一眼读完：${hint}`)
-    }
-  }
+  assert.equal(dict.zh.title, '数据源')
+  assert.equal(dict.zh.selectedSkillsTitle, '精选 Skills')
+  assert.equal(dict.zh.selectedSkillsHint, undefined, '已移除整段精选 Skills 说明')
   assert.equal(dict.zh.openDocs, '官方文档')
 })
 
@@ -387,6 +430,7 @@ test('capital-config Client：回退开关即时写嵌套路径，写被拒不�
     useCapitalCard: (selector) => selector(store.getSnapshot()),
     edit: injected.edit, save: injected.save, discard: injected.discard, resetField: injected.resetField,
     toggleLocalFetch: injected.toggleLocalFetch,
+    toggleSelectedSkill: injected.toggleSelectedSkill,
   })
   const notice = collect(page, 'p').find((node) => node.props.role === 'status')
   assert.ok(notice, '被拒的即时写必须有一句可见的提示')
@@ -399,11 +443,44 @@ test('capital-config Client：回退开关即时写嵌套路径，写被拒不�
   assert.equal(writes.length, 2, 'settings 只读时不得发起 mutate（前两次尝试之外不应有第三次写入）')
 })
 
+test('capital-config Client：selected skill 开关只写允许的 volatile 路径且默认关闭', async () => {
+  const doc = { value: { selectedSkills: { buffettFramework: false } } }
+  let writable = true
+  const writes = []
+  const scope = {
+    getSnapshot: () => ({ status: 'ready', writable, value: doc.value, user: {}, base: {}, revision: 0 }),
+    subscribe: () => () => {},
+    mutate: async (ops) => {
+      writes.push(ops)
+      doc.value = { selectedSkills: { buffettFramework: ops[0].value } }
+      return true
+    },
+  }
+  const { mod } = loadClient({ scope })
+  const { ctx, registrations } = fakeCtx({ scope })
+  mod.apply(ctx)
+  const injected = registrationFor(registrations, 'plugins.bundle.config').declaration.inject()
+  const store = injected.hooks.capitalCard
+  assert.equal(store.getSnapshot().selectedSkills.buffettFramework.on, false)
+  await injected.toggleSelectedSkill('buffettFramework', true)
+  assert.equal(JSON.stringify(writes), JSON.stringify([[{ op: 'set', path: ['selectedSkills', 'buffettFramework'], value: true }]]))
+  assert.equal(store.getSnapshot().selectedSkills.buffettFramework.on, true)
+
+  await injected.toggleSelectedSkill('not-in-catalog', true)
+  assert.equal(writes.length, 1, '不在准入 catalog 的 key 不得写入')
+  writable = false
+  await injected.toggleSelectedSkill('buffettFramework', false)
+  assert.equal(writes.length, 1, '只读设置不得发起写入')
+})
+
 test('capital-config Host：schema 默认值必须与主插件 Config 完全一致（两处 schema 不能漂移）', () => {
   // 主插件用条目配置覆盖自身配置，再用自己的 Config 校验。两处 schema 一旦
   // 漂移，字段会在 条目→主插件 边界被静默改写/丢弃。默认值是最低限度的同步契约。
   // 摊平走的是 Host 自己那道 plainConfig：卡片与主插件看到的都是摊平后的值。
   assert.deepEqual(plainConfig(CapitalConfig({})), MainConfig({}))
+  assert.deepEqual(MainConfig({}).selectedSkills, Object.fromEntries(SELECTED_SKILL_CATALOG.map(({ key }) => [key, false])), 'selected skill 默认必须全部关闭')
+  assert.deepEqual(plainConfig(CapitalConfig({})).selectedSkills, MainConfig({}).selectedSkills,
+    'Host 设置与主插件运行期的 selectedSkills 默认值必须一致')
 })
 
 test('capital-config Host：localFetch 默认值两处一致且消费点独立生效', () => {

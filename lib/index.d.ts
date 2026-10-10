@@ -1,5 +1,6 @@
 import { Context } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
+import { type SelectedSkillSelection } from './agents/selected-skills-provider.js';
 /** Internal plugin name used by the Capital mode preset. */
 export declare const name = "capital-generation";
 /**
@@ -81,6 +82,8 @@ export declare function resolveLocalFetchConfig(config?: LocalFetchConfig): Requ
 export interface Config {
     /** Optional additive persona override; core safety guidance is preserved. */
     customPersona?: string;
+    /** Community experiments explicitly selected for the Capital root Agent only. */
+    selectedSkills?: SelectedSkillSelection;
     /** Fuyao credentials 引用名；空值回退到 FUYAO_API_KEY。 */
     fuyaoCredentialRef?: string;
     /** web_retriever 配置（可选；缺省使用 AnySearch 默认地址与凭据名）。 */
@@ -89,6 +92,23 @@ export interface Config {
 /** DSH 0.1.2-rc.1 configuration schema. */
 export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     customPersona: z<string, string, "defined">;
+    selectedSkills: z<Schemastery.ObjectS<NoInfer<{
+        buffettFramework: z<boolean, boolean, "defined">;
+        financialHealth: z<boolean, boolean, "defined">;
+        riskWarningCatalysts: z<boolean, boolean, "defined">;
+        valuationInvestmentStrategy: z<boolean, boolean, "defined">;
+        strategyBusinessTransition: z<boolean, boolean, "defined">;
+        industryCompetitionMoat: z<boolean, boolean, "defined">;
+        businessDecompositionOrderQuality: z<boolean, boolean, "defined">;
+    }>>, Schemastery.ObjectT<NoInfer<{
+        buffettFramework: z<boolean, boolean, "defined">;
+        financialHealth: z<boolean, boolean, "defined">;
+        riskWarningCatalysts: z<boolean, boolean, "defined">;
+        valuationInvestmentStrategy: z<boolean, boolean, "defined">;
+        strategyBusinessTransition: z<boolean, boolean, "defined">;
+        industryCompetitionMoat: z<boolean, boolean, "defined">;
+        businessDecompositionOrderQuality: z<boolean, boolean, "defined">;
+    }>>, "defined">;
     fuyaoCredentialRef: z<string, string, "defined">;
     retriever: z<Schemastery.ObjectS<NoInfer<{
         baseURL: z<string, string, "defined">;
@@ -169,6 +189,23 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     }>>, "defined">;
 }>>, Schemastery.ObjectT<NoInfer<{
     customPersona: z<string, string, "defined">;
+    selectedSkills: z<Schemastery.ObjectS<NoInfer<{
+        buffettFramework: z<boolean, boolean, "defined">;
+        financialHealth: z<boolean, boolean, "defined">;
+        riskWarningCatalysts: z<boolean, boolean, "defined">;
+        valuationInvestmentStrategy: z<boolean, boolean, "defined">;
+        strategyBusinessTransition: z<boolean, boolean, "defined">;
+        industryCompetitionMoat: z<boolean, boolean, "defined">;
+        businessDecompositionOrderQuality: z<boolean, boolean, "defined">;
+    }>>, Schemastery.ObjectT<NoInfer<{
+        buffettFramework: z<boolean, boolean, "defined">;
+        financialHealth: z<boolean, boolean, "defined">;
+        riskWarningCatalysts: z<boolean, boolean, "defined">;
+        valuationInvestmentStrategy: z<boolean, boolean, "defined">;
+        strategyBusinessTransition: z<boolean, boolean, "defined">;
+        industryCompetitionMoat: z<boolean, boolean, "defined">;
+        businessDecompositionOrderQuality: z<boolean, boolean, "defined">;
+    }>>, "defined">;
     fuyaoCredentialRef: z<string, string, "defined">;
     retriever: z<Schemastery.ObjectS<NoInfer<{
         baseURL: z<string, string, "defined">;

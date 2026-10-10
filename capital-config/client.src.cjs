@@ -7,6 +7,7 @@ const {
   Switch,
   IconRightUpOutlineRegular,
 } = require('@deepseek-ai/dsh-client-ui-primitives')
+const { SELECTED_SKILL_CATALOG, SELECTED_SKILL_TAG_LABELS } = require('../selected-skills/catalog.js')
 
 /**
  * 卡片读的是**配置条目 id**，坐的是**组合包自己的页面**——两个不同的字符串，各自钉在不同地方：
@@ -59,6 +60,7 @@ const DOC_URLS = {
  * 加一个 Key 以前要在九处各补一遍，漏掉的那处不会报错，只会让用户填了却不生效。
  */
 const CREDENTIAL_FIELDS = ['fuyao', 'anysearch', 'wind', 'paddleocr']
+const SELECTED_SKILL_FIELDS = SELECTED_SKILL_CATALOG.map(({ key }) => key)
 const DEFAULT_REFS = {
   fuyao: FUYAO_DEFAULT_REF,
   anysearch: ANYSEARCH_DEFAULT_REF,
@@ -70,7 +72,7 @@ const freshStatus = () => Object.fromEntries(
 )
 
 const zh = {
-  title: '配置',
+  title: '数据源',
   fuyaoLabel: 'Fuyao API Key',
   fuyaoHint: '同花顺 Fuyao 结构化数据接口。保存后新 Capital 模式会话生效。',
   anysearchLabel: 'AnySearch API Key',
@@ -81,6 +83,13 @@ const zh = {
   windHint: 'Wind 金融信披类文档检索接口。保存后新 Capital 模式会话生效。',
   paddleocrLabel: 'PaddleOCR 文档解析 Token',
   paddleocrHint: '配置 Token 后自动解析 PDF、图片。保存后新 Capital 模式会话生效。',
+  selectedSkillsTitle: '精选 Skills',
+  selectedSkillsFilterLabel: '按能力筛选',
+  selectedSkillsEmpty: '没有匹配这个标签的 Skill。',
+  selectedSkillsCopyName: '复制技能',
+  selectedSkillsCopyAction: '复制技能',
+  selectedSkillsCopied: '已复制',
+  selectedSkillsOpenRepo: '打开上游仓库',
   openDocs: '官方文档',
   configured: '已配置密钥。',
   notConfigured: '未配置密钥。',
@@ -94,7 +103,7 @@ const zh = {
 }
 
 const en = {
-  title: 'Configuration',
+  title: 'Data Sources',
   fuyaoLabel: 'Fuyao API Key',
   fuyaoHint: 'Tonghuashun Fuyao structured-data API. Takes effect in new Capital mode sessions.',
   anysearchLabel: 'AnySearch API Key',
@@ -105,6 +114,13 @@ const en = {
   windHint: 'Wind financial disclosure document retrieval interface. Takes effect in new Capital mode sessions.',
   paddleocrLabel: 'PaddleOCR document token',
   paddleocrHint: 'Configure the token to parse PDFs and images automatically. Takes effect in new Capital mode sessions.',
+  selectedSkillsTitle: 'Selected Skills',
+  selectedSkillsFilterLabel: 'Filter by capability',
+  selectedSkillsEmpty: 'No skills match this tag.',
+  selectedSkillsCopyName: 'Copy skill',
+  selectedSkillsCopyAction: 'Copy skill',
+  selectedSkillsCopied: 'Copied',
+  selectedSkillsOpenRepo: 'Open upstream repository',
   openDocs: 'Official docs',
   configured: 'A key is configured.',
   notConfigured: 'No key is configured.',
@@ -141,6 +157,22 @@ function installStyles() {
     .capital-config-secret-row label { flex: 0 1 auto; }
     .capital-config-secret-row label ~ span { order: 1; margin-left: auto; }
     .capital-config-field { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; border-top: 0.5px solid var(--dsw-alias-border-l2); }
+    .capital-config-selected-skills { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 0.5px solid var(--dsw-alias-border-l2); }
+    .capital-config-selected-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+    .capital-config-selected-filter-label { flex: 0 0 100%; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
+    .capital-config-selected-filter-button { min-height: 26px; padding: 3px 8px; border: 0.5px solid var(--dsw-alias-border-l1); border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 12px; line-height: 18px; cursor: pointer; }
+    .capital-config-selected-filter-button:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+    .capital-config-selected-filter-button[aria-pressed="true"] { border-color: var(--dsw-alias-brand-primary); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent); color: var(--dsw-alias-label-primary); }
+    .capital-config-skill-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+    .capital-config-skill-tag { padding: 1px 5px; border-radius: 4px; background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 16px; }
+    .capital-config-skill-heading { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .capital-config-skill-slug { min-width: 0; overflow-wrap: anywhere; color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 16px; }
+    .capital-config-skill-copy { flex: none; padding: 2px 6px; border: 0; border-radius: 4px; background: transparent; color: var(--dsw-alias-label-tertiary); font: inherit; font-size: 11px; line-height: 16px; cursor: pointer; }
+    .capital-config-skill-copy:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+    .capital-config-skill-copy:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-brand-primary)); outline-offset: 1px; }
+    .capital-config-skill-repo { display: inline-flex; align-items: center; gap: 3px; color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 16px; text-decoration: none; }
+    .capital-config-skill-repo:hover { color: var(--dsw-alias-brand-primary); text-decoration: underline; }
+    .capital-config-skill-description { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
     .capital-config-doc-link { display: inline-flex; align-items: center; gap: 3px; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 20px; white-space: nowrap; text-decoration: none; }
     .capital-config-doc-link:hover { color: var(--dsw-alias-brand-primary); text-decoration: underline; }
     .capital-config-doc-link:focus-visible { border-radius: 3px; outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-brand-primary)); outline-offset: 2px; }
@@ -171,8 +203,10 @@ class CapitalCardController {
     this.status = freshStatus()
     this.localFetchWriting = false
     this.localFetchFailed = false
-    // 四个密钥控件都在配置段之外落盘（write-only，值从不随响应出网），所以 specs 为空：
-    // 本卡片不编辑任何普通字段，唯一的配置写入是下面那个即时保存的回退开关。
+    this.selectedSkillWriting = new Set()
+    this.selectedSkillFailed = new Set()
+    // 密钥通过 credentials 域独立写入（write-only，值从不随响应出网），所以普通字段 specs 为空。
+    // 本机回退与选用 Skill 两类开关直接 mutate volatile 路径，不进入密钥草稿流。
     this.model = new SettingsFormModel(scope, [], CREDENTIAL_FIELDS.map((field) => ({
       field,
       write: (value) => this.writeKey(field, value),
@@ -208,6 +242,11 @@ class CapitalCardController {
         writing: this.localFetchWriting,
         failed: this.localFetchFailed,
       },
+      selectedSkills: Object.fromEntries(SELECTED_SKILL_FIELDS.map((field) => [field, {
+        on: snapshot.value?.selectedSkills?.[field] === true,
+        writing: this.selectedSkillWriting.has(field),
+        failed: this.selectedSkillFailed.has(field),
+      }])),
     }
   }
 
@@ -290,6 +329,24 @@ class CapitalCardController {
     this.store.set(this.projection())
   }
 
+  async toggleSelectedSkill(field, value) {
+    if (!SELECTED_SKILL_FIELDS.includes(field) || this.selectedSkillWriting.has(field)) return
+    const snapshot = this.scope.getSnapshot()
+    if (snapshot.status !== 'ready' || !snapshot.writable) return
+    this.selectedSkillWriting.add(field)
+    this.selectedSkillFailed.delete(field)
+    this.store.set(this.projection())
+    try {
+      await this.scope.mutate([{ op: 'set', path: ['selectedSkills', field], value }])
+    } catch {
+      // The saved snapshot below decides whether the switch changed.
+    }
+    this.selectedSkillWriting.delete(field)
+    const landed = this.scope.getSnapshot().value?.selectedSkills?.[field] === value
+    if (!landed) this.selectedSkillFailed.add(field)
+    this.store.set(this.projection())
+  }
+
   inject() {
     return {
       hooks: {
@@ -297,6 +354,7 @@ class CapitalCardController {
       },
       ...this.model.actions(),
       toggleLocalFetch: (value) => this.toggleLocalFetch(value),
+      toggleSelectedSkill: (field, value) => this.toggleSelectedSkill(field, value),
     }
   }
 }
@@ -340,6 +398,62 @@ function SecretRow({ field, label, hint, docsUrl, state, disabled, onEdit, t }) 
   )
 }
 
+function skillLocale() {
+  const language = typeof document !== 'undefined' ? document.documentElement?.lang : ''
+  return typeof language === 'string' && language.toLowerCase().startsWith('en') ? 'en' : 'zh'
+}
+
+function SelectedSkillRow({ entry, state, disabled, onChange, t }) {
+  const locale = skillLocale()
+  const label = entry.label[locale]
+  const repositoryUrl = `https://github.com/${entry.owner}/${entry.repository}`
+  const [copied, setCopied] = useState(false)
+  const copyName = async () => {
+    const clipboard = globalThis.navigator?.clipboard
+    if (typeof clipboard?.writeText !== 'function') return
+    try {
+      await clipboard.writeText(entry.name)
+      setCopied(true)
+    } catch {
+      // Clipboard access can be denied by the browser; keep the row usable.
+    }
+  }
+  return h('div', { className: 'capital-config-field' },
+    h('div', { className: 'capital-config-switch-row' },
+      h('div', { className: 'capital-config-switch-text' },
+        h('div', { className: 'capital-config-skill-heading' },
+          h('span', { className: 'capital-config-title' }, label),
+          h('code', { className: 'capital-config-skill-slug' }, entry.name),
+          state?.on === true ? h('button', {
+            type: 'button',
+            className: 'capital-config-skill-copy',
+            title: t('selectedSkillsCopyName'),
+            'aria-label': t('selectedSkillsCopyName'),
+            onClick: copyName,
+          }, copied ? t('selectedSkillsCopied') : t('selectedSkillsCopyAction')) : null,
+        ),
+        h('p', { className: 'capital-config-skill-description' }, entry.description[locale]),
+        h('a', {
+          className: 'capital-config-skill-repo',
+          href: repositoryUrl,
+          target: '_blank',
+          rel: 'noopener noreferrer',
+          title: t('selectedSkillsOpenRepo'),
+        }, `${entry.owner}/${entry.repository}`, h(IconRightUpOutlineRegular, { size: 12 })),
+        h('div', { className: 'capital-config-skill-tags' }, entry.tags.map((tag) =>
+          h('span', { key: tag, className: 'capital-config-skill-tag' }, SELECTED_SKILL_TAG_LABELS[locale][tag] ?? tag))),
+      ),
+      h(Switch, {
+        label,
+        checked: state?.on === true,
+        disabled: disabled || state?.writing === true,
+        onChange,
+      }),
+    ),
+    state?.failed ? h('p', { role: 'status', className: 'capital-config-write-failed' }, t('saveFailed')) : null,
+  )
+}
+
 /**
  * 组合包页面的配置段：页面只提供 `<section data-plugin-config>` 的容器与间距，小节标题由卡片
  * 自己画（与页面自绘的「包含的组件」同一字号层级）。`plugins.bundle.config` 只以 `view: 'page'`
@@ -349,6 +463,34 @@ function CapitalCard(props) {
   const t = props.t
   const state = props.useCapitalCard((snapshot) => snapshot)
   const disabled = !state.writable
+  const locale = skillLocale()
+  const [tagFilter, setTagFilter] = useState('all')
+  const tagLabels = SELECTED_SKILL_TAG_LABELS[locale]
+  const tags = ['all', ...Array.from(new Set(SELECTED_SKILL_CATALOG.flatMap((entry) => entry.tags)))]
+  const visibleSkills = SELECTED_SKILL_CATALOG.filter((entry) => tagFilter === 'all' || entry.tags.includes(tagFilter))
+  const selectedSkillsSection = h('section', { className: 'capital-config-selected-skills' },
+    h('h5', { className: 'capital-config-title' }, t('selectedSkillsTitle')),
+    h('div', { className: 'capital-config-selected-filter', role: 'group', 'aria-label': t('selectedSkillsFilterLabel') },
+      h('span', { className: 'capital-config-selected-filter-label' }, t('selectedSkillsFilterLabel')),
+      ...tags.map((tag) => h('button', {
+        key: tag,
+        type: 'button',
+        className: 'capital-config-selected-filter-button',
+        'aria-pressed': tagFilter === tag ? 'true' : 'false',
+        onClick: () => setTagFilter(tag),
+      }, tagLabels[tag] ?? tag)),
+    ),
+    visibleSkills.length > 0
+      ? visibleSkills.map((entry) => h(SelectedSkillRow, {
+        key: entry.key,
+        entry,
+        state: state.selectedSkills?.[entry.key],
+        disabled: disabled || state.saving,
+        onChange: (value) => props.toggleSelectedSkill(entry.key, value),
+        t,
+      }))
+      : h('p', { className: 'capital-config-hint' }, t('selectedSkillsEmpty')),
+  )
   const form = h(SettingsForm, {
     labels: {
       unavailable: t('unavailable'),
@@ -365,28 +507,27 @@ function CapitalCard(props) {
     h(SecretRow, { field: 'anysearch', label: t('anysearchLabel'), hint: t('anysearchHint'), docsUrl: DOC_URLS.anysearch, state: state.anysearch, disabled: disabled || state.saving || !state.anysearch.writable, onEdit: (value) => props.edit('anysearch', value), t }),
     h(SecretRow, { field: 'wind', label: t('windLabel'), hint: t('windHint'), docsUrl: DOC_URLS.wind, state: state.wind, disabled: disabled || state.saving || !state.wind.writable, onEdit: (value) => props.edit('wind', value), t }),
     h(SecretRow, { field: 'paddleocr', label: t('paddleocrLabel'), hint: t('paddleocrHint'), docsUrl: DOC_URLS.paddleocr, state: state.paddleocr, disabled: disabled || state.saving || !state.paddleocr.writable, onEdit: (value) => props.edit('paddleocr', value), t }),
-    // 回退开关排在四个密钥之后：它不是密钥，夹在密钥行中间会被读成第五个 Key。
-    h('div', { className: 'capital-config-field' },
-      h('div', { className: 'capital-config-switch-row' },
-        h('div', { className: 'capital-config-switch-text' },
-          h('span', { className: 'capital-config-switch-label' }, t('localFetchLabel')),
-          h('p', { className: 'capital-config-hint' }, t('localFetchHint')),
-        ),
-        h(Switch, {
-          label: t('localFetchLabel'),
-          checked: state.localFetch?.on !== false,
-          disabled: disabled || state.saving || state.localFetch?.writing === true,
-          onChange: props.toggleLocalFetch,
-        }),
+  )
+  const localFetchSection = h('div', { className: 'capital-config-field' },
+    h('div', { className: 'capital-config-switch-row' },
+      h('div', { className: 'capital-config-switch-text' },
+        h('span', { className: 'capital-config-switch-label' }, t('localFetchLabel')),
+        h('p', { className: 'capital-config-hint' }, t('localFetchHint')),
       ),
-      // 被拒的即时写不留草稿、也不进表单的 failed（那是保存流的），所以自己说一句：
-      // 开关没翻转就是事实，但用户需要知道"点了、没落上"而不是以为点错了。
-      state.localFetch?.failed ? h('p', { role: 'status', className: 'capital-config-write-failed' }, t('saveFailed')) : null,
+      h(Switch, {
+        label: t('localFetchLabel'),
+        checked: state.localFetch?.on !== false,
+        disabled: disabled || state.saving || state.localFetch?.writing === true,
+        onChange: props.toggleLocalFetch,
+      }),
     ),
+    state.localFetch?.failed ? h('p', { role: 'status', className: 'capital-config-write-failed' }, t('saveFailed')) : null,
   )
   return h('div', { className: 'capital-config-card' },
     h('h4', { className: 'capital-config-title' }, t('title')),
     form,
+    state.available ? localFetchSection : null,
+    state.available ? selectedSkillsSection : null,
   )
 }
 

@@ -8,7 +8,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { MAX_ITEMS, SEED_ITEMS, createWatchlistService, domainSpec } from '../capital-watchlist/index.js'
-import { createFakeDomain, stubFuyao } from './watchlist-harness.mjs'
+import { createFakeDomain, HOLDABLE_ROWS, stubFuyao, withHoldable } from './watchlist-harness.mjs'
 
 function service(options = {}) {
   const fake = createFakeDomain()
@@ -489,4 +489,257 @@ test('⛔ 三路分派之后，上限这一闸仍然只许进一条：只差一�
   } finally {
     stub.restore()
   }
+})
+
+/**
+ * ── 持仓标记（2026-10-09 加，主 Agent 经 `get_watchlist` 读的就是这一格）─────────────
+ * 这一格是**用户自报**的权重，所以闸门全在"别说谎"上：没填 ≠ 0、取消 ≠ 换位置、
+ * 刷新写回 ≠ 撤销用户的标记、指数 ≠ 可持有的标的。每条都配反向对照（把修复撤掉即红）。
+ */
+
+test('标记持仓：填比例 / 只标记不填 / 真填 0 是三态；取消标记不许把行甩到清单末尾', async () => {
+  const stub = stubFuyao()
+  const { instance, fake } = service()
+  try {
+    await withHoldable(instance, fake)
+    const before = [...fake.records.keys()]
+
+    const marked = await instance.markHolding({ thscode: '300750.SZ', weight_pct: 20 })
+    assert.equal(marked.ok, true)
+    assert.equal(marked.item.holding.weight_pct, 20)
+    assert.ok(Number.isInteger(marked.item.holding.marked_at), '标记时刻是整数 epoch：主 Agent 靠它判断这句话说了多久')
+
+    const blank = await instance.markHolding({ thscode: '600519.SH', weight_pct: '' })
+    assert.equal(blank.item.holding.weight_pct, null, '⛔ 留空是"标了持仓、比例没填"，落 null 而不是 0（Number(null) 就是 0）')
+
+    const zero = await instance.markHolding({ thscode: '510300.SH', weight_pct: 0 })
+    assert.equal(zero.item.holding.weight_pct, 0, '⛔ 0 是用户真填的数，不许被当成"没填"改写成 null')
+
+    const absent = await instance.markHolding({ thscode: '00700.HK' })
+    assert.equal(absent.item.holding.weight_pct, null, '缺字段与空串同一档')
+
+    // 三个市场各标一条：闸门认的是**类型**而不是市场（A 股个股 / 场内 ETF / 港股 / 美股都可持有）。
+    assert.equal((await instance.markHolding({ thscode: 'AAPL.OQ', weight_pct: 5 })).ok, true)
+
+    const cleared = await instance.clearHolding({ thscode: '600519.SH' })
+    assert.equal(cleared.ok, true)
+    assert.equal(cleared.item.holding, undefined, '取消持仓就是没有这一格')
+    assert.equal('holding' in fake.records.get('600519.SH'), false, '落盘的记录里不许留一个值为 undefined 的空格')
+    assert.deepEqual(
+      [...fake.records.keys()],
+      before,
+      '⛔ 取消标记不许改插入顺序：删键重插会把这一行甩到清单末尾——用户只是取消了一个标记，行却自己跳走了',
+    )
+  } finally {
+    stub.restore()
+  }
+})
+
+test('持仓比例的取值闸门：越界与非数一律 invalid_query，数字字符串照收', async () => {
+  const stub = stubFuyao()
+  const { instance, fake } = service()
+  try {
+    await withHoldable(instance, fake)
+    await instance.markHolding({ thscode: '300750.SZ', weight_pct: 20 })
+    for (const bad of [-0.5, 100.5, 1000, 'abc', '  ', true, {}, [], Number.NaN]) {
+      const result = await instance.markHolding({ thscode: '300750.SZ', weight_pct: bad })
+      assert.equal(result.ok, false, `${JSON.stringify(bad)} 不该被接成持仓比例`)
+      assert.equal(result.code, 'invalid_query')
+    }
+    assert.equal(fake.records.get('300750.SZ').holding.weight_pct, 20, '非法入参不许动已经落库的那一格')
+
+    for (const good of [0, 100, '20', ' 20 ', 20]) {
+      const result = await instance.markHolding({ thscode: '300750.SZ', weight_pct: good })
+      assert.equal(result.ok, true, `${JSON.stringify(good)} 应当被接受（0–100 闭区间，数字字符串与 numberValue 同口径）`)
+    }
+    assert.equal(fake.records.get('300750.SZ').holding.weight_pct, 20, '" 20 " 归一成 20，不留字符串')
+  } finally {
+    stub.restore()
+  }
+})
+
+test('标记持仓的标的边界：不在清单里 not_found、裸代码 invalid_query，都不许凭空造出一格', async () => {
+  const stub = stubFuyao()
+  const { instance, fake } = service()
+  try {
+    await withHoldable(instance, fake)
+    const missing = await instance.markHolding({ thscode: '000004.SZ', weight_pct: 10 })
+    assert.equal(missing.ok, false)
+    assert.equal(missing.code, 'not_found', '标记持仓不是添加自选：清单外的一只票不该被这一格凭空建出来')
+
+    const bare = await instance.markHolding({ thscode: '300750', weight_pct: 10 })
+    assert.equal(bare.code, 'invalid_query', '裸代码一律拒绝（`300750` 是哪一档由上游裁决，不由这里猜）')
+
+    const clearMissing = await instance.clearHolding({ thscode: 'AMZN.OQ' })
+    assert.equal(clearMissing.code, 'not_found')
+    assert.equal(fake.records.size, SEED_ITEMS.length + HOLDABLE_ROWS.length, '三次失败一次都没写进域')
+  } finally {
+    stub.restore()
+  }
+})
+
+test('刷新写回不许抹掉刚标的持仓', async () => {
+  const stub = stubFuyao()
+  const { instance, fake } = service()
+  try {
+    await withHoldable(instance, fake)
+    await instance.markHolding({ thscode: '300750.SZ', weight_pct: 35 })
+    const stamp = fake.records.get('300750.SZ').holding.marked_at
+    const refreshed = await instance.refresh()
+    assert.equal(refreshed.ok, true)
+    assert.equal(fake.records.get('300750.SZ').holding.weight_pct, 35, '写回只该换 quote 那一格')
+    assert.equal(fake.records.get('300750.SZ').holding.marked_at, stamp, '标记时刻不许跟着一次刷新往前走')
+    const row = refreshed.items.find((item) => item.thscode === '300750.SZ')
+    assert.equal(row.holding.weight_pct, 35, '回包也要带着持仓，面板不必再读一次 /list')
+  } finally {
+    stub.restore()
+  }
+})
+
+test('⛔ 刷新在途时标记与移除持仓，不许被写回撤销；在途被删的行不许带着持仓复活', async () => {
+  // 与"刷新在途时的删除与置顶"同一扇窗、同一个形状，只是这一格原先不存在：
+  // 面板一打开就自动刷新，而用户就在刷新那几秒里点「标记持仓」。
+  const stub = stubFuyao()
+  const { instance, fake } = service()
+  const outer = globalThis.fetch
+  let release
+  let gateOn = false
+  const gate = new Promise((resolve) => { release = resolve })
+  globalThis.fetch = async (url, init) => {
+    const pending = outer(url, init)
+    if (gateOn) await gate
+    return pending
+  }
+  try {
+    await withHoldable(instance, fake)
+    await instance.markHolding({ thscode: '300750.SZ', weight_pct: 12 })
+    gateOn = true
+
+    const running = instance.refresh()
+    const marked = await instance.markHolding({ thscode: '600519.SH', weight_pct: 50 })
+    const removed = await instance.remove({ thscode: '300750.SZ' })
+    assert.equal(marked.ok, true, '标记当场回执成功')
+    assert.equal(removed.ok, true, '删除当场回执成功')
+    assert.equal(fake.records.has('300750.SZ'), false, '中间态：带着持仓的那条真的删掉了')
+
+    release()
+    const result = await running
+    assert.equal(fake.records.get('600519.SH').holding.weight_pct, 50, '刷新写回用旧快照盖掉了刚标的持仓')
+    assert.equal(fake.records.has('300750.SZ'), false, '刷新写回把刚删的标的连同它的持仓一起复活了')
+    assert.equal(result.items.some((item) => item.thscode === '300750.SZ'), false, '回包也不许带它')
+  } finally {
+    globalThis.fetch = outer
+    stub.restore()
+  }
+})
+
+test('⛔ 类型闸门：指数不是一个可持有的标的，标不上、也不许留在域里', async () => {
+  const stub = stubFuyao()
+  const { instance, fake } = service()
+  try {
+    await withHoldable(instance, fake)
+    for (const code of ['000001.SH', 'HSI.HK', 'IXIC.US', 'INX.US']) {
+      const result = await instance.markHolding({ thscode: code, weight_pct: 20 })
+      assert.equal(result.ok, false, `${code} 是指数，不该被接成仓位`)
+      assert.equal(result.code, 'invalid_query', '不新增错误码：这一档就是"这个入参不成立"')
+      assert.equal(fake.records.get(code).holding, undefined, '⛔ 被拒的请求连那一格都不许写进去（写了模型就真会读到一句用户没说过的话）')
+    }
+    // 未知类型同样不可标（闸门是白名单而不是"排除 *-index"）：这条靠上面四条已经证明，
+    // 这里钉的是**同一份判定**认个股与场内基金——两个方向都要有证据，反选写法会静默放行未来新增的档。
+    for (const code of ['300750.SZ', '510300.SH', '00700.HK', 'AAPL.OQ']) {
+      assert.equal((await instance.markHolding({ thscode: code, weight_pct: 10 })).ok, true, `${code} 该能标`)
+    }
+  } finally {
+    stub.restore()
+  }
+})
+
+test('⛔ 闸门只拦"标"、不拦"取消"：一条遗留的指数持仓必须退得掉', async () => {
+  // 类型改判之前（2026-10-09 早先那一版）指数是能标的，磁盘上可能就有这样的记录；手改 JSON 也造得出。
+  // 若两边都拦：面板按类型不画取消出口、宿主又拒绝写 → 那一格被锁死在域里，而 get_watchlist 会一直
+  // 把一句用户早已不认的话当他的仓位读。
+  const stub = stubFuyao()
+  const { instance, fake } = service()
+  try {
+    await instance.list()
+    await fake.table.put('HSI.HK', { ...fake.records.get('HSI.HK'), holding: { weight_pct: 40, marked_at: 1_790_586_000_000 } })
+
+    const remark = await instance.markHolding({ thscode: 'HSI.HK', weight_pct: 55 })
+    assert.equal(remark.ok, true, '已经标过的行改比例仍走得通（拒它等于把用户锁在改不掉的错话上）')
+    assert.equal(remark.item.holding.weight_pct, 55)
+
+    const cleared = await instance.clearHolding({ thscode: 'HSI.HK' })
+    assert.equal(cleared.ok, true, '取消持仓不声明任何领域事实，不需要类型闸门')
+    assert.equal(cleared.item.holding, undefined)
+    assert.equal(fake.records.get('HSI.HK').holding, undefined, '落盘也真的没了')
+  } finally {
+    stub.restore()
+  }
+})
+
+test('⛔ 合计闸门：只做多的组合，占比加起来不许超过 120%', async () => {
+  // 用户点名"我居然可以针对多只标的都填超过 50%"。单只 0–100 已经管住了，管不住的是**加起来**；
+  // 额度按"其余持仓"算，所以这一格自己改小永远走得通（见下面第二条）。
+  const stub = stubFuyao()
+  const { instance, fake } = service()
+  try {
+    await withHoldable(instance, fake)
+    assert.equal((await instance.markHolding({ thscode: '300750.SZ', weight_pct: 100 })).ok, true, '第一只吃满 100 是合法的')
+
+    const tooMuch = await instance.markHolding({ thscode: '600519.SH', weight_pct: 30 })
+    assert.equal(tooMuch.ok, false, '其余已占 100，这一格只剩 20')
+    assert.equal(tooMuch.code, 'invalid_query', '不新增错误码：这一档同样是"这个入参不成立"')
+    assert.match(tooMuch.message, /100/, '拒绝的理由要说得出剩余额度，光回 invalid_query 用户只看到按不动')
+    assert.equal(fake.records.get('600519.SH').holding, undefined, '⛔ 被拒的写入连那一格都不许落盘')
+
+    assert.equal((await instance.markHolding({ thscode: '600519.SH', weight_pct: 20 })).ok, true, '正好 120 —— 到线不越线')
+    const noRoom = await instance.markHolding({ thscode: '510300.SH', weight_pct: 1 })
+    assert.equal(noRoom.ok, false, '额度用完了，再加一格都不行')
+    assert.equal(noRoom.code, 'invalid_query')
+  } finally {
+    stub.restore()
+  }
+})
+
+test('⛔ 合计闸门只拦"变大"：已超额的数据必须还能改小、勾上没填永远放行', async () => {
+  // 手改 JSON 或旧版本都能造出"每一只都不越单只上限、加起来却 200%"的一份域（正是用户点名的形态）。
+  // 若闸门连"改小"与"先勾上"一起拦，用户就再也出不去了——与类型闸门不拦 clearHolding 同一族理由。
+  const stub = stubFuyao()
+  const { instance, fake } = service()
+  try {
+    await withHoldable(instance, fake)
+    const stamp = async (code, weight) => fake.table.put(code, { ...fake.records.get(code), holding: { weight_pct: weight, marked_at: 1 } })
+    await stamp('300750.SZ', 100)
+    await stamp('600519.SH', 100)
+
+    assert.equal((await instance.markHolding({ thscode: '600519.SH', weight_pct: 10 })).ok, true, '其余 100、这一格从 100 改到 10：改小必须通')
+    assert.equal((await instance.markHolding({ thscode: '300750.SZ', weight_pct: 0 })).ok, true, '0 是一个真数（这一只出清了），也是一次改小')
+
+    await stamp('510300.SH', 100)
+    await stamp('00700.HK', 100) // 此刻 0 + 10 + 100 + 100 = 210%，额度对 AAPL 已经是 0
+    const markedEmpty = await instance.markHolding({ thscode: 'AAPL.OQ', weight_pct: null })
+    assert.equal(markedEmpty.ok, true, '勾上、比例留空：不加重，闸门不参与（否则超额旧数据会堵死"先勾上再慢慢填"）')
+    assert.equal(markedEmpty.item.holding.weight_pct, null)
+    assert.equal((await instance.markHolding({ thscode: 'AAPL.OQ', weight_pct: 1 })).ok, false, '但只要真要填一个数，超额的那 210 就算在其余持仓里')
+    assert.equal((await instance.clearHolding({ thscode: '510300.SH' })).ok, true, '退一格同样永远放行')
+  } finally {
+    stub.restore()
+  }
+})
+
+test('holding 是可选字段：没有这一格的 v1 老记录照样过 schema，非法形态在持久边界就被拒', () => {
+  // 与 pinned_at 同一条理由：域在加载边界逐条校验，写成必填（或 nullable + 默认值）会让
+  // 现有清单一次读就 invalid-record → 整条路由 store_unavailable。
+  const legacy = {
+    thscode: '000001.SH', ticker: '000001', name: '上证指数', exchange: 'SH', asset_type: 'a-share-index',
+    added_at: 1, source: 'seed', quote: null,
+  }
+  const schema = domainSpec.tables.items.valueSchema
+  assert.equal(schema.parse(legacy).holding, undefined, '没有这一格 = 未持仓，不需要迁移、不抬 domain version')
+  assert.equal(schema.parse({ ...legacy, holding: { weight_pct: null, marked_at: 5 } }).holding.weight_pct, null)
+  assert.equal(schema.safeParse({ ...legacy, holding: { weight_pct: 120, marked_at: 5 } }).success, false, '越界比例进不了域')
+  assert.equal(schema.safeParse({ ...legacy, holding: { weight_pct: 10, marked_at: 'now' } }).success, false, '标记时刻只接受整数')
+  assert.equal(schema.safeParse({ ...legacy, holding: { weight_pct: 10 } }).success, false, '标了持仓就必须留下标记时刻')
+  assert.equal(schema.safeParse({ ...legacy, holding: null }).success, false,
+    '⛔ 外部不写 nullable：「没有这一格」与「这一格是 null」是两句话，一种意思只留一种写法')
 })

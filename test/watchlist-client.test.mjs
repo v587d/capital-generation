@@ -116,7 +116,7 @@ function factoryRequire(name) {
   if (name === '@deepseek-ai/dsh-client-store') return { createSnapshotStore }
   if (name === '@deepseek-ai/dsh-client-ui-primitives') {
     // 这一份是**白名单**，不是官方包的全集：名字对着宿主里装的
-    // `@deepseek-ai/dsh-client-ui-primitives` 的 export 表抄（面板用的九个 Icon* 全在里面）。
+    // `@deepseek-ai/dsh-client-ui-primitives` 的 export 表抄（面板用的十支 Icon* 全在里面）。
     // 取不到的名字当场抛错——上一版让 destructuring 拿到 `undefined` 静默通过，症状是"面板上
     // 那枚按钮不见了"，测试红得看不出根因；图标名写错在真 React 里是崩溃，在这里必须是失败。
     // 每支图标带自己的名字（displayName）：用例因此能断言"这一枚按钮画的是哪支图标"，而不只是
@@ -125,12 +125,23 @@ function factoryRequire(name) {
     const stub = {
       Modal: (props) => ({ type: 'Modal', props }),
       // 行内「更多」菜单：真身是官方 Menu primitive（portal + 模态层语义），这里只留 props 契约。
+      // `MenuItemButton` 是官方给"组件行"用的那一颗（持仓菜单里的「移除」行靠它带 separatorBefore）。
       Menu: (props) => ({ type: 'Menu', props }),
+      MenuItemButton: (props) => ({ type: 'MenuItemButton', props }),
+      // 官方开关：真身是 button[role=switch] + aria-checked（视觉状态与读屏状态同一个来源）。
+      // 这里只留 props 契约：checked / onChange(nextState) / label / disabled / title / className。
+      Switch: (props) => ({ type: 'Switch', props }),
       Button: (props) => ({ type: 'Button', props }),
       Toast: (props) => ({ type: 'Toast', props }),
       IconChecklistOutlineRegular: icon('IconChecklistOutlineRegular'),
       IconCloseOutlineRegular: icon('IconCloseOutlineRegular'),
+      IconDatabaseOutlineRegular: icon('IconDatabaseOutlineRegular'),
       IconEllipsisOutlineRegular: icon('IconEllipsisOutlineRegular'),
+      // 「持仓」那一行的行首图标。官方集里**没有**钱包 / 饼图 / 公文包 / 硬币这类金融图标，也没有
+      // "空心圆"（对着安装态的 export 表把全部 Icon* 逐名核过）；这一支是把 24 支候选抽成真实 SVG
+      // 排成深色菜单对照表**按眼睛**挑的（Archive 那只箱子 14px 下糊、Plan/Checklist 是"单子"、
+      // Data 带齿轮太忙、Folder 是"文件"）。⛔ 不许退回 IconCheckCircle*：圆心里画着勾，未选态会撒谎。
+      // 官方集同样没有 minus，所以步进键是文本 −/+ 一对，不混用 IconPlus 组件与文本减号。
       IconGoalOutlineRegular: icon('IconGoalOutlineRegular'),
       IconListPenOutlineRegular: icon('IconListPenOutlineRegular'),
       IconPinOutlineRegular: icon('IconPinOutlineRegular'),
@@ -140,8 +151,10 @@ function factoryRequire(name) {
     }
     return new Proxy(stub, {
       get: (target, key) => {
-        if (typeof key === 'string' && key.startsWith('Icon') && !(key in target)) {
-          throw new Error(`官方图标集里没有 "${key}" 这个名字（先对着宿主的 export 表确认，再补进 stub 白名单）`)
+        // ⛔ 任何**大写开头**的取不到都当场抛错，不只 Icon*：组件名（MenuItemButton / Switch 那一族）
+        // 取到 undefined 的表现是"渲染了 undefined 组件"，红得看不出是名字不在白名单里。
+        if (typeof key === 'string' && /^[A-Z]/.test(key) && !(key in target)) {
+          throw new Error(`官方 primitives 的 stub 白名单里没有 "${key}"（先对着宿主的 export 表确认，再补进来）`)
         }
         return target[key]
       },
@@ -216,6 +229,42 @@ const iconOf = (node) => {
 function selectFromMenu(render, id, index = 0) {
   moreButtonAt(render(), index).props.onClick()
   menuNodes(render())[index].props.onSelect(id)
+  return render()
+}
+
+/**
+ * 第 `index` 行菜单的**组件行**（官方 `Menu` 的 `children`：比例步进行 + 「移除」行）。
+ * 组件行是 `h(MenuItemButton, …)`，stub 只有被调用一次才现出 `type: 'MenuItemButton'`
+ * （与 `walkNodes` 对函数组件做的事同一手法），所以这里先摊开一层。
+ */
+const menuChildren = (tree, index = 0) => childrenOf(menuNodes(tree)[index].props).map((node) => (
+  typeof node?.type === 'function' ? node.type({ ...node.props, children: node.props.children ?? node.children ?? [] }) : node
+))
+
+/** 「移除」那一颗（`MenuItemButton` 组件行，带 danger 与 separatorBefore）。 */
+const removeRow = (tree, index = 0) => menuChildren(tree, index).find((node) => node.type === 'MenuItemButton')
+
+/**
+ * 步进器里的两颗键与读数。按**文档序**认（− 在左、+ 在右），不按 aria-label：
+ * 字典住在 vm 那一侧，模块级的 `zh` 到不了这里。键的可达名由用例自己对着 `harness.zh` 断言。
+ */
+function stepButtons(tree, index = 0) {
+  const stepper = classNodes(menuNodes(tree)[index].props.children, 'capital-watchlist-stepper')[0]
+  if (stepper === undefined) return null
+  const buttons = classNodes(stepper, 'capital-watchlist-stepperbtn')
+  assert.equal(buttons.length, 2, '步进行必须正好两颗键（− 与 +）')
+  return {
+    down: buttons[0],
+    up: buttons[1],
+    readout: classNodes(stepper, 'capital-watchlist-stepperreadout')[0],
+    stepper,
+  }
+}
+
+/** 这一行菜单里点「移除」（组件行自带 onSelect，不走 `Menu.onSelect`）。 */
+function removeViaMenu(render, index = 0) {
+  if (menuNodes(render())[index].props.open !== true) moreButtonAt(render(), index).props.onClick()
+  removeRow(render(), index).props.onSelect()
   return render()
 }
 
@@ -756,10 +805,18 @@ test('面板排版：headless 官方卡片 + 420 宽 + 类型徽标 + 两位小�
   assert.match(mountedCss(), /\.capital-watchlist-quote \{[^}]*padding-right: 12px/, '报价与动作区之间那口气只有这一个来源')
   assert.match(mountedCss(), /\.capital-watchlist-head \{[^}]*white-space: nowrap/, '表头标签不参与换行')
   // 关闭层常驻但收起：常驻挂载才有淡入淡出，visibility:hidden 的子节点天然退出 Tab 序。
-  const confirm = classNodes(tree, 'capital-watchlist-confirm')
-  assert.equal(confirm.length, 1, '确认层只有一层，且默认挂载')
-  assert.equal(confirm[0].props.className.includes('capital-watchlist-confirm-open'), false, '未点删除时确认层是收起的')
-  assert.equal(confirm[0].props['aria-hidden'], 'true')
+  // **只剩一层**（移除确认）：持仓改到「更多」菜单里之后，面板不再为它开第二张遮罩
+  // （2026-10-09 用户点名"不要再弹出窗口"）。层数钉死在这里，是为了让"顺手又加一层"必须显式改这条。
+  const layers = classNodes(tree, 'capital-watchlist-confirm')
+  assert.equal(layers.length, 1, '常驻遮罩层只有"移除确认"这一层')
+  for (const layer of layers) {
+    assert.equal(layer.props.className.includes('capital-watchlist-confirm-open'), false, '没点动作时这一层是收起的')
+    assert.equal(layer.props['aria-hidden'], 'true')
+  }
+  // 菜单没开的时候，树里一颗步进控件都不画（步进行住在 Menu 的 children 里，而那一行只在
+  // "已标持仓且类型可持有"时才存在）。留着看不见的控件，按 class 找按钮的断言就会串到它身上。
+  assert.equal(classNodes(tree, 'capital-watchlist-stepper').length, 0, '菜单收起时不画比例步进器')
+  assert.equal(classNodes(tree, 'capital-watchlist-holdingtag').length, 0, '⛔ 持仓徽标那一族已经废掉：行上标持仓只有名称标红一条路')
 })
 
 test('🔴 浅色模式闸门：面板 CSS 只准用"两套主题都读得出"的 token 角色', () => {
@@ -796,7 +853,7 @@ test('🔴 浅色模式闸门：面板 CSS 只准用"两套主题都读得出"�
   assert.match(css, /--dsh-scrollbar-thumb:\s*var\(--dsw-alias-scrollbar-bg-l2\)/)
   // 键盘焦点：官方变量表达式（宿主按主题与输入模态管环色），每个可聚焦控件都要覆盖到。
   assert.match(css, /outline:\s*var\(--dsw-focus-ring-width\) solid var\(--dsw-focus-ring-color/)
-  for (const control of ['close', 'clear', 'option', 'filterbtn', 'more', 'predict', 'review', 'refresh', 'confirmbtn']) {
+  for (const control of ['close', 'clear', 'option', 'filterbtn', 'more', 'predict', 'review', 'refresh', 'confirmbtn', 'stepperbtn']) {
     assert.match(css, new RegExp(`\\.capital-watchlist-${control}:focus-visible`), `${control} 缺键盘焦点环`)
   }
   // 筛选头要"锁得住"：下拉是 flex 列、**只有选项那一层**滚，头与 hint 都是 flex: none。
@@ -1102,27 +1159,45 @@ test('删除二次确认：行内「更多」→ 移除只出确认层，确认�
   assert.equal(more.props['aria-label'], '更多 宁德时代', '行内按钮的可达名点名标的')
   assert.equal(more.props.className, 'capital-watchlist-more', '行内键从 trash 换成省略号')
 
-  // 点「更多」只展开菜单：菜单里是「置顶 / 移除」，此刻一个请求都不许发。
+  // 点「更多」只展开菜单：一条数据行（置顶）+ 组件行（持仓行 / 移除），此刻一个请求都不许发。
   more.props.onClick()
   tree = render()
   const menu = menuNodes(tree)[0]
   assert.equal(menu.props.open, true, '点「更多」展开这一行的菜单')
-  assert.deepEqual([...menu.props.items].map((entry) => entry.id), ['pin', 'remove'], '菜单两条：置顶 + 移除')
-  assert.deepEqual([...menu.props.items].map((entry) => entry.label), ['置顶', '移除'])
+  assert.deepEqual([...menu.props.items].map((entry) => entry.id), ['pin'], '数据行只有「置顶」：持仓那一簇得住 children（它要带键，也不能顺手收这张菜单）')
   assert.equal(menu.props.items[0].disabled, true, '只有一行时「置顶」没有位移，置灰')
-  assert.equal(menu.props.items[1].danger, true, '「移除」是破坏性行（danger）')
-  assert.deepEqual(calls.filter((url) => url.includes('/remove') || url.includes('/pin')), [], '只展开菜单，一个请求都不许发')
+  assert.equal(menu.props.selectedIds, undefined, '持仓态不借官方那道尾勾：它是那颗开关的 aria-checked')
+  // 持仓那一行：图标 + 名词 + 开关。⛔ 整行不是按钮——两态必须是同一个形状（见几何那条用例）。
+  const checkrow = checkRow(tree)
+  assert.equal(checkrow.type, 'div', '⛔ 行本身不可点：标记与取消只能碰那颗开关')
+  assert.equal(checkrow.props.role, 'group', '行是 group（menu 允许的合法子角色），那颗 switch 挂在它里面')
+  assert.equal(checkrow.props['aria-label'], '持仓')
+  assert.equal(iconOf(classNodes(menu.props.children, 'capital-watchlist-checkicon')[0]), 'IconDatabaseOutlineRegular',
+    '行首是 Database 那一摞圆盘（24 支候选画成真实 SVG 比过；官方集里没有钱包/饼图/公文包/硬币，也不许退回画着勾的 CheckCircle）')
+  assert.equal(textOf(checkLabel(tree)).trim(), '持仓', '行标签就两个字（用户点名"标记持仓改成持仓"）')
+  const toggle = holdingSwitch(tree)
+  assert.equal(toggle.props.checked, false, '默认关')
+  assert.equal(toggle.props.label, '持仓', '开关的可达名与行标签同一个词（字典里只有一个 key）')
+  assert.equal(toggle.props.disabled, false)
+  const remove = removeRow(tree)
+  assert.ok(remove, '「移除」是菜单里的官方组件行（MenuItemButton），不是第三条数据行')
+  assert.equal(remove.props.danger, true, '「移除」是破坏性行（danger）')
+  assert.equal(remove.props.separatorBefore, true, '⛔ 移除与持仓那一簇之间必须有一根发丝线（2026-10-09 用户点名：太近会点错）')
+  assert.equal(textOf(remove).trim(), '移除')
+  // 比例那一行只在"已标持仓"之后才存在，这里开关还关着 ⇒ children 只有持仓行与移除两行。
+  assert.equal(menuChildren(tree).length, 2, '未标记时 children 是持仓行 + 移除（没有比例行）')
+  assert.deepEqual(calls.filter((url) => url.includes('/remove') || url.includes('/pin') || url.includes('/holding')), [], '只展开菜单，一个请求都不许发')
 
   // 再点一次同一个键：收起（同一个键既开又关）。
   moreButtonAt(render()).props.onClick()
   assert.equal(injected.hooks.dialog.getSnapshot().rowMenu, null, '再点「更多」收起菜单')
 
   // 选「移除」才进确认层（删除逻辑与旧版一致：面板内二次确认 + /remove）。
-  tree = selectFromMenu(render, 'remove')
+  tree = removeViaMenu(render)
   const confirm = classNodes(tree, 'capital-watchlist-confirm')[0]
   assert.ok(confirm.props.className.includes('capital-watchlist-confirm-open'), '选移除只展开确认层')
   assert.match(textOf(confirm), /宁德时代 · 300750/, '确认文案带上被移除的那一条（名称 + 代码）')
-  assert.equal(injected.hooks.dialog.getSnapshot().rowMenu, null, '选中之后菜单收起')
+  assert.equal(injected.hooks.dialog.getSnapshot().rowMenu, null, '确认层展开时菜单已收起')
   assert.deepEqual(calls.filter((url) => url.includes('/remove')), [], '确认层展开时一次 /remove 都不许发')
 
   // Esc 归确认层：先关确认层，不吃掉整个弹窗（官方 Modal 的 document 监听收不到这个事件）。
@@ -1134,11 +1209,11 @@ test('删除二次确认：行内「更多」→ 移除只出确认层，确认�
   assert.equal(injected.hooks.dialog.getSnapshot().open, true, '弹窗本体还开着')
 
   // 取消：不发请求，行还在。
-  classNodes(selectFromMenu(render, 'remove'), 'capital-watchlist-confirmbtn').filter((n) => n.props.className.includes('confirmdanger') === false)[0].props.onClick()
+  classNodes(removeViaMenu(render), 'capital-watchlist-confirmbtn').filter((n) => n.props.className.includes('confirmdanger') === false)[0].props.onClick()
   assert.deepEqual(calls.filter((url) => url.includes('/remove')), [], '取消一个请求都不发')
 
   // 确认：走 /remove（乐观删除，失败由 surface.remove 自己回滚）。
-  selectFromMenu(render, 'remove')
+  removeViaMenu(render)
   classNodes(render(), 'capital-watchlist-confirmdanger')[0].props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.equal(calls.filter((url) => url.includes('/remove')).length, 1, '确认那一下才真删')
@@ -1163,7 +1238,7 @@ test('⛔ 确认层开着时关掉面板：重开必须是干净清单，不是�
 
   surface.open()
   await settle()
-  selectFromMenu(render, 'remove')
+  removeViaMenu(render)
   assert.ok(classNodes(render(), 'capital-watchlist-confirm')[0].props.className.includes('capital-watchlist-confirm-open'), '确认层开着')
 
   surface.close() // 点遮罩 / 宿主 Modal 的 onClose 走的就是这一条
@@ -1321,6 +1396,11 @@ test('置顶：菜单选「置顶」把该行提到第一行（乐观 + /pin）�
   assert.deepEqual(menuNodes(tree).map((menu) => menu.props.open), [false, false], '初始两行的菜单都收着')
   assert.equal(menuNodes(tree)[0].props.items[0].disabled, true, '第一行的「置顶」置灰')
   assert.equal(menuNodes(tree)[1].props.items[0].disabled, false, '第二行可以置顶')
+  // ⛔ 指数那一行**根本没有那颗「持仓」开关**：它不是一个可以持有并配比率的标的（2026-10-09 用户点名）。
+  // 第一行正是 `000001.SH` / `a-share-index`，第二行是 A 股个股——两形的差别就是这道闸门的形状。
+  assert.equal(menuNodes(tree)[0].props.items.length, 1, '两行的数据行都只有「置顶」（持仓行不住在这儿）')
+  assert.equal(checkRow(tree, 0), undefined, '指数行没有持仓行')
+  assert.equal(checkRow(tree, 1).type, 'div', '个股行有，且整行不可点（只有那颗开关改状态）')
 
   tree = selectFromMenu(render, 'pin', 1)
   await settle()
@@ -1802,4 +1882,501 @@ test('⛔ "没有更多"住在滚动区末尾（跟着内容滚），文案里�
   const filtered = render()
   assert.equal(classNodes(filtered, 'capital-watchlist-endhint').length, 0, '空档不画"没有更多"')
   assert.match(textOf(filtered), /这个市场下没有匹配的标的/)
+})
+
+/**
+ * ── 持仓标记（2026-10-09 同日第三轮：菜单里的勾选行改成一枚**圆圈 checkbox**，比例收成一行，
+ * 读数不再写「未填」而是显示这一格的剩余额度 `0~N`，并新增合计 120% 的额度）─────────────────
+ * 这一族钉的是"标记别说谎"与"取消不能误伤"：勾选 = 标了持仓而比例还没填（不是 0）、
+ * 0 与"没填"两种读法、标记时刻归宿主而不是浏览器的钟、连点之后晚到的回包不许把行改回旧比例、
+ * 失败只弹回那一行、指数根本没有这个入口而一条遗留的指数持仓仍然退得掉、
+ * 全组合的自报占比加起来不许超过 120%（只做多、没有 put）。
+ * ⛔ 一次动作恰好一个 `/holding`：这条从表单时代继承下来，形态变了、账没变。
+ */
+
+const heldRow = (over = {}) => ({
+  thscode: '300750.SZ', ticker: '300750', name: '宁德时代', exchange: 'SZ', asset_type: 'a-share',
+  added_at: 1, source: 'user', quote: null, ...over,
+})
+const indexRow = (over = {}) => ({
+  thscode: 'HSI.HK', ticker: 'HSI', name: '恒生指数', exchange: 'HK', asset_type: 'hk-index',
+  added_at: 1, source: 'seed', quote: null, ...over,
+})
+
+/** 持仓用例的共用装配：记下每一次 `/holding` 的 body，`respond` 可以顶掉任意一条回包。 */
+function holdingHarness(sessionId, options = {}) {
+  const posts = []
+  const posted = []
+  // `stored` 给数组就是"屏上有好几行"（回滚用例要看着别的行），给单个对象就是只有一行。
+  const rows = Array.isArray(options.stored) ? [...options.stored] : [options.stored ?? heldRow()]
+  const payload = `[${rows.map((row) => JSON.stringify(row)).join(',')}]`
+  const first = JSON.stringify(rows[0])
+  const { ctx } = mount({
+    fetch: async (url, init) => {
+      const target = String(url)
+      const path = target.replace('/capital-watchlist', '').split('?')[0]
+      if (init?.body !== undefined) {
+        posted.push(path)
+        if (path === '/holding') {
+          const raw = String(init.body)
+          posts.push({ path, body: JSON.parse(raw), raw })
+        }
+      }
+      const override = options.respond?.(path, posts)
+      if (override !== undefined) return override
+      if (path.includes('/holding')) return { ok: true, status: 200, text: async () => `{"ok":true,"item":${first}}` }
+      if (path.includes('/list')) return { ok: true, status: 200, text: async () => `{"ok":true,"items":${payload},"seeded_at":1,"limit":30}` }
+      return { ok: true, status: 200, text: async () => `{"ok":true,"items":${payload},"refreshed_at":1,"failures":[]}` }
+    },
+  })
+  const injected = ctx.registrations[0].declaration.inject(sessionId)
+  const zh = ctx.dictionaries['capital.watchlist'].zh
+  const t = (key) => zh[key] ?? key
+  const render = () => {
+    resetHooks()
+    return ctx.registrations[0].component({ ...injected, useDialog: (selector) => selector(injected.hooks.dialog.getSnapshot()), t })
+  }
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+  return { ctx, injected, surface: injected.surface, posts, posted, render, settle, zh, state: () => injected.hooks.dialog.getSnapshot() }
+}
+
+/** 打开这一行的「更多」菜单。 */
+function openMore(harness, index = 0) {
+  moreButtonAt(harness.render(), index).props.onClick()
+  return harness.render()
+}
+
+/**
+ * 「持仓」那一行（住在 Menu 的 children 里）。⛔ 整行**不是**按钮：两态是同一个容器、同一支图标、
+ * 同一个标签，只有那颗开关能改状态——上一版"未标整行可点 / 已标只剩圆圈可点"两态形状不同，
+ * 实机看就是"点一下标记，整块浮层跳了一下"。
+ */
+const checkRow = (tree, index = 0) => classNodes(menuNodes(tree)[index].props.children, 'capital-watchlist-checkrow')[0]
+const checkLabel = (tree, index = 0) => classNodes(menuNodes(tree)[index].props.children, 'capital-watchlist-checklabel')[0]
+
+/** 这一行的那颗官方开关（stub 出来的 `type` 是字符串 `'Switch'`；它不带 className，按类型认）。 */
+function holdingSwitch(tree, index = 0) {
+  const found = []
+  walkNodes(menuNodes(tree)[index].props.children, (node) => { if (node.type === 'Switch') found.push(node) })
+  assert.equal(found.length, 1, `第 ${index} 行的菜单里必须正好一颗开关（找到 ${found.length} 颗）`)
+  return found[0]
+}
+
+/** 把这一行的开关拨到 `next`：开 = 标成持仓（比例先不填），关 = 取消持仓。 */
+function flipSwitch(harness, next, index = 0) {
+  openMore(harness, index)
+  holdingSwitch(harness.render(), index).props.onChange(next)
+  return harness.render()
+}
+
+/** 开那颗开关 = 标上持仓（点完照常 render 取新树）。 */
+const markViaMenu = (harness, index = 0) => flipSwitch(harness, true, index)
+/** 关那颗开关 = 取消持仓——这是唯一的取消出口，行本身点不动。 */
+const clearViaMenu = (harness, index = 0) => flipSwitch(harness, false, index)
+
+/** 按 aria-label 找到步进键并点它（文本是 −/+，不靠文本认）。 */
+function pressStep(harness, which, index = 0) {
+  const buttons = stepButtons(harness.render(), index)
+  if (buttons === null) throw new Error('菜单里没有步进行')
+  buttons[which].props.onClick()
+  return harness.render()
+}
+
+test('勾选行：点整行当场标上（比例是 null 不是 0），菜单不关，比例行读这一格的剩余额度', async () => {
+  const harness = holdingHarness('s-hold-check', {
+    respond: (path) => (path.includes('/holding')
+      ? { ok: true, status: 200, text: async () => `{"ok":true,"item":${JSON.stringify(heldRow({ holding: { weight_pct: null, marked_at: 7 } }))}}` }
+      : undefined),
+  })
+  harness.surface.open()
+  for (let round = 0; round < 5; round += 1) await harness.settle()
+
+  assert.equal(classNodes(harness.render(), 'capital-watchlist-name-held').length, 0, '没标过就不标红（标了就是替用户报了个仓位）')
+  assert.equal(holdingSwitch(harness.render()).props.checked, false, '未标：开关在"关"这一档')
+  assert.equal(classNodes(harness.render(), 'capital-watchlist-stepper').length, 0, '没开不给比例行')
+
+  const before = harness.posted.length
+  const tree = markViaMenu(harness)
+  assert.equal(harness.posted.length, before + 1, '⛔ 开一下开关就是那一次写：只多一个 /holding，不多不少')
+  assert.deepEqual(harness.posts.map((post) => post.body), [{ thscode: '300750.SZ', weight_pct: null }])
+  assert.match(harness.posts[0].raw, /"weight_pct":null/, '⛔ 提交的是 null：写成 0 等于替用户报了一个"零仓位"')
+  assert.equal(harness.state().pendingRemove, null, '它标的是持仓，不是移除确认')
+  assert.equal(harness.state().rowMenu, '300750.SZ', '⛔ 开完菜单必须还开着：接下来还要在这儿调比例，收起就是把用户刚点的东西拿走')
+  assert.equal(classNodes(tree, 'capital-watchlist-confirm').length, 1, '⛔ 面板里不许长出第二层常驻遮罩（持仓这件事全在菜单里）')
+  // 开上之后：那颗开关自己说状态（官方 Switch 的视觉读 aria-checked，我们不再画任何勾选态图标），
+  // 比例那一行出现，读数不是"未填"而是这一格的剩余额度。
+  assert.equal(holdingSwitch(tree).props.checked, true, '已标：开关在"开"这一档')
+  assert.equal(classNodes(tree, 'capital-watchlist-box').length, 0, '⛔ 自己画的空环那一族已经废掉，不许长回来')
+  const step = stepButtons(tree)
+  assert.ok(step, '开上之后比例行出现在同一张菜单里')
+  assert.equal(textOf(step.readout).trim(), '0~100', '不设默认值：没填就显示剩余额度（此刻其余持仓为 0 ⇒ 满额 100）')
+  assert.equal(classNodes(tree, 'capital-watchlist-stepperplaceholder').length, 1, 'placeholder 降一档颜色：它是一句提示，不是一个数')
+  assert.equal(step.down.props.disabled, true, '没填那一档 − 点不动（按它只会得到一个假的 0）')
+  assert.equal(step.up.props.disabled, false)
+  assert.equal(textOf(checkLabel(tree)).trim(), '持仓', '行标签不因状态改口：标没标由那颗开关说')
+  assert.equal(menuChildren(tree).length, 3, 'children 三行：持仓 + 比例 + 移除')
+})
+
+test('已标过的行：名称标红 + tooltip 说自报占比；只有那颗开关能取消', async () => {
+  const marked = heldRow({ holding: { weight_pct: 20, marked_at: 5 } })
+  const harness = holdingHarness('s-hold-marked', {
+    stored: marked,
+    respond: (path) => (path.includes('/holding')
+      ? { ok: true, status: 200, text: async () => `{"ok":true,"item":${JSON.stringify(heldRow())}}` }
+      : undefined),
+  })
+  harness.surface.open()
+  for (let round = 0; round < 5; round += 1) await harness.settle()
+
+  const name = classNodes(harness.render(), 'capital-watchlist-name')[0]
+  assert.ok(name.props.className.includes('capital-watchlist-name-held'), '标过持仓的行：名称标红')
+  //  红与"红涨"同色，所以这句话必须有第二条不靠颜色的通道（tooltip / 读屏）。
+  assert.match(name.props.title, /宁德时代 300750 · 持仓 20%/, 'tooltip 带上自报占比（原样给，不补成 20.00%）')
+  assert.equal(classNodes(harness.render(), 'capital-watchlist-holdingtag').length, 0, '徽标那一族已经废掉：不许再长回来')
+  assert.equal(classNodes(harness.render(), 'capital-watchlist-tag').length, 1, '类型徽标仍只有市场那一枚，持仓不借它的 class')
+
+  // ⛔ 行本身不许取消持仓（2026-10-09 用户点名两次：先"点整行把标记取消了"，再"整块浮层跳一下"）。
+  // 现在整行两态都是同一个不可点的容器，名称是静态字，唯一的出口就是那颗开关。
+  openMore(harness)
+  const label = checkLabel(harness.render())
+  assert.equal(label.type, 'span', '名称是静态字：不是按钮')
+  assert.equal(label.props.onClick, undefined, '⛔ 点名称不许取消持仓')
+  const row = checkRow(harness.render())
+  assert.equal(row.type, 'div', '⛔ 整行不是按钮：开与关都只能碰那颗开关')
+  assert.equal(row.props.onClick, undefined, '行上没有可点的东西——两态形状一致，因此不会位移')
+  assert.equal(holdingSwitch(harness.render()).props.checked, true, '已标那一态：开关在"开"，状态由它自己说')
+  assert.equal(harness.posts.length, 0, '展开菜单与看名称，一次请求都不许发')
+
+  const tree = clearViaMenu(harness)
+  assert.deepEqual(harness.posts.map((post) => post.body), [{ thscode: '300750.SZ', clear: true }], '取消持仓走那颗开关，只打那一条路由')
+  assert.equal(classNodes(tree, 'capital-watchlist-name')[0].props.className.includes('capital-watchlist-name-held'), false, '取消之后红名跟着退')
+  assert.equal(classNodes(tree, 'capital-watchlist-row').length, 1, '⛔ 取消持仓不是"移除自选"：那一行还在清单里')
+  assert.equal(stepButtons(tree), null, '关开关让比例那一行一起消失（它挂在"已标"上，不留一颗点不动的键）')
+  assert.equal(holdingSwitch(tree).props.checked, false, '取消之后开关回到"关"，那一行仍是同一形状')
+})
+
+test('步进 = 一次一档、一次一个 /holding；body 是 {thscode, weight_pct}，标记时刻以宿主回包为准', async () => {
+  const saved = heldRow({ holding: { weight_pct: 10, marked_at: 999 } })
+  const harness = holdingHarness('s-hold-step', {
+    respond: (path) => (path.includes('/holding')
+      ? { ok: true, status: 200, text: async () => `{"ok":true,"item":${JSON.stringify(saved)}}` }
+      : undefined),
+  })
+  harness.surface.open()
+  for (let round = 0; round < 5; round += 1) await harness.settle()
+  markViaMenu(harness)
+  const posts = harness.posts.length
+
+  pressStep(harness, 'up')
+  for (let round = 0; round < 5; round += 1) await harness.settle()
+  assert.equal(harness.posts.length, posts + 1, `一档只打一次（实际多出 ${harness.posts.length - posts}）`)
+  assert.deepEqual(harness.posts[harness.posts.length - 1].body, { thscode: '300750.SZ', weight_pct: 10 }, '没填的那一格第一次按 + 落 10，不是 1、也不是 0')
+  const stored = harness.state().items[0]
+  assert.equal(stored.holding.weight_pct, 10)
+  assert.equal(stored.holding.marked_at, 999, '⛔ 标记时刻归宿主——乐观那一格用的是浏览器钟，回包落地必须覆盖它')
+  assert.equal(textOf(stepButtons(harness.render()).readout).trim(), '10%', '读数跟着宿主那一条走')
+  assert.match(classNodes(harness.render(), 'capital-watchlist-name')[0].props.title, /持仓 10%/, 'tooltip 当场跟着更新（失败才弹回去）')
+})
+
+test('⛔ 步进边界：0 是用户真填的数、100 到顶置灰、37.5 不吸附', async () => {
+  const harness = holdingHarness('s-hold-bounds', { stored: heldRow({ holding: { weight_pct: 0, marked_at: 7 } }) })
+  harness.surface.open()
+  for (let round = 0; round < 5; round += 1) await harness.settle()
+  const tree = openMore(harness)
+  const step = stepButtons(tree)
+  assert.equal(textOf(step.readout).trim(), '0%', '"填了 0"与"没填"是两句话：这一档读 0%，不读那句剩余额度')
+  assert.equal(classNodes(tree, 'capital-watchlist-stepperplaceholder').length, 0, '有数就不许挂 placeholder 那一档颜色')
+  assert.equal(step.down.props.disabled, true, '0 已经是下界')
+  assert.equal(step.up.props.disabled, false)
+
+  // 到顶：100 那一档 + 置灰，且不许发出 110。
+  const atTop = holdingHarness('s-hold-top', { stored: heldRow({ holding: { weight_pct: 100, marked_at: 7 } }) })
+  atTop.surface.open()
+  for (let round = 0; round < 5; round += 1) await atTop.settle()
+  const top = stepButtons(openMore(atTop))
+  assert.equal(top.up.props.disabled, true, '100 是上界')
+  assert.equal(top.down.props.disabled, false)
+  pressStep(atTop, 'up')
+  await atTop.settle()
+  assert.deepEqual(atTop.posts, [], '置灰的键点不动：宿主永远收不到一个 110')
+
+  // 不吸附：域里存着非 10 倍数（旧版自由文本填的）就照它 ±10，不替用户把数掰正。
+  const odd = holdingHarness('s-hold-odd', { stored: heldRow({ holding: { weight_pct: 37.5, marked_at: 7 } }) })
+  odd.surface.open()
+  for (let round = 0; round < 5; round += 1) await odd.settle()
+  assert.equal(textOf(stepButtons(openMore(odd)).readout).trim(), '37.5%', '原样读，不四舍五入到 40')
+  pressStep(odd, 'up')
+  await odd.settle()
+  assert.deepEqual(odd.posts[0].body, { thscode: '300750.SZ', weight_pct: 47.5 }, '⛔ 把用户写过的 37.5 掰成 40 就是替他说了句话')
+})
+
+test('⛔ 合计封顶 120%：其余持仓吃掉额度之后 + 置灰，placeholder 说的就是剩余额度', async () => {
+  // 用户点名"我居然可以针对多只标的都填超过 50%"。只做多、没有 put，所以全组合加起来有额度：
+  // 这一格的上限 = min(100, 120 − 其余持仓之和)。面板把 `+` 置灰与宿主拒绝用的是同一个减法
+  // （`capital-watchlist/holding-rules.js`），所以这里红了先去查那份模块。
+  const rows = [
+    heldRow(),
+    heldRow({ thscode: '600519.SH', ticker: '600519', name: '贵州茅台', exchange: 'SH', holding: { weight_pct: 100, marked_at: 3 } }),
+  ]
+  const harness = holdingHarness('s-hold-budget', {
+    stored: rows,
+    // 假宿主：照 body 把那一条写回（三态与真宿主一致——clear 抹掉那一格、留空落 null、数字照收）。
+    respond: (path, posts) => (path.includes('/holding')
+      ? {
+        ok: true,
+        status: 200,
+        text: async () => {
+          const body = posts[posts.length - 1].body
+          const item = { ...rows.find((row) => row.thscode === body.thscode) }
+          if (body.clear === true) delete item.holding
+          else item.holding = { weight_pct: body.weight_pct ?? null, marked_at: 10 + posts.length }
+          return `{"ok":true,"item":${JSON.stringify(item)}}`
+        },
+      }
+      : undefined),
+  })
+  harness.surface.open()
+  for (let round = 0; round < 5; round += 1) await harness.settle()
+
+  markViaMenu(harness, 0)
+  await harness.settle()
+  assert.equal(harness.posts[0].body.weight_pct, null, '勾选本身不占额度：其余已经 100% 也照样标得上')
+  assert.equal(textOf(stepButtons(harness.render(), 0).readout).trim(), '0~20', '没填就显示这一格还剩 20（120 减其余 100）')
+
+  pressStep(harness, 'up', 0)
+  await harness.settle()
+  assert.deepEqual(harness.posts[1].body, { thscode: '300750.SZ', weight_pct: 10 })
+  pressStep(harness, 'up', 0)
+  await harness.settle()
+  assert.equal(textOf(stepButtons(harness.render(), 0).readout).trim(), '20%', '按到额度顶就停在这儿：不是 30')
+
+  const step = stepButtons(harness.render(), 0)
+  assert.equal(step.up.props.disabled, true, '⛔ 额度用完：+ 置灰，而不是"按了没反应"')
+  assert.equal(step.up.props.title, '0~20', '那颗灰键自己说上限是多少')
+  assert.equal(step.down.props.disabled, false, '往回走永远通（改小不受额度管）')
+  const posts = harness.posts.length
+  pressStep(harness, 'up', 0)
+  await harness.settle()
+  assert.equal(harness.posts.length, posts, '置灰的键点不动：宿主永远收不到会破 120 的那一档')
+  assert.equal(harness.state().items[1].holding.weight_pct, 100, '另一只的账不受这次点击影响')
+})
+
+test('⛔ 菜单几何：列表固定宽度、行按 border-box 算——开开关不许位移，也不许长出横向滚动条', async () => {
+  // 2026-10-09 实机那两条（"整个 div 严重位移" + 一条横向滚动条）同一个根：官方 .list 只给
+  // min-width（收缩到内容宽），而这张菜单 align:'end' 贴右缘开 ⇒ 比例那一行一出现就把列表撑宽、
+  // 左缘整块跳一下；内容超出列表内容盒那一寸，.scrollable .viewport 的 overflow-y:auto 又让
+  // overflow-x 计算成 auto ⇒ 横向滚动条。合成树看不见像素，所以这里钉的是**写法**。
+  const css = mountedCss().replace(/\/\*[\s\S]*?\*\//g, ' ')
+  assert.match(css, /\.capital-watchlist-rows \{ width: \d+px; \}/, '⛔ 菜单列表必须是固定 width（min-width 会跟着内容长）')
+  assert.equal(/\.capital-watchlist-rows \{[^}]*min-width/.test(css), false, 'min-width 一回来，两态宽度就不一样')
+  assert.match(css, /\.capital-watchlist-checkrow \{ box-sizing: border-box;[^}]*width: 100%/, '持仓行必须 border-box 才塞得进列表内容盒')
+  assert.match(css, /\.capital-watchlist-stepper \{ box-sizing: border-box;[^}]*width: 100%/, '比例行同上')
+  // 官方 .item 是 width:100% + padding 而**没有**声明 box-sizing（这套主题没有全局重置）：
+  // 那 16px 的溢出在我们这张列表里收口，不替上游改类名、也不动它的样式。
+  assert.match(css, /\.capital-watchlist-rows button \{ box-sizing: border-box; \}/, '菜单里的官方行也要按 border-box 算宽')
+  const width = Number(/\.capital-watchlist-rows \{ width: (\d+)px/.exec(css)[1])
+  assert.ok(width >= 240 && width <= 360, `列表宽度 ${width}px 得装得下最宽那一行，又不顶破官方 max-width: 360px`)
+
+  // 形状不随状态变：开与关两态里那一行都是同一个 div、同一支图标、同一个标签。
+  const harness = holdingHarness('s-hold-geometry')
+  harness.surface.open()
+  for (let round = 0; round < 5; round += 1) await harness.settle()
+  const off = checkRow(openMore(harness))
+  assert.equal(off.type, 'div', '未标：行是容器')
+  markViaMenu(harness)
+  await harness.settle()
+  const on = checkRow(harness.render())
+  assert.equal(on.type, off.type, '⛔ 两态同一形状：形状一变，align:end 就把整块菜单挪了')
+  assert.equal(on.props.className, off.props.className, '类名也不许跟着状态换（换的就是那 16px 的位移）')
+  assert.equal(iconOf(classNodes(menuNodes(harness.render())[0].props.children, 'capital-watchlist-checkicon')[0]),
+    'IconDatabaseOutlineRegular', '开上之后行首还是那一摞圆盘（不许换成画着勾的那两支）')
+})
+
+test('⛔ 连点之后晚到的回包不许把行改回旧比例（seq 闸门）', async () => {
+  // 服务端的写是串行的，**HTTP 回包的到达顺序却不是**：连按两下 + 之后，第一次那一条可能后到。
+  // 没有 seq 闸门时它会先把行改回 20，下一次 + 从 20 起步 ⇒ 用户看到的是"按了不动"。
+  const stamps = { 20: 111, 30: 222 }
+  const gates = []
+  const harness = holdingHarness('s-hold-race', {
+    stored: heldRow({ holding: { weight_pct: 10, marked_at: 7 } }),
+    respond: (path, posts) => {
+      if (!path.includes('/holding')) return undefined
+      const weight = posts[posts.length - 1].body.weight_pct
+      return new Promise((resolve) => {
+        gates.push(() => resolve({ ok: true, status: 200, text: async () => `{"ok":true,"item":${JSON.stringify(heldRow({ holding: { weight_pct: weight, marked_at: stamps[weight] } }))}}` }))
+      })
+    },
+  })
+  harness.surface.open()
+  for (let round = 0; round < 5; round += 1) await harness.settle()
+  openMore(harness)
+
+  pressStep(harness, 'up')
+  pressStep(harness, 'up')
+  await harness.settle()
+  assert.equal(gates.length, 2, '两下 = 两条 /holding 在途')
+  assert.deepEqual(harness.posts.map((post) => post.body.weight_pct), [20, 30], '乐观值跟着点击走，第二次从 20 起步')
+
+  gates[1]() // 后按的那一次先回
+  for (let round = 0; round < 5; round += 1) await harness.settle()
+  assert.equal(harness.state().items[0].holding.weight_pct, 30)
+
+  gates[0]() // 先按的那一次**晚**到
+  for (let round = 0; round < 5; round += 1) await harness.settle()
+  const row = harness.state().items[0]
+  assert.equal(row.holding.weight_pct, 30, '⛔ 旧回包不许把行改回 20')
+  assert.equal(row.holding.marked_at, 222, '连标记时刻也不许被旧回包顶掉')
+  assert.equal(textOf(stepButtons(harness.render()).readout).trim(), '30%', '屏上读的就是用户最后要的那个值')
+})
+
+test('⛔ 失败只弹回那一行：连点失败回到最近一次宿主确认值，别的行不动', async () => {
+  // 整张数组复原是这一族最容易踩的形状：一次失败的 + 会把**别的行**刚落地的一切（刚加的行、
+  // 刚标的持仓、刚置顶的结果）一起倒回点击前——那些都是别的动作的成功回执，域里也已经有了。
+  const other = { thscode: '600519.SH', ticker: '600519', name: '贵州茅台', exchange: 'SH', asset_type: 'a-share', added_at: 2, source: 'user', quote: null, holding: { weight_pct: 40, marked_at: 8 } }
+  const stored = heldRow({ holding: { weight_pct: 10, marked_at: 7 } })
+  const harness = holdingHarness('s-hold-rollback', {
+    stored: [stored, other],
+    respond: (path) => (path.includes('/holding')
+      ? { ok: false, status: 503, text: async () => '{"ok":false,"code":"store_unavailable","message":"x"}' }
+      : undefined),
+  })
+  harness.surface.open()
+  for (let round = 0; round < 5; round += 1) await harness.settle()
+  openMore(harness)
+
+  pressStep(harness, 'up')
+  assert.equal(harness.state().items[0].holding.weight_pct, 20, '乐观：请求在途时先按新值画')
+  await harness.settle()
+  await harness.settle()
+  const rows = harness.state().items
+  assert.equal(rows[0].holding.weight_pct, 10, '没写成库就该弹回最近一次宿主确认的 10，而不是停在 20')
+  assert.equal(rows[0].holding.marked_at, 7, '弹回的是宿主那一条，连标记时刻一起回来')
+  assert.equal(rows[1].holding.weight_pct, 40, '⛔ 别的行一点都不许被这次失败波及')
+})
+
+test('⛔ 指数没有持仓入口；一条遗留的指数持仓仍然退得掉、仍然标红', async () => {
+  // 判据来自 `capital-watchlist/holding-rules.js` 那一份，所以这里红了就说明两个半边脱钩了。
+  const rows = [
+    indexRow(),
+    { thscode: '000001.SH', ticker: '000001', name: '上证指数', exchange: 'SH', asset_type: 'a-share-index', added_at: 2, source: 'seed', quote: null },
+    { thscode: 'INX.US', ticker: 'INX', name: '标普500', exchange: 'US', asset_type: 'us-index', added_at: 3, source: 'seed', quote: null },
+    { thscode: '510300.SH', ticker: '510300', name: '沪深300ETF', exchange: 'SH', asset_type: 'fund-etf', added_at: 4, source: 'user', quote: null },
+  ]
+  const harness = holdingHarness('s-hold-index', { stored: rows })
+  harness.surface.open()
+  for (let round = 0; round < 5; round += 1) await harness.settle()
+  rows.forEach((row, index) => {
+    openMore(harness, index)
+    assert.deepEqual([...menuNodes(harness.render())[index].props.items].map((entry) => entry.id), ['pin'],
+      `${row.asset_type} 的数据行只有「置顶」（勾选行不住在 items 里）`)
+  })
+  const marked = (index) => checkRow(harness.render(), index) !== undefined
+  assert.equal(marked(0), false, '恒指：没有勾选行')
+  assert.equal(marked(1), false, '上证指数：没有勾选行')
+  assert.equal(marked(2), false, '标普500：没有勾选行')
+  assert.equal(marked(3), true, '场内 ETF 是可以持有的券，勾选行照给')
+  // 三种指数的菜单都得只剩「移除」那一颗，不会因为少了一行就把移除挤到别的位置上。
+  assert.equal(menuChildren(harness.render(), 0).length, 1, '指数行少一行，children 就只剩移除')
+  assert.equal(removeRow(harness.render(), 0).props.separatorBefore, true, '少一行也要有那根发丝线（分隔的是持仓那一簇与移除）')
+})
+
+test('⛔ 改判前标上的指数持仓：仍然标红、仍然给取消出口——只按类型画就会把人锁死', async () => {
+  // 类型闸门之前（2026-10-09 早先那一版）指数是能标的，磁盘上可能就有这样的记录；手改 JSON 也造得出。
+  // 若渲染只认 `isHoldable`：那一行既不标红也没有取消出口，而宿主那边 clearHolding 是放行的——
+  // 面板就成了"看得见看不见都说不清"的地方，而 get_watchlist 会一直把一句用户早不认的话当仓位读。
+  const legacy = indexRow({ holding: { weight_pct: 40, marked_at: 5 } })
+  const harness = holdingHarness('s-hold-legacy', {
+    stored: legacy,
+    respond: (path) => (path.includes('/holding')
+      ? { ok: true, status: 200, text: async () => `{"ok":true,"item":${JSON.stringify(indexRow())}}` }
+      : undefined),
+  })
+  harness.surface.open()
+  for (let round = 0; round < 5; round += 1) await harness.settle()
+
+  assert.ok(classNodes(harness.render(), 'capital-watchlist-name')[0].props.className.includes('capital-watchlist-name-held'), '红名照画：这一格在域里，读屏与主 Agent 看到的都是同一句话')
+  const tree = clearViaMenu(harness)
+  assert.deepEqual(harness.posts.map((post) => post.body), [{ thscode: 'HSI.HK', clear: true }], '取消出口给得出（那枚实心圆圈就是它）')
+  assert.equal(classNodes(tree, 'capital-watchlist-name')[0].props.className.includes('capital-watchlist-name-held'), false, '取消之后红名退掉')
+  assert.equal(stepButtons(tree), null, '但遗留的指数持仓没有调档那一行：类型不成立，不给它继续写比例的入口')
+})
+
+test('⛔ 步进器开着时关掉面板：重开必须是干净清单，不是上一轮那只票的菜单', async () => {
+  // 座位常驻、组件不卸载（关闭走 return null）。表单时代那两格 store（pendingHolding / holdingDraft）
+  // 就是为了这一条；现在状态整个搬进"那一行的 holding + rowMenu"，所以钉法跟着换：
+  // 关面板 ⇒ rowMenu 归零 ⇒ 步进器与勾都没地方画，而屏上那几行的红/不红是宿主的真值，不是草稿。
+  const harness = holdingHarness('s-hold-reopen', { stored: heldRow({ holding: { weight_pct: 30, marked_at: 7 } }) })
+  harness.surface.open()
+  for (let round = 0; round < 5; round += 1) await harness.settle()
+  openMore(harness)
+  assert.ok(stepButtons(harness.render()), '步进器开着')
+
+  harness.surface.close()
+  assert.equal(harness.state().rowMenu, null, '关面板时菜单一起收：它现在是步进器唯一的座位')
+  harness.surface.open()
+  for (let round = 0; round < 5; round += 1) await harness.settle()
+
+  const tree = harness.render()
+  // 假 `Menu` 不管 `open` 都把 props 记下来（真身在 open 为 false 时根本不渲染列表），
+  // 所以这里钉的是**开合状态**本身：步进器的座位就是这张关掉的菜单。
+  assert.equal(menuNodes(tree)[0].props.open, false, '重开时菜单是收着的，步进器没有座位')
+  assert.equal(classNodes(tree, 'capital-watchlist-confirm').length, 1)
+  assert.equal(classNodes(tree, 'capital-watchlist-confirm').length, 1, '常驻遮罩层仍然只有移除那一张')
+})
+
+test('⛔ 刷新落回整张清单时，在途的持仓写不许再改它（seq 账目跟着作废）', async () => {
+  // 面板一打开就自动刷新，而用户就在刷新那几秒里点 +。刷新回包是宿主的真值（写在那边是串行的），
+  // 它落地之后任何还在路上的 /holding 回执都必须丢掉——否则一次刷新会被一句旧回执"改口"。
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  const harness = holdingHarness('s-hold-refresh', {
+    stored: heldRow({ holding: { weight_pct: 10, marked_at: 7 } }),
+    respond: (path) => (path.includes('/holding')
+      ? gate.then(() => ({ ok: true, status: 200, text: async () => `{"ok":true,"item":${JSON.stringify(heldRow({ holding: { weight_pct: 20, marked_at: 55 } }))}}` }))
+      : undefined),
+  })
+  harness.surface.open()
+  for (let round = 0; round < 5; round += 1) await harness.settle()
+  openMore(harness)
+
+  pressStep(harness, 'up')
+  assert.equal(harness.state().items[0].holding.weight_pct, 20, '乐观：在途时先按新值画')
+
+  await harness.surface.refresh()
+  for (let round = 0; round < 5; round += 1) await harness.settle()
+  assert.equal(harness.state().items[0].holding.weight_pct, 10, '刷新回包是宿主真值：屏上回到它')
+
+  release()
+  for (let round = 0; round < 5; round += 1) await harness.settle()
+  assert.equal(harness.state().items[0].holding.weight_pct, 10, '⛔ 那条旧回执晚到了，不许把 20 又画回去')
+  assert.equal(harness.state().items[0].holding.marked_at, 7)
+})
+
+test('两套字典都要有持仓这一族，且英文界面不许画中文类型词', () => {
+  const harness = holdingHarness('s-hold-dict')
+  const zh = harness.ctx.dictionaries['capital.watchlist'].zh
+  const en = harness.ctx.dictionaries['capital.watchlist'].en
+  for (const key of ['holdingWeightLabel', 'holdingStepper', 'holdingStepUp', 'holdingStepDown', 'holdingName']) {
+    assert.ok(typeof zh[key] === 'string' && zh[key].length > 0, `zh 缺 ${key}`)
+    assert.ok(typeof en[key] === 'string' && en[key].length > 0, `en 缺 ${key}`)
+  }
+  // ⛔ 表单时代那批键，加上后来删掉的三键（「未填」、那句固定的范围、动词式的行标签），必须**真的没了**：
+  // 留着 `holdingMenu` 就是有人把"标记持仓 / 取消标记"两个动词各写一份、再拿行标签去说状态的余地。
+  for (const gone of ['holdingTitle', 'holdingHint', 'holdingBadNumber', 'holdingSave', 'holdingCancel',
+    'holdingUnmark', 'holdingMenuMarked', 'holdingBadge', 'holdingWeightPlaceholder', 'holdingDescSuffix',
+    'holdingUnset', 'holdingRange', 'holdingMenu']) {
+    assert.equal(zh[gone], undefined, `zh 里还留着 ${gone}`)
+    assert.equal(en[gone], undefined, `en 里还留着 ${gone}`)
+  }
+  // 行标签、开关的可达名与 tooltip 里那个词是**同一个 key**（「持仓」/ Holding）：一处改，三处跟着改。
+  assert.equal(zh.holdingName, '持仓')
+  // 比例那一行的标题是用户点名的两个词（"占组合比例改成持仓比例"）；旧说法不许从任何一处漏回来。
+  assert.equal(zh.holdingWeightLabel, '持仓比例')
+  assert.equal(zh.holdingStepper.startsWith(zh.holdingWeightLabel), true, '开关悬停那句必须与行标题同词')
+  assert.equal(Object.values(zh).some((value) => value.includes('占组合')), false, '「占组合比例」这一族说法已经作废')
+  assert.equal(/标记|mark/i.test(zh.holdingName + en.holdingName), false, '行标签是名词，不带"标记"这个动词')
+  // 那句 `0~N` 不是文案：它是这一格的**剩余额度**（随其余持仓变，最多 100、合计封顶 120），
+  // 所以在代码里拼、不住在字典里——两套语言因此天然同值。
+  assert.equal(Object.values(zh).some((value) => /未填/.test(value)), false, 'zh 里不许再出现"未填"这个词')
+  assert.equal(Object.values(en).some((value) => /not set/i.test(value)), false, 'en 里不许再出现 Not set')
 })

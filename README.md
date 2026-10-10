@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.6.5-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.7.0-9cf" alt="Version"></a>
 </p>
 
 # Capital Generation
@@ -26,14 +26,12 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 
 **🎞️视频演示：**[安装、配置与使用](https://www.bilibili.com/video/BV1fzaZ6CE9J/)。
 
-例如，你可以问：「复盘 XXXX 最近 20 个交易日的走势，结合公告和财务数据说明主要变化，并画一张量价图。」
-
 [样例：假期后研判报告（20261007）](docs/sample/假期后研判报告.md)。
 
 > [!IMPORTANT]
 > 本项目仍在探索中，不提供金融服务或投资建议，不保证数据完整、及时或准确，也不承诺投资回报。请自行核对来源并承担投资风险。
 
-## 开始使用
+## 快速上手
 
 > [!NOTE]
 > 适配 DSH`@0.2.0-rc.2`。已在 Linux 的 Web profile 和 Windows 桌面端验证；其他环境尚未充分测试。建议使用 `Deepseek/deepseek-flash` ，思考推理能力为 High ；GPT / Claude 尚未充分测试。
@@ -76,14 +74,14 @@ https://github.com/v587d/capital-generation
    | [Wind Alice](https://market.windalice.com/#/home) | 公告与新闻检索，以及宏观/行业/汇率指标与按日期区间取的历史 K 线 |
    | [PaddleOCR AIStudio](https://aistudio.baidu.com/paddleocr) | 解析 PDF 和图片中的文字 |
 
-   这些都是第三方服务的密钥，需分别向服务方申请；额度和条款以各服务方为准。
-   保存后**新建 Capital 模式会话**即可生效，无需重启。
-   也可以将密钥写入 `~/.dsh/.credentials.yaml`，名称依次为 `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`、`PADDLE_OCR_TOKEN`。
-   密钥由 DSH 凭据服务保存，不会显示在会话配置中。
+    这些都是第三方服务的密钥，需分别向服务方申请；额度和条款以各服务方为准。
+    保存后**新建 Capital 模式会话**即可生效，无需重启。
+    也可以将密钥写入 `~/.dsh/.credentials.yaml`，名称依次为 `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`、`PADDLE_OCR_TOKEN`。
+    密钥由 DSH 凭据服务保存，不会显示在会话配置中。
 
    <p align="center">
-     <a href="assets/DSH@0.2.0rc2插件主页配置.png">
-       <img src="assets/DSH@0.2.0rc2插件主页配置.png" alt="插件主页的「配置」段" width="800">
+     <a href="assets/数据源配置.png">
+       <img src="assets/数据源配置.png" alt="数据源配置" width="800">
      </a>
    </p>
 
@@ -95,22 +93,60 @@ https://github.com/v587d/capital-generation
      </a>
    </p>
 
-## 能做什么
+## 试试这么用
+
+在新的 Capital 模式会话中使用以下指令。将方括号内容换成自己的标的、公告或持仓；证券代码写完整市场后缀，例如 `600519.SH`。每条指令单独发送，便于观察结果。
+
+**完整投资研究报告**
+
+```text
+请对[公司名称、俗称]([证券代码])做一份完整投资研究报告。
+以你实际取得的最新可用数据为截止，覆盖业务、财务、估值、价格走势、近期重要事件以及风险与反方观点。
+先给核心判断和最大风险；关键数字注明报告期或交易日、来源和采集时间。
+证据不足的部分注明未评估及原因，不编造目标价或收益概率。
+```
+
+**事件与公告影响分析**
+
+```text
+请核查[公司名称]([完整证券代码])的[公告标题及披露日期，或“最近一次业绩公告”]，
+分析它对经营、现金流和投资风险可能产生的影响。
+先核对公告原文、披露时间和事项进展，区分已实施事实与尚待批准的方案；
+如讨论股价反应，只比较公告后可交易时段和同窗市场走势，不把同期涨跌直接归因于公告。
+给出最大不确定性和后续验证指标，找不到原文时不要假设事件已发生。
+```
+
+**持仓与组合复盘**
+
+```text
+请复盘我的持仓[其他资产如有，请补充]。
+请先核对这些比例是否覆盖全部资产，再分析单只标的、行业与市场的集中风险，
+以及哪些风险会同时影响多个持仓。
+我没有提供交易流水或成本，不要计算期间收益、最大回撤或收益归因；
+我只在自选股里标过持仓的那几只才算仓位，没标的只是关注。
+给出最需要核实的信息和可观察的防守选项。
+```
+
+## 还能做什么
 
 - **查数据和资料：** 覆盖A股、港股、美股，由 Agents 按需获取行情、财务、指数、基金与宏观行业数据，检索公告、新闻和研报。共计 **94** 个数据收集能力和 **14** 个网页检索能力，部分公开数据源无需额外密钥；具体覆盖范围见 [数据收集能力表](docs/data-collector-capabilities.md) 和 [网页检索能力表](docs/web-retriever-capabilities.md)。
 - **数据分析：** 所有 Agents 均不直接接触原始结构数据，Agents 按需读取数据、校验数据，并写脚本挖掘数据背后含义。 
 - **可视化：** 将数据交给不同角色处理，再生成可交互图表。图表会作为本轮交付物出现在会话中，可在侧栏查看或离线打开。了解处理流程可看 [Agent 角色说明](docs/agent-roles.md)。
-- **管理自选股：** 在 Capital 会话中输入 `/` 或点击输入框旁的 `+`，从「指令」中打开「自选股」。A股、港股、美股共用这一个入口：直接敲代码或名称，候选列表会写清它属于哪个市场；清单里每一行都带市场标注，指数另标一行。某一个市场取数失败时，其余市场照常刷新，页面会说明失败的是哪一路；整体刷新失败时已有报价仍显示为旧快照，并标明时间，请勿当作实时价格。
-
-会话中的图表效果：
 
 | 走势折线 | K 线与量价 |
 | :---: | :---: |
 | <a href="assets/chart-line-sidebar.png"><img src="assets/chart-line-sidebar.png" alt="侧栏折线图" width="400"></a> | <a href="assets/chart-candlestick-sidebar.png"><img src="assets/chart-candlestick-sidebar.png" alt="侧栏 K 线图" width="400"></a> |
 
+- **管理自选股：** 在 Capital 会话中输入 `/` 或点击输入框旁的 `+`，从「指令」中打开「自选股」。
+
+| 管理自选股 | 标记持仓 |
+| :---: | :---: |
+| <a href="assets/watchlist-popup.png"><img src="assets/watchlist-popup.png" alt="管理自选股" width="400"></a> | <a href="assets/watchlist-more.png"><img src="assets/watchlist-more.png" alt="标记持仓" width="400"></a> |
+
+- **精选 Skills：** 当前收录两个开源项目：[The Investment Skills Lexicon](https://github.com/finterm-ai/investment-skills)（Buffett Investment Framework）和 [China Stock Research Skills](https://github.com/spikeHongg/china-stock-research-skills)（六个研究模块）。上游编排 skill 不会覆盖 Capital 的会话路由。可在「插件」→ **Capital Generation** →「配置」中按需开启；开启后新建 Capital 会话生效，默认关闭。
 <p align="center">
-  <a href="assets/watchlist-popup.png">
-    <img src="assets/watchlist-popup.png" alt="自选股面板" width="420">
+  <a href="assets/selected-skills配置.png">
+    <img src="assets/selected-skills配置.png" alt="selected-skills配置" width="800">
   </a>
 </p>
 
@@ -138,3 +174,11 @@ npm run smoke:boot  # 检查插件装配
 ```
 
 完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。问题与建议可到 [Issues](https://github.com/v587d/capital-generation/issues) 或 [DSH官方 Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions/6947) 交流。本项目采用 [MIT 许可](LICENSE)。
+
+## 致谢
+
+- 「精选 Skills」的研究流程**原样收录**自 [finterm-ai/investment-skills](https://github.com/finterm-ai/investment-skills) 与 [spikeHongg/china-stock-research-skills](https://github.com/spikeHongg/china-stock-research-skills)（均 MIT License）：不改上游文本，按固定 commit 收录，全部默认关闭，其中观点与方法论属于原作者，不构成对本插件结论的背书。
+- 会话里的可交互图表由 [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts)（Apache-2.0）渲染。
+- 行情、财务、公告与网页材料来自同花顺 Fuyao、Wind Alice、AnySearch、PaddleOCR 以及东方财富、腾讯等公开或申请制接口；数据版权归各服务方，额度与条款以服务方为准，本项目不重新分发原始数据。
+
+随包分发的第三方组件、版本与许可逐条列在 [第三方组件与许可](THIRD_PARTY_NOTICES.md)。

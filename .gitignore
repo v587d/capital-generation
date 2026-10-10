@@ -47,8 +47,10 @@ docs/design/*
 !docs/design/data-capability-expansion.md
 # Wind 接入同例：真报文结论（七处上游漂移、参数面的每一项依据）只在这份里有，实现按它落地就必须能对照它。
 !docs/design/wind-market-source.md
+!docs/design/external-skill-intake.md
 docs/reference/*
 !docs/reference/dsh-surface-ledger.md
+!docs/reference/external-skill-scan-2026-10.md
 # docs/dev/ = AGENTS.md 的详情层，整目录都是研发文档（同样要先放行目录再挑文件）。
 !docs/dev/
 docs/dev/*

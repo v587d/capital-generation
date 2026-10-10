@@ -143,6 +143,7 @@ ds('eastmoney', 'eastmoney_sector_rotation', 'daily', { page: 1, size: 3 }, {
 `normalizeParams`；以及**删行**——覆盖闸门按注册数算分母，漏一行就红（§10.8 第 1 条同源）。
 
 顺序：改 → `npm test` → `npm run contract:probe -- --only <子串>` 本地看判据落在哪 → `git push`。
-下次 07:00（北京）自动生效，想立刻验：`gh workflow run data-source-contract.yml --ref master -f tier=daily`。
+下次 06:00（北京）自动生效（周六全量维持 07:00）；改时间要连注册表里的 `SCHEDULE_UTC` 一起改——两边有
+逐个"星期 + 小时"的回归比对，只改 YAML 会让看门狗天天误报没跑。想立刻验：`gh workflow run data-source-contract.yml -f tier=daily`。
 **别为了"少报几条"标影子**：`TRANSPORT` / `SLOW` / `EMPTY` 本来就不开单（`ISSUE_VERDICTS` 只认
 `GUARD` / `ENVELOPE` / `HTTP_STATUS`），影子的定义域是**这个视角测不准**——定性前先换个出口重打一次。

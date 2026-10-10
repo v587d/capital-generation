@@ -1,0 +1,6 @@
+# Capital Generation 的打包排除，不是上游内容的一部分（见 UPSTREAM.md 的 Packaging 一行）。
+# 这两坨是上游 README 用的成图与它自己的 viz 站点：2.3 MB，其中 images/ 与 viz/out/ 是同一批
+# PNG 的两份拷贝，而 skill 正文一处都没有引用它们（grep 'images/\|viz/' 于 */skills/ 为空）。
+# 装出去的用户只需要 skill 正文与溯源，全量快照仍然完整住在 git 里（github: 安装拿得到）。
+images/
+viz/

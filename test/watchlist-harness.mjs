@@ -253,3 +253,27 @@ export function httpFixture({ method = 'GET', url = '/', body, headers = {} }) {
   }
   return { req, res }
 }
+
+/**
+ * 可交易的几条标的。持仓这一族的用例不能拿种子的四条指数来标：`markHolding` 的类型闸门
+ * 只放行个股与场内基金（指数是市场读数，不是可持有、可配比率的券）。
+ */
+export const HOLDABLE_ROWS = [
+  { thscode: '300750.SZ', ticker: '300750', name: '宁德时代', exchange: 'SZ', asset_type: 'a-share' },
+  { thscode: '600519.SH', ticker: '600519', name: '贵州茅台', exchange: 'SH', asset_type: 'a-share' },
+  { thscode: '510300.SH', ticker: '510300', name: '沪深300ETF', exchange: 'SH', asset_type: 'fund-etf' },
+  { thscode: '00700.HK', ticker: '00700', name: '腾讯控股', exchange: 'HK', asset_type: 'hk-stock' },
+  { thscode: 'AAPL.OQ', ticker: 'AAPL', name: '苹果', exchange: 'US', asset_type: 'us-stock' },
+]
+
+/**
+ * 先读一次清单让种子落地，再把上面几条经**域的写入边界**摆进来（走同一道 `itemSchema.parse`，
+ * 形状与真域一致，也不依赖上游搜索恰好命中哪几条）。返回摆进来的代码，供用例数行数。
+ */
+export async function withHoldable(instance, fake, addedAt = 1_790_586_000_000) {
+  await instance.list()
+  for (const row of HOLDABLE_ROWS) {
+    await fake.table.put(row.thscode, { ...row, added_at: addedAt, source: 'user', quote: null })
+  }
+  return HOLDABLE_ROWS.map((row) => row.thscode)
+}

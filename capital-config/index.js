@@ -1,4 +1,5 @@
 import z from '@deepseek-ai/schemastery'
+import { SELECTED_SKILL_CATALOG } from '../selected-skills/catalog.js'
 
 export const name = 'capital-config'
 
@@ -81,8 +82,17 @@ const PaddleOcrSchema = z.object({
   pollBudgetMs: z.number().default(PADDLE_OCR_DEFAULTS.pollBudgetMs).volatile().description('ocr 内部等作业的预算毫秒，0 = 默认 200000'),
 })
 
+const SelectedSkillsShape = Object.fromEntries(SELECTED_SKILL_CATALOG.map((entry) => [
+  entry.key,
+  z.boolean().default(false).volatile().description(`Enable ${entry.name} for the Capital root Agent (experimental; default off)`),
+]))
+const SelectedSkillsSchema = z.object(SelectedSkillsShape)
+
+const SELECTED_SKILL_DEFAULTS = Object.fromEntries(SELECTED_SKILL_CATALOG.map((entry) => [entry.key, false]))
+
 export const Config = z.object({
   customPersona: z.string().default('').volatile().description('Capital 模式附加人设文本'),
+  selectedSkills: SelectedSkillsSchema.default(SELECTED_SKILL_DEFAULTS).description('Explicitly selected community experiments; default off and visible only to the Capital root Agent'),
   fuyaoCredentialRef: z.string().default('FUYAO_API_KEY').volatile().description('Fuyao credentials 引用名'),
   retriever: z.object({
     baseURL: z.string().default('').volatile().description('AnySearch API 地址'),

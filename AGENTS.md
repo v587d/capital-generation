@@ -23,14 +23,13 @@
 | `render_chart` 准入与呈现 | `docs/dev/chart-presentation.md`（§6.1 §6.2）|
 | 交付登记与会话事件类型 | `docs/dev/chart-delivery-events.md`（§6.3）|
 | preset 现状、人设落点、「不许改」全表、新增角色六处齐改 | `docs/dev/preset-persona.md`（§8.1 §8.2 §8.4 §8.5）|
+| 外部 Skills 接入 | `docs/dev/selected-skills.md`（§8.6）|
 | 工具 schema 全表、数据源验收全表 | `docs/dev/tool-schema.md`（§9.1–§9.6 §10.1–§10.9）|
 
 ### ⛔ 硬约束一览
 
-- **§1.1** 省往返靠 `isConcurrencySafe` + 框架并发池；体积闸门只有一道（`SAFE_RESULT_CHARS=7000`
-  小回执 + hint）——不合并多份 dataset，也不引入 digest / 裁剪阶梯。
-- **§1.3** 日期串落到数值时间列必须 `query_type_conflict` 响亮失败，不许静默跳过 filter；日期归一
-  （`query-time.ts`）与 session 读取（`src/tool-exec.ts` 的 `exec.agent.session`）各只有一份实现，新增入口必须复用、不提供兜底。
+- **§1.1** 省往返靠 `isConcurrencySafe` + 框架并发池；体积闸门只有一道（`SAFE_RESULT_CHARS=7000` 小回执 + hint）——不合并多份 dataset，也不引入 digest / 裁剪阶梯。
+- **§1.3** 日期串落到数值时间列必须 `query_type_conflict` 响亮失败，不许静默跳过 filter；日期归一（`query-time.ts`）与 session 读取（`src/tool-exec.ts` 的 `exec.agent.session`）各只有一份实现，新增入口必须复用、不提供兜底。
 - **§1.6** bash 闸门不是安全边界（沙箱只拦写），别把它写成边界；guard 刻意不解析命令内容。
 - **§5.1** 可编辑配置只坐 `plugins.bundle.config`（key = 组合包名）一处，不开行级座位：每深一跳就多一次"设置里没这个插件"。
 - **§6.1** 根收敛监听只能挂 `ctx.root`（挂 standing scope 收不到且不报错）；通用 `subagent` 行必须
@@ -38,6 +37,7 @@
 - **§6.1** `/capital-charts` 序列旁路必须接 `connection.requestRejection`，否则是无认证端点。
 - **§6.3** 会话事件词汇表是闭集，交付必须走 first-party `deliverables/presented`；cordis ctx 不能用
   `{ ...ctx }` 展开（`get`/`on`/`effect` 挂在原型上）；寄存队列按 owner（根会话）归档。
+- **§8.6** Skill frontmatter 与目录须可发现；catalog/provider 的运行时和打包约束见详情。
 - **§9.5 / §9.6** 工具返回值必须无损 JSON（`undefined` / `NaN` / 空洞不许带出），且必须满足自己
   声明的 `output.schema`——多返回一个未声明字段同样致命。
 
@@ -122,10 +122,7 @@ capital-analysis/runs/<analysis_id>/          # 预留（data_analyst）
 
 1. **挂载验证**（0.1.7 起用 `agentPresets.resolve(id)`：结果无 `broken`，且 `compositionInventory()`
    新增行 active（`FiberState.ACTIVE = 2`），失败信息点名问题行；旧 `standingKeyFor` 已消失）
-2. **`npm test` 全绿**（会先跑 `npm run build`）。断言的是"实测教训"不是措辞，**不允许靠删断言
-   变绿**：`assertRuleAny()` 全部落空 = 规则真消失，**补人设**；规则外迁时断言跟着改读目标正文。
-   体积闸门（persona 与 `agent.patch.yml` 正文）见 `test/persona.test.mjs`，文档行数见
-   `test/dev-docs.test.mjs`；上调须同步测试数字与理由注释。改过 `src/`、`scripts/`、host 平面的路径 / 换行 / 子进程形状，`test/cross-platform.test.mjs` 会红——它钉的是只在 Windows 上炸的写法形状，不是行为，别为变绿放宽它。
+2. **`npm test` 全绿**（会先 build）。测试断言实测教训，不准删断言变绿；规则迁移须同步断言。persona / `agent.patch.yml` 体积与文档行数闸门见相应测试。改过运行时路径、换行或子进程形状，勿放宽 `test/cross-platform.test.mjs`。
 3. **测试跟随本机 dsh 版本**：`dsh-persona` 字段是 `prefix` 不是 `text`（`test/persona.test.mjs`
    有核对用例）。字段名变化必须只在**一条**用例里失败并点名文件。
 4. 动过 preset 行 / host 平面 / 交付事件，再跑 `npm run check:dsh`（扩展面账本逐条探测）。

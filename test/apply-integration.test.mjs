@@ -81,7 +81,7 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
     assert.ok(services.get('datasetStore'), 'apply 必须提供 datasetStore 服务')
     assert.equal(hub.capabilityNames().length, 94, '装配后应注册 61 个 Fuyao、9 个 Tencent、21 个 Eastmoney 与 3 个 Wind capability')
 
-    for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status', 'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'prepare_chart_source', 'get_local_datetime', 'resolve_data_time_range', 'anysearch_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'ocr', 'render_chart']) {
+    for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status', 'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'prepare_chart_source', 'get_local_datetime', 'resolve_data_time_range', 'get_watchlist', 'anysearch_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'ocr', 'render_chart']) {
       assert.ok(toolNamed(tools, name), `装配后应注册工具 ${name}`)
     }
     // 2026-09-17 设计修订：final_report 整条链路删除（报告投影不再是主 Agent 的职责）。
@@ -258,6 +258,48 @@ function assertObjectSchemas(node, path, toolName) {
   }
   for (const [key, value] of Object.entries(node)) assertObjectSchemas(value, `${path}.${key}`, toolName)
 }
+
+/**
+ * `get_watchlist` 走的是**另一条数据面**：清单归 host 平面的 `capital-watchlist` 行
+ * （`ctx.provide('capitalWatchlist', …)`），本插件只读、不另建存储。两条都要钉：
+ * 注册不以服务在不在为条件（§9.7 ⑤ 桌面端事故的形状），以及服务后到必须立刻读得到。
+ */
+test('apply()：get_watchlist 无条件注册，capitalWatchlist 晚到也照样读得到', async () => {
+  process.env.FUYAO_API_KEY = 'smoke-key'
+  try {
+    const { ctx, tools, services, effectResults } = fakeCtx()
+    apply(ctx, { customPersona: '', retriever: { baseURL: '', credentialRef: '', windDocs: { endpoint: '', credentialRef: '', timeoutMs: 0 } } })
+    await Promise.all(effectResults)
+
+    const definition = toolNamed(tools, 'get_watchlist')
+    assert.ok(definition, '装配后必须注册 get_watchlist（host 平面那行在不在都要注册，否则它不在回归保护内）')
+
+    const before = await definition.execute({}, exec(delegated))
+    assert.equal(before.ok, false, '⛔ 服务没挂载时绝不回空清单：那会被模型答成"你还没加自选股"')
+    assert.equal(before.code, 'watchlist_unavailable')
+    assert.equal(before.items, undefined)
+
+    services.set('capitalWatchlist', {
+      list: async () => ({
+        ok: true,
+        limit: 30,
+        items: [{ thscode: '300750.SZ', name: '宁德时代', asset_type: 'a-share', added_at: Date.now() - 86_400_000 }],
+      }),
+    })
+    const after = await definition.execute({}, exec(delegated))
+    assert.equal(after.ok, true, '同一进程里服务后到就要立刻读得到——装配期取一次 = 把用户的自选股锁到进程结束')
+    assert.equal(after.count, 1)
+    assert.equal(after.items[0].thscode, '300750.SZ')
+    assert.equal(after.items[0].held, false, '没标过持仓就是未持仓，不是 0%')
+    assert.equal(after.limit, 30, '上限从宿主回包来，不在插件侧抄常量')
+
+    // 只读：这条路上没有任何写入口（添加 / 移除 / 标记持仓都只在面板里）。
+    assert.equal(Object.keys(definition.parameters.properties).length, 0, 'get_watchlist 不该有任何入参')
+  } finally {
+    if (SAVED_KEY === undefined) delete process.env.FUYAO_API_KEY
+    else process.env.FUYAO_API_KEY = SAVED_KEY
+  }
+})
 
 test('apply()：所有注册工具的 parameters 根必须是 object 型 schema', async () => {
   process.env.FUYAO_API_KEY = 'smoke-key'

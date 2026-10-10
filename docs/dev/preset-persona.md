@@ -50,7 +50,7 @@
   不新建、`description` = 角色标签、durable id、委派清单与 `waiting_data`、路由表、禁主 Agent
   直连数据工具与检索、子 Agent 互通经主 Agent 中继、全部 continuable、安全合规底线、叶子边界与
   「第一步先加载协议」。长协议 / 示例 JSON / 重试表 / 清单格式一律进 `skills/`。
-- **不要在插件代码里注册 skill provider**（`ctx.skills.registerProvider` 等）：Skills 由组合行承载。
+- **插件代码默认不注册 skill provider**：preset 自带 skills 继续由 `skill-filesystem` / `tool-skill` 组合行承载。唯一例外是用户显式选择的 community `selected-skills`：只在 `agent/created` 中同时确认 Capital preset 与 root Agent 后，注册到该 Agent 自己的 scope；配置默认全关，provider 只扫描 `selected-skills/catalog.js` 批准的快照目录并按 catalog 过滤，catalog 条目可带 `experimental` / `watchlist` 状态和能力标签，随 Agent scope 注销并停止 watcher。冷启动阶段维护频率和评分是用户可见的风险信号，不是自动拒绝条件；未来可随 catalog 规模和评测成熟逐步收紧。不得注册到 preset standing scope 或 Host scope；子 Agent 的既有 `toolFilter.allow` 不变。回归 `test/selected-skills-provider.test.mjs` 与 `test/persona.test.mjs`。
 - **子 Agent 读 skill 的唯一开关是 allow 里的 `skill`**：restriction 过滤继承层、只豁免本 scope
   自注册工具；这条链上任一环改动（toolFilter / skill 名 / 文件名）都要同步测试。
 - `dataCollectorHub` / `datasetStore` 必须留在 `capital-generation-scope` 的 isolate realm 内

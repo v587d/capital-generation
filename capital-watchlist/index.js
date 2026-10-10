@@ -29,6 +29,7 @@ import {
   fetchSmartbox,
   normalizeHkCode,
 } from '../lib/sources/tencent-public-core.js'
+import { ASSET_TYPES, isHoldable, weightCeiling, otherHeldWeightPct, MAX_ROW_WEIGHT_PCT, MAX_TOTAL_WEIGHT_PCT } from './holding-rules.js'
 
 export const name = 'capital-watchlist'
 
@@ -67,7 +68,9 @@ export const SEARCH_BRANCH_LIMITS = { 'a-share': 50, hk: 10, us: 10 }
 /** A 股那一路的搜索白名单（Fuyao 与报价端点双端都有可靠支撑）；场外基金 / 北交所不进候选。
  * 港美股那两路各有自己的白名单（`SMARTBOX_STOCK_TYPES` + `SMARTBOX_INDEX_TYPE`），互不通用。 */
 export const SEARCH_ASSET_TYPES = 'a-share,a-share-index,fund-etf'
-const ASSET_TYPES = ['a-share', 'a-share-index', 'fund-etf', 'hk-stock', 'hk-index', 'us-stock', 'us-index']
+// `ASSET_TYPES`（域里允许的类型）、"哪些类型可以是一个仓位"与"占比合计封顶多少"都住在
+// `./holding-rules.js` **一份**里：浏览器半边（`client.src.cjs`）也引它，菜单画不画那一行、
+// `+` 什么时候置灰，与这里收不收这一格不可能各说一套。
 /**
  * `exchange` 这一格存的是**市场**而不是交易所：A 股沿用 `SH`/`SZ`，港美股落 `HK`/`US`。
  * 具体交易所（美股的 `OQ` / `N` / `AM` / 粉单 `PS`）留在 canonical 代码里（`AAPL.OQ`）——
@@ -271,6 +274,24 @@ const itemSchema = z.object({
    * 永远带它——两个方向的兼容因此都不需要迁移、也不需要抬 domain version。
    */
   pinned_at: z.number().int().optional(),
+  /**
+   * 用户**自报**的持仓标记（缺这一格 = 不是持仓，只是关注）。
+   *
+   * 三态两轴，不许糊成一态：缺 `holding` = 未持仓；`weight_pct === null` = 标了持仓但比例没填；
+   * `0` = 用户真填了 0——与上面 `change_pct` 同一条口径，"没有这个数"永远不等于"这个数是零"。
+   * 所以这一格**外部可选、内部 nullable**：外面写成 `.nullable()` 会让"未持仓"与"持仓没填比例"
+   * 共用一种写法，里面写 `.default(null)` 会把磁盘上手改出来的缺字段读成一份 0% 仓位。
+   * 可选同样是为了不迁移、不抬 domain version（见上面 `pinned_at` 那一段）。
+   *
+   * `marked_at` 记的是**标记时刻**，不是"持仓起始日"：比例归用户所有、没有到期日，但"这句话是
+   * 哪天说的"必须能自证——`get_watchlist` 把它交给主 Agent 判断要不要向用户复核。合计是否正好
+   * 100、分母含不含现金，仍不由我们校验（那本账只有用户自己知道怎么记的）；我们只挡一个**上限**：
+   * 只做多、不算 put，全组合加起来不许超过 120%（判据在 `./holding-rules.js`，面板与宿主共用）。
+   */
+  holding: z.object({
+    weight_pct: z.number().min(0).max(100).nullable(),
+    marked_at: z.number().int(),
+  }).optional(),
 })
 
 /**
@@ -710,7 +731,9 @@ export function createWatchlistService(options = {}) {
   async function list() {
     await ensureSeeded()
     const opened = await domain()
-    return { ok: true, items: rowsOf(opened.table('items')), seeded_at: opened.global.get().seeded_at }
+    // `limit` 跟着回包走（与 `add` 的 `list_full` 同一口径）：上限这个数字归本包所有，
+    // 面板那句话和 `get_watchlist` 那句都不许自己抄一份。
+    return { ok: true, items: rowsOf(opened.table('items')), seeded_at: opened.global.get().seeded_at, limit: MAX_ITEMS }
   }
 
   async function add(input) {
@@ -796,6 +819,90 @@ export function createWatchlistService(options = {}) {
       if (existing === undefined) return { ok: false, code: 'not_found', message: '该标的不在自选清单里' }
       await items.put(thscode, { ...existing, pinned_at: now() })
       return { ok: true, items: rowsOf(items) }
+    })
+  }
+
+  /**
+   * 标记持仓 = 给这一条写 `holding`；比例留空（`undefined` / `null` / 空串）表示"标了持仓、
+   * 比例还没填"，落 `null` 而不是 0。`clearHolding` 抹掉这一格，关注条目本身不动。
+   *
+   * 与 `pin()` 同一条读—改—写口径：**锁内逐键重读**——刷新在途刚被用户删掉的那一行不许被旧记录
+   * 连同持仓一起写回来（那还会重新占掉一格）。比例只收 0–100，越界与"根本不是数"都回
+   * `invalid_query`：这一格是用户自报的权重，我们不替用户核对券商账，但**也不接一个明显不成立的数**。
+   * ⛔ `Number(null)` 是 0——空值一律先在这外面判成"未填"，绝不放进 `numberValue` 硬转。
+   *
+   * 还有一道**类型闸门**（`isHoldable`，与面板共用 `./holding-rules.js` 那一份）：指数不是一个可以
+   * 持有并配比率的标的。`marked_at` 每次写入都重打——它是"这句话最后一次说出来的时刻"，
+   * 不是"仓位建立日"；用户把 20% 调成 30%，那句自报的话确实就是刚刚说的。
+   *
+   * 第三道是**合计闸门**（`weightCeiling`，同一份模块）：只做多、没有 put，所以全组合的自报占比
+   * 合计封顶 120%（2026-10-09 用户点名"我居然可以对多只标的都填超过 50%"）。额度按**其余持仓**
+   * 算，不含这一格自己，所以 lowering 永远走得通。⛔ 勾上但没填（`weight === null`）不加任何敞口，
+   * 因此**不因合计被拒**——否则一条手改出来的超额数据会把"先勾上再慢慢填"这条路一起堵死。
+   */
+  async function markHolding(input) {
+    await ensureSeeded()
+    const items = await table()
+    const thscode = normalizeThscode(input?.thscode)
+    if (thscode === undefined) return { ok: false, code: 'invalid_query', message: '代码格式不符：要带市场或交易所后缀的完整代码' }
+    const raw = input?.weight_pct
+    let weight = null
+    if (raw !== undefined && raw !== null && raw !== '') {
+      const parsed = numberValue(raw)
+      if (parsed === undefined || parsed < 0 || parsed > MAX_ROW_WEIGHT_PCT) {
+        return { ok: false, code: 'invalid_query', message: `持仓比例要 0 到 ${MAX_ROW_WEIGHT_PCT} 之间的数字；留空表示只标记持仓、不填比例` }
+      }
+      weight = parsed
+    }
+    return serialize(async () => {
+      const existing = items.get(thscode)
+      if (existing === undefined) return { ok: false, code: 'not_found', message: '该标的不在自选清单里' }
+      // 类型闸门排在 `not_found` **之后**：一个根本不在这份清单里的代码，该听到的是"不在清单里"，
+      // 不是"指数不能标持仓"——后者会把人引去查类型，而真正的问题是那一行不存在。
+      // `existing.holding === undefined` 这一半是给"重标"留的门：已经标过的行（包括在旧版本或
+      // 手改数据里标上的指数）改比例仍走得通，⛔ 否则那一格会退不掉——面板不画取消出口、宿主又不收。
+      // 只拦"标"、不拦"取消"（见 `clearHolding`）：抹一格不声明任何领域事实。
+      if (existing.holding === undefined && !isHoldable(existing)) {
+        return { ok: false, code: 'invalid_query', message: '这一条不是一个可以持有并配比率的标的（指数是市场读数，不是券），因此不能标记为持仓' }
+      }
+      // 合计闸门也排在锁内：额度取决于**其余持仓此刻**是多少，读—判—写不在同一环里就会
+      // 被并发写入各放一只过去（两行都看到"还有额度"，落盘的合计却超了）。
+      if (weight !== null) {
+        const rows = rowsOf(items)
+        const ceiling = weightCeiling(rows, thscode)
+        if (weight > ceiling) {
+          return { ok: false, code: 'invalid_query', message: `其余持仓已合计 ${otherHeldWeightPct(rows, thscode)}%，这一格最多只能填 ${ceiling}%（只做多的组合合计不超过 ${MAX_TOTAL_WEIGHT_PCT}%）` }
+        }
+      }
+      const item = { ...existing, holding: { weight_pct: weight, marked_at: now() } }
+      await items.put(thscode, item)
+      return { ok: true, item }
+    })
+  }
+
+  /**
+   * 取消持仓 = 写回一份**没有** `holding` 那一格的记录。
+   *
+   * 不删键再插：官方单文件后端是 `Map` + 整份 JSON 原子写，`put` 已有键保留原位置，
+   * 而删了重插会把这一行甩到插入顺序的末尾——用户取消一个持仓标记，清单却跟着重排，
+   * 那是"动作与位移对不上"的静默副作用（与 `pin()` 不改键序同一条理由，设计文档 §3.2）。
+   *
+   * ⛔ 这里**故意不查类型**：`markHolding` 拒的是"把指数说成仓位"这句新话，`clearHolding` 只是
+   * 不再说那句话。两边都拦，一条遗留或手改出来的"指数持仓"就永远退不掉——面板不画取消出口
+   * （它按类型决定画不画），宿主又拒绝写，那一格被锁死在域里。
+   */
+  async function clearHolding(input) {
+    await ensureSeeded()
+    const items = await table()
+    const thscode = normalizeThscode(input?.thscode)
+    if (thscode === undefined) return { ok: false, code: 'invalid_query', message: '代码格式不符：要带市场或交易所后缀的完整代码' }
+    return serialize(async () => {
+      const existing = items.get(thscode)
+      if (existing === undefined) return { ok: false, code: 'not_found', message: '该标的不在自选清单里' }
+      const item = { ...existing }
+      delete item.holding
+      await items.put(thscode, item)
+      return { ok: true, item }
     })
   }
 
@@ -994,6 +1101,8 @@ export function createWatchlistService(options = {}) {
     add,
     remove,
     pin,
+    markHolding,
+    clearHolding,
     refresh,
     async close() {
       const opened = await domainPromise
@@ -1131,6 +1240,12 @@ export function createRouteHandler(service, options = {}) {
       if (method === 'POST' && pathname === '/add') return sendBusiness(res, await service.add(input))
       if (method === 'POST' && pathname === '/remove') return sendBusiness(res, await service.remove(input))
       if (method === 'POST' && pathname === '/pin') return sendBusiness(res, await service.pin(input))
+      if (method === 'POST' && pathname === '/holding') {
+        // 标记与取消共用一条路由、靠 body 里那一个布尔分流：面板上的概念只有一个（"这条是不是
+        // 我的持仓"），拆两条要多一套字典与一份围栏回归，而两者差别只是写不写那一格。
+        const next = input?.clear === true ? service.clearHolding(input) : service.markHolding(input)
+        return sendBusiness(res, await next)
+      }
       if (method === 'POST' && pathname === '/refresh') {
         // 刷新是"部分成功 + 逐条失败"的形态：整批失败也带 items 与 error 回来，
         // 面板按 error.code 居中显示，绝不清空列表。

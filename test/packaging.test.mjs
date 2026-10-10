@@ -58,7 +58,11 @@ test('打包闸门：vendored 图表库与构建产物都在发布清单里', (t
     'capital-config/client.js',
     'capital-watchlist/package.json',
     'capital-watchlist/index.js',
+    // 类型表被 host 半边 import、被浏览器半边内联：漏进包 = 装出去的插件整条 /capital-watchlist 起不来。
+    'capital-watchlist/holding-rules.js',
     'capital-watchlist/client.js',
+    // 第三方清单要点得到文件：写了 `xxx/LICENSE` 却没随包发，等于把署名义务发丢了。
+    'THIRD_PARTY_NOTICES.md',
     'preset/capital-generation/agent.patch.yml',
     'preset/capital-generation/skills/capital-chart-protocol/SKILL.md',
     'cordis.patch.yml',
@@ -86,6 +90,46 @@ test('打包闸门：vendored 图表库与构建产物都在发布清单里', (t
     assert.equal(path.startsWith('docs/'), false, `研发文档不应随包发布：${path}`)
   }
   t.diagnostic(`发布清单 ${paths.size} 个文件`)
+})
+
+test('打包闸门：selected-skills 的运行时半边逐条落在发布清单里', async () => {
+  // provider 运行时按**包内相对路径** import catalog、并解析两颗 skills 目录
+  // （src/agents/selected-skills-provider.ts 的 '../../selected-skills/…'）：漏发任何一条的表现
+  // 不是报错，而是"用户在卡片上勾了，那个 skill 就是不出现"。仓库里跑测试永远发现不了，
+  // 因为目录就在 cwd 下面——AGENTS.md §9.7 那一族，只有打包器能回答"发出去有哪些文件"。
+  const paths = packedFilePaths()
+  const { SELECTED_SKILL_CATALOG } = await import('../selected-skills/catalog.js')
+  assert.ok(SELECTED_SKILL_CATALOG.length >= 1, 'catalog 一条都没有，这条闸门就变成空断言了')
+
+  for (const required of ['selected-skills/catalog.js', 'selected-skills/README.md']) {
+    assert.ok(paths.has(required), `发布清单里缺少 ${required}（settings 卡片与 provider 都 import catalog）`)
+  }
+
+  for (const entry of SELECTED_SKILL_CATALOG) {
+    const skillPath = `selected-skills/${entry.repository}/skills/${entry.name}/SKILL.md`
+    assert.ok(paths.has(skillPath),
+      `catalog 登记了 ${entry.key}（${entry.name}），但包里找不到 ${skillPath} —— 用户勾上这一格也不会生效`)
+  }
+
+  // MIT 快照随包发布，许可证与溯源记录必须跟着走（上游全文快照是刻意保留的，见 selected-skills/README.md）。
+  const repositories = [...new Set(SELECTED_SKILL_CATALOG.map((entry) => entry.repository))]
+  for (const repository of repositories) {
+    for (const provenance of ['LICENSE', 'UPSTREAM.md']) {
+      const path = `selected-skills/${repository}/${provenance}`
+      assert.ok(paths.has(path), `上游快照的 ${path} 必须随包发布（MIT 的署名义务与"哪个 commit"的溯源）`)
+    }
+  }
+
+  // 反向断言：上游 README 用的成图与它自己的 viz 站点不进包（2.3 MB，其中 images/ 与 viz/out/ 是
+  // 同一批 PNG 的两份拷贝，skill 正文零引用）。`files` 按仓库逐个登记，所以新接一份快照忘了登记
+  // 时上面那条会点名失败；这一条防的是反向漂移——有人把排除口径放宽回去。
+  for (const path of paths) {
+    assert.equal(
+      /^selected-skills\/[^/]+\/(images|viz)\//.test(path),
+      false,
+      `上游的成图与 viz 站点又进包了：${path}（用户装的是运行时正文，全量快照住在 git 里）`,
+    )
+  }
 })
 
 test('打包闸门：声明 dsh.client 的包，其客户端 bundle 必须真的在包里', () => {
@@ -156,4 +200,20 @@ test('插件显示名：根包 locale meta 必须能被宿主读到，且 README
     'README 还在让用户到「已安装」列表里找 npm 包名，但卡片显示的是 locale meta.title')
   assert.match(readme, /已安装的 \*\*Capital Generation\*\*/u,
     'README 的指路措辞要与卡片显示名同源（zh 界面是 meta.title「Capital Generation（证券研究）」的前半）')
+})
+
+test('打包闸门：第三方清单点名的文件必须真的随包发布', () => {
+  // 清单是"这是谁的东西、什么许可"对外的唯一答案。写了路径却没发出去 = 署名义务发丢了，
+  // 而且什么报错都不会有——所以把清单里点名的每个仓内路径都拿去问一次真实打包器。
+  const notices = readFileSync(join(ROOT, 'THIRD_PARTY_NOTICES.md'), 'utf8')
+  // 反引号里还写着 `@deepseek-ai/cordis` 这类 npm 包名，它们带斜杠但不是仓内路径。
+  const named = [...new Set(
+    [...notices.matchAll(/`([^`]+)`/g)]
+      .map((match) => match[1])
+      .filter((value) => value.includes('/') && !value.startsWith('@') && !value.includes(' ')),
+  )]
+  assert.ok(named.length >= 3, `第三方清单只点名了 ${named.length} 个仓内路径，多半是格式被改坏了`)
+  const paths = packedFilePaths()
+  const missing = named.filter((value) => !paths.has(value))
+  assert.deepEqual(missing, [], `第三方清单点名了不随包发布的路径：${missing.join(', ')}`)
 })

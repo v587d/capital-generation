@@ -9,7 +9,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { apply, createRouteHandler, createWatchlistService, ROUTE_PATH, SEED_ITEMS } from '../capital-watchlist/index.js'
 import { fakeCtx } from './cordis-fake.mjs'
-import { createFakeDomain, httpFixture, stubFuyao } from './watchlist-harness.mjs'
+import { createFakeDomain, httpFixture, stubFuyao, withHoldable } from './watchlist-harness.mjs'
 
 function harness(options = {}) {
   const fake = createFakeDomain()
@@ -182,6 +182,73 @@ test('POST /pin：置顶那条排到最前；不在清单 404、裸代码 400，
   }
 })
 
+test('POST /holding：标记与取消都只写那一格；非法比例 / 指数 / 合计超 120% 都是 400，不在清单 404，且一次网都不出', async () => {
+  const stub = stubFuyao()
+  const { service, fake, handler } = harness()
+  try {
+    await withHoldable(service, fake)
+
+    const marked = await call(handler, { method: 'POST', url: '/capital-watchlist/holding', body: { thscode: '300750.SZ', weight_pct: 20 } })
+    assert.equal(marked.statusCode, 200)
+    assert.equal(marked.json().item.holding.weight_pct, 20)
+    assert.equal(typeof marked.json().item.holding.marked_at, 'number')
+
+    const listed = await call(handler, { method: 'GET', url: '/capital-watchlist/list' })
+    const row = listed.json().items.find((item) => item.thscode === '300750.SZ')
+    assert.equal(row.holding.weight_pct, 20, '/list 必须把持仓一起给面板——主 Agent 经 get_watchlist 读的就是同一格')
+
+    const blank = await call(handler, { method: 'POST', url: '/capital-watchlist/holding', body: { thscode: '510300.SH', weight_pct: '' } })
+    assert.equal(blank.json().item.holding.weight_pct, null, '留空 = 标了持仓、比例没填；不是 0')
+
+    const cleared = await call(handler, { method: 'POST', url: '/capital-watchlist/holding', body: { thscode: '300750.SZ', clear: true } })
+    assert.equal(cleared.statusCode, 200)
+    assert.equal(cleared.json().item.holding, undefined, '取消持仓回包里就没有这一格，不是留一个假的 0')
+
+    const outOfRange = await call(handler, { method: 'POST', url: '/capital-watchlist/holding', body: { thscode: '300750.SZ', weight_pct: 120 } })
+    assert.equal(outOfRange.statusCode, 400)
+    assert.equal(outOfRange.json().code, 'invalid_query', '越界比例是不被接受的入参，复用既有错误码，不另造一个')
+
+    const bare = await call(handler, { method: 'POST', url: '/capital-watchlist/holding', body: { thscode: '000001', weight_pct: 10 } })
+    assert.equal(bare.statusCode, 400)
+    assert.equal(bare.json().code, 'invalid_query')
+
+    const missing = await call(handler, { method: 'POST', url: '/capital-watchlist/holding', body: { thscode: '600000.SH', weight_pct: 10 } })
+    assert.equal(missing.statusCode, 404)
+    assert.equal(missing.json().code, 'not_found', '标记持仓不是添加自选：清单外的一只票不许被这一格凭空建出来')
+
+    // 类型闸门在 HTTP 这一路同样在（面板不画那一行是形状，宿主拒才是围栏）：
+    // 直接打路由也不该能把一根指数说成仓位。
+    const index = await call(handler, { method: 'POST', url: '/capital-watchlist/holding', body: { thscode: 'HSI.HK', weight_pct: 10 } })
+    assert.equal(index.statusCode, 400)
+    assert.equal(index.json().code, 'invalid_query')
+    assert.equal(fake.records.get('HSI.HK').holding, undefined, '被拒的请求不许改动那一格')
+    // 但"取消"不查类型：一条遗留的指数持仓必须退得掉（否则面板没这个出口、宿主又不收，就被锁死了）。
+    await fake.table.put('HSI.HK', { ...fake.records.get('HSI.HK'), holding: { weight_pct: 40, marked_at: 1_790_586_000_000 } })
+    const legacy = await call(handler, { method: 'POST', url: '/capital-watchlist/holding', body: { thscode: 'HSI.HK', clear: true } })
+    assert.equal(legacy.statusCode, 200)
+    assert.equal(fake.records.get('HSI.HK').holding, undefined)
+
+    // 合计闸门在 HTTP 这一路同样在（`+` 置灰是形状，宿主拒才是围栏）：只做多、没有 put，
+    // 两只各 100% 已经越过 120%，第三只填任何数都该被挡，而"勾上没填"不占额度、照放行。
+    await fake.table.put('300750.SZ', { ...fake.records.get('300750.SZ'), holding: { weight_pct: 100, marked_at: 1 } })
+    await fake.table.put('600519.SH', { ...fake.records.get('600519.SH'), holding: { weight_pct: 100, marked_at: 1 } })
+    const overBudget = await call(handler, { method: 'POST', url: '/capital-watchlist/holding', body: { thscode: '00700.HK', weight_pct: 10 } })
+    assert.equal(overBudget.statusCode, 400)
+    assert.equal(overBudget.json().code, 'invalid_query', '超合计上限同样是"这个入参不成立"，不另造错误码')
+    assert.equal(fake.records.get('00700.HK').holding, undefined, '被拒的请求不许改动那一格')
+    const unfilled = await call(handler, { method: 'POST', url: '/capital-watchlist/holding', body: { thscode: '00700.HK', weight_pct: null } })
+    assert.equal(unfilled.statusCode, 200, '标了但没填 = 0 敞口，不因合计被拒')
+
+    const viaGet = await call(handler, { method: 'GET', url: '/capital-watchlist/holding' })
+    assert.equal(viaGet.statusCode, 404)
+    assert.equal(viaGet.json().code, 'not_found', '这一条只认 POST：GET 落回"未知子路径"，不静默当成读')
+
+    assert.equal(stub.calls.length, 0, '标记持仓是纯本地动作：一次出网都不许有')
+  } finally {
+    stub.restore()
+  }
+})
+
 test('refresh 回包里 always 有 items / failures / refreshed_at 三件（面板按这个形状渲染）', async () => {
   const stub = stubFuyao()
   const { handler } = harness()
@@ -213,6 +280,8 @@ test('域打不开时所有路径改口 store_unavailable，不返回空清单�
       { method: 'GET', url: '/capital-watchlist/search?q=%E5%AE%81%E5%BE%B7%E6%97%B6%E4%BB%A3' },
       { method: 'POST', url: '/capital-watchlist/add', body: { thscode: '300750.SZ' } },
       { method: 'POST', url: '/capital-watchlist/pin', body: { thscode: '000300.SH' } },
+      { method: 'POST', url: '/capital-watchlist/holding', body: { thscode: '000300.SH', weight_pct: 10 } },
+      { method: 'POST', url: '/capital-watchlist/holding', body: { thscode: '000300.SH', clear: true } },
       { method: 'POST', url: '/capital-watchlist/refresh', body: {} },
     ]) {
       const res = await call(handler, input)
@@ -285,6 +354,17 @@ test('⛔ apply()：认证围栏必须真的接到注册出去的那颗 handler 
   assert.equal(res.statusCode, 401, '⛔ connection 判 401 却不生效 = 围栏没接上，这是个无认证端点')
   assert.equal(res.body, 'unauthorized')
   assert.equal(res.headers['cache-control'], 'no-store')
+
+  // 写路径也要过一次：`/holding` 会改用户自报的持仓那一格，而这条正是 `get_watchlist` 读给
+  // 主 Agent 的数据。只测 GET /list 的话，"给写路由漏接围栏"不会让任何断言变红。
+  // ⛔ 标的必须挑一条**可交易**的：换成指数，宿主自己的类型闸门就会先拒一次，
+  // 于是"围栏被拆掉"这件事仍然测不出来（断言会为了错误的原因绿）。
+  await fake.table.put('300750.SZ', { thscode: '300750.SZ', ticker: '300750', name: '宁德时代', exchange: 'SZ', asset_type: 'a-share', added_at: 1, source: 'user', quote: null })
+  const write = httpFixture({ method: 'POST', url: '/capital-watchlist/holding', body: { thscode: '300750.SZ', weight_pct: 50 } })
+  await routes[0].handler(write.req, write.res)
+  assert.deepEqual(asked, ['/capital-watchlist/list', '/capital-watchlist/holding'], 'POST 也要过围栏')
+  assert.equal(write.res.statusCode, 401)
+  assert.equal(fake.records.get('300750.SZ')?.holding, undefined, '被拒的请求不许改动持仓那一格')
 })
 
 test('apply()：connection 判可放行时，围栏不许自己把请求拦死', async () => {
