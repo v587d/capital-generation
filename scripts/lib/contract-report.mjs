@@ -9,7 +9,7 @@
  * ⛔ 不输出响应正文、不输出 query string、不输出密钥；只有键名与 code。
  */
 
-import { ISSUE_VERDICTS } from './contract-registry.mjs'
+import { ISSUE_VERDICTS, beijingDateOf } from './contract-registry.mjs'
 
 const cell = (text) => String(text ?? '-').replace(/\|/gu, '\\|').replace(/\r?\n/gu, ' ')
 const row = (...cells) => `| ${cells.map(cell).join(' | ')} |`
@@ -18,7 +18,7 @@ export function renderReport(report) {
   const egress = report.egress ?? {}
   const out = [
     '## 巡检结论', '',
-    `run-date ${report.at.slice(0, 10)} · tier ${report.tier} · 视角 ${egress.ip ?? 'unknown'}`
+    `run-date ${beijingDateOf(report.at)} · tier ${report.tier} · 视角 ${egress.ip ?? 'unknown'}`
     + (egress.country ? `（${egress.city ?? ''} ${egress.country}${egress.org ? ` · ${egress.org}` : ''}）` : ''),
     '**本结论仅代表上述网络视角**：只有其它出口才看得见的故障，这里抓不到。', '',
     `共 ${report.counts.total} 条：合格 ${report.counts.pass} · 慢 ${report.counts.slow} · 空 ${report.counts.empty}`

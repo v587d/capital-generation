@@ -20,7 +20,7 @@ import { createTencentSources } from '../lib/sources/tencent-http.js'
 import { createWindSources } from '../lib/sources/wind-mcp.js'
 import {
   CONTRACT_PROBES, KNOWN_GAP_CODES, PROBE_FAMILIES, stateOf, secretRefOf, probesForTier, resolveTier,
-  lastScheduledDue,
+  lastScheduledDue, beijingDateOf,
 } from '../scripts/lib/contract-registry.mjs'
 
 /** 生产里真注册出来的 DataSource 能力全集——覆盖数的分母，不数注册表自己。 */
@@ -152,14 +152,16 @@ test('tier 取档：daily 只打日档，full 打日档+周档，excluded 永不
 })
 
 test('档位换算只认北京时区——cron 的星期是 UTC，读 runner 本地时间会错位一天', () => {
-  // UTC 周五 23:00 = 北京周六 07:00：这正是 workflow 里那条 cron 真正触发的时刻。
+  // UTC 周五 23:00 = 北京周六 07:00：全量档那条 cron 真正触发的时刻。
   assert.equal(resolveTier(new Date(Date.UTC(2026, 9, 9, 23, 0, 0))), 'full', '北京周六必须打全量')
-  // UTC 周四 23:00 = 北京周五 07:00。
-  assert.equal(resolveTier(new Date(Date.UTC(2026, 9, 8, 23, 0, 0))), 'daily')
-  // UTC 周六 01:00 = 北京周六 09:00（手动补跑的情形）。
+  // UTC 周四 22:00 = 北京周五 06:00：工作日档的触发时刻。
+  assert.equal(resolveTier(new Date(Date.UTC(2026, 9, 8, 22, 0, 0))), 'daily')
+  // UTC 周六 01:00 = 北京周六 09:00（调度迟到或手动补跑的情形）。
   assert.equal(resolveTier(new Date(Date.UTC(2026, 9, 10, 1, 0, 0))), 'full')
-  // UTC 周日 23:00 = 北京周一 07:00。
-  assert.equal(resolveTier(new Date(Date.UTC(2026, 9, 11, 23, 0, 0))), 'daily')
+  // UTC 周日 22:00 = 北京周一 06:00。
+  assert.equal(resolveTier(new Date(Date.UTC(2026, 9, 11, 22, 0, 0))), 'daily')
+  // 同一个 UTC 周五 23:00 与北京周六 07:00 是同一档，跨 UTC 午夜不许把周六判成周五。
+  assert.equal(resolveTier(new Date(Date.UTC(2026, 9, 9, 16, 59, 0))), 'full', 'UTC 周五 16:59 = 北京周六 00:59')
 })
 
 test('开工前闸门要的凭据集合：只有真会发请求的条目才把 key 拉进检查范围', () => {
@@ -194,33 +196,37 @@ test('每个档位要的凭据都在 workflow 里显式映射了：secrets 不�
   }
 })
 
-test('cron 与 resolveTier 咬合：UTC 星期/小时写错，北京周六那档全量就永远打不到', () => {
+test('cron 与 resolveTier / 北京时间咬合：工作日 06:00、周六 07:00，小时或星期写错都会错档', () => {
   const crons = [...workflow.matchAll(/- cron:\s*'([^']+)'/g)].map((m) => m[1])
   assert.equal(crons.length, 2, `工作日与周六要各一条 cron，实际 ${crons.length} 条`)
-  // 北京周一到周六的档位，由每条 cron 的 (UTC 小时, UTC 星期) 反推——只有周六必须是 full。
-  const tierByBeijingDay = new Map()
+  const byBeijingDay = new Map()
   for (const cron of crons) {
     const [minute, hour, , , dow] = cron.split(' ')
     assert.equal(minute, '0', '分钟字段必须是整点')
-    assert.equal(hour, '23', '北京 07:00 只能写成 UTC 23:00（退一天）；写 7 会变成北京 15:00')
     for (let day = 0; day < 7; day += 1) {
       if (!expandCronDay(day, dow)) continue
       // 2026-10-04 是周日：day 偏移后就是那周的 UTC 星期 day。
       const fired = new Date(Date.UTC(2026, 9, 4 + day, Number(hour), Number(minute)))
       assert.equal(fired.getUTCDay(), day, `锚点日期算错了星期（${fired.toISOString()}）`)
-      const beijing = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai', weekday: 'short' }).format(fired)
-      const tier = resolveTier(fired)
-      const seen = tierByBeijingDay.get(beijing)
-      assert.ok(seen === undefined || seen === tier, `北京${beijing}被两条 cron 打出不同档位（${seen} / ${tier}）`)
-      tierByBeijingDay.set(beijing, tier)
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Shanghai', weekday: 'short', hour: 'numeric', hour12: false,
+      }).formatToParts(fired)
+      const of = (type) => Number(parts.find((p) => p.type === type).value)
+      const beijing = parts.find((p) => p.type === 'weekday').value
+      const seen = byBeijingDay.get(beijing)
+      assert.ok(!seen || (seen.tier === resolveTier(fired) && seen.hour === of('hour')),
+        `北京${beijing}被两条 cron 打出不同时间或档位（${JSON.stringify(seen)} / ${of('hour')} ${resolveTier(fired)}）`)
+      byBeijingDay.set(beijing, { tier: resolveTier(fired), hour: of('hour') })
     }
   }
-  assert.deepEqual([...tierByBeijingDay.keys()].sort(), ['Fri', 'Mon', 'Sat', 'Thu', 'Tue', 'Wed'],
+  assert.deepEqual([...byBeijingDay.keys()].sort(), ['Fri', 'Mon', 'Sat', 'Thu', 'Tue', 'Wed'],
     '北京周一到周六都要有排程（周日不跑）')
-  assert.equal(tierByBeijingDay.get('Sat'), 'full', '只有北京周六打全量')
   for (const day of ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']) {
-    assert.equal(tierByBeijingDay.get(day), 'daily', `北京${day}应该只打 daily 档`)
+    assert.equal(byBeijingDay.get(day).tier, 'daily', `北京${day}应该只打 daily 档`)
+    assert.equal(byBeijingDay.get(day).hour, 6, `北京${day}要在 06:00 打（UTC 侧写成 22:00，退一天）`)
   }
+  assert.equal(byBeijingDay.get('Sat').tier, 'full', '只有北京周六打全量')
+  assert.equal(byBeijingDay.get('Sat').hour, 7, '北京周六维持 07:00：全量档跑得久，不跟着工作日提前')
 })
 
 /** cron 的星期字段：`0-4`、`5`、`*`、逗号列表都算一下（本仓只用到前两种，但别写死）。 */
@@ -232,33 +238,48 @@ function expandCronDay(day, field) {
   })
 }
 
-test('lastScheduledDue：北京周一~周六 07:00 才该跑，周日那一档不存在', () => {
+test('lastScheduledDue：工作日 06:00、周六 07:00（北京），北京周日那一档不存在', () => {
   const iso = (d) => d.toISOString()
-  // UTC 周四 23:30 = 北京周五 07:30，就是这一档自己。
-  assert.equal(iso(lastScheduledDue(new Date('2026-10-08T23:30:00Z'))), '2026-10-08T23:00:00.000Z')
-  // UTC 周五 01:30 = 北京周五 09:30（看门狗的实际时刻）→ 回看昨晚那一档。
-  assert.equal(iso(lastScheduledDue(new Date('2026-10-09T01:30:00Z'))), '2026-10-08T23:00:00.000Z')
-  // UTC 周六 23:30 = 北京周日 07:30：这一档不该跑，最近应跑是 UTC 周五 23:00（北京周六 07:00）。
-  assert.equal(iso(lastScheduledDue(new Date('2026-10-10T23:30:00Z'))), '2026-10-09T23:00:00.000Z')
-  // UTC 周日 01:30 = 北京周日 09:30：仍然只欠到北京周六那一档，不许误报"今天没跑"。
-  assert.equal(iso(lastScheduledDue(new Date('2026-10-11T01:30:00Z'))), '2026-10-09T23:00:00.000Z')
+  // UTC 周四 22:30 = 北京周五 06:30，就是这一档自己。
+  assert.equal(iso(lastScheduledDue(new Date('2026-10-08T22:30:00Z'))), '2026-10-08T22:00:00.000Z')
+  // UTC 周五 01:30 = 北京周五 09:30（看门狗时刻）→ 回看今早 06:00 那一档。
+  assert.equal(iso(lastScheduledDue(new Date('2026-10-09T01:30:00Z'))), '2026-10-08T22:00:00.000Z')
+  // UTC 周五 23:30 = 北京周六 07:30：全量档自己，小时与工作日不同，靠 SCHEDULE_UTC 分档。
+  assert.equal(iso(lastScheduledDue(new Date('2026-10-09T23:30:00Z'))), '2026-10-09T23:00:00.000Z')
+  // UTC 周六 01:30 = 北京周日 09:30：北京周日不排程，最近应跑仍是北京周六那档，不许误报"没跑"。
+  assert.equal(iso(lastScheduledDue(new Date('2026-10-10T01:30:00Z'))), '2026-10-09T23:00:00.000Z')
+  // UTC 周六中午：周六 23:00 还没到，不许把"未来"当成"应跑已过"。
+  assert.equal(iso(lastScheduledDue(new Date('2026-10-10T12:00:00Z'))), '2026-10-09T23:00:00.000Z')
+  // UTC 周日 22:30 = 北京周一 06:30：新的一周落回工作日档。
+  assert.equal(iso(lastScheduledDue(new Date('2026-10-11T22:30:00Z'))), '2026-10-11T22:00:00.000Z')
 })
 
-test('lastScheduledDue 与 workflow 里那两条 cron 必须同构', () => {
-  // 看门狗判"漏跑"的依据是这份推算，而排程的真值是 workflow 文件。两边一旦分叉，
-  // 要么天天误报、要么整周静默遮丑——所以这里把两个载体逐个星期对一遍。
+test('beijingDateOf：报告与 Issue 标题按北京切日，否则每天的单都盖着前一天', () => {
+  // 北京 06:00 = UTC 前一天 22:00；直接 at.slice(0,10) 会把 10-10 那次巡检写成 10-09。
+  assert.equal(beijingDateOf('2026-10-09T22:00:00.000Z'), '2026-10-10', '北京周六 06:00 那档')
+  assert.equal(beijingDateOf('2026-10-09T23:00:00.000Z'), '2026-10-10', '北京周六 07:00 那档')
+  assert.equal(beijingDateOf('2026-10-09T15:59:00.000Z'), '2026-10-09', '北京 23:59 还在当天')
+  assert.equal(beijingDateOf(new Date('2026-10-09T02:48:52Z')), '2026-10-09', '迟到 4 小时那次实测')
+})
+
+test('lastScheduledDue 与 workflow 的 cron 必须同构（星期与小时都要一致）', () => {
+  // 排程真值在 YAML、推算在注册表，两份载体一分叉就两种结局：天天误报，或整周静默遮丑。
   const crons = [...workflow.matchAll(/- cron:\s*'([^']+)'/g)].map((m) => m[1])
-  const dueDays = new Set()
+  const slotHour = new Map()
   for (const cron of crons) {
     const [, hour, , , dow] = cron.split(' ')
-    assert.equal(hour, '23', `cron ${cron} 的小时字段不是 23，lastScheduledDue 里的 23 要一起改`)
-    for (let d = 0; d < 7; d += 1) if (expandCronDay(d, dow)) dueDays.add(d)
+    for (let d = 0; d < 7; d += 1) {
+      if (!expandCronDay(d, dow)) continue
+      assert.ok(!slotHour.has(d), `UTC 星期 ${d} 被两条 cron 重复排程，lastScheduledDue 只会认第一条`)
+      slotHour.set(d, Number(hour))
+    }
   }
-  // 2026-10-04 是 UTC 周日：4 + d 那天的小时 23:30 就落在那一"档"的窗口里。
-  for (let d = 0; d < 7; d += 1) {
-    const slot = Date.UTC(2026, 9, 4 + d, 23)
-    const isDue = lastScheduledDue(new Date(slot + 30 * 60_000)).getTime() === slot
-    assert.equal(isDue, dueDays.has(d), `UTC 星期 ${d}：cron 判${dueDays.has(d) ? '该跑' : '不跑'}，`
-      + `lastScheduledDue 判${isDue ? '该跑' : '不跑'}——两边必须一起改`)
+  for (const [d, hour] of slotHour) {
+    const slot = Date.UTC(2026, 9, 4 + d, hour)   // 2026-10-04 是 UTC 周日
+    assert.equal(lastScheduledDue(new Date(slot + 30 * 60_000)).getTime(), slot,
+      `UTC 星期 ${d} 的 ${hour}:00 那一档 cron 排了，lastScheduledDue 却判成别的时间——SCHEDULE_UTC 没跟着改`)
   }
+  assert.ok(!slotHour.has(6), 'UTC 周六（北京周日）不该有排程')
+  const satSlot = Date.UTC(2026, 9, 10, 23, 30)
+  assert.notEqual(lastScheduledDue(new Date(satSlot)).getTime(), satSlot, 'lastScheduledDue 凭空造出了北京周日那一档')
 })

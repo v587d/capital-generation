@@ -2,8 +2,8 @@
  * 数据源契约巡检注册表（`docs/dev/tool-schema.md` §10.8 那道闸门的正文）。
  *
  * 一条能力一行，**四态取一**：
- *   · `tier: 'daily'`   每天 07:00 打，失败算结论
- *   · `tier: 'weekly'`  周六全量打（静态面：基金档案 / 经理 / 回测这一类）
+ *   · `tier: 'daily'`   每天 06:00（北京）打，失败算结论
+ *   · `tier: 'weekly'`  周六 07:00（北京）全量打（静态面：基金档案 / 经理 / 回测这一类）
  *   · `shadow: {…}`     照打，但本视角不判——视角差异不是上游故障；每天在报告里露一次脸
  *   · `excluded: {…}`   刻意不打（按次计费等），理由必须写下来
  *
@@ -287,17 +287,46 @@ export function resolveTier(date = new Date()) {
 }
 
 /**
- * 最近一个**本该跑**的时刻：北京周一~周六 07:00 = UTC 周日~周五 23:00（北京周日刻意不排程）。
+ * 排程真值表，**用 UTC 写**，与 workflow 里那两条 cron 一一对应：
+ * 北京周一~周五 06:00 = UTC 周日~周四 22:00；北京周六 07:00（全量）= UTC 周五 23:00；北京周日不排。
+ * 代码里再写一份的理由：cron 只住在 YAML，看门狗却要算"最近一个本该跑的时刻"，总得有能读的那一份。
+ * 两边漂移由 `test/contract-registry.test.mjs` 逐个 (星期, 小时) 比对拦住——改时间必须同时改两处。
+ */
+export const SCHEDULE_UTC = [
+  { hour: 22, dow: [0, 1, 2, 3, 4] },
+  { hour: 23, dow: [5] },
+]
+
+/**
+ * 最近一个**本该跑**的时刻（UTC）。北京周日那一档不存在，往回跳；小时跟着 `SCHEDULE_UTC` 走，
+ * 所以工作日 06:00 与周六 07:00 各判各的。
  * 与 workflow 里那两条 cron 严格同构，所以由 `test/contract-registry.test.mjs` 钉住两边一致。
  * 看门狗拿它判"调度漏没漏"——**不能拿"若干小时内跑过"当心跳**：一次手动 dispatch 就能把整周的
  * 调度停摆遮过去，而手动跑恰恰不是调度器还活着的证据（2026-10-09 第一次遇到 schedule 静默没跑）。
+ * GitHub 的 `schedule` 只保证"会跑"，实测迟到 4~6 小时（2026-10-09），所以这里算的是"最近该跑的
+ * 那一档"，不是某个准点窗口——迟到但最终跑过的记录照样算心跳。
  */
 export function lastScheduledDue(now = new Date()) {
-  const due = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23))
-  if (now < due) due.setUTCDate(due.getUTCDate() - 1)
-  // UTC 周六 = 北京周日，那一档不存在；往前一天。
-  while (due.getUTCDay() === 6) due.setUTCDate(due.getUTCDate() - 1)
-  return due
+  for (let back = 0; back <= 7; back += 1) {
+    const day = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - back))
+    const spec = SCHEDULE_UTC.find((entry) => entry.dow.includes(day.getUTCDay()))
+    if (!spec) continue
+    const slot = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), spec.hour))
+    if (slot <= now) return slot
+  }
+  throw new Error('SCHEDULE_UTC 一周里没有任何排程，lastScheduledDue 无法回看')
+}
+
+/**
+ * 报告与 Issue 标题上"哪一天"必须用**北京日期**：北京 06:00 = UTC 前一天 22:00，直接切 `at` 的
+ * UTC 日会让每天的单都盖着前一天的日期——同天去重与「连续第 N 天」都读这个字符串。
+ */
+export function beijingDateOf(value) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date(value))
+  const of = (type) => parts.find((part) => part.type === type).value
+  return `${of('year')}-${of('month')}-${of('day')}`
 }
 
 /** 本次要真打的条目（含影子——影子照打，只是不计入结论）。
