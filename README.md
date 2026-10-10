@@ -26,8 +26,6 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 
 **🎞️视频演示：**[安装、配置与使用](https://www.bilibili.com/video/BV1fzaZ6CE9J/)。
 
-[样例：假期后研判报告（20261007）](docs/sample/假期后研判报告.md)。
-
 > [!IMPORTANT]
 > 本项目仍在探索中，不提供金融服务或投资建议，不保证数据完整、及时或准确，也不承诺投资回报。请自行核对来源并承担投资风险。
 
@@ -65,7 +63,7 @@ https://github.com/v587d/capital-generation
 > [!NOTE]
 > 本插件所有自带密钥均可免费申请、免费日常使用。 哪怕所有密钥留空也不影响插件核心功能，即缺哪个密钥，仅表示对应能力就不可用，其他功能照常。
 
-2. **选填密钥。** 打开 DSH 「插件」 → **Capital Generation** -> 「配置」。
+2. **选填密钥。** 打开 DSH 「插件」 → **Capital Generation** -> 「数据源」。
 
    | 密钥 | 用途 |
    | --- | --- |
@@ -96,6 +94,8 @@ https://github.com/v587d/capital-generation
 ## 试试这么用
 
 在新的 Capital 模式会话中使用以下指令。将方括号内容换成自己的标的、公告或持仓；证券代码写完整市场后缀，例如 `600519.SH`。每条指令单独发送，便于观察结果。
+
+[样例：假期后研判报告（20261007）](docs/sample/假期后研判报告.md)
 
 **完整投资研究报告**
 
