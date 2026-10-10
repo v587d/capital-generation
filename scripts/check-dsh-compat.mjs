@@ -386,6 +386,11 @@ const probes = [
         ['组合包页面按**包名**渲染配置段，且只给 view: page（不给 form）', /renderSlot\("plugins\.bundle\.config", \{ view: "page" \}, \{ entryKey: pkg\.name \}\)/, pmPage, pmPageFile],
         ['没人按包名注册 ⇒ 整块配置段不出现（座位是注册出来的）', /configured: ledger\.bundles\.has\(openPkg\.name\)/, pmPage, pmPageFile],
         ['包级座位的 key 进 ledger 投影', /bundles: keysOf\("plugins\.bundle\.config"\)/, pmPage, pmPageFile],
+        // ── 卡片第三格：我们没有能替换「包含的组件」的座位，只按它的 DOM 形状切可见性 ──
+        ['「包含的组件」那一格仍叫 section[data-plugin-rows]（收起/放行就认这一个）', /"data-plugin-rows": true/, pmPage, pmPageFile],
+        ['包页仍把配置段与组件段画成同一容器的兄弟两格（我们的选择器靠这条相邻关系）', /"data-plugin-config": true,[\s\S]{0,300}?\(RowsSection,/, pmPage, pmPageFile],
+        ['包页根节点仍带 data-plugin-detail="<包名>"（样式表用它把规则限定在自己那一页）', /"data-plugin-detail": pkg\.name/, pmPage, pmPageFile],
+        ['pluginManager/listBundles 这颗 remote 仍被装配（tab 上的行数只有这一个来源）', /pluginManager\/listBundles/, remote, remoteFile],
         ['SettingsFormModel（暂存 + revision 围栏写）', /declare class SettingsFormModel/, model, modelFile],
         ['write-only 密钥控件的 spec 形状', /interface SettingsSecretSpec/, model, modelFile],
         ['SettingsSecretField（只报"是否已配置"）', /declare function SettingsSecretField/, fields, fieldsFile],
@@ -400,7 +405,7 @@ const probes = [
       ]
       const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
       return missing.length === 0
-        ? { status: PASS, detail: '条目 volatile 投影 / 命名空间=条目 id / configForms 读写 / keyed 包级配置槽 / credentials remote 都仍在' }
+        ? { status: PASS, detail: '条目 volatile 投影 / 命名空间=条目 id / configForms 读写 / keyed 包级配置槽 / credentials remote / 组件段 DOM 形状与 listBundles 都仍在' }
         : { status: FAIL, detail: `settings 卡片链路的接口变了：${missing.join(' / ')}（见账本 L15；改本仓 adapter，不要改探针）` }
     },
   },
@@ -498,8 +503,11 @@ const probes = [
   },
   {
     id: 'L19',
-    title: '座位 conversation.input.overlay（kind list / scope session）与官方 Modal 的 props / headless 卡片底板',
-    why: '自选股弹窗挂在这个座位上，而座位是**常驻**的（客户端 bundle 在 host 平面，与 preset 无关）：上游改 kind/scope 或改 Modal props，症状是弹窗打不开或刷新按钮落点失效。面板用 `headless: true` 自绘全部几何，所以**卡片底板**（`.dialog` 的 background / radius / overflow / flex）也进了账目：官方散列类够不着，这四条漂了只能靠这条探针点名。',
+    title: '座位 conversation.input.overlay（kind list / scope session）与官方 Modal 的 props / headless 卡片底板 / 非 headless 的开合与标题面',
+    why: '自选股弹窗挂在这个座位上，而座位是**常驻**的（客户端 bundle 在 host 平面，与 preset 无关）：上游改 kind/scope 或改 Modal props，症状是弹窗打不开或刷新按钮落点失效。面板用 `headless: true` 自绘全部几何，所以**卡片底板**（`.dialog` 的 background / radius / overflow / flex）也进了账目：官方散列类够不着，这四条漂了只能靠这条探针点名。'
+      + '「精选 Skills」的「详情」用的是**非 headless** 的同一颗组件（官方给 header、标题、关闭按钮、Esc 与遮罩），'
+      + '所以"关着时返回 null""closeLabel 落在关闭按钮上""description 仍渲染"也是我们的账：35 行各挂一个浮层'
+      + '就是把卡片埋掉，而默认 380px 那一档宽度是「详情」必须自己覆掉的东西。',
     run() {
       const slotsFile = join(PKG('dsh-client-ui-conversation'), 'lib/types/client/contract/slots.d.ts')
       const slots = readIfPresent(slotsFile)
@@ -510,6 +518,9 @@ const probes = [
       const modalCssFile = join(PKG('dsh-client-ui-primitives'), 'lib/Modal.module.css')
       const modalCss = readIfPresent(modalCssFile)
       if (modalCss === undefined) return { status: FAIL, detail: `读不到 ${modalCssFile}` }
+      const implFile = join(PKG('dsh-client-ui-primitives'), 'lib/index.js')
+      const impl = readIfPresent(implFile)
+      if (impl === undefined) return { status: FAIL, detail: `读不到 ${implFile}` }
       const overlay = /'conversation\.input\.overlay': \{\s*kind: 'list';\s*scope: 'session';/.test(slots)
       const props = ['open', 'onClose', 'title', 'closeLabel', 'footer', 'contentClassName', 'shortcutModal', 'headless']
       const missingProps = props.filter((name) => !new RegExp(`\\b${name}\\??:`).test(modal))
@@ -522,13 +533,25 @@ const probes = [
         ['卡片仍是 flex column（我们把 padding 收到 0）', /display: flex;\s*flex-direction: column/],
       ]
       const missingCard = card.filter(([label, pattern]) => !pattern.test(modalCss)).map(([label]) => label)
+      // 「详情」那一格靠这五条活着：只挑字符串字面量，不押 css$NN 那种每次构建都会改的散列名。
+      const chrome = [
+        ['关着时返回 null（35 行「详情」不许各挂一个浮层）', /if \(!open\) return null/, impl, implFile],
+        ['对话框语义仍由 aria-modal 给出（标题走 aria-label，我们只出 title）', /"aria-modal": "true"/, impl, implFile],
+        ['关闭按钮的无障碍名仍取 closeLabel（不给就是颗空按钮）', /"aria-label": closeLabel/, impl, implFile],
+        ['点遮罩仍走 onClose（Esc 归 useModalLayer，我们自己不再写 keydown）', /onClick: onClose/, impl, implFile],
+        ['slug 放在 description 上：那句还在', /optional supporting sentence under the title/, modal, modalFile],
+        ['默认宽度仍是 380px 那一档（「详情」的宽度是我们自己覆的，漂了要重看那条）', /width: min\(380px, 100%\)/, modalCss, modalCssFile],
+      ]
+      const missingChrome = chrome.filter(([, pattern, source]) => !pattern.test(source))
+        .map(([label, , source]) => `${label}（${source}）`)
       const missing = []
       if (!overlay) missing.push(`overlay 座位不再是 list/session（${slotsFile}）`)
       if (/headerActions|[aA]ctions\?:/.test(modal)) missing.push(`Modal 出现了 header 动作位，刷新工具条落点要重看（${modalFile}）`)
       if (missingProps.length > 0) missing.push(`Modal 缺 props：${missingProps.join(' / ')}（${modalFile}）`)
       if (missingCard.length > 0) missing.push(`headless 卡片底板变了：${missingCard.join(' / ')}（${modalCssFile}）`)
+      if (missingChrome.length > 0) missing.push(...missingChrome)
       return missing.length === 0
-        ? { status: PASS, detail: "overlay 座位仍是 list/session，Modal props 与 headless 卡片底板未变（无 header 动作位）" }
+        ? { status: PASS, detail: "overlay 座位仍是 list/session，Modal props、headless 卡片底板与非 headless 的开合/标题面都未变（无 header 动作位）" }
         : { status: FAIL, detail: `弹窗座位或外壳变了：${missing.join(' / ')}（见账本 L19）` }
     },
   },
@@ -799,6 +822,46 @@ const probes = [
       return missing.length === 0
         ? { status: PASS, detail: 'Switch 的 props 面 / role+aria-checked 驱动视觉 / onChange(next) / 自带焦点环都仍在（36×20 那颗胶囊）' }
         : { status: FAIL, detail: `官方 Switch 契约变了：${missing.join(' / ')}（见账本 L27；capital-watchlist 的「持仓」开关依赖它）` }
+    },
+  },
+  {
+    id: 'L28',
+    title: '官方 SegmentedControl：props 面（id / value / options / onChange / label / disabled / className）、它自己发 tablist+tab 与 `<id>-<value>-panel` 的 aria-controls、roving tabIndex 与 ←→/Home/End 走位',
+    why: 'settings 卡片顶上的三格（数据源 / 精选 Skills / 包含的组件）就是它。四种漂移都不报错：'
+      + '① `aria-controls` 的 id 方案一改（换分隔符、换顺序、改成内部生成），我们三块面板的 `id` 与 '
+      + '`aria-labelledby` 全部对不上——**第三块面板指的就是宿主那段清单**，读屏用户点「跳到面板」落到空处；'
+      + '② roving tabIndex 没了 ⇒ 每格都进 Tab 序，一条 tablist 六个停靠点；③ 键盘走位改语义或不再跳过 '
+      + 'disabled 项 ⇒ 方向键与卡片行为分叉（我们自己不补 onKeyDown，补了就是双重选择）；④ 视觉选中态或'
+      + '焦点环换载体（不再读 `aria-selected`）⇒ 屏上与读屏各说一套。另外它是**完全受控**件（value 由我们'
+      + '持有），改成自持状态就会与卡片根的 `data-capital-config-tab` 两套真相——那属性正驱动着收起宿主'
+      + '「包含的组件」那两条 `:has()` 规则（见 L15）。',
+    run() {
+      const file = join(PKG('dsh-client-ui-primitives'), 'lib/index.js')
+      const text = readIfPresent(file)
+      if (text === undefined) return { status: FAIL, detail: `读不到 ${file}` }
+      const cssFile = join(PKG('dsh-client-ui-primitives'), 'lib/SegmentedControl.module.css')
+      const css = readIfPresent(cssFile)
+      if (css === undefined) return { status: FAIL, detail: `读不到 ${cssFile}` }
+      const typesFile = join(PKG('dsh-client-ui-primitives'), 'lib/types/SegmentedControl.d.ts')
+      const types = readIfPresent(typesFile)
+      if (types === undefined) return { status: FAIL, detail: `读不到 ${typesFile}` }
+      const checks = [
+        ['SegmentedControl 仍从包根导出（我们 require 的就是包根）', /export \{[^}]*\bSegmentedControl\b[^}]*\}/, text, file],
+        ['props 面仍是 id / value / options / onChange / label / disabled / className 这七个', /function SegmentedControl\(\{ id, value, options, onChange, label, disabled = false, className \}\)/, text, file],
+        ['它仍是 role="tablist" 且带 aria-label（我们只给名字，不自造 tablist）', /role: "tablist",\s*"aria-label": label/, text, file],
+        ['每格仍是 role="tab" + aria-selected', /role: "tab",\s*"aria-selected": active/, text, file],
+        ['aria-controls 仍是 `<id>-<value>-panel`（三块面板的 id 就是照它写的）', /"aria-controls": `\$\{id\}-\$\{option\.value\}-panel`/, text, file],
+        ['roving tabIndex：只有选中那格进 Tab 序', /tabIndex: active \? 0 : -1/, text, file],
+        ['方向键走位仍在（我们不自带 onKeyDown，两套会打架）', /function isWalkKey\(key\) \{\s*return key === "ArrowLeft" \|\| key === "ArrowRight"/, text, file],
+        ['Home / End 落在**可用**项上（跳过 disabled 的语义）', /if \(key === "Home"\) return enabled\[0\];/, text, file],
+        ['选中态视觉仍读 aria-selected（与读屏同一个来源）', /\.tab\[aria-selected='true'\]/, css, cssFile],
+        ['焦点环由它自己声明', /\.tab:focus-visible/, css, cssFile],
+        ['id 方案写在 `.d.ts` 的 props 注释里（这条契约是文档化的，不是抄来的）', /<id>-<value>-panel/, types, typesFile],
+      ]
+      const missing = checks.filter(([, pattern, source]) => !pattern.test(source)).map(([label, , , source]) => `${label}（${source}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: 'SegmentedControl 的 props 面 / tablist+aria-controls id 方案 / roving tabIndex / 键盘走位 / aria-selected 驱动视觉都仍在' }
+        : { status: FAIL, detail: `官方 SegmentedControl 契约变了：${missing.join(' / ')}（见账本 L28；改本仓 adapter，不要改探针）` }
     },
   },
 ]

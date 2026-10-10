@@ -1,5 +1,5 @@
 import z from '@deepseek-ai/schemastery'
-import { SELECTED_SKILL_CATALOG } from '../selected-skills/catalog.js'
+import { SELECTED_SKILL_CATALOG, SELECTED_SKILL_SKILL_DIRS } from '../selected-skills/catalog.js'
 
 export const name = 'capital-config'
 
@@ -114,10 +114,173 @@ export const Config = z.object({
 })
 
 /**
- * 本行**不消费**自己的配置，也不需要注册任何服务：可编辑性全部是 schema 事实
- * （`.volatile()`），`dsh-settings` 从条目 Config 投影出表单，主插件再经
- * `settings.describe()` 读回解析值。所以这里只留一行日志，证明这颗行激活了。
+ * 「精选 Skills」那一格的**原文旁路**：卡片上的「详情」悬浮要显示 `SKILL.md` 原文，
+ * 而原文是随包携带的快照文件（35 份共 ~750 KB）。
+ *
+ * 为什么走一条本机路由，而不是把原文打进客户端 bundle：客户端 bundle 在页面加载那一刻
+ * 整体送达浏览器（`window.__ModuleLoader__.load` 是单文件 IIFE，没有按需分片），750 KB 会
+ * 让每一次打开插件页都付一遍——包括从不点「详情」的那次。旁路只在悬停时取一份，且取的是
+ * **磁盘上当前那份**，不是构建期抄的副本：抄来的原文会随快照更新而变旧，而这块 UI 说的
+ * 是"这就是原文"（控件对自己的状态说谎 = 事故）。
+ *
+ * 闭集：路径按 `SELECTED_SKILL_CATALOG` × `SELECTED_SKILL_SKILL_DIRS` 在模块加载时现算成
+ * `Map<skill 名, file: URL>`，请求里的名字**只做这张表的键**，不参与任何路径拼接——
+ * `%2F..%2F` 之类一律落在"表里没有这个名字"那一侧（404）。路径用 `URL` 表示：`fs` 直接收
+ * `file:` URL，省掉一次 `fileURLToPath`（也就省掉在 import 期依赖 node 内置模块）。
+ *
+ * ⛔ 认证围栏与 `/capital-charts`、`/capital-watchlist` 同一写法（`connection.requestRejection`，
+ * docs/dev/chart-presentation.md §6.1）：`webServer.register({ kind: 'prefix' })` 本身不做任何认证。
+ */
+export const SKILL_DOC_ROUTE = '/capital-skills'
+/** 单份原文的字节上限：超限**整份拒绝、绝不截断**（"原文"被切一半比没有原文更误导人）。 */
+export const MAX_SKILL_DOC_BYTES = 128 * 1024
+
+const SKILL_DOC_SUFFIX = 'SKILL.md'
+
+/** catalog 里的顺序 = 卡片上的顺序，所以这里只多算一份"名字 → 快照文件"的索引。 */
+export const SKILL_DOCS = new Map(SELECTED_SKILL_CATALOG.map((entry) => [
+  entry.name,
+  new URL(`../selected-skills/${entry.repository}/${SELECTED_SKILL_SKILL_DIRS[entry.repository]}/${entry.name}/${SKILL_DOC_SUFFIX}`, import.meta.url),
+]))
+
+function fsModule() {
+  const processLike = globalThis.process
+  const fs = processLike?.getBuiltinModule?.('node:fs')
+  if (!fs || typeof fs.readFileSync !== 'function') throw new Error('capital-config: Node fs is unavailable')
+  return fs
+}
+
+function sendJson(res, status, payload) {
+  res.statusCode = status
+  res.setHeader('content-type', 'application/json; charset=utf-8')
+  res.setHeader('cache-control', 'no-store')
+  res.setHeader('x-content-type-options', 'nosniff')
+  res.end(JSON.stringify(payload))
+}
+
+/**
+ * @param options.readFile - `(url) => string | Buffer`，用例注入假读盘。
+ * @param options.authorize - `(req) => 401 | 403 | undefined`；非空即拒，**且一次都不碰文件系统**。
+ */
+export function createSkillDocHandler(options = {}) {
+  const readFile = options.readFile ?? ((target) => fsModule().readFileSync(target, 'utf8'))
+  const statSize = options.statSize ?? ((target) => fsModule().statSync(target).size)
+  const authorize = options.authorize
+  return async function handler(req, res) {
+    if (typeof authorize === 'function') {
+      let rejection
+      try {
+        rejection = authorize(req)
+      } catch {
+        // 围栏自己答不上来时必须 fail closed：放行就等于"认证失败 = 不认证"。
+        rejection = 401
+      }
+      if (rejection !== undefined && rejection !== null) {
+        res.statusCode = rejection
+        res.setHeader('content-type', 'text/plain; charset=utf-8')
+        res.setHeader('cache-control', 'no-store')
+        res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
+        return
+      }
+    }
+    if (req?.method !== 'GET') {
+      sendJson(res, 405, { error: 'method_not_allowed' })
+      return
+    }
+    let pathname
+    try {
+      pathname = new URL(req.url ?? '/', 'http://localhost').pathname
+    } catch {
+      sendJson(res, 400, { error: 'bad_request' })
+      return
+    }
+    if (!pathname.startsWith(`${SKILL_DOC_ROUTE}/`)) {
+      sendJson(res, 404, { error: 'not_found' })
+      return
+    }
+    const match = /^([^/]+)\.md$/.exec(pathname.slice(`${SKILL_DOC_ROUTE}/`.length))
+    if (!match) {
+      sendJson(res, 404, { error: 'not_found' })
+      return
+    }
+    let name
+    try {
+      name = decodeURIComponent(match[1])
+    } catch {
+      sendJson(res, 400, { error: 'bad_request' })
+      return
+    }
+    const target = SKILL_DOCS.get(name)
+    if (target === undefined) {
+      sendJson(res, 404, { error: 'skill_not_catalogued', name })
+      return
+    }
+    let bytes
+    try {
+      bytes = statSize(target)
+    } catch {
+      // 快照没随包落地（装到一半 / files 清单漏了）：说清楚"读不到"，别回一份空原文当好结果。
+      sendJson(res, 404, { error: 'skill_doc_unreadable', name })
+      return
+    }
+    if (bytes > MAX_SKILL_DOC_BYTES) {
+      sendJson(res, 413, { error: 'skill_doc_too_large', name, limit: MAX_SKILL_DOC_BYTES })
+      return
+    }
+    let body
+    try {
+      body = readFile(target)
+    } catch {
+      sendJson(res, 404, { error: 'skill_doc_unreadable', name })
+      return
+    }
+    res.statusCode = 200
+    res.setHeader('content-type', 'text/plain; charset=utf-8')
+    res.setHeader('cache-control', 'no-store')
+    res.setHeader('x-content-type-options', 'nosniff')
+    res.end(typeof body === 'string' ? body : Buffer.from(body))
+  }
+}
+
+/**
+ * 卡片那侧拼 URL 的唯一口径（文件名里带 `.` 的 slug 也要能拼，所以走 encodeURIComponent）。
+ * 客户端 bundle 与这里是**同一条字符串**的两端：漂移的表现为"详情永远读不到"，由
+ * `test/capital-config.test.mjs` 的同字断言钉住（客户端不能 import 本模块 ⇒ 只能对着产物量）。
+ */
+export function skillDocUrl(name) {
+  return `${SKILL_DOC_ROUTE}/${encodeURIComponent(name)}.md`
+}
+
+/**
+ * 本行消费两件事：自己的配置（schema 事实，见上）与快照原文的读盘旁路。
+ *
+ * `webServer` 只走 `inject`——`ctx.get('webServer')` 解析得到值**不代表**属性访问合法
+ * （cordis 的属性代理只认"本层声明过 inject"），探测式写法会把正确性押在装配顺序上，
+ * 这条踩过两次（见 `chart-ui/index.js` 的同一段注释）。认证面 `connection` 反之要**惰性**
+ * 解析：它缺席（Electron / file:// 这类没有浏览器认证面的载体）就退化成"没有认证面"的旧行为，
+ * 但解析抛错一律 401。
  */
 export function apply(ctx) {
-  ctx.logger?.info?.('capital-config: settings entry active (volatile config surface)')
+  const authorize = (req) => {
+    let connection
+    try {
+      connection = ctx.get('connection')
+    } catch {
+      return 401
+    }
+    if (connection === undefined || connection === null) return undefined
+    if (typeof connection.requestRejection !== 'function') return undefined
+    return connection.requestRejection(req)
+  }
+  ctx.inject(['webServer'], (webCtx) => {
+    webCtx.effect(
+      () => webCtx.webServer.register({
+        kind: 'prefix',
+        path: SKILL_DOC_ROUTE,
+        handler: createSkillDocHandler({ authorize }),
+      }),
+      'capital-config: skill 原文旁路',
+    )
+  })
+  ctx.logger?.info?.('capital-config: settings entry active (volatile config surface + skill 原文旁路)')
 }

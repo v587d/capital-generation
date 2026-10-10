@@ -1,0 +1,17 @@
+# Capital Generation 的打包排除，不是上游内容的一部分（见 UPSTREAM.md 的 Packaging 一行）。
+# 运行时只读 plugins/us-stock-analysis/skills/**/SKILL.md；下面这些是上游自己的静态站
+# （site/ 1.7 MB，含 5 份 FULL-DEMO 长文）、它给别的平台复制的提示词（prompts/ 772 KB，
+# 与 skill 正文同源的两份拷贝）、GitHub Actions 与站点体检记录、以及一批 node 脚本。
+# 脚本作为材料留在 git 里，provider 从不执行它们（docs/dev/selected-skills.md §8.6）。
+# 全量快照仍然完整住在 git，github: 安装与"当时是哪个 commit"的复核都不受影响。
+site/
+prompts/
+qa/
+doc/
+data/
+scripts/
+.github/
+.cursor/
+.claude-plugin/
+node_modules/
+package-lock.json

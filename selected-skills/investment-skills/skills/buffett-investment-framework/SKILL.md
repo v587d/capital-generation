@@ -19,7 +19,7 @@ into investment actions.
 5. Apply each card’s question, actions, output, and limits.
 6. Return supported, challenged, or unresolved findings using the output contract.
 
-Use the bundled deterministic router when a shell is available.
+Use the bundled deterministic router when the host gives this role a shell **and** this skill's directory is reachable. Where either is missing — a role-split host that grants no shell, or an install without `scripts/` — skip the router and open the `references/` file for the chosen module directly, using the mapping in *Choose the Workflow* below. The router only decides which file to read; it holds no analysis of its own, so nothing is lost by reading the file.
 From the skill directory, run:
 
 ```bash

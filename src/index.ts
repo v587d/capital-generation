@@ -17,7 +17,7 @@ import { registerChartTool } from './chart/tool.js'
 import { createChartEventPublisher, type ChartEventContext } from './chart/events.js'
 import { registerRootToolPolicy, rootPolicyProbes, type PolicyContext } from './agents/root-tool-policy.js'
 import { registerBashGuard } from './agents/bash-guard.js'
-import { registerRootSelectedSkills, type SelectedSkillSelection } from './agents/selected-skills-provider.js'
+import { registerRootSelectedSkills, SELECTED_SKILL_CATALOG, type SelectedSkillSelection } from './agents/selected-skills-provider.js'
 import { ChartSourceTokenStore, registerChartSourceTool } from './chart/source-token.js'
 import { ChartArtifactRegistry } from './chart/artifact-ref.js'
 import { WebRetriever } from './web-retriever/retriever.js'
@@ -198,23 +198,15 @@ export interface Config {
   retriever?: RetrieverConfig
 }
 
-const SelectedSkillsSchema = z.object({
-  buffettFramework: z.boolean().default(false).description('Enable the Finterm Buffett framework experiment for the Capital root Agent'),
-  financialHealth: z.boolean().default(false).description('Enable the China-stock financial health experiment for the Capital root Agent'),
-  riskWarningCatalysts: z.boolean().default(false).description('Enable the China-stock risk and catalyst monitoring experiment for the Capital root Agent'),
-  valuationInvestmentStrategy: z.boolean().default(false).description('Enable the China-stock valuation experiment for the Capital root Agent'),
-  strategyBusinessTransition: z.boolean().default(false).description('Enable the China-stock business transition experiment for the Capital root Agent'),
-  industryCompetitionMoat: z.boolean().default(false).description('Enable the China-stock industry and competition experiment for the Capital root Agent'),
-  businessDecompositionOrderQuality: z.boolean().default(false).description('Enable the China-stock order quality experiment for the Capital root Agent'),
-}).default({
-  buffettFramework: false,
-  financialHealth: false,
-  riskWarningCatalysts: false,
-  valuationInvestmentStrategy: false,
-  strategyBusinessTransition: false,
-  industryCompetitionMoat: false,
-  businessDecompositionOrderQuality: false,
-})
+// 开关清单只有一处来源：selected-skills 的 catalog。卡片那侧（capital-config/index.js）一直按
+// catalog 现算，主插件 Config 却手抄过一份 key 列表——接第三颗快照时这两处就漂了（默认值在
+// 条目→主插件 边界被静默丢弃，表现是卡片能拨、运行期读不到）。新增快照因此不必再动 src/。
+const SelectedSkillsSchema = z.object(
+  Object.fromEntries(SELECTED_SKILL_CATALOG.map(({ key, name }) => [
+    key,
+    z.boolean().default(false).description(`Enable the community experiment "${name}" for the Capital root Agent`),
+  ])),
+).default(Object.fromEntries(SELECTED_SKILL_CATALOG.map(({ key }) => [key, false])))
 
 /** DSH 0.1.2-rc.1 configuration schema. */
 export const Config = z.object({

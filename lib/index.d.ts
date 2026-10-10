@@ -93,21 +93,9 @@ export interface Config {
 export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     customPersona: z<string, string, "defined">;
     selectedSkills: z<Schemastery.ObjectS<NoInfer<{
-        buffettFramework: z<boolean, boolean, "defined">;
-        financialHealth: z<boolean, boolean, "defined">;
-        riskWarningCatalysts: z<boolean, boolean, "defined">;
-        valuationInvestmentStrategy: z<boolean, boolean, "defined">;
-        strategyBusinessTransition: z<boolean, boolean, "defined">;
-        industryCompetitionMoat: z<boolean, boolean, "defined">;
-        businessDecompositionOrderQuality: z<boolean, boolean, "defined">;
+        [k: string]: z<boolean, boolean, "defined">;
     }>>, Schemastery.ObjectT<NoInfer<{
-        buffettFramework: z<boolean, boolean, "defined">;
-        financialHealth: z<boolean, boolean, "defined">;
-        riskWarningCatalysts: z<boolean, boolean, "defined">;
-        valuationInvestmentStrategy: z<boolean, boolean, "defined">;
-        strategyBusinessTransition: z<boolean, boolean, "defined">;
-        industryCompetitionMoat: z<boolean, boolean, "defined">;
-        businessDecompositionOrderQuality: z<boolean, boolean, "defined">;
+        [k: string]: z<boolean, boolean, "defined">;
     }>>, "defined">;
     fuyaoCredentialRef: z<string, string, "defined">;
     retriever: z<Schemastery.ObjectS<NoInfer<{
@@ -190,21 +178,9 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
 }>>, Schemastery.ObjectT<NoInfer<{
     customPersona: z<string, string, "defined">;
     selectedSkills: z<Schemastery.ObjectS<NoInfer<{
-        buffettFramework: z<boolean, boolean, "defined">;
-        financialHealth: z<boolean, boolean, "defined">;
-        riskWarningCatalysts: z<boolean, boolean, "defined">;
-        valuationInvestmentStrategy: z<boolean, boolean, "defined">;
-        strategyBusinessTransition: z<boolean, boolean, "defined">;
-        industryCompetitionMoat: z<boolean, boolean, "defined">;
-        businessDecompositionOrderQuality: z<boolean, boolean, "defined">;
+        [k: string]: z<boolean, boolean, "defined">;
     }>>, Schemastery.ObjectT<NoInfer<{
-        buffettFramework: z<boolean, boolean, "defined">;
-        financialHealth: z<boolean, boolean, "defined">;
-        riskWarningCatalysts: z<boolean, boolean, "defined">;
-        valuationInvestmentStrategy: z<boolean, boolean, "defined">;
-        strategyBusinessTransition: z<boolean, boolean, "defined">;
-        industryCompetitionMoat: z<boolean, boolean, "defined">;
-        businessDecompositionOrderQuality: z<boolean, boolean, "defined">;
+        [k: string]: z<boolean, boolean, "defined">;
     }>>, "defined">;
     fuyaoCredentialRef: z<string, string, "defined">;
     retriever: z<Schemastery.ObjectS<NoInfer<{

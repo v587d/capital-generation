@@ -6,7 +6,7 @@ import { agentSessionId, isRootAgent, type AgentLike, type PolicyContext } from 
 // The catalog is a shipped data file outside the TypeScript root; runtime keeps this
 // import so the published lib resolves the same metadata beside the pinned snapshots.
 // @ts-expect-error catalog.js is intentionally maintained as package data.
-import { SELECTED_SKILL_CATALOG as CATALOG } from '../../selected-skills/catalog.js'
+import { SELECTED_SKILL_CATALOG as CATALOG, SELECTED_SKILL_SKILL_DIRS } from '../../selected-skills/catalog.js'
 
 export type SelectedSkillStatus = 'experimental' | 'watchlist'
 export type SelectedSkillCatalogEntry = {
@@ -23,10 +23,12 @@ export type SelectedSkillSelection = Partial<Record<SelectedSkillKey, boolean>>
 export type SelectedSkillSelectionSource = SelectedSkillSelection | (() => SelectedSkillSelection)
 
 const PROVIDER_NAME = 'capital-selected-skills'
-const SKILL_ROOTS = [
-  fileURLToPath(new URL('../../selected-skills/investment-skills/skills', import.meta.url)),
-  fileURLToPath(new URL('../../selected-skills/china-stock-research-skills/skills', import.meta.url)),
-]
+// skills 根按 catalog 的「仓库 → 上游 SKILL.md 相对路径」现算：第三颗快照的上游把 skill 放在
+// plugins/us-stock-analysis/skills，不在 <repo>/skills 底下。写死目录列表的表现不是报错，
+// 而是"用户在卡片上勾了那一格、技能永远不出现"（AGENTS.md §9.7）。
+const SKILL_ROOTS = Object.entries(SELECTED_SKILL_SKILL_DIRS as Record<string, string>).map(
+  ([repository, skillsDir]) => fileURLToPath(new URL(`../../selected-skills/${repository}/${skillsDir}`, import.meta.url)),
+)
 
 type FileSystemSkillConfig = {
   providerName: string

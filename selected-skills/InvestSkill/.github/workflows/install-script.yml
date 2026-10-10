@@ -1,0 +1,196 @@
+name: Install Script
+
+# Tests install.sh — the one-command curl installer.
+#
+#   lint          shellcheck + bash -n
+#   unit-tests    scripts/test-install.js — runs install.sh against a locally
+#                 built tarball via a curl test double (offline, hermetic),
+#                 on Linux + macOS and on the oldest supported Node
+#   live-install  the real documented command (curl | bash) against this very
+#                 commit, once per supported agent
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'install.sh'
+      - 'scripts/test-install.js'
+      - '.github/workflows/install-script.yml'
+      - 'prompts/**'
+      - 'plugins/**'
+      - 'site/build/build-site.js'
+      - 'README*.md'
+      - 'site/content/COOKBOOK*.md'
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+# Every job here only reads the repository.
+permissions:
+  contents: read
+
+jobs:
+  # ── Static analysis ───────────────────────────────────────────────────────
+  lint:
+    name: Lint — shellcheck & bash -n
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+      with:
+        persist-credentials: false
+
+    - name: bash -n (syntax)
+      run: |
+        bash -n install.sh
+        echo "✅ install.sh parses cleanly"
+
+    - name: shellcheck
+      run: |
+        shellcheck --version
+        shellcheck --severity=warning --shell=bash install.sh
+        echo "✅ shellcheck clean (warning severity and above)"
+
+    - name: POSIX-portable temp/dir usage
+      run: |
+        # A shell installer that people pipe from curl must never rm outside
+        # its own mktemp dir.
+        if grep -nE '\brm\s+-[rf]{1,2}\b' install.sh | grep -v 'TMP' | grep -vE '^\s*[0-9]+:\s*(info|say|ok) '; then
+          echo "❌ rm -rf outside of \$TMP found above"
+          exit 1
+        fi
+        echo "✅ every rm -rf targets \$TMP only"
+
+  # ── Offline behaviour tests ───────────────────────────────────────────────
+  unit-tests:
+    name: Unit Tests — ${{ matrix.os }} / node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, node: '22' }
+          - { os: ubuntu-latest, node: '18' }   # engines floor
+          - { os: macos-latest,  node: '22' }   # BSD tar / BSD sed
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v5
+      with:
+        persist-credentials: false
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v5
+      with:
+        node-version: ${{ matrix.node }}
+
+    - name: Report shell & tar flavour
+      run: |
+        bash --version | head -1
+        tar --version | head -1
+
+    - name: Run install script test suite
+      run: node scripts/test-install.js
+
+  # ── The real curl | bash path, against this commit ────────────────────────
+  live-install:
+    name: Live Install — ${{ matrix.agent }}
+    runs-on: ubuntu-latest
+    # Forks cannot be fetched by sha from this repo's codeload endpoint.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { agent: claude,   expect: '.claude/skills/stock-eval/SKILL.md' }
+          - { agent: cursor,   expect: '.cursor/rules/investskill.mdc' }
+          - { agent: copilot,  expect: '.github/copilot-instructions.md' }
+          - { agent: gemini,   expect: 'GEMINI.md' }
+          - { agent: codex,    expect: 'AGENTS.md' }
+          - { agent: opencode, expect: 'AGENTS.md' }
+          - { agent: any,      expect: '.investskill/prompts/stock-eval.md' }
+
+    steps:
+    - name: Resolve ref under test
+      id: ref
+      run: |
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          echo "sha=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+        else
+          echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Install via curl | bash (${{ matrix.agent }})
+      run: |
+        SHA="${{ steps.ref.outputs.sha }}"
+        mkdir -p "$RUNNER_TEMP/live/${{ matrix.agent }}"
+        cd "$RUNNER_TEMP/live/${{ matrix.agent }}"
+        curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/$SHA/install.sh" \
+          | bash -s -- -a ${{ matrix.agent }} -r "$SHA"
+
+    - name: Verify installed layout
+      run: |
+        cd "$RUNNER_TEMP/live/${{ matrix.agent }}"
+        ERRORS=0
+
+        prompt_count=0
+        for f in .investskill/prompts/*.md; do
+          [ -e "$f" ] || continue
+          prompt_count=$((prompt_count + 1))
+        done
+        if [ "$prompt_count" -gt 0 ]; then
+          echo "✅ $prompt_count frameworks in .investskill/prompts/"
+        else
+          echo "❌ no frameworks installed"
+          ERRORS=$((ERRORS + 1))
+        fi
+
+        if [ -e "${{ matrix.expect }}" ]; then
+          echo "✅ ${{ matrix.expect }} created"
+        else
+          echo "❌ ${{ matrix.expect }} MISSING"
+          ERRORS=$((ERRORS + 1))
+        fi
+
+        [ "$ERRORS" -eq 0 ] || exit 1
+
+    - name: Re-run must be a no-op (idempotent)
+      run: |
+        SHA="${{ steps.ref.outputs.sha }}"
+        cd "$RUNNER_TEMP/live/${{ matrix.agent }}"
+        before=$(find . -type f | sort | xargs shasum | shasum | cut -d' ' -f1)
+        curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/$SHA/install.sh" \
+          | bash -s -- -a ${{ matrix.agent }} -r "$SHA"
+        after=$(find . -type f | sort | xargs shasum | shasum | cut -d' ' -f1)
+        if [ "$before" = "$after" ]; then
+          echo "✅ second run changed nothing ($before)"
+        else
+          echo "❌ second run changed the tree ($before → $after)"
+          exit 1
+        fi
+
+  # ── Summary ───────────────────────────────────────────────────────────────
+  install-script-summary:
+    name: Install Script Summary
+    needs: [lint, unit-tests, live-install]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+    - name: Report
+      run: |
+        echo "════════════════════════════════════════"
+        echo "  install.sh Test Results"
+        echo "════════════════════════════════════════"
+        echo "  lint:          ${{ needs.lint.result }}"
+        echo "  unit-tests:    ${{ needs.unit-tests.result }}"
+        echo "  live-install:  ${{ needs.live-install.result }}"
+        echo "════════════════════════════════════════"
+
+    - name: Fail if any job failed
+      if: >
+        needs.lint.result == 'failure' ||
+        needs.unit-tests.result == 'failure' ||
+        needs.live-install.result == 'failure'
+      run: exit 1

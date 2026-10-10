@@ -93,20 +93,27 @@ test('打包闸门：vendored 图表库与构建产物都在发布清单里', (t
 })
 
 test('打包闸门：selected-skills 的运行时半边逐条落在发布清单里', async () => {
-  // provider 运行时按**包内相对路径** import catalog、并解析两颗 skills 目录
-  // （src/agents/selected-skills-provider.ts 的 '../../selected-skills/…'）：漏发任何一条的表现
-  // 不是报错，而是"用户在卡片上勾了，那个 skill 就是不出现"。仓库里跑测试永远发现不了，
-  // 因为目录就在 cwd 下面——AGENTS.md §9.7 那一族，只有打包器能回答"发出去有哪些文件"。
+  // provider 运行时按**包内相对路径** import catalog，skills 根按 catalog 的仓库→相对路径映射现算
+  // （src/agents/selected-skills-provider.ts）：漏发任何一条的表现不是报错，而是"用户在卡片上勾了，
+  // 那个 skill 就是不出现"。仓库里跑测试永远发现不了，因为目录就在 cwd 下面——AGENTS.md §9.7 那一族，
+  // 只有打包器能回答"发出去有哪些文件"。
   const paths = packedFilePaths()
-  const { SELECTED_SKILL_CATALOG } = await import('../selected-skills/catalog.js')
+  const { SELECTED_SKILL_CATALOG, SELECTED_SKILL_SKILL_DIRS } = await import('../selected-skills/catalog.js')
   assert.ok(SELECTED_SKILL_CATALOG.length >= 1, 'catalog 一条都没有，这条闸门就变成空断言了')
 
   for (const required of ['selected-skills/catalog.js', 'selected-skills/README.md']) {
     assert.ok(paths.has(required), `发布清单里缺少 ${required}（settings 卡片与 provider 都 import catalog）`)
   }
 
+  // 每条 catalog 的 repository 都得在「仓库 → skills 相对路径」里有登记，否则 provider 现算不出根、
+  // 下面这条按真实路径反查也无从查起（InvestSkill 的 skill 在 plugins/us-stock-analysis/skills 底下）。
   for (const entry of SELECTED_SKILL_CATALOG) {
-    const skillPath = `selected-skills/${entry.repository}/skills/${entry.name}/SKILL.md`
+    assert.ok(SELECTED_SKILL_SKILL_DIRS[entry.repository],
+      `catalog 条目 ${entry.key} 的仓库 ${entry.repository} 没有 skills 根登记（SELECTED_SKILL_SKILL_DIRS）`)
+  }
+
+  for (const entry of SELECTED_SKILL_CATALOG) {
+    const skillPath = `selected-skills/${entry.repository}/${SELECTED_SKILL_SKILL_DIRS[entry.repository]}/${entry.name}/SKILL.md`
     assert.ok(paths.has(skillPath),
       `catalog 登记了 ${entry.key}（${entry.name}），但包里找不到 ${skillPath} —— 用户勾上这一格也不会生效`)
   }
@@ -120,15 +127,25 @@ test('打包闸门：selected-skills 的运行时半边逐条落在发布清单�
     }
   }
 
-  // 反向断言：上游 README 用的成图与它自己的 viz 站点不进包（2.3 MB，其中 images/ 与 viz/out/ 是
-  // 同一批 PNG 的两份拷贝，skill 正文零引用）。`files` 按仓库逐个登记，所以新接一份快照忘了登记
-  // 时上面那条会点名失败；这一条防的是反向漂移——有人把排除口径放宽回去。
-  for (const path of paths) {
-    assert.equal(
-      /^selected-skills\/[^/]+\/(images|viz)\//.test(path),
-      false,
-      `上游的成图与 viz 站点又进包了：${path}（用户装的是运行时正文，全量快照住在 git 里）`,
-    )
+  // 反向断言：随包发的是运行时正文与溯源，不是上游仓库全部。每颗快照的排除口径就写在它自己的
+  // `.npmignore` 里（上一颗挡 images/ 与 viz/ 的成图和 viz 站点；InvestSkill 挡它自己的静态站、
+  // 与 skill 正文同源的 prompts/ 副本、脚本与 CI 材料），所以这里以那份文件为唯一声明处：
+  // 有人放宽口径、或 .npmignore 写了却没被打包器执行，这条会点名哪个目录又进包了。
+  for (const repository of repositories) {
+    const ignorePath = join(ROOT, 'selected-skills', repository, '.npmignore')
+    if (!existsSync(ignorePath)) continue
+    const excluded = readFileSync(ignorePath, 'utf8').split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#') && !line.startsWith('!') && line.startsWith('/') === false && line.endsWith('/'))
+      .map((line) => line.slice(0, -1))
+    assert.ok(excluded.length > 0, `${repository}/.npmignore 一条目录规则都没有，反向断言会退化成空断言`)
+    const prefix = `selected-skills/${repository}/`
+    for (const path of paths) {
+      if (!path.startsWith(prefix)) continue
+      const hit = path.slice(prefix.length).split('/').slice(0, -1).find((segment) => excluded.includes(segment))
+      assert.equal(hit, undefined,
+        `${repository} 的 .npmignore 排除了 ${hit}/，但它又出现在发布包里：${path}（全量快照本该住在 git 里）`)
+    }
   }
 })
 

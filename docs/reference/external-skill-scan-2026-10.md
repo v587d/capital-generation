@@ -10,6 +10,7 @@
 
 1. [`spikeHongg/china-stock-research-skills`](https://github.com/spikeHongg/china-stock-research-skills)：内容可作为 A 股财务健康、风险监控、估值、战略转型、行业竞争和订单质量的实验模块；截至 2026-10-08，最后提交为 2026-03-09，状态为 `watchlist`，用户可按模块自行开启。其 orchestrator 仍因与 Capital 路由冲突排除。
 2. [`finterm-ai/investment-skills`](https://github.com/finterm-ai/investment-skills)：最后提交为 2026-07-22，状态为 `experimental`，可作为 Buffett-inspired 商业分析、现金流、估值和风险框架显式实验，仍默认关闭。它主要源于美股/伯克希尔语境，不能直接当作 A 股规则。
+3. [`yennanliu/InvestSkill`](https://github.com/yennanliu/InvestSkill)：**2026-10-10 追加入驻**，状态 `experimental`，28 个美股模块进 catalog、默认关闭。判断依据与逐条排除见下面的追加节。
 
 所有条目都需要用户自行判断是否适合当前任务；Owner 会继续寻找合适的社区项目，也欢迎通过 PR 提交新的固定快照和标签元数据。
 
@@ -46,6 +47,29 @@
 1. 先挑 Finterm 的 “Owner earnings / 现金流质量” 与 China 的财务健康、订单质量等模块，和现有 `capital-equity-research` 做盲测；用户也可以在设置页按标签自行组合。
 2. 固定相同问题、截止日期和输入证据；只比较证据完整性、冲突处理、遗漏、无依据断言和 token/工具成本，不比较是否猜中股价。
 3. 用用户反馈、失败案例和对照评测逐步改善标签、风险提示和复查周期；当候选规模和 benchmark 足够成熟时，再考虑把长期无响应或低价值条目移出 catalog。
-4. 2026-11-06 重新检查两仓库的 release/commit、许可证、依赖与问题处理；上游变化只触发复审，不自动更新本地能力。
+4. 2026-11-06 重新检查三颗快照的 release/commit、许可证、依赖与问题处理；上游变化只触发复审，不自动更新本地能力。
 
-本扫描是公开信息桌面审阅，不是完整安全审计、法律意见、作者背书或金融方法有效性证明。入驻前仍需固定 commit，静态检查完整文件树，逐一复核许可与引用，并运行隔离评测。
+## 追加（2026-10-10）：InvestSkill 入驻
+
+候选：[`yennanliu/InvestSkill`](https://github.com/yennanliu/InvestSkill)（Claude Code plugin `us-stock-analysis`，`v1.12.0`，MIT）。固定 commit `c3f2a17`（main，2026-10-09；最后一次内容提交 `113527f`，2026-09-25）。
+
+**与本轮其余候选不同，这一条是 clone 后逐文件读的**（不是只读 README），并且**按接入清单改写过正文**。快照与所钉 commit 的差异只有三类，逐条记在 `selected-skills/InvestSkill/UPSTREAM.md`：34 篇 `SKILL.md` 各补一行 `name:`（DSH provider 缺它就不发现该文件）；删掉上游自己的 `.gitignore`（它在宿主仓库会静默挡掉 `site/build/`）；**28 颗 catalog skill 的取数口径改写**（168 行删 / 161 行增）——原文成规模地要求分析角色自己 `use web search` 取实时报价，取不到就"打个 ⚠️ 警告后用 training-data estimates 继续"，另有两处 `node scripts/fetch-*.js` 指令。分析结论、评分表与输出模板一字未改；不进 catalog 的 6 颗原文未动。这一轮之后，接入清单（含"谁去取数""取不到怎么办"两条硬问题）固化在 `docs/dev/selected-skills.md` §8.6，正文结果由 `test/selected-skills-content.test.mjs` 复查。
+
+| 硬门槛 | 读到的是什么 |
+|---|---|
+| 来源可核验 | 仓库、作者、tag `v1.12.0`、251 次提交；无转载痕迹 |
+| 许可可用 | MIT，`Copyright (c) 2026 yennanliu`，原件随包 |
+| 权限可控 | 原文每篇开篇要求分析角色"自己取实时报价"（24 颗写 `use web search`、25 颗留"取不到就用训练记忆估"的逃生口）——**已按清单改为委派与报缺**；本插件的取数边界本身不受正文影响（出网工具逐名 deny、bash 只给 `data_junior`），但记忆回填没有工具会拦，所以必须改在正文里。无凭据读取、无外传、无自动下单 |
+| 可审查 | `scripts/` 372 KB 全部是 node 脚本，随快照留在 git、provider 从不执行；无下载后执行、无混淆代码、无隐藏网络调用 |
+| 金融表达可校验 | 无收益/准确率承诺；打分项（Verification / ETF Fitness / Risk Budget 0–10）衡量的是自洽度与结构特征；`bear-case`、`earnings-preview`、`position-ladder` 含情景与股数写法，逐条在 `riskNote` 里写明是推演练习、不是订单 |
+| 可适配 | 34 颗各自是一个有边界的分析视角/验证步骤，输入输出与失效条件都写在正文里 |
+
+**catalog 收录 28 颗，排除 6 颗**（都留在快照里当材料）：`fundamental-analysis`、`dcf-valuation`、`research-bundle` 是上游自己标注的 alias 残片（`scripts/lib/skill-registry.js` 的 `ALIAS_SKILLS`，正文已声明并入他处）；`full-report` 是编排 skill，与 `china-stock-research-orchestrator` 同一条排除理由；`report-generator` 是上游输出口（HTML/PDF 存 `output/`），与已删除、禁止恢复的报告交付链路冲突；`chart-master` 教 Agent 自己出图，出图一律走 `render_chart`。
+
+**它填的缺口**：本插件此前没有逐条主张核验（`fact-check`）、刻意反方（`bear-case`）、SEC 披露面（Form 4 / 13F / 短仓）与结果自洽度评分（`result-validator`）这几类视角；使用者在"复核一份别人写的报告""给一个看多论点找反证""读美股年报"这三类任务里会去勾它。**重叠**：`stock-valuation` 与 `valuation-investment-strategy`、`competitor-analysis` 与 `industry-competition-moat` 主题相近，但前者按美股同业与四方法区间出假设清单，后者按 A 股披露口径——两条 riskNote 都写明了不可互相替代。
+
+**A 股专项检查**：本条**不声称**适用于 A 股。复权、T+1、涨跌停、披露制度（无 Form 4/13F/13D、无 SEC EDGAR full-text）与税务（无 wash-sale 规则）都不成立，因此 `us-stock` 与 `filings` 标签就是给使用者的口径提示，各条 `riskNote` 逐条点名要换的口径。
+
+维护性：近 90 天 47 次非机器人提交、近 180 天 111 次，最新 release `v1.12.0`（2026-09-25），CI 自带 skill 契约检查（`scripts/check-skill-contract.js`）。活跃，因此 `experimental` 而非 `watchlist`。下次复查 2026-11-06（与另两颗同一节奏）。
+
+本扫描是公开信息桌面审阅（InvestSkill 那一节除外：那一节 clone 后逐文件读过），不是完整安全审计、法律意见、作者背书或金融方法有效性证明。入驻前仍需固定 commit，静态检查完整文件树，逐一复核许可与引用，并运行隔离评测。

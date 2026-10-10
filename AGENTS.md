@@ -37,7 +37,7 @@
 - **§6.1** `/capital-charts` 序列旁路必须接 `connection.requestRejection`，否则是无认证端点。
 - **§6.3** 会话事件词汇表是闭集，交付必须走 first-party `deliverables/presented`；cordis ctx 不能用
   `{ ...ctx }` 展开（`get`/`on`/`effect` 挂在原型上）；寄存队列按 owner（根会话）归档。
-- **§8.6** Skill frontmatter 与目录须可发现；catalog/provider 的运行时和打包约束见详情。
+- **§8.6** 接入必查清单先过：取数一律委派、不许用记忆回填、不带执行面；frontmatter/目录须可发现；catalog 与打包约束见详情。
 - **§9.5 / §9.6** 工具返回值必须无损 JSON（`undefined` / `NaN` / 空洞不许带出），且必须满足自己
   声明的 `output.schema`——多返回一个未声明字段同样致命。
 

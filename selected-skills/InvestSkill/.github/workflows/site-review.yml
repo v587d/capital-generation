@@ -1,0 +1,56 @@
+name: Daily Site Review
+
+# Runs the automated site-review health check once per day and commits a
+# dated report to qa/site_review_YYYYMMDD.md. The script also prunes reports
+# older than the 5-day retention window, and those deletions are committed in
+# the same commit. Also runnable on demand.
+on:
+  schedule:
+    - cron: '17 6 * * *'   # 06:17 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  site-review:
+    name: Site review & report
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v5
+      with:
+        node-version: '22'
+
+    - name: Install build dependencies
+      run: npm install --no-save markdown-it@^14.0.0 markdown-it-anchor@^8.6.7
+
+    - name: Run site review
+      id: review
+      continue-on-error: true
+      run: node scripts/site-review.js
+
+    - name: Commit report to qa/ (and prune old ones)
+      if: always()
+      run: |
+        git config user.name  "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        # -A so reports pruned by the retention window are staged as deletions,
+        # not just the new report. Scoped to qa/ so nothing else is picked up.
+        git add -A qa/
+        if git diff --cached --quiet; then
+          echo "No report changes to commit."
+        else
+          git commit -m "chore(qa): daily site review report $(date -u +%Y%m%d) (keep last 5 days)"
+          git push
+        fi
+
+    - name: Reflect check status
+      if: steps.review.outcome == 'failure'
+      run: |
+        echo "::warning::Daily site review found failing checks — see the committed qa/ report."
+        exit 1

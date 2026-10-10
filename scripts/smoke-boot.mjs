@@ -137,6 +137,50 @@ async function watchlistFenceProbe(url, cookie) {
   return { anonymousStatus: anonymous.status, status: authed.status, items, cause, cacheControl: authed.headers.get('cache-control') }
 }
 
+/**
+ * SKILL.md 原文旁路（`/capital-skills/<名>.md`）的围栏与**闭集**实弹核对。
+ *
+ * 这条路由读的是盘上的文件，所以"匿名必须 401"之外还要问两件事：① 表里没这个名字（含 `%2F..%2F`
+ * 这种编码斜杠）必须 404 而不是 500/读到别人的文件；② 命中时必须真的拿到那份快照的开头
+ * （frontmatter 的 `---`），拿到空串就是"把没读到写成一份空原文"。与上一条同理，单元测试用的是
+ * fake authorize，证明不了真围栏。
+ */
+async function skillDocFenceProbe(url, cookie, skillName) {
+  const signal = AbortSignal.timeout(15_000)
+  const origin = new URL(url).origin
+  const target = `${origin}/capital-skills/${encodeURIComponent(skillName)}.md`
+  const headers = cookie.length > 0 ? { cookie } : {}
+  const anonymous = await fetch(target, { signal })
+  const authed = await fetch(target, { headers, signal })
+  const body = authed.ok ? await authed.text() : ''
+  const missing = await fetch(`${origin}/capital-skills/not-a-catalogued-skill.md`, { headers, signal })
+  const traversal = await fetch(`${origin}/capital-skills/${encodeURIComponent('../../package.json')}.md`, { headers, signal })
+  let missingError = null
+  try {
+    missingError = (await missing.json())?.error ?? null
+  } catch {
+    missingError = '回包不是 JSON'
+  }
+  return {
+    anonymousStatus: anonymous.status,
+    status: authed.status,
+    cacheControl: authed.headers.get('cache-control'),
+    bytes: body.length,
+    startsWithFrontMatter: body.startsWith('---'),
+    missingStatus: missing.status,
+    missingError,
+    traversalStatus: traversal.status,
+  }
+}
+
+/** 围栏判据：匿名拒绝、带 cookie 可读、闭集外一律 404、且拿到的确实是那份快照。 */
+function skillFenceOk(fence) {
+  return fence !== undefined && fence.anonymousStatus === 401 && fence.status === 200
+    && fence.cacheControl === 'no-store' && fence.startsWithFrontMatter && fence.bytes > 200
+    && fence.missingStatus === 404 && fence.missingError === 'skill_not_catalogued'
+    && fence.traversalStatus === 404
+}
+
 async function bootGraphHasCapitalBundles(url) {
   try {
     const response = await fetchIndex(url)
@@ -366,6 +410,7 @@ const tail = result.output.split('\n').filter(Boolean).slice(-15).join('\n')
 
 let bundles
 let fence
+let skillFence
 try {
   if (result.ok) {
     console.log(`smoke-boot: ✅ ${result.reason}`)
@@ -390,6 +435,19 @@ try {
         fence = { ok: false, error: String(error?.message ?? error) }
         console.log(`smoke-boot: ❌ 自选股路由探针失败：${fence.error}`)
       }
+      // 读原文那条旁路是**这一版新加的文件读面**：闭集与围栏都只在真宿主里才量得出真效果。
+      try {
+        const { SELECTED_SKILL_CATALOG } = await import(new URL('../selected-skills/catalog.js', import.meta.url).href)
+        const skillName = SELECTED_SKILL_CATALOG[0].name
+        skillFence = await skillDocFenceProbe(url, bundles.cookie ?? '', skillName)
+        skillFence.ok = (bundles.cookie ?? '').length === 0
+          ? skillFence.status === 200 && skillFence.startsWithFrontMatter
+          : skillFenceOk(skillFence)
+        console.log(`smoke-boot: ${skillFence.ok ? '✅' : '❌'} /capital-skills/${skillName}.md：匿名 HTTP ${skillFence.anonymousStatus}（应 401）、带 cookie HTTP ${skillFence.status}（应 200）${skillFence.bytes} 字节、cache-control=${skillFence.cacheControl}、开头是 frontmatter=${skillFence.startsWithFrontMatter}；表外名 HTTP ${skillFence.missingStatus}（error=${skillFence.missingError}）、编码斜杠穿越 HTTP ${skillFence.traversalStatus}（都应 404）`)
+      } catch (error) {
+        skillFence = { ok: false, error: String(error?.message ?? error) }
+        console.log(`smoke-boot: ❌ 读原文路由探针失败：${skillFence.error}`)
+      }
     } else {
       console.log(`smoke-boot: ⚠️  未能拉取 index.html 复核 boot graph：${bundles.error ?? 'unknown'}`)
     }
@@ -401,8 +459,9 @@ try {
       console.log(`smoke-boot: ${probe.presetRows?.every((row) => row.state === 2) ? '✅' : '❌'} 关键预设行：${JSON.stringify(probe.presetRows ?? [])}`)
       console.log(`smoke-boot: ${probe.entry === 'present' && typeof probe.localFetchEnabled === 'boolean' ? '✅' : '❌'} settings 条目 ${SETTINGS_ENTRY_ID}：${probe.entry}，retriever.localFetch.enabled=${probe.localFetchEnabled}`)
       // 卡片坐 **bundle 自己的页面**（0.1.7 起设置页不再托管第三方卡片）：这里按 bundle 的行清单核取数通道。
+      // 顺手把**行数**也打出来：设置卡片第三格那个数字同源同值，肉眼能对着浏览器核。
       console.log(probe.rows
-        ? `smoke-boot: ${probe.rows.includes(SETTINGS_ENTRY_ID) ? '✅' : '❌'} 插件页里 ${PACKAGE_NAME} 的行：${probe.rows.join(', ')}`
+        ? `smoke-boot: ${probe.rows.includes(SETTINGS_ENTRY_ID) ? '✅' : '❌'} 插件页里 ${PACKAGE_NAME} 的行（共 ${probe.rows.length} 行 = 卡片「包含的组件」那个数字）：${probe.rows.join(', ')}`
         : `smoke-boot: ⚠️  读不到插件页的行清单（${probe.rowReadError ?? '未知原因'}），卡片座位需人工确认`)
     }
     if (problems.length > 0) {
@@ -447,5 +506,7 @@ const positiveOk = result.ok
   // ⛔ 自选股路由必须"匿名拒绝 + 带 cookie 可读"：prefix 路由自己不接 requestRejection
   // 就是任何本机进程凭路径即可读写用户自选股（docs/dev/chart-presentation.md §6.1 那条硬约束的同一族）。
   && (bundles?.fetched !== true || fence?.ok === true)
+  // ⛔ 读原文的旁路同一条要求：匿名拒绝、闭集外一律 404、命中才读盘（§6.1 那一族的第三条路径）。
+  && (bundles?.fetched !== true || skillFence?.ok === true)
 // 反向对照**期望**是失败：`negative.ok` 为 false 才算它对，所以这里只问"特征有没有触发"。
 process.exit(positiveOk && gateFired !== undefined ? 0 : 1)

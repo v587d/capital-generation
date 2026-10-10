@@ -8,7 +8,7 @@ import { resolveUserCustomizationSection } from '../lib/index.js'
 import { RETRIEVAL_DENIED_TOOLS } from '../lib/agents/root-tool-policy.js'
 import { SOURCE_OUTPUT_BUDGET_CHARS } from '../lib/web-retriever/tools.js'
 import { PRESET_PATCH_TEXT, presetRows } from './preset-rows.mjs'
-import { SELECTED_SKILL_CATALOG } from '../selected-skills/catalog.js'
+import { SELECTED_SKILL_CATALOG, SELECTED_SKILL_SKILL_DIRS } from '../selected-skills/catalog.js'
 
 // 预设装配行的读取（含 `!!js` 剥离）只在 test/preset-rows.mjs 有一份。
 const COMPOSITION_TEXT = PRESET_PATCH_TEXT
@@ -257,6 +257,27 @@ test('skills：内置 skills 由组合行承载，selected skill 只注册到 Ca
   assert.ok(SELECTED_SKILL_CATALOG.some(({ name }) => name === 'financial-health'), 'catalog 必须包含可拆分的 China 模块')
    assert.ok(SELECTED_SKILL_CATALOG.every(({ tags, status }) => tags.length > 0 && ['experimental', 'watchlist'].includes(status)), '每个 catalog 条目都必须带状态和能力标签')
    assert.ok(!SELECTED_SKILL_CATALOG.some(({ name }) => name === 'china-stock-research-orchestrator'), '与 Capital 路由冲突的 orchestrator 不得进入 catalog')
+  // 快照正文缺 frontmatter `name` 时，DSH filesystem provider 只 warn 一声就**静默跳过**这颗 skill，
+  // 症状是"卡片上勾了、会话里没有"。InvestSkill 上游不带 name（Claude Code 从目录名推导），所以本仓
+  // 按 UPSTREAM.md 记录补了这一行；将来照 commit 重新覆盖快照时，这条会点名哪颗没补回去。
+  for (const entry of SELECTED_SKILL_CATALOG) {
+    const file = fileURLToPath(new URL(`../selected-skills/${entry.repository}/${SELECTED_SKILL_SKILL_DIRS[entry.repository]}/${entry.name}/SKILL.md`, import.meta.url))
+    const front = readFileSync(file, 'utf8').match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/)
+    assert.ok(front && new RegExp(`^name: ${entry.name}$`, 'm').test(front[1]),
+      `快照 ${entry.repository}/${entry.name} 的 frontmatter 必须带 name: ${entry.name}，否则 provider 不发现它`)
+    assert.ok(front && /^description: \S/m.test(front[1]), `快照 ${entry.name} 的 frontmatter 必须带 description`)
+  }
+  // 留在快照里当材料、但不进可选清单的三类：接管会话路由的编排 skill、自带报告输出口、自带出图。
+  for (const excluded of ['full-report', 'report-generator', 'chart-master', 'research-bundle']) {
+    assert.ok(!SELECTED_SKILL_CATALOG.some(({ name }) => name === excluded),
+      `${excluded} 与 Capital 的既有契约冲突（路由 / 报告交付 / render_chart），不得进入 catalog`)
+  }
+  // catalog 身份冲突检查：多颗快照允许同名 skill，但 key 与 name 必须各自唯一，否则 provider 的
+  // enabled 集合与设置里的开关都会指错东西。
+  for (const field of ['key', 'name']) {
+    const values = SELECTED_SKILL_CATALOG.map((entry) => entry[field])
+    assert.equal(new Set(values).size, values.length, `catalog 的 ${field} 有重复`)
+  }
 
   // skills/ 必须随包分发：preset 目录已在 package.json 的 files 里。
   assert.ok(pkg.files.includes('preset'), 'package.json 的 files 必须包含 preset（skills/ 在其中）')

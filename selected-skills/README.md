@@ -38,9 +38,17 @@ source material and are never executed by intake or activation. The Capital prov
 scans only catalog-approved skill directories, registers only explicitly enabled names,
 and does not register the upstream orchestrator that conflicts with Capital routing.
 
-Do not edit upstream skill files casually. If a local adaptation is required, record it
-in `UPSTREAM.md`. These are vendored snapshots, not GitHub forks or submodules; use the
-original owner/repository URL and pinned commit for attribution.
+Upstream prose **is** edited when it fails the intake checklist — a skill that tells the
+analysis role to run its own web search, to proceed on "training-data estimates", or to
+invoke a helper script would otherwise route around this plugin's data boundaries with no
+tool to stop it. Every such rewrite is mechanical, scoped to catalog-exposed skills, and
+listed per category in that snapshot's `UPSTREAM.md`; `test/selected-skills-content.test.mjs`
+re-checks the result on every run. Do not touch prose for taste, do not rename directories,
+and leave skills that are not in the catalog exactly as upstream wrote them.
+
+The full checklist lives in `docs/dev/selected-skills.md` §8.6. If a local adaptation is
+required, record it in `UPSTREAM.md`. These are vendored snapshots, not GitHub forks or
+submodules; use the original owner/repository URL and pinned commit for attribution.
 
 See `docs/design/external-skill-intake.md` for the staged intake policy and
 `docs/reference/external-skill-scan-2026-10.md` for the initial candidate scan.
