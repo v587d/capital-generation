@@ -163,7 +163,7 @@ https://github.com/v587d/capital-generation
 目前 Windows 桌面端有一项[已知宿主差异](CHANGELOG.md)：主 Agent 的部分工具限制可能不生效。请特别留意它实际调用了哪些工具；结构化数据的取数限制仍由工具自身执行。
 
 ## 开发与贡献
-
+[![OctoCounts](https://api.octocounts.com/badge/v587d/capital-generation/branch/master)](https://octocounts.com/github/v587d/capital-generation/tree/master)
 普通用户不需要执行下面的命令。修改源码时请参考 [贡献指南](CONTRIBUTING.md) 和 [开发约定](AGENTS.md)：
 
 ```bash

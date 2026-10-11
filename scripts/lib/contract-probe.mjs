@@ -25,6 +25,7 @@ import { createWindRpc, WIND_BASE } from './wind-rpc.mjs'
 import { resolveCredential } from './credentials.mjs'
 import {
   probesForTier, secretRefOf, stateOf, PROVIDER_GAP_MS, FUYAO_PROBE_GAP_MS, ISSUE_VERDICTS,
+  resolveDayShifts,
 } from './contract-registry.mjs'
 
 /** 只有这三类判据开 Issue；定义在注册表里，这里转出是为了让 runner 与报告共用一个名字。 */
@@ -278,12 +279,29 @@ async function runOne({ entry, sources, probes, identifiers }) {
   }
 }
 
+/**
+ * 把条目里的 `dayShift` 标记换成具体日期——**一次运行只做一遍**，之后 runner、运行时 id 解析、
+ * 报告看到的都是普通字符串（换算做两遍就会出现两个"今天"，跨 UTC 午夜那档尤其）。
+ * 单独导出是为了能被离线测试钉住：这一步漏掉的症状是"参数是个对象"，只有真发请求才会炸，
+ * 而本仓已经踩过一次"本地全绿、只有 CI 发现"（§11.5 第 4 条）。
+ */
+export function withResolvedDates(entries, runAt = new Date()) {
+  return entries.map((entry) => ({
+    ...entry,
+    ...(entry.params ? { params: resolveDayShifts(entry.params, runAt) } : {}),
+    ...(entry.resolveFrom
+      ? { resolveFrom: { ...entry.resolveFrom, params: resolveDayShifts(entry.resolveFrom.params, runAt) } }
+      : {}),
+  }))
+}
+
 export async function runContractProbes({ tier = 'daily', only, family, log = (text) => console.error(text) } = {}) {
   let entries = probesForTier(tier)
   if (family) entries = entries.filter((entry) => entry.family === family)
   if (only) entries = entries.filter((entry) => entry.capability.includes(only))
   // trading_calendar 排最前：它决定后面所有 EMPTY 该怎么解释。
   entries = [...entries].sort((a, b) => Number(b.capability === 'trading_calendar') - Number(a.capability === 'trading_calendar'))
+  entries = withResolvedDates(entries)
 
   const needed = assertCredentials(entries)
   log(`档位 ${tier}：${entries.length} 条真打；需要凭据 ${needed.join(', ') || '（无）'}`)

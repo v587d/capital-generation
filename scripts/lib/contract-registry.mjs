@@ -2,8 +2,8 @@
  * 数据源契约巡检注册表（`docs/dev/tool-schema.md` §10.8 那道闸门的正文）。
  *
  * 一条能力一行，**四态取一**：
- *   · `tier: 'daily'`   每天 06:00（北京）打，失败算结论
- *   · `tier: 'weekly'`  周六 07:00（北京）全量打（静态面：基金档案 / 经理 / 回测这一类）
+ *   · `tier: 'daily'`   每天 04:00（北京）打，失败算结论
+ *   · `tier: 'weekly'`  周六 04:00（北京）全量打（静态面：基金档案 / 经理 / 回测这一类）
  *   · `shadow: {…}`     照打，但本视角不判——视角差异不是上游故障；每天在报告里露一次脸
  *   · `excluded: {…}`   刻意不打（按次计费等），理由必须写下来
  *
@@ -11,9 +11,10 @@
  * 与 `validateOutput`，URL 与参数校验来自生产的 `execute()`——写第二份就是第二份真相（§10.8 第 3 条）。
  * 这里只回答三个问题：**打谁、用什么最小参数、允许多慢**。
  *
- * 参数一律**静态可复现**：能省略的日期一律省略（让上游自己取最近可用交易日），
- * 显式传非交易日会拿到 `1002`（`dragon_tiger` 的 description 明写「不自动回退」），
- * 那是巡检自己造出来的失败。
+ * 参数一律**可复现**：能省略的日期一律省略（让上游自己取最近可用交易日），显式传非交易日会拿到
+ * `1002`（`dragon_tiger` 的 description 明写「不自动回退」），那是巡检自己造出来的失败。
+ * 非要给日期窗时**只写相对量**（`dayShift(-30)`），由 runner 在每次运行时按北京日历换成具体日期：
+ * 写死 `end_date: '2026-09-30'` 那种窗会一天天变旧，到点就永久 EMPTY——同一类失败的第二个版本。
  */
 
 /**
@@ -51,6 +52,16 @@ export const KNOWN_GAP_CODES = Object.freeze(['1002', '2004', '5003'])
 
 const ETFS = '510300.SH'
 const A_SHARE = '600519.SH'
+
+/**
+ * 相对"巡检跑的那天"的北京日历日偏移：`dayShift(-1)` = 前一个自然日，`dayShift(-30)` = 往前 30 天。
+ * 只是个标记，真正换成日期在 `resolveDayShifts()`（runner 每次运行做一遍）。
+ * ⛔ 不许在这里写死绝对日期：窗口会一天天变旧，到点永久 EMPTY，那是巡检自己造的失败。
+ */
+const dayShift = (days) => {
+  if (!Number.isInteger(days)) throw new RangeError(`dayShift 要整数天，拿到 ${JSON.stringify(days)}`)
+  return { dayShift: days }
+}
 
 /** DataSource 面：走生产的 `source.execute()` + `source.validateOutput()`。 */
 const ds = (family, capability, tier, params, extra = {}) => ({
@@ -159,11 +170,20 @@ const FUYAO = [
 
 // ── Eastmoney 数据面（21 颗，全部每天）────────────────────────────────────────
 // 全量而非"每族一个代表"：上游改版通常打中一个端点，不打中一族。
-const EM_RANGE = { start_date: '2025-01-01', end_date: '2026-09-30', page: 1, size: 3 }
+// 龙虎榜两颗：日期窗只写**相对量**，上界取前一个自然日；单票那颗不写死代码——从当天真榜单的
+// 首行取 `thscode`（`requires` + `resolveFrom`，跟 manager_id 同一套机制）。于是它每天打的是一只
+// "确定在榜"的股票，EMPTY 就只剩"上游真出问题"这一种解释了。
+// ⚠️ `requires` 的键名同时就是注入的参数名（runner 里 `{...params, [requires]: id}`），
+//    所以一条能力只能有一个运行时解析的参数；`ticker` 这个键名全表只此一处，别复用。
+const BILLBOARD = { start_date: dayShift(-30), end_date: dayShift(-1), page: 1, size: 3 }
+// 宏观指标：下界写死没问题（2025 年 1 月起都有数），上界必须是"昨天"——写死 2026-09-30 意味着
+// 这个窗只会越来越旧，直到某天没人注意到它已经一年没往前走过。
+const EM_RANGE = { start_date: '2025-01-01', end_date: dayShift(-1), page: 1, size: 3 }
 const EM = [
-  ds('eastmoney', 'eastmoney_top_buy_sell_market', 'daily', { start_date: '2026-09-21', end_date: '2026-09-25', page: 1, size: 3 }),
-  ds('eastmoney', 'eastmoney_top_buy_sell_ticker', 'daily', { ticker: A_SHARE, start_date: '2026-01-01', end_date: '2026-09-30', page: 1, size: 3 }),
-  ds('eastmoney', 'eastmoney_lockup_expiry', 'daily', { start_date: '2026-10-01', end_date: '2026-12-31', page: 1, size: 3 }),
+  ds('eastmoney', 'eastmoney_top_buy_sell_market', 'daily', { ...BILLBOARD }, { expect: { minRows: 1 } }),
+  ds('eastmoney', 'eastmoney_top_buy_sell_ticker', 'daily', { ...BILLBOARD },
+    { requires: 'ticker', resolveFrom: { capability: 'eastmoney_top_buy_sell_market', params: { ...BILLBOARD }, path: 'item.0.thscode' } }),
+  ds('eastmoney', 'eastmoney_lockup_expiry', 'daily', { start_date: dayShift(0), end_date: dayShift(90), page: 1, size: 3 }),
   ds('eastmoney', 'eastmoney_sector_rotation', 'daily', { page: 1, size: 3 }, { note: '海外视角经 302 到 push2delay 延迟镜像，禁止对它做新鲜度断言' }),
   ds('eastmoney', 'eastmoney_cashflow_rotation', 'daily', { page: 1, size: 3 }, { note: '同上' }),
   ds('eastmoney', 'eastmoney_cpi', 'daily', EM_RANGE, { expect: { minRows: 1 } }),
@@ -175,13 +195,13 @@ const EM = [
   ds('eastmoney', 'eastmoney_customs_trade', 'daily', EM_RANGE, { expect: { minRows: 1 } }),
   ds('eastmoney', 'eastmoney_retail_sales', 'daily', EM_RANGE, { expect: { minRows: 1 } }),
   ds('eastmoney', 'eastmoney_deposit_reserve', 'daily', EM_RANGE, { expect: { minRows: 1 } }),
-  ds('eastmoney', 'eastmoney_mutual_flow', 'daily', { start_date: '2026-09-01', end_date: '2026-09-30', page: 1, size: 3 }),
+  ds('eastmoney', 'eastmoney_mutual_flow', 'daily', { start_date: dayShift(-30), end_date: dayShift(-1), page: 1, size: 3 }),
   ds('eastmoney', 'eastmoney_main_capital_snapshot', 'daily', { page: 1, size: 3 }),
   ds('eastmoney', 'eastmoney_dividend_plan', 'daily', { ticker: A_SHARE, ...EM_RANGE }),
   ds('eastmoney', 'eastmoney_holder_number_snapshot', 'daily', { page: 1, size: 3 }),
   ds('eastmoney', 'eastmoney_mutual_quota', 'daily', {}, { note: '无参数；closed_reason 非空表示休市，是合法结果' }),
-  ds('eastmoney', 'eastmoney_margin_trading', 'daily', { ticker: A_SHARE, start_date: '2026-09-01', end_date: '2026-09-30', page: 1, size: 3 }),
-  ds('eastmoney', 'eastmoney_convertible_bond_list', 'daily', { start_date: '2026-01-01', end_date: '2026-12-31', page: 1, size: 3 }),
+  ds('eastmoney', 'eastmoney_margin_trading', 'daily', { ticker: A_SHARE, start_date: dayShift(-30), end_date: dayShift(-1), page: 1, size: 3 }),
+  ds('eastmoney', 'eastmoney_convertible_bond_list', 'daily', { start_date: dayShift(-180), end_date: dayShift(-1), page: 1, size: 3 }),
 ]
 
 // ── Tencent 公开端点（9 颗，全部每天；免密，120 ms 一条链）─────────────────────
@@ -287,24 +307,21 @@ export function resolveTier(date = new Date()) {
 }
 
 /**
- * 排程真值表，**用 UTC 写**，与 workflow 里那两条 cron 一一对应：
- * 北京周一~周五 06:00 = UTC 周日~周四 22:00；北京周六 07:00（全量）= UTC 周五 23:00；北京周日不排。
+ * 排程真值表，**用 UTC 写**，与 workflow 里那条 cron 一一对应：
+ * 北京周一~周六 04:00 = UTC 周日~周五 20:00；北京周日不排。
+ * 工作日与周六同一个 UTC 小时，所以只有一条——档位差异（daily / full）在 `resolveTier()` 按北京星期判。
  * 代码里再写一份的理由：cron 只住在 YAML，看门狗却要算"最近一个本该跑的时刻"，总得有能读的那一份。
  * 两边漂移由 `test/contract-registry.test.mjs` 逐个 (星期, 小时) 比对拦住——改时间必须同时改两处。
  */
 export const SCHEDULE_UTC = [
-  { hour: 22, dow: [0, 1, 2, 3, 4] },
-  { hour: 23, dow: [5] },
+  { hour: 20, dow: [0, 1, 2, 3, 4, 5] },
 ]
 
 /**
- * 最近一个**本该跑**的时刻（UTC）。北京周日那一档不存在，往回跳；小时跟着 `SCHEDULE_UTC` 走，
- * 所以工作日 06:00 与周六 07:00 各判各的。
- * 与 workflow 里那两条 cron 严格同构，所以由 `test/contract-registry.test.mjs` 钉住两边一致。
- * 看门狗拿它判"调度漏没漏"——**不能拿"若干小时内跑过"当心跳**：一次手动 dispatch 就能把整周的
- * 调度停摆遮过去，而手动跑恰恰不是调度器还活着的证据（2026-10-09 第一次遇到 schedule 静默没跑）。
- * GitHub 的 `schedule` 只保证"会跑"，实测迟到 4~6 小时（2026-10-09），所以这里算的是"最近该跑的
- * 那一档"，不是某个准点窗口——迟到但最终跑过的记录照样算心跳。
+ * 最近一个**本该跑**的时刻（UTC）。北京周日那一档不存在，往回跳；小时跟着 `SCHEDULE_UTC` 走。
+ * 与 workflow 里那条 cron 严格同构，所以由 `test/contract-registry.test.mjs` 钉住两边一致。
+ * GitHub 的 `schedule` 只保证"会跑"，实测迟到 3~4 小时，所以这里算的是"最近该跑的那一档"，
+ * 不是某个准点窗口——迟到但最终跑过的记录照样算心跳。
  */
 export function lastScheduledDue(now = new Date()) {
   for (let back = 0; back <= 7; back += 1) {
@@ -318,7 +335,22 @@ export function lastScheduledDue(now = new Date()) {
 }
 
 /**
- * 报告与 Issue 标题上"哪一天"必须用**北京日期**：北京 06:00 = UTC 前一天 22:00，直接切 `at` 的
+ * **上一档**（= 把时刻往前推一天再取 `lastScheduledDue`），看门狗用它而不是上面那个。
+ *
+ * 理由是一次实测出来的顺序倒挂：旧的北京 07:00 那一档实际 10:13 / 10:48 才落地，而看门狗的名义
+ * 时刻是同一天的 09:30——**判据那一刻，正常迟到的探针还没出现**。当时没误报，纯粹因为看门狗自己
+ * 迟到了 6 小时（比探针还晚），于是把正确性押在"两条互不保证先后的 best-effort 调度器恰好按想要的
+ * 顺序迟到"上。把排程提前到 04:00 只把名义余量从 2.5 小时涨到 5.5 小时，还是在赌；改成判上一档之后，
+ * 被检查的那一档至少已经过去一整天，一个排程日内迟到多久都不影响结论。代价是发现调度器死了要晚约
+ * 24~30 小时——对一个本来就会迟到 6 小时的信道，这个代价买的是"永不误报"，值得。
+ * 手动 dispatch 依然不算心跳（那是人替它跑，不是调度器活着）。
+ */
+export function previousScheduledDue(now = new Date()) {
+  return lastScheduledDue(new Date(now.getTime() - 24 * 3_600_000))
+}
+
+/**
+ * 报告与 Issue 标题上"哪一天"必须用**北京日期**：北京 04:00 = UTC 前一天 20:00，直接切 `at` 的
  * UTC 日会让每天的单都盖着前一天的日期——同天去重与「连续第 N 天」都读这个字符串。
  */
 export function beijingDateOf(value) {
@@ -327,6 +359,27 @@ export function beijingDateOf(value) {
   }).formatToParts(new Date(value))
   const of = (type) => parts.find((part) => part.type === type).value
   return `${of('year')}-${of('month')}-${of('day')}`
+}
+
+/**
+ * 把参数里的 `dayShift` 标记换成**具体日期**（北京日历）——runner 每次运行只做一次，之后所有
+ * 请求、报告、测试看到的都是普通字符串，标记不会漏进生产校验。
+ * 只认"单独一个 `dayShift` 键"的对象：多写一个键就不算标记，宁可让它原样漏到 normalizeParams
+ * 里炸响，也不要在巡检侧猜意图。数组递归、其余值（含 undefined）原样返回、不改动入参。
+ */
+export function resolveDayShifts(value, runAt = new Date()) {
+  if (Array.isArray(value)) return value.map((item) => resolveDayShifts(item, runAt))
+  if (value && typeof value === 'object') {
+    const keys = Object.keys(value)
+    if (keys.length === 1 && keys[0] === 'dayShift') {
+      const days = value.dayShift
+      if (!Number.isInteger(days)) throw new TypeError(`dayShift 要整数天，拿到 ${JSON.stringify(days)}`)
+      // 先按天推时刻、再取北京日历：中国无夏令时，±24h 的整数步长不会跨过一天。
+      return beijingDateOf(new Date(runAt.getTime() + days * 86_400_000))
+    }
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, resolveDayShifts(item, runAt)]))
+  }
+  return value
 }
 
 /** 本次要真打的条目（含影子——影子照打，只是不计入结论）。

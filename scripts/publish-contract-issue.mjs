@@ -23,7 +23,7 @@ const { values: flags } = parseArgs({
 })
 
 const report = JSON.parse(readFileSync(flags.report, 'utf8'))
-const runDate = beijingDateOf(report.at)  // 北京的哪一天：06:00 北京 = UTC 前一天 22:00，切 UTC 日会天天盖成昨天
+const runDate = beijingDateOf(report.at)  // 北京的哪一天：04:00 北京 = UTC 前一天 20:00，切 UTC 日会天天盖成昨天
 const worst = report.failing.map((row) => row.verdict).sort()[0] ?? '-'
 const title = `数据源契约巡检 ${runDate}：${report.failing.length} 项不合格（${worst}）· 海外视角`
 

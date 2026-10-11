@@ -12,15 +12,16 @@ name: data-source-contract
 on:
   schedule:
     # GitHub cron 只认 UTC，**星期与日期字段也都是 UTC**：北京时间要退一天才能写。
-    #   北京 周一~周五 06:00 = UTC 周日~周四 22:00
-    #   北京 周六 07:00（全量档） = UTC 周五 23:00      北京 周日：不排
-    # 改这两个小时要连 `SCHEDULE_UTC`（scripts/lib/contract-registry.mjs）一起改，
-    # 两边漂移有回归逐个 (星期, 小时) 比对拦住。
-    # 真正的档位判定不在这里，在 resolveTier()（按 Asia/Shanghai 换算，也有测试钉着）。
-    # ⚠️ `schedule` 不保证准点：实测迟到 4~6 小时（2026-10-09），所以 06:00 只是"尽量早于
-    # A 股 09:30 拿到结论"，任何逻辑都不许建立在"刚好 6 点"上。
-    - cron: '0 22 * * 0-4'
-    - cron: '0 23 * * 5'
+    #   北京 周一~周六 04:00 = UTC 周日~周五 20:00      北京 周日：不排
+    # 工作日与周六**共用同一个 UTC 小时**，所以一条 cron 就够——档位（daily / full）不在这里判，
+    # 由 resolveTier() 按 Asia/Shanghai 的星期判周六全量，也有测试钉着。
+    # 为什么是 04:00：实测 `schedule` 迟到 3~4 小时（北京 07:00 那一档 10:13 / 10:48 才落地，
+    # 而对照 push 触发的 test.yml 是同一秒建 run——迟到是调度通道独有的，不是机器排队）。
+    # 往前挪三小时才换回"开盘前有结论"。但迟到**没有上界**，所以任何逻辑都不许建立在"刚好 4 点"上：
+    # 看门狗判的是上一档（`previousScheduledDue`），探针迟到 24 小时以内都不会被误判成"没跑"。
+    # 改这个小时要连 `SCHEDULE_UTC`（scripts/lib/contract-registry.mjs）一起改，
+    # 两边漂移由 test/contract-registry.test.mjs 逐个 (星期, 小时) 比对拦住。
+    - cron: '0 20 * * 0-5'
   workflow_dispatch:
     inputs:
       tier:

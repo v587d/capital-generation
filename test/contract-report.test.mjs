@@ -123,9 +123,9 @@ test('看门狗告警单只提文件名，巡检结果无权关它', () => {
 })
 
 test('正文的 run-date 用北京日期，不是 UTC 日期', () => {
-  // 排程是北京 06:00 = UTC 前一天 22:00。Issue 标题、同天去重、关单留言都读这个字符串，
+  // 排程是北京 04:00 = UTC 前一天 20:00。Issue 标题、同天去重、关单留言都读这个字符串，
   // 切 UTC 日会让每天那张单都盖着昨天的日期（2026-10-09 那次定时跑就是这个形状）。
-  const body = renderReport(report({ at: '2026-10-09T22:00:00.000Z' }))
+  const body = renderReport(report({ at: '2026-10-09T20:00:00.000Z' }))
   assert.match(body, /run-date 2026-10-10/, `正文首行应当是北京日期：${body.split('\n')[2] ?? ''}`)
   assert.doesNotMatch(body, /run-date 2026-10-09/)
 })

@@ -1,15 +1,17 @@
 /**
- * 巡检报告的 Markdown 渲染——Issue 正文的唯一形状来源。
+ * 巡检的两份用户可见产物：每日报告正文（Issue 正文的唯一形状来源）+ 看门狗的心跳判据与告警单标识。
  *
- * 单独成模块的理由：这是**用户每天读的那份东西**，格式坏了等于整套巡检失效，
+ * 单独成模块的理由：这些是**用户每天读的那份东西**，格式坏了等于整套巡检失效，
  * 但它原先长在 CLI 里没法被测。拆出来就能拿一份假报告直接断言形状。
+ * 看门狗的判据同理住这里：脚本只在 CI 跑，lib 才能被离线测试钉住——而"该不该报警/该关哪张单"
+ * 恰恰是最不能等到 CI 才发现写错的那一类。
  *
  * ⛔ 只渲染 `report.failing`（结构/状态级）。`TRANSPORT` / `SLOW` / `EMPTY` 一律进
  * 「不进结论」一节——把它们和真故障混在一张表里，是这套东西被忽略的第一原因。
  * ⛔ 不输出响应正文、不输出 query string、不输出密钥；只有键名与 code。
  */
 
-import { ISSUE_VERDICTS, beijingDateOf } from './contract-registry.mjs'
+import { ISSUE_VERDICTS, beijingDateOf, previousScheduledDue } from './contract-registry.mjs'
 
 const cell = (text) => String(text ?? '-').replace(/\|/gu, '\\|').replace(/\r?\n/gu, ' ')
 const row = (...cells) => `| ${cells.map(cell).join(' | ')} |`
@@ -87,4 +89,35 @@ export function closeDecision(issueBody, results, activeCapabilities) {
     return { action: 'keep', mentioned, reason: `${unverified.join(' / ')} 本次没真打（不在本档位，或 id 没解析出来），没复核就不关` }
   }
   return { action: 'close', mentioned, reason: `${mentioned.join(' / ')} 本次全部通过` }
+}
+
+/** 看门狗告警单的标识：开单、找旧单、关单三处共用同一个字符串，不许各自再写一遍。 */
+export const WATCHDOG_MARKER = '巡检未运行'
+
+/** 这张是不是看门狗自己开的单（不是巡检日报单、不是 PR）。 */
+export function isWatchdogAlarm(issue) {
+  return !issue.pull_request && String(issue.title ?? '').includes(WATCHDOG_MARKER)
+}
+
+/**
+ * 心跳判据：**`schedule` 触发过 == 调度器还活着**。三条都是被实测逼出来的：
+ *
+ * 1. 只认 `event === 'schedule'`。一次手动 dispatch 就能把整周的调度停摆遮过去，而手动跑
+ *    恰恰不是调度器活着的证据（2026-10-09 第一次遇到整档没按时出现）。
+ * 2. **不看 `status` / `conclusion`**：跑挂了也算心跳。红 = 我方 harness 坏，Issue = 上游坏，
+ *    未运行 = 调度死——三个信道各说各的事；把 failed 从心跳里剔掉，等于让一个天天红的巡检
+ *    在看门狗这里判成"没跑"，两个信道当场混掉。
+ * 3. 判**上一档**（`previousScheduledDue`）而不是"最近本该跑那一档"：实测 `schedule` 迟到 3~4 小时，
+ *    探针的实际落地时刻晚于看门狗的名义时刻——按名义顺序看门狗每一天都会误报，它过去没误报
+ *    纯粹因为自己也迟到得更多。把正确性押在"两条互不保证先后的 best-effort 调度器恰好按想要的
+ *    顺序迟到"上，就是这套东西第一次真跑起来时踩到的那个坑。
+ *
+ * `newest` 取 schedule 里最晚的一条，不信 API 的顺序。
+ */
+export function heartbeatVerdict(runs, now = new Date()) {
+  const due = previousScheduledDue(now)
+  const scheduled = (runs ?? []).filter((run) => run.event === 'schedule' && run.created_at)
+  const heartbeat = scheduled.filter((run) => new Date(run.created_at) >= due)
+  const newest = scheduled.reduce((best, run) => (best && new Date(best.created_at) >= new Date(run.created_at) ? best : run), undefined)
+  return { due, heartbeat, newest, ok: heartbeat.length > 0 }
 }

@@ -10,7 +10,11 @@ name: data-source-contract-watchdog
 
 on:
   schedule:
-    - cron: '30 1 * * *'   # UTC 01:30 = 北京 09:30，给 07:00 那次留出调度延迟的余量
+    # UTC 01:30 = 北京 09:30。**这条不需要排在探针之后**：看门狗判的是上一档
+    # （`previousScheduledDue`）。按"本档该跑了却没跑"判，名义余量只有 5.5 小时，等于赌两条
+    # 互不保证先后的 best-effort 调度器谁迟到得更少；判上一档之后余量是一整天。
+    # 定在 09:30 只为了报警落在有人看的时间。
+    - cron: '30 1 * * *'
   workflow_dispatch:
 
 permissions:
