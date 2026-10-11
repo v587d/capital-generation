@@ -42,15 +42,18 @@ test('README 的黑话闸门不许被整体注释掉', () => {
   assert.ok(prose.includes('# Capital Generation'), 'README 正文本身应可读（标题行缺失多半是文件被截断）')
 })
 
-test('README「精选 Skills」的项目数与模块数跟着 catalog 走', () => {
+test('README「精选 Skills」的项目数与 Skill 数跟着 catalog 走', () => {
   // 卡片行数是按 catalog 现算的；首页把数字抄成一份字面量，下一次接快照忘了改就是
   // "卡片 46 行、首页说 45"——AGENTS.md §9.7 那一族（手抄副本漂移），也是控件谎报状态。
+  // 量词两种写法都收：对外术语已统一成配置页那格叫的「Skill」（README 与 THIRD_PARTY_NOTICES
+  // 全用新词），但 CHANGELOG 已发布段落的原文仍写「可选模块」，历史行不回改。钉死措辞只会让
+  // 下次改术语的人先把闸门放宽再改红——这条真正守的是**数字**，措辞不是它的判据。
   const projects = new Set(SELECTED_SKILL_CATALOG.map(({ repository }) => repository)).size
   const line = prose.split('\n').find((text) => text.includes('**精选 Skills：**'))
   assert.ok(line, 'README 里找不到「精选 Skills」那行')
-  const stated = line.match(/(\d+) 个开源项目、共 (\d+) 个可选模块/)
-  assert.ok(stated, `那行要写成"N 个开源项目、共 M 个可选模块"（catalog 现算是 ${projects} / ${SELECTED_SKILL_CATALOG.length}）`)
+  const stated = line.match(/(\d+) 个开源项目、共 (\d+) 个\s*(?:Skill|可选模块)/)
+  assert.ok(stated, `那行要写成"N 个开源项目、共 M 个 Skill"（catalog 现算是 ${projects} / ${SELECTED_SKILL_CATALOG.length}）`)
   assert.equal(Number(stated[1]), projects, `首页写的开源项目数是 ${stated[1]}，catalog 现算是 ${projects}`)
   assert.equal(Number(stated[2]), SELECTED_SKILL_CATALOG.length,
-    `首页写的可选模块总数是 ${stated[2]}，catalog 现算是 ${SELECTED_SKILL_CATALOG.length}（接新快照时两处一起改）`)
+    `首页写的 Skill 总数是 ${stated[2]}，catalog 现算是 ${SELECTED_SKILL_CATALOG.length}（接新快照时两处一起改）`)
 })

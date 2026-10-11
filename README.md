@@ -11,6 +11,8 @@
   <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DeepSeek_Harness-web-orange" alt="DSH Web"></a>
   <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DeepSeek_Harness-desktop-brightgreen" alt="DSH Desktop · 已实机验证"></a>
   <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DSH%20Baseline-0.2.0--rc.2-blue" alt="DSH@0.2.0-rc.2"></a>
+
+  <a href="https://www.npmjs.com/package/@v587d/capital-generation"><img src="https://img.shields.io/npm/v/%40v587d%2Fcapital-generation" alt="npm version"></a>
 </p>
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
@@ -148,11 +150,11 @@ https://github.com/v587d/capital-generation
 | 项目名称 | 收录边界 |
 | :---: | :---: |
 | [The Investment Skills Lexicon](https://github.com/finterm-ai/investment-skills) | Buffett Investment Framework |
-| [China Stock Research Skills](https://github.com/spikeHongg/china-stock-research-skills) | 6个 A 股研究模块 |
-| [InvestSkill](https://github.com/yennanliu/InvestSkill) | 28 个美股模块：逐条主张核验、空头反方、披露文件与内部人追踪、压力测试等 |
+| [China Stock Research Skills](https://github.com/spikeHongg/china-stock-research-skills) | 6 个 A 股研究 Skill |
+| [InvestSkill](https://github.com/yennanliu/InvestSkill) | 28 个美股 Skill：逐条主张核验、空头反方、披露文件与内部人追踪、压力测试等 |
 | [Peter Lynch Research](https://github.com/DjNero11/peter-lynch-skill) | 一条完整的个股研究流程 |
-| [Trading Skills](https://github.com/marian2js/trading-skills) | 9 个交易过程模块：催化剂排布、自选股分诊、论点压力测试、执行计划检查、交易日志复盘等，美股与境外交易口径 |
-| [Claude for Financial Services CN](https://github.com/jwangkun/claude-for-financial-services-cn) | 9 个 A 股卖方研究模块：业绩点评与差异表述、财报前瞻、可比倍数、A 股 DCF 口径、行业全景、催化剂日历、财务核查等 |
+| [Trading Skills](https://github.com/marian2js/trading-skills) | 9 个交易过程 Skill：催化剂排布、自选股分诊、论点压力测试、执行计划检查、交易日志复盘等，美股与境外交易口径 |
+| [Claude for Financial Services CN](https://github.com/jwangkun/claude-for-financial-services-cn) | 9 个 A 股卖方研究 Skill：业绩点评与差异表述、财报前瞻、可比倍数、A 股 DCF 口径、行业全景、催化剂日历、财务核查等 |
 
 <p align="center">
   <a href="assets/selected-skills配置.png">
@@ -188,7 +190,7 @@ npm run smoke:boot  # 检查插件装配
 
 ## 致谢
 
-- 「精选 Skills」的研究与交易过程模块按固定 commit **快照收录**自 [finterm-ai/investment-skills](https://github.com/finterm-ai/investment-skills)、[spikeHongg/china-stock-research-skills](https://github.com/spikeHongg/china-stock-research-skills)、[yennanliu/InvestSkill](https://github.com/yennanliu/InvestSkill)、[DjNero11/peter-lynch-skill](https://github.com/DjNero11/peter-lynch-skill)、[marian2js/trading-skills](https://github.com/marian2js/trading-skills)（以上均 MIT License）与 [jwangkun/claude-for-financial-services-cn](https://github.com/jwangkun/claude-for-financial-services-cn)（Apache-2.0）。
+- 「精选 Skills」的研究与交易过程 Skill 按固定 commit **快照收录**自 [finterm-ai/investment-skills](https://github.com/finterm-ai/investment-skills)、[spikeHongg/china-stock-research-skills](https://github.com/spikeHongg/china-stock-research-skills)、[yennanliu/InvestSkill](https://github.com/yennanliu/InvestSkill)、[DjNero11/peter-lynch-skill](https://github.com/DjNero11/peter-lynch-skill)、[marian2js/trading-skills](https://github.com/marian2js/trading-skills)（以上均 MIT License）与 [jwangkun/claude-for-financial-services-cn](https://github.com/jwangkun/claude-for-financial-services-cn)（Apache-2.0）。
 - 会话里的可交互图表由 [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts)（Apache-2.0）渲染，图上保留它自带的归属标识。
 - 行情、财务、公告与网页材料来自四类需自备密钥的服务（同花顺 Fuyao、Wind Alice、AnySearch、PaddleOCR）与一批公开口径的来源（东方财富、腾讯、新浪、财联社、华尔街见闻、巨潮互动易、上证 e互动、同花顺公开站点）；数据版权归各服务方，额度与条款以服务方为准，本项目不重新分发原始数据。
 
