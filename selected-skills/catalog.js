@@ -8,6 +8,10 @@ export const SELECTED_SKILL_SKILL_DIRS = Object.freeze({
   InvestSkill: 'plugins/us-stock-analysis/skills',
   // 上游把 SKILL.md 放在仓库根，快照因此套了一层 skills/<name>/（理由见该快照的 UPSTREAM.md）。
   'peter-lynch-skill': 'skills',
+  // 上游把 skill 按主题分了两层（skills/<domain>/<name>/），provider 只枚举 skills 根的直接子目录，
+  // 指上去等于发现 0 颗：快照因此平铺掉 <domain>/ 这一层（每颗的 references/、assets/ 跟着走，
+  // 正文链接都在自己目录内，不破）。理由与逐颗原分组记在该快照的 UPSTREAM.md。
+  'trading-skills': 'skills',
 })
 
 // Selected-skill metadata owned by Capital Generation. Upstream snapshots remain unchanged.
@@ -698,6 +702,177 @@ export const SELECTED_SKILL_CATALOG = Object.freeze([
       en: 'Cold-start experiment; upstream has two commits and has been quiet since 2026-06-28, so review the sources before use. The X/10 score rates thesis consistency and structure, not forecast performance, and is not investment advice.',
     },
   },
+  {
+    key: 'catalystMap',
+    name: 'catalyst-map',
+    label: { zh: '催化剂地图', en: 'Catalyst Map' },
+    description: {
+      zh: '把要发生的事件按"影响什么、什么时候影响、会传导到谁"排成注意力优先级，并标出依赖同一事件链的持仓。美股与境外宏观日历口径。',
+      en: 'Ranks upcoming events by what they move, when, and how they transmit across related names, and flags positions hanging on the same event chain. US and overseas calendar conventions.',
+    },
+    owner: 'marian2js',
+    repository: 'trading-skills',
+    status: 'watchlist',
+    lastCommit: '2026-03-16',
+    reviewBy: '2026-11-06',
+    tags: ['trade-discipline', 'macro', 'monitoring', 'us-stock'],
+    riskNote: {
+      zh: '冷启动实验；上游自 2026-03-16 起无提交，启用前请自行复核来源。它排的是注意力优先级，不预测价格走向，也不构成买卖建议。',
+      en: 'Cold-start experiment; upstream has been quiet since 2026-03-16, so review the sources before use. The map ranks attention, not price direction, and is not investment advice.',
+    },
+  },
+  {
+    key: 'watchlistReview',
+    name: 'watchlist-review',
+    label: { zh: '自选股分诊', en: 'Watchlist Review' },
+    description: {
+      zh: '对使用者给出的自选清单做分诊：哪些值得盯、哪些只作背景、哪些理由已经不成立，并说清移出的是清单条目而不是持仓。',
+      en: 'Triages the watchlist the user supplies into active focus, background monitoring, or removal, and says that what comes off is a list entry, not a position.',
+    },
+    owner: 'marian2js',
+    repository: 'trading-skills',
+    status: 'watchlist',
+    lastCommit: '2026-03-16',
+    reviewBy: '2026-11-06',
+    tags: ['trade-discipline', 'portfolio', 'monitoring', 'us-stock'],
+    riskNote: {
+      zh: '冷启动实验；上游自 2026-03-16 起无提交，启用前请自行复核来源。分诊只作用于自选清单，不构成买卖动作；本插件读不到券商账户。',
+      en: 'Cold-start experiment; upstream has been quiet since 2026-03-16, so review the sources before use. The triage acts on the watchlist only, is not a buy or sell action, and this plugin cannot read a brokerage account.',
+    },
+  },
+  {
+    key: 'evidenceGapCheck',
+    name: 'evidence-gap-check',
+    label: { zh: '证据缺口检查', en: 'Evidence Gap Check' },
+    description: {
+      zh: '把一笔想法还缺的事实、假设与未解问题按"会不会改变判断"排序，说清哪些缺口必须先补、哪些只是降低置信度。',
+      en: 'Ranks the missing facts, assumptions and open questions behind an idea by whether they change the judgement, and separates blocking gaps from confidence gaps.',
+    },
+    owner: 'marian2js',
+    repository: 'trading-skills',
+    status: 'watchlist',
+    lastCommit: '2026-03-16',
+    reviewBy: '2026-11-06',
+    tags: ['trade-discipline', 'verification', 'risk'],
+    riskNote: {
+      zh: '冷启动实验；上游自 2026-03-16 起无提交，启用前请自行复核来源。它只列证据缺口，不给评级、不替使用者决定这笔做不做。',
+      en: 'Cold-start experiment; upstream has been quiet since 2026-03-16, so review the sources before use. It lists evidence gaps only: no rating, and no decision about whether to take the trade.',
+    },
+  },
+  {
+    key: 'thesisValidation',
+    name: 'thesis-validation',
+    label: { zh: '论点压力测试', en: 'Thesis Validation' },
+    description: {
+      zh: '把一个说法压成可检验的主张：论点、证据、失效条件与时间窗分开写，再判它够不够格进入结构检查。',
+      en: 'Turns a claim into something testable — thesis, evidence, invalidation, timeframe — then judges whether it is ready to be built on.',
+    },
+    owner: 'marian2js',
+    repository: 'trading-skills',
+    status: 'watchlist',
+    lastCommit: '2026-03-16',
+    reviewBy: '2026-11-06',
+    tags: ['trade-discipline', 'verification', 'risk'],
+    riskNote: {
+      zh: '冷启动实验；上游自 2026-03-16 起无提交，启用前请自行复核来源。判的是论点是否自洽可检验，不预测表现，也不构成买卖建议。',
+      en: 'Cold-start experiment; upstream has been quiet since 2026-03-16, so review the sources before use. It tests whether a thesis is coherent and falsifiable, not how it will perform, and is not investment advice.',
+    },
+  },
+  {
+    key: 'riskRewardSanityCheck',
+    name: 'risk-reward-sanity-check',
+    label: { zh: '盈亏比自洽检查', en: 'Risk-Reward Sanity Check' },
+    description: {
+      zh: '按入场、止损与目标算出盈亏比，再检查这个结构是否自洽：目标是否落在噪声里、止损是否在明显的流动性聚集处。',
+      en: 'Works out the reward-to-risk ratio from entry, stop and target, then tests whether the structure holds — targets inside noise, stops sitting in obvious liquidity pools.',
+    },
+    owner: 'marian2js',
+    repository: 'trading-skills',
+    status: 'watchlist',
+    lastCommit: '2026-03-16',
+    reviewBy: '2026-11-06',
+    tags: ['trade-discipline', 'risk', 'us-stock'],
+    riskNote: {
+      zh: '冷启动实验；上游自 2026-03-16 起无提交，启用前请自行复核来源。比值衡量的是结构自洽与失败面，不是胜率或收益承诺，本插件也不据它给仓位数字。',
+      en: 'Cold-start experiment; upstream has been quiet since 2026-03-16, so review the sources before use. The ratio measures structural coherence and failure modes, not win rate or returns, and this plugin derives no position size from it.',
+    },
+  },
+  {
+    key: 'executionPlanCheck',
+    name: 'execution-plan-check',
+    label: { zh: '执行计划检查', en: 'Execution Plan Check' },
+    description: {
+      zh: '检查一份交易计划在操作上是否真的能落地：订单类型与紧迫度是否匹配、流动性与点差风险、事件时点、止损能否成交。',
+      en: 'Checks whether a plan is operationally workable: order type against urgency, liquidity and spread risk, event timing, and whether a stop would actually fill.',
+    },
+    owner: 'marian2js',
+    repository: 'trading-skills',
+    status: 'watchlist',
+    lastCommit: '2026-03-16',
+    reviewBy: '2026-11-06',
+    tags: ['trade-discipline', 'risk', 'monitoring', 'us-stock'],
+    riskNote: {
+      zh: '冷启动实验；上游自 2026-03-16 起无提交，启用前请自行复核来源。检查的是计划的可操作性：本插件不下单、不改单，也不给仓位数字。',
+      en: 'Cold-start experiment; upstream has been quiet since 2026-03-16, so review the sources before use. It reviews whether a plan is executable: this plugin places and amends no orders and gives no position size.',
+    },
+  },
+  {
+    key: 'portfolioConcentration',
+    name: 'portfolio-concentration',
+    label: { zh: '组合集中度检查', en: 'Portfolio Concentration' },
+    description: {
+      zh: '看组合是否过度压在同一批发行人、行业、主题或相关暴露上，并写清这个判断需要哪些持仓数据才成立。',
+      en: 'Shows whether a book leans too hard on a few issuers, sectors, themes or correlated exposures, and what holdings data that verdict needs to stand.',
+    },
+    owner: 'marian2js',
+    repository: 'trading-skills',
+    status: 'watchlist',
+    lastCommit: '2026-03-16',
+    reviewBy: '2026-11-06',
+    tags: ['trade-discipline', 'portfolio', 'risk'],
+    riskNote: {
+      zh: '冷启动实验；上游自 2026-03-16 起无提交，启用前请自行复核来源。文中的 5%／10% 一类是经验口径不是普适规则；持仓只以使用者自报的标记为准（本插件读不到券商账户），也不构成加减仓建议。',
+      en: 'Cold-start experiment; upstream has been quiet since 2026-03-16, so review the sources before use. The 5% / 10% bands are practical review thresholds, not universal laws; the book comes only from positions the user marked as held (this plugin cannot read a brokerage account), and it is not advice to add or reduce.',
+    },
+  },
+  {
+    key: 'journalPatternAnalyzer',
+    name: 'journal-pattern-analyzer',
+    label: { zh: '交易日志模式分析', en: 'Journal Pattern Analyzer' },
+    description: {
+      zh: '从使用者自己的交易日志里找重复出现的优势与失误、它们各自发生在什么环境下，并为小样本设护栏。',
+      en: 'Finds the repeated strengths and mistakes in the user’s own trade journal, groups them by environment, and keeps small samples from hardening into lessons.',
+    },
+    owner: 'marian2js',
+    repository: 'trading-skills',
+    status: 'watchlist',
+    lastCommit: '2026-03-16',
+    reviewBy: '2026-11-06',
+    tags: ['trade-discipline', 'education', 'portfolio'],
+    riskNote: {
+      zh: '冷启动实验；上游自 2026-03-16 起无提交，启用前请自行复核来源。胜率、期望值这类数字是对已有日志的描述，不证明可持续的优势，也不构成投资建议。',
+      en: 'Cold-start experiment; upstream has been quiet since 2026-03-16, so review the sources before use. Win rate and expectancy describe the log you already have: they prove no durable edge and are not investment advice.',
+    },
+  },
+  {
+    key: 'postTradeReview',
+    name: 'post-trade-review',
+    label: { zh: '交易复盘', en: 'Post-Trade Review' },
+    description: {
+      zh: '按论点、setup、执行、守规与结果几条线复盘一笔已经平掉的交易，避免用后视镜编造教训。',
+      en: 'Reviews a closed trade across thesis, setup, execution, adherence and outcome without rewriting it with hindsight.',
+    },
+    owner: 'marian2js',
+    repository: 'trading-skills',
+    status: 'watchlist',
+    lastCommit: '2026-03-16',
+    reviewBy: '2026-11-06',
+    tags: ['trade-discipline', 'education'],
+    riskNote: {
+      zh: '冷启动实验；上游自 2026-03-16 起无提交，启用前请自行复核来源。复盘得出的"下次要改的规则"属于过程推演，本插件不据它替使用者调整持仓或下单。',
+      en: 'Cold-start experiment; upstream has been quiet since 2026-03-16, so review the sources before use. The rule changes it suggests are process exercises: this plugin adjusts no holdings and places no orders on them.',
+    },
+  },
 ])
 
 export const SELECTED_SKILL_TAG_LABELS = Object.freeze({
@@ -723,6 +898,7 @@ export const SELECTED_SKILL_TAG_LABELS = Object.freeze({
     strategy: '战略',
     tax: '税务',
     technicals: '技术面',
+    'trade-discipline': '交易纪律',
     'us-stock': '美股',
     valuation: '估值',
     verification: '证据核验',
@@ -749,6 +925,7 @@ export const SELECTED_SKILL_TAG_LABELS = Object.freeze({
     strategy: 'Strategy',
     tax: 'Tax',
     technicals: 'Technicals',
+    'trade-discipline': 'Trade discipline',
     'us-stock': 'US equity',
     valuation: 'Valuation',
     verification: 'Verification',

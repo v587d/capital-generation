@@ -272,6 +272,13 @@ test('skills：内置 skills 由组合行承载，selected skill 只注册到 Ca
     assert.ok(!SELECTED_SKILL_CATALOG.some(({ name }) => name === excluded),
       `${excluded} 与 Capital 的既有契约冲突（路由 / 报告交付 / render_chart），不得进入 catalog`)
   }
+  // trading-skills 排除的是另外三类，同一族但形态新：券商 API 执行面（在对话里采集凭据、真实下单）、
+  // 给仓位与持仓动作的 skill、上游自己按 "Workflow routing" 接管会话路由的编排 skill。
+  // 逐条理由见 selected-skills/trading-skills/UPSTREAM.md；etoro 连发布包都不进（同目录 .npmignore）。
+  for (const excluded of ['etoro', 'position-sizing', 'position-management', 'pre-trade-check']) {
+    assert.ok(!SELECTED_SKILL_CATALOG.some(({ name }) => name === excluded),
+      `${excluded} 与 Capital 的既有契约冲突（下单执行面 / 仓位与买卖动作 / 会话路由），不得进入 catalog`)
+  }
   // catalog 身份冲突检查：多颗快照允许同名 skill，但 key 与 name 必须各自唯一，否则 provider 的
   // enabled 集合与设置里的开关都会指错东西。
   for (const field of ['key', 'name']) {

@@ -436,14 +436,24 @@ try {
         console.log(`smoke-boot: ❌ 自选股路由探针失败：${fence.error}`)
       }
       // 读原文那条旁路是**这一版新加的文件读面**：闭集与围栏都只在真宿主里才量得出真效果。
+      // 测 catalog 的**头尾各一颗**：两端分属不同快照与不同目录布局，只测 `[0]` 的话，
+      // 后面每接一颗快照，它的路径与闭集都没有实弹核对过（AGENTS.md §9.7 同一族）。
       try {
         const { SELECTED_SKILL_CATALOG } = await import(new URL('../selected-skills/catalog.js', import.meta.url).href)
-        const skillName = SELECTED_SKILL_CATALOG[0].name
-        skillFence = await skillDocFenceProbe(url, bundles.cookie ?? '', skillName)
-        skillFence.ok = (bundles.cookie ?? '').length === 0
-          ? skillFence.status === 200 && skillFence.startsWithFrontMatter
-          : skillFenceOk(skillFence)
-        console.log(`smoke-boot: ${skillFence.ok ? '✅' : '❌'} /capital-skills/${skillName}.md：匿名 HTTP ${skillFence.anonymousStatus}（应 401）、带 cookie HTTP ${skillFence.status}（应 200）${skillFence.bytes} 字节、cache-control=${skillFence.cacheControl}、开头是 frontmatter=${skillFence.startsWithFrontMatter}；表外名 HTTP ${skillFence.missingStatus}（error=${skillFence.missingError}）、编码斜杠穿越 HTTP ${skillFence.traversalStatus}（都应 404）`)
+        const skillNames = [...new Set([
+          SELECTED_SKILL_CATALOG[0].name,
+          SELECTED_SKILL_CATALOG[SELECTED_SKILL_CATALOG.length - 1].name,
+        ])]
+        const fences = []
+        for (const skillName of skillNames) {
+          const fence = await skillDocFenceProbe(url, bundles.cookie ?? '', skillName)
+          fence.ok = (bundles.cookie ?? '').length === 0
+            ? fence.status === 200 && fence.startsWithFrontMatter
+            : skillFenceOk(fence)
+          fences.push(fence)
+          console.log(`smoke-boot: ${fence.ok ? '✅' : '❌'} /capital-skills/${skillName}.md：匿名 HTTP ${fence.anonymousStatus}（应 401）、带 cookie HTTP ${fence.status}（应 200）${fence.bytes} 字节、cache-control=${fence.cacheControl}、开头是 frontmatter=${fence.startsWithFrontMatter}；表外名 HTTP ${fence.missingStatus}（error=${fence.missingError}）、编码斜杠穿越 HTTP ${fence.traversalStatus}（都应 404）`)
+        }
+        skillFence = { ok: fences.length > 0 && fences.every((fence) => fence.ok === true) }
       } catch (error) {
         skillFence = { ok: false, error: String(error?.message ?? error) }
         console.log(`smoke-boot: ❌ 读原文路由探针失败：${skillFence.error}`)

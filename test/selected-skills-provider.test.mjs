@@ -14,6 +14,22 @@ const INVESTSKILL_EXCLUDED = [
   'chart-master',      // 教 Agent 自己出图：出图只走 render_chart
 ]
 
+// 第五颗 19 里只开放 9：下面这些留在快照里当可审查材料（etoro 连发布包都不进），理由逐条写在
+// selected-skills/trading-skills/UPSTREAM.md 与 docs/reference/external-skill-scan-2026-10.md。
+const TRADING_SKILLS_EXCLUDED = [
+  '_lib',                      // 共享 python 计算模块：不是 skill，本插件也没有 shell 能跑它（§1.6）
+  'etoro',                     // 券商 API 执行面：在对话里采集凭据、真实下单（§8.6 第 4 与第 7 条）
+  'position-sizing',           // 输出仓位数字：与「买卖动作和仓位决策属于明确冲突」的既有口径一致
+  'position-management',       // hold / trim / close 的持仓动作决断，同上
+  'earnings-preview',          // 数据层写死付费 API（curl + 向用户要凭据），且与 InvestSkill 那颗同名
+  'macro-event-analysis',      // 同上：ask which supported provider + curl
+  'market-regime-analysis',    // 同上
+  'pre-trade-check',           // orchestrator：上游自己的 "Workflow routing" 段接管会话路由
+  'earnings-trade-prep',       // 同上
+  'portfolio-risk-review',     // 同上
+  'post-trade-debrief',        // 同上
+]
+
 function candidate(name) {
   return { name, description: name, invocation: { modelInvocable: true, userInvocable: true }, source: 'custom', provider: 'source', rank: 1, locator: name }
 }
@@ -90,8 +106,8 @@ function makeHarness() {
 
 test('selected skill provider: disabled by default and limited to the approved catalog', () => {
   // 前两颗快照的清单逐条钉住：这些 key 已经发出去了，改名等于把使用者已拨开的开关清掉。
-  // 按仓库点名而不是"减去某一颗"：后面追加的快照不在这条的钉子范围内（InvestSkill 由下面
-  // 「目录 − 排除清单」派生，peter-lynch-skill 只有一颗，由 test/persona.test.mjs 逐条核对身份）。
+  // 按仓库点名而不是"减去某一颗"：后面追加的快照不在这条的钉子范围内（InvestSkill 与 trading-skills
+  // 由下面「目录 − 排除清单」派生，peter-lynch-skill 只有一颗，由 test/persona.test.mjs 逐条核对身份）。
   const pinnedRepositories = ['investment-skills', 'china-stock-research-skills']
   assert.deepEqual(SELECTED_SKILL_CATALOG.filter(({ repository }) => pinnedRepositories.includes(repository)).map(({ name }) => name), [
     'buffett-investment-framework',
@@ -113,6 +129,17 @@ test('selected skill provider: disabled by default and limited to the approved c
     .sort()
   assert.deepEqual(investSkillCatalog, investSkillDirs,
     `InvestSkill 的可选清单与快照目录不符：多出或缺少 ${investSkillCatalog.filter((n, i) => n !== investSkillDirs[i]).join('、')}`)
+  // 第五颗同样是「目录 − 排除清单」的派生钉法，而且排除得多（19 里开放 9）：
+  // 有人把 etoro（券商下单）、position-sizing（仓位数字）或某颗 orchestrator 顺手加回 catalog，这条就红。
+  const tradingSkillsCatalog = SELECTED_SKILL_CATALOG
+    .filter(({ repository }) => repository === 'trading-skills')
+    .map(({ name }) => name)
+    .sort()
+  const tradingSkillDirs = readdirSync(fileURLToPath(new URL('../selected-skills/trading-skills/skills', import.meta.url)))
+    .filter((dir) => !TRADING_SKILLS_EXCLUDED.includes(dir))
+    .sort()
+  assert.deepEqual(tradingSkillsCatalog, tradingSkillDirs,
+    `trading-skills 的可选清单与快照目录不符：多出或缺少 ${tradingSkillsCatalog.filter((n, i) => n !== tradingSkillDirs[i]).join('、')}`)
   assert.ok(SELECTED_SKILL_CATALOG.every(({ status, tags }) => ['experimental', 'watchlist'].includes(status) && tags.length > 0))
   const harness = makeHarness()
   registerRootSelectedSkills(harness.ctx, { buffettFramework: false }, harness.createFilesystemProvider)

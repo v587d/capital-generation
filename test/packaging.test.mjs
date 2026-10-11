@@ -130,21 +130,33 @@ test('打包闸门：selected-skills 的运行时半边逐条落在发布清单�
   // 反向断言：随包发的是运行时正文与溯源，不是上游仓库全部。每颗快照的排除口径就写在它自己的
   // `.npmignore` 里（上一颗挡 images/ 与 viz/ 的成图和 viz 站点；InvestSkill 挡它自己的静态站、
   // 与 skill 正文同源的 prompts/ 副本、脚本与 CI 材料），所以这里以那份文件为唯一声明处：
-  // 有人放宽口径、或 .npmignore 写了却没被打包器执行，这条会点名哪个目录又进包了。
+  // 有人放宽口径、或 .npmignore 写了却没被打包器执行，这条会点名哪个目录或哪份文件又进包了。
+  // **目录规则与文件规则都要问**：第五颗之后补的排除大多是 `README*.md` 这类文件规则，
+  // 只查目录等于放任它们不生效（AGENTS.md §9.7 同一族：闸门必须覆盖真会失效的那一类）。
+  const globToRegExp = (rule) => new RegExp(`^${rule
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.')}$`)
   for (const repository of repositories) {
     const ignorePath = join(ROOT, 'selected-skills', repository, '.npmignore')
     if (!existsSync(ignorePath)) continue
-    const excluded = readFileSync(ignorePath, 'utf8').split(/\r?\n/)
+    const rules = readFileSync(ignorePath, 'utf8').split(/\r?\n/)
       .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith('#') && !line.startsWith('!') && line.startsWith('/') === false && line.endsWith('/'))
-      .map((line) => line.slice(0, -1))
-    assert.ok(excluded.length > 0, `${repository}/.npmignore 一条目录规则都没有，反向断言会退化成空断言`)
+      .filter((line) => line && !line.startsWith('#') && !line.startsWith('!') && line.startsWith('/') === false)
+    const excludedDirs = rules.filter((line) => line.endsWith('/')).map((line) => line.slice(0, -1))
+    const excludedFiles = rules.filter((line) => !line.endsWith('/') && !line.includes('/'))
+    assert.ok(excludedDirs.length + excludedFiles.length > 0,
+      `${repository}/.npmignore 一条规则都没有（目录或文件名），反向断言会退化成空断言`)
     const prefix = `selected-skills/${repository}/`
     for (const path of paths) {
       if (!path.startsWith(prefix)) continue
-      const hit = path.slice(prefix.length).split('/').slice(0, -1).find((segment) => excluded.includes(segment))
+      const relative = path.slice(prefix.length)
+      const hit = relative.split('/').slice(0, -1).find((segment) => excludedDirs.includes(segment))
       assert.equal(hit, undefined,
         `${repository} 的 .npmignore 排除了 ${hit}/，但它又出现在发布包里：${path}（全量快照本该住在 git 里）`)
+      const fileNameHit = excludedFiles.find((rule) => globToRegExp(rule).test(relative.split('/').pop()))
+      assert.equal(fileNameHit, undefined,
+        `${repository} 的 .npmignore 排除了 ${fileNameHit}，但它又出现在发布包里：${path}（全量快照本该住在 git 里）`)
     }
   }
 })

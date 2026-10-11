@@ -10,6 +10,15 @@
 - Imported content: 该 commit 的完整仓库快照，只移除上游自己的 `.gitignore`（见下）。
   34 颗 skill 在 `plugins/us-stock-analysis/skills/<name>/SKILL.md`；`scripts/`、`prompts/`、
   `site/`、`qa/`、`doc/`、`data/`、`.github/` 作为可审查材料保留，intake 与 activation 都不执行它们。
+- Packaging: 这颗自己的 `.npmignore` 是排除口径的唯一声明处（`test/packaging.test.mjs` 逐条反查，
+  目录规则与文件规则都问）。挡掉的是上游静态站 `site/`（1.7 MB）、与 skill 正文同源的提示词副本
+  `prompts/`（772 KB）、`scripts/`、`qa/`、`doc/`、`data/`、`.github/`、`.cursor/`、`.claude-plugin/`，
+  以及只有人类读者会用的仓库文档：`README*.md` 六个语言/平台变体（含 `plugins/us-stock-analysis/README.md`）、
+  `CLAUDE.md`、`GEMINI.md`、`ADDING-NEW-SKILLS.md`、`CI-CD-GUIDE.md`、`CONTRIBUTING.md`、`DEPLOYMENTS.md`、
+  `FAQ.md`、`PLATFORM-COMPATIBILITY.md`、`RELEASE_NOTES.md`、`RELEASE-QUICK-REFERENCE.md`、`SECURITY.md`、
+  `TODO.md` 与它自己的 `package.json`。根级 `install.sh` 照旧随包保留（本插件从不执行它）。
+  不进可选清单的六颗 skill 也照旧随包，作为可审查材料。全量快照完整住在 git，
+  `github:` 安装与"当时是哪个 commit"的复核都不受影响。
 - Local modifications（三类，逐条可复核；口径与理由见 `docs/dev/selected-skills.md` §8.6 的接入必查清单）：
   1. **34 颗 `SKILL.md` 的 frontmatter 第一键补 `name: <目录名>`。** DSH filesystem provider 要求
      frontmatter 同时有 `name` 与 `description`，缺 `name` 的文件是**静默跳过**（只 warn）——原样收录

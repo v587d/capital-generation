@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { SELECTED_SKILL_CATALOG } from '../selected-skills/catalog.js'
 
 /**
  * README 的受众闸门：首页是**写给读者看的**，不是写给仓库自己看的。
@@ -39,4 +40,17 @@ test('README 的黑话闸门不许被整体注释掉', () => {
   // 这条防的是最省事的绕过方式：把 JARGON 清空或整段注掉，上面那些用例就全绿了。
   assert.ok(JARGON.length >= 5, `黑话形状清单只剩 ${JARGON.length} 条，低于 5 条即视为被削减`)
   assert.ok(prose.includes('# Capital Generation'), 'README 正文本身应可读（标题行缺失多半是文件被截断）')
+})
+
+test('README「精选 Skills」的项目数与模块数跟着 catalog 走', () => {
+  // 卡片行数是按 catalog 现算的；首页把数字抄成一份字面量，下一次接快照忘了改就是
+  // "卡片 46 行、首页说 45"——AGENTS.md §9.7 那一族（手抄副本漂移），也是控件谎报状态。
+  const projects = new Set(SELECTED_SKILL_CATALOG.map(({ repository }) => repository)).size
+  const line = prose.split('\n').find((text) => text.includes('**精选 Skills：**'))
+  assert.ok(line, 'README 里找不到「精选 Skills」那行')
+  const stated = line.match(/(\d+) 个开源项目、共 (\d+) 个可选模块/)
+  assert.ok(stated, `那行要写成"N 个开源项目、共 M 个可选模块"（catalog 现算是 ${projects} / ${SELECTED_SKILL_CATALOG.length}）`)
+  assert.equal(Number(stated[1]), projects, `首页写的开源项目数是 ${stated[1]}，catalog 现算是 ${projects}`)
+  assert.equal(Number(stated[2]), SELECTED_SKILL_CATALOG.length,
+    `首页写的可选模块总数是 ${stated[2]}，catalog 现算是 ${SELECTED_SKILL_CATALOG.length}（接新快照时两处一起改）`)
 })

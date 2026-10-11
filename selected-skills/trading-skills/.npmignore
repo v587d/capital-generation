@@ -1,0 +1,21 @@
+# Capital Generation 的打包排除，不是上游内容的一部分（见 UPSTREAM.md 的 Packaging 一行）。
+# 装出去的只需要「可选清单里那九颗」的运行时正文与溯源；下面这些是上游自己的仓库材料：
+# 站点化的文档站（docs/，含 18 份 walkthrough 与它自己的 skill 模板）、仓库校验与 catalog 生成脚本
+# （scripts/）、GitHub Actions、给别的宿主用的共享 python 计算模块（skills/_lib/，本插件没有 shell，
+# 计算交给宿主数据侧）、它的可选清单索引（catalog.json，与本仓 selected-skills/catalog.js 无关），
+# 以及上游的 README / CONTRIBUTING / CHANGELOG / VERSION / Makefile。
+# 还有一条是合规口径，不只是体积：skills/etoro/ 是券商 API 执行面（真实下单端点、在对话里采集凭据），
+# 连发布包都不进。其余不进可选清单的 skill 照 InvestSkill 先例随包保留作为可审查材料，
+# provider 的 list()/get() 与 /capital-skills 旁路都按 catalog 闭集过滤，运行时读不到它们。
+# 全量快照仍然完整住在 git，github: 安装与"当时是哪个 commit"的复核都不受影响。
+docs/
+scripts/
+.github/
+_lib/
+etoro/
+catalog.json
+README.md
+CONTRIBUTING.md
+CHANGELOG.md
+VERSION
+Makefile

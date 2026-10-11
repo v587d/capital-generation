@@ -12,10 +12,11 @@
 2. [`finterm-ai/investment-skills`](https://github.com/finterm-ai/investment-skills)：最后提交为 2026-07-22，状态为 `experimental`，可作为 Buffett-inspired 商业分析、现金流、估值和风险框架显式实验，仍默认关闭。它主要源于美股/伯克希尔语境，不能直接当作 A 股规则。
 3. [`yennanliu/InvestSkill`](https://github.com/yennanliu/InvestSkill)：**2026-10-10 追加入驻**，状态 `experimental`，28 个美股模块进 catalog、默认关闭。判断依据与逐条排除见下面的追加节。
 4. [`DjNero11/peter-lynch-skill`](https://github.com/DjNero11/peter-lynch-skill)：**2026-10-11 追加入驻**，状态 `watchlist`，一颗个股研究工作流（Quick 快筛 + Deep 尽调）进 catalog、默认关闭。它带来本仓第一颗**自带完整证据预算与引用契约**的工作流，也第一次遇到"`SKILL.md` 住在仓库根"的结构。判断依据与逐条改写见文末第二个追加节。
+5. [`marian2js/trading-skills`](https://github.com/marian2js/trading-skills)：**2026-10-11 追加入驻**，状态 `watchlist`，19 颗里 9 颗进 catalog（下单前的过程检查与下单后的复盘），默认关闭。券商执行面、仓位与买卖动作、接管路由的编排、写死付费 API 的那几颗逐条排除；它也是第一颗 `SKILL.md` 藏在**两层目录**底下的快照。判断依据与逐条排除见文末第三个追加节。
 
 所有条目都需要用户自行判断是否适合当前任务；Owner 会继续寻找合适的社区项目，也欢迎通过 PR 提交新的固定快照和标签元数据。
 
-观察名单：[`yaorenliang/trading-agents-skill`](https://github.com/yaorenliang/trading-agents-skill)，仅评估多空相互反驳、延迟复盘等可拆分 workflow；评级、买卖动作和仓位决策属于明确冲突，不能直接集成。
+观察名单：[`yaorenliang/trading-agents-skill`](https://github.com/yaorenliang/trading-agents-skill)，仅评估多空相互反驳、延迟复盘等可拆分 workflow；评级、买卖动作和仓位决策属于明确冲突，不能直接集成。**同一口径已在下一颗上执行过一次**：[`marian2js/trading-skills`](https://github.com/marian2js/trading-skills) 入驻时，券商执行面那颗（`etoro`）、给仓位数字的（`position-sizing`）与给持仓加减动作的（`position-management`）都按这条排除，只收过程检查与复盘模块（见文末第三个追加节）。
 
 外部服务/合作参考：[`MobiusQuant/Gendangzou-skill`](https://github.com/MobiusQuant/Gendangzou-skill)。其板块政策与多信号快照、证据链是独特主题，但主体能力依赖其在线 API，结论范围限定在板块，不能视作可离线导入的通用技能。
 
@@ -48,7 +49,7 @@
 1. 先挑 Finterm 的 “Owner earnings / 现金流质量” 与 China 的财务健康、订单质量等模块，和现有 `capital-equity-research` 做盲测；用户也可以在设置页按标签自行组合。
 2. 固定相同问题、截止日期和输入证据；只比较证据完整性、冲突处理、遗漏、无依据断言和 token/工具成本，不比较是否猜中股价。
 3. 用用户反馈、失败案例和对照评测逐步改善标签、风险提示和复查周期；当候选规模和 benchmark 足够成熟时，再考虑把长期无响应或低价值条目移出 catalog。
-4. 2026-11-06 重新检查四颗快照的 release/commit、许可证、依赖与问题处理；上游变化只触发复审，不自动更新本地能力。
+4. 2026-11-06 重新检查五颗快照的 release/commit、许可证、依赖与问题处理；上游变化只触发复审，不自动更新本地能力。
 
 ## 追加（2026-10-10）：InvestSkill 入驻
 
@@ -98,4 +99,46 @@
 
 维护性：全仓两次提交（2026-06-23 建仓、2026-06-28 最后提交），至扫描日 105 天无提交；无 CI、无 release/tag。内容读起来像"按意图做完"而非"烂尾"（入口与八份附属文件彼此一致、无残片），但维护信号确实薄，因此 `watchlist` 而非 `experimental`（与 `china-stock-research-skills` 同一口径：内容可用、维护薄，启用前请使用者自行复核来源）。下次复查 2026-11-06（与另三颗同一节奏）。
 
-本扫描是公开信息桌面审阅（InvestSkill 与 peter-lynch-skill 两节除外：那两节 clone 后逐文件读过），不是完整安全审计、法律意见、作者背书或金融方法有效性证明。入驻前仍需固定 commit，静态检查完整文件树，逐一复核许可与引用，并运行隔离评测。
+## 追加（2026-10-11）：trading-skills 入驻
+
+候选：[`marian2js/trading-skills`](https://github.com/marian2js/trading-skills)（MIT，19 颗 skill 按主题分 8 组：idea-discovery / market-context / trade-construction / position-oversight / review-learning / thesis-validation / workflows / live-trade）。固定 commit `f1ae7d48`（main，2026-03-16）。
+
+结构上第一次遇到的是**深了一层**（与前一颗的"太浅"正好相反）：上游把 skill 放在 `skills/<domain>/<name>/SKILL.md`，而 provider 只枚举 skills 根的**直接子项**——`SELECTED_SKILL_SKILL_DIRS` 填 `skills` 等于发现 0 颗，症状与 peter-lynch 那一颗同族（卡片能勾、会话里永远不出现）。取舍是**在快照里平铺掉 `<domain>/`**：先逐颗核过正文链接（19 颗全部只指向自己目录内的 `references/` 与 `assets/`，无 `../`、无跨目录），平铺后一条都不破；上游 `catalog.json` 的 `path` / `docs_path` 与 `docs/examples/` 的路径随之变旧，两者都不进 catalog 也不进发布包，按"不进 catalog 的正文不动"原样保留。原分组逐颗记在 `UPSTREAM.md`，复核时仍能一次 `diff` 对上 commit。
+
+**这一颗把危险换了形态，是本轮最要紧的一课**：全文 `web search` 零命中、记忆回填零命中（19 颗每颗都写"缺什么就点名缺、别编"，`example-mode` 指使用者自带的示例数据并要求标注，不是逃生口），但"谁去取数"这条边界以三种前两课没见过的写法出现：
+
+- 自己调外部付费服务商：三颗 market-context 里的 `ask which supported provider` 与 18 处 `curl "…apikey=<FMP_API_KEY>"`，上游校验器甚至把它写成硬要求（`scripts/validate_repo.py:146`）；
+- 在对话里认领凭据：`check whether the user … already shared usable access details`，以及 `etoro` 的 `Keys (request from the user on install)` 与逐步生成密钥的说明；
+- 把计算推给能跑代码的宿主：`For agents that support code execution … skills/_lib/calculations.py`（三颗引用同一个共享 python 模块）。
+
+所以 `test/selected-skills-content.test.mjs` 的 FORBIDDEN 从六条加到十二条，新增的六条按**词组族**扫（`curl`、`code execution`、`ask which supported provider`、`usable access details`、`fetch live`、`pair this skill`），在已有四颗快照上实测零命中——只加不减。§8.6 第 10 条的反证改打在新写法上：把 `catalyst-map` 或 `journal-pattern-analyzer` 换回原文必须红并点名。
+
+| 硬门槛 | 读到的是什么 |
+|---|---|
+| 来源可核验 | 仓库、owner、固定 commit `f1ae7d48`；31 次提交全落在 2026-03-06 至 03-16 十天里，`VERSION` 是 `0.1.0-rc.1`，无 release/tag |
+| 许可可用 | MIT 原件随包，但其 `Copyright (c) 2026` 一行**没有署名**（上游就是这么写的）；署名按仓库 owner 与 commit author 记为 `marian2js`，失真记进 `UPSTREAM.md` |
+| 权限可控 | `etoro` 是券商 API 操作手册：真实下单端点、`IsBuy`/`Leverage`/`UnitsToDeduct`、按 `positionId` 平仓、末尾指到一个 MCP server —— 不进 catalog，且连发布包都不进（`.npmignore`）。收录的九颗无脚本执行、无凭据、无自己出网（已按清单改为委派） |
+| 可审查 | 55 个文件约 460 KB 全是 markdown，另有两个 python 模块（上游的仓库校验与共享计算，留在 git、不进包、从不执行）；无混淆、无下载后执行 |
+| 金融表达可校验 | 无收益或准确率承诺；`execution-plan-check`／`risk-reward-sanity-check`／`portfolio-concentration` 触及订单结构、盈亏比与 5%/10% 阈值，`post-trade-review` 的例子含"高冲击数据日减 25% 仓位"——逐条在 `riskNote` 写明是过程推演，本插件不下单、不改单、不给仓位数字；`journal-pattern-analyzer` 的胜率／期望值注明"是对已有日志的描述，不证明可持续优势" |
+| 可适配 | 九颗都是单点检查：输入清单、判定档位词汇（`must-watch` / `fragile` / `too concentrated` 一类）、输出顺序与缺数据行为都写在正文里 |
+
+**catalog 收录 9 颗、排除 10 颗**，四条排除线各自有先例：
+
+| 排除 | 理由 |
+|---|---|
+| `etoro` | 券商执行面 + 对话内采集凭据 + 真实下单（§8.6 第 4、7 条）；不进包 |
+| `position-sizing`、`position-management` | 输出仓位数字（`Position Recommendation`、索取 account equity）与 hold／trim／close 决断；照本记录上方既有的口径——「评级、买卖动作和仓位决策属于明确冲突，不能直接集成」 |
+| `pre-trade-check`、`earnings-trade-prep`、`portfolio-risk-review`、`post-trade-debrief` | 上游自己的 "Workflow routing" 段按结果把会话分流到 11–12 颗子 skill，与 `china-stock-research-orchestrator`／`full-report` 同一条理由 |
+| `earnings-preview`、`macro-event-analysis`、`market-regime-analysis` | 数据层写死付费服务商（见上），本插件没有那些凭据，也不为它们开第二条取数口子；改成委派会让那 10 份 provider 文档变死路，所以整颗留原文不改。`earnings-preview` 另与 InvestSkill 已收录的**同名**那颗撞车：provider 的启用集合只按 `name` 认，catalog 的 `name` 必须全局唯一（`test/persona.test.mjs` 钉着），不改上游身份 |
+
+派生式钉法跟着上：`test/selected-skills-provider.test.mjs` 按「skills 根 − 排除清单」核对本颗的 9 条，`test/persona.test.mjs` 另把 `etoro`／`position-sizing`／`position-management`／`pre-trade-check` 明确断为不进 catalog——有人顺手加回去就会红并点名。
+
+**它填的缺口**：此前 36 颗全是"投研"（生意质量、估值、披露文件、风险专题），没有一颗管**下单前的过程检查与下单后的复盘**。`capital-portfolio-review` 复盘的是组合层持仓、`capital-event-impact` 看的是单个事件影响，而"这笔想法还缺哪些证据""这个盈亏比结构自洽吗""这份计划在流动性能不能落地""这笔已经平掉的交易怎么复盘而不做事后诸葛亮"四件事此前没有对应模块。新标签 `trade-discipline`（中文显示名"交易纪律"、英文 "Trade discipline"）就是这条线，两套显示名同时补（`test/capital-config.test.mjs` 守着），市场口径继续用 `us-stock`。
+
+**重叠**：`portfolio-concentration` 与 `capital-portfolio-review` 都看集中度——本插件那颗只读使用者在自选股面板里亲手标过的持仓与自报权重并要求逐项可复核，上游这颗吃用户贴进来的账户快照并给经验阈值，`riskNote` 写明以自报口径为准；`watchlist-review` 作用于自选清单条目（移出的是清单条目，不是持仓）；`catalyst-map` 与 `capital-event-impact` 相邻，但它排的是"一排事件的注意力"，后者查的是"单个事件的影响"。
+
+**A 股专项检查**：本条**不声称**适用于 A 股。美股时段与盘前盘后、ES／期权／CFD 的合约乘数、FINRA／Fidelity／Schwab 口径的阈值、EURUSD 与 T+0 假设在 A 股都不成立（T+1、涨跌停、无盘后连续竞价这些规则上游完全不知道）。因此 `us-stock` 标签与逐条 `riskNote` 是给使用者的口径提示，仓位与订单类内容一律不收录，改写时也没替它补 A 股假设。
+
+维护性：31 次提交集中在十天内（2026-03-06 建仓、2026-03-16 最后提交），至扫描日 209 天无提交；16 stars / 6 forks，`0.1.0-rc.1` 未发 release，有 CI（两条 GitHub Actions）。内容读起来完整而非烂尾（每颗都带 will-not 清单、invalidation、输出顺序与小样本护栏，风格统一），但维护信号薄，因此 `watchlist`（与 china、peter-lynch 同一口径：内容可用、维护薄，启用前请使用者自行复核来源）。下次复查 2026-11-06（与另四颗同一节奏）。
+
+本扫描是公开信息桌面审阅（InvestSkill、peter-lynch-skill 与 trading-skills 三节除外：那三节 clone 后逐文件读过），不是完整安全审计、法律意见、作者背书或金融方法有效性证明。入驻前仍需固定 commit，静态检查完整文件树，逐一复核许可与引用，并运行隔离评测。

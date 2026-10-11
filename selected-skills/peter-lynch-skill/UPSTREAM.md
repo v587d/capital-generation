@@ -51,10 +51,11 @@
      `system-prompt.md` 本来就把取回的东西限定成"来自研究简报"。不为了套 InvestSkill 的改法新造上游没有的模板字段。
   复核方法：`git clone` 所钉 commit 后 `diff -r`，差异只应包含以上三类；
   `test/selected-skills-content.test.mjs` 扫正文**结果**、本文件记**理由**，两边任一漂回去都会红。
-- Packaging: 这颗**不带 `.npmignore`**——除 `README.md`（13 KB）之外全是运行时正文与溯源，包体积增量约 120 KB，
-  没有需要挡的成图、静态站或脚本目录（`china-stock-research-skills` 同样没挡）。
+- Packaging: 这颗带一份 `.npmignore`，只挡上游 `README.md`（13 KB，写给 GitHub 访客的仓库说明）——
+  其余全是运行时正文与溯源，正文一处也没引用那份 README。包体积增量约 107 KB。
   `package.json` 的 `files` 已逐仓库登记 `selected-skills/peter-lynch-skill`，
-  `test/packaging.test.mjs` 从 catalog 反查发布清单里的真实 `SKILL.md` / `LICENSE` / `UPSTREAM.md`。
+  `test/packaging.test.mjs` 从 catalog 反查发布清单里的真实 `SKILL.md` / `LICENSE` / `UPSTREAM.md`，
+  并反查 `.npmignore` 的每条规则（目录与文件名两类）确实生效。
 - Catalog 收录判断：`SKILL.md` 内部的 Quick / Deep 二选一**不算**"会接管会话路由的编排 skill"——
   它不跨 Agent、不改本插件的角色分流，只在本颗的两条工作流之间选择（`china-stock-research-orchestrator`
   与 InvestSkill 的 `full-report` 是另一类东西）。也不触发 §7（报告交付链路已删除）与 §6.1（出图只走

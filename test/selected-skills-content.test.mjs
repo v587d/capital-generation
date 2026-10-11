@@ -17,12 +17,26 @@ import { SELECTED_SKILL_CATALOG, SELECTED_SKILL_SKILL_DIRS } from '../selected-s
  * 因此接入前必须逐条审、不合规就地改掉（清单见 `docs/dev/selected-skills.md` §8.6）。
  * 这条测试钉的是**改完之后不许漂回去**：按 catalog 现算扫描面，新加一条 skill 立刻进扫描，
  * 重新按 commit 覆盖快照而未重做合规改写也会立刻红。
+ *
+ * 第五颗（marian2js/trading-skills）把同一族危险换了形态：它一处 `web search` 都不写，改成
+ * `curl "…apikey=<FMP_API_KEY>"` 自己取数、`ask which supported provider` 向用户点选付费服务商、
+ * `Do not fetch live data unless the user explicitly asks to pair this skill with …`（把委派之外的取数写成
+ * 默认允许的条件分支）、"already shared usable access details"（在对话里认领凭据），
+ * "For agents that support code execution … `skills/_lib/calculations.py`" 把计算推给能跑代码的宿主，
+ * 另有一颗 `etoro` 教 Agent 采集券商凭据并真实下单（因此不进 catalog，也不进发布包）。
+ * 所以下面按**词组族**加宽（六条 → 十二条），而不是只补回被改掉的那一句——§8.6 第 10 条的反证就打在新增这六条上。
  */
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
 /** [正则, 为什么不允许]。命中即失败，并点名该改成什么。 */
 const FORBIDDEN = [
   [/web search/i, '把取数交给 Agent 自己浏览：本插件的检索只有一个入口（委派 web_retriever），改成"走宿主取数通道 / 角色分流的宿主里把标的、字段、as-of 日期写进委派 brief 交出去"'],
+  [/\bcurl\b/i, '让 Agent 自己伸手取数或直接调接口：取数只有一个入口（委派 data_collector / web_retriever），且上游点名的 FMP／Polygon／TradingEconomics／券商凭据本插件一概没有——密钥只进 credentials 域（docs/dev/settings-config.md §5.2），不在对话里收'],
+  [/code[\s-]execution/i, '把计算推给"能跑代码的宿主"：本插件的分析角色没有 shell（docs/dev/bash-gate.md §1.6），统计量交给宿主数据侧（委派 data_junior），少量数字在答复里把算式写出来'],
+  [/ask which supported provider/i, '向用户点选外部付费数据服务商：本插件没有这些服务商的凭据，也不为它们开第二条取数口子'],
+  [/fetch live/i, '把"分析角色自己去取实时数据"写成默认允许的条件分支（上游的句式是 `Do not fetch live data unless …`）：取数一律委派，改成"缺哪个字段就把标的、字段、as-of 日期写成 brief 交给宿主取数通道，用回来的继续、其余标为未知"'],
+  [/pair this skill/i, '指望"和另一颗会取数的 skill 配对"来绕开委派：那颗未必在使用者开启的集合里，本插件的取数入口也只有委派这一个（docs/dev/selected-skills.md §8.6 第 1 条）'],
+  [/usable access details/i, '以"对话里已经给过凭据"为由取数：凭据不进对话，取数一律委派（同上两条）'],
   [/Retrieval: model memory/i, '把"记忆"当成一种取数途径：出处块的 Retrieval 只能是真路径（delegated retrieval / web/tool retrieval / pasted by user）'],
   [/training[- ]data estimates/i, '允许用训练记忆估算值继续分析：本插件不接受回填数字，取不到就报缺'],
   [/Live data unavailable/i, '"打个警告然后照跑"的逃生口：改成点名缺哪些字段并停止该字段下的分析'],

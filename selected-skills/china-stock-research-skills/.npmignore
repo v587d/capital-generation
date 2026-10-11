@@ -1,0 +1,18 @@
+# Capital Generation 的打包排除，不是上游内容的一部分（见 UPSTREAM.md 的 Packaging 一行）。
+# 挡的是只有人类读者会用的上游仓库材料：GitHub issue/PR 模板、它自己的发布与贡献文档、
+# README 的两个语言版本与 examples/ 的示范对话。
+# skills/shared/ **必须留在包里**：六颗可选模块的正文都按 `../shared/references/…` 与
+# `../shared/templates/…` 相对链接读那些引用标准、行业 overlay 与输出模板（15 处链接），
+# 挡掉等于让运行时读空文件。上游 orchestrator 那颗也照旧随包保留作为可审查材料，
+# 只是不进可选清单（与本插件的角色路由冲突）。
+.github/
+examples/
+README*.md
+SKILLS.md
+CHANGELOG.md
+CONTRIBUTING.md
+GITHUB_PUBLISHING.md
+INSTALL.md
+PUBLISH_CHECKLIST.md
+RELEASE_ASSETS.md
+ROADMAP.md

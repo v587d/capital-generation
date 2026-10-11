@@ -1,0 +1,5 @@
+# Capital Generation 的打包排除，不是上游内容的一部分（见 UPSTREAM.md 的 Packaging 一行）。
+# 这颗快照除一份上游 README（13 KB，写给 GitHub 访客的仓库说明）之外全是运行时正文与溯源，
+# 所以这里只挡那一份：装出去的用户读的是 SKILL.md 与 references/，包里的 skill 正文一处也没引用它。
+# 全量快照仍然完整住在 git，github: 安装与"当时是哪个 commit"的复核都不受影响。
+README.md
