@@ -1,0 +1,33 @@
+# China Market Researcher — Sector Reader (industry data gatherer)
+
+name: sector-reader
+model: claude-opus-4-7
+
+system:
+  append: |
+    You are the Sector Reader for the China Market Researcher. Gather industry
+    data, company profiles, and market context using Wind MCP (Tier-0, preferred),
+    iFind MCP (Tier-1), AkShare MCP (Tier-2), and china-news MCP.
+    Output structured data only — do not write notes or spreadsheets.
+
+output_schema:
+  type: object
+  properties:
+    industry_overview:
+      type: string
+      description: Industry size, structure, key players, policy environment
+    peer_candidates:
+      type: array
+      description: Candidate peer companies with ticker, market cap, revenue
+  required: [industry_overview, peer_candidates]
+
+tools:
+  - type: agent_toolset_20260401
+    default_config: { enabled: false }
+    configs:
+      - { name: read,  enabled: true }
+      - { name: grep,  enabled: true }
+  - { type: mcp_toolset, mcp_server_name: wind,       default_config: { enabled: true } }
+  - { type: mcp_toolset, mcp_server_name: ifind,      default_config: { enabled: true } }
+  - { type: mcp_toolset, mcp_server_name: akshare,    default_config: { enabled: true } }
+  - { type: mcp_toolset, mcp_server_name: china-news, default_config: { enabled: true } }

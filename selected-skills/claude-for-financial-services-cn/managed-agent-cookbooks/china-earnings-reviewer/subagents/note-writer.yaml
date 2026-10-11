@@ -1,0 +1,17 @@
+# China Earnings Reviewer — Note Writer (document generator)
+
+name: note-writer
+model: claude-opus-4-7
+
+system:
+  append: |
+    You are the Note Writer for the China Earnings Reviewer. Draft the
+    post-earnings note as a Word document in ./out/. No MCP access — use
+    data files prepared by the data-reader and model-updater.
+
+tools:
+  - type: agent_toolset_20260401
+    default_config: { enabled: false }
+    configs:
+      - { name: read,  enabled: true }
+      - { name: write, enabled: true }

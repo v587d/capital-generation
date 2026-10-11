@@ -1,0 +1,43 @@
+{
+  "name": "wind-spec-sync",
+  "leadAgentId": "53ce2f30f1804b2c8d76c39772ae5df9",
+  "workspacePath": "/Users/jwangkun/ai/financial-services/china",
+  "createdAt": "2026-06-09T12:49:59.035Z",
+  "options": {
+    "workspacePath": "/Users/jwangkun/ai/financial-services/china",
+    "isAutoTeam": false
+  },
+  "members": [
+    {
+      "memberId": "team-lead@wind-spec-sync",
+      "name": "team-lead",
+      "role": "Team Lead - coordinates the team and interacts with the user"
+    },
+    {
+      "memberId": "update-claude@wind-spec-sync",
+      "name": "update-claude",
+      "role": "Update CLAUDE.md for new wind spec"
+    },
+    {
+      "memberId": "update-readme@wind-spec-sync",
+      "name": "update-readme",
+      "role": "Update README Wind tool table"
+    },
+    {
+      "memberId": "update-marketdata@wind-spec-sync",
+      "name": "update-marketdata",
+      "role": "Update china-market-data SKILL.md"
+    },
+    {
+      "memberId": "update-plan@wind-spec-sync",
+      "name": "update-plan",
+      "role": "Update IFIND-INTEGRATION-PLAN.md"
+    },
+    {
+      "memberId": "validate-check@wind-spec-sync",
+      "name": "validate-check",
+      "role": "Update check-china.py tool count"
+    }
+  ],
+  "isAutoTeam": false
+}

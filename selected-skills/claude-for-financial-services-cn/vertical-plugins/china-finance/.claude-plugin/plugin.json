@@ -1,0 +1,8 @@
+{
+  "name": "china-finance",
+  "version": "0.1.0",
+  "description": "Chinese financial data and analysis tools: A-share market data, fund data, financial statements, industry classification via AkShare open-source dataset",
+  "author": {
+    "name": "Anthropic FSI China"
+  }
+}

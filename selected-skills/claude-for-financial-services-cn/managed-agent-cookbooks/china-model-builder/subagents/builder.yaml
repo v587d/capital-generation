@@ -1,0 +1,18 @@
+# China Model Builder — Builder (Excel model constructor)
+
+name: builder
+model: claude-opus-4-7
+
+system:
+  append: |
+    You are the Builder for the China Model Builder. Construct the Excel
+    financial model in ./out/ using data from the data-puller. Follow CAS
+    accounting conventions, China-specific WACC. All calc cells are formulas.
+
+tools:
+  - type: agent_toolset_20260401
+    default_config: { enabled: false }
+    configs:
+      - { name: read,  enabled: true }
+      - { name: grep,  enabled: true }
+      - { name: write, enabled: true }

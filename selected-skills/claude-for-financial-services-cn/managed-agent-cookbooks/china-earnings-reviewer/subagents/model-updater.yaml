@@ -1,0 +1,18 @@
+# China Earnings Reviewer — Model Updater (Excel)
+
+name: model-updater
+model: claude-opus-4-7
+
+system:
+  append: |
+    You are the Model Updater for the China Earnings Reviewer. Update the
+    coverage Excel model with actuals from the data-reader. Every changed
+    cell must be traceable to a source. Output to ./out/.
+
+tools:
+  - type: agent_toolset_20260401
+    default_config: { enabled: false }
+    configs:
+      - { name: read,  enabled: true }
+      - { name: grep,  enabled: true }
+      - { name: write, enabled: true }

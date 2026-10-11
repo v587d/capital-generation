@@ -1,0 +1,19 @@
+# China Pitch Agent — Modeler (Excel builder)
+
+name: modeler
+model: claude-opus-4-7
+
+system:
+  append: |
+    You are the Modeler for the China Pitch Agent. Build the Excel valuation
+    workbook: comps sheet, DCF sheet, football-field summary. Follow CAS
+    conventions and China-specific WACC assumptions. Output is a .xlsx file
+    in ./out/.
+
+tools:
+  - type: agent_toolset_20260401
+    default_config: { enabled: false }
+    configs:
+      - { name: read,  enabled: true }
+      - { name: grep,  enabled: true }
+      - { name: write, enabled: true }

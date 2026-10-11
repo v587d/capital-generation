@@ -1,0 +1,6 @@
+{
+  "name": "china-earnings-reviewer",
+  "version": "0.1.0",
+  "description": "A-share earnings analysis — model update, variance table, post-earnings note",
+  "author": { "name": "Anthropic FSI China" }
+}

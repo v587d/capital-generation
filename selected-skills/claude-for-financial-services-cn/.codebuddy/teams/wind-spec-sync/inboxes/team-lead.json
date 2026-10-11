@@ -1,0 +1,47 @@
+[
+  {
+    "id": "msg-1781009526627-qslzua",
+    "from": "update-claude",
+    "to": "team-lead",
+    "type": "message",
+    "content": "CLAUDE.md has been updated. Here's what changed:\n\n**Line 32** — Wind MCP data source priority entry updated:\n- Added version tag: `(Tier-0 paid, v2.0)`\n- Replaced the old Chinese-category description (`A股/港美股/基金/指数/债券/宏观/研报/分析`) with the new 8-domain breakdown:\n  - `stock_data (10)`, `global_stock_data (10)`, `fund_data (10)`, `index_data (6)`, `bond_data (4)`, `financial_docs (2)`, `economic_data (1)`, `analytics_data (1)`\n- Tool count of 44 remains unchanged (still 10+10+10+6+4+2+1+1 = 44)\n\nNo other sections required changes. The remaining file (iFind, AkShare, china-news entries, data source mode switch table, commands, agents, etc.) was already accurate.",
+    "timestamp": "2026-06-09T12:52:06.627Z",
+    "read": true
+  },
+  {
+    "id": "msg-1781009548563-7ztqet",
+    "from": "update-marketdata",
+    "to": "team-lead",
+    "type": "message",
+    "content": "Updated `/Users/jwangkun/ai/financial-services/china/vertical-plugins/china-finance/skills/china-market-data/SKILL.md` data source priority table (lines 33-55).\n\n**Renamed tools (old → new):**\n- `wind_get_stock_financials` → `wind_get_stock_fundamentals`\n- `wind_get_stock_info` → `wind_get_stock_basicinfo`\n- `wind_get_stock_shareholders` → `wind_get_stock_equity_holders`\n- `wind_risk_model` → `wind_get_risk_metrics`\n- `wind_get_bond_*` → split into `wind_get_bond_basicinfo` + `wind_get_bond_market_data` (two rows)\n- `wind_get_global_stock_*` → split into `wind_get_global_stock_fundamentals` + `wind_get_global_stock_basicinfo` (two rows)\n- Added `wind_get_stock_technicals` as standalone row (was previously under old `wind_get_stock_technical`)\n\n**New tools added:**\n- `wind_get_stock_price_indicators` — 行情快照 (real-time quote snapshot)\n- `wind_get_stock_kline` — K线 (OHLCV history)\n- `wind_get_stock_technicals` — 技术指标 (technical indicators)\n- `wind_get_financial_news` — 财经新闻 (financial news)\n- `wind_get_company_announcements` — 公司公告 (company announcements)\n- `wind_get_financial_data` — 兜底取数 (catch-all financial data query)\n\nThe table now has 26 rows (was 19), covering all renamed and new Wind tools with their iFind and AkShare counterparts.",
+    "timestamp": "2026-06-09T12:52:28.563Z",
+    "read": true
+  },
+  {
+    "id": "msg-1781009551154-jbpmni",
+    "from": "validate-check",
+    "to": "team-lead",
+    "type": "message",
+    "content": "check-china.py validation complete. No changes were required.\n\nAnalysis:\n1. MCP_SERVER_CONFIG (line 43): `\"wind-mcp\": {\"config_required\": True, \"config_key\": \"WIND_API_KEY\", \"mcp_name\": \"wind\"}` — still correctly references wind-mcp. server.py uses WIND_API_KEY (line 73) and FastMCP(\"wind-mcp\", ...) — fully consistent.\n\n2. No hardcoded tool counts or names: The script only validates structural integrity (file existence, YAML frontmatter, MCP config presence, forbidden patterns, .mcp.json consistency). It has zero references to tool counts (like \"44\") or specific tool names. The v2.0 rewrite with 44 tools across 8 domains doesn't affect any of its checks.\n\n3. Script runs successfully: `python3 scripts/check-china.py` exits with code 0, all 6 check sections pass:\n   - [1/6] Vertical plugins: 59 skills all valid\n   - [2/6] Agent plugins: 4 agents all valid\n   - [3/6] MCP server integrity: all 4 servers pass (wind-mcp has mcp_config.json, server.py, requirements.txt)\n   - [4/6] .mcp.json consistency: all 6 vertical plugins register all 4 MCP servers\n   - [5/6] Cookbook MCP configuration: all 4 cookbooks have correct MCP references\n   - [6/6] Summary: All checks passed\n\nNo fixes were needed — the script was already resilient to the v2.0 server rewrite.",
+    "timestamp": "2026-06-09T12:52:31.154Z",
+    "read": true
+  },
+  {
+    "id": "msg-1781009553270-8olt0a",
+    "from": "update-readme",
+    "to": "team-lead",
+    "type": "message",
+    "content": "已完成 README.md 中 Wind 部分的更新：\n\n**1. 工具表（line 320-329）** — 更新为最新 spec 的 8 大服务域和 44 个工具：\n\n| 服务域 | 工具数 | 变化 |\n|---|---|---|\n| stock_data | 8→**10** | 能力更细化：行情快照、分钟行情、基本档案、财务数据、股本股东、重大事件、技术指标、风险指标 |\n| global_stock_data | 5→**10** | 与 A 股对齐，覆盖港股/美股同等 10 项能力 |\n| fund_data | 6→**10** | 新增档案费率、业绩排名、持有人、公司信息 |\n| index_data | 5→**6** | 聚焦行情快照、K线、分钟行情、基本档案、基本面、技术指标 |\n| bond_data | 5→**4** | 聚焦债券档案、发债主体、市场数据、主体财务 |\n| financial_docs | 5→**2** | 聚焦公司公告(年报/季报/招股书)和财经新闻 |\n| economic_data | 5→**1** | 聚焦宏观/行业 EDB 指标 |\n| analytics_data | 5→**1** | 通用结构化取数兜底 |\n\nTotal: 10+10+10+6+4+2+1+1 = **44** ✓\n\n**2. 使用示例（line 372-384）** — 更新为正确的新工具名：\n- `wind_get_stock_financials` → `wind_get_stock_fundamentals`\n- `wind_compare_global_stocks` → `wind_get_global_stock_snapshot` + `wind_get_stock_snapshot`\n- `wind_search_research` → `wind_get_financial_docs`\n- `wind_factor_analysis` → `wind_get_index_technicals`",
+    "timestamp": "2026-06-09T12:52:33.270Z",
+    "read": true
+  },
+  {
+    "id": "msg-1781009607938-wc5va7",
+    "from": "update-plan",
+    "to": "team-lead",
+    "type": "message",
+    "content": "已完成 IFIND-INTEGRATION-PLAN.md 的更新，具体变更如下：\n\n**1. 工具映射表完全重写** (lines 126-210)\n原来的48个工具单表格已替换为按8大服务域分组的表格，每域标注了工具数量，新增了 `server-side tool_name` 列（即实际调用时传给Wind远程MCP的工具名），共44个工具：\n\n| 服务域 | 工具数 | 关键变更 |\n|--------|--------|----------|\n| stock_data | 10 | `get_stock_info`→`get_stock_basicinfo`; `get_stock_financials`→`get_stock_fundamentals`; `get_stock_shareholders`→`get_stock_equity_holders`; `get_stock_technical`→`get_stock_technicals`; 新增 `get_stock_price_indicators`, `get_stock_kline`, `get_stock_quote`, `get_risk_metrics`; 移除 `get_stock_consensus`, `get_stock_summary` |\n| global_stock_data | 10 | `get_global_stock_info`→`get_global_stock_basicinfo`; `get_global_stock_financials`→`get_global_stock_fundamentals`; 新增 `get_global_stock_price_indicators`, `get_global_stock_kline`, `get_global_stock_quote`, `get_global_stock_equity_holders`, `get_global_stock_technicals`, `get_global_stock_risk_metrics`; 移除 `compare_global_stocks` |\n| fund_data | 10 | `get_fund_nav`→`get_fund_price_indicators`; `get_fund_portfolio`→`get_fund_holdings`; 新增 `get_fund_kline`, `get_fund_quote`, `get_fund_performance`, `get_fund_holders`; 移除 `compare_funds`, `get_fund_performance_attribution` |\n| index_data | 6 | 完全重命名: `search_indices`, `get_index_info`, `get_index_constituents`, `get_index_weights`, `compare_indices` → `get_index_price_indicators`, `get_index_kline`, `get_index_quote`, `get_index_basicinfo`, `get_index_fundamentals`, `get_index_technicals` |\n| bond_data | 4 | `search_bonds`→移除; `get_bond_info`→`get_bond_basicinfo`; `get_bond_rating`+`get_bond_yield`+`get_bond_spread`→`get_bond_market_data`; `get_credit_report`→`get_bond_issuer_info` |\n| financial_docs | 2 | `search_research`→`get_financial_news`; `get_announcements`+`get_financial_report`+`get_prospectus`→`get_company_announcements`; 移除 `get_credit_report` |\n| economic_data | 1 | `search_economic_indicators`+`get_economic_data`+`compare_economic_data`+`get_economic_forecast`+`get_leading_indicators`→合并为 `get_economic_data` |\n| analytics_data | 1 | `factor_analysis`+`backtest`+`risk_model`+`portfolio_optimization`+`scenario_analysis`→合并为 `get_financial_data` |\n\n**2. 工具数量描述更新** (line 122): 从 \"44 个，覆盖 8 大服务域\" 更新为详细分布说明\n\n**3. 数据源优先级描述更新** (line 214): 补充了8大服务域的具体内容\n\n**4. 新增任务清单条目** (line 233): \"✅ server.py v2.0: 按官方 tool-contracts.md 重新对齐 44 个工具名称、参数结构、服务域划分\"",
+    "timestamp": "2026-06-09T12:53:27.938Z",
+    "read": true
+  }
+]

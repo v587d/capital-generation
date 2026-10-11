@@ -1,0 +1,34 @@
+# China Market Researcher — managed-agent cookbook
+
+name: china-market-researcher
+model: claude-opus-4-7
+
+system:
+  file: ../../agent-plugins/china-market-researcher/agents/china-market-researcher.md
+  append: "You are running headless. Produce files in ./out/; do not assume an open Office document."
+
+tools:
+  - type: agent_toolset_20260401
+    default_config: { enabled: false }
+    configs:
+      - { name: read,  enabled: true }
+      - { name: grep,  enabled: true }
+      - { name: glob,  enabled: true }
+  - { type: mcp_toolset, mcp_server_name: akshare,  default_config: { enabled: true } }
+  - { type: mcp_toolset, mcp_server_name: ifind,    default_config: { enabled: true } }
+  - { type: mcp_toolset, mcp_server_name: china-news, default_config: { enabled: true } }
+  - { type: mcp_toolset, mcp_server_name: wind,       default_config: { enabled: true } }
+
+mcp_servers:
+  - { type: url, name: akshare,    url: "${AKSHARE_MCP_URL}" }
+  - { type: url, name: ifind,      url: "${IFIND_MCP_URL}" }
+  - { type: url, name: china-news, url: "${CHINA_NEWS_MCP_URL}" }
+  - { type: url, name: wind,       url: "${WIND_MCP_URL}" }
+
+skills:
+  - { from_plugin: ../../agent-plugins/china-market-researcher }
+
+callable_agents:
+  - { manifest: ./subagents/sector-reader.yaml }
+  - { manifest: ./subagents/comps-spreader.yaml }
+  - { manifest: ./subagents/note-writer.yaml }

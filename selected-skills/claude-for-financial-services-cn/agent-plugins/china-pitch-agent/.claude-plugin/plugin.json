@@ -1,0 +1,6 @@
+{
+  "name": "china-pitch-agent",
+  "version": "0.1.0",
+  "description": "A-share pitch agent — comps, DCF, LBO, and branded deck for Chinese listed targets",
+  "author": { "name": "Anthropic FSI China" }
+}

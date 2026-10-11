@@ -12,7 +12,12 @@ for the user to review the source and decide whether it fits the task.
 
 ## Layout
 
-- `<project>/skills/`: upstream skill files, preserved at a pinned commit.
+- `<project>/<skills root>/`: upstream skill files, preserved at a pinned commit. The root
+  is not always `skills/` — it is declared per repository in `SELECTED_SKILL_SKILL_DIRS`
+  (`catalog.js`), because upstreams lay skills out differently: one buries them under a
+  plugin directory, one groups them two levels deep, and the A-share snapshot has six
+  parallel roots, of which exactly one is registered (the line upstream itself calls the
+  source of truth). Everything else in the snapshot stays unregistered material.
 - `<project>/UPSTREAM.md`: repository URL, owner, commit, license, runtime scope,
   maintenance notes, and local changes.
 - `<project>/LICENSE`: original upstream license.

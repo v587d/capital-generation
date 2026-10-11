@@ -30,6 +30,35 @@ const TRADING_SKILLS_EXCLUDED = [
   'post-trade-debrief',        // 同上
 ]
 
+// 第六颗（jwangkun/claude-for-financial-services-cn）：上游有六个 skills 根，这里只登记规范根
+// vertical-plugins/china-finance/skills（31 颗），开放其中 9 颗。下面 22 颗留在快照里当可审查材料
+// （mcp-servers/ 四份取数服务端连发布包都不进），理由逐条写在
+// selected-skills/claude-for-financial-services-cn/UPSTREAM.md 与 docs/reference/external-skill-scan-2026-10.md。
+const CHINA_FINANCE_EXCLUDED = [
+  'china-market-data',           // 它本身就是取数目录：服务商 MCP 工具名表 + export 模式开关，无分析产出
+  'china-skill-creator',         // 元技能：教造新 skill，模板里硬编码服务商阶梯，还要 python3 scripts/*.py 校验
+  'china-dcf-model',             // 上游自标的 alias（"redirects to china-dcf"）：§8.6 第 6 条
+  'china-comps',                 // 同题材的薄一份，且带两份 frontmatter
+  'china-morning-note',          // 给 Long / Short 方向、止损位与仓位建议：明确的买卖动作口径
+  'china-thesis-tracker',        // Maintain / Add / Reduce / Exit + 止损位，同上
+  'china-idea-generation',       // 选股清单给方向，还有 Position sizing recommendations
+  'china-tax-loss-harvesting',   // Full exit / Reduce position / 执行买卖，且是美股应税账户语境
+  'china-3-statement-model',     // 要求产出 xlsx 工作簿（还有 OpenPyXL Formatting 一节）
+  'china-lbo-model',             // 同上：File named: …_LBO_Model_….xlsx
+  'china-xlsx-author',           // 交付物就是一份工作簿
+  'china-pptx-author',           // python3 scripts/generate_a_share_ppt.py + .pptx
+  'china-ppt-template-creator',  // .pptx 模板与 _Style_Guide.pdf
+  'china-deck-refresh',          // 读写既有 deck 并另存 .pptx + .pdf
+  'china-audit-xls',             // 审计对象是一份 xlsx 工作簿
+  'china-ib-check-deck',         // 质检对象是一份 pitch deck
+  'china-clean-data-xls',        // 表格清洗，对象同样是工作簿
+  'china-model-update',          // 维护本地模型文件并给新目标价
+  'china-roll-forward',          // 把工作簿滚动到新期间（"All cells formula-driven"）
+  'china-gl-recon',              // 总账对账：会计作业口径，不是本插件使用者的研究场景
+  'china-accrual-schedule',      // 计提计划，同上
+  'china-deal-screening',        // 一级市场标的筛选（PE / 投行语境）
+]
+
 function candidate(name) {
   return { name, description: name, invocation: { modelInvocable: true, userInvocable: true }, source: 'custom', provider: 'source', rank: 1, locator: name }
 }
@@ -140,6 +169,20 @@ test('selected skill provider: disabled by default and limited to the approved c
     .sort()
   assert.deepEqual(tradingSkillsCatalog, tradingSkillDirs,
     `trading-skills 的可选清单与快照目录不符：多出或缺少 ${tradingSkillsCatalog.filter((n, i) => n !== tradingSkillDirs[i]).join('、')}`)
+  // 第六颗同样是派生钉法，两点不同：它排除得多（规范根 31 里开放 9），而且根路径**从映射现取**、不写死目录名。
+  // 这颗的 skills 根是 vertical-plugins/china-finance/skills（上游有六个根），写死就等于"映射漂了"
+  // 只能等 provider 装配时才被发现——正是 AGENTS.md §9.7 那一族。排除的 22 颗逐条理由见该快照 UPSTREAM.md。
+  const chinaFinanceCatalog = SELECTED_SKILL_CATALOG
+    .filter(({ repository }) => repository === 'claude-for-financial-services-cn')
+    .map(({ name }) => name)
+    .sort()
+  const chinaFinanceRoot = SELECTED_SKILL_SKILL_DIRS['claude-for-financial-services-cn']
+  const chinaFinanceDirs = readdirSync(fileURLToPath(new URL(`../selected-skills/claude-for-financial-services-cn/${chinaFinanceRoot}`, import.meta.url)))
+    .filter((dir) => !CHINA_FINANCE_EXCLUDED.includes(dir))
+    .sort()
+  assert.deepEqual(chinaFinanceCatalog, chinaFinanceDirs,
+    `claude-for-financial-services-cn 的可选清单与规范根（${chinaFinanceRoot}）不符：`
+    + `多出或缺少 ${chinaFinanceCatalog.filter((n, i) => n !== chinaFinanceDirs[i]).join('、')}`)
   assert.ok(SELECTED_SKILL_CATALOG.every(({ status, tags }) => ['experimental', 'watchlist'].includes(status) && tags.length > 0))
   const harness = makeHarness()
   registerRootSelectedSkills(harness.ctx, { buffettFramework: false }, harness.createFilesystemProvider)

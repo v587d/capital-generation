@@ -1,0 +1,6 @@
+{
+  "name": "china-model-builder",
+  "version": "0.1.0",
+  "description": "DCF, LBO, 3-statement, and comps models for Chinese equities using AkShare data",
+  "author": { "name": "Anthropic FSI China" }
+}

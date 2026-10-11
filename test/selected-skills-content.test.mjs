@@ -25,6 +25,16 @@ import { SELECTED_SKILL_CATALOG, SELECTED_SKILL_SKILL_DIRS } from '../selected-s
  * "For agents that support code execution … `skills/_lib/calculations.py`" 把计算推给能跑代码的宿主，
  * 另有一颗 `etoro` 教 Agent 采集券商凭据并真实下单（因此不进 catalog，也不进发布包）。
  * 所以下面按**词组族**加宽（六条 → 十二条），而不是只补回被改掉的那一句——§8.6 第 10 条的反证就打在新增这六条上。
+ *
+ * 第六颗（jwangkun/claude-for-financial-services-cn，A 股 63 颗）又把同一族摊成**全量**：63 份正文每份都带
+ * 一节三档服务商阶梯（万得 Wind 带 `WIND_API_KEY` 与密钥申请 URL、同花顺 iFind 带 `IFIND_AUTH_TOKEN`、
+ * AkShare 兜底）、```python 围栏里的伪工具调用、尾部统一的 `IFIND_DATA_SOURCE_MODE` 环境变量开关，
+ * 以及把服务商名写死进引用格式的 `Source: AkShare, [date]`。本插件没有 shell（§1.6）、没有那些服务商的凭据
+ * （密钥只进 credentials 域 §5），取数一律委派（§1.1），所以这一族的每一条都要进闸门。
+ * 注意 `\bWind\b` / `\bChoice\b` 这种"按英文单词名"的写法**不能用**：测试把命中统计强制成 `gi`，
+ * 于是 sector-analysis 里的"wind"（风电）与 fact-check、tax-lens 里的"choice"普通词都会被误判。
+ * 服务商这一族改按**无歧义形状**扫：中文名（万得 / 慧博）、`Wind / Choice` 的阶梯形状、以及 iFind / AkShare
+ * 这两个本身不成英文词的品牌名。第六颗另有许可侧的正向断言（Apache-2.0 §4(b) 的改动声明行）。
  */
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
@@ -42,6 +52,19 @@ const FORBIDDEN = [
   [/Live data unavailable/i, '"打个警告然后照跑"的逃生口：改成点名缺哪些字段并停止该字段下的分析'],
   [/node scripts\/|bash scripts\//i, '指向上游脚本：脚本不进发布包、根角色也没有 shell，取数一律走委派'],
   [/host can(?:not)? fetch/i, '以"宿主能不能抓"分支：本插件的取数通道恒在（委派），只有"宿主完全没有检索路径"才谈用户粘贴'],
+  // ↓ 第六颗那一族：正文自带的数据层（服务商阶梯、伪调用、模式开关、凭据形态）。
+  //   反证（§8.6 第 10 条）打在下面这几条上：把任意一颗换回上游原文，只有这一族会红。
+  [/```python/, '把取数写成一段看起来能跑的 python：本插件的取数入口只有委派一个（docs/dev/selected-skills.md §8.6 第 1 条），这些函数名指向的是上游那几个不随包发布的取数服务；改成"要哪些字段、as-of 哪天"的委派 brief'],
+  [/\bmcp__[a-z_]+__\b/, '点名 MCP 工具名当取数途径：运行时不存在这些工具（上游服务端连发布包都不进），改成委派 brief 里写清标的、字段与 as-of 日期'],
+  [/\bIFIND_DATA_SOURCE_MODE\b/, '留着一个环境变量决定"用哪家服务商"：取数档位由宿主的凭据域决定（docs/dev/settings-config.md §5.2），不在对话正文里配置，也不向使用者索取凭据'],
+  [/\bWIND_API_KEY\b|\bIFIND_AUTH_TOKEN\b/, '正文出现凭据名：密钥只进 credentials 域（docs/dev/settings-config.md §5.2），分析正文一律不带'],
+  [/\bak\.[a-z_]+\(/, '指向上游 SDK 的具体函数：本插件不跑代码取数（docs/dev/bash-gate.md §1.6），要那个字段就向宿主的数据通道要'],
+  [/\bget_[a-z_]+\(/, '伪工具调用形状（`get_financials(ticker, …)` 一类）：运行时没有这些工具，取数一律委派，写成字段清单与 as-of 日期'],
+  [/\bifind_[a-z_]+/, '点名付费服务商接口的函数名：本插件没有该服务商的凭据，也不为它开第二条取数口子'],
+  [/密钥申请|aifinmarket/, '在正文里给使用者指路去申请数据服务密钥：凭据只进 credentials 域（docs/dev/settings-config.md §5.2），分析正文不引导开户'],
+  [/\bAkShare\b|\bAkSource\b/, '把某家外部数据服务商写成取数途径：本插件的取数入口只有委派一个，服务商与密钥不归分析正文决定'],
+  [/\biFind\b/, '同上：点名外部服务商作为数据档位（本颗用它而不写成"同花顺"，因为同花顺结构数据正是本插件在用的来源之一）'],
+  [/万得|慧博|wind\s*\/\s*choice/i, '服务商阶梯（"哪家最全、付费/免费备选"）留在正文里：本插件不选服务商，取数一律委派；缺字段就点名并停止该字段的分析（§8.6 第 2 条）'],
 ]
 
 /** 出现即要求同一文件里必须同时存在的退路说明。 */
@@ -103,5 +126,18 @@ test('内容闸门：出处块点名的 Retrieval 取值必须包含委派这一
       assert.ok(/delegated retrieval/.test(enumLine[1]),
         `${where(skill, file)} 的 Retrieval 枚举缺 delegated retrieval：${enumLine[1]}`)
     }
+  }
+})
+
+test('内容闸门：第六颗快照里被改写的正文必须各带一行 Apache-2.0 §4(b) 声明', () => {
+  // 前五份是 MIT：再分发不要求在**被改的那份文件上**留痕，改动口径只住在 UPSTREAM.md 里就够了。
+  // Apache-2.0 第 4(b) 条不同——它要求"修改过的文件带上显著的声明"。所以这颗快照里凡与上游不同的正文，
+  // 正文第一行都得有一句可见声明指回该快照的 UPSTREAM.md。这一条不像取数那族会顺带撞别的断言，
+  // 漏了没人响，所以单独钉住：漏一颗就点名那一颗。
+  const sixth = skills.filter(({ entry }) => entry.repository === 'claude-for-financial-services-cn')
+  assert.ok(sixth.length > 0, 'catalog 里没有第六颗快照的条目，这条闸门会退化成空断言')
+  for (const { entry, path } of sixth) {
+    assert.match(readFileSync(path, 'utf8'), /^> 本文件相对上游 `d7585ca` 快照做过合规改写/m,
+      `${entry.name}/SKILL.md 缺 §4(b) 的改动声明行（一级标题下那一句可见声明，指回快照根的 UPSTREAM.md）`)
   }
 })

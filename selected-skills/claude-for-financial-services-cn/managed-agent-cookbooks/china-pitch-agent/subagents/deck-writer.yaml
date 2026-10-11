@@ -1,0 +1,17 @@
+# China Pitch Agent — Deck Writer (PowerPoint)
+
+name: deck-writer
+model: claude-opus-4-7
+
+system:
+  append: |
+    You are the Deck Writer for the China Pitch Agent. Generate the branded
+    pitch deck as a .pptx file in ./out/. Every number on every slide must
+    match the model workbook. Do not use MCP tools.
+
+tools:
+  - type: agent_toolset_20260401
+    default_config: { enabled: false }
+    configs:
+      - { name: read,  enabled: true }
+      - { name: write, enabled: true }

@@ -12,6 +12,11 @@ export const SELECTED_SKILL_SKILL_DIRS = Object.freeze({
   // 指上去等于发现 0 颗：快照因此平铺掉 <domain>/ 这一层（每颗的 references/、assets/ 跟着走，
   // 正文链接都在自己目录内，不破）。理由与逐颗原分组记在该快照的 UPSTREAM.md。
   'trading-skills': 'skills',
+  // 上游有六个 skills 根（vertical-plugins/<条线>/skills/），并且 agent-plugins/<角色>/skills/ 是它自己
+  // vendored 的副本（上游 CLAUDE.md 规定"不许直接改 bundled copies"）。provider 只扫一个根，
+  // 因此只登记规范根那一条线：vertical-plugins/china-finance/skills —— 上游自己写明 skill 正文就 authored 在这里。
+  // 另外五条线（投行 / PE / 基金运营 / 财富 / 账户）与副本留在快照里当材料，不进可选清单。
+  'claude-for-financial-services-cn': 'vertical-plugins/china-finance/skills',
 })
 
 // Selected-skill metadata owned by Capital Generation. Upstream snapshots remain unchanged.
@@ -871,6 +876,177 @@ export const SELECTED_SKILL_CATALOG = Object.freeze([
     riskNote: {
       zh: '冷启动实验；上游自 2026-03-16 起无提交，启用前请自行复核来源。复盘得出的"下次要改的规则"属于过程推演，本插件不据它替使用者调整持仓或下单。',
       en: 'Cold-start experiment; upstream has been quiet since 2026-03-16, so review the sources before use. The rule changes it suggests are process exercises: this plugin adjusts no holdings and places no orders on them.',
+    },
+  },
+  {
+    key: 'chinaEarningsAnalysis',
+    name: 'china-earnings-analysis',
+    label: { zh: 'A 股业绩点评', en: 'A-Share Earnings Review' },
+    description: {
+      zh: '把已覆盖公司的季报或年报写成 A 股卖方体例的点评：实际 / 一致预期 / 上期的差异表、收入与利润率分解、资产负债表与现金流关注点，再落到估值与风险。',
+      en: 'Writes a quarterly or annual update in Chinese sell-side format: an actual / consensus / prior variance table, revenue and margin decomposition, balance-sheet and cash-flow focus, then valuation and risks.',
+    },
+    owner: 'jwangkun',
+    repository: 'claude-for-financial-services-cn',
+    status: 'watchlist',
+    lastCommit: '2026-09-14',
+    reviewBy: '2026-11-08',
+    tags: ['a-share', 'earnings', 'filings', 'financial-health'],
+    riskNote: {
+      zh: '冷启动实验；上游最近一次提交是 2026-09-14，启用前请自行复核来源。本插件没有一致预期的结构化取数面：那一列取不到就留空并点名缺失，不用记忆补。报告里的评级与目标价段落属于推演练习，不构成买卖建议。',
+      en: 'Cold-start experiment; upstream last moved on 2026-09-14, so review the sources before use. This plugin has no consensus endpoint: that column stays empty and the gap is named rather than remembered. The rating and target-price paragraphs are exercises, not investment advice.',
+    },
+  },
+  {
+    key: 'chinaEarningsPreview',
+    name: 'china-earnings-preview',
+    label: { zh: 'A 股财报前瞻', en: 'A-Share Earnings Preview' },
+    description: {
+      zh: '公布前把关注点排好：历史基线、要盯的三到五个指标、乐观 / 基准 / 悲观三档情景与触发条件，按 A 股披露节奏（业绩预告、快报、正式报告）写前瞻。',
+      en: 'Sets up the pre-release frame: historical baseline, the three to five metrics that matter, bull / base / bear scenarios with their triggers, all on the A-share rhythm of 预告, 快报 and the full report.',
+    },
+    owner: 'jwangkun',
+    repository: 'claude-for-financial-services-cn',
+    status: 'watchlist',
+    lastCommit: '2026-09-14',
+    reviewBy: '2026-11-08',
+    tags: ['a-share', 'earnings', 'monitoring'],
+    riskNote: {
+      zh: '冷启动实验；上游最近一次提交是 2026-09-14，启用前请自行复核来源。宿主取不到一致预期时，情景对比写在历史与自家披露口径上，并标明那是你自己的基线；文中的仓位与交易策略设想属于推演练习。',
+      en: 'Cold-start experiment; upstream last moved on 2026-09-14, so review the sources before use. With no retrievable consensus, scenarios are framed against history and the company’s own disclosed range, labelled as your baseline; the sizing and trade ideas it sketches are exercises.',
+    },
+  },
+  {
+    key: 'chinaCompsAnalysis',
+    name: 'china-comps-analysis',
+    label: { zh: 'A 股可比公司倍数', en: 'A-Share Comparable Multiples' },
+    description: {
+      zh: '按 A 股口径搭同业倍数表：板块分组与市值 / 增速 / 盈利性筛选，P/E（动态·静态·TTM）、P/B、EV/EBITDA 与溢价折价的解释，最后收敛成一个估值区间。',
+      en: 'Builds a peer multiple table on A-share conventions: sector grouping with size, growth and profitability screens, dynamic / static / TTM P/E, P/B and EV/EBITDA, premium and discount explanations, and a resulting valuation range.',
+    },
+    owner: 'jwangkun',
+    repository: 'claude-for-financial-services-cn',
+    status: 'watchlist',
+    lastCommit: '2026-09-14',
+    reviewBy: '2026-11-08',
+    tags: ['a-share', 'valuation', 'competition'],
+    riskNote: {
+      zh: '冷启动实验；上游最近一次提交是 2026-09-14，启用前请自行复核来源。区间随倍数假设大幅移动，末尾的目标价与投资建议属于推演练习，本插件不据它下单，也不给仓位数字。',
+      en: 'Cold-start experiment; upstream last moved on 2026-09-14, so review the sources before use. The range moves with the multiple assumptions, and the closing target price and recommendation are exercises: this plugin places no orders and derives no position size from them.',
+    },
+  },
+  {
+    key: 'chinaDcf',
+    name: 'china-dcf',
+    label: { zh: 'A 股 DCF 口径', en: 'A-Share DCF Conventions' },
+    description: {
+      zh: '用中国财报口径跑 DCF：无风险利率取十年期国债收益率、A 股股权风险溢价、25% 税率（高新技术企业 15%）、本币终值增长，再把 WACC 与敏感性摊开。',
+      en: 'Runs a DCF on Chinese conventions: a 10-year government bond yield as the risk-free rate, A-share equity risk premium, 25% tax (15% for 高新技术企业), local-currency terminal growth, then WACC and sensitivities.',
+    },
+    owner: 'jwangkun',
+    repository: 'claude-for-financial-services-cn',
+    status: 'watchlist',
+    lastCommit: '2026-09-14',
+    reviewBy: '2026-11-08',
+    tags: ['a-share', 'valuation', 'cash-flow'],
+    riskNote: {
+      zh: '冷启动实验；上游最近一次提交是 2026-09-14，启用前请自行复核来源。国债收益率或 β 取不到时按假设区间做敏感性并写明假设，不假设一个点位；行业利润率的默认值是这个模型的输入，不是对公司的预测。',
+      en: 'Cold-start experiment; upstream last moved on 2026-09-14, so review the sources before use. If the bond yield or beta cannot be retrieved, the model runs as a labelled sensitivity band rather than a guessed level; the sector margin defaults are inputs to this model, not forecasts of the company.',
+    },
+  },
+  {
+    key: 'chinaSectorOverview',
+    name: 'china-sector-overview',
+    label: { zh: 'A 股行业全景', en: 'A-Share Sector Landscape' },
+    description: {
+      zh: '画一张 A 股行业地图：市场规模与集中度、政策与监管框架、竞争格局与按板块的关键 KPI（批价、装机量、NIM 一类），再落到主题与估值对照。',
+      en: 'Maps an A-share industry: market size and concentration, the policy and regulatory frame, competitive structure with sector-specific KPIs (批价, 装机量, NIM and the like), then themes and valuation context.',
+    },
+    owner: 'jwangkun',
+    repository: 'claude-for-financial-services-cn',
+    status: 'watchlist',
+    lastCommit: '2026-09-14',
+    reviewBy: '2026-11-08',
+    tags: ['a-share', 'macro', 'competition', 'business-analysis'],
+    riskNote: {
+      zh: '冷启动实验；上游最近一次提交是 2026-09-14，启用前请自行复核来源。行业口径的统计取不到就写成缺口，不折算成记忆里的数；多空一览与"重点标的、目标价、评级"一节属于推演练习，本插件不据它下单，也不给仓位。',
+      en: 'Cold-start experiment; upstream last moved on 2026-09-14, so review the sources before use. Industry statistics that do not come back stay a named gap rather than a remembered figure; the long / short list and the 重点标的、目标价、评级 section are exercises — no orders and no position size come from them.',
+    },
+  },
+  {
+    key: 'chinaCatalystCalendar',
+    name: 'china-catalyst-calendar',
+    label: { zh: 'A 股催化剂日历', en: 'A-Share Catalyst Calendar' },
+    description: {
+      zh: '把 A 股的披露与事件按时间排成注意力日历：财报与业绩预告、股东大会、解禁与分红回购、政策与行业会议，并标出压在同一个事件链上的公司。',
+      en: 'Lays A-share disclosures and events out as an attention calendar: earnings and 业绩预告, shareholder meetings, lockup expiries, dividends and buybacks, policy and industry events, flagging names hanging on the same event chain.',
+    },
+    owner: 'jwangkun',
+    repository: 'claude-for-financial-services-cn',
+    status: 'watchlist',
+    lastCommit: '2026-09-14',
+    reviewBy: '2026-11-08',
+    tags: ['a-share', 'monitoring', 'macro', 'earnings'],
+    riskNote: {
+      zh: '冷启动实验；上游最近一次提交是 2026-09-14，启用前请自行复核来源。与美股口径的「催化剂地图」同族，但换成 A 股披露节奏；日期没取回来就标成未确认，不编日历，也不预测价格走向。',
+      en: 'Cold-start experiment; upstream last moved on 2026-09-14, so review the sources before use. The same family as the US-market Catalyst Map, retuned to A-share disclosure rhythm; a date that did not come back is marked unconfirmed rather than invented, and the calendar forecasts no price direction.',
+    },
+  },
+  {
+    key: 'chinaBreakTrace',
+    name: 'china-break-trace',
+    label: { zh: 'A 股财务核查', en: 'A-Share Forensic Review' },
+    description: {
+      zh: '对 A 股财报做取证式核查：科目勾稽、利润与现金流的背离、应收与存货异常、营运资本口径，再读审计意见类型、交易所问询与处罚公告里的信号。',
+      en: 'Works through A-share statements forensically: line-item tie-outs, the gap between earnings and cash flow, receivable and inventory anomalies, working-capital behaviour, then what auditor opinions, exchange inquiries and penalties signal.',
+    },
+    owner: 'jwangkun',
+    repository: 'claude-for-financial-services-cn',
+    status: 'watchlist',
+    lastCommit: '2026-09-14',
+    reviewBy: '2026-11-08',
+    tags: ['a-share', 'risk', 'financial-health', 'verification'],
+    riskNote: {
+      zh: '冷启动实验；上游最近一次提交是 2026-09-14，启用前请自行复核来源。它列的是"该去查什么"，不是指控，也不构成买卖建议；与「风险与催化剂监控」部分重叠，这颗按报表科目与监管文书走。',
+      en: 'Cold-start experiment; upstream last moved on 2026-09-14, so review the sources before use. It lists what to investigate, not an accusation, and is not investment advice; it overlaps the risk-and-catalyst module but works from statement lines and regulatory documents.',
+    },
+  },
+  {
+    key: 'chinaVarianceCommentary',
+    name: 'china-variance-commentary',
+    label: { zh: 'A 股业绩差异表述', en: 'A-Share Variance Commentary' },
+    description: {
+      zh: '把差异写成读得懂的中文：超预期 / 低于预期怎么分类、驱动因素归因到哪一层、口径与单位一致性怎么交代，以及"这个变化意味着什么"的句子级写法。',
+      en: 'Turns variances into readable Chinese commentary: how to classify beat / miss / in-line, where to attribute the driver, how to keep 口径 and units consistent, and how to say what the change actually means.',
+    },
+    owner: 'jwangkun',
+    repository: 'claude-for-financial-services-cn',
+    status: 'watchlist',
+    lastCommit: '2026-09-14',
+    reviewBy: '2026-11-08',
+    tags: ['a-share', 'earnings', 'verification'],
+    riskNote: {
+      zh: '冷启动实验；上游最近一次提交是 2026-09-14，启用前请自行复核来源。宿主取不到一致预期时，差异就写在去年同期、先前口径与披露区间上，并说明那是哪种基线，不冒充市场共识。',
+      en: 'Cold-start experiment; upstream last moved on 2026-09-14, so review the sources before use. Without a retrievable consensus, variances are stated against prior-year, your own earlier figures and the disclosed range — labelled as which baseline, never dressed up as market consensus.',
+    },
+  },
+  {
+    key: 'chinaInitiatingCoverage',
+    name: 'china-initiating-coverage',
+    label: { zh: 'A 股首次覆盖', en: 'A-Share Initiation Report' },
+    description: {
+      zh: '按券商研究所体例搭一份 A 股首次覆盖：公司与行业分析、三表建模、估值与倍数区间、图表清单与报告骨架，一路写到评级与目标价那一节。',
+      en: 'Assembles an initiation report in Chinese sell-side form: company and industry analysis, three-statement modelling, valuation and multiple ranges, the exhibit list and the report skeleton, through to the rating and target-price section.',
+    },
+    owner: 'jwangkun',
+    repository: 'claude-for-financial-services-cn',
+    status: 'watchlist',
+    lastCommit: '2026-09-14',
+    reviewBy: '2026-11-08',
+    tags: ['a-share', 'valuation', 'business-analysis', 'filings'],
+    riskNote: {
+      zh: '冷启动实验；上游最近一次提交是 2026-09-14，启用前请自行复核来源。五档评级与目标价是把材料写成一个结论的推演练习，本插件不据它下单，也不给仓位数字；报告写在最终答复里、不产出文件，页数只是体量参考。',
+      en: 'Cold-start experiment; upstream last moved on 2026-09-14, so review the sources before use. The five-tier rating and target price are a conclusion exercise: this plugin places no orders and gives no position size on them. The report is written into the final reply rather than a file, and the page counts are only a sense of scale.',
     },
   },
 ])

@@ -1,0 +1,14 @@
+[
+  {
+    "event": "Build DCF: 600519 (贵州茅台), projection: 5 years, terminal growth 4%",
+    "description": "Single-name DCF for mature A-share consumer stock"
+  },
+  {
+    "event": "Build 3-statement model: 002594 (比亚迪), projection: 3 years, include EV battery segment",
+    "description": "Full 3-statement with segment breakdown"
+  },
+  {
+    "event": "Build comps + LBO: 000858 (五粮液), standard market leverage",
+    "description": "LBO analysis for A-share consumer staple"
+  }
+]

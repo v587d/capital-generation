@@ -13,10 +13,11 @@
 3. [`yennanliu/InvestSkill`](https://github.com/yennanliu/InvestSkill)：**2026-10-10 追加入驻**，状态 `experimental`，28 个美股模块进 catalog、默认关闭。判断依据与逐条排除见下面的追加节。
 4. [`DjNero11/peter-lynch-skill`](https://github.com/DjNero11/peter-lynch-skill)：**2026-10-11 追加入驻**，状态 `watchlist`，一颗个股研究工作流（Quick 快筛 + Deep 尽调）进 catalog、默认关闭。它带来本仓第一颗**自带完整证据预算与引用契约**的工作流，也第一次遇到"`SKILL.md` 住在仓库根"的结构。判断依据与逐条改写见文末第二个追加节。
 5. [`marian2js/trading-skills`](https://github.com/marian2js/trading-skills)：**2026-10-11 追加入驻**，状态 `watchlist`，19 颗里 9 颗进 catalog（下单前的过程检查与下单后的复盘），默认关闭。券商执行面、仓位与买卖动作、接管路由的编排、写死付费 API 的那几颗逐条排除；它也是第一颗 `SKILL.md` 藏在**两层目录**底下的快照。判断依据与逐条排除见文末第三个追加节。
+6. [`jwangkun/claude-for-financial-services-cn`](https://github.com/jwangkun/claude-for-financial-services-cn)：**2026-10-11 追加入驻**，状态 `watchlist`，规范根 31 颗里 9 颗进 catalog（A 股卖方研究体裁：业绩点评与差异表述、财报前瞻、可比倍数、A 股 DCF、行业全景、催化剂日历、财务核查、首次覆盖），默认关闭。本仓**第一份非 MIT 的快照（Apache-2.0）**，因此被改写的九份正文各带一行 §4(b) 要求的改动声明；它也是第一颗把取数层写成**结构**（三档服务商阶梯 + 环境变量模式开关 + 伪调用围栏，63 份正文每份都带）的快照，以及六个并列 skills 根里**只登记一条线**的那种结构。判断依据与逐条排除见文末第四个追加节。
 
 所有条目都需要用户自行判断是否适合当前任务；Owner 会继续寻找合适的社区项目，也欢迎通过 PR 提交新的固定快照和标签元数据。
 
-观察名单：[`yaorenliang/trading-agents-skill`](https://github.com/yaorenliang/trading-agents-skill)，仅评估多空相互反驳、延迟复盘等可拆分 workflow；评级、买卖动作和仓位决策属于明确冲突，不能直接集成。**同一口径已在下一颗上执行过一次**：[`marian2js/trading-skills`](https://github.com/marian2js/trading-skills) 入驻时，券商执行面那颗（`etoro`）、给仓位数字的（`position-sizing`）与给持仓加减动作的（`position-management`）都按这条排除，只收过程检查与复盘模块（见文末第三个追加节）。
+观察名单：[`yaorenliang/trading-agents-skill`](https://github.com/yaorenliang/trading-agents-skill)，仅评估多空相互反驳、延迟复盘等可拆分 workflow；评级、买卖动作和仓位决策属于明确冲突，不能直接集成。**同一口径已在下一颗上执行过一次**：[`marian2js/trading-skills`](https://github.com/marian2js/trading-skills) 入驻时，券商执行面那颗（`etoro`）、给仓位数字的（`position-sizing`）与给持仓加减动作的（`position-management`）都按这条排除，只收过程检查与复盘模块（见文末第三个追加节）。**第六颗入驻时同一口径再执行一次**：`china-morning-note`（晨会给 Long／Short 方向与止损位、仓位建议）、`china-thesis-tracker`（Maintain／Add／Reduce／Exit）、`china-idea-generation`（选股清单给方向并含 `Position sizing recommendations`）、`china-tax-loss-harvesting`（Full exit／Reduce position 与执行买卖）四颗整颗不收，不改写后收进来。
 
 外部服务/合作参考：[`MobiusQuant/Gendangzou-skill`](https://github.com/MobiusQuant/Gendangzou-skill)。其板块政策与多信号快照、证据链是独特主题，但主体能力依赖其在线 API，结论范围限定在板块，不能视作可离线导入的通用技能。
 
@@ -49,7 +50,7 @@
 1. 先挑 Finterm 的 “Owner earnings / 现金流质量” 与 China 的财务健康、订单质量等模块，和现有 `capital-equity-research` 做盲测；用户也可以在设置页按标签自行组合。
 2. 固定相同问题、截止日期和输入证据；只比较证据完整性、冲突处理、遗漏、无依据断言和 token/工具成本，不比较是否猜中股价。
 3. 用用户反馈、失败案例和对照评测逐步改善标签、风险提示和复查周期；当候选规模和 benchmark 足够成熟时，再考虑把长期无响应或低价值条目移出 catalog。
-4. 2026-11-06 重新检查五颗快照的 release/commit、许可证、依赖与问题处理；上游变化只触发复审，不自动更新本地能力。
+4. 2026-11-06 重新检查前五颗快照的 release/commit、许可证、依赖与问题处理，2026-11-08 复查第六颗（节奏与它自己的 `reviewBy` 一致）；上游变化只触发复审，不自动更新本地能力。
 
 ## 追加（2026-10-10）：InvestSkill 入驻
 
@@ -141,4 +142,51 @@
 
 维护性：31 次提交集中在十天内（2026-03-06 建仓、2026-03-16 最后提交），至扫描日 209 天无提交；16 stars / 6 forks，`0.1.0-rc.1` 未发 release，有 CI（两条 GitHub Actions）。内容读起来完整而非烂尾（每颗都带 will-not 清单、invalidation、输出顺序与小样本护栏，风格统一），但维护信号薄，因此 `watchlist`（与 china、peter-lynch 同一口径：内容可用、维护薄，启用前请使用者自行复核来源）。下次复查 2026-11-06（与另四颗同一节奏）。
 
-本扫描是公开信息桌面审阅（InvestSkill、peter-lynch-skill 与 trading-skills 三节除外：那三节 clone 后逐文件读过），不是完整安全审计、法律意见、作者背书或金融方法有效性证明。入驻前仍需固定 commit，静态检查完整文件树，逐一复核许可与引用，并运行隔离评测。
+## 追加（2026-10-11）：claude-for-financial-services-cn 入驻
+
+候选：[`jwangkun/claude-for-financial-services-cn`](https://github.com/jwangkun/claude-for-financial-services-cn)（Apache-2.0，63 颗 A 股 skill 按六条业务线组织：证券研究 31、投行 10、私募 9、基金运营 6、财富管理 5、账户与合规 2；同一批正文又被打包成四个"角色 Agent"再抄一遍，所以仓里 `SKILL.md` 有 188 个路径、唯一 `name` 只有 58 个）。固定 commit `d7585ca0`（main，2026-09-14）。
+
+结构上第一次遇到的是**并列六个 skills 根**：上游把正文放在 `vertical-plugins/<条线>/skills/`，provider 与五处反查只认"一颗快照一个根"。取舍是**只登记规范根那一条线**（`SELECTED_SKILL_SKILL_DIRS` 填 `vertical-plugins/china-finance/skills`），既不平铺（上一颗的做法）也不套层（再上一颗的做法），`src/` 一行不动。依据不是口味：那颗快照自己的 `CLAUDE.md` 写明 "Skills are authored in `vertical-plugins/china-finance/skills/`"，并规定 "Agent plugins bundle vendored copies of their skills. **Never edit bundled copies directly.**"。这一手同时避开了**同一仓库内部的撞名**——`fund-admin` 有五颗与 `china-finance` 同名而内容更薄（`china-accrual-schedule` 5799 vs 6563 字节），两个根一起登记必然撞上"启用集合只按 `name` 认"。
+
+**这一颗的取数层是结构，不是句子**，是本轮最要紧的一课：63 份正文每一份都带
+- 一节 `## Data Sources (Multi-Tier)` 按付费程度排开的服务商阶梯，顶层那档写着 `WIND_API_KEY`、`ak_` 密钥前缀与**密钥申请去处**，第二档带 `IFIND_AUTH_TOKEN`；
+- 一段 ```python 围栏里的**伪工具调用**（`get_financials(ticker, "income", "annual")`、`ifind_get_stock_events(query)`、`ak.bond_zh_us_rate()`）——不是 shell 指令，模型却会照着这个形状去调一个运行时不存在的工具；
+- 尾部统一的 `IFIND_DATA_SOURCE_MODE` 环境变量开关块，用对话正文决定"这次用哪家、取不到降级到哪家"；
+- 把服务商名写死的引用格式与检查项（`Source: AkShare, [date]`、"All numbers sourced from …"）。
+
+`test/selected-skills-content.test.mjs` 的 FORBIDDEN 因此从十二条加到二十三条，新增的一族在被改写的九份上实测命中、在既有五颗上零命中。**另一个教训是关于闸门本身**：服务商名不能按英文单词扫——这道测试把命中统计强制成 `gi`，`\bWind\b` 会撞上按"风电"写的 `sector-analysis`，`\bChoice\b` 会撞上把 choice 当普通词用的 `fact-check` 与 `tax-lens`。改按无歧义形状写（中文名"万得／慧博"、`Wind / Choice` 的阶梯形状、iFind 与 AkShare 这类不成词的品牌名）。一条误伤会把整条闸门逼瘦，那是 §9.7 同一族。
+
+| 硬门槛 | 读到的是什么 |
+|---|---|
+| 来源可核验 | 仓库、owner、固定 commit `d7585ca0`；15 次提交（`jwangkun` 14 + `fintech-python-java` 1），2026-06-07 建仓、06-08/09 集中 10 次、此后沉寂三个月到本 commit；831 stars、3 open issue，无 release/tag |
+| 许可可用 | **Apache-2.0**（本仓第一份非 MIT），`LICENSE` 原件随包，无 `NOTICE` 文件。署名三处不一致：`LICENSE:189` 是 `Copyright [2025] [jwangkun]`（Apache 说明要求填好后去掉方括号，上游没去）、六份 `plugin.json` 署 `Anthropic FSI China`、`README.md` 自称基于 [`anthropics/claude-for-financial-services`](https://github.com/anthropics/claude-for-financial-services) 适配（README 对照表称两者均 Apache 2.0）。三处都按现状记进 `UPSTREAM.md`，catalog `owner` 用仓库 owner |
+| 权限可控 | 收录的九颗改写后无脚本执行、无凭据、无自己出网。四份可运行的取数服务端（`mcp-servers/`：万得／同花顺／AkShare／新闻，带密钥配置形态）**连发布包都不进**，与不发布券商执行面（`etoro`）同一条线 |
+| 可审查 | 全树 267 个文件 / 3.1 MB：markdown 为主，另有 9 个 python（上游的服务端与生成校验脚本，留在 git、不进包、从不执行）与 4 份 cookbook YAML；无混淆、无下载后执行 |
+| 金融表达可校验 | 无收益或准确率承诺；但报告模板以**投资评级五档（买入／增持／中性／减持／卖出）+ 目标价**收尾（`china-initiating-coverage`），`china-comps-analysis` 末尾有 `投资建议: [Buy / Hold / Sell]`，`china-sector-overview` 有 `Long / Short` 一览——档位表与模板按"不为口味改结论"原样保留，逐条在 `riskNote` 写明是推演练习，本插件不给评级、目标价与仓位建议，也不据它们下单 |
+| 可适配 | 九颗都是单点研究方法：输入清单、阈值表、报告骨架与缺数据行为都写在正文里；正文没有跨目录链接（实测九份零 markdown 链接、零脚本引用），所以不改布局也不破链 |
+
+**catalog 收录 9 颗、规范根排除 22 颗**（另五条款线 32 颗整条不登记），排除线与前几颗同源：
+
+| 排除 | 理由 |
+|---|---|
+| `china-market-data` | 它本身就是那份服务商工具目录（`mcp__ifind__*` 一类工具名表 + 28 个"要什么数据用哪个工具"的配方 + `export IFIND_DATA_SOURCE_MODE=…`），自己不产出分析。收录等于在本插件既有取数协议之外再造一条取数路由（§8.6 第 1、6 条） |
+| `china-skill-creator` | 元技能：教造新 `china-*` 正文，模板里硬编码那节服务商阶梯，还要 `python3 scripts/check-china.py`／`sync-china-skills.py` 校验同步（第 4、6 条） |
+| `china-dcf-model`、`china-comps` | 前者是上游自标的 alias（"redirects to `china-dcf`"）；后者是同题材的薄一份且带**两份 frontmatter**（`L1-4` 与 `L37-40`） |
+| `china-morning-note`、`china-thesis-tracker`、`china-idea-generation`、`china-tax-loss-harvesting` | 给买卖方向与仓位：Long／Short、`[Maintain / Add / Reduce / Exit]`、`Position sizing recommendations`、Full exit／Reduce position。照本文上方既有口径整颗不收，不改写后收进来 |
+| 十一颗 `*-xls` / `*-xlsx` / `*-pptx` / `*-deck` / `*-model` / `*-recon` 一类 | 交付物是工作簿或 deck 文件（`File named: …_.xlsx`、`python3 scripts/generate_a_share_ppt.py`、"All cells formula-driven"），本插件没有 shell（§1.6）、报告链路已删除（§7）、出图只走 `render_chart`（§6.1） |
+| `china-gl-recon`、`china-accrual-schedule`、`china-deal-screening` | 无明显违规，但对象是总账对账、计提计划与一级市场筛选，不是本插件使用者的研究场景 |
+| 另五条业务线（投行 10、私募 9、基金运营 6、财富 5、账户 2） | 不在登记的根里；交付物多为机构流程文件（teaser／CIM／datapack／IC memo／净值对账），财富管理那条线直接给配置与投资建议 |
+
+派生式钉法跟着上：`test/selected-skills-provider.test.mjs` 按「规范根目录 − 排除清单」核对本颗的 9 条，且**根路径从 `SELECTED_SKILL_SKILL_DIRS` 现取**（这颗的根不是 `<快照>/skills`，写死目录名就等于映射漂了要等装配才发现）；`test/persona.test.mjs` 另把 `china-market-data`／`china-skill-creator`／`china-dcf-model`／`china-idea-generation`／`china-morning-note` 断为不进 catalog；`test/selected-skills-content.test.mjs` 有一条**正向**断言钉住"被改写的九份必须各带一行 Apache §4(b) 声明"——漏了不会有别的报错。§8.6 第 10 条的反证打在新族上：把 `china-dcf` 的 8-33 行换回上游原文，命中的全是本次新增的模式（`WIND_API_KEY`、密钥申请、`aifinmarket`、万得、`ifind_`、`get_financials(`、`IFIND_DATA_SOURCE_MODE`），既有十二条一条都不响。
+
+**它填的缺口**：此前 45 颗里 A 股只有 spikeHongg 的六颗专题（财务健康、风险与催化剂、估值情景、战略转型、行业竞争、订单质量），没有一颗按**中国大陆卖方体例**写：业绩点评的超预期分解（实际／一致预期／上期三列 + beat/miss 档位）、财报公布前的三档情景与"要盯的三到五个指标"、A 股口径的可比倍数（动态／静态／TTM 三套 P/E 与 涨停流动性折价）、DCF 的中国参数档（十年期国债、A 股 ERP、25%／高新技术企业 15%）、按披露节奏排的催化剂日历（业绩预告→快报→正式报告、解禁、股东大会）、按报表科目与监管文书走的财务核查、以及首次覆盖的报告骨架。
+
+**与既有能力的重叠**：`china-sector-overview` 与 `industry-competition-moat` 都看行业，前者按市场规模／政策／板块 KPI 铺全景、后者专攻竞争格局与护城河；`china-break-trace` 与 `risk-warning-catalysts` 都找风险，后者盯事件与催化剂、这颗盯科目勾稽与审计意见；`china-earnings-analysis` 与 InvestSkill 的 `10k-digest`／`stock-valuation` 同族但换成 A 股披露口径（扣非净利润、商誉、政府补助、涨跌停对盘后反应的影响）；`china-catalyst-calendar` 与第五颗的 `catalyst-map` 是同族的两份实现，一个 A 股披露节奏、一个美股事件窗口，`riskNote` 与标签把两者分开（这颗全部带 `a-share`，不新增标签）。
+
+**A 股专项检查**：这是本仓第一份**整份按 A 股写**的快照，所以这一条这次反过来问的是"哪里不适用"。一是**一致预期取不到**：本插件的结构化数据面没有盈利预测／一致预期条目，唯一带预测形状字段的是东财研报条目上的本年／次年 EPS 预测（单家口径，不是市场共识）——按一致预期做的差异分解与 beat/miss 判定只能落到披露区间与自家基线上，正文改写时已如实写明，不留"用历史增速推一个预期"的逃生口。二是**卖方投顾边界**：五档评级、目标价与"重点标的"是本插件明确不提供的东西，收录只为呈现流程，`riskNote` 逐条标注为推演练习。三是这些正文假定使用者能接入万得／同花顺级别的付费数据，而本插件的取数面与之不对应；改写消掉的是"自己去取"的指令，不是它的分析框架。
+
+维护性：15 次提交里 10 次落在建仓后两天，之后三个月无动作，直到本 commit 修 AkShare 服务端返回空数组的 bug；831 stars、3 open issue、无 release/tag。内容读起来成体系（六十三条口径统一、术语表与板块 KPI 表是内行写的），但维护方式是"一次性把 Anthropic 的仓库搬到 A 股语境"，因此 `watchlist`（与 china、peter-lynch、trading 同一口径）。下次复查 2026-11-08。
+
+打包侧的实测结果：整包 291 → 356 个文件（净增 65：63 份 `SKILL.md` + 上游 `LICENSE` + 本仓写的 `UPSTREAM.md`），未压缩 3.49 → 3.98 MiB、下载 1.15 → 1.31 MiB。进包的是六十三份正文（含未登记的另五条款线 32 份，作为"为什么不收这 54 颗"的可审查材料），被挡在包外的是四份取数服务端、`agent-plugins/` 副本、cookbooks、CodeBuddy 材料、上游脚本与每条款线的 `.mcp.json`／manifest。`.npmignore` 的规则**只能写裸名**：反向断言丢掉以 `/` 开头或带内部斜杠的规则，而目录规则按任意路径段匹配——写一条 `skills/` 就能把六十三份正文全挡掉。
+
+本扫描是公开信息桌面审阅（InvestSkill、peter-lynch-skill、trading-skills 与 claude-for-financial-services-cn 四节除外：那四节 clone 后逐文件读过），不是完整安全审计、法律意见、作者背书或金融方法有效性证明。入驻前仍需固定 commit，静态检查完整文件树，逐一复核许可与引用，并运行隔离评测。

@@ -1,0 +1,35 @@
+# China Model Builder — Data Puller (financial data gatherer)
+
+name: data-puller
+model: claude-opus-4-7
+
+system:
+  append: |
+    You are the Data Puller for the China Model Builder. Gather all financial
+    data for the target A-share stock: use Wind MCP (Tier-0, preferred) for
+    comprehensive financials; iFind MCP (Tier-1) for precise financials;
+    AkShare MCP (Tier-2) for basic market data. Output structured data only.
+
+output_schema:
+  type: object
+  properties:
+    financial_statements:
+      type: object
+      description: Historical financials (IS, BS, CF) for projection years
+    market_data:
+      type: object
+      description: Current price, shares outstanding, beta, credit data
+    peer_data:
+      type: array
+      description: Peer comparison data for cross-check
+  required: [financial_statements, market_data]
+
+tools:
+  - type: agent_toolset_20260401
+    default_config: { enabled: false }
+    configs:
+      - { name: read,  enabled: true }
+      - { name: grep,  enabled: true }
+  - { type: mcp_toolset, mcp_server_name: wind,    default_config: { enabled: true } }
+  - { type: mcp_toolset, mcp_server_name: ifind,   default_config: { enabled: true } }
+  - { type: mcp_toolset, mcp_server_name: akshare, default_config: { enabled: true } }

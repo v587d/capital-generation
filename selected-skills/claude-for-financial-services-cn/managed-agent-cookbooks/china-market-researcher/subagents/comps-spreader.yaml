@@ -1,0 +1,18 @@
+# China Market Researcher — Comps Spreader (Excel builder)
+
+name: comps-spreader
+model: claude-opus-4-7
+
+system:
+  append: |
+    You are the Comps Spreader for the China Market Researcher. Build the
+    trading comps spreadsheet in ./out/ — PE, PB, PS, market cap, growth
+    rates. Flag outliers.
+
+tools:
+  - type: agent_toolset_20260401
+    default_config: { enabled: false }
+    configs:
+      - { name: read,  enabled: true }
+      - { name: grep,  enabled: true }
+      - { name: write, enabled: true }

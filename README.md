@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.7.3-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.7.4-9cf" alt="Version"></a>
 </p>
 
 # Capital Generation
@@ -143,7 +143,7 @@ https://github.com/v587d/capital-generation
 | :---: | :---: |
 | <a href="assets/watchlist-popup.png"><img src="assets/watchlist-popup.png" alt="管理自选股" width="400"></a> | <a href="assets/watchlist-more.png"><img src="assets/watchlist-more.png" alt="标记持仓" width="400"></a> |
 
-- **精选 Skills：** 当前收录 5 个开源项目、共 45 个可选模块（默认全部关闭，在配置页逐格打开）：[The Investment Skills Lexicon](https://github.com/finterm-ai/investment-skills)（Buffett Investment Framework）、[China Stock Research Skills](https://github.com/spikeHongg/china-stock-research-skills)（六个 A 股研究模块）、[InvestSkill](https://github.com/yennanliu/InvestSkill)（28 个美股模块：逐条主张核验、空头反方、披露文件与内部人追踪、压力测试等）、[Peter Lynch Research](https://github.com/DjNero11/peter-lynch-skill)（一条完整的个股研究流程）与 [Trading Skills](https://github.com/marian2js/trading-skills)（9 个交易过程模块：催化剂排布、自选股分诊、论点压力测试、执行计划检查、交易日志复盘等，美股与境外交易口径）。
+- **精选 Skills：** 当前收录 6 个开源项目、共 54 个可选模块（默认全部关闭，在配置页逐格打开）：[The Investment Skills Lexicon](https://github.com/finterm-ai/investment-skills)（Buffett Investment Framework）、[China Stock Research Skills](https://github.com/spikeHongg/china-stock-research-skills)（六个 A 股研究模块）、[InvestSkill](https://github.com/yennanliu/InvestSkill)（28 个美股模块：逐条主张核验、空头反方、披露文件与内部人追踪、压力测试等）、[Peter Lynch Research](https://github.com/DjNero11/peter-lynch-skill)（一条完整的个股研究流程）、[Trading Skills](https://github.com/marian2js/trading-skills)（9 个交易过程模块：催化剂排布、自选股分诊、论点压力测试、执行计划检查、交易日志复盘等，美股与境外交易口径）与 [Claude for Financial Services CN](https://github.com/jwangkun/claude-for-financial-services-cn)（9 个 A 股卖方研究模块：业绩点评与差异表述、财报前瞻、可比倍数、A 股 DCF 口径、行业全景、催化剂日历、财务核查与首次覆盖）。
 
 <p align="center">
   <a href="assets/selected-skills配置.png">
@@ -179,8 +179,8 @@ npm run smoke:boot  # 检查插件装配
 
 ## 致谢
 
-- 「精选 Skills」的研究与交易过程模块按固定 commit **快照收录**自 [finterm-ai/investment-skills](https://github.com/finterm-ai/investment-skills)、[spikeHongg/china-stock-research-skills](https://github.com/spikeHongg/china-stock-research-skills)、[yennanliu/InvestSkill](https://github.com/yennanliu/InvestSkill)、[DjNero11/peter-lynch-skill](https://github.com/DjNero11/peter-lynch-skill) 与 [marian2js/trading-skills](https://github.com/marian2js/trading-skills)（均 MIT License）。
-- 会话里的可交互图表由 [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts)（Apache-2.0）渲染。
-- 行情、财务、公告与网页材料来自同花顺 Fuyao、Wind Alice、AnySearch、PaddleOCR 以及东方财富、腾讯等公开或申请制接口；数据版权归各服务方，额度与条款以服务方为准，本项目不重新分发原始数据。
+- 「精选 Skills」的研究与交易过程模块按固定 commit **快照收录**自 [finterm-ai/investment-skills](https://github.com/finterm-ai/investment-skills)、[spikeHongg/china-stock-research-skills](https://github.com/spikeHongg/china-stock-research-skills)、[yennanliu/InvestSkill](https://github.com/yennanliu/InvestSkill)、[DjNero11/peter-lynch-skill](https://github.com/DjNero11/peter-lynch-skill)、[marian2js/trading-skills](https://github.com/marian2js/trading-skills)（这五份均 MIT License）与 [jwangkun/claude-for-financial-services-cn](https://github.com/jwangkun/claude-for-financial-services-cn)（Apache-2.0，它自己又基于 [anthropics/claude-for-financial-services](https://github.com/anthropics/claude-for-financial-services) 适配 A 股）。
+- 会话里的可交互图表由 [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts)（Apache-2.0）渲染，图上保留它自带的归属标识。
+- 行情、财务、公告与网页材料来自四类需自备密钥的服务（同花顺 Fuyao、Wind Alice、AnySearch、PaddleOCR）与一批公开口径的来源（东方财富、腾讯、新浪、财联社、华尔街见闻、巨潮互动易、上证 e互动、同花顺公开站点）；数据版权归各服务方，额度与条款以服务方为准，本项目不重新分发原始数据。
 
-随包分发的第三方组件、版本与许可逐条列在 [第三方组件与许可](THIRD_PARTY_NOTICES.md)。
+第三方组件、版本与许可，以及宿主提供哪部分、构建期用什么、各服务的数据会出到哪些地方，逐条列在 [第三方组件与许可](THIRD_PARTY_NOTICES.md)。
