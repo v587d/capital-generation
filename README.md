@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.7.1-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.7.2-9cf" alt="Version"></a>
 </p>
 
 # Capital Generation
@@ -143,7 +143,7 @@ https://github.com/v587d/capital-generation
 | :---: | :---: |
 | <a href="assets/watchlist-popup.png"><img src="assets/watchlist-popup.png" alt="管理自选股" width="400"></a> | <a href="assets/watchlist-more.png"><img src="assets/watchlist-more.png" alt="标记持仓" width="400"></a> |
 
-- **精选 Skills：** 当前收录三个开源项目：[The Investment Skills Lexicon](https://github.com/finterm-ai/investment-skills)（Buffett Investment Framework）、[China Stock Research Skills](https://github.com/spikeHongg/china-stock-research-skills)（六个 A 股研究模块）与 [InvestSkill](https://github.com/yennanliu/InvestSkill)（28 个美股模块：逐条主张核验、空头反方、披露文件与内部人追踪、压力测试等）。
+- **精选 Skills：** 当前收录四个开源项目：[The Investment Skills Lexicon](https://github.com/finterm-ai/investment-skills)（Buffett Investment Framework）、[China Stock Research Skills](https://github.com/spikeHongg/china-stock-research-skills)（六个 A 股研究模块）、[InvestSkill](https://github.com/yennanliu/InvestSkill)（28 个美股模块：逐条主张核验、空头反方、披露文件与内部人追踪、压力测试等）与 [Peter Lynch Research](https://github.com/DjNero11/peter-lynch-skill)（一条完整的个股研究流程：先快筛决定值不值得深挖，再按固定证据预算出尽调报告，每条主张都带可点开的来源链接）。
 
 <p align="center">
   <a href="assets/selected-skills配置.png">

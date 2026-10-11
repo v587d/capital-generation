@@ -90,7 +90,10 @@ function makeHarness() {
 
 test('selected skill provider: disabled by default and limited to the approved catalog', () => {
   // 前两颗快照的清单逐条钉住：这些 key 已经发出去了，改名等于把使用者已拨开的开关清掉。
-  assert.deepEqual(SELECTED_SKILL_CATALOG.filter(({ repository }) => repository !== 'InvestSkill').map(({ name }) => name), [
+  // 按仓库点名而不是"减去某一颗"：后面追加的快照不在这条的钉子范围内（InvestSkill 由下面
+  // 「目录 − 排除清单」派生，peter-lynch-skill 只有一颗，由 test/persona.test.mjs 逐条核对身份）。
+  const pinnedRepositories = ['investment-skills', 'china-stock-research-skills']
+  assert.deepEqual(SELECTED_SKILL_CATALOG.filter(({ repository }) => pinnedRepositories.includes(repository)).map(({ name }) => name), [
     'buffett-investment-framework',
     'financial-health',
     'risk-warning-catalysts',

@@ -8,12 +8,16 @@
 
 清单只针对 **catalog 暴露的 skill**：不进可选清单的正文留在快照里当材料，不改也不扫。
 `test/selected-skills-content.test.mjs` 按 catalog 现算扫描面，新加一条 skill 立刻进扫描，
-重新按 commit 覆盖快照而没重做下面的改写会直接红。
+重新按 commit 覆盖快照而没重做下面的改写会直接红。扫描面是**每颗 catalog skill 目录下的全部 `.md`**
+（含 `references/` 一类附属文件）：第四颗改完 `SKILL.md` 才发现，真正把 Agent 指回自行浏览的那一句
+住在 `references/deep/system-prompt.md`，只扫入口等于没扫（AGENTS.md §9.7 同一个族）。
 
 - [ ] **1. 谁去取数。** 正文有没有要求 Agent 自己去 `web search`、抓 URL 或跑取数脚本。本插件取数
   只有一个入口：主 Agent 委派 `data_collector`（结构化数据）/ `web_retriever`（网页与披露文件）；
   根角色的 13 颗出网工具是逐名 deny 的（§1.1、`src/agents/root-tool-policy.ts`）。
   **改法**：把"你自己搜"换成"走宿主取数通道；角色分流的宿主里，把标的、字段、as-of 日期写进委派 brief 交出去"。
+  闸门按 `web search` 这**个词组**扫，不是只扫 `use web search` 那一种措辞——第四颗的原句是
+  `All data comes from web search and fetched pages` 与 `Using the host agent's web search and page fetch tools`。
 - [ ] **2. 取不到怎么办（最严重的一条）。** 有没有"打个 ⚠️ 警告然后用训练记忆估一个"的逃生口
   （`training-data estimates`、`Retrieval: model memory`、`Live data unavailable`）。**没有任何工具会拦它**——
   工具面拦得住越界取数，拦不住编造数字。**改法**：点名缺哪些字段、该字段下的分析停止，不回填。
@@ -46,6 +50,7 @@
 
 - 每个可选 skill 在 `selected-skills/catalog.js` 有独立条目。`key` 是 Capital 设置使用的稳定键，`repository` 对应快照目录名，`name` 对应上游 skill frontmatter。多个项目可有同名 skill，但 provider 的启用集合**只按 name 认**，所以 catalog 里 `key` 与 `name` 都必须全局唯一（`test/persona.test.mjs` 钉住）。
 - skills 根不假设是 `<快照目录>/skills`：`selected-skills/catalog.js` 的 `SELECTED_SKILL_SKILL_DIRS`（repository → 上游放 `SKILL.md` 的相对子路径）是唯一来源，provider 现算 `customSkillDirs`、`test/packaging.test.mjs` 按它反查发布清单。上游把 skill 埋在 `plugins/<plugin>/skills/` 底下（InvestSkill 即如此）时只改这一处映射。
+- 但这处映射表达不了"`SKILL.md` 就是 skills 根本身"（第四颗 peter-lynch-skill 即如此）：provider 与五处反查都按 `…/<skills 根>/<name>/SKILL.md` 走。这种情况在**快照里套一层 `skills/<name>/`**，`references/` 跟着一起搬（正文的相对链接因此不破），并记进该快照的 `UPSTREAM.md` 作为第三类本地改动——不为了让路径成立去动 provider 的布局假设。
 - provider 明确关闭 DSH 默认 skill roots，只扫描配置的快照目录；否则用户或项目目录中的其他 skills 可能进入同一来源。
 - 设置里的开关字段（主插件 `Config.selectedSkills` 与 settings 卡片）都按 catalog 现算。主插件 Config 曾手抄过一份 key 列表，接第三颗快照时两处就漂了——表现是卡片能拨、运行期读不到（AGENTS.md §9.7 同一族）。新增快照因此不动 `src/`。
 - catalog 过滤必须同时覆盖 provider 的 `list()` 与 `get()`。只过滤列表不够：已有 candidate 仍可能被直接传给 `get()`，因此未启用或不在 catalog 的名字必须在读取内容时再次拒绝。
@@ -58,4 +63,4 @@
 - 本地工作区能发现文件，不代表发布包含有它。`package.json` 的 `files` 按仓库逐个登记（`selected-skills/catalog.js`、同级 `README.md`，加上每颗 `selected-skills/<repository>`）；新接一份快照忘了登记时 catalog 仍可能有条目，但用户启用后找不到对应 `SKILL.md`。
 - 更新 catalog 时，确认每一条 `repository` / `name` 都能对应到 `selected-skills/<repository>/skills/<name>/SKILL.md`，并确认该项目的 `LICENSE` 与 `UPSTREAM.md` 随包发布。通过 npm pack 文件清单验证，不要只依赖仓库目录存在。
 - 随包发的是运行时正文与溯源（skills 根 + `LICENSE` + `UPSTREAM.md`），不是上游仓库的全部：每颗快照用**自己的 `.npmignore`** 挡非运行内容（`investment-skills` 挡 README 成图与 viz 站点；`InvestSkill` 挡它的静态站 `site/`、与 skill 正文同源的 `prompts/` 副本、`scripts/`、CI 与站点体检记录）。全量快照完整住在 git，`github:` 安装与"当时是哪个 commit"的复核都不受影响。**那份 `.npmignore` 就是排除口径的唯一声明处**：`test/packaging.test.mjs` 逐颗快照读它、再拿发布清单反查，写了却没生效、或有人放宽口径都会红。放宽口径要同步该项目的 `UPSTREAM.md` Packaging 一行。
-- 回归重点在 `test/selected-skills-content.test.mjs`（按 catalog 现算的正文合规扫描：取数归属、记忆回填、执行面、委派档）、`test/selected-skills-provider.test.mjs`（默认关闭、root/preset 限定、list/get 过滤、scope 清理和新 Agent 读最新开关；catalog 清单对多 skill 的快照按「skills 根目录 − 排除清单」派生，不写死名单）、`test/persona.test.mjs`（skill frontmatter / preset 接线 / catalog 身份唯一）及 `test/packaging.test.mjs`（发布包逐条查文件）。改动目录布局、catalog 字段或接入逻辑时同步这些断言。
+- 回归重点在 `test/selected-skills-content.test.mjs`（按 catalog 现算的正文合规扫描，扫每颗 skill 目录下的全部 `.md`：取数归属、记忆回填、执行面、委派档）、`test/selected-skills-provider.test.mjs`（默认关闭、root/preset 限定、list/get 过滤、scope 清理和新 Agent 读最新开关；catalog 清单对多 skill 的快照按「skills 根目录 − 排除清单」派生，不写死名单）、`test/persona.test.mjs`（skill frontmatter / preset 接线 / catalog 身份唯一）及 `test/packaging.test.mjs`（发布包逐条查文件）。改动目录布局、catalog 字段或接入逻辑时同步这些断言。

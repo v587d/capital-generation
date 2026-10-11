@@ -11,6 +11,7 @@
 1. [`spikeHongg/china-stock-research-skills`](https://github.com/spikeHongg/china-stock-research-skills)：内容可作为 A 股财务健康、风险监控、估值、战略转型、行业竞争和订单质量的实验模块；截至 2026-10-08，最后提交为 2026-03-09，状态为 `watchlist`，用户可按模块自行开启。其 orchestrator 仍因与 Capital 路由冲突排除。
 2. [`finterm-ai/investment-skills`](https://github.com/finterm-ai/investment-skills)：最后提交为 2026-07-22，状态为 `experimental`，可作为 Buffett-inspired 商业分析、现金流、估值和风险框架显式实验，仍默认关闭。它主要源于美股/伯克希尔语境，不能直接当作 A 股规则。
 3. [`yennanliu/InvestSkill`](https://github.com/yennanliu/InvestSkill)：**2026-10-10 追加入驻**，状态 `experimental`，28 个美股模块进 catalog、默认关闭。判断依据与逐条排除见下面的追加节。
+4. [`DjNero11/peter-lynch-skill`](https://github.com/DjNero11/peter-lynch-skill)：**2026-10-11 追加入驻**，状态 `watchlist`，一颗个股研究工作流（Quick 快筛 + Deep 尽调）进 catalog、默认关闭。它带来本仓第一颗**自带完整证据预算与引用契约**的工作流，也第一次遇到"`SKILL.md` 住在仓库根"的结构。判断依据与逐条改写见文末第二个追加节。
 
 所有条目都需要用户自行判断是否适合当前任务；Owner 会继续寻找合适的社区项目，也欢迎通过 PR 提交新的固定快照和标签元数据。
 
@@ -47,7 +48,7 @@
 1. 先挑 Finterm 的 “Owner earnings / 现金流质量” 与 China 的财务健康、订单质量等模块，和现有 `capital-equity-research` 做盲测；用户也可以在设置页按标签自行组合。
 2. 固定相同问题、截止日期和输入证据；只比较证据完整性、冲突处理、遗漏、无依据断言和 token/工具成本，不比较是否猜中股价。
 3. 用用户反馈、失败案例和对照评测逐步改善标签、风险提示和复查周期；当候选规模和 benchmark 足够成熟时，再考虑把长期无响应或低价值条目移出 catalog。
-4. 2026-11-06 重新检查三颗快照的 release/commit、许可证、依赖与问题处理；上游变化只触发复审，不自动更新本地能力。
+4. 2026-11-06 重新检查四颗快照的 release/commit、许可证、依赖与问题处理；上游变化只触发复审，不自动更新本地能力。
 
 ## 追加（2026-10-10）：InvestSkill 入驻
 
@@ -72,4 +73,29 @@
 
 维护性：近 90 天 47 次非机器人提交、近 180 天 111 次，最新 release `v1.12.0`（2026-09-25），CI 自带 skill 契约检查（`scripts/check-skill-contract.js`）。活跃，因此 `experimental` 而非 `watchlist`。下次复查 2026-11-06（与另两颗同一节奏）。
 
-本扫描是公开信息桌面审阅（InvestSkill 那一节除外：那一节 clone 后逐文件读过），不是完整安全审计、法律意见、作者背书或金融方法有效性证明。入驻前仍需固定 commit，静态检查完整文件树，逐一复核许可与引用，并运行隔离评测。
+## 追加（2026-10-11）：peter-lynch-skill 入驻
+
+候选：[`DjNero11/peter-lynch-skill`](https://github.com/DjNero11/peter-lynch-skill)（作者 Szymon Nycz，GitHub 账号 `DjNero11`，MIT，一颗 skill、两条工作流）。固定 commit `e0eaf58`（main，2026-06-28）。
+
+结构与前三颗都不同的一点：**上游把 `SKILL.md` 放在仓库根**，没有 `skills/` 那一层。`SELECTED_SKILL_SKILL_DIRS` 能表达"`<repo>` 下哪个子路径是 skills 根"，表达不了"`<name>/SKILL.md` 这一层就是根本身"——provider 与四处反查都会去找 `…/peter-lynch-skill/peter-lynch-skill/SKILL.md`。取舍是把 `SKILL.md` 与 `references/` 一起套进 `skills/peter-lynch-skill/`：相对链接不破、frontmatter `name` 与目录名一致、五处路径计算一行不动，代价是快照不再与上游树逐字节一致（这条失真记在 `UPSTREAM.md`，没有为了让路径成立去动 provider 的布局假设）。原文旁路 `MAX_SKILL_DOC_BYTES` 是 128 KB，这颗 `SKILL.md` 7.8 KB，余量充足。
+
+**这一颗是 clone 后逐文件读的**，并按接入清单改写过正文。快照与所钉 commit 的差异只有三类，逐条记在 `selected-skills/peter-lynch-skill/UPSTREAM.md`：套一层 `skills/<name>/`；删掉上游 `.gitignore`；**六份文件 124 行的取数口径改写**——原文把取数交给 Agent 自己（`All data comes from web search and fetched pages`、Step 3 抬头 `Using the host agent's web search and page fetch tools`、两份 `web-research.md` 里 28 处独立 `search`、`deep/system-prompt.md` 的 `use web search results`），而本插件的检索只有一个入口：委派 `web_retriever` / `data_collector`。预算数字与计量对象分开处理——"向通道要几次"改了措辞，次数一字未动。**与 InvestSkill 那一轮相反，第 2 条硬门槛这里没有内容**：`model memory`、`training-data estimates`、`Live data unavailable` 零命中，正文本来就写"只用简报里的数据、不知道就说不知道"，所以没有记忆逃生口要堵，也不为它新造 `Retrieval:` 枚举。方法论、Source Ledger 字段、`Reported/Calculated/Inference` 标注、停止规则与输出模板一字未改。
+
+| 硬门槛 | 读到的是什么 |
+|---|---|
+| 来源可核验 | 仓库、作者、固定 commit `e0eaf58`；两次提交的单人小项目，无转载痕迹 |
+| 许可可用 | MIT，`Copyright (c) 2026 Szymon Nycz`，原件随包 |
+| 权限可控 | 原文要求 Agent 自行浏览（**已按清单改为委派**）；无凭据读取、无外传、无自动下单、无脚本（正文自陈 `no bundled scripts`） |
+| 可审查 | 132 KB 全是 markdown：一份入口 + 八份附属文件；无混淆、无隐藏网络调用、无下载后执行 |
+| 金融表达可校验 | 无收益/准确率承诺；`Deep` 的 Attractiveness score X/10 已补一句"衡量论点自洽度与结构特征，不预测价格或收益、不是买卖指令"；全文无仓位、无买卖动作、无目标价（`buy`/`sell`/position size/price target 零命中）；上游自带 disclaimer 已声明非投资建议 |
+| 可适配 | 一条有边界的研究工作流：输入（代码或公司名 + 可选交易所）、输出（约 450 字快筛或最多 3000 字尽调）、失效行为（点名缺哪些字段并停止该字段下的分析）都写在正文里 |
+
+**catalog 收录 1 颗，无排除**：`SKILL.md` 内部的 Quick / Deep 二选一是**这颗自己**在两条工作流之间做选择，不接管会话路由、不跨 Agent，因此不算 `china-stock-research-orchestrator` / `full-report` 那一类；输出是最终答复里的 markdown，不落报告文件、不出图，与 §7（报告链路已删除）和 §6.1（出图只走 `render_chart`）都不冲突。这条判断记在 `UPSTREAM.md`，免得下一个人误判成编排 skill。
+
+**它填的缺口**：catalog 此前没有"带固定证据预算的两级工作流"——`buffett-investment-framework` 给的是 65 张方法卡，InvestSkill 给的是 28 个单点视角，china 那六颗是 A 股专题；这一颗给的是**从"要不要深挖"到"完整尽调"的一条路径**，并强制每条主张配可点开的链接（`verification` 标签）。使用者在"第一次看一只美股票""手上只有一个代码，需要判断值不值得花时间"这类任务里会去勾它。**重叠**：与 `buffett-investment-framework` 同在美股语境、都关心生意质量与负债，但那条按卡驱动分析、这一颗按"取数预算—简报—报告"三段与分诊驱动，不可互相替代。**新标签**：`peter-lynch`（zh/en 两套显示名同时补，`test/capital-config.test.mjs` 的显示名闸门守着）——前三颗没有以人物命名视角的先例（`perspective` 是泛化标签），用它是因为使用者真的会按"这是哪一种流派"来筛。
+
+**A 股专项检查**：本条**不声称**适用于 A 股。SEC EDGAR / 10-K / 20-F / Form 4 / 13F、美元本位与 wash-sale 税务都不成立；正文点名的 aggregator（Yahoo Finance、MarketWatch、Macrotrends、StockAnalysis、GuruFocus、CompaniesMarketCap、Nasdaq）在本插件里只能由通用检索通道取，九个具名来源全是 A 股口径。因此 `us-stock` 标签与 `riskNote` 就是给使用者的口径提示，改写时另在 `SKILL.md` 加了"A 股会话要换成 A 股披露口径，由宿主取数通道决定"一句。
+
+维护性：全仓两次提交（2026-06-23 建仓、2026-06-28 最后提交），至扫描日 105 天无提交；无 CI、无 release/tag。内容读起来像"按意图做完"而非"烂尾"（入口与八份附属文件彼此一致、无残片），但维护信号确实薄，因此 `watchlist` 而非 `experimental`（与 `china-stock-research-skills` 同一口径：内容可用、维护薄，启用前请使用者自行复核来源）。下次复查 2026-11-06（与另三颗同一节奏）。
+
+本扫描是公开信息桌面审阅（InvestSkill 与 peter-lynch-skill 两节除外：那两节 clone 后逐文件读过），不是完整安全审计、法律意见、作者背书或金融方法有效性证明。入驻前仍需固定 commit，静态检查完整文件树，逐一复核许可与引用，并运行隔离评测。

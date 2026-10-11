@@ -6,6 +6,8 @@ export const SELECTED_SKILL_SKILL_DIRS = Object.freeze({
   'investment-skills': 'skills',
   'china-stock-research-skills': 'skills',
   InvestSkill: 'plugins/us-stock-analysis/skills',
+  // 上游把 SKILL.md 放在仓库根，快照因此套了一层 skills/<name>/（理由见该快照的 UPSTREAM.md）。
+  'peter-lynch-skill': 'skills',
 })
 
 // Selected-skill metadata owned by Capital Generation. Upstream snapshots remain unchanged.
@@ -677,6 +679,25 @@ export const SELECTED_SKILL_CATALOG = Object.freeze([
       en: 'Upstream assumes it can save files; under Capital it writes into the session workspace and obeys its permissions.',
     },
   },
+  {
+    key: 'peterLynchResearch',
+    name: 'peter-lynch-skill',
+    label: { zh: '彼得·林奇式个股研究', en: 'Peter Lynch Research' },
+    description: {
+      zh: '给一个代码或公司名，走快筛（SKIP / WATCHLIST / DEEP RESEARCH）或完整尽调，生意理解、分类与估值放在同一套检查里，每条主张配可点开的来源链接。美股与境外上市口径。',
+      en: 'Screens a ticker or company fast (SKIP / WATCHLIST / DEEP RESEARCH) or runs full due diligence, with linked sources under every claim. US and overseas-listing conventions.',
+    },
+    owner: 'DjNero11',
+    repository: 'peter-lynch-skill',
+    status: 'watchlist',
+    lastCommit: '2026-06-28',
+    reviewBy: '2026-11-06',
+    tags: ['peter-lynch', 'us-stock', 'valuation', 'risk', 'verification'],
+    riskNote: {
+      zh: '冷启动实验；上游仅两次提交、自 2026-06-28 起无更新，启用前请自行复核来源。X/10 衡量的是论点自洽度与结构特征，不预测表现，也不构成买卖建议。',
+      en: 'Cold-start experiment; upstream has two commits and has been quiet since 2026-06-28, so review the sources before use. The X/10 score rates thesis consistency and structure, not forecast performance, and is not investment advice.',
+    },
+  },
 ])
 
 export const SELECTED_SKILL_TAG_LABELS = Object.freeze({
@@ -696,6 +717,7 @@ export const SELECTED_SKILL_TAG_LABELS = Object.freeze({
     monitoring: '监控',
     orders: '订单',
     perspective: '分析视角',
+    'peter-lynch': '彼得·林奇',
     portfolio: '组合与仓位',
     risk: '风险',
     strategy: '战略',
@@ -721,6 +743,7 @@ export const SELECTED_SKILL_TAG_LABELS = Object.freeze({
     monitoring: 'Monitoring',
     orders: 'Orders',
     perspective: 'Perspective',
+    'peter-lynch': 'Peter Lynch',
     portfolio: 'Portfolio',
     risk: 'Risk',
     strategy: 'Strategy',
