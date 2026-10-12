@@ -150,9 +150,9 @@ const zh = {
   /** 行标签、开关的 aria-label，以及名称标红之外那句非颜色通道（红名与"红涨"同色）共用这一个词。 */
   holdingName: '持仓',
   predict: '预测',
-  predictTip: 'AI预测该证券标的',
+  predictTip: 'AI预测',
   review: '复盘',
-  reviewTip: 'AI复盘该证券标的',
+  reviewTip: 'AI复盘',
   /**
    * ⚠️「预测」与「复盘」写进输入框的那句话**只改这四行**（zh / en 各两处，两套语言必须同时改）。
    * 中间的 `名称 (thscode · 类型)` 是结构不是措辞，不住在这里：Agent 靠 thscode 认标的、
@@ -257,9 +257,9 @@ const en = {
   /** ⚠️ 这两条标签受**格宽预算**约束：动作列是定值 52px（见 CSS 里 grid 那一处），
    *  12px/500 下八个字符就顶到边。要改名先量长度，别让它溢出描边。 */
   predict: 'Predict',
-  predictTip: 'AI prediction for this symbol',
+  predictTip: 'AI prediction',
   review: 'Review',
-  reviewTip: 'AI review of this symbol',
+  reviewTip: 'AI review',
   predictPromptPrefix: 'Predict ',
   predictPromptSuffix: ' over the next 5 sessions: the likely path and key levels, the evidence behind the call, and how uncertain it is.',
   reviewPromptPrefix: 'Review ',
