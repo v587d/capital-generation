@@ -57,6 +57,21 @@ function readSelection(source: SelectedSkillSelectionSource): SelectedSkillSelec
   return typeof source === 'function' ? source() : source
 }
 
+// 选择指纹只认 catalog 的 key 集合：pre-step 每轮拿它对比"上次交给注册表的选择"，
+// 变了才失效目录缓存，未变就零成本放行。
+function selectionFingerprint(selection: SelectedSkillSelection): string {
+  return SELECTED_SKILL_CATALOG.map(({ key }) => (selection[key] === true ? '1' : '0')).join('')
+}
+
+type PreStepListener = (payload: unknown, next: () => unknown) => unknown
+
+// agent/pre-step 是 dsh-agent 声明的事件，类型不在本包的 import 面里；按结构挂到注入后的
+// Agent context（其 scope tag 就是该 Agent，dispatch 的 scope filter 才放行这条监听）。
+function onPreStepEvent(ctx: Context, listener: PreStepListener): unknown {
+  const events = ctx as unknown as { on?: (event: string, listener: PreStepListener) => unknown }
+  return events.on?.('agent/pre-step', listener)
+}
+
 function strictCapitalPreset(ctx: PolicyContext, agent: AgentLike): boolean {
   try {
     const presets = ctx.get?.('agentPresets') as { composedPreset?: (agentCtx: unknown) => string | undefined } | undefined
@@ -74,16 +89,16 @@ export function registerRootSelectedSkills(
   createFilesystemProvider: FileSystemSkillFactory = createFilesystemSkillProvider,
 ): void {
   // Static callers retain the cheap all-disabled fast path. The Capital plugin
-  // passes a reader so a settings toggle is observed for the next root Agent.
+  // passes a reader so a settings toggle is observed at the next step of every
+  // live root Agent: list()/get() filter against the current selection, and the
+  // pre-step hook below refreshes the visible catalog when the selection changes.
   if (typeof selection !== 'function' && selectedNames(selection).size === 0) return
 
   const listenCtx = ctx.root ?? ctx
   if (typeof listenCtx.on !== 'function') return
 
-  const stop = listenCtx.on('agent/created', ({ agent }) => {
+  const stop = listenCtx.on('agent/created', async ({ agent }) => {
     if (!agent || !isRootAgent(agent) || !strictCapitalPreset(ctx, agent)) return
-    const enabled = selectedNames(readSelection(selection))
-    if (enabled.size === 0) return
     const agentCtx = agent.ctx as (Context & {
       inject?: (deps: string[], callback: (injectedCtx: Context & { skills?: SkillRegistryLike }) => void) => unknown
     }) | undefined
@@ -92,45 +107,81 @@ export function registerRootSelectedSkills(
       return
     }
 
-    agentCtx.inject(['skills'], (injectedCtx) => {
-      const skills = injectedCtx.skills
-      if (typeof skills?.registerProvider !== 'function') {
-        ctx.logger?.warn?.('capital-generation: selected skills are unavailable (root Agent has no skills registry)')
-        return
-      }
-
-      let filesystemProvider: FileSystemSkillSource | undefined
-      injectedCtx.effect(() => {
-        const unregister = skills.registerProvider((control) => {
-          filesystemProvider = createFilesystemProvider(injectedCtx, control, {
-            providerName: PROVIDER_NAME,
-            includeDefaultRoots: false,
-            customSkillDirs: SKILL_ROOTS,
-            watch: true,
-          })
-          const provider: SkillProvider = {
-            name: PROVIDER_NAME,
-            async list(options) {
-              const result = await filesystemProvider!.list(options)
-              if (Array.isArray(result)) return result.filter((candidate) => enabled.has(candidate.name))
-              return { ...result, candidates: result.candidates.filter((candidate) => enabled.has(candidate.name)) }
-            },
-            get(candidate, options) {
-              if (!enabled.has(candidate.name)) {
-                throw new Error(`selected skill is not enabled: ${candidate.name}`)
-              }
-              return filesystemProvider!.get(candidate, options)
-            },
-          }
-          return provider
-        })
-        return () => {
-          unregister()
-          void filesystemProvider?.dispose()
-          filesystemProvider = undefined
+    try {
+      // agent/created 是串行事件、DSH 等监听器 settle 才继续创建：await 注入 Fiber，
+      // provider 与 pre-step 钩子都在首轮 prompt 前落位（首轮 catalog 不与注册竞态）。
+      await agentCtx.inject(['skills'], (injectedCtx) => {
+        const skills = injectedCtx.skills
+        if (typeof skills?.registerProvider !== 'function') {
+          ctx.logger?.warn?.('capital-generation: selected skills are unavailable (root Agent has no skills registry)')
+          return
         }
-      }, `capital-generation: selected skills for ${agentSessionId(agent) ?? 'root'}`)
-    })
+
+        let filesystemProvider: FileSystemSkillSource | undefined
+        let control: SkillProviderControl | undefined
+        // 上次交给 skills 注册表的选择指纹。开关是 settings 偏好，不在 Agent 创建时定格：
+        // 全关也照常注册 provider（否则会话创建后打开开关永远不出现），靠下面的 pre-step
+        // 钩子每轮对齐设置。
+        let served = selectionFingerprint(readSelection(selection))
+        injectedCtx.effect(() => {
+          const unregister = skills.registerProvider((registration) => {
+            control = registration
+            filesystemProvider = createFilesystemProvider(injectedCtx, registration, {
+              providerName: PROVIDER_NAME,
+              includeDefaultRoots: false,
+              customSkillDirs: SKILL_ROOTS,
+              watch: true,
+            })
+            const provider: SkillProvider = {
+              name: PROVIDER_NAME,
+              async list(options) {
+                // 调用期现读：开关是 settings 偏好，不许在 Agent 创建时定格。
+                const enabled = selectedNames(readSelection(selection))
+                // 全关是默认常态：短路掉，不碰快照目录（filesystem watcher 在它的 list()
+                // 里才启动，短路保证默认关闭的会话不起任何 watcher）。
+                if (enabled.size === 0) return []
+                const result = await filesystemProvider!.list(options)
+                if (Array.isArray(result)) return result.filter((candidate) => enabled.has(candidate.name))
+                return { ...result, candidates: result.candidates.filter((candidate) => enabled.has(candidate.name)) }
+              },
+              get(candidate, options) {
+                if (!selectedNames(readSelection(selection)).has(candidate.name)) {
+                  throw new Error(`selected skill is not enabled: ${candidate.name}`)
+                }
+                return filesystemProvider!.get(candidate, options)
+              },
+            }
+            return provider
+          })
+          // 每轮 pre-step 重读开关：集合变了就调 provider control 的 invalidate()，失效
+          // skills 的目录缓存（revision++），tool-skill 随后的 catalog 快照因此按最新开关
+          // 重算；未变则 digest 不变、catalog 不重发。必须在放行 next() 之前做完——
+          // waterfall 里 tool-skill 是 await next() 之后才快照，但监听器注册顺序不归我们
+          // 管，先做完再放行在两种顺序下都赶得上本轮快照。设置读取失败只降级，不阻断本轮。
+          const stopPreStep = onPreStepEvent(injectedCtx, (_payload, next) => {
+            try {
+              const fingerprint = selectionFingerprint(readSelection(selection))
+              if (fingerprint !== served) {
+                served = fingerprint
+                control?.invalidate()
+              }
+            } catch (error) {
+              ctx.logger?.warn?.(`capital-generation: selected skill settings unreadable (${String(error)})`)
+            }
+            return next()
+          })
+          return () => {
+            if (typeof stopPreStep === 'function') (stopPreStep as () => void)()
+            unregister()
+            void filesystemProvider?.dispose()
+            filesystemProvider = undefined
+          }
+        }, `capital-generation: selected skills for ${agentSessionId(agent) ?? 'root'}`)
+      })
+    } catch (error) {
+      // selected skills 是可选能力：注入失败只降级告警，不能把整个 Agent 创建挡掉。
+      ctx.logger?.warn?.(`capital-generation: selected skills are unavailable (${String(error)})`)
+    }
   })
 
   ctx.effect?.(() => () => {

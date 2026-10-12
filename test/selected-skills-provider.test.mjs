@@ -68,6 +68,7 @@ function makeHarness() {
   let providerRegistrationCount = 0
   let providerUnregisterCount = 0
   let providerDisposeCount = 0
+  let invalidateCount = 0
   let providerConfig
   const root = {
     on(event, listener) {
@@ -84,11 +85,31 @@ function makeHarness() {
     effect(callback) { rootCleanup = callback() },
     logger: { warn() {} },
   }
-  function makeAgent({ preset = 'capital-generation', parentSession } = {}) {
+  function makeAgent({ preset = 'capital-generation', parentSession, lateSnapshot = false } = {}) {
+    const agent = { session: { id: 'session', header: { parentSession } }, ctx: undefined }
+    const preStepListeners = []
+    let catalogSnapshot = []
+    // 模拟 SkillRegistry 的 collect 缓存：list 结果按 revision 缓存，只有 control.invalidate()
+    // 才重算。少了这层缓存，"开关变了但没失效缓存"的回归永远抓不到（真注册表里的症状是
+    // 每轮 catalog 都还停在旧选择）。
     const skills = {
       registerProvider(create) {
         providerRegistrationCount += 1
-        provider = create({ signal: new AbortController().signal })
+        let cache
+        const control = {
+          signal: new AbortController().signal,
+          invalidate() { invalidateCount += 1; cache = undefined },
+        }
+        const created = create(control)
+        provider = {
+          name: created.name,
+          async list(options) {
+            if (cache) return cache
+            cache = await created.list(options)
+            return cache
+          },
+          get: created.get,
+        }
         return () => { providerUnregisterCount += 1 }
       },
     }
@@ -98,14 +119,44 @@ function makeHarness() {
       inject(_deps, callback) {
         return Promise.resolve().then(() => callback(Object.create(agentCtx, { skills: { value: skills, enumerable: true } })))
       },
+      on(event, listener) {
+        if (event !== 'agent/pre-step') return () => {}
+        preStepListeners.push(listener)
+        return () => {
+          const index = preStepListeners.indexOf(listener)
+          if (index >= 0) preStepListeners.splice(index, 1)
+        }
+      },
     }
+    agent.ctx = agentCtx
+    // tool-skill 形状的快照监听：await next() 之后才取 catalog，与 dsh-tool-skill 同形状。
+    // 默认在 makeAgent 时先注册（= 运行期 preset 组合先挂、本包钩子在内层）；lateSnapshot
+    // 则推迟到 preStep 才挂（= 本包钩子在外层）。两种顺序下本包都必须赶在快照之前失效缓存，
+    // 否则这一轮目录仍停在旧选择。
+    const snapshotListener = async (_payload, next) => {
+      const decision = await next()
+      catalogSnapshot = provider ? (await provider.list({})).map(({ name }) => name) : []
+      return decision
+    }
+    if (!lateSnapshot) preStepListeners.push(snapshotListener)
     Object.defineProperty(agentCtx, 'skills', {
       configurable: true,
       get() { throw new Error('cannot get property "skills" without inject') },
     })
     return {
-      agent: { session: { id: 'session', header: { parentSession } }, ctx: agentCtx },
+      agent,
       agentCtx,
+      async preStep() {
+        if (lateSnapshot && !preStepListeners.includes(snapshotListener)) preStepListeners.push(snapshotListener)
+        const chain = [...preStepListeners]
+        const next = () => {
+          const listener = chain.shift()
+          return listener ? listener({ agent }, next) : { kind: 'admit' }
+        }
+        return next()
+      },
+      get catalogSnapshot() { return catalogSnapshot },
+      get preStepListenerCount() { return preStepListeners.length },
     }
   }
   const createFilesystemProvider = (_ctx, _control, config) => {
@@ -127,6 +178,7 @@ function makeHarness() {
     get providerRegistrationCount() { return providerRegistrationCount },
     get providerUnregisterCount() { return providerUnregisterCount },
     get providerDisposeCount() { return providerDisposeCount },
+    get invalidateCount() { return invalidateCount },
     get providerConfig() { return providerConfig },
   }
 }
@@ -206,6 +258,7 @@ test('selected skill provider: Capital root only, filtered catalog, scope cleanu
   assert.equal(harness.providerRegistrationCount, 0, 'provider 必须在 agent/created 的异步注入完成前保持未注册')
   await creation
   assert.equal(harness.providerRegistrationCount, 1)
+  assert.equal(root.preStepListenerCount, 2, 'pre-step 钩子必须在 agent/created settle 前落位（tool-skill 形状快照 + 本包刷新钩子）')
   assert.equal(harness.providerConfig.includeDefaultRoots, false)
   // skills 根按 catalog 的「仓库 → 相对路径」现算：InvestSkill 的 skill 不在 <repo>/skills 底下，
   // 而在 plugins/us-stock-analysis/skills。写死两颗的表现不是报错，是勾了那一格永远不出现。
@@ -227,6 +280,7 @@ test('selected skill provider: Capital root only, filtered catalog, scope cleanu
   root.agentCtx.cleanup?.()
   assert.equal(harness.providerUnregisterCount, 1)
   assert.equal(harness.providerDisposeCount, 1, 'agent scope teardown must stop the filesystem watcher')
+  assert.equal(root.preStepListenerCount, 1, 'scope teardown 必须摘掉每轮刷新钩子，不许留悬挂监听')
   harness.disposeRoot()
   assert.equal(harness.listeners.size, 0, 'plugin teardown must detach the root Agent listener')
 })
@@ -246,19 +300,59 @@ test('selected skill provider: 嵌套 skills 根里的名字走同一个 list/ge
   )
 })
 
-test('selected skill provider: dynamic selection is read for each newly created root Agent', async () => {
+test('selected skill provider: 开关每轮现读，已有 Agent 的 catalog 跟随设置刷新', async () => {
+  // 会话先建、开关后拨是真实使用顺序。旧实现把 enabled 集合定格在 agent/created（而且全关时
+  // 干脆不注册 provider），于是"建好会话再打开开关"永远不出现——本次要修的就是这一族。
   const harness = makeHarness()
   let selection = { buffettFramework: false }
   registerRootSelectedSkills(harness.ctx, () => selection, harness.createFilesystemProvider)
   const created = harness.listeners.get('agent/created')
   assert.equal(typeof created, 'function')
 
-  const beforeToggle = harness.makeAgent()
-  await created({ agent: beforeToggle.agent })
-  assert.equal(harness.providerRegistrationCount, 0, '关闭时不注册 provider')
+  const live = harness.makeAgent()
+  await created({ agent: live.agent })
+  assert.equal(harness.providerRegistrationCount, 1, '初始全关也必须注册 provider（空目录）')
+  assert.deepEqual((await harness.provider.list({})).map(({ name }) => name), [])
+  assert.equal(harness.invalidateCount, 0)
 
+  // 会话已经存在，用户在设置里打开开关、发下一条指令：
   selection = { buffettFramework: true }
-  const afterToggle = harness.makeAgent()
-  await created({ agent: afterToggle.agent })
-  assert.equal(harness.providerRegistrationCount, 1, '新 root Agent 必须读取最新开关')
+  await live.preStep()
+  assert.deepEqual(live.catalogSnapshot, ['buffett-investment-framework'],
+    '下一轮 pre-step 的 catalog 快照必须看到新开关，不需要新建会话')
+  assert.equal(harness.invalidateCount, 1, '开关变化必须失效目录缓存，否则快照读到缓存里的旧目录')
+
+  await live.preStep()
+  assert.equal(harness.invalidateCount, 1, '开关未变不重算目录：每轮零成本')
+  assert.deepEqual(live.catalogSnapshot, ['buffett-investment-framework'])
+
+  selection = { buffettFramework: false }
+  await live.preStep()
+  assert.deepEqual(live.catalogSnapshot, [], '关掉后下一轮目录立即消失')
+  assert.equal(harness.invalidateCount, 2)
+  assert.throws(
+    () => harness.provider.get(candidate('buffett-investment-framework'), {}),
+    /not enabled/,
+    '关掉后 get 也必须拒绝（目录过滤与正文读取同一道闸门）',
+  )
+
+  // 注册顺序反过来也要成立：tool-skill 形状的快照监听若是后挂的（本包钩子在外层），
+  // 钩子照样必须在放行 next() 之前失效缓存——两种顺序都要赶得上本轮快照。
+  selection = { factCheck: true }
+  const innerOrder = harness.makeAgent({ lateSnapshot: true })
+  await created({ agent: innerOrder.agent })
+  await innerOrder.preStep()
+  assert.deepEqual(innerOrder.catalogSnapshot, ['fact-check'])
+  selection = { factCheck: false, buffettFramework: true }
+  await innerOrder.preStep()
+  assert.deepEqual(innerOrder.catalogSnapshot, ['buffett-investment-framework'],
+    '快照监听先注册或后注册都要赶得上：钩子必须在 next() 之前失效缓存')
+  assert.equal(harness.invalidateCount, 3)
+
+  // 新建的 root Agent 同样读最新开关（这条不回退到"创建时定格"）。
+  selection = { factCheck: true }
+  const late = harness.makeAgent()
+  await created({ agent: late.agent })
+  assert.equal(harness.providerRegistrationCount, 3)
+  assert.deepEqual((await harness.provider.list({})).map(({ name }) => name), ['fact-check'], '新 root Agent 必须读取最新开关')
 })
