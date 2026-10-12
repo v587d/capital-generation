@@ -5,33 +5,36 @@ description: Systematic stock screening and investment idea sourcing for A-share
 
 # china-idea-generation
 
+> 本文件相对上游 `d7585ca` 快照做过合规改写（取数与凭据口径），逐条记在快照根目录的 UPSTREAM.md；方法论、阈值与输出模板未改。
+
 ## Purpose
 
 Systematically surface new **A股投资机会** through quantitative screens, thematic analysis, and pattern recognition.
 
 ## Data Sources
 
-### Primary: iFind MCP (Tier-1 付费) / AkShare MCP (Tier-2 免费备选)
+A screen is a set of conditions applied to numbers somebody else handed back, and this step retrieves none of them: the plugin has one retrieval entry — the main agent delegating to the role that owns structured data or web and disclosure material — and it holds no data-service key and runs no query from here.
 
-```python
-get_market_overview()                    → Top gainers, losers, most active
-get_quote(ticker)                        → Price, PE, PB, market cap
-get_historical_data(ticker)              → Price trends, momentum
-get_financials(ticker, "income")         → Financial metrics
-get_financials(ticker, "balance")        → Balance sheet health
-get_industry_stocks(industry="...")      → Peer comparison
-```
+发 brief 时按族写清标的或筛选条件、要的字段与 as-of 日期：
+
+- 全市场快照：涨跌幅榜、成交额榜与异动名单
+- 候选池的行情与估值：价格、PE / PB、市值，以及一段价格序列（动量与形态要用同一段区间）
+- 财务口径：利润表与资产负债表的关键科目（筛选阈值那一节按这些数下判断）
+- 分类与同业：行业分类口径下的成分股清单，以及同一批字段（一次 brief，别逐个问）
 
 ### Secondary Screening Data
 
-| Data | Source | Use |
-|------|--------|-----|
-| 龙虎榜 (Dragon-Tiger list) | 东方财富 | Unusual activity, institutional interest |
+| Data | 披露/发布方 | Use |
+|------|-------------|-----|
+| 龙虎榜 (Dragon-Tiger list) | 交易所每日榜单 | Unusual activity, institutional interest |
 | 北向资金 (Northbound flows) | 沪深港通 | Foreign investor sentiment |
 | 融资融券 (Margin trading) | 交易所 | Leverage and sentiment |
-| 股东人数变化 | 巨潮 | Institutional accumulation/distribution |
-| 机构持仓 | 季报/F10 | Fund ownership trends |
+| 股东人数变化 | 定期报告与公告 | Institutional accumulation/distribution |
+| 机构持仓 | 季报 / F10 | Fund ownership trends |
 | 大宗交易 (Block trades) | 交易所 | Smart money signals |
+
+这几档同样按"要哪个字段"写进 brief，由检索侧决定去哪儿取；哪一档没回来就在筛选记录里写明它缺席，
+不许凭印象把它算进或排除。北向那一档按宿主返回的口径转述——实时买卖明细已停止披露，别写成"净买入"。
 
 ## Workflow
 
@@ -211,13 +214,16 @@ Output: Event-driven opportunities
 - **Medium**: Good thesis, catalyst timeline uncertain
 - **Low**: Exploratory, needs more research
 
+清单里的 Idea Type（Long / Short）、信念档与后面那条仓位设想，是把筛选结果写成一个结论的**推演练习**：
+本插件没有券商接口，不据它下单，也不会替你建任何一笔仓；它同样不去替你决定这笔做不做。
+
 ### Step 7: Monitor & Update
 
 **Ongoing tracking:**
 - Weekly price and news updates
-- Catalyst tracking (china-catalyst-calendar)
+- Catalyst tracking（事件日期与是否落地，逐条复查）
 - Thesis validation / invalidation
-- Position sizing recommendations
+- Position sizing recommendations（若使用者要一个仓位，按宿主的风险预算口径把算式写出来给他看，不落成订单）
 
 **Update triggers:**
 - Earnings results
@@ -271,7 +277,5 @@ Before delivering ideas list:
 - [ ] Conviction levels assigned
 - [ ] Liquidity verified (tradable)
 - [ ] Regulatory/compliance review passed
-> **Data Source Mode Switch**: Set env var `IFIND_DATA_SOURCE_MODE` to control data source preference.
-> - `ifind-only` (strict): Use iFind only, error if unavailable
-> - `ifind-fallback` (default): iFind preferred, fallback to AkShare
-> - `akshare-only, wind-only (Wind only), wind-fallback (Wind first, fallback to iFind → AkShare)`: Skip iFind, use AkShare only
+
+> 取数档位（接哪家数据服务、用哪个密钥）由宿主的凭据域决定：这份选股清单不配置它，也不向使用者索取凭据。

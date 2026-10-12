@@ -5,64 +5,45 @@ description: Daily morning research note for A-share markets. Summarizes overnig
 
 # china-morning-note
 
+> 本文件相对上游 `d7585ca` 快照做过合规改写（取数与凭据口径），逐条记在快照根目录的 UPSTREAM.md；方法论、阈值与输出模板未改。
+
 ## Purpose
 
 Draft concise **A股晨会纪要/每日策略**, summarizing overnight developments and pre-market sentiment for the Chinese equity market. Designed for the typical Chinese sell-side 晨会 format (typically 7:00-8:30 AM before market open).
 
-## Data Sources (Multi-Tier)
+## Data Sources
 
-### Tier 0 — 万得 Wind（最全面付费数据）
-- 覆盖：A股/港美股/基金/指数/债券/宏观/研报/分析（44个工具）
-- MCP 服务：`wind-mcp`（需 `WIND_API_KEY` 密钥，以 `ak_` 开头）
-- 优势：全市场覆盖面最广、数据最全面、包含研报和量化分析
-- 密钥申请：https://aifinmarket.wind.com.cn/#/home
+A morning note is assembled before the open from material this step does not fetch: the plugin has one retrieval entry — the main agent delegating it to the role that owns market data or web and disclosure material — and this note holds no data-service key and issues no query of its own.
 
-### Tier 1 - Tonghuashun iFind (paid)
-```python
-ifind_search_news(query)       -> Real-time financial news
-ifind_search_trending_news()   -> Trending events
-ifind_index_data(query)        -> Index data
-ifind_sector_data(query)       -> Sector data
-```
+按族发 brief，每条写明标的或指标、要的字段与 as-of 日期：
 
-### Tier 2 - AkShare / Other (free, fallback)
+- 指数与全市场：四大指数（上证 / 深证成 / 创业板 / 科创50）上一交易日收盘、涨跌家数、成交额；全市场新闻流
+- 隔夜与外盘：美股三大指数、恒生、原油 / 铜 / 黄金、USD/CNY
+- 资金与情绪：北向与南向的成交口径、两融余额、龙虎榜异动名单
+- 公司要闻与披露：前一晚与今晨的公告（业绩预告、增减持、重大合同、回购）、已有研报条目
+- 事件日历：今日披露、解禁、股东大会、业绩说明会、宏观数据发布
 
-> Data source mode: `IFIND_DATA_SOURCE_MODE=ifind-only` for iFind-only mode.
+| 材料 | 由谁取 | 注意 |
+|------|--------|------|
+| 行情、指数、资金口径 | 宿主结构化取数，回传为数据集引用 | 全套统一 as-of；晨会的写法是"前一交易日收盘 + 今晨可用信息" |
+| 公告、政策原文、监管通报 | 宿主的披露与网页检索（正文过长时由其解析成可读文本） | 引用落到具体文件与时点 |
+| 宏观指标 | 把发布方与频率列进检索 brief（见下表） | 取不到就写成缺口，不折算成记忆里的数 |
 
-## Data Sources (Legacy)
+披露场所与资讯站点由检索侧决定去哪儿取：这份纪要只写"要哪一类文件"，不把某个站点或某家服务商的工具当取数指令。
+没回来的那一档在正文里写成"未取到"，不要让前一天早上的数字冒充今天的。
 
-### Market Data
+### Macro context (which indicators matter, and their release cadence)
 
-```python
-get_market_overview()          → Top gainers, losers, most active
-get_index_data("000001")       → 上证指数
-get_index_data("399001")       → 深证成指
-get_index_data("399006")       → 创业板指
-get_index_data("000688")       → 科创50
-get_stock_news(ticker="")      → Market headlines
-```
-
-### News & Sentiment
-
-| Source | Coverage |
-|--------|----------|
-| china-news MCP | Stock-specific and market headlines from 东方财富 |
-| 财联社 | Real-time financial news |
-| 华尔街见闻 | Macro and market news |
-| 证券时报 | Regulatory and market news |
-| 中国新闻网 / 新华社 | Policy announcements |
-
-### Macro Data (if relevant)
-
-| Data | Source | Frequency |
+| Data | 发布方 | Frequency |
 |------|--------|-----------|
 | PMI (制造业/非制造业) | 国家统计局 | Monthly |
 | CPI / PPI | 国家统计局 | Monthly |
 | Social financing / M2 | 央行 | Monthly |
 | FX rate (USD/CNY) | 中国外汇交易中心 | Daily |
 | Bond yields (10Y CGB) | 中国债券信息网 | Daily |
-| 北向资金 | 沪深港通 | Daily |
-| Southbound 南向资金 | 沪深港通 | Daily |
+| 北向 / 南向资金 | 沪深港通 | Daily |
+
+北向那一档按宿主返回的口径转述：实时买卖明细已停止披露，不要把取到的成交额写成"净买入"。
 
 ## Workflow
 
@@ -181,6 +162,9 @@ For each idea:
 - Flag high-conviction ideas vs. lower-conviction
 - Include risk management notes (止损位, 仓位建议)
 
+【今日策略】里的方向（Long / Short / Watch）、止损位与仓位写法，是把上面这些材料写成一个结论的**推演练习**：
+本插件没有券商接口，不据它下单，也不会替你执行任何一笔。
+
 **Typical length:**
 - 300-600 words for daily note
 - 800-1,500 words for weekly strategy piece
@@ -225,3 +209,5 @@ Before delivering:
 - [ ] Event calendar complete
 - [ ] Risk factors included
 - [ ] Tone appropriate for morning meeting format
+
+> 取数档位（接哪家数据服务、用哪个密钥）由宿主的凭据域决定：这份晨会纪要不配置它，也不向使用者索取凭据。

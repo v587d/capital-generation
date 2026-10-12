@@ -494,8 +494,8 @@ export const SELECTED_SKILL_CATALOG = Object.freeze([
     reviewBy: '2026-11-06',
     tags: ['us-stock', 'portfolio', 'monitoring'],
     riskNote: {
-      zh: '正文里的股数区间是推演用的练习，不是买卖指令；本插件不提供投资建议，仓位决定在使用者。',
-      en: 'Its share-count ranges are rehearsal arithmetic, not orders; this plugin gives no investment advice.',
+      zh: '正文里的股数区间是推演用的练习，不是买卖指令；本插件没有券商接口、不替使用者下单，仓位决定在使用者。',
+      en: 'Its share-count ranges are rehearsal arithmetic, not orders; this plugin holds no broker interface and places nothing for you — the sizing call stays with you.',
     },
   },
   {
@@ -817,8 +817,8 @@ export const SELECTED_SKILL_CATALOG = Object.freeze([
     reviewBy: '2026-11-06',
     tags: ['trade-discipline', 'risk', 'monitoring', 'us-stock'],
     riskNote: {
-      zh: '冷启动实验；上游自 2026-03-16 起无提交，启用前请自行复核来源。检查的是计划的可操作性：本插件不下单、不改单，也不给仓位数字。',
-      en: 'Cold-start experiment; upstream has been quiet since 2026-03-16, so review the sources before use. It reviews whether a plan is executable: this plugin places and amends no orders and gives no position size.',
+      zh: '冷启动实验；上游自 2026-03-16 起无提交，启用前请自行复核来源。检查的是计划的可操作性：本插件没有券商接口，不下单、不改单，也不会替你执行任何一笔。',
+      en: 'Cold-start experiment; upstream has been quiet since 2026-03-16, so review the sources before use. It reviews whether a plan is executable: this plugin has no broker interface, places and amends no orders and executes nothing for you.',
     },
   },
   {
@@ -879,6 +879,44 @@ export const SELECTED_SKILL_CATALOG = Object.freeze([
     },
   },
   {
+    key: 'positionSizing',
+    name: 'position-sizing',
+    label: { zh: '入场仓位测算', en: 'Position Sizing' },
+    description: {
+      zh: '从账户规模、单笔风险预算、入场价与止损价反推一个可辩护的仓位，并把摩擦成本、事件风险与流动性挡在公式之外——它只算大小，不评判这笔该不该做。',
+      en: 'Works a defensible size back from account equity, a per-trade risk budget, entry and stop, with trading friction taken into account; it sizes the trade and deliberately does not judge the thesis.',
+    },
+    owner: 'marian2js',
+    repository: 'trading-skills',
+    status: 'watchlist',
+    lastCommit: '2026-03-16',
+    reviewBy: '2026-11-06',
+    tags: ['trade-discipline', 'risk', 'portfolio', 'us-stock'],
+    riskNote: {
+      zh: '冷启动实验；上游自 2026-03-16 起无提交，启用前请自行复核来源。它给出的仓位数字是方法推演，不是订单：本插件没有券商接口，不据它下单，也不替你动任何一笔仓；账户规模与风险预算由你提供，取不到就停下而不是猜。止损、滑点、合约乘数与流动性那一档按美股／境外口径写（A 股 T+1、涨跌停与集合竞价都不成立）。',
+      en: 'Cold-start experiment; upstream has been quiet since 2026-03-16, so review the sources before use. The size it produces is a method exercise, not an order: this plugin holds no broker interface, places nothing on it and moves no position for you. Account equity and risk budget come from you — if they are missing it stops rather than guesses. Stops, slippage, contract multipliers and liquidity assumptions are US / offshore conventions (A-share T+1, daily limits and the call auction do not map onto them).',
+    },
+  },
+  {
+    key: 'positionManagement',
+    name: 'position-management',
+    label: { zh: '持仓论点复核', en: 'Position Management' },
+    description: {
+      zh: '对照原始论点、失效条件、催化剂日历与执行约束复查一笔在手仓位，给出继续持有、减仓、收紧止损还是离场的判断，并交代这个判断建立在哪些证据上。',
+      en: 'Revisits an open position against the original thesis, its invalidation logic, the catalyst calendar and execution constraints, then argues hold, trim, tighten or exit on stated evidence.',
+    },
+    owner: 'marian2js',
+    repository: 'trading-skills',
+    status: 'watchlist',
+    lastCommit: '2026-03-16',
+    reviewBy: '2026-11-06',
+    tags: ['trade-discipline', 'monitoring', 'portfolio', 'us-stock'],
+    riskNote: {
+      zh: '冷启动实验；上游自 2026-03-16 起无提交，启用前请自行复核来源。持仓加减（持有 / 减仓 / 收紧 / 离场）属于方法推演，本插件没有券商接口、不代你执行任何一笔；原始论点或持仓信息缺失时它按临时口径复查并点名缺口，不编一份干净的事前计划。期权、盘后时段与执行约束那一档按美股／境外口径写，A 股的 T+1、涨跌停与集合竞价在正文里没有对应物。',
+      en: 'Cold-start experiment; upstream has been quiet since 2026-03-16, so review the sources before use. The hold / trim / tighten / exit call is a method exercise: this plugin holds no broker interface and executes nothing for you. When the original plan or position detail is missing it reviews provisionally and names the gap instead of inventing a tidy prior plan. Options, extended hours and execution constraints follow US / offshore conventions — A-share T+1, daily price limits and the call auction have no counterpart in the text.',
+    },
+  },
+  {
     key: 'chinaEarningsAnalysis',
     name: 'china-earnings-analysis',
     label: { zh: 'A 股业绩点评', en: 'A-Share Earnings Review' },
@@ -931,8 +969,8 @@ export const SELECTED_SKILL_CATALOG = Object.freeze([
     reviewBy: '2026-11-08',
     tags: ['a-share', 'valuation', 'competition'],
     riskNote: {
-      zh: '冷启动实验；上游最近一次提交是 2026-09-14，启用前请自行复核来源。区间随倍数假设大幅移动，末尾的目标价与投资建议属于推演练习，本插件不据它下单，也不给仓位数字。',
-      en: 'Cold-start experiment; upstream last moved on 2026-09-14, so review the sources before use. The range moves with the multiple assumptions, and the closing target price and recommendation are exercises: this plugin places no orders and derives no position size from them.',
+      zh: '冷启动实验；上游最近一次提交是 2026-09-14，启用前请自行复核来源。区间随倍数假设大幅移动，末尾的目标价与投资建议属于推演练习，本插件没有券商接口，不据它下单，也不会替你执行任何一笔。',
+      en: 'Cold-start experiment; upstream last moved on 2026-09-14, so review the sources before use. The range moves with the multiple assumptions, and the closing target price and recommendation are exercises: this plugin has no broker interface and places no order on them.',
     },
   },
   {
@@ -969,8 +1007,8 @@ export const SELECTED_SKILL_CATALOG = Object.freeze([
     reviewBy: '2026-11-08',
     tags: ['a-share', 'macro', 'competition', 'business-analysis'],
     riskNote: {
-      zh: '冷启动实验；上游最近一次提交是 2026-09-14，启用前请自行复核来源。行业口径的统计取不到就写成缺口，不折算成记忆里的数；多空一览与"重点标的、目标价、评级"一节属于推演练习，本插件不据它下单，也不给仓位。',
-      en: 'Cold-start experiment; upstream last moved on 2026-09-14, so review the sources before use. Industry statistics that do not come back stay a named gap rather than a remembered figure; the long / short list and the 重点标的、目标价、评级 section are exercises — no orders and no position size come from them.',
+      zh: '冷启动实验；上游最近一次提交是 2026-09-14，启用前请自行复核来源。行业口径的统计取不到就写成缺口，不折算成记忆里的数；多空一览与"重点标的、目标价、评级"一节属于推演练习，本插件没有券商接口，不据它下单，也不会替你执行任何一笔。',
+      en: 'Cold-start experiment; upstream last moved on 2026-09-14, so review the sources before use. Industry statistics that do not come back stay a named gap rather than a remembered figure; the long / short list and the 重点标的、目标价、评级 section are exercises, and this plugin — with no broker interface — places no order on them.',
     },
   },
   {
@@ -1045,8 +1083,65 @@ export const SELECTED_SKILL_CATALOG = Object.freeze([
     reviewBy: '2026-11-08',
     tags: ['a-share', 'valuation', 'business-analysis', 'filings'],
     riskNote: {
-      zh: '冷启动实验；上游最近一次提交是 2026-09-14，启用前请自行复核来源。五档评级与目标价是把材料写成一个结论的推演练习，本插件不据它下单，也不给仓位数字；报告写在最终答复里、不产出文件，页数只是体量参考。',
-      en: 'Cold-start experiment; upstream last moved on 2026-09-14, so review the sources before use. The five-tier rating and target price are a conclusion exercise: this plugin places no orders and gives no position size on them. The report is written into the final reply rather than a file, and the page counts are only a sense of scale.',
+      zh: '冷启动实验；上游最近一次提交是 2026-09-14，启用前请自行复核来源。五档评级与目标价是把材料写成一个结论的推演练习，本插件没有券商接口，不据它下单，也不会替你执行任何一笔；报告写在最终答复里、不产出文件，页数只是体量参考。',
+      en: 'Cold-start experiment; upstream last moved on 2026-09-14, so review the sources before use. The five-tier rating and target price are a conclusion exercise: this plugin has no broker interface and places no order on them. The report is written into the final reply rather than a file, and the page counts are only a sense of scale.',
+    },
+  },
+  {
+    key: 'chinaMorningNote',
+    name: 'china-morning-note',
+    label: { zh: 'A 股晨会纪要', en: 'A-Share Morning Note' },
+    description: {
+      zh: '按国内卖方晨会节奏（开盘前 7:00–8:30）写一份当日策略：隔夜与外盘变化、盘前情绪、当日解禁与披露事件、盯盘要点，收到 2–4 条当日想法。',
+      en: 'Writes the pre-open desk note on Chinese sell-side timing (07:00–08:30): overnight and external markets, pre-market sentiment, today’s unlock and disclosure events, what to watch intraday, distilled into 2–4 ideas for the session.',
+    },
+    owner: 'jwangkun',
+    repository: 'claude-for-financial-services-cn',
+    status: 'watchlist',
+    lastCommit: '2026-09-14',
+    reviewBy: '2026-11-08',
+    tags: ['a-share', 'monitoring', 'portfolio'],
+    riskNote: {
+      zh: '冷启动实验；上游最近一次提交是 2026-09-14，启用前请自行复核来源。晨会里的方向（Long / Short / Watch）、止损位与仓位写法都是推演练习：本插件没有券商接口，不据它下单，也不替你动仓。行情、公告与事件一律走宿主取数通道，没回来的字段写成缺口。',
+      en: 'Cold-start experiment; upstream last moved on 2026-09-14, so review the sources before use. The Long / Short / Watch calls, stop levels and sizing language in the note are a rehearsal exercise: this plugin holds no broker interface, places no order on them and moves no position for you. Quotes, filings and events come through the host retrieval channel, and anything that does not come back is written up as a gap.',
+    },
+  },
+  {
+    key: 'chinaThesisTracker',
+    name: 'china-thesis-tracker',
+    label: { zh: 'A 股持仓论点跟踪', en: 'A-Share Thesis Tracker' },
+    description: {
+      zh: '为持仓与自选逐只维护投资逻辑：记下论点前提、跟踪关键数据点与催化剂、按新披露更新有效性，并给出维持 / 加仓 / 减仓 / 离场的判断与目标价、止损位。',
+      en: 'Keeps a live thesis per holding and watchlist name: states the premises, tracks the key data points and catalysts, updates validity as new filings land, and argues maintain / add / reduce / exit with a target price and a stop.',
+    },
+    owner: 'jwangkun',
+    repository: 'claude-for-financial-services-cn',
+    status: 'watchlist',
+    lastCommit: '2026-09-14',
+    reviewBy: '2026-11-08',
+    tags: ['a-share', 'monitoring', 'portfolio'],
+    riskNote: {
+      zh: '冷启动实验；上游最近一次提交是 2026-09-14，启用前请自行复核来源。加仓 / 减仓 / 离场与目标价、止损位属于推演练习：本插件没有券商接口，不据它执行任何一笔，也不掌握你的实际持仓与成本——那些得由你给，缺了就只复查逻辑不动作。',
+      en: 'Cold-start experiment; upstream last moved on 2026-09-14, so review the sources before use. The add / reduce / exit calls with target price and stop are a rehearsal exercise: this plugin holds no broker interface, executes nothing on them and does not know your actual holdings or cost basis — provide them, and with them missing it reviews the logic without recommending action.',
+    },
+  },
+  {
+    key: 'chinaIdeaGeneration',
+    name: 'china-idea-generation',
+    label: { zh: 'A 股选股与机会生成', en: 'A-Share Idea Screening' },
+    description: {
+      zh: '按量化筛选、主题线索与形态识别三条线系统性地找 A 股标的：多空两侧各出清单，逐条写催化剂、为什么现在、信念档与验证下一步。',
+      en: 'Surfaces A-share names along three rails — quantitative screens, thematic leads and pattern recognition — producing long and short lists with, per name, the catalyst, why now, a conviction tier and the next check.',
+    },
+    owner: 'jwangkun',
+    repository: 'claude-for-financial-services-cn',
+    status: 'watchlist',
+    lastCommit: '2026-09-14',
+    reviewBy: '2026-11-08',
+    tags: ['a-share', 'technicals', 'portfolio'],
+    riskNote: {
+      zh: '冷启动实验；上游最近一次提交是 2026-09-14，启用前请自行复核来源。清单里的 Long / Short 方向、信念档与仓位建议属于推演练习，不是订单：本插件没有券商接口，也不据它们替你下任何一笔；筛选条件要的数字取不到就点名缺口，不用记忆里的数补齐。',
+      en: 'Cold-start experiment; upstream last moved on 2026-09-14, so review the sources before use. The Long / Short directions, conviction tiers and sizing suggestions on the list are a rehearsal exercise, not orders: this plugin holds no broker interface and places nothing for you on them. Numbers a screen needs but retrieval cannot get are named as gaps rather than filled from memory.',
     },
   },
 ])

@@ -63,8 +63,8 @@
 - Runtime status: `experimental` / 显式实验。默认全关，只在使用者于「插件」→ Capital Generation →「配置」
   逐格打开后，对**之后新建**的 Capital 根 Agent 可见；子 Agent 不继承。
 - Financial boundary: 正文口径天生是美股（SEC EDGAR / Form 4 / 13F、FRED、美国税制），并且多模块给出
-  0–10 打分与分批仓位的写法。本插件不提供投资建议：每条 catalog 的 `riskNote` 写明打分是自洽度信号、
-  股数区间是推演练习，不是订单，也不承诺表现。
+  0–10 打分与分批仓位的写法。本插件不提供代交易服务（没有券商接口，不代使用者下单或改单）：
+  每条 catalog 的 `riskNote` 写明打分是自洽度信号、股数区间是推演练习，不是订单，也不承诺表现。
 - Data-fetch assumption: 每颗 skill 开篇都要求 Agent 先用网页搜索取实时报价。**这不授予新权限**——
   取数仍受本插件的角色与工具边界约束（主 Agent 委派、原始 rows 不出工具层），skill 正文只是方法论材料。
 - Review status: 收录供使用者自行实验，不构成对任何金融方法的背书。复核前先读上面的 Catalog scope，

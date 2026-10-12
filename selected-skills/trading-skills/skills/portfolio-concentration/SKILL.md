@@ -104,7 +104,7 @@ Always include:
 - any special risk from employer stock, narrow products, or illiquid holdings
 - whether the user should move next to `position-sizing`, reduce exposure first, or review a fuller portfolio snapshot
 
-A skill named above is an option for the user, not a step this role can take: only the skills the user switched on exist in this session, and the ones this plugin deliberately does not offer — placing orders, setting position size — are not reachable at all. Say what you would check next and let the user decide.
+A skill named above is an option for the user, not a step this role can take: only the skills the user switched on exist in this session, and what this plugin deliberately does not offer — placing or amending an order on the user's behalf — is not reachable at all. Say what you would check next and let the user decide.
 
 ## Best practices
 

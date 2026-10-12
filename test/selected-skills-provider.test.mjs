@@ -14,13 +14,13 @@ const INVESTSKILL_EXCLUDED = [
   'chart-master',      // 教 Agent 自己出图：出图只走 render_chart
 ]
 
-// 第五颗 19 里只开放 9：下面这些留在快照里当可审查材料（etoro 连发布包都不进），理由逐条写在
+// 第五颗 19 里开放 11：下面这些留在快照里当可审查材料（etoro 连发布包都不进），理由逐条写在
 // selected-skills/trading-skills/UPSTREAM.md 与 docs/reference/external-skill-scan-2026-10.md。
+// 注意这里**不含** position-sizing / position-management：那两颗给的是仓位数字与持仓加减建议，
+// 与本插件的冲突只可能在执行面，而本插件没有券商接口（§8.6 第 7 条的判据）。
 const TRADING_SKILLS_EXCLUDED = [
   '_lib',                      // 共享 python 计算模块：不是 skill，本插件也没有 shell 能跑它（§1.6）
   'etoro',                     // 券商 API 执行面：在对话里采集凭据、真实下单（§8.6 第 4 与第 7 条）
-  'position-sizing',           // 输出仓位数字：与「买卖动作和仓位决策属于明确冲突」的既有口径一致
-  'position-management',       // hold / trim / close 的持仓动作决断，同上
   'earnings-preview',          // 数据层写死付费 API（curl + 向用户要凭据），且与 InvestSkill 那颗同名
   'macro-event-analysis',      // 同上：ask which supported provider + curl
   'market-regime-analysis',    // 同上
@@ -31,18 +31,16 @@ const TRADING_SKILLS_EXCLUDED = [
 ]
 
 // 第六颗（jwangkun/claude-for-financial-services-cn）：上游有六个 skills 根，这里只登记规范根
-// vertical-plugins/china-finance/skills（31 颗），开放其中 9 颗。下面 22 颗留在快照里当可审查材料
+// vertical-plugins/china-finance/skills（31 颗），开放其中 12 颗。下面 19 颗留在快照里当可审查材料
 // （mcp-servers/ 四份取数服务端连发布包都不进），理由逐条写在
 // selected-skills/claude-for-financial-services-cn/UPSTREAM.md 与 docs/reference/external-skill-scan-2026-10.md。
+// 这里同样**不收**"给方向与仓位"那一类理由：本插件不收的是执行面（§8.6 第 7 条）。
 const CHINA_FINANCE_EXCLUDED = [
   'china-market-data',           // 它本身就是取数目录：服务商 MCP 工具名表 + export 模式开关，无分析产出
   'china-skill-creator',         // 元技能：教造新 skill，模板里硬编码服务商阶梯，还要 python3 scripts/*.py 校验
   'china-dcf-model',             // 上游自标的 alias（"redirects to china-dcf"）：§8.6 第 6 条
   'china-comps',                 // 同题材的薄一份，且带两份 frontmatter
-  'china-morning-note',          // 给 Long / Short 方向、止损位与仓位建议：明确的买卖动作口径
-  'china-thesis-tracker',        // Maintain / Add / Reduce / Exit + 止损位，同上
-  'china-idea-generation',       // 选股清单给方向，还有 Position sizing recommendations
-  'china-tax-loss-harvesting',   // Full exit / Reduce position / 执行买卖，且是美股应税账户语境
+  'china-tax-loss-harvesting',   // §8.6 第 8 条市场口径：wash-sale / 应税账户成本基础是美股税制产物，A 股无此制度
   'china-3-statement-model',     // 要求产出 xlsx 工作簿（还有 OpenPyXL Formatting 一节）
   'china-lbo-model',             // 同上：File named: …_LBO_Model_….xlsx
   'china-xlsx-author',           // 交付物就是一份工作簿
@@ -98,7 +96,7 @@ function makeHarness() {
       preset,
       effect(callback) { agentCtx.cleanup = callback() },
       inject(_deps, callback) {
-        callback(Object.create(agentCtx, { skills: { value: skills, enumerable: true } }))
+        return Promise.resolve().then(() => callback(Object.create(agentCtx, { skills: { value: skills, enumerable: true } })))
       },
     }
     Object.defineProperty(agentCtx, 'skills', {
@@ -196,15 +194,17 @@ test('selected skill provider: Capital root only, filtered catalog, scope cleanu
   assert.equal(typeof created, 'function')
 
   const child = harness.makeAgent({ parentSession: 'parent-session' })
-  created({ agent: child.agent })
+  await created({ agent: child.agent })
   assert.equal(harness.providerRegistrationCount, 0, 'child Agent must not receive a provider')
 
   const otherPreset = harness.makeAgent({ preset: 'other-preset' })
-  created({ agent: otherPreset.agent })
+  await created({ agent: otherPreset.agent })
   assert.equal(harness.providerRegistrationCount, 0, 'other presets must not receive a provider')
 
   const root = harness.makeAgent()
-  created({ agent: root.agent })
+  const creation = created({ agent: root.agent })
+  assert.equal(harness.providerRegistrationCount, 0, 'provider 必须在 agent/created 的异步注入完成前保持未注册')
+  await creation
   assert.equal(harness.providerRegistrationCount, 1)
   assert.equal(harness.providerConfig.includeDefaultRoots, false)
   // skills 根按 catalog 的「仓库 → 相对路径」现算：InvestSkill 的 skill 不在 <repo>/skills 底下，
@@ -236,7 +236,7 @@ test('selected skill provider: 嵌套 skills 根里的名字走同一个 list/ge
   // plugins/us-stock-analysis/skills 底下，name 与顶层快照同级，必须同样被 list 过滤、被 get 复核。
   const harness = makeHarness()
   registerRootSelectedSkills(harness.ctx, { factCheck: true }, harness.createFilesystemProvider)
-  harness.listeners.get('agent/created')({ agent: harness.makeAgent().agent })
+  await harness.listeners.get('agent/created')({ agent: harness.makeAgent().agent })
   assert.deepEqual((await harness.provider.list({})).map(({ name }) => name), ['fact-check'])
   assert.equal((await harness.provider.get(candidate('fact-check'), {})).content, 'loaded')
   assert.throws(
@@ -246,7 +246,7 @@ test('selected skill provider: 嵌套 skills 根里的名字走同一个 list/ge
   )
 })
 
-test('selected skill provider: dynamic selection is read for each newly created root Agent', () => {
+test('selected skill provider: dynamic selection is read for each newly created root Agent', async () => {
   const harness = makeHarness()
   let selection = { buffettFramework: false }
   registerRootSelectedSkills(harness.ctx, () => selection, harness.createFilesystemProvider)
@@ -254,11 +254,11 @@ test('selected skill provider: dynamic selection is read for each newly created 
   assert.equal(typeof created, 'function')
 
   const beforeToggle = harness.makeAgent()
-  created({ agent: beforeToggle.agent })
+  await created({ agent: beforeToggle.agent })
   assert.equal(harness.providerRegistrationCount, 0, '关闭时不注册 provider')
 
   selection = { buffettFramework: true }
   const afterToggle = harness.makeAgent()
-  created({ agent: afterToggle.agent })
+  await created({ agent: afterToggle.agent })
   assert.equal(harness.providerRegistrationCount, 1, '新 root Agent 必须读取最新开关')
 })

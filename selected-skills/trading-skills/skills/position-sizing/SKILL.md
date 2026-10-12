@@ -49,7 +49,7 @@ If any key input is missing, state what is missing and stop rather than invent i
 
 Use [references/methodology.md](references/methodology.md) for sizing conventions and caveats. Use [assets/trade-plan-template.md](assets/trade-plan-template.md) when the user wants a reusable planning format.
 
-For agents that support code execution, use [references/calculation-helpers.md](references/calculation-helpers.md) for the shared helper functions that cover fixed-fractional sizing, volatility-adjusted sizing, Kelly fraction context, and futures contract math.
+Use [references/calculation-helpers.md](references/calculation-helpers.md) for the quantities behind fixed-fractional sizing, volatility-adjusted sizing, Kelly fraction context, and futures contract math. This host has no shell: work each one from the base formula in [references/methodology.md](references/methodology.md) and show the arithmetic in the reply, handing volatility-type statistics to the data side (delegate `data_junior`).
 
 ## Output structure
 

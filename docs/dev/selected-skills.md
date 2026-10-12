@@ -63,7 +63,11 @@ AGENTS.md §9.7 同一族的另一面：**闸门误伤过一次，下一个人�
   （§6.1 出图只走 `render_chart`；§7 报告链路已删除且禁止恢复），留在快照里当材料。
 - [ ] **6. 编排与别名。** 会接管会话路由的 orchestrator、上游自己标注的 alias 残片，不进 catalog。
 - [ ] **7. 金融表达合规。** 不承诺收益或准确率；打分项（0–10 那一类）要说明衡量的是自洽度/结构特征
-  而非预测表现；给仓位、买卖动作的段落必须在 `riskNote` 写明是推演练习——本项目不提供投资建议。
+  而非预测表现。正文里出现方向、评级、目标价或仓位数字**不是排除理由**——本插件从不代使用者下单，
+  也从不发布能下单的东西（那归第 4 条与 Packaging 的执行面口径，`etoro` 与四份取数服务端是按那条挡的）；
+  这类段落只要在 `riskNote` 写明它是方法推演、本插件不据它执行。**别把第 7 条读成内容禁令**：
+  第五、六颗当初就是这么混读的，结果把三颗 A 股卖方流程与两颗交易过程检查整颗挡在门外。
+  真因"给动作"要不收的那类走第 8 条市场口径（wash-sale 是美国应税账户产物，A 股无此制度）。
 - [ ] **8. 市场口径。** 非 A 股口径（SEC EDGAR / Form 4 / 13F / FRED / 美国税制…）逐条进
   `description` 与 `riskNote`，并给一个能力标签，让使用者在卡片上筛得出来哪些是美股专用。
 - [ ] **9. 许可与留痕。** 许可证明确且允许再分发；`LICENSE` 原件随包；commit / release / 最近提交
@@ -97,7 +101,7 @@ AGENTS.md §9.7 同一族的另一面：**闸门误伤过一次，下一个人�
 - provider 明确关闭 DSH 默认 skill roots，只扫描配置的快照目录；否则用户或项目目录中的其他 skills 可能进入同一来源。
 - 设置里的开关字段（主插件 `Config.selectedSkills` 与 settings 卡片）都按 catalog 现算。主插件 Config 曾手抄过一份 key 列表，接第三颗快照时两处就漂了——表现是卡片能拨、运行期读不到（AGENTS.md §9.7 同一族）。新增快照因此不动 `src/`。
 - catalog 过滤必须同时覆盖 provider 的 `list()` 与 `get()`。只过滤列表不够：已有 candidate 仍可能被直接传给 `get()`，因此未启用或不在 catalog 的名字必须在读取内容时再次拒绝。
-- selected-skills provider 只在新建的 Capital 根 Agent scope 内注册；子 Agent 和其他 preset 不注册。设置值在 Agent 创建时读取，因此切换设置不会改写已经创建的 Agent；新建 Capital 会话后才按新选择加载。
+- selected-skills provider 只在新建的 Capital 根 Agent scope 内注册；子 Agent 和其他 preset 不注册。设置值在 Agent 创建时读取，因此切换设置不会改写已经创建的 Agent；新建 Capital 会话后才按新选择加载。`agent/created` 监听会等待 `agent.ctx.inject(['skills'], ...)` 完成，再让 DSH 继续首轮 prompt，保证首轮 skill catalog 不与 provider 注册竞态。provider 注册本身不等于全文自动注入：`tool-skill` 在每次 `agent/pre-step` 发布可用目录，模型仍需调用 `skill` 工具加载匹配 skill 的正文。
 - 与 Capital 已有路由冲突的上游编排 skill 不应仅因为它和模块一起存在于快照中就进入 catalog。当前 China Stock Research 快照保留上游 orchestrator 作为来源材料，但 catalog 只列独立研究模块。
 - 上游脚本随快照保留不等于它们会运行。intake/provider 路径只发现并读取 skill 文档，不执行上游脚本。
 

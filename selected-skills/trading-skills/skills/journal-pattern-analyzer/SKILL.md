@@ -105,7 +105,7 @@ Always include:
 - one or two process changes to test next
 - whether the next step is `post-trade-review`, a revised rule in the journal, or no additional skill yet
 
-A skill named above is an option for the user, not a step this role can take: only the skills the user switched on exist in this session, and the ones this plugin deliberately does not offer — placing orders, setting position size — are not reachable at all. Say what you would check next and let the user decide.
+A skill named above is an option for the user, not a step this role can take: only the skills the user switched on exist in this session, and what this plugin deliberately does not offer — placing or amending an order on the user's behalf — is not reachable at all. Say what you would check next and let the user decide.
 
 ## Best practices
 

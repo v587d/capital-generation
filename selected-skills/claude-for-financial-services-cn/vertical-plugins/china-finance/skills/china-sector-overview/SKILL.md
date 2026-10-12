@@ -254,4 +254,4 @@ Before delivering:
 - [ ] Ideas shortlist included (3-5 names)
 - [ ] Risk factors specific to China market included
 > 取数档位（接哪家数据服务、用哪个密钥）由宿主的凭据域决定：这份行业报告不配置它，也不向使用者索取凭据。
-> Step 8 的 Long / Short 一览与第七节的重点标的、目标价、评级是把上面这些材料写成结论的**推演练习**：本插件不据它下单，也不给仓位。
+> Step 8 的 Long / Short 一览与第七节的重点标的、目标价、评级是把上面这些材料写成结论的**推演练习**：本插件没有券商接口，不据它下单，也不会替你执行任何一笔。

@@ -48,7 +48,7 @@ Use the user's materials first.
 
 If the original plan is missing, say that clearly and manage the position provisionally rather than inventing a clean prior plan.
 
-Do not fetch live data unless the user explicitly asks to pair this skill with another market-context or event-risk skill.
+Nothing here goes and gets market material on its own: work from what the user handed over. When the review genuinely needs a current quote or a fresh event, that is the main agent's call to delegate through the host's single retrieval entry (naming the ticker, the fields and the as-of date); whether a market-context or event-risk companion is worth pulling in is the same routing call, not this skill's.
 
 ## Analysis process
 
