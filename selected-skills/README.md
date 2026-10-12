@@ -17,7 +17,9 @@ for the user to review the source and decide whether it fits the task.
   (`catalog.js`), because upstreams lay skills out differently: one buries them under a
   plugin directory, one groups them two levels deep, and the A-share snapshot has six
   parallel roots, of which exactly one is registered (the line upstream itself calls the
-  source of truth). Everything else in the snapshot stays unregistered material.
+  source of truth). The newest snapshot needed none of these — its 48 skills sit flat under
+  `skills/`, each frontmatter `name` already matching its directory, and no prose links
+  outside its own folder. Everything else in the snapshot stays unregistered material.
 - `<project>/UPSTREAM.md`: repository URL, owner, commit, license, runtime scope,
   maintenance notes, and local changes.
 - `<project>/LICENSE`: original upstream license.

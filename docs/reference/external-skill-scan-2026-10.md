@@ -14,6 +14,7 @@
 4. [`DjNero11/peter-lynch-skill`](https://github.com/DjNero11/peter-lynch-skill)：**2026-10-11 追加入驻**，状态 `watchlist`，一颗个股研究工作流（Quick 快筛 + Deep 尽调）进 catalog、默认关闭。它带来本仓第一颗**自带完整证据预算与引用契约**的工作流，也第一次遇到"`SKILL.md` 住在仓库根"的结构。判断依据与逐条改写见文末第二个追加节。
 5. [`marian2js/trading-skills`](https://github.com/marian2js/trading-skills)：**2026-10-11 追加入驻**，状态 `watchlist`，19 颗里 11 颗进 catalog（下单前的过程检查、仓位测算与持仓复核、下单后的复盘），默认关闭。券商执行面、接管路由的编排、写死付费 API 的那几颗逐条排除；它也是第一颗 `SKILL.md` 藏在**两层目录**底下的快照。**2026-10-12 判据纠正**后收回 `position-sizing` 与 `position-management`（当初按"给仓位与买卖动作"排除，是把内容形状当成了执行面）。判断依据与逐条排除见文末第三个追加节与第五个追加节。
 6. [`jwangkun/claude-for-financial-services-cn`](https://github.com/jwangkun/claude-for-financial-services-cn)：**2026-10-11 追加入驻**，状态 `watchlist`，规范根 31 颗里 12 颗进 catalog（A 股卖方研究体裁：业绩点评与差异表述、财报前瞻、可比倍数、A 股 DCF、行业全景、催化剂日历、财务核查、首次覆盖，另有晨会纪要、持仓逻辑跟踪与选股清单），默认关闭。本仓**第一份非 MIT 的快照（Apache-2.0）**，因此被改写的十二份正文各带一行 §4(b) 要求的改动声明；它也是第一颗把取数层写成**结构**（三档服务商阶梯 + 环境变量模式开关 + 伪调用围栏，63 份正文每份都带）的快照，以及六个并列 skills 根里**只登记一条线**的那种结构。判断依据与逐条排除见文末第四个追加节与第五个追加节。
+7. [`GAJETOso/financeskills`](https://github.com/GAJETOso/financeskills)：**2026-10-12 追加入驻**，状态 `watchlist`，48 颗里 8 颗进 catalog（估值与建模的工程层：`wacc-computation`、`three-statement-modeling`、`company-valuation`；偿债与行业专用财务：`credit-analysis`、`ecl-computation`、`banking-compliance`、`insurance-reserving`；加一颗 `forensic-accounting` 的首位数字排查），默认关闭。两点第一次：**重心不在证券研究**——上游 `README.md:5` 自述写给 accountants，因此 40 颗的排除理由是"领域外"（编制视角的会计作业、内部审计与内控、个人理财与美国 / 英国税制、加密资产、私有公司语境）而不是执行面；以及**正文自带可运行的计算脚本**——43 份 `calculate.py` 逐份审过（全标准库、零网络零落盘零子进程零凭据、38 份对上游 `MANIFEST.sha256` 哈希一致），但本轮仍按现行 §8.6 第 4 条处置：删掉"你自己跑"那一句，脚本不进发布包。判断依据、脚本审计与"政策若翻案要动哪三处"见文末第六个追加节与该快照的 `UPSTREAM.md`。
 
 所有条目都需要用户自行判断是否适合当前任务；Owner 会继续寻找合适的社区项目，也欢迎通过 PR 提交新的固定快照和标签元数据。
 
@@ -210,4 +211,28 @@
 
 验证：四组定向闸门 + 反证 + `npm test` 全绿（2.7.6）。
 
-本扫描是公开信息桌面审阅（InvestSkill、peter-lynch-skill、trading-skills、claude-for-financial-services-cn 四节，以及本轮判据纠正除外：那几节都在所钉 commit 上 clone 后逐文件读过），不是完整安全审计、法律意见、作者背书或金融方法有效性证明。入驻前仍需固定 commit，静态检查完整文件树，逐一复核许可与引用，并运行隔离评测。
+## 追加（2026-10-12）：第七颗 GAJETOso/financeskills 入驻，以及"允许脚本"这条政策为什么本轮不落
+
+Owner 给的三条判据是：是否符合本项目合规性、是否填补 skill 空白、优先 A 股适用性高的（美股那些必须真的填补），并加了一条资产类别边界（本项目不涉及比特币之类）。这一节按这三条给结论，全部数字都在所钉 commit 的 clone 上现算。
+
+**候选画像。** MIT，48 颗，`skills/<name>/SKILL.md` 一层扁平，正文 77–108 行的统一模板（Initial Assessment → Framework → Technical Steps → Output Format → Scripts → References → Assets → Related Skills），`references/` 83 份平均 29 行，`assets/` 只有 6 份。上游 `README.md:5` 自述服务对象是 accountants（"for accountants in oil & gas, banking, insurance, and corporate finance"）——**这一句决定了本轮的取舍**：本插件的使用者是做证券研究的人，读别人披露的账，不是把账做对的人。46 次提交（2026-05-01 至 2026-10-01），版本文件停在 v1.0.1，唯一持续的活动是按月刷新评测基线。
+
+**合规性：闸门几乎不响，因为这一批压根没有取数层。** 把 `test/selected-skills-content.test.mjs` 那 23 条 FORBIDDEN 的原文正则套到全 48 颗的 185 份 `.md` 上，命中 **2 处**，且都在本轮不收的 `automated-reconciliation/references/fuzzy-logic.md` 与 `nlp-earnings-sentiment/references/finbert-guide.md`（两处 ```python 围栏）。没有服务商阶梯、没有凭据名、没有伪工具调用、没有"向用户点选付费服务商"。**违规形状换了一族**：43 份正文写着 `Run \`python3 scripts/calculate.py\` to self-test`，而同文件里带着"没有 shell 时读哪份附属文件"退路句的是 **0 份**——按现行 §8.6 第 4 条与闸门 `NEEDS_FALLBACK`（`test/selected-skills-content.test.mjs:71-73`），这 43 份一份都过不去。
+
+**结构上是七颗里最干净的一份：四类结构改动一处都不需要。** 48 份 frontmatter 的 `name` 与目录名逐颗一致（前五颗为这件事补过 `name`）、`description` 齐备、175 条相对链接全部指向存在的文件、`../` 跨目录引用 **0 处**（因此上游那份 924 KB 的 `standards/` 与 2.2 MB 的 `tools/` 整个不复制进来也不会破任何一条链接）、与现有 59 颗零撞名。`SELECTED_SKILL_SKILL_DIRS` 因此就是 `skills` 一个词。
+
+**填补什么空白：按双语词表在已收录 59 颗的正文上现算。** 宇宙取的是 catalog 条目目录下的全部 `.md`（与闸门同一口径，103 份）。**0 命中**的有六项：EV→股权价值 bridge、敏感性网格与 mid-year convention、三表勾稽与 revolver 循环、PD / LGD / ECL 三阶段减值、Benford 首位数字。**1 命中**的有五项：先例交易、控制权溢价、DuPont、CET1 / RWA / LCR（只在 `sector-analysis` 顺带一次）、IBNR / 综合成本率（只在 `peter-lynch-skill` 顺带一次）。**2 命中**：CAPM 与 β 去杠杆——都被点名过，都没有估法。**已经覆盖所以不收**：现金周期 7 命中（`working-capital-analysis` 判重复）、正常化 14 命中、无风险利率 7 命中、比率与 VaR 各有更厚的既有颗。⚠ 这一条差点犯下的错：**只用英文词表核对会把中文写的 A 股正文误判成空白**（例如"折现率""营运资本""综合成本率"在 `china-*` 那十二份里是用中文写的），第一版核对因此报出过 80 份命中"WACC"这种荒谬数——修正成中英两套同时算，并且把宇宙限定在已收录条目之后才是上面的数。
+
+**A 股适用性：整体低，所以只取可迁移的方法层。** 这批按 IFRS / US GAAP 写，原生长不出"A 股专用"的 skill。8 颗里对 A 股最有用的恰恰是那些**披露结构相同而准则号不同**的：EV→股权 bridge（参股公司与少数股东权益是 A 股合并报表的常态难题）、三阶段减值（CAS 22 已对齐 IFRS 9，但年报只给阶段余额不给 PD / LGD——这颗因此是"读别人的减值合不合理"而非"自己算一个准备数"）、保险准备金与综合成本率、银行资本与流动性。数字基准确实是美国的三颗（`wacc-computation` 用 10 年期美债与美股 ERP、`company-valuation` 用控制权溢价与先例交易惯例、`credit-analysis` 用国际公司贷款阈值）套 `us-stock` 标签；其余五颗是国际准则，标成"美股专用"反而会把 A 股能用的东西藏起来，口径差异写进 `riskNote`。**这一轮没有给 A 股找到新东西，这条结论本身就记在这里**：下一颗如果要按"A 股优先"找，得往境内作者写的卖方 / 买方流程材料里找，而不是在 IFRS 系里再筛一遍。
+
+**`banking-compliance` 与 `forensic-accounting` 是带风险收的两颗（Owner 选"带风险标注全收"）。** 前者正文的资本阈值是巴塞尔原值 4.5% / 6% / 8%，而境内适用《商业银行资本管理办法》：核心一级最低 5%，之上还有储备资本与系统重要性附加，资本定义与风险权重另有表——**正文一个数字没改**（§8.6：不改阈值与结论），风险全部改在 `riskNote` 上说明"比率形状可用、数字只能当境外参照，不能当境内合规判断"。后者除首位数字检验可以只对公开报表做以外，主要路径（银行流水、员工与供应商信息比对、企业内网 ERP）需要使用者自己提供账务明细；`SKILL.md:29` 那句本意是护栏，但点名了 `web_fetch`（本插件根角色没有这颗工具）并承诺了"specific API integrations"（本插件不提供企业接口集成），两处都改写到位且保留护栏含义——这是本轮最容易"过了闸门却改坏内容"的一处，与上一轮 `position-management:51` 同一族。
+
+**实测改写量**（`diff -r` 对所钉 commit + `git diff --no-index --numstat` 现算）：8 份 `SKILL.md` + `three-statement-modeling/references/model-checks.md` + `wacc-computation/assets/wacc-memo-template.md`，**10 份文件 / 16 段 / +16 −16**，其余 38 颗逐字节相同。16 段的构成：脚本指令 8 段、"用代码算"4 段、`references/` 里的写代码指令 1 段、产出物模板的假出处脚注 1 段、点名宿主工具那 2 行、`## Related Skills` 一个都没动。
+
+**"允许 skill 自带脚本"这条政策本轮不落，但把落它需要的东西全部备好了。** 政策是 Owner 2026-10-12 给的（允许自带 scripts，需要仔细 review 代码风险；未来会有能执行 shell 的子 Agent）。**代码风险已经审完并写进 `selected-skills/financeskills/UPSTREAM.md` 的"脚本审计"一节**：43 份 / 2002 行，顶层 import 只有 `__future__` `copy` `dataclasses` `itertools` `math` `random` `statistics` `typing`（全标准库，宿主不需要 pip 装任何东西），零网络、零文件读写、零 subprocess / eval、零 `os.environ` 与凭据读取，`__main__` 是 `assert` 自检；38 份与上游 `MANIFEST.sha256` 哈希一致、0 份不符，5 份不在清单（上游自述"judgment-only by design"，而那 5 份正是个人理财那批，本轮不收）。**不落的理由是一轮一个关注点**：政策落地要同时动三处——§8.6 第 4 条（把"没有一句话指挥 Agent 去跑它"换成"执行一律委派给有 shell 的角色"）、闸门 `NEEDS_FALLBACK`（现认的退路句是 `skip the router`，要认新的委派形状）、这颗的 `.npmignore`（现在挡 `scripts`，翻案要放开）。三处一起动会把"收录 8 颗"和"改运行时纪律"混进同一轮，而后者需要真机验证：`python3` 在本机是 3.14，Windows 桌面端不保证存在（§1.6 记录了 pwsh 侧只量到一半），宿主那三条 python 通道也都不在这条路上。本轮因此按现行口径执行（脚本不进包、指令删净），并把"翻案需要改哪三处 + 实测依据"整段留在 UPSTREAM.md，将来那一轮是一次改动而不是重审一遍代码。顺带存到一个有用事实：DSH 的 `skill` 工具会在结果里给一行 `<skill_resources>` 与 **Base directory for this skill: <绝对路径>**（本仓真实会话里取到两例），所以脚本路径其实可解析——真正的约束从来是"谁来执行"，不是"能不能定位"。
+
+**收录数字**：catalog **59 → 67**；快照内共 48 颗；六颗快照的上游 skill 总数 125 → **173**。不进可选清单的 40 颗照 InvestSkill 先例随包保留为可审查材料（provider 的 `list()` / `get()` 与 `/capital-skills` 旁路都按 catalog 闭集过滤），`evals`（896 KB 评测夹具）与 `scripts`（344 KB）连发布包都不进。**许可的差别记清楚**：本颗 MIT，被改写的 10 份正文**不带**改动声明行——那是第六颗（Apache-2.0 §4(b)）的许可义务，不是本仓惯例，`test/selected-skills-content.test.mjs:132-143` 那条正向断言按 `repository` 钉死只问那一族；下一份若又是 MIT 而有人"照格式"给正文加声明行，反而是把特殊义务伪装成通用规则。
+
+验证：四组定向闸门 + 三条反证 + `npm pack --dry-run` 抽查 + `npm test` 全绿（2.7.8）。
+
+本扫描是公开信息桌面审阅（InvestSkill、peter-lynch-skill、trading-skills、claude-for-financial-services-cn、financeskills 五节，以及 2026-10-12 判据纠正那次除外：那几节都在所钉 commit 上 clone 后逐文件读过，脚本还逐份审过依赖与 IO 形状），不是完整安全审计、法律意见、作者背书或金融方法有效性证明。入驻前仍需固定 commit，静态检查完整文件树，逐一复核许可与引用，并运行隔离评测。

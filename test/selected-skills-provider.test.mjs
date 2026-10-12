@@ -57,6 +57,62 @@ const CHINA_FINANCE_EXCLUDED = [
   'china-deal-screening',        // 一级市场标的筛选（PE / 投行语境）
 ]
 
+// 第七颗（GAJETOso/financeskills）：上游 48 颗扁平排列，这里开放 8 颗。下面 40 颗留在快照里当
+// 可审查材料（scripts/ 与 evals/ 连发布包都不进），理由逐条写在
+// selected-skills/financeskills/UPSTREAM.md 与 docs/reference/external-skill-scan-2026-10.md。
+// 排除的主族不是"给方向与仓位"（§8.6 第 7 条早就不收这一类理由），而是**领域外**：这批正文的
+// 角色是总账会计、内控经理、FP&A 经理与个人理财顾问，与本插件使用者的证券研究场景不是一件事。
+const FINANCESKILLS_EXCLUDED = [
+  // 与既有 59 颗重叠：比率 / 现金周期 / VaR / 综合评估都已有更厚的一份
+  'financial-analysis',
+  'investment-analysis',
+  'risk-assessment',
+  'working-capital-analysis',
+  // 资产类别：本插件不涉及加密资产
+  'crypto-accounting',
+  // 个人理财与美国 / 英国税制（401k、Roth、ISA）：不是证券投研，且市场口径不可迁移
+  'personal-budgeting',
+  'net-worth-tracker',
+  'retirement-planning',
+  'debt-payoff',
+  'tax-planning',
+  'tax-efficient-investing',
+  // 编制视角的会计作业：怎么把账记对、把报表做出来，不是怎么读别人的披露
+  'journal-entry',
+  'statement-preparation',
+  'intercompany-accounting',
+  'corporate-consolidation',
+  'close-management',
+  'automated-reconciliation',
+  'deferred-tax',
+  'revenue-recognition',
+  'lease-accounting',
+  'inventory-costing',
+  'fixed-asset-accounting',
+  'aro-computation',
+  'variance-analysis',
+  // 审计、内控与披露合规的执行面
+  'audit-checklist',
+  'sox-compliance',
+  'esg-reporting',
+  // 企业内部经营与资金管理
+  'budget-forecast',
+  'predictive-burn-rate',
+  'product-profitability',
+  'cvp-breakeven',
+  'treasury-management',
+  'earned-value-mgmt',
+  // 私有公司与特殊融资语境：本插件没有非上市标的的取数面
+  'startup-valuation',
+  'lbo-modeling',
+  'venture-debt',
+  'debt-restructuring',
+  'oil-gas-valuation',
+  // 依赖本插件不具备的模型 / 数据形态（transformers 情感模型、无监督异常检测）
+  'ai-anomaly-detection',
+  'nlp-earnings-sentiment',
+]
+
 function candidate(name) {
   return { name, description: name, invocation: { modelInvocable: true, userInvocable: true }, source: 'custom', provider: 'source', rank: 1, locator: name }
 }
@@ -233,6 +289,19 @@ test('selected skill provider: disabled by default and limited to the approved c
   assert.deepEqual(chinaFinanceCatalog, chinaFinanceDirs,
     `claude-for-financial-services-cn 的可选清单与规范根（${chinaFinanceRoot}）不符：`
     + `多出或缺少 ${chinaFinanceCatalog.filter((n, i) => n !== chinaFinanceDirs[i]).join('、')}`)
+  // 第七颗同样是派生钉法（48 里开放 8）。它排除得最多，理由是**领域外**而不是执行面——所以这条
+  // 断言真正钉住的是"别把个人理财、加密与编制会计那几族顺手加回 catalog"：加一颗就红并点名差在哪。
+  const financeskillsCatalog = SELECTED_SKILL_CATALOG
+    .filter(({ repository }) => repository === 'financeskills')
+    .map(({ name }) => name)
+    .sort()
+  const financeskillsRoot = SELECTED_SKILL_SKILL_DIRS.financeskills
+  const financeskillDirs = readdirSync(fileURLToPath(new URL(`../selected-skills/financeskills/${financeskillsRoot}`, import.meta.url)))
+    .filter((dir) => !FINANCESKILLS_EXCLUDED.includes(dir))
+    .sort()
+  assert.deepEqual(financeskillsCatalog, financeskillDirs,
+    `financeskills 的可选清单与快照目录（${financeskillsRoot}）不符：`
+    + `多出或缺少 ${financeskillsCatalog.filter((n, i) => n !== financeskillDirs[i]).join('、')}`)
   assert.ok(SELECTED_SKILL_CATALOG.every(({ status, tags }) => ['experimental', 'watchlist'].includes(status) && tags.length > 0))
   const harness = makeHarness()
   registerRootSelectedSkills(harness.ctx, { buffettFramework: false }, harness.createFilesystemProvider)

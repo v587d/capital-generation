@@ -290,6 +290,14 @@ test('skills：内置 skills 由组合行承载，selected skill 只注册到 Ca
     assert.ok(!SELECTED_SKILL_CATALOG.some(({ name }) => name === excluded),
       `${excluded} 与 Capital 的既有契约冲突（第二道取数入口 / 会话路由与 skill 生产线），不得进入 catalog`)
   }
+  // 第七颗（GAJETOso/financeskills，48 颗企业会计与公司金融）排除的 40 颗走的是**资产类别与领域**，
+  // 不是执行面：本插件不涉及加密资产，也不做个人理财与家庭报税；其余是编制视角的会计作业
+  // （总账、合并、结账、对账）与内部审计 / 司库 / FP&A 场景，使用者是证券研究者不是记账的人。
+  // 逐条理由见 selected-skills/financeskills/UPSTREAM.md；它的 scripts/ 与 evals/ 连发布包都不进。
+  for (const excluded of ['crypto-accounting', 'personal-budgeting', 'tax-planning']) {
+    assert.ok(!SELECTED_SKILL_CATALOG.some(({ name }) => name === excluded),
+      `${excluded} 超出本插件的资产类别与服务范围（加密资产 / 个人理财 / 家庭报税），不得进入 catalog`)
+  }
   // catalog 身份冲突检查：多颗快照允许同名 skill，但 key 与 name 必须各自唯一，否则 provider 的
   // enabled 集合与设置里的开关都会指错东西。
   for (const field of ['key', 'name']) {

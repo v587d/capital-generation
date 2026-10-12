@@ -17,6 +17,9 @@ export const SELECTED_SKILL_SKILL_DIRS = Object.freeze({
   // 因此只登记规范根那一条线：vertical-plugins/china-finance/skills —— 上游自己写明 skill 正文就 authored 在这里。
   // 另外五条线（投行 / PE / 基金运营 / 财富 / 账户）与副本留在快照里当材料，不进可选清单。
   'claude-for-financial-services-cn': 'vertical-plugins/china-finance/skills',
+  // 上游就是扁平的 skills/<name>/SKILL.md（48 颗一层到底，frontmatter name 与目录名逐颗一致，
+  // 正文链接全部落在自己目录内），所以前六颗踩过的套一层 / 平铺 / 多根取一都不用做。
+  financeskills: 'skills',
 })
 
 // Selected-skill metadata owned by Capital Generation. Upstream snapshots remain unchanged.
@@ -1142,6 +1145,158 @@ export const SELECTED_SKILL_CATALOG = Object.freeze([
     riskNote: {
       zh: '冷启动实验；上游最近一次提交是 2026-09-14，启用前请自行复核来源。清单里的 Long / Short 方向、信念档与仓位建议属于推演练习，不是订单：本插件没有券商接口，也不据它们替你下任何一笔；筛选条件要的数字取不到就点名缺口，不用记忆里的数补齐。',
       en: 'Cold-start experiment; upstream last moved on 2026-09-14, so review the sources before use. The Long / Short directions, conviction tiers and sizing suggestions on the list are a rehearsal exercise, not orders: this plugin holds no broker interface and places nothing for you on them. Numbers a screen needs but retrieval cannot get are named as gaps rather than filled from memory.',
+    },
+  },
+  {
+    key: 'companyValuation',
+    name: 'company-valuation',
+    label: { zh: '企业估值与股权价值桥', en: 'Company Valuation' },
+    description: {
+      zh: '三条路估企业价值与股权价值：先剥离一次性项目做 DCF，再用同业倍数与先例交易交叉验证，最后把企业价值换成股权价值——有息负债、少数股东权益、参股公司、养老金缺口逐笔列出。',
+      en: 'Triangulates enterprise and equity value: a DCF on normalized earnings, cross-checked against peer multiples and precedent deal multiples, then an explicit enterprise-to-equity bridge that itemizes debt-like charges, minority interests, associates and any pension deficit.',
+    },
+    owner: 'GAJETOso',
+    repository: 'financeskills',
+    status: 'watchlist',
+    lastCommit: '2026-10-01',
+    reviewBy: '2026-11-15',
+    tags: ['valuation', 'cash-flow', 'us-stock'],
+    riskNote: {
+      zh: '冷启动实验；上游最近一次提交是 2026-10-01，启用前请自行复核来源。这颗按 IFRS 与美股估值惯例写：先例交易倍数、控制权溢价 20–35% 与 EV/EBITDA 那套倍数在 A 股披露里常常拿不到同口径数据，取不到就点名缺口，不用记忆里的数补齐。它给出的估值区间与"哪几条假设真正决定答案"属于方法推演，不是订单——本插件没有券商接口，也不据它下单。',
+      en: 'Cold-start experiment; upstream last moved on 2026-10-01, so review the sources before use. The method is written to IFRS and US valuation practice: precedent-transaction multiples, the 20–35% control premium and the EV/EBITDA comp set often have no same-basis counterpart in A-share disclosure — name the gap instead of filling it from memory. The concluded range and the "assumptions that actually move the answer" are a rehearsal exercise, not orders: this plugin holds no broker interface and places nothing for you.',
+    },
+  },
+  {
+    key: 'waccComputation',
+    name: 'wacc-computation',
+    label: { zh: 'WACC 与资本成本估算', en: 'WACC Computation' },
+    description: {
+      zh: '把折现率拆开估：CAPM 各输入（无风险利率、β、股权风险溢价、规模与国家风险溢价）、可比 β 的去杠杆与再杠杆、按市值加权的税后债务成本，最后交出一张 β × 风险溢价的敏感性区间。',
+      en: 'Builds the discount rate piece by piece — CAPM inputs (risk-free rate, beta, equity risk premium, size and country premia), unlevering and relevering peer betas on the target\u0027s capital structure, market-value weights on the after-tax cost of debt — and ends on a beta-by-premium sensitivity range.',
+    },
+    owner: 'GAJETOso',
+    repository: 'financeskills',
+    status: 'watchlist',
+    lastCommit: '2026-10-01',
+    reviewBy: '2026-11-15',
+    tags: ['valuation', 'risk', 'us-stock'],
+    riskNote: {
+      zh: '冷启动实验；上游最近一次提交是 2026-10-01，启用前请自行复核来源。正文的数字基准是美国的：无风险利率取 10 年期美债、风险溢价用美股 ERP、税率按美国边际税率。用于 A 股要换成中国 10 年期国债、境内 ERP 与 15% / 25% 那一档实际税率，这些替换值本插件没有现成来源时一律留空点名，不凭记忆填。算出的 WACC 是推演输入，不是对任何标的的判断。',
+      en: 'Cold-start experiment; upstream last moved on 2026-10-01, so review the sources before use. Its numeric anchors are American: a 10-year Treasury as the risk-free rate, US equity risk premium, a US marginal tax rate. Applying it to A-shares means a China 10-year government bond yield, a local ERP and the 15% / 25% statutory rate actually paid — where this plugin has no source for the replacement value, leave it blank and say so rather than quoting memory. The computed WACC is an input to a rehearsal, not a verdict on anything.',
+    },
+  },
+  {
+    key: 'threeStatementModeling',
+    name: 'three-statement-modeling',
+    label: { zh: '三表勾稽建模与诊断', en: 'Three-Statement Modeling' },
+    description: {
+      zh: '按固定顺序搭一张联动的三表模型：驱动因子集中一处、收入构建利润表、固定资产与营运资本与债务三张附表推动资产负债表、现金流量表完全由前两表的差额倒推，每一期都摆一行"不平就点名"的平衡检查。',
+      en: 'Assembles a linked three-statement model in a fixed order — one place for drivers, an income statement built from revenue, PP&E / working-capital / debt schedules driving the balance sheet, a cash flow statement derived entirely from the deltas — with a balance check on every period that names the ones that do not tie.',
+    },
+    owner: 'GAJETOso',
+    repository: 'financeskills',
+    status: 'watchlist',
+    lastCommit: '2026-10-01',
+    reviewBy: '2026-11-15',
+    tags: ['financial-health', 'cash-flow', 'business-analysis'],
+    riskNote: {
+      zh: '冷启动实验；上游最近一次提交是 2026-10-01，启用前请自行复核来源。科目表按 IFRS / US GAAP 列示，A 股报表另有一批需要自己映射的行次（其他应收、合同资产与合同负债、少数股东权益等）——这颗只讲勾稽形状，不替你判断哪一笔该归哪一科目。它建的是模型骨架，产出的预测数字属于推演；需要的历史报表或附注明细取不到就点名缺口。',
+      en: 'Cold-start experiment; upstream last moved on 2026-10-01, so review the sources before use. Its chart of accounts is IFRS / US GAAP, so A-share statements need their own mapping for lines such as other receivables, contract assets and liabilities, and minority interests — this skill teaches the linkage, not where a given item belongs. What it produces is a model skeleton whose projected numbers are a rehearsal; historical statements or note detail it cannot retrieve are named as gaps.',
+    },
+  },
+  {
+    key: 'creditAnalysis',
+    name: 'credit-analysis',
+    label: { zh: '偿债能力与债务容量分析', en: 'Credit Analysis' },
+    description: {
+      zh: '回答一件事：这家公司能不能穿过周期把钱还上。杠杆、利息覆盖、DSCR、自由现金流对债务、流动性五组算式各算正常口径与压力口径，再看担保折价、清收顺序、契约余量与"谁替它兜底"。',
+      en: 'Answers one question: can this borrower service and repay through the cycle. Five ratio families — leverage, interest coverage, DSCR, free cash flow to debt, liquidity — each on a normalized and a stressed basis, then collateral haircuts, recovery ranking, covenant headroom and who actually stands behind it.',
+    },
+    owner: 'GAJETOso',
+    repository: 'financeskills',
+    status: 'watchlist',
+    lastCommit: '2026-10-01',
+    reviewBy: '2026-11-15',
+    tags: ['risk', 'financial-health', 'us-stock'],
+    riskNote: {
+      zh: '冷启动实验；上游最近一次提交是 2026-10-01，启用前请自行复核来源。正文的"舒适阈值"（杠杆 3.0x、DSCR 1.2x 一类）是国际公司贷款的惯例值，不是任何市场的监管线；境内公司债、可转债与银行授信的契约条款和定义各不相同，要按募集说明书与年报原文核对。它写出的 approve / decline / 结构建议属信用侧的方法推演，既不是授信意见也不是订单——本插件不代你下单。',
+      en: 'Cold-start experiment; upstream last moved on 2026-10-01, so review the sources before use. Its comfort thresholds (3.0x leverage, 1.2x DSCR and the rest) are international corporate-lending conventions, not any market\u0027s regulatory line; domestic bond, convertible and bank-facility covenants differ in both level and definition, so check them against the offering circular and the annual report as filed. The approve / decline / restructure it writes is a credit-side rehearsal, neither a credit opinion nor an order — this plugin places nothing for you.',
+    },
+  },
+  {
+    key: 'eclComputation',
+    name: 'ecl-computation',
+    label: { zh: '预期信用损失与三阶段减值', en: 'Expected Credit Loss' },
+    description: {
+      zh: '按 IFRS 9 的三阶段思路把减值拆开：阶段划分与迁徙判断、PD / LGD / EAD 三参数、应收账龄的准备矩阵简化法、宏观情景加权与覆盖率，再问一句"下行情景概率提高 10% 会怎样"。',
+      en: 'Takes the IFRS 9 impairment logic apart: stage assignment and migration, the PD / LGD / EAD parameters, the simplified provision matrix over aging buckets, macro scenario weighting and coverage ratios, then one more question — what changes if the downside scenario gains ten points of probability.',
+    },
+    owner: 'GAJETOso',
+    repository: 'financeskills',
+    status: 'watchlist',
+    lastCommit: '2026-10-01',
+    reviewBy: '2026-11-15',
+    tags: ['risk', 'financial-health', 'filings'],
+    riskNote: {
+      zh: '冷启动实验；上游最近一次提交是 2026-10-01，启用前请自行复核来源。中国《企业会计准则第 22 号》已与 IFRS 9 的三阶段框架对齐，但披露粒度不同：上市公司年报给出阶段余额与减值准备，不给出 PD / LGD 参数。所以这颗更适合用来判断别人披露的减值合不合理，而不是自己算出一个准备数；需要而取不到的明细一律点名缺口，不用合计倒推。',
+      en: 'Cold-start experiment; upstream last moved on 2026-10-01, so review the sources before use. China\u0027s Accounting Standard for Business Enterprises No. 22 already follows the IFRS 9 three-stage framework, but disclosure granularity differs: listed issuers give stage balances and impairment charges, not PD / LGD parameters. Use this skill to judge whether a disclosed provision is defensible rather than to compute your own; detail that retrieval cannot get is named as a gap, never back-derived from a total.',
+    },
+  },
+  {
+    key: 'insuranceReserving',
+    name: 'insurance-reserving',
+    label: { zh: '保险准备金与综合成本率', en: 'Insurance Reserving' },
+    description: {
+      zh: '一条准备金链条走到底：赔款发展三角、年龄到年龄因子、链式法与 Bornhuetter-Ferguson、IBNR，再落到综合成本率——把"未决赔款估得准不准"和"这单承保业务到底赚不赚钱"分成两件事。',
+      en: 'Runs the reserve chain end to end: loss development triangles, age-to-age factors, chain ladder and Bornhuetter-Ferguson, IBNR, then the combined ratio — keeping "are unpaid claims estimated well" and "does this book actually earn" as two separate questions.',
+    },
+    owner: 'GAJETOso',
+    repository: 'financeskills',
+    status: 'watchlist',
+    lastCommit: '2026-10-01',
+    reviewBy: '2026-11-15',
+    tags: ['risk', 'financial-health'],
+    riskNote: {
+      zh: '冷启动实验；上游最近一次提交是 2026-10-01，启用前请自行复核来源。精算假设、折现与负债计量按 IFRS 17 与一般精算惯例写，境内上市险企的法定准备金、折现率参考曲线与保户储金口径另有规定。发展三角要按险种和年度拆开的赔款明细，这类粒度在公开披露里常常取不到——点名缺口，不要拿合计数摊。',
+      en: 'Cold-start experiment; upstream last moved on 2026-10-01, so review the sources before use. Its actuarial assumptions, discounting and measurement follow IFRS 17 and general actuarial practice; statutory reserves, the reference yield curve and policyholder-deposit treatment for listed Chinese insurers follow separate rules. A development triangle needs claims detail split by line and accident year — granularity public disclosure often does not give, so name the gap instead of spreading a total across it.',
+    },
+  },
+  {
+    key: 'bankingCompliance',
+    name: 'banking-compliance',
+    label: { zh: '银行资本与流动性指标', en: 'Bank Capital Ratios' },
+    description: {
+      zh: '银行股最硬的几张表：CET1 / Tier 1 / 总资本充足率、风险加权资产及其权重结构、杠杆率与 LCR / NSFR，加一套"违约打进来后资本够不够"的压力形状。',
+      en: 'The hardest numbers on a bank name: CET1 / Tier 1 / total capital adequacy, risk-weighted assets and their weight structure, the leverage ratio, LCR and NSFR, plus a pass that asks whether capital still holds once defaults arrive.',
+    },
+    owner: 'GAJETOso',
+    repository: 'financeskills',
+    status: 'watchlist',
+    lastCommit: '2026-10-01',
+    reviewBy: '2026-11-15',
+    tags: ['risk', 'financial-health', 'macro'],
+    riskNote: {
+      zh: '冷启动实验；上游最近一次提交是 2026-10-01，启用前请自行复核来源。阈值按巴塞尔原值写（4.5% / 6% / 8%）：中国大陆适用《商业银行资本管理办法》，核心一级最低 5% 之上还有储备资本与系统重要性附加，资本定义与风险权重也另有表——这颗的比率形状可以用，数字只能当境外参照，不能当境内合规判断。风险权重明细与 LCR 分项在 A 股年报里的披露粒度不一，取不到就点名缺口。',
+      en: 'Cold-start experiment; upstream last moved on 2026-10-01, so review the sources before use. Its thresholds are Basel originals (4.5% / 6% / 8%): mainland China applies the Capital Rules for Commercial Banks, where the 5% minimum CET1 sits on top of a conservation buffer and system-importance add-ons, and capital definitions and risk-weight tables differ again. Use the ratio shapes, treat the numbers as an overseas reference, and never as a domestic compliance judgement; risk-weight and LCR detail varies by filing, so missing lines are named as gaps.',
+    },
+  },
+  {
+    key: 'forensicAccounting',
+    name: 'forensic-accounting',
+    label: { zh: '账务异常与数字分布排查', en: 'Forensic Ledger Screening' },
+    description: {
+      zh: '拿账和数字做取证式排查：首位数字的 Benford 分布检验、整数与重复金额、资金循环路径、供应商与关联方重合，并把结论写成一条经得起复核与质询的证据链。',
+      en: 'Screens a ledger forensically: Benford first-digit tests, round-number and repeated-amount patterns, round-trip flows, vendor and related-party overlaps — written up as an evidence chain that can survive review and cross-examination.',
+    },
+    owner: 'GAJETOso',
+    repository: 'financeskills',
+    status: 'watchlist',
+    lastCommit: '2026-10-01',
+    reviewBy: '2026-11-15',
+    tags: ['verification', 'risk', 'financial-health'],
+    riskNote: {
+      zh: '冷启动实验；上游最近一次提交是 2026-10-01，启用前请自行复核来源。除首位数字检验可以只对公开报表做以外，这颗的主要路径（银行流水、员工与供应商信息比对、企业内部系统）需要使用者自己提供账务明细：本插件不连企业内部系统，也没有那些数据源。它给出的"疑似"清单是排查线索，不是舞弊认定，也不构成审计或法律意见；样本量不足时首位数字检验本身不成立，正文的门槛要照做。',
+      en: 'Cold-start experiment; upstream last moved on 2026-10-01, so review the sources before use. Only the first-digit test can run on published statements; the rest of this skill\u0027s paths — bank statements, employee-versus-vendor matching, internal ERP systems — require the user to supply the accounting detail, since this plugin connects to no corporate system and holds no such source. What it returns is a list of leads, not a fraud finding, and neither an audit nor a legal opinion; a Benford test on too small a sample is void, and the sample thresholds in the text stand.',
     },
   },
 ])

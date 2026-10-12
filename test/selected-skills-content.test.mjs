@@ -65,6 +65,17 @@ const FORBIDDEN = [
   [/\bAkShare\b|\bAkSource\b/, '把某家外部数据服务商写成取数途径：本插件的取数入口只有委派一个，服务商与密钥不归分析正文决定'],
   [/\biFind\b/, '同上：点名外部服务商作为数据档位（本颗用它而不写成"同花顺"，因为同花顺结构数据正是本插件在用的来源之一）'],
   [/万得|慧博|wind\s*\/\s*choice/i, '服务商阶梯（"哪家最全、付费/免费备选"）留在正文里：本插件不选服务商，取数一律委派；缺字段就点名并停止该字段的分析（§8.6 第 2 条）'],
+  // ↓ 第七颗（financeskills）那一族：这批没有取数层，"把活儿推给运行时"写成了**代码与脚本**的形状。
+  //   上面 `code[\s-]execution` 那条要求两个词连着写，所以 `**Build with code**`、`In code: a single
+  //   CONFIG dict`、`with code-verified math` 全都不响；`node scripts/|bash scripts/` 只认那两个动词，
+  //   所以产出物模板里 `Computed with scripts/calculate.py` 这一句运行时假话也不响；宿主工具名从来没
+  //   进过模式表，所以 `**web_fetch … cannot access secure banking portals**` 也不响。三条一起补上，
+  //   否则照 commit 重新覆盖快照时这六段会静默退回，而 `npm test` 照样全绿。
+  //   误伤面实测过：三种形状在已收录 67 颗的正文里零命中（唯一两处撞在 InvestSkill 仓库级
+  //   SECURITY.md / CLAUDE.md，那些不进扫描面）。
+  [/\b(?:in|with) code\b|code-verified/i, '把计算推给"能跑代码"的运行时（`Build with code`、`Compute ratios with code`、`In code: a single CONFIG dict`、`code-verified math` 都是这一族）：根角色没有 shell（docs/dev/bash-gate.md §1.6），改成"照 references/ 的算式做、把算式写进答复、真要算力就委派 data_junior"'],
+  [/\bwith scripts\/|\bvia scripts\//i, '产出物把数字归给"跑过的脚本"（模板脚注 `Computed with scripts/calculate.py` 一类）：脚本不进发布包、也没有一句话能让它跑起来，这是一句运行时假话。注意不要写成裸 `scripts/`——`## Scripts` 段本来就链接它并写明"没人会执行"'],
+  [/\bweb_fetch\b/, '点名宿主工具名当取数或取证途径：本插件的检索只有一个入口（委派 web_retriever），且根角色的工具表里没有这颗工具。上游这句原意是护栏（"抓不到银行门户与企业内网"），改写时要保住护栏含义，别只把词换掉'],
 ]
 
 /** 出现即要求同一文件里必须同时存在的退路说明。 */

@@ -22,6 +22,16 @@
 于是 `\bWind\b` 会撞上按"风电"写的 sector-analysis、`\bChoice\b` 会撞上把 choice 当普通词用的 fact-check
 与 tax-lens。这一族改按无歧义形状写（中文名、`Wind / Choice` 的阶梯形状、iFind 与 AkShare 这类不成词的品牌名）——
 AGENTS.md §9.7 同一族的另一面：**闸门误伤过一次，下一个人就会把它整体削掉。**
+第七颗（GAJETOso/financeskills，企业会计与公司金融 48 颗）违规形状**整个换了地方**：它没有取数层——
+没有服务商阶梯、没有凭据名、一句 `web search` 都不写，23 条模式套全 48 颗只命中 2 处（都不在候选里）。
+但它把"推给运行时"写成了**代码与脚本**：43 份正文带着 `Run \`python3 scripts/calculate.py\` to self-test`，
+另有 `**Build with code**`、`In code: a single CONFIG dict`、`code-verified math`、模板脚注
+`Computed with scripts/calculate.py`，以及一句点名宿主工具名的 `**web_fetch … cannot access secure
+banking portals**`。上面那几条模式一条都不认（`code[\s-]execution` 要求两个词连着写，
+`node scripts/|bash scripts/` 只认那两个动词，工具名从来没进过表）。**代价就是这六段改完没人看守**：
+照 commit 重新覆盖快照时它们会静默退回而 `npm test` 全绿。因此闸门再加三条（二十三条 → 二十六条），
+补之前先量过误伤面：三种形状在已收录的正文里零命中。裸 `scripts/` **不能**当模式——`## Scripts`
+段本来就链接 `./scripts/calculate.py` 并写明"没人会执行它"，要认的是"把数字归给跑过的脚本"那个形状。
 
 - [ ] **1. 谁去取数。** 正文有没有要求 Agent 自己去 `web search`、抓 URL 或跑取数脚本。本插件取数
   只有一个入口：主 Agent 委派 `data_collector`（结构化数据）/ `web_retriever`（网页与披露文件）；
@@ -59,6 +69,12 @@ AGENTS.md §9.7 同一族的另一面：**闸门误伤过一次，下一个人�
   同一族的另一种形状是**"看起来能跑"的伪调用围栏**：第六颗的 ```python 块里没有 import、没有 shell 指令，
   写的却是 `get_financials(ticker, "income", "annual") → 利润表`——模型会照着这个形状去调一个运行时不存在的工具。
   按同一条处理：整段换成委派 brief（要哪些字段、as-of 哪天），字段清单本身是方法论，留下。
+  第七颗又添三种同族形状，都要按同一个改法处理（删掉指令 + 点名"读哪份 `references/`、算式写进答复、
+  统计量委派 `data_junior`"）：**"用代码算"的英文措辞**（`Build with code` / `Compute ratios with code` /
+  `In code: a single CONFIG dict` / `code-verified math`）、**产出物把数字归给跑过的脚本**（模板脚注
+  `Computed with scripts/calculate.py`——这在本插件里是一句运行时假话，没有任何脚本执行过），以及
+  **点名宿主工具名**（`web_fetch` 那句本意是护栏"抓不到银行门户与企业内网"，改写时**两层意思都得保住**：
+  闸门只认词形，第五颗的 `position-management:51` 与这一颗是同一课）。
 - [ ] **5. 出图与报告。** 教 Agent 自己产出 HTML/Chart.js/图形或报告文件的，**不进 catalog**
   （§6.1 出图只走 `render_chart`；§7 报告链路已删除且禁止恢复），留在快照里当材料。
 - [ ] **6. 编排与别名。** 会接管会话路由的 orchestrator、上游自己标注的 alias 残片，不进 catalog。
@@ -109,6 +125,11 @@ AGENTS.md §9.7 同一族的另一面：**闸门误伤过一次，下一个人�
 
 - 本地工作区能发现文件，不代表发布包含有它。`package.json` 的 `files` 按仓库逐个登记（`selected-skills/catalog.js`、同级 `README.md`，加上每颗 `selected-skills/<repository>`）；新接一份快照忘了登记时 catalog 仍可能有条目，但用户启用后找不到对应 `SKILL.md`。
 - 更新 catalog 时，确认每一条 `repository` / `name` 都能对应到 `selected-skills/<repository>/skills/<name>/SKILL.md`，并确认该项目的 `LICENSE` 与 `UPSTREAM.md` 随包发布。通过 npm pack 文件清单验证，不要只依赖仓库目录存在。
-- 随包发的是运行时正文与溯源（skills 根 + `LICENSE` + `UPSTREAM.md`），不是上游仓库的全部：六颗快照**都**用自己的 `.npmignore` 挡非运行内容（`investment-skills` 挡 README 成图、viz 站点、它的 CI 与 roadmap 文档；`china-stock-research-skills` 挡 issue/PR 模板、`examples/` 与九份仓库文档，但 **`skills/shared/` 必须留**——六颗模块的正文按 `../shared/…` 相对链接读那里的引用标准、行业 overlay 与输出模板；`InvestSkill` 挡静态站、与 skill 正文同源的 `prompts/` 副本、`scripts/`、CI 与 20 份仓库文档；`peter-lynch-skill` 只挡一份上游 README；`trading-skills` 挡它的 `docs/`、`scripts/`、CI、`catalog.json` 与 `skills/_lib/`，另按合规口径挡掉券商执行面那颗 `skills/etoro/`；第六颗挡 `agent-plugins/`（上游自己 vendored 的 skill 副本）、`managed-agent-cookbooks/` 与 `.codebuddy/`（它给别家宿主编排用的材料）、`scripts/`、每条款线的 `.claude-plugin/` 与 `.mcp.json`、根级 `README.md` / `CLAUDE.md` / 接入计划，并按同一条合规口径挡掉**四份可运行的取数服务端** `mcp-servers/`——它能连付费接口、带密钥配置形态，与不发布券商执行面是同一条线）。**上游自带的可执行面不在这条线上**：`framework.py`、`install.sh`、`Makefile`、`agents/openai.yaml` 照旧随包作为材料（有的正文把它写成方法论入口并同时给了无 shell 的退路），provider 与工具面从不执行——第 4 条管的是"正文不许指挥 Agent 去跑它"，不是"文件必须不在盘上"。全量快照完整住在 git，`github:` 安装与"当时是哪个 commit"的复核都不受影响。**那份 `.npmignore` 就是排除口径的唯一声明处**：`test/packaging.test.mjs` 逐颗快照读它、再拿发布清单反查，**目录规则与文件规则两类都问**（补的排除多是 `README*.md` 这类文件规则，只查目录等于放任它们不生效——AGENTS.md §9.7 同一族）；写了却没生效、或有人放宽口径都会红。放宽或收紧口径都要同步该项目的 `UPSTREAM.md` Packaging 一行。
+- 随包发的是运行时正文与溯源（skills 根 + `LICENSE` + `UPSTREAM.md`），不是上游仓库的全部：七颗快照**都**用自己的 `.npmignore` 挡非运行内容（`investment-skills` 挡 README 成图、viz 站点、它的 CI 与 roadmap 文档；`china-stock-research-skills` 挡 issue/PR 模板、`examples/` 与九份仓库文档，但 **`skills/shared/` 必须留**——六颗模块的正文按 `../shared/…` 相对链接读那里的引用标准、行业 overlay 与输出模板；`InvestSkill` 挡静态站、与 skill 正文同源的 `prompts/` 副本、`scripts/`、CI 与 20 份仓库文档；`peter-lynch-skill` 只挡一份上游 README；`trading-skills` 挡它的 `docs/`、`scripts/`、CI、`catalog.json` 与 `skills/_lib/`，另按合规口径挡掉券商执行面那颗 `skills/etoro/`；第六颗挡 `agent-plugins/`（上游自己 vendored 的 skill 副本）、`managed-agent-cookbooks/` 与 `.codebuddy/`（它给别家宿主编排用的材料）、`scripts/`、每条款线的 `.claude-plugin/` 与 `.mcp.json`、根级 `README.md` / `CLAUDE.md` / 接入计划，并按同一条合规口径挡掉**四份可运行的取数服务端** `mcp-servers/`——它能连付费接口、带密钥配置形态，与不发布券商执行面是同一条线）；第七颗只带 `skills/` 一棵树——上游仓库根的 `tools/`（MCP 服务端与
+Stripe / Plaid / QuickBooks / Xero 连接器，执行面）、`standards/`（924 KB 准则摘要）、`commands/`、
+`projects/` 等**整个不复制进本仓**（实测：48 颗的 175 条相对链接全部落在自己目录内，`../` 零命中，
+所以不带也不破任何一条正文链接），它的 `.npmignore` 只有两条裸名规则：`evals`（48 份评测夹具，
+`SKILL.md` 从不链接）与 `scripts`（43 份 python 计算脚本，本轮按第 4 条处置——"允许自带脚本、
+由能执行 shell 的角色跑"这条政策若要翻案，第一条要动的就是这里）。**上游自带的可执行面不在这条线上**：`framework.py`、`install.sh`、`Makefile`、`agents/openai.yaml` 照旧随包作为材料（有的正文把它写成方法论入口并同时给了无 shell 的退路），provider 与工具面从不执行——第 4 条管的是"正文不许指挥 Agent 去跑它"，不是"文件必须不在盘上"。全量快照完整住在 git，`github:` 安装与"当时是哪个 commit"的复核都不受影响。**那份 `.npmignore` 就是排除口径的唯一声明处**：`test/packaging.test.mjs` 逐颗快照读它、再拿发布清单反查，**目录规则与文件规则两类都问**（补的排除多是 `README*.md` 这类文件规则，只查目录等于放任它们不生效——AGENTS.md §9.7 同一族）；写了却没生效、或有人放宽口径都会红。放宽或收紧口径都要同步该项目的 `UPSTREAM.md` Packaging 一行。
 **规则只能写裸名**（一条目录名或一个文件名，不带路径、不以 `/` 开头）：反向断言丢掉以 `/` 开头的规则、也不检查带内部斜杠的规则，而目录规则按**任意路径段**匹配——所以 `skills/` 这一条绝不能写（一颗快照里有六个 `skills` 段，写下去等于把全部正文挡掉，而 catalog 反查只报"包里找不到 SKILL.md"），`vertical-plugins/fund-admin/` 这种写法看起来更精确、实际根本不被检查。上游同名文件到处有的（`README.md`）也按裸名挡，npm 的 ignore 语义本来就是逐目录生效。
 - 回归重点在 `test/selected-skills-content.test.mjs`（按 catalog 现算的正文合规扫描，扫每颗 skill 目录下的全部 `.md`：取数归属、记忆回填、执行面、委派档）、`test/selected-skills-provider.test.mjs`（默认关闭、root/preset 限定、list/get 过滤、scope 清理和每轮 pre-step 读最新开关——含已有 Agent 的目录刷新、缓存失效时机与两种监听顺序；catalog 清单对多 skill 的快照按「skills 根目录 − 排除清单」派生，不写死名单）、`test/persona.test.mjs`（skill frontmatter / preset 接线 / catalog 身份唯一）及 `test/packaging.test.mjs`（发布包逐条查文件）。改动目录布局、catalog 字段或接入逻辑时同步这些断言。

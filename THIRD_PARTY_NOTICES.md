@@ -16,14 +16,20 @@
 | Peter Lynch Research（`e0eaf58`，固定快照；套一层 skills 目录 + 取数口径改写，方法论、预算与输出模板未改） | Szymon Nycz（仓库账号 `DjNero11`） | MIT | <https://github.com/DjNero11/peter-lynch-skill> | `selected-skills/peter-lynch-skill/LICENSE` | 1 / 1 | 「精选 Skills」中的 `peter-lynch-skill`（个股快筛与尽调工作流，美股与境外上市口径） |
 | Trading Skills（`f1ae7d4`，固定快照；平铺掉上游的主题分组 + 取数与计算口径改写，判定档位、阈值与分析结论未改） | marian2js | MIT | <https://github.com/marian2js/trading-skills> | `selected-skills/trading-skills/LICENSE` | 11 / 19 | 「精选 Skills」中的 11 颗交易过程 Skill（`catalyst-map`、`watchlist-review`、`evidence-gap-check`、`thesis-validation`、`risk-reward-sanity-check`、`execution-plan-check`、`portfolio-concentration`、`journal-pattern-analyzer`、`post-trade-review`、`position-sizing`、`position-management`）；券商执行面那颗不进发布包，其余排除项留在快照里作为材料 |
 | Claude for Financial Services CN（`d7585ca`，固定快照；改写 12 颗正文的取数层与出图口径，判定档位、报告骨架与分析结论未改） | jwangkun（`LICENSE` 的署名行还带着没去掉的方括号，六份 plugin manifest 另署 `Anthropic FSI China`；上游自称基于 Anthropic 官方仓库适配 A 股） | **Apache-2.0** | <https://github.com/jwangkun/claude-for-financial-services-cn> | `selected-skills/claude-for-financial-services-cn/LICENSE` | 12 / 63 | 「精选 Skills」中的 12 颗 A 股卖方研究 Skill（`china-earnings-analysis`、`china-earnings-preview`、`china-comps-analysis`、`china-dcf`、`china-sector-overview`、`china-catalyst-calendar`、`china-break-trace`、`china-variance-commentary`、`china-initiating-coverage`、`china-morning-note`、`china-thesis-tracker`、`china-idea-generation`）；正文本身就是取数目录的那颗、元技能与 alias 残片、按美股税制写的税损收割那颗、以及要求产出或读取工作簿与 deck 的十一颗都不开放；四份可运行的取数服务端不进发布包 |
+| FinanceSkills（`b0c6239`，固定快照；改写 8 颗正文里"自己跑脚本 / 用代码算"那 16 段与一句点名宿主检索工具的护栏，公式、阈值与分析结论未改） | Ayotunde Oso（仓库账号 `GAJETOso`；`LICENSE` 版权行、`marketplace.json` 的 publisher 与上游 `AGENTS.md` 另署 **KOMVIA**） | MIT | <https://github.com/GAJETOso/financeskills> | `selected-skills/financeskills/LICENSE` | 8 / 48 | 「精选 Skills」中的 8 颗估值建模与偿债 / 行业专用财务 Skill（`wacc-computation`、`company-valuation`、`three-statement-modeling`、`credit-analysis`、`ecl-computation`、`banking-compliance`、`insurance-reserving`、`forensic-accounting`）；其余 40 颗按**领域外**排除（编制视角的会计作业、内部审计与内控、个人理财与美国 / 英国税制、加密资产、私有公司语境），留在快照里作为可审查材料；上游自带的 43 份 python 计算脚本与它自己的评测夹具目录不进发布包，上游的 MCP 服务端与 Stripe / Plaid 等账户连接器连本仓都不进 |
 
-六份快照合计 **59 个可选 Skill**（快照里共有 125 颗 skill，差额逐颗记在各自的 `UPSTREAM.md` 里）。
+七份快照合计 **67 个可选 Skill**（快照里共有 173 颗 skill，差额逐颗记在各自的 `UPSTREAM.md` 里）。
 首页「精选 Skills」那句里的两个数字与此同源，由回归测试按 catalog 现算钉住。
 它们的收录方式、上游 commit、维护状态与逐颗排除理由记在各自的 `UPSTREAM.md` 里，并且**默认全部关闭**，
 只在使用者于配置页显式开启后才对新建的 Capital 会话可见。
 上游自带的编排、报告与出图 skill 不进入可选清单（InvestSkill 的六颗、Trading Skills 的七颗与这第六颗的 51 颗
 仍留在快照里作为可审查材料）：前者与本插件既有的角色路由冲突，后两者与已删除的报告交付链路、
 以及"出图只走 `render_chart`"的约定冲突。
+第七份（FinanceSkills）排除的 40 颗走的是**另一条线**：不是执行面，也不是路由冲突，而是**领域外**——
+上游自述服务对象是会计与企业财务人员，正文的角色是总账会计、集团报告会计、内控经理、FP&A 经理与
+个人理财顾问，把账做对；本插件的使用者读别人披露的账。加密资产那颗（`crypto-accounting`）与本插件
+不涉及的资产类别有关，个人理财与美国 / 英国税制那六颗与本插件的服务范围无关，两者都按这一条排除，
+逐族理由记在该快照的 `UPSTREAM.md` 里。
 Trading Skills 另外排除的几类走的是同一批约定：券商 API 执行面（在对话里采集凭据、真实下单）不进可选清单、
 也不进发布包；接管会话路由的四颗编排 Skill 不收录；把取数写死成"向用户点选付费服务商再自己调接口"的三颗不收录，
 本插件没有那些服务商的凭据，密钥只进凭据域。给出仓位数字与持仓加减动作的那两颗**收录**：本插件不收的是执行面，
@@ -45,7 +51,7 @@ python 模块"；第六颗（本颗）把形态摊成全量：每份正文自带
 改了什么、影响几篇，逐条记在对应快照的 `UPSTREAM.md`；改写结果由仓库自带的回归测试逐条复查。
 方法论、评分表、输出模板与分析结论一字未改。
 
-**本颗是六份里唯一的 Apache-2.0 快照**（其余五份为 MIT），许可义务也因此多一条：Apache-2.0 第 4 条 (b) 款要求
+**本颗是七份里唯一的 Apache-2.0 快照**（其余六份为 MIT），许可义务也因此多一条：Apache-2.0 第 4 条 (b) 款要求
 "修改过的文件本身带上显著声明"，而不只是在他处说明。所以被改写的那 12 份正文在标题下各留了一句可见的改动声明，
 点名所钉 commit 并指回该快照的 `UPSTREAM.md`；与上游逐字节相同的 51 份不带这一行。上游没有 `NOTICE` 文件，
 因此随包保留 `LICENSE` 原件与这份清单即可。
@@ -132,10 +138,15 @@ roadmap 与贡献指南、站点体检记录、给别的宿主用的接线配置
 ## 本插件自身
 
 Capital Generation 的原创代码与文档以 MIT 许可发布，见仓库根的 `LICENSE`。
-本文件不构成对任何第三方项目、数据源或其观点的背书；六份 Skill 快照里的方法论与结论属于原作者，
+本文件不构成对任何第三方项目、数据源或其观点的背书；七份 Skill 快照里的方法论与结论属于原作者，
 使用前请自行复核来源，尤其不要把按美股语境写的框架直接当作 A 股规则——反过来也一样，
 第六份是按中国大陆卖方与机构研究惯例（中金 / 中信 / 华泰体例、申万与中信行业分类、CAS 科目、涨跌停与北向资金）写的，
 不能当作境外市场的口径。
 交易过程类的 Skill（第五份）给的是下单前的检查与下单后的复盘方法，其中也包含仓位数字与持仓加减建议；
 第六份的报告模板以投资评级、目标价与多空方向收尾。这些都停留在文字与图表上，属于方法推演而不是订单：
 本插件没有券商接口，不据它们下单、不改单，也不会替使用者执行任何一笔。
+第七份（FinanceSkills）给的是折现率、估值区间、偿债与债务容量、减值覆盖率、银行资本比率、保险准备金
+与账务异常线索：口径按 IFRS / US GAAP 与国际精算、巴塞尔惯例写，其中 `banking-compliance` 的资本阈值
+是巴塞尔原值（4.5% / 6% / 8%），境内适用《商业银行资本管理办法》另有最低线与附加资本，**不能当境内合规
+判断用**；`forensic-accounting` 给出的"疑似"清单是排查线索，不构成舞弊认定，也不构成审计意见或法律意见。
+这些数字同样是方法推演的产物，不承诺表现，动手那一侧永远是使用者。
