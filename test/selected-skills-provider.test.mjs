@@ -1,10 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readdirSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { registerRootSelectedSkills, SELECTED_SKILL_CATALOG } from '../lib/agents/selected-skills-provider.js'
-import { SELECTED_SKILL_SKILL_DIRS } from '../selected-skills/catalog.js'
+import { SELECTED_SKILL_SKILL_DIRS, SELECTED_SKILL_TASK_IDS } from '../selected-skills/catalog.js'
 
 // 留在快照里、但不进可选清单的六颗，理由逐条写在 selected-skills/InvestSkill/UPSTREAM.md。
 const INVESTSKILL_EXCLUDED = [
@@ -116,6 +116,14 @@ const FINANCESKILLS_EXCLUDED = [
 function candidate(name) {
   return { name, description: name, invocation: { modelInvocable: true, userInvocable: true }, source: 'custom', provider: 'source', rank: 1, locator: name }
 }
+
+/**
+ * provider 的 `list()` 现在多带一类候选：任务型内置 skill 的**遮蔽候选**（正文在读取期拼上
+ * 外部精选 skill 索引）。它们与 fs provider 的同名候选并存，注册表按 rank 取本包这一份，
+ * 所以"精选清单"类断言必须先把它们摘掉——不摘的话，量到的是两类东西的并集。
+ * 遮蔽契约本身由文件末尾那组用例专门钉住，不靠这些断言顺手带上。
+ */
+const selectedOnly = (names) => names.filter((name) => !SELECTED_SKILL_TASK_IDS.includes(name))
 
 function makeHarness() {
   const listeners = new Map()
@@ -369,7 +377,7 @@ test('selected skill provider: Capital root only, filtered catalog, scope cleanu
       `provider 的 customSkillDirs 缺少 ${repository} 的 skills 根（应以 ${expected} 结尾）`)
   }
   assert.equal(harness.providerConfig.providerName, 'capital-selected-skills')
-  assert.deepEqual((await harness.provider.list({})).map(({ name }) => name), ['buffett-investment-framework'])
+  assert.deepEqual(selectedOnly((await harness.provider.list({})).map(({ name }) => name)), ['buffett-investment-framework'])
   assert.equal((await harness.provider.get(candidate('buffett-investment-framework'), {})).content, 'loaded')
    assert.throws(
      () => harness.provider.get(candidate('financial-health'), {}),
@@ -412,7 +420,7 @@ test('selected skill provider: 先建会话再切 preset（GUI 顺序）也必�
 
   await selected('session-root', 'capital-generation')
   assert.equal(harness.providerRegistrationCount, 1, '切到 Capital 必须注册 provider')
-  assert.deepEqual((await harness.provider.list({})).map(({ name }) => name), ['buffett-investment-framework'])
+  assert.deepEqual(selectedOnly((await harness.provider.list({})).map(({ name }) => name)), ['buffett-investment-framework'])
   assert.equal(root.preStepListenerCount, 2, '切换路径同样要落位每轮刷新钩子')
 
   // 同一个 Agent 的重复事件（再 select 一次 / 与 agent/created 撞车）不许注册第二个 provider。
@@ -447,7 +455,7 @@ test('selected skill provider: 嵌套 skills 根里的名字走同一个 list/ge
   const harness = makeHarness()
   registerRootSelectedSkills(harness.ctx, { factCheck: true }, harness.createFilesystemProvider)
   await harness.listeners.get('agent/created')({ agent: harness.makeAgent().agent })
-  assert.deepEqual((await harness.provider.list({})).map(({ name }) => name), ['fact-check'])
+  assert.deepEqual(selectedOnly((await harness.provider.list({})).map(({ name }) => name)), ['fact-check'])
   assert.equal((await harness.provider.get(candidate('fact-check'), {})).content, 'loaded')
   assert.throws(
     () => harness.provider.get(candidate('buffett-investment-framework'), {}),
@@ -474,13 +482,13 @@ test('selected skill provider: 开关每轮现读，已有 Agent 的 catalog 跟
   // 会话已经存在，用户在设置里打开开关、发下一条指令：
   selection = { buffettFramework: true }
   await live.preStep()
-  assert.deepEqual(live.catalogSnapshot, ['buffett-investment-framework'],
+  assert.deepEqual(selectedOnly(live.catalogSnapshot), ['buffett-investment-framework'],
     '下一轮 pre-step 的 catalog 快照必须看到新开关，不需要新建会话')
   assert.equal(harness.invalidateCount, 1, '开关变化必须失效目录缓存，否则快照读到缓存里的旧目录')
 
   await live.preStep()
   assert.equal(harness.invalidateCount, 1, '开关未变不重算目录：每轮零成本')
-  assert.deepEqual(live.catalogSnapshot, ['buffett-investment-framework'])
+  assert.deepEqual(selectedOnly(live.catalogSnapshot), ['buffett-investment-framework'])
 
   selection = { buffettFramework: false }
   await live.preStep()
@@ -498,10 +506,10 @@ test('selected skill provider: 开关每轮现读，已有 Agent 的 catalog 跟
   const innerOrder = harness.makeAgent({ lateSnapshot: true })
   await created({ agent: innerOrder.agent })
   await innerOrder.preStep()
-  assert.deepEqual(innerOrder.catalogSnapshot, ['fact-check'])
+  assert.deepEqual(selectedOnly(innerOrder.catalogSnapshot), ['fact-check'])
   selection = { factCheck: false, buffettFramework: true }
   await innerOrder.preStep()
-  assert.deepEqual(innerOrder.catalogSnapshot, ['buffett-investment-framework'],
+  assert.deepEqual(selectedOnly(innerOrder.catalogSnapshot), ['buffett-investment-framework'],
     '快照监听先注册或后注册都要赶得上：钩子必须在 next() 之前失效缓存')
   assert.equal(harness.invalidateCount, 3)
 
@@ -510,5 +518,75 @@ test('selected skill provider: 开关每轮现读，已有 Agent 的 catalog 跟
   const late = harness.makeAgent()
   await created({ agent: late.agent })
   assert.equal(harness.providerRegistrationCount, 3)
-  assert.deepEqual((await harness.provider.list({})).map(({ name }) => name), ['fact-check'], '新 root Agent 必须读取最新开关')
+  assert.deepEqual(selectedOnly((await harness.provider.list({})).map(({ name }) => name)), ['fact-check'], '新 root Agent 必须读取最新开关')
+})
+
+/**
+ * 任务型内置 skill 的索引：正文在**读取期**拼上"本轮可用的外部精选 Skill"。
+ *
+ * 三条判据，缺一条就会退化成另一件事：
+ *   ① 一颗都没启用时**不遮蔽**：`list()` 为空，用户看到的与没有这个 provider 时逐字相同；
+ *   ② 索引为空的那些任务型 skill **不遮蔽**（让给 fs provider 的原文）——遮蔽是加法不是替换，
+ *      "没有索引"永远不许演变成"这颗 skill 不见了"（AGENTS.md §9.7 ⑤）；
+ *   ③ `get()` 拿到的正文 = 磁盘正文 + 索引块，磁盘文件一个字节都不动；索引里的描述用**运行时那一份**
+ *      （与会话目录同源），不是设置卡片里策展过的中文摘要。
+ */
+test('任务型 skill 索引：只有"确实有索引可给"的那几颗才遮蔽，正文在读取期拼装', async () => {
+  const harness = makeHarness()
+  const skillsDir = fileURLToPath(new URL('../preset/capital-generation/skills', import.meta.url))
+  // 这个用例自带替身 fs 根，为的是让"每颗任务型 skill 分开算"量得出来：
+  // `china-comps-analysis`（valuation + competition）只进 equity / event，`tax-lens`（tax + portfolio）
+  // 只进 portfolio —— 共用 fixture 那三颗都带 `risk`，而 risk 三颗全收，量不出区别。
+  const createFilesystemProvider = (_ctx, _control, config) => ({
+    name: config.providerName,
+    async list() { return [candidate('china-comps-analysis'), candidate('tax-lens')] },
+    async get(value) { return { ...value, content: 'loaded' } },
+    async dispose() {},
+  })
+  // 读选择用**函数**形状（settings 读回就是每轮现读），静态全关会在注册前短路掉。
+  const selection = { chinaCompsAnalysis: false }
+  registerRootSelectedSkills(harness.ctx, () => selection, createFilesystemProvider)
+  const created = harness.listeners.get('agent/created')
+
+  // ① 默认全关：一条候选都不列，遮蔽为零。
+  const off = harness.makeAgent()
+  await created({ agent: off.agent })
+  assert.deepEqual(await harness.provider.list({}), [], '一颗都没启用时不许遮蔽任何内置 skill')
+
+  // ② `china-comps-analysis` 只挂 equity + event ⇒ portfolio 那一颗不许被遮蔽（留给 fs provider 的原文）。
+  selection.chinaCompsAnalysis = true
+  const live = harness.makeAgent()
+  await created({ agent: live.agent })
+  const shadows = (await harness.provider.list({})).filter(({ name }) => SELECTED_SKILL_TASK_IDS.includes(name))
+  assert.deepEqual(shadows.map(({ name }) => name), ['capital-equity-research', 'capital-event-impact'],
+    '索引为空的任务型 skill 不许遮蔽；有索引的才遮蔽')
+  assert.ok(shadows.every(({ rank }) => rank < 300),
+    '遮蔽候选的 rank 必须低于同层自定义根（CUSTOM_RANK = 300），否则同名时赢不了，索引永远看不见')
+  assert.ok(shadows.every(({ invocation }) => invocation.modelInvocable === true),
+    '遮蔽候选必须自带 invocation：isModelInvocable 直接读它，缺了会在 tool-skill 里抛错')
+
+  // ③ 正文拼装：磁盘正文 + 索引块；索引行是「name: 运行时描述」（替身 fs 的 description 就是 name）。
+  const definition = await harness.provider.get(candidate('capital-equity-research'), {})
+  const raw = readFileSync(join(skillsDir, 'capital-equity-research', 'SKILL.md'), 'utf8')
+  // 换行一律写成可选 CR：Windows 工作区拿到的 SKILL.md 是 CRLF（test/cross-platform.test.mjs 钉着）。
+  const body = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim()
+  assert.ok(definition.content.startsWith(body), '正文必须以磁盘原文开头，索引只往后接')
+  assert.match(definition.content, /## 附：本轮可用的外部精选 Skill（索引）/)
+  assert.match(definition.content, /以本 skill 为准/, '索引块必须自带冲突判据（协议优先）')
+  assert.match(definition.content, /`china-comps-analysis`: china-comps-analysis/, '索引行 = name + 运行时描述')
+  assert.equal(definition.content.includes('`tax-lens`'), false, '没启用的精选 skill 不许出现在索引里')
+  assert.equal(definition.resourceBase.kind, 'directory', '正文里的相对链接仍要能按目录解析')
+  assert.ok(definition.resourceBase.path.endsWith(join('skills', 'capital-equity-research')))
+
+  // ④ 换成只挂 portfolio 的那一颗：遮蔽对象跟着换，equity 回到"没有索引"。
+  // 开关变化要经**下一轮 pre-step** 才失效缓存（替身注册表按 revision 缓存 list 结果，与真注册表同形状），
+  // 所以这里先走一轮 pre-step——正是"用户拨开关、发下一条指令"的真实顺序。
+  selection.chinaCompsAnalysis = false
+  selection.taxLens = true
+  await live.preStep()
+  assert.deepEqual((await harness.provider.list({}))
+    .filter(({ name }) => SELECTED_SKILL_TASK_IDS.includes(name)).map(({ name }) => name),
+  ['capital-portfolio-review'], '索引跟着启用集合走：谁有料谁才遮蔽')
+  const plain = await harness.provider.get(candidate('capital-equity-research'), {})
+  assert.equal(plain.content, body, '没有索引时正文必须与磁盘原文逐字相同（遮蔽在内容上不可见）')
 })

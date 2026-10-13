@@ -24,6 +24,7 @@
 | 交付登记与会话事件类型 | `docs/dev/chart-delivery-events.md`（§6.3）|
 | preset 现状、人设落点、「不许改」全表、新增角色六处齐改 | `docs/dev/preset-persona.md`（§8.1 §8.2 §8.4 §8.5）|
 | 外部 Skills 接入 | `docs/dev/selected-skills.md`（§8.6）|
+| 精选 Skill 索引与标签注册表（含勾选上限） | `docs/dev/selected-skill-index.md`（§8.7）|
 | 工具 schema 全表、数据源验收全表 | `docs/dev/tool-schema.md`（§9.1–§9.6 §10.1–§10.9）|
 
 ### ⛔ 硬约束一览

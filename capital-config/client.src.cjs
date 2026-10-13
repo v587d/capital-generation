@@ -9,8 +9,9 @@ const {
   Modal,
   writeClipboard,
   IconRightUpOutlineRegular,
+  IconWarningTriangleOutlineRegular,
 } = require('@deepseek-ai/dsh-client-ui-primitives')
-const { SELECTED_SKILL_CATALOG, SELECTED_SKILL_TAG_LABELS } = require('../selected-skills/catalog.js')
+const { SELECTED_SKILL_CATALOG, SELECTED_SKILL_TAG_LABELS, SELECTED_SKILLS_MAX_ENABLED } = require('../selected-skills/catalog.js')
 
 /**
  * 卡片读的是**配置条目 id**，坐的是**组合包自己的页面**——两个不同的字符串，各自钉在不同地方：
@@ -107,6 +108,11 @@ const zh = {
   selectedSkillsTitle: '精选 Skills',
   selectedSkillsFilterLabel: '按能力筛选',
   selectedSkillsEmpty: '没有匹配这个标签的 Skill。',
+  // 上限只挡"再勾一个"，不挡"已经勾上的生效"：老配置多于上限时照常全部生效，只提示收敛
+  // （运行期 provider 不按这个数截断，否则就是"卡片上开着 10 个、会话里只剩 6 个"的静默砍功能）。
+  // 被挡住的原因只活在**开关左侧那枚三角警示图标**上（悬停 title / 读屏 aria-label 同一串）：
+  // {count} 是计数占位（"6/6"），由代码拼，字典不存数字。
+  selectedSkillsCapTooltip: 'Skill已达上限 ({count})。',
   selectedSkillsCopyName: '复制技能名',
   selectedSkillsCopied: '已复制',
   selectedSkillsDetail: '详情',
@@ -146,6 +152,7 @@ const en = {
   selectedSkillsTitle: 'Selected Skills',
   selectedSkillsFilterLabel: 'Filter by capability',
   selectedSkillsEmpty: 'No skills match this tag.',
+  selectedSkillsCapTooltip: 'Skill limit reached ({count}).',
   selectedSkillsCopyName: 'Copy skill name',
   selectedSkillsCopied: 'Copied',
   selectedSkillsDetail: 'Details',
@@ -253,7 +260,12 @@ function installStyles() {
     .capital-config-switch-text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
     .capital-config-switch-label { color: var(--dsw-alias-label-primary); font-size: 13px; font-weight: 500; line-height: 20px; }
     .capital-config-hint { margin: 0; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
-    .capital-config-write-failed { margin: 0; color: var(--dsw-alias-label-error); font-size: 12px; line-height: 18px; }
+    /* ⚠️ 语义色只用主题真实定义的 --dsw-alias-state-*：--dsw-alias-label-error 主题里**没定义**，
+       var() 判败回继承色 ⇒ light 黑 / dark 白（这枚图标与"保存失败"行实机就是这么错的）。
+       warn 色用 --dsw-alias-state-warn-primary（StateDot / Tag 的 warning 同款）。cursor:help 让
+       "它有话要说"看得出来；padding 2px + 负 margin 只放大悬停命中区、不占布局（14px 的图标当悬停靶子太小）。 */
+    .capital-config-skill-cap-icon { display: inline-flex; align-items: center; flex: none; padding: 2px; margin: -2px; color: var(--dsw-alias-state-warn-primary); cursor: help; }
+    .capital-config-write-failed { margin: 0; color: var(--dsw-alias-state-error-primary); font-size: 12px; line-height: 18px; }
     /* 标题右侧的两枚外链：官方那一格是 flex-wrap + gap:8px，整组自己收成一个 inline-flex 项，
        免得标题变长时被换行拆成两截。颜色只走 --dsw-* 变量，明暗两套都跟着宿主。 */
     .capital-config-plugin-links { flex: none; align-items: center; gap: 2px; display: inline-flex; }
@@ -570,7 +582,7 @@ function loadSkillDoc(name) {
 /** 「已复制」亮多久：要够读完，又不能亮到让人以为它是个状态开关。 */
 const COPIED_FLASH_MS = 1600
 
-function SelectedSkillRow({ entry, state, disabled, onChange, t }) {
+function SelectedSkillRow({ entry, state, disabled, capReached = false, capTooltip, onChange, t }) {
   const locale = skillLocale()
   const label = entry.label[locale]
   const repositoryUrl = `https://github.com/${entry.owner}/${entry.repository}`
@@ -667,10 +679,22 @@ function SelectedSkillRow({ entry, state, disabled, onChange, t }) {
         h('div', { className: 'capital-config-skill-tags' }, entry.tags.map((tag) =>
           h('span', { key: tag, className: 'capital-config-skill-tag' }, SELECTED_SKILL_TAG_LABELS[locale][tag] ?? tag))),
       ),
+      // 被上限挡住的行（到上限 + 没勾）：开关**左边**一枚三角警示图标，原因挂在图标的
+      // title / aria-label 上（同一串，悬停才见）——开关上不挂 title，列表顶上也没有整行提示。
+      // 图标组件不吃自定义 props（artwork 只解构 size/className/strokeWidth），所以 title /
+      // aria 挂在包着它的 span 上；`role=img` 让读屏在开关之前先听到"为什么它拨不动"。
+      capReached && state?.on !== true ? h('span', {
+        className: 'capital-config-skill-cap-icon',
+        title: capTooltip,
+        role: 'img',
+        'aria-label': capTooltip,
+      }, h(IconWarningTriangleOutlineRegular, { size: 14 })) : null,
       h(Switch, {
         label,
         checked: state?.on === true,
-        disabled: disabled || state?.writing === true,
+        // 上限只挡"再勾一个"：**已勾上的行永远关得掉**——把用户关进一个既不能再选、也不能取消的
+        // 格子里，比不给上限糟得多。被挡住的原因由左边那枚警示图标回答（控件不许对自己的状态说谎）。
+        disabled: disabled || state?.writing === true || (capReached && state?.on !== true),
         onChange,
       }),
     ),
@@ -774,19 +798,29 @@ function CapitalCard(props) {
       onClick: () => setTagFilter(tag),
     }, tagLabels[tag] ?? tag, h('span', { className: 'capital-config-selected-filter-count' }, String(tagCounts.get(tag))))),
   )
+  // 已选数按开关现算（tab 上那个 n/68 也用它）。上限**只在编辑期**生效：它挡"再勾一个"，
+  // 不挡"已经勾上的生效"——老配置超过上限时运行期照常全部加载，这里只提示收敛。
+  const enabledSkills = SELECTED_SKILL_CATALOG.filter(
+    (entry) => state.selectedSkills?.[entry.key]?.on === true,
+  ).length
+  const capReached = enabledSkills >= SELECTED_SKILLS_MAX_ENABLED
+  // 被挡住的行共用同一串悬停文案（含计数），拼一次传下去：62 行各自重拼，漂移就是两处对不齐。
+  const capTooltip = t('selectedSkillsCapTooltip')
+    .replace('{count}', `${enabledSkills}/${SELECTED_SKILLS_MAX_ENABLED}`)
   const skillRows = visibleSkills.length > 0
     ? visibleSkills.map((entry) => h(SelectedSkillRow, {
       key: entry.key,
       entry,
       state: state.selectedSkills?.[entry.key],
       disabled: disabled || state.saving,
+      capReached,
+      capTooltip,
       onChange: (value) => props.toggleSelectedSkill(entry.key, value),
       t,
     }))
     : [h('p', { key: 'empty', className: 'capital-config-hint' }, t('selectedSkillsEmpty'))]
-  const enabledSkills = SELECTED_SKILL_CATALOG.filter(
-    (entry) => state.selectedSkills?.[entry.key]?.on === true,
-  ).length
+  // 到上限的提示不再占一整行：原因逐行挂在被挡住的开关左侧那枚三角警示图标上（SelectedSkillRow），
+  // 这里不画任何汇总提示——一行红字 + 62 个灰开关是两套说法，只留图标一套。
   // 行数取不到就**只留标题**：把"还不知道"画成 `0` 是控件对自己的状态说谎（数字缺席本身就是信号）。
   const withCount = (label, count) => (Number.isInteger(count) ? `${label} ${count}` : label)
   const options = [
@@ -821,10 +855,12 @@ function CapitalCard(props) {
       },
     }),
     panel('sources', [form, localFetchSection]),
-    panel('skills', [h('div', { className: 'capital-config-selected-layout' },
-      skillsFilter,
-      h('div', { className: 'capital-config-selected-list' }, ...skillRows),
-    )]),
+    panel('skills', [
+      h('div', { className: 'capital-config-selected-layout' },
+        skillsFilter,
+        h('div', { className: 'capital-config-selected-list' }, ...skillRows),
+      ),
+    ]),
     // 第三块的内容是宿主自己画的那段清单（切过来才在下方显形）。画面上不再写那句"清单在下方"——
     // 用户点这一格看到的就是清单，多余的一行字只是噪音。但 `aria-controls` 指的这块面板不许是空的
     // （空面板不报错，只有读屏用户付账），所以那句话改挂在 sr-only 上：零布局贡献、读得到。

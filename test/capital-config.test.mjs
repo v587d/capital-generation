@@ -9,7 +9,7 @@ import { apply as hostApply, Config as CapitalConfig, SETTINGS_ENTRY_ID } from '
 import { fakeCtx as hostFakeCtx } from './cordis-fake.mjs'
 import { CAPITAL_CONFIG_ENTRY_ID, Config as MainConfig, LOCAL_FETCH_DEFAULTS, resolveLocalFetchConfig } from '../lib/index.js'
 import { LOCAL_FETCH_CLIENT_VERSION } from '../lib/web-retriever/local-fetch.js'
-import { SELECTED_SKILL_CATALOG, SELECTED_SKILL_TAG_LABELS } from '../selected-skills/catalog.js'
+import { SELECTED_SKILL_CATALOG, SELECTED_SKILL_TAG_LABELS, SELECTED_SKILLS_MAX_ENABLED } from '../selected-skills/catalog.js'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const CLIENT = join(ROOT, 'capital-config', 'client.js')
@@ -223,6 +223,9 @@ function loadClient({ scope, primitives = {}, fetchImpl = defaultFetch } = {}) {
         Modal(props) { return { type: 'Modal', props, children: props.children ?? [] } },
         Switch(props) { return { type: 'Switch', props, children: props.children ?? [] } },
         IconRightUpOutlineRegular: () => ({ type: 'icon', props: {}, children: [] }),
+        // 上限警示那枚官方三角 + 感叹号图标。桩给它一个可辨认的节点名，
+        // 好让用例钉住"行里真的渲染了这枚图标"而不是只钉文案。
+        IconWarningTriangleOutlineRegular: () => ({ type: 'warning-icon', props: {}, children: [] }),
         SettingsFormModel: function SettingsFormModel() { return model },
         writeClipboard: async (value) => { clipboardWrites.push(value); return true },
         ...primitives,
@@ -593,6 +596,103 @@ test('capital-config Client：已开启的 Skill 置顶，但只在进入那一�
 })
 
 /**
+ * 精选 Skills 的**编辑期上限**。三条判据缺一不可：
+ *   ① 到上限后没勾的开关点不动，原因挂在**开关左侧那枚三角警示图标**上（悬停 title 与读屏
+ *      aria-label 同一串；控件不许对自己的状态说谎——灰着的开关为什么灰着必须答得出来）；
+ *   ② **已勾上的行永远关得掉**——把用户关进一个既不能再选、也不能取消的格子里，比不给上限糟得多；
+ *   ③ 老配置（多于上限）照常全部生效，只提示收敛：运行期 provider **不按这个数截断**
+ *      （`test/selected-skill-tags.test.mjs` 的「上限不变量」钉着运行期那一半），否则症状就是
+ *      "卡片上开着 10 个、会话目录里只剩 6 个"的静默砍功能。
+ */
+test('capital-config Client：精选 Skills 编辑期封顶，老配置照常生效只提示收敛', () => {
+  const keys = SELECTED_SKILL_CATALOG.map((entry) => entry.key)
+  const labelOf = new Map(SELECTED_SKILL_CATALOG.map((entry) => [entry.label.zh, entry]))
+  const renderWith = (selectedSkills) => {
+    const scope = readyScope({ selectedSkills })
+    const { mod } = loadClient({ scope })
+    const { ctx, registrations, dictionaries } = fakeCtx({ scope })
+    mod.apply(ctx)
+    const page = cardRenderer(registrations).render()
+    // 精选 skill 的行 = 包着 Switch 的 switch-row（localFetch 那行同形，按 label 认出并排除）。
+    const rows = collect(page, 'div')
+      .filter((node) => node.props.className === 'capital-config-switch-row')
+      .filter((row) => collect(row, 'Switch').some((node) => node.props.label !== 'localFetchLabel'))
+    return {
+      rows,
+      switches: collect(page, 'Switch').filter((node) => node.props.label !== 'localFetchLabel'),
+      capPanels: collect(page, 'p').filter((node) => node.props['data-capital-config-cap'] !== undefined),
+      dict: dictionaries.get('settings.capital'),
+    }
+  }
+  /** 警示图标的位置与身份：在**开关左边**，悬停 title 与读屏 aria-label 同一串（原句由字典用例钉）。 */
+  const assertCapIcon = (row, blocked) => {
+    const iconIndex = row.children.findIndex((node) => node.props.className === 'capital-config-skill-cap-icon')
+    const switchIndex = row.children.findIndex((node) => node.type === 'Switch')
+    if (!blocked) {
+      assert.equal(iconIndex, -1, '没被挡住的行不放警示图标')
+      return
+    }
+    assert.ok(iconIndex >= 0, '被挡住的行左边要有三角警示图标')
+    assert.ok(iconIndex < switchIndex, '图标必须在开关左边')
+    const icon = row.children[iconIndex]
+    assert.equal(icon.children[0].type, 'warning-icon', '三角感叹号是官方那枚')
+    assert.equal(icon.props.title, 'selectedSkillsCapTooltip', '悬停文案挂 title')
+    assert.equal(icon.props['aria-label'], 'selectedSkillsCapTooltip', '读屏拿到同一串，不许另说一套')
+    assert.equal(icon.props.role, 'img', '这枚图标要能被读屏听到')
+  }
+
+  const atCap = Object.fromEntries(keys.slice(0, SELECTED_SKILLS_MAX_ENABLED).map((key) => [key, true]))
+  const { rows, switches, capPanels, dict } = renderWith(atCap)
+  assert.equal(switches.length, SELECTED_SKILL_CATALOG.length, '每颗精选 skill 一个开关')
+  for (const node of switches) {
+    const entry = labelOf.get(node.props.label)
+    assert.ok(entry, `认不出的开关：${node.props.label}`)
+    assert.equal(node.props.checked, atCap[entry.key] === true)
+    if (atCap[entry.key] === true) {
+      assert.notEqual(node.props.disabled, true, '已勾上的行永远关得掉')
+    } else {
+      assert.equal(node.props.disabled, true, '到上限后没勾的开关都点不动')
+      assert.equal(node.props.title, undefined, '开关上不挂 title：原因挪到左侧那枚警示图标上')
+    }
+  }
+  for (const row of rows) {
+    const entry = labelOf.get(collect(row, 'Switch')[0].props.label)
+    assertCapIcon(row, atCap[entry.key] !== true)
+  }
+  assert.deepEqual(capPanels, [], '列表顶上那行整行提示已删：原因只活在图标上')
+  // 悬停文案的原句：{count} 是计数占位（"6/6"），由代码拼，字典不存数字。
+  assert.equal(
+    dict.zh.selectedSkillsCapTooltip.replace('{count}', `${SELECTED_SKILLS_MAX_ENABLED}/${SELECTED_SKILLS_MAX_ENABLED}`),
+    'Skill已达上限 (6/6)。', '悬停原句')
+  for (const locale of ['zh', 'en']) {
+    assert.match(dict[locale].selectedSkillsCapTooltip, /\{count\}/, `${locale} 必须带计数占位`)
+    assert.equal(dict[locale].selectedSkillsCapTooltip, dict[locale].selectedSkillsCapTooltip.trim(),
+      `${locale} 不许带首尾空格`)
+  }
+  for (const key of ['selectedSkillsCapReached', 'selectedSkillsCapReachedHint', 'selectedSkillsCapExceededHint']) {
+    assert.equal(dict.zh[key], undefined, `${key} 已随旧话术删掉`)
+  }
+
+  // 祖父条款：升级前就勾了 10 个的用户，不该被这一次改动悄悄关掉 4 个功能。
+  const overCap = Object.fromEntries(keys.slice(0, SELECTED_SKILLS_MAX_ENABLED + 2).map((key) => [key, true]))
+  const exceeded = renderWith(overCap)
+  for (const node of exceeded.switches) {
+    const entry = labelOf.get(node.props.label)
+    assert.equal(node.props.checked, overCap[entry.key] === true)
+    if (overCap[entry.key] === true) {
+      assert.notEqual(node.props.disabled, true, '老配置里已勾上的照常生效，也关得掉')
+    } else {
+      assert.equal(node.props.disabled, true, '超过上限时仍然不许再加')
+    }
+  }
+  assert.deepEqual(exceeded.capPanels, [], '超额态也没有汇总提示：原因同样只活在图标上')
+  for (const row of exceeded.rows) {
+    const entry = labelOf.get(collect(row, 'Switch')[0].props.label)
+    assertCapIcon(row, overCap[entry.key] !== true)
+  }
+})
+
+/**
  * 「详情」那份原文：按需取、成功才缓存、失败必须还能再试（AGENTS.md §9.7 ⑤ 同一族）。
  * 取数挂在悬停/点击上而不是页面加载上：35 份快照原文合计约 750 KB。
  * ⛔ 开合必须是**点击**：官方 HoverCard 只认 pointerenter 计时（默认 500ms），且点锚点会把它关掉——
@@ -918,7 +1018,14 @@ test('capital-config Client：筛选器吸顶、三格首行等距，且不许�
     '宽度那条要挂在 div. 上：光一个类名与官方散列类同权重，靠"我们的样式后注入"赢是押注不是设计')
   assert.match(rule('.capital-config-skill-doc'), /overflow:\s*auto/, '原文在对话框里自己滚（一份有 34 KB）')
   assert.match(rule('.capital-config-skill-doc'), /max-height:/, '封顶的是正文那一块，标题与关闭按钮因此留在原位')
-  for (const retired of ['capital-config-skill-slug', 'capital-config-skill-copy', 'capital-config-selected-filter-label']) {
+  // ⛔ 语义色只许引用主题**真实定义**的 token：`--dsw-alias-label-error` 主题里没定义，var() 判败
+  // 回继承色 ⇒ light 黑 / dark 白（这枚图标实机就是这么错的）。warn / error 各钉一个真 token。
+  assert.doesNotMatch(css, /--dsw-alias-label-error/, '主题里不存在的 token 不许引用')
+  assert.match(rule('.capital-config-skill-cap-icon'), /color:\s*var\(--dsw-alias-state-warn-primary\)/,
+    '警示图标用 DSH 的 warn 色（StateDot / Tag 的 warning 同款）')
+  assert.match(rule('.capital-config-write-failed'), /color:\s*var\(--dsw-alias-state-error-primary\)/,
+    '写失败红字用 error-primary：同一个坏 token 的另一处，一并钉住')
+  for (const retired of ['capital-config-skill-slug', 'capital-config-skill-copy', 'capital-config-selected-filter-label', 'capital-config-cap-hint', 'capital-config-selected-cap-count']) {
     assert.ok(!css.includes(`.${retired}`), `.${retired} 已经从渲染树上 retire 了，样式表里不许留死规则`)
   }
 })

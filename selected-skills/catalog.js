@@ -28,8 +28,9 @@ export const SELECTED_SKILL_SKILL_DIRS = Object.freeze({
 })
 
 // Selected-skill metadata owned by Capital Generation. Upstream snapshots remain unchanged.
-// 能力标签的词表就是下面 SELECTED_SKILL_TAG_LABELS 的键：卡片按条目实际用到的标签现算筛选条，
-// 少一套语言的显示名就会露出英文原词（test/capital-config.test.mjs 钉着）。
+// 能力标签的词表由文件末尾的 SELECTED_SKILL_TAGS 注册表现算派生（SELECTED_SKILL_TAG_LABELS）：
+// 卡片按条目实际用到的标签现算筛选条，少一套语言的显示名就会露出英文原词（test/capital-config.test.mjs
+// 钉着）；tags 同时决定条目进哪几颗任务型内置 skill 的索引，所以登记一处、两处生效。
 export const SELECTED_SKILL_CATALOG = Object.freeze([
   {
     key: 'buffettFramework',
@@ -1329,59 +1330,140 @@ export const SELECTED_SKILL_CATALOG = Object.freeze([
   },
 ])
 
-export const SELECTED_SKILL_TAG_LABELS = Object.freeze({
-  zh: {
-    all: '全部',
-    'a-share': 'A 股',
-    'business-analysis': '业务分析',
-    'capital-allocation': '资本配置',
-    'cash-flow': '现金流',
-    competition: '竞争格局',
-    earnings: '业绩与电话会',
-    education: '教学',
-    filings: '披露文件',
-    'financial-health': '财务健康',
-    instruments: '期权与基金',
-    macro: '宏观与行业',
-    monitoring: '监控',
-    orders: '订单',
-    perspective: '分析视角',
-    'peter-lynch': '彼得·林奇',
-    portfolio: '组合与仓位',
-    risk: '风险',
-    strategy: '战略',
-    tax: '税务',
-    technicals: '技术面',
-    'trade-discipline': '交易纪律',
-    'us-stock': '美股',
-    valuation: '估值',
-    verification: '证据核验',
-  },
-  en: {
-    all: 'All',
-    'a-share': 'A-share',
-    'business-analysis': 'Business analysis',
-    'capital-allocation': 'Capital allocation',
-    'cash-flow': 'Cash flow',
-    competition: 'Competition',
-    earnings: 'Earnings',
-    education: 'Education',
-    filings: 'Filings',
-    'financial-health': 'Financial health',
-    instruments: 'Options & funds',
-    macro: 'Macro & industry',
-    monitoring: 'Monitoring',
-    orders: 'Orders',
-    perspective: 'Perspective',
-    'peter-lynch': 'Peter Lynch',
-    portfolio: 'Portfolio',
-    risk: 'Risk',
-    strategy: 'Strategy',
-    tax: 'Tax',
-    technicals: 'Technicals',
-    'trade-discipline': 'Trade discipline',
-    'us-stock': 'US equity',
-    valuation: 'Valuation',
-    verification: 'Verification',
-  },
+// ── 能力标签注册表：索引与筛选的唯一来源 ─────────────────────────────────────────
+//
+// 一条精选 skill 的 tags 同时决定两件事：① 设置卡片左侧筛选条怎么分类它；② 它进哪几颗
+// **任务型内置 skill** 的索引。所以标签不是"展示分类"，而是"路由声明"——登记一次，两处生效。
+//
+// 新增一个标签 = 在 SELECTED_SKILL_TAGS 里加一行（zh / en 本来就必须填，`capital-config.test.mjs`
+// 钉着），`serves` 或 `fallback` 顺带填掉。没有第二处要改，也没有任何东西会因为"忘了挂"而静默变成孤儿：
+// 下面四条闸门（`test/selected-skill-tags.test.mjs`）会把漏挂、拼错、孤儿和上限都打红。
+
+/**
+ * 任务型内置 skill：正文会被补上"外部精选 skill 索引"的那几颗（住 `preset/capital-generation/skills/`）。
+ * 其余五颗内置 skill 是协议 / 流程类（data / web / chart / visualization / orchestration），读者是
+ * 特定角色或特定工具调用，不是"用户提了一个研究任务"的入口，因此不接索引。
+ */
+export const SELECTED_SKILL_TASK_IDS = Object.freeze([
+  'capital-equity-research',
+  'capital-event-impact',
+  'capital-portfolio-review',
+])
+
+/** 没有任何归属的标签，其条目兜底进这一颗（2026-10-13 决策：一切兜底都往 equity 里装）。 */
+export const SELECTED_SKILL_FALLBACK_TASK = 'capital-equity-research'
+
+/**
+ * 标签轴。`routes: false` 的轴只做**标注**，不决定条目进哪颗任务型 skill；`routes: true` 的轴参与路由。
+ *
+ * 市场口径轴是**不路由**的，这一点被实测纠过一次：最初把它写成"对所有任务型 skill 生效"，结果
+ * 你这 10 个启用项（9 颗带 `a-share`）在三颗任务型 skill 里得到**完全相同**的清单，索引等于失效；
+ * 修成不路由之后，`10k-digest`（美股 10-K 深读）只进 equity / event-impact，`tax-lens` 只进
+ * portfolio。判据因此是："是 A 股"不蕴含"服务单股研究 / 事件影响 / 组合复盘"。
+ *
+ * 好处顺带落在自动化上：**新增一个市场口径标签零决策**——不写 serves、不重跑任何分配，
+ * 只登记一行（zh/en/axis）即可。新增一个 routing 轴 = 这里加一行，该轴的标签各自带 `axis`。
+ */
+export const SELECTED_SKILL_TAG_AXES = Object.freeze({
+  market: Object.freeze({ routes: false }),
+  capability: Object.freeze({ routes: true }),
+  topic: Object.freeze({ routes: true }),
 })
+
+/**
+ * 能力标签注册表。键集 ≡ 标签词表（`SELECTED_SKILL_TAG_LABELS` 由它派生）。三轴判据：
+ *   market     —— 什么市场口径（A 股 / 美股 / 将来的港股…），**不路由**，只做标注；
+ *   capability —— 调用什么分析方法（估值 / 财务健康 / 证据核验…）；
+ *   topic      —— 落在什么场景或对象上（组合、监控、税务…）。
+ * routing 轴（capability / topic）的 `serves` 与 `fallback` 二选一：前者点名接收它的任务型 skill
+ * （允许重叠），后者是"还没想好挂哪颗"的显式承认。两者都不给 = 孤儿，闸门会红——不写成"静默不出现"，
+ * 因为静默正是这套东西最容易坏的地方。
+ */
+export const SELECTED_SKILL_TAGS = Object.freeze({
+  'a-share': { zh: 'A 股', en: 'A-share', axis: 'market', serves: [] },
+  'business-analysis': { zh: '业务分析', en: 'Business analysis', axis: 'capability', serves: ['capital-equity-research'] },
+  'capital-allocation': { zh: '资本配置', en: 'Capital allocation', axis: 'capability', serves: ['capital-equity-research'] },
+  'cash-flow': { zh: '现金流', en: 'Cash flow', axis: 'capability', serves: ['capital-equity-research', 'capital-event-impact'] },
+  competition: { zh: '竞争格局', en: 'Competition', axis: 'topic', serves: ['capital-equity-research'] },
+  earnings: { zh: '业绩与电话会', en: 'Earnings', axis: 'capability', serves: ['capital-equity-research', 'capital-event-impact'] },
+  // `education` 是这张表里最勉强的一条：post-trade-review / journal-pattern-analyzer 确实服务组合复盘，
+  // learning-coach 则哪边都不像。归到 portfolio 是先给一个明确归属，而不是让它掉进兜底。
+  education: { zh: '教学', en: 'Education', axis: 'topic', serves: ['capital-portfolio-review'] },
+  filings: { zh: '披露文件', en: 'Filings', axis: 'capability', serves: ['capital-equity-research', 'capital-event-impact'] },
+  'financial-health': { zh: '财务健康', en: 'Financial health', axis: 'capability', serves: ['capital-equity-research', 'capital-event-impact'] },
+  instruments: { zh: '期权与基金', en: 'Options & funds', axis: 'topic', serves: ['capital-portfolio-review'] },
+  macro: { zh: '宏观与行业', en: 'Macro & industry', axis: 'topic', serves: ['capital-equity-research', 'capital-event-impact'] },
+  monitoring: { zh: '监控', en: 'Monitoring', axis: 'topic', serves: ['capital-event-impact', 'capital-portfolio-review'] },
+  orders: { zh: '订单', en: 'Orders', axis: 'topic', serves: ['capital-equity-research'] },
+  perspective: { zh: '分析视角', en: 'Perspective', axis: 'topic', serves: ['capital-equity-research', 'capital-event-impact'] },
+  'peter-lynch': { zh: '彼得·林奇', en: 'Peter Lynch', axis: 'topic', serves: ['capital-equity-research'] },
+  portfolio: { zh: '组合与仓位', en: 'Portfolio', axis: 'topic', serves: ['capital-portfolio-review'] },
+  risk: { zh: '风险', en: 'Risk', axis: 'topic', serves: ['capital-equity-research', 'capital-event-impact', 'capital-portfolio-review'] },
+  strategy: { zh: '战略', en: 'Strategy', axis: 'topic', serves: ['capital-equity-research'] },
+  tax: { zh: '税务', en: 'Tax', axis: 'topic', serves: ['capital-portfolio-review'] },
+  technicals: { zh: '技术面', en: 'Technicals', axis: 'topic', serves: ['capital-event-impact', 'capital-portfolio-review'] },
+  'trade-discipline': { zh: '交易纪律', en: 'Trade discipline', axis: 'topic', serves: ['capital-portfolio-review'] },
+  'us-stock': { zh: '美股', en: 'US equity', axis: 'market', serves: [] },
+  valuation: { zh: '估值', en: 'Valuation', axis: 'capability', serves: ['capital-equity-research', 'capital-event-impact'] },
+  verification: { zh: '证据核验', en: 'Verification', axis: 'capability', serves: ['capital-equity-research', 'capital-event-impact', 'capital-portfolio-review'] },
+})
+
+/**
+ * 设置卡片最多能同时勾选的精选 skill 数。**只约束"能勾几个"，不约束"已勾的生效"**：
+ * 运行期 provider 不按这个数截断——老配置多于 6 个时照常全部生效并提示收敛，否则就是
+ * "卡片上开着 10 个、会话里只有 6 个"那种静默砍功能（AGENTS.md §9.7）。
+ */
+export const SELECTED_SKILLS_MAX_ENABLED = 6
+
+/** 标签的显示名（含恒在第一格的「全部」）。键集恒等于注册表，所以新标签只登记一次。 */
+export const SELECTED_SKILL_TAG_LABELS = Object.freeze({
+  zh: Object.freeze({
+    all: '全部',
+    ...Object.fromEntries(Object.entries(SELECTED_SKILL_TAGS).map(([tag, meta]) => [tag, meta.zh])),
+  }),
+  en: Object.freeze({
+    all: 'All',
+    ...Object.fromEntries(Object.entries(SELECTED_SKILL_TAGS).map(([tag, meta]) => [tag, meta.en])),
+  }),
+})
+
+/** 该标签服务的任务型 skill（不路由的轴 → 空；未登记的标签 → 空）。 */
+export function taggedTaskSkills(tag) {
+  const meta = SELECTED_SKILL_TAGS[tag]
+  if (meta === undefined) return []
+  const axis = SELECTED_SKILL_TAG_AXES[meta.axis]
+  if (axis === undefined || !axis.routes) return []
+  return [...meta.serves]
+}
+
+/** 该任务型 skill 收到的全部标签。派生自注册表：反向可达闸门与文档读它，不手写清单。 */
+export function taskSkillTags(taskId) {
+  return Object.keys(SELECTED_SKILL_TAGS).filter((tag) => taggedTaskSkills(tag).includes(taskId))
+}
+
+/** 该条目是否挂上了至少一颗任务型 skill——没挂上的按兜底规则进 `SELECTED_SKILL_FALLBACK_TASK`。 */
+function entryRoutesAnywhere(entry) {
+  return entry.tags.some((tag) => taggedTaskSkills(tag).length > 0)
+}
+
+/**
+ * **唯一实现**：已启用（按运行时 skill name）的精选条目里，某颗任务型 skill 应当索引到哪几条。
+ * 目录（provider 的 `list()`）、任务型 skill 的索引块、测试三处都调这一个函数，不许各自重算
+ * （AGENTS.md §9.7：两份实现必然漂移，而漂移的表现是"某一处少了/多了一条"，零报错）。
+ * `enabledNames` 由调用方在**调用期**现读开关得到——开关是 settings 偏好，不许在装配期定格。
+ */
+export function selectedSkillsForTask(taskId, enabledNames) {
+  const enabled = new Set(enabledNames)
+  return SELECTED_SKILL_CATALOG.filter((entry) => {
+    if (!enabled.has(entry.name)) return false
+    if (entry.tags.some((tag) => taggedTaskSkills(tag).includes(taskId))) return true
+    // 兜底只在 equity 生效（2026-10-13 决策）：一条都挂不上的条目，宁可多给它看一条，
+    // 也不要静默不出现。`fallback: true` 的标签走的就是这条路。
+    return taskId === SELECTED_SKILL_FALLBACK_TASK && !entryRoutesAnywhere(entry)
+  })
+}
+
+/** 只靠兜底才看得见的条目（当前应为空）。闸门钉住它：新增孤儿会当场点名，而不是静默消失。 */
+export function fallbackOnlySkillNames() {
+  return SELECTED_SKILL_CATALOG.filter((entry) => !entryRoutesAnywhere(entry)).map((entry) => entry.name)
+}
