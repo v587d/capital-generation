@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { apply, LOCAL_FETCH_DEFAULTS } from '../lib/index.js'
+import { apply, readCapitalSettings, LOCAL_FETCH_DEFAULTS } from '../lib/index.js'
 import { ROOT_AGENT_DENIED_TOOLS } from '../lib/agents/root-tool-policy.js'
 import { collectUndeclaredRequired } from './output-contract.mjs'
 
@@ -19,20 +19,23 @@ function fakeCtx({ credentials, settings } = {}) {
   const effectResults = []
   const listeners = []
   const sections = []
+  const warnings = []
   const ctx = {
     get: (name) => {
       if (name === 'tools') return { register: (definition) => { tools.push(definition); return () => {} } }
       if (name === 'credentials') return credentials
-      if (name === 'settings') return settings
+      // settings 允许晚到（services.set 之后才可见）：宿主 boot 里 fibers 并行 apply，
+      // 服务注册顺序不保证，读取面必须经得起"装配期没有、调用期才有"。
+      if (name === 'settings') return settings ?? services.get('settings')
       return services.get(name)
     },
     provide: (name, value) => { services.set(name, value) },
     effect: (callback) => { effectResults.push(callback()); return () => {} },
     on: (event, listener) => { listeners.push({ event, listener }); return () => {} },
-    logger: { info() {}, warn() {}, error() {}, debug() {} },
+    logger: { info() {}, warn(message) { warnings.push(String(message)) }, error() {}, debug() {} },
     systemPrompt: { section: (section) => { sections.push(section); return () => {} } },
   }
-  return { ctx, tools, services, effectResults, listeners, sections }
+  return { ctx, tools, services, effectResults, listeners, sections, warnings }
 }
 
 const toolNamed = (tools, name) => tools.find((definition) => definition.name === name)
@@ -238,6 +241,94 @@ test('apply()：配置读自 capital-config 条目，条目缺席或报错时回
 })
 
 /**
+ * 2026-10-13 复盘回归（session-bb8635a1）：用户 07:51 在设置卡保存 10 个精选 Skills 开关、
+ * 07:54 新建 Capital 会话，首轮 skill catalog 里一个精选 Skill 都没有；08:30 重组后同一条
+ * 读取路径立刻读对。根因一族：**读取面押在装配期捕获的外部状态上**——boot 里各 fiber 并行
+ * apply，settings / configEditor 晚于本插件注册时，装配期 `ctx.get('settings')` 捕获到
+ * undefined，整场进程静默降级成 preset 默认（全关），"读不到"被伪装成"用户全关"。
+ */
+test('readCapitalSettings：服务引用调用期现取，保存层兜底，preset 回落可辨认', () => {
+  const boot = { customPersona: 'preset 人设' }
+  let services
+  const ctx = { get: (name) => services?.get(name) }
+
+  // 装配期 settings 尚未注册：回落 preset，但 source 必须认得出"读不到"。
+  assert.equal(readCapitalSettings(ctx, boot).source, 'preset')
+
+  // 服务晚到（同一进程、同一条读取路径）：立刻读到条目值，不需要重启。
+  services = new Map([
+    ['settings', { describe: () => [{ ns: 'capital-config', value: { customPersona: '  条目人设  ' } }] }],
+  ])
+  const applied = readCapitalSettings(ctx, boot)
+  assert.equal(applied.source, 'settings-describe')
+  assert.equal(applied.config.customPersona.trim(), '条目人设')
+
+  // describe() 整个跳过条目（条目 fiber 未挂好的窗口）：用户已保存的值仍要读得到。
+  services = new Map([
+    ['settings', { describe: () => [{ ns: 'other-entry', value: {} }] }],
+    ['configEditor', { entries: () => [{ options: { id: 'capital-config', config: { customPersona: '保存层人设' } } }] }],
+  ])
+  const saved = readCapitalSettings(ctx, boot)
+  assert.equal(saved.source, 'config-editor')
+  assert.equal(saved.config.customPersona, '保存层人设')
+
+  // 两级都读不到（describe 抛错、保存层也没有本条目）：回落 preset 且可辨认。
+  services = new Map([
+    ['settings', { describe: () => { throw new Error('entry not mounted') } }],
+    ['configEditor', { entries: () => [{ options: { id: 'other', config: {} } }] }],
+  ])
+  assert.equal(readCapitalSettings(ctx, boot).source, 'preset')
+})
+
+test('apply()：settings 晚到也必须挂住精选 Skills 读取链路（保存后立刻建会话就得看得到）', async () => {
+  const { ctx, listeners, services, effectResults } = fakeCtx()
+  services.set('agentPresets', { composedPreset: () => 'capital-generation' })
+  // 装配期没有 settings 服务（boot 竞态的真实形态），selectedSkills 全默认关。
+  apply(ctx, { customPersona: '', retriever: { baseURL: '', credentialRef: '', windDocs: { endpoint: '', credentialRef: '', timeoutMs: 0 } } })
+  await Promise.all(effectResults)
+
+  // 服务缺席也必须挂监听并注册 provider：旧实现在这里走"静态全关"快路径——监听都不挂，
+  // 整场进程的精选 Skills 就此锁死，正是 2026-10-13 那 36 分钟。
+  let provider
+  const cleanups = []
+  const injectedCtx = {
+    // 真实 filesystem provider 会探测可选的 fs 服务：没有就走 node 原生发现（本仓快照目录）。
+    get: () => undefined,
+    skills: {
+      registerProvider(create) {
+        provider = create({ signal: new AbortController().signal, invalidate() {} })
+        return () => {}
+      },
+    },
+    effect(callback) { cleanups.push(callback()) },
+    on() { return () => {} },
+  }
+  const agent = {
+    session: { id: 's-1', header: {} },
+    ctx: { inject(_deps, callback) { callback(injectedCtx) } },
+  }
+  try {
+    for (const { event, listener } of listeners) {
+      if (event === 'agent/created') await listener({ agent })
+    }
+    assert.ok(provider, 'settings 服务缺席时也必须注册 selected skills provider（默认全关只是空目录）')
+    assert.deepEqual((await provider.list({})).map(({ name }) => name), [], '默认全关：空目录')
+
+    // settings 晚到（保存完成）：同一条读取路径立刻生效——不重启、不新建会话。
+    services.set('settings', {
+      describe: () => [{ ns: 'capital-config', value: { selectedSkills: { buffettFramework: true } } }],
+    })
+    const names = (await provider.list({})).map(({ name }) => name)
+    assert.ok(names.includes('buffett-investment-framework'),
+      `晚到的 settings 必须立刻生效（首轮 catalog 就该看到），实际目录：${names.join(', ') || '(空)'}`)
+    assert.ok(!names.includes('financial-health'), '没开的仍然不进目录（默认全关不许破）')
+  } finally {
+    // 失败路径也必须收摊：真实 filesystem provider 带 watcher，漏了就拖住整个测试进程。
+    for (const dispose of cleanups) dispose?.()
+  }
+})
+
+/**
  * 事故回归（2026-09-14）：`query_dataset` 的 parameters 根曾写成 `{ oneOf: [...] }`
  * 而没有 `type: 'object'`。模型供应商在请求进入时整体校验
  * `tools[].function.parameters`，直接返回 400
@@ -360,10 +451,11 @@ test('apply()：注册根 Agent 工具收敛监听（只拿掉主 Agent 的专�
     await Promise.all(effectResults)
 
     const created = listeners.filter((entry) => entry.event === 'agent/created')
-    // 两个监听是两件事，不能合并：① 根 Agent 工具收敛（render_chart 等）；
-    // ② data_junior 的 bash 闸门（身份 + 必然失败的升级）。顺序即 apply() 里的注册顺序，
-    // 但这里不去依赖它——逐个调用、按行为断言。
-    assert.equal(created.length, 2, 'apply 必须注册两个 agent/created 监听：根收敛 + bash 闸门')
+    // 三个监听是三件事，不能合并：① 根 Agent 工具收敛（render_chart 等）；
+    // ② data_junior 的 bash 闸门（身份 + 必然失败的升级）；③ selected skills 的 provider
+    // 注册（2026-10-13 起不再按"有没有 settings 服务"走快路径跳过——那正是静默锁死的根子）。
+    // 顺序即 apply() 里的注册顺序，但这里不去依赖它——逐个调用、按行为断言。
+    assert.equal(created.length, 3, 'apply 必须注册三个 agent/created 监听：根收敛 + bash 闸门 + selected skills')
     const notifyCreated = (agent) => { for (const entry of created) entry.listener({ agent }) }
 
     const restricted = []

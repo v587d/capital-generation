@@ -261,6 +261,23 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
         }>>, "defined">;
     }>>, "defined">;
 }>>, "plain">;
+export type CapitalSettingsSource = 'settings-describe' | 'config-editor' | 'preset';
+/**
+ * 读取 `capital-config` 条目的生效配置。三级取数、逐级兜底：
+ *  1. `settings.describe()`：活动条目的已应用视图（0.1.7 官方读回面）；
+ *  2. `configEditor.entries()` 的条目保存层：设置卡写入的就是这层（complete raw config）。
+ *     describe() 在条目 fiber 未挂好的窗口会**整个跳过条目**，用户已保存的值仍然在这里可读；
+ *  3. preset 配置兜底，且必须可辨认（`source === 'preset'`）——"读不到"不许伪装成"用户全关"。
+ *
+ * ⛔ 服务引用一律**调用期现取**（AGENTS.md §9.7）：装配期 `ctx.get()` 押的是"宿主服务已注册"
+ * 这个外部时刻——boot 里各 fiber 并行 apply，settings / configEditor 晚于本插件注册时，装配期
+ * 捕获到 undefined，整场进程会静默降级成 preset 默认。2026-10-13 复盘（session-bb8635a1：
+ * 07:51 保存 10 个开关、07:54 建会话读到全关、08:30 重组后同一条读取路径立刻读对）就是这一族。
+ */
+export declare function readCapitalSettings(ctx: Context, bootConfig: Config): {
+    config: Config;
+    source: CapitalSettingsSource;
+};
 /**
  * 把可选的用户人设文本转成独立 system-prompt section（官方 systemPrompt
  * registry 的注册对象）。空白输入返回 undefined（不注册）；超长抛错；
