@@ -7,6 +7,71 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [2.7.9] - 2026-10-13
+
+第八份 Skill 快照入驻：社区项目 **Quant Agent Skills**（`Howard-Jerry/quant-agent-skills`，MIT，钉在
+commit `03677d2`，2026-08-05）。这一份的收录口径与前七份不同，先说清楚：上游那三颗 skill 都是**自述的
+编排器**，正文指挥公开版根本不附带的私有数据层（实测三颗点名的本地路径一个都不在仓里），所以
+**一颗都不进可选清单**；本仓改为**自持一颗入口** `cross-market-listing-choice`（跨市场选线 A/H · ADR/HK），
+只挂载上游那两份零执行面、零私有引用的口径文件（逐字复制，非改写）。上游三颗与 `docs/`、`scripts/`
+等完整文件树随 git 快照保留供复核，由该快照自己的 `.npmignore` 挡在发布包之外。可选清单 **67 → 68**，
+收录项目 **7 → 8**。
+
+同版修掉精选 Skills 的一条注册路径（先建会话、再切到 Capital 模式），并收了 2026-10-10 真机复盘的
+三处往返收敛（图表 token 幂等、超预算回执带体积归因、事实核查分级）与 `data_analyst` 条文补齐。
+其余契约照旧：工具入参与返回（除下面点名的两个只读字段）、能力清单、四把密钥与凭据引用名、配置字段、
+会话日志格式、你已有的自选股数据与**已经开启的那几项 Skill** 全部没动。宿主要求与 2.7.8 相同
+（DSH`@0.2.0-rc.2`），不必换版本，升级无需迁移；两个返回面的变化都在下面写明。
+
+### Added
+
+- **跨市场选线一颗**：`cross-market-listing-choice`——同一家公司在多个市场各有上市线时（A/H、ADR/HK）
+  选一条来持有、加仓或观察：A/H 溢价与币种股息税、流动性与通道、ADR 换算比例与披露文件路径。
+  公司层面只研究一次（A 与 H 是同一家公司的两条线），价差是当天的事实、不是"折价那条会涨回来"的结论。
+  本插件没有现成的 A/H 溢价或 ADR 平价条目：溢价必须由两条线同一 as-of 交易日的收盘价加上当日汇率
+  现算，三项任缺一项就只报缺哪一项，也不用记忆里的近似汇率补数。
+- **上游三颗编排器刻意不收**（`concept-research` / `industry-research` / `stock-research`）：正文点名
+  的本地取数路径公开版没有，属"指挥 Agent 去跑公开版没有的执行面"，逐条判据与 132 处闸门命中分布见
+  `selected-skills/quant-agent-skills/UPSTREAM.md`。文件仍随快照住在 git 与发布包的材料区，运行时读不到。
+
+### Fixed
+
+- **先建会话、再切到 Capital 模式，精选 Skills 也注入了**。用户可见症状：设置卡里 10 个开关全开，
+  会话里却始终只有 preset 自带的 8 条 `capital-*`；直接从 Capital 建会话（或恢复旧会话）却正常。
+  根因是 provider 只挂在 `agent/created` 一条监听上，而建会话的真实顺序是"先按默认预设把根 Agent
+  建好、随后才 `select` 到 `capital-generation`"——`agent/created` 在那次 select 之前就发完了，
+  只挂一条时本插件的 `apply()` 是在**这次挂载里**才跑的，监听器出生就错过了自己这个 Agent。
+  现在同时挂 `agent-preset/selected`（preset registry 在挂载完成后才发这条事件，一定赶得上），
+  同一个 Agent 由 `WeakSet` 去重、注册失败撤登记以留下重试余地；子 Agent 与其他 preset 照旧不注册。
+  真机复核：重启前同一份会话的目录是「8 条 / 0 精选」，重启后同一份会话补齐「18 条 / 10 精选」；
+  新建会话（走的正是先建后切）首轮目录直接是「18 条 / 10 精选」。回归见
+  `test/selected-skills-provider.test.mjs`（先建后切注册路径 + 切换期注入失败可重试）。
+
+### Changed
+
+- **`prepare_chart_source` 幂等**：同一 `task_id` + `dataset_id` 在 TTL 内重复调用返回**同一个**
+  `chart_source_ref`（token 是读能力而非一次性凭证，`resolve` 不消费，复用没有语义损失）。
+  2026-10-10 真机：data_junior 改了视图方案后为同一 Dataset 重签，紧跟一个 7.9K 字符的思考回合；
+  人设与 skill 里"不要重签"的提醒拦不住，就把幂等沉到工具层。`capital-visualization-protocol` 同步
+  改成"再签一次也无妨，工具层保证不会签出第二个"。
+- **`describe_dataset` 超预算回执自带体积归因**：`too_large` 现在返回 `facts_bytes` / `queries_bytes`
+  （本版唯一新增的返回字段，只增不改），`hint` 直指大头（queries 大 → 去掉 queries、聚合改单独走
+  `query_dataset`；facts 大 → `columns_of_interest` 收窄列）。同日真机：两份宽表各带 5-6 条聚合打穿
+  7000 码点闸门，而旧 hint 只说"收窄列"——列本来已经很窄，超预算的其实是 queries，模型只好
+  `describe` + `query_dataset` 各来一轮，4 次调用里 2 次本可省。⛔ 体积闸门仍只有一道，没有引入
+  digest / 裁剪阶梯（`docs/dev/data-roles.md` §1.1）。
+- **外部事实核查改成分级写需求**：核心事实（直接改变结论或风险判断的——审计意见、商誉、质押/担保/
+  资金占用、现金流与利润背离、有息负债、再融资/重组、被监管调查等）≤10 条逐条核验、每条一行来源；
+  外围事实（分红方案、互动平台问答、媒体花絮）合并成一句话清单，来源整段合标。不再预设"逐条
+  URL+日期+双分类"的审计级格式，异常线索（质押、商誉减值、现金流恶化、审计非标）出现才对该项深挖。
+  同日真机：全量审计级核验产出 18 条情报、39K 输出 tokens，拖慢主结论。落点：`capital-web-protocol` §5、
+  `capital-orchestration`、`capital-equity-research`。
+- **`data_analyst` 条文补齐**（该角色仍保持 `disabled`）：启用后由主 Agent **按需激活**（不进每轮强制
+  预检），补数走与 `data_gap` 同构的 `analysis_data_request`（主 Agent 是范围闸门，只转交 brief 内的
+  请求；`blocking: true` 未决时不得写最终答复），输入只敲标量（≤20 个）、逐数核对再算、不整行复制
+  （同日真机：整段聚合行逐数敲进脚本，转写出笔误又花 7.2K 字符发更正）。落点：`docs/dev/data-roles.md`、
+  人设与 5 份协议 skill。
+
 ## [2.7.8] - 2026-10-12
 
 第七份 Skill 快照入驻：社区项目 **FinanceSkills**（`GAJETOso/financeskills`，MIT，钉在 commit `b0c6239`），

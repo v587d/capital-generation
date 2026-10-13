@@ -11,12 +11,12 @@
   <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DeepSeek_Harness-web-orange" alt="DSH Web"></a>
   <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DeepSeek_Harness-desktop-brightgreen" alt="DSH Desktop · 已实机验证"></a>
   <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DSH%20Baseline-0.2.0--rc.2-blue" alt="DSH@0.2.0-rc.2"></a>
-  <a href="https://www.npmjs.com/package/@v587d/capital-generation"><img src="https://img.shields.io/npm/v/%40v587d%2Fcapital-generation" alt="npm version"></a>
 </p>
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.7.8-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.7.9-9cf" alt="Version"></a>
+  <a href="https://www.npmjs.com/package/@v587d/capital-generation"><img src="https://img.shields.io/npm/v/%40v587d%2Fcapital-generation" alt="npm version"></a>
 </p>
 
 # Capital Generation
@@ -144,7 +144,7 @@ https://github.com/v587d/capital-generation
 | :---: | :---: |
 | <a href="assets/watchlist-popup.png"><img src="assets/watchlist-popup.png" alt="管理自选股" width="400"></a> | <a href="assets/watchlist-more.png"><img src="assets/watchlist-more.png" alt="标记持仓" width="400"></a> |
 
-- **精选 Skills：** 当前收录 7 个开源项目、共 67 个 Skill（默认全部关闭，在配置页按需打开；随时切换，无需新建会话，正在使用的 Capital 会话下一条指令即生效）
+- **精选 Skills：** 当前收录 8 个开源项目、共 68 个 Skill（默认全部关闭，在配置页按需打开；随时切换，无需新建会话，正在使用的 Capital 会话下一条指令即生效）
 
 | 项目名称 | 收录边界 |
 | :---: | :---: |
@@ -155,6 +155,7 @@ https://github.com/v587d/capital-generation
 | [Trading Skills](https://github.com/marian2js/trading-skills) | 11 个交易过程 Skill：催化剂排布、自选股分诊、论点压力测试、执行计划检查、入场仓位测算、持仓论点复核、交易日志复盘等，美股与境外交易口径 |
 | [Claude for Financial Services CN](https://github.com/jwangkun/claude-for-financial-services-cn) | 12 个 A 股卖方研究 Skill：业绩点评与差异表述、财报前瞻、可比倍数、A 股 DCF 口径、行业全景、催化剂日历、财务核查、晨会纪要、持仓逻辑跟踪与选股清单等 |
 | [FinanceSkills](https://github.com/GAJETOso/financeskills) | 8 个估值与财务方法 Skill：折现率（WACC）估算、三表勾稽建模、企业估值与股权价值桥、偿债能力与债务容量、预期信用损失三阶段、银行资本与流动性、保险准备金与综合成本率、账务异常排查；按 IFRS / 美股与国际准则口径写，境内监管阈值与科目名需自行对照 |
+| [Quant Agent Skills](https://github.com/Howard-Jerry/quant-agent-skills) | 1 个跨市场选线 Skill：同一家公司在 A 股与港股、或美股 ADR 与港股各有一条线时该走哪一条——价差、币种与股息税、流动性与通道、披露文件路径各不相同。公司本身只研究一次，便宜的那条线不构成"这家公司更值得买"；A/H 溢价与 ADR 平价没有现成条目，须按两条线同一天的收盘价与当日汇率现算，缺任一项就只报缺的那一项 |
 
 <p align="center">
   <a href="assets/selected-skills配置.png">
@@ -166,7 +167,7 @@ https://github.com/v587d/capital-generation
 
 - **安装后找不到 Capital 模式？** 确认插件出现在「插件」→ 已安装列表；Web / CLI profile 安装后要重启该 profile，并在新会话选择模式。
 - **配置在哪？** 打开「插件」→ 已安装的 **Capital Generation**，页面顶部就是「数据源 / 精选 Skills / 包含的组件」三格，四把密钥都在第一格；不在 DSH 的普通「设置」页面，也不用点进任何一行组件。保存密钥后新建会话再试。
-- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.7.8` 或 `@2.7.8`。
+- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.7.9` 或 `@2.7.9`。
 - **刚发布的新版本装不到？** 桌面端取包时会跳过**刚发布不久**的版本（宿主侧包管理器的发布冷却策略，实测会静默装成上一个版本），国内镜像的同步也可能滞后一段时间。急着用最新代码，改用仓库地址安装最直接。
 - **网页抓取失败？** 配置卡片中的「允许启动本地提取网页内容」默认开启：AnySearch 提取失败时可尝试本机直连。关闭后，本机直连的具名来源查询也不可用；请检查该开关和网络连接。
 - **Wind 那部分会消耗积分？** 会。公告与新闻检索、宏观 / 行业 / 汇率指标、按日期区间取的历史 K 线都按次消耗你在 Wind 侧的额度；额度与条款以 Wind 为准，插件不做用量封顶。没配 `WIND_API_KEY` 时这几类不可用，其余功能照常。
@@ -190,7 +191,7 @@ npm run smoke:boot  # 检查插件装配
 
 ## 致谢
 
-- 「精选 Skills」的研究、交易过程与财务方法 Skill 按固定 commit **快照收录**自 [finterm-ai/investment-skills](https://github.com/finterm-ai/investment-skills)、[spikeHongg/china-stock-research-skills](https://github.com/spikeHongg/china-stock-research-skills)、[yennanliu/InvestSkill](https://github.com/yennanliu/InvestSkill)、[DjNero11/peter-lynch-skill](https://github.com/DjNero11/peter-lynch-skill)、[marian2js/trading-skills](https://github.com/marian2js/trading-skills)、[GAJETOso/financeskills](https://github.com/GAJETOso/financeskills)（以上均 MIT License）与 [jwangkun/claude-for-financial-services-cn](https://github.com/jwangkun/claude-for-financial-services-cn)（Apache-2.0）。快照目录、收录口径与逐颗排除理由见 [selected-skills/](selected-skills/README.md)，第三方组件与许可见下面的清单文件。
+- 「精选 Skills」的研究、交易过程与财务方法 Skill 按固定 commit **快照收录**自 [finterm-ai/investment-skills](https://github.com/finterm-ai/investment-skills)、[spikeHongg/china-stock-research-skills](https://github.com/spikeHongg/china-stock-research-skills)、[yennanliu/InvestSkill](https://github.com/yennanliu/InvestSkill)、[DjNero11/peter-lynch-skill](https://github.com/DjNero11/peter-lynch-skill)、[marian2js/trading-skills](https://github.com/marian2js/trading-skills)、[GAJETOso/financeskills](https://github.com/GAJETOso/financeskills)、[Howard-Jerry/quant-agent-skills](https://github.com/Howard-Jerry/quant-agent-skills)（以上均 MIT License）与 [jwangkun/claude-for-financial-services-cn](https://github.com/jwangkun/claude-for-financial-services-cn)（Apache-2.0）。最后那一份只按原文收了它两份跨市场选线的口径文件，收录流程本身由本项目写；该快照另外三颗会自行派子任务取数并产出一包文件的编排流程不收录。快照目录、收录口径与逐颗排除理由见 [selected-skills/](selected-skills/README.md)，第三方组件与许可见下面的清单文件。
 - 会话里的可交互图表由 [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts)（Apache-2.0）渲染，图上保留它自带的归属标识。
 - 行情、财务、公告与网页材料来自四类需自备密钥的服务（同花顺 Fuyao、Wind Alice、AnySearch、PaddleOCR）与一批公开口径的来源（东方财富、腾讯、新浪、财联社、华尔街见闻、巨潮互动易、上证 e互动、同花顺公开站点）；数据版权归各服务方，额度与条款以服务方为准，本项目不重新分发原始数据。
 

@@ -77,6 +77,10 @@ export interface DescribeTooLarge {
     shape: DatasetInspection['query_access']['shape'];
     columns: string[];
     bytes: number;
+    /** 体积归因：facts（元数据 + profile 事实块）部分的码点数。 */
+    facts_bytes: number;
+    /** 体积归因：queries（含各条 result）部分的码点数。 */
+    queries_bytes: number;
     hint: string;
 }
 export type DescribeOutput = DescribeResult | DescribeTooLarge;

@@ -23,6 +23,8 @@ export type SelectedSkillSelection = Partial<Record<SelectedSkillKey, boolean>>
 export type SelectedSkillSelectionSource = SelectedSkillSelection | (() => SelectedSkillSelection)
 
 const PROVIDER_NAME = 'capital-selected-skills'
+/** 本 preset 的身份：两条注册路径（`agent/created` 与 `agent-preset/selected`）共用一份。 */
+const CAPITAL_PRESET_ID = 'capital-generation'
 // skills 根按 catalog 的「仓库 → 上游 SKILL.md 相对路径」现算：第三颗快照的上游把 skill 放在
 // plugins/us-stock-analysis/skills，不在 <repo>/skills 底下。写死目录列表的表现不是报错，
 // 而是"用户在卡片上勾了那一格、技能永远不出现"（AGENTS.md §9.7）。
@@ -76,7 +78,7 @@ function strictCapitalPreset(ctx: PolicyContext, agent: AgentLike): boolean {
   try {
     const presets = ctx.get?.('agentPresets') as { composedPreset?: (agentCtx: unknown) => string | undefined } | undefined
     return typeof presets?.composedPreset === 'function'
-      && presets.composedPreset(agent.ctx) === 'capital-generation'
+      && presets.composedPreset(agent.ctx) === CAPITAL_PRESET_ID
   } catch {
     return false
   }
@@ -97,17 +99,24 @@ export function registerRootSelectedSkills(
   const listenCtx = ctx.root ?? ctx
   if (typeof listenCtx.on !== 'function') return
 
-  const stop = listenCtx.on('agent/created', async ({ agent }) => {
-    if (!agent || !isRootAgent(agent) || !strictCapitalPreset(ctx, agent)) return
-    const agentCtx = agent.ctx as (Context & {
-      inject?: (deps: string[], callback: (injectedCtx: Context & { skills?: SkillRegistryLike }) => void) => unknown
-    }) | undefined
-    if (!agentCtx || typeof agentCtx.inject !== 'function') {
-      ctx.logger?.warn?.('capital-generation: selected skills are unavailable (root Agent cannot inject skills)')
-      return
-    }
+  // 一个 root Agent 只注册一次：下面两条事件路径会在同一个 Agent 上重叠（建会话时就带 Capital
+  // 预设 → `agent/created`；先按默认预设建、再 select 到 Capital → `agent-preset/selected`）。
+  const registered = new WeakSet<AgentLike>()
+
+  const registerFor = async (agent: AgentLike | undefined): Promise<void> => {
+    if (!agent || registered.has(agent)) return
+    if (!isRootAgent(agent) || !strictCapitalPreset(ctx, agent)) return
+    registered.add(agent)
 
     try {
+      const agentCtx = agent.ctx as (Context & {
+        inject?: (deps: string[], callback: (injectedCtx: Context & { skills?: SkillRegistryLike }) => void) => unknown
+      }) | undefined
+      if (!agentCtx || typeof agentCtx.inject !== 'function') {
+        registered.delete(agent)
+        ctx.logger?.warn?.('capital-generation: selected skills are unavailable (root Agent cannot inject skills)')
+        return
+      }
       // agent/created 是串行事件、DSH 等监听器 settle 才继续创建：await 注入 Fiber，
       // provider 与 pre-step 钩子都在首轮 prompt 前落位（首轮 catalog 不与注册竞态）。
       await agentCtx.inject(['skills'], (injectedCtx) => {
@@ -179,12 +188,37 @@ export function registerRootSelectedSkills(
         }, `capital-generation: selected skills for ${agentSessionId(agent) ?? 'root'}`)
       })
     } catch (error) {
-      // selected skills 是可选能力：注入失败只降级告警，不能把整个 Agent 创建挡掉。
+      // selected skills 是可选能力：注入失败只降级告警，不能把整个 Agent 创建挡掉；
+      // 同时撤掉登记，让后面的事件（下一次 select、别的注册路径）还有重试的余地。
+      registered.delete(agent)
       ctx.logger?.warn?.(`capital-generation: selected skills are unavailable (${String(error)})`)
     }
+  }
+
+  const stop = listenCtx.on('agent/created', ({ agent }) => registerFor(agent))
+
+  // 第二条路径：**先按默认预设建会话、再切到 Capital**（GUI 的真实顺序）。
+  // 2026-10-13 复核复现：会话（header `agentPreset: "cordis"`）建好后客户端才发
+  // `agentPresets.select('capital-generation')`，而 `agent/created` 在 select 之前就已经发完——
+  // 只挂那一条时本插件的 `apply()` 是在**这次 recompose 的 mount 里**才跑的，监听器出生就错过了
+  // 自己这个 Agent：设置卡 10 个开关全开、会话目录仍只有 preset 自带的 8 颗（真 boot graph 探针：
+  // create→select 8 颗 / 建会话时 mount 同一 preset 18 颗）。preset registry 在 mount 完成后才
+  // `session.append('agent-preset/selected')`，所以本行一定早于这条事件落位。
+  const onPresetEvent = listenCtx.on as unknown as
+    | ((event: string, listener: (sessionId?: unknown, agentPreset?: unknown) => void) => unknown)
+    | undefined
+  const stopPreset = onPresetEvent?.('agent-preset/selected', (sessionId, agentPreset) => {
+    if (agentPreset !== CAPITAL_PRESET_ID) return
+    const agents = ctx.get?.('agents') as { get?: (id: string) => AgentLike | undefined } | undefined
+    const agent = agents?.get?.(String(sessionId))
+    if (agent === undefined) return
+    // emit 型事件不等待监听器；返回 promise 只为让单测能等到注册落地。registerFor 内部
+    // 自兜异常（失败只降级告警并撤登记，下一次事件还有重试的余地），这里不会产生未处理拒绝。
+    return registerFor(agent)
   })
 
   ctx.effect?.(() => () => {
-    if (typeof stop === 'function') stop()
+    if (typeof stop === 'function') (stop as () => void)()
+    if (typeof stopPreset === 'function') (stopPreset as () => void)()
   }, 'capital-generation: selected skill root listener')
 }

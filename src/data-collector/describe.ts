@@ -97,6 +97,10 @@ export interface DescribeTooLarge {
   shape: DatasetInspection['query_access']['shape']
   columns: string[]
   bytes: number
+  /** 体积归因：facts（元数据 + profile 事实块）部分的码点数。 */
+  facts_bytes: number
+  /** 体积归因：queries（含各条 result）部分的码点数。 */
+  queries_bytes: number
   hint: string
 }
 
@@ -333,6 +337,12 @@ export async function describeDataset(input: DescribeDatasetInput): Promise<Desc
   const encoded = JSON.stringify(value)
   const bytes = codePointLength(encoded)
   if (bytes > SAFE_RESULT_CHARS) {
+    // 体积归因：把 queries 部分单量出来，hint 指名先砍哪边。2026-10-10 真机（task_fh_300803_20261010）：
+    // 两份宽表各带 5-6 聚合的 queries 打穿闸门，而回执只说"用 columns_of_interest 收窄"——列本来
+    // 已经很窄，超预算的其实是 queries，模型只好 describe（去 queries）+ query_dataset 各来一轮，
+    // 4 次调用里 2 次本可省。归因字段让 hint 直指大头，不引入第二道闸门（⛔ 体积闸门仍只有一道）。
+    const queriesBytes = codePointLength(JSON.stringify(value.queries))
+    const factsBytes = bytes - queriesBytes
     return compact({
       status: 'too_large',
       dataset_id: inspection.dataset_id,
@@ -340,9 +350,13 @@ export async function describeDataset(input: DescribeDatasetInput): Promise<Desc
       shape,
       columns: profile.columns,
       bytes,
+      facts_bytes: factsBytes,
+      queries_bytes: queriesBytes,
       hint: shape === 'document'
         ? '文档型 Dataset 的结果超预算：直接调 profile_dataset 取有界内容（本工具的列过滤对文档无效）'
-        : '结果超预算：重发一次 describe_dataset，用 columns_of_interest 指定本次问题真正需要的列，或减少 queries 条数',
+        : queriesBytes > factsBytes
+          ? `结果超预算（queries 占 ${queriesBytes} > facts 占 ${factsBytes}）：先去掉 queries（只 describe 不带 queries，聚合改单独走 query_dataset），facts 仍超再用 columns_of_interest 收窄列`
+          : `结果超预算（facts 占 ${factsBytes} ≥ queries 占 ${queriesBytes}）：先用 columns_of_interest 指定本次问题真正需要的列，或减少 queries 条数`,
     }) as unknown as DescribeTooLarge
   }
   return value

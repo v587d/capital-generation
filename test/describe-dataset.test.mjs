@@ -264,12 +264,59 @@ test('describe_dataset：体积闸门——宽表不返回超长载荷，改返�
   assert.ok(tooLarge.profile_ref.startsWith('workspace://capital-data/profiles/'))
   assert.ok(/columns_of_interest/.test(tooLarge.hint))
   assert.ok(JSON.stringify(tooLarge).length < SAFE_RESULT_CHARS, '回执自身必须在预算内')
+  // 体积归因（2026-10-10 真机）：宽表带 queries 打穿闸门时，回执只说"用 columns_of_interest
+  // 收窄"会把模型引去砍列——真正的大头常常是 queries。归因字段必须自洽，hint 指名先砍哪边。
+  assert.equal(typeof tooLarge.facts_bytes, 'number')
+  assert.equal(typeof tooLarge.queries_bytes, 'number')
+  assert.equal(tooLarge.facts_bytes + tooLarge.queries_bytes, tooLarge.bytes,
+    `facts_bytes(${tooLarge.facts_bytes}) + queries_bytes(${tooLarge.queries_bytes}) 应等于 bytes(${tooLarge.bytes})`)
+  assert.ok(tooLarge.facts_bytes > tooLarge.queries_bytes, '无 queries 时 facts 是大头')
+  assert.match(tooLarge.hint, /columns_of_interest/, 'facts 大头时 hint 应指名 columns_of_interest')
 
   // 按 hint 收窄后应当正常返回
   const narrowed = await definition.execute({ dataset_id: ref.dataset_id, columns_of_interest: ['metric_0', 'metric_1'] }, exec(CHILD))
   assert.equal(narrowed.status, 'ok')
   assertLosslessJson(narrowed)
   assert.ok(JSON.stringify(narrowed).length <= SAFE_RESULT_CHARS)
+})
+
+test('describe_dataset：queries 是大头时 hint 指名先砍 queries（2026-10-10 真机回归）', async () => {
+  // 真机形状：列已收窄，但 queries 带 5-6 个聚合、30 行分组结果，照样打穿闸门。
+  // 旧 hint 只说"用 columns_of_interest 收窄"，模型只好 describe（去 queries）+ query_dataset
+  // 各来一轮；归因字段指名 queries 是大头后，一次去掉 queries 即可。
+  const { store } = makeStore()
+  const ref = await saveRows(store, closeRows(240))
+  const definition = describeTool(store)
+
+  const tooLarge = await definition.execute({
+    dataset_id: ref.dataset_id,
+    columns_of_interest: ['date_ms', 'close_price', 'volume'],
+    queries: [{
+      group_by: ['date_ms'],
+      aggregates: [
+        { function: 'count', as: 'n' },
+        { function: 'sum', column: 'close_price', as: 'sum_close' },
+        { function: 'sum', column: 'volume', as: 'sum_volume' },
+        { function: 'avg', column: 'close_price', as: 'avg_close' },
+        { function: 'max', column: 'close_price', as: 'max_close' },
+      ],
+      limit: 200,
+    }],
+  }, exec(CHILD))
+  assert.equal(tooLarge.status, 'too_large')
+  assertLosslessJson(tooLarge)
+  assertToolOutput(definition, tooLarge)
+  assert.ok(tooLarge.queries_bytes > tooLarge.facts_bytes,
+    `queries_bytes(${tooLarge.queries_bytes}) 应大于 facts_bytes(${tooLarge.facts_bytes})`)
+  assert.match(tooLarge.hint, /去掉 queries/, 'queries 大头时 hint 应指名先去掉 queries')
+
+  // 去掉 queries 后同一份 columns_of_interest 应正常返回
+  const factsOnly = await definition.execute({
+    dataset_id: ref.dataset_id,
+    columns_of_interest: ['date_ms', 'close_price', 'volume'],
+  }, exec(CHILD))
+  assert.equal(factsOnly.status, 'ok')
+  assertLosslessJson(factsOnly)
 })
 
 test('describe_dataset：窄表不触发闸门（闸门只拦真正超预算的结果）', async () => {

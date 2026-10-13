@@ -139,6 +139,24 @@ export class ChartSourceTokenStore {
   }): Promise<ChartSourceTokenRef> {
     const datasetId = readDatasetId(input.dataset_id)
     const taskId = readTaskId(input.task_id, true)!
+    const now = this.now()
+    this.purgeExpired(now)
+
+    // 幂等：同一 session + task_id + dataset_id 在 TTL 内重复签发返回**同一个** token。
+    // 2026-10-10 真机（task_fh_300803_20261010）：data_junior 改了视图方案后为同一 dataset
+    // 重签，跟着就是 7.9K 字符的思考回合——skill 里的"不要重签"警告拦不住，所以把幂等沉到
+    // 工具层。token 是读能力而非一次性凭证（resolve 不消费），复用没有语义损失。
+    for (const record of this.tokens.values()) {
+      if (record.dataset_id === datasetId && record.task_id === taskId && record.sourceSession.id === input.session.id) {
+        return {
+          chart_source_ref: record.chart_source_ref,
+          dataset_id: record.dataset_id,
+          task_id: record.task_id,
+          expires_at: record.expires_at,
+        }
+      }
+    }
+
     const inspection: DatasetInspection = await input.store.inspectDataset(datasetId, input.session, input.signal)
     if (!inspection.query_access.readable || !['array', 'envelope_item'].includes(inspection.query_access.shape)) {
       throw new ChartError(
@@ -147,8 +165,6 @@ export class ChartSourceTokenStore {
       )
     }
 
-    const now = this.now()
-    this.purgeExpired(now)
     const token = this.newToken()
     if (!CHART_SOURCE_TOKEN_PATTERN.test(token)) {
       throw new ChartError('chart_source_invalid', 'generated chart_source_ref is invalid')
@@ -226,7 +242,8 @@ export function registerChartSourceTool(
     name: 'prepare_chart_source',
     description:
       '为当前 delegated data agent 的指定 Dataset 签发短期 chart_source_ref，供 visualization_specialist 通过受控 render_chart 读取。' +
-      '只返回 opaque token 和小型元数据，不返回原始数据、文件路径或数据行；必须提供 dataset_id，可选 task_id。',
+      '只返回 opaque token 和小型元数据，不返回原始数据、文件路径或数据行；必须提供 dataset_id，可选 task_id。' +
+      '同一 task_id + dataset_id 重复调用幂等返回同一个 chart_source_ref（TTL 内），改了视图方案直接复用即可。',
     parameters: jsonObject({
       dataset_id: { type: 'string', description: '已授权的 DatasetRef dataset_id' },
       task_id: { type: 'string', description: '当前可视化任务标识；用于绑定 token，必填' },

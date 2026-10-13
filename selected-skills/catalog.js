@@ -20,6 +20,11 @@ export const SELECTED_SKILL_SKILL_DIRS = Object.freeze({
   // 上游就是扁平的 skills/<name>/SKILL.md（48 颗一层到底，frontmatter name 与目录名逐颗一致，
   // 正文链接全部落在自己目录内），所以前六颗踩过的套一层 / 平铺 / 多根取一都不用做。
   financeskills: 'skills',
+  // 第八颗（Howard-Jerry/quant-agent-skills）：上游把三颗 skill 直接放在**仓库根**，而这三颗都是
+  // 自述的编排器、正文指挥公开版不附带的私有数据层，一颗都不能进可选清单（判据见该快照 UPSTREAM.md）。
+  // 快照因此另起一个 skills/ 根，里面只放本仓自持的那一颗入口；上游三颗完整住在 git、由快照自己的
+  // .npmignore 挡在发布包之外，provider 的 skills 根里根本没有它们，list()/get() 也谈不上过滤。
+  'quant-agent-skills': 'skills',
 })
 
 // Selected-skill metadata owned by Capital Generation. Upstream snapshots remain unchanged.
@@ -1297,6 +1302,29 @@ export const SELECTED_SKILL_CATALOG = Object.freeze([
     riskNote: {
       zh: '冷启动实验；上游最近一次提交是 2026-10-01，启用前请自行复核来源。除首位数字检验可以只对公开报表做以外，这颗的主要路径（银行流水、员工与供应商信息比对、企业内部系统）需要使用者自己提供账务明细：本插件不连企业内部系统，也没有那些数据源。它给出的"疑似"清单是排查线索，不是舞弊认定，也不构成审计或法律意见；样本量不足时首位数字检验本身不成立，正文的门槛要照做。',
       en: 'Cold-start experiment; upstream last moved on 2026-10-01, so review the sources before use. Only the first-digit test can run on published statements; the rest of this skill\u0027s paths — bank statements, employee-versus-vendor matching, internal ERP systems — require the user to supply the accounting detail, since this plugin connects to no corporate system and holds no such source. What it returns is a list of leads, not a fraud finding, and neither an audit nor a legal opinion; a Benford test on too small a sample is void, and the sample thresholds in the text stand.',
+    },
+  },
+  // 第八颗（Howard-Jerry/quant-agent-skills）：上游三颗正文都是自述的**编排器**、且指挥公开版
+  // 根本不附带的私有数据层（实测三颗 SKILL.md 点名的本地路径一个都不在仓里），一颗都不进可选清单；
+  // 逐条判据与 132 处闸门命中的分布见该快照 UPSTREAM.md。这里开放的是本仓自持的一颗入口，
+  // 它只挂载上游那两份零执行面、零私有引用的跨市场选线口径（逐字复制，非改写）。
+  {
+    key: 'crossMarketListingChoice',
+    name: 'cross-market-listing-choice',
+    label: { zh: '跨市场选线（A/H · ADR/HK）', en: 'Cross-Market Listing Choice' },
+    description: {
+      zh: '同一家公司在多个市场各有上市线时，选一条来持有、加仓或观察：A/H 溢价与币种股息税、流动性与通道、ADR 换算比例与披露文件路径。公司层面只研究一次——A 与 H 是同一家公司的两条线，变的只有价差、税、币种和你能不能买到。',
+      en: 'Picks which listing of a single issuer to hold, add, or watch: A/H premium and currency/dividend withholding, liquidity and channel access, ADR conversion ratios and filing paths. The company is researched once — A and H are two lines of the same business, so what changes is spread, tax, currency and whether you can reach it.',
+    },
+    owner: 'Howard-Jerry',
+    repository: 'quant-agent-skills',
+    status: 'watchlist',
+    lastCommit: '2026-08-05',
+    reviewBy: '2026-11-15',
+    tags: ['a-share', 'us-stock', 'portfolio', 'risk'],
+    riskNote: {
+      zh: '冷启动实验：上游五次提交全落在 2026-08-05 同一天，之后无维护，作者声明正文来自其私有量化系统（数据层尚未开源）。这颗只做选线，不重做公司研究——公司本身的结论交给既有研究路径。本插件没有现成的 A/H 溢价或 ADR 平价条目：溢价必须由两条线同一 as-of 交易日的收盘价加上当日汇率现算，这三项任一项取不到就不给溢价数字，只报告缺哪一项；汇率条目按次消耗上游积分，凭据缺失、限流与后端错误一律不重试，也不许用记忆里的近似汇率补数。本插件不持有使用者的成交账本，持仓与成本价只能按你在对话里当场给出的信息回答，回答完就放下，不持久化。价差是当天的事实，"折价的那条线会涨回来"不是这颗的结论，历史价差区间只是参照、不是目标。本插件不提供交易执行界面，不构成投资建议，动哪条线与动多少由使用者自己决定并自己执行。',
+      en: 'Cold-start experiment: all five upstream commits landed on 2026-08-05 with nothing since, and the author states the text comes from a private quant system whose data layer is not yet open. This skill only picks a listing — it never re-runs the company research, which stays with the existing paths. This plugin has no ready-made A/H premium or ADR parity entry: the premium must be computed from both lines\u0027 closes on the same as-of trading day plus that day\u0027s FX, and if any of the three is missing you report which one instead of publishing a premium. FX entries consume upstream quota; missing credentials, throttling and backend errors are never retried, and an approximate rate from memory is not a substitute. This plugin holds no user trade ledger — position and cost basis can only be answered from what the user states in the conversation, and nothing is persisted. A spread is a same-day fact; "the cheaper line will converge" is not a conclusion of this skill, and a historical range is a reference, not a target. No trading interface is provided and nothing here is investment advice: which line to take, and how much, stays with the user.',
     },
   },
 ])

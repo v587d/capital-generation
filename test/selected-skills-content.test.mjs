@@ -76,6 +76,19 @@ const FORBIDDEN = [
   [/\b(?:in|with) code\b|code-verified/i, '把计算推给"能跑代码"的运行时（`Build with code`、`Compute ratios with code`、`In code: a single CONFIG dict`、`code-verified math` 都是这一族）：根角色没有 shell（docs/dev/bash-gate.md §1.6），改成"照 references/ 的算式做、把算式写进答复、真要算力就委派 data_junior"'],
   [/\bwith scripts\/|\bvia scripts\//i, '产出物把数字归给"跑过的脚本"（模板脚注 `Computed with scripts/calculate.py` 一类）：脚本不进发布包、也没有一句话能让它跑起来，这是一句运行时假话。注意不要写成裸 `scripts/`——`## Scripts` 段本来就链接它并写明"没人会执行"'],
   [/\bweb_fetch\b/, '点名宿主工具名当取数或取证途径：本插件的检索只有一个入口（委派 web_retriever），且根角色的工具表里没有这颗工具。上游这句原意是护栏（"抓不到银行门户与企业内网"），改写时要保住护栏含义，别只把词换掉'],
+  // ↓ 第八颗（Howard-Jerry/quant-agent-skills）带来的一族。这颗的违规形状不在措辞，而在**指挥一件
+  //   公开版根本不存在的东西**：上游三颗 SKILL.md 点名的本地路径实测 10 / 32 / 16 个，公开仓里一个
+  //   都没有（私有数据层要到 v1.1 才开源）。现有 26 条在这三颗上只响 1 次——第 10 条只认
+  //   `node|bash scripts/`，而它写的是 `Use \`scripts/x.py\`` 和 `PYTHONPATH=… python data_platform/…`。
+  //   下面四条加进来之前逐条量过误伤面：在已收录的正文里全部零命中（脚本记在
+  //   docs/reference/external-skill-scan-2026-10.md 的第八颗一节）。特别地，
+  //   `python3? <带路径的 .py>` 这种更宽的写法**不能当模式**——第一颗的
+  //   `python3 scripts/framework.py` 是 NEEDS_FALLBACK 刻意放行的（它配了"没有 shell 时直接读
+  //   references/"那句退路），把它一起挡掉等于削掉既有设计。§9.7 同一族：闸门要认的是真会漂回去的那一形。
+  [/\{\{\s*QUANT_ROOT\s*\}\}|\bPYTHONPATH\s*=|(?:data_platform|auto_research|sleeve)\/[\w./-]+\.py/, '指向作者私有工作区的执行指令（`{{QUANT_ROOT}}`、`PYTHONPATH=… python data_platform/…`、`auto_research/*.py`）：那些脚本与目录不随包发布、上游自己也写明要等到 v1.1 才开源，Agent 照做只会撞一条跑不通的指令。改成"向宿主数据通道要哪些字段、as-of 哪天"的委派 brief（docs/dev/selected-skills.md §8.6 第 1、4 条）'],
+  [/\b(?:use|run)\s+`?scripts\//i, '把取数或计算交给 `scripts/` 里的脚本（第八颗的主措辞是 `Use \`scripts/stock_tools.py\` via \`StockTools\``）：本插件的分析角色没有 shell（docs/dev/bash-gate.md §1.6），根角色也没有。第 10 条只认 `node|bash scripts/`，这一形从来没进过表。改成点名要哪个字段、交给谁算'],
+  [/\bcollect-data\b/, '指向上游的自建采集层（那句"所有 DB 和 API 数据采集必须通过 collect-data 完成，禁止绕过"）：本插件的取数入口只有委派 data_collector / web_retriever 一个，自建的第二条通道与"原始 rows 永不出工具层"直接冲突（§1.1、§8.6 第 1 条）'],
+  [/五文件|三地沉淀/, '把结论落成一包文件（上游的 `README.md / 深度研究.md / 财务数据.md / 研报索引.md / 跟踪框架.md` 五文件包，以及"三地沉淀"里往个人知识库同步那一地）：报告交付链路 2026-09-17 已整条删除且禁止恢复（AGENTS.md §7），结论、证据、来源与局限一律写在最终答复里'],
 ]
 
 /** 出现即要求同一文件里必须同时存在的退路说明。 */

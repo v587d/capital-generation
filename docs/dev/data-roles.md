@@ -16,8 +16,9 @@
   - **⛔ 省往返靠 `isConcurrencySafe: () => true` + 框架并发池**：**不要**改成"一次调用合并返回
     多份 dataset"——会同时废掉体积闸门和 hint。
   - **⛔ 体积闸门只有一道**：超过 `SAFE_RESULT_CHARS = 7000` 码点返回 `{status:'too_large',
-    profile_ref, columns, hint}` 小回执，按 hint 用 `columns_of_interest`（或 queries ≤8 条）
-    重发。**不要**再引入 digest / 裁剪阶梯，也不要因一次重发砍事实块（超预算的成因总是塞多了）。
+    profile_ref, columns, bytes, facts_bytes, queries_bytes, hint}` 小回执，回执自带体积归因
+    （哪边大砍哪边：queries 大 → 去 queries 单走 query_dataset；facts 大 → `columns_of_interest`
+    收窄）。**不要**再引入 digest / 裁剪阶梯，也不要因一次重发砍事实块（超预算的成因总是塞多了）。
   - **出图只有一个入口**：`prepare_chart_source` 创建 one-shot `visualization_specialist` 并汇总
     `chart_ref`（§6 → `chart-presentation.md`）。主 Agent 不出图、不在正文罗列图表文件。
   - **gate 的"必须出图"以委派范围为前提**（2026-09-26 实机冒烟）：主 Agent 说"停在 profile"，
@@ -32,7 +33,7 @@
   收到 collector 终结消息后才要求综合与可视化 gate；同一 task_id + dataset_id 不重复派发。
 - **`visualization_specialist`**：one-shot 前台子 Agent，工具表只有 `skill` + `render_chart`；
   spec 由它组装，data_junior 只交"要什么视图"。
-- **`data_analyst`**：保持 `disabled`，启用前置条件见 §8.4（`preset-persona.md`）。
+- **`data_analyst`**：保持 `disabled`，启用前置条件见 §8.4（`preset-persona.md`）。启用后由主 Agent **按需激活**（不进每轮强制预检），补数走 §1.4 的 `analysis_data_request`，不直接持有取数工具。
   **`web_retriever`**：纪律见 §4.1（`web-retriever.md`）。
 
 ## 1.2 两条数据边界（必须分清；2026-09 放宽仅此一处）
@@ -48,6 +49,7 @@
 - **`data_gap` 不需要插件代码**：data_junior 用 `send_message` 向父 Agent 发**补数据请求**（细则
   在 persona 与 skill `capital-data-protocol`，两侧都有断言）；框架原生支持 child → direct
   parent 回程，父 Agent id 由框架注入。
+- **`analysis_data_request` 与 `data_gap` 同构**：analyst 用 `send_message` 向主 Agent 发补数请求（`{type:'analysis_data_request', task_id, analysis_id, need, blocking, already_have, suggested_query}`，见设计稿 §6.2）。主 Agent 是**范围闸门**：只转交 brief 内的请求，超出范围或目标已满足就拒绝并说明。取回新 refs 后发回**同一个** analyst（continuable 复用、不新建同角色）；`blocking: true` 未决时主 Agent **不得写最终答复**，必须先补数或让 analyst 明确降级 partial。暂不设轮次硬上限，出现“连续 blocking 仍不收敛”的 bad case 再评估。
 - **子 Agent 结束本轮 ≠ 任务完成**：等数据的子 Agent 会先结束回合。委派清单用 `waiting_data`
   标记；收到结算通知不得认定完成、不得新建同角色实例。
 - **最终结论前对账结算通知**（真机 `01d6197b`：回传先到、结算后到，结论被切成两个消息）：收齐

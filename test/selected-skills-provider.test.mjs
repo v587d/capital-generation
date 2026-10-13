@@ -119,6 +119,8 @@ function candidate(name) {
 
 function makeHarness() {
   const listeners = new Map()
+  const agents = new Map()
+  const warnings = []
   let rootCleanup
   let provider
   let providerRegistrationCount = 0
@@ -136,15 +138,17 @@ function makeHarness() {
     root,
     get(name) {
       if (name === 'agentPresets') return { composedPreset: (agentCtx) => agentCtx?.preset }
+      if (name === 'agents') return { get: (id) => agents.get(id) }
       return undefined
     },
     effect(callback) { rootCleanup = callback() },
-    logger: { warn() {} },
+    logger: { warn(message) { warnings.push(message) } },
   }
-  function makeAgent({ preset = 'capital-generation', parentSession, lateSnapshot = false } = {}) {
+  function makeAgent({ preset = 'capital-generation', parentSession, lateSnapshot = false, injectFails = 0 } = {}) {
     const agent = { session: { id: 'session', header: { parentSession } }, ctx: undefined }
     const preStepListeners = []
     let catalogSnapshot = []
+    let remainingInjectFailures = injectFails
     // 模拟 SkillRegistry 的 collect 缓存：list 结果按 revision 缓存，只有 control.invalidate()
     // 才重算。少了这层缓存，"开关变了但没失效缓存"的回归永远抓不到（真注册表里的症状是
     // 每轮 catalog 都还停在旧选择）。
@@ -173,6 +177,10 @@ function makeHarness() {
       preset,
       effect(callback) { agentCtx.cleanup = callback() },
       inject(_deps, callback) {
+        if (remainingInjectFailures > 0) {
+          remainingInjectFailures -= 1
+          return Promise.reject(new Error('inject refused'))
+        }
         return Promise.resolve().then(() => callback(Object.create(agentCtx, { skills: { value: skills, enumerable: true } })))
       },
       on(event, listener) {
@@ -227,6 +235,8 @@ function makeHarness() {
   return {
     ctx,
     listeners,
+    agents,
+    warnings,
     makeAgent,
     createFilesystemProvider,
     disposeRoot() { rootCleanup?.() },
@@ -302,6 +312,27 @@ test('selected skill provider: disabled by default and limited to the approved c
   assert.deepEqual(financeskillsCatalog, financeskillDirs,
     `financeskills 的可选清单与快照目录（${financeskillsRoot}）不符：`
     + `多出或缺少 ${financeskillsCatalog.filter((n, i) => n !== financeskillDirs[i]).join('、')}`)
+  // 第八颗（Howard-Jerry/quant-agent-skills）是另一种形状：上游那三颗自述的编排器**根本不在登记的
+  // skills 根里**（它们在快照根，本仓另起了 skills/ 只放我们自持的那一颗入口）。所以这里除了派生核对，
+  // 还要钉一句字面禁令：编排器不进 catalog，也不许被挪进 skills 根——后者是"改一行映射就整颗开门"的
+  // 那一族（AGENTS.md §9.7：同一能力两个入口，回归只喂了接好的那一个）。
+  const quantCatalog = SELECTED_SKILL_CATALOG
+    .filter(({ repository }) => repository === 'quant-agent-skills')
+    .map(({ name }) => name)
+    .sort()
+  const quantRoot = SELECTED_SKILL_SKILL_DIRS['quant-agent-skills']
+  const quantDirs = readdirSync(fileURLToPath(new URL(`../selected-skills/quant-agent-skills/${quantRoot}`, import.meta.url)))
+    .sort()
+  assert.deepEqual(quantCatalog, quantDirs,
+    `quant-agent-skills 的可选清单与登记的 skills 根（${quantRoot}）不符：`
+    + `多出或缺少 ${quantCatalog.filter((n, i) => n !== quantDirs[i]).join('、')}`)
+  for (const orchestrator of ['concept-research', 'industry-research', 'stock-research']) {
+    assert.ok(!SELECTED_SKILL_CATALOG.some(({ name }) => name === orchestrator),
+      `${orchestrator} 是上游自述的编排器（接管会话路由、并行派生 5–6 个子代理，并指挥公开版不附带的`
+      + `私有数据层），不得进入可选清单（docs/dev/selected-skills.md §8.6 第 1、4、5、6 条；逐条实测见该快照 UPSTREAM.md）`)
+    assert.ok(!quantDirs.includes(orchestrator),
+      `${orchestrator} 不得被挪进 ${quantRoot}：一旦落进登记的 skills 根，provider 就会把它发现并暴露出去`)
+  }
   assert.ok(SELECTED_SKILL_CATALOG.every(({ status, tags }) => ['experimental', 'watchlist'].includes(status) && tags.length > 0))
   const harness = makeHarness()
   registerRootSelectedSkills(harness.ctx, { buffettFramework: false }, harness.createFilesystemProvider)
@@ -352,6 +383,62 @@ test('selected skill provider: Capital root only, filtered catalog, scope cleanu
   assert.equal(root.preStepListenerCount, 1, 'scope teardown 必须摘掉每轮刷新钩子，不许留悬挂监听')
   harness.disposeRoot()
   assert.equal(harness.listeners.size, 0, 'plugin teardown must detach the root Agent listener')
+})
+
+test('selected skill provider: 先建会话再切 preset（GUI 顺序）也必须注册 provider', async () => {
+  // 2026-10-13 实测（在真 boot graph 里跑的一次性探针，已清理）：GUI 建会话时先按 profile 默认
+  // preset（`cordis`）把 Agent 建好，随后才 `agentPresets.select('capital-generation')`——
+  // `agent/created` 在 select 之前就发完了，只挂那一条的实现在这条路径上 provider 从未注册：
+  // 设置卡 10 个开关全开，会话目录仍只有 preset 自带的 8 颗（对照：建会话时就 mount 同一 preset
+  // 是 18 颗）。preset registry 在 mount 完成后才 emit `agent-preset/selected`，而本插件的
+  // apply() 正是在这次 mount 里跑的，所以第二条监听一定早于事件落位。
+  const harness = makeHarness()
+  registerRootSelectedSkills(harness.ctx, { buffettFramework: true }, harness.createFilesystemProvider)
+  const selected = harness.listeners.get('agent-preset/selected')
+  assert.equal(typeof selected, 'function', '必须挂 agent-preset/selected：先建后切是 GUI 的真实顺序')
+
+  const root = harness.makeAgent()
+  harness.agents.set('session-root', root.agent)
+
+  await selected('session-root', 'cordis')
+  assert.equal(harness.providerRegistrationCount, 0, '别的 preset 的切换不许碰')
+  await selected('session-missing', 'capital-generation')
+  assert.equal(harness.providerRegistrationCount, 0, '活 Agent 表里没有的会话静默跳过（dispose 后仍可能收到事件）')
+
+  const child = harness.makeAgent({ parentSession: 'session-root' })
+  harness.agents.set('session-child', child.agent)
+  await selected('session-child', 'capital-generation')
+  assert.equal(harness.providerRegistrationCount, 0, '子 Agent 一律不注册')
+
+  await selected('session-root', 'capital-generation')
+  assert.equal(harness.providerRegistrationCount, 1, '切到 Capital 必须注册 provider')
+  assert.deepEqual((await harness.provider.list({})).map(({ name }) => name), ['buffett-investment-framework'])
+  assert.equal(root.preStepListenerCount, 2, '切换路径同样要落位每轮刷新钩子')
+
+  // 同一个 Agent 的重复事件（再 select 一次 / 与 agent/created 撞车）不许注册第二个 provider。
+  await selected('session-root', 'capital-generation')
+  await harness.listeners.get('agent/created')({ agent: root.agent })
+  assert.equal(harness.providerRegistrationCount, 1, '同一个 Agent 只许注册一次')
+
+  harness.disposeRoot()
+  assert.equal(harness.listeners.size, 0, 'plugin teardown 必须把两条监听都摘掉')
+})
+
+test('selected skill provider: 切换路径注入失败要留重试余地', async () => {
+  // §9.7 的另一半：失败不许把该 Agent 钉成永久失败（rejection memoize 的教训）。
+  const harness = makeHarness()
+  registerRootSelectedSkills(harness.ctx, { buffettFramework: true }, harness.createFilesystemProvider)
+  const selected = harness.listeners.get('agent-preset/selected')
+  const root = harness.makeAgent({ injectFails: 1 })
+  harness.agents.set('session-root', root.agent)
+
+  await selected('session-root', 'capital-generation')
+  assert.equal(harness.providerRegistrationCount, 0)
+  assert.ok(harness.warnings.some((message) => message.includes('selected skills are unavailable')),
+    '注入失败只降级告警')
+
+  await selected('session-root', 'capital-generation')
+  assert.equal(harness.providerRegistrationCount, 1, '一次注入失败不许把该 Agent 钉成永久失败')
 })
 
 test('selected skill provider: 嵌套 skills 根里的名字走同一个 list/get 闸门', async () => {

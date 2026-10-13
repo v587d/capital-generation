@@ -18,7 +18,9 @@
 | Claude for Financial Services CN（`d7585ca`，固定快照；改写 12 颗正文的取数层与出图口径，判定档位、报告骨架与分析结论未改） | jwangkun（`LICENSE` 的署名行还带着没去掉的方括号，六份 plugin manifest 另署 `Anthropic FSI China`；上游自称基于 Anthropic 官方仓库适配 A 股） | **Apache-2.0** | <https://github.com/jwangkun/claude-for-financial-services-cn> | `selected-skills/claude-for-financial-services-cn/LICENSE` | 12 / 63 | 「精选 Skills」中的 12 颗 A 股卖方研究 Skill（`china-earnings-analysis`、`china-earnings-preview`、`china-comps-analysis`、`china-dcf`、`china-sector-overview`、`china-catalyst-calendar`、`china-break-trace`、`china-variance-commentary`、`china-initiating-coverage`、`china-morning-note`、`china-thesis-tracker`、`china-idea-generation`）；正文本身就是取数目录的那颗、元技能与 alias 残片、按美股税制写的税损收割那颗、以及要求产出或读取工作簿与 deck 的十一颗都不开放；四份可运行的取数服务端不进发布包 |
 | FinanceSkills（`b0c6239`，固定快照；改写 8 颗正文里"自己跑脚本 / 用代码算"那 16 段与一句点名宿主检索工具的护栏，公式、阈值与分析结论未改） | Ayotunde Oso（仓库账号 `GAJETOso`；`LICENSE` 版权行、`marketplace.json` 的 publisher 与上游 `AGENTS.md` 另署 **KOMVIA**） | MIT | <https://github.com/GAJETOso/financeskills> | `selected-skills/financeskills/LICENSE` | 8 / 48 | 「精选 Skills」中的 8 颗估值建模与偿债 / 行业专用财务 Skill（`wacc-computation`、`company-valuation`、`three-statement-modeling`、`credit-analysis`、`ecl-computation`、`banking-compliance`、`insurance-reserving`、`forensic-accounting`）；其余 40 颗按**领域外**排除（编制视角的会计作业、内部审计与内控、个人理财与美国 / 英国税制、加密资产、私有公司语境），留在快照里作为可审查材料；上游自带的 43 份 python 计算脚本与它自己的评测夹具目录不进发布包，上游的 MCP 服务端与 Stripe / Plaid 等账户连接器连本仓都不进 |
 
-七份快照合计 **67 个可选 Skill**（快照里共有 173 颗 skill，差额逐颗记在各自的 `UPSTREAM.md` 里）。
+| Quant Agent Skills（`03677d2`，固定快照；上游三颗自述的编排器不进可选清单，只有两份跨市场选线口径按原文随包） | Jerry Wang（仓库账号 `Howard-Jerry`；上游 README 声明正文来自其个人量化系统，数据层尚未开源） | MIT | <https://github.com/Howard-Jerry/quant-agent-skills> | `selected-skills/quant-agent-skills/LICENSE` | 1 / 4 | 「精选 Skills」中的 `cross-market-listing-choice`（跨市场选线：A/H 与 ADR/HK）。**这颗的入口正文由本仓撰写**——上游那三颗都会接管会话路由并指挥公开版根本不附带的私有脚本，一颗都不能开放；随包的上游原文只有两份 overlay 口径文件（与所钉 commit 逐字节相同，核对方式与该快照的 `UPSTREAM.md` 里）；上游三颗与它的工程材料留在 git 里供复核，由快照自己的 `.npmignore` 挡在发布包之外 |
+
+八份快照合计 **68 个可选 Skill**（快照里共有 177 颗 skill，差额逐颗记在各自的 `UPSTREAM.md` 里）。
 首页「精选 Skills」那句里的两个数字与此同源，由回归测试按 catalog 现算钉住。
 它们的收录方式、上游 commit、维护状态与逐颗排除理由记在各自的 `UPSTREAM.md` 里，并且**默认全部关闭**，
 只在使用者于配置页显式开启后才对新建的 Capital 会话可见。
@@ -38,6 +40,14 @@ Trading Skills 另外排除的几类走的是同一批约定：券商 API 执行
 （含密钥申请去处与一个用环境变量决定"用哪家"的开关）、一段看起来能跑的伪调用，以及把服务商名写死的引用格式。
 其中 `china-market-data` 整颗就是那份服务商工具目录，收录它等于在本插件既有的取数协议之外再造一条取数路由；
 四份配套的服务端脚本（万得 / 同花顺 / AkShare / 新闻）与本插件不发布券商执行面是同一条线，连发布包都不进。
+第八颗（Quant Agent Skills）排除的理由与前面每一颗都不一样：**不是措辞问题，是它指挥的东西根本不在仓里。**
+上游三颗自述为编排器（接管会话路由、并行派生 5–6 个子代理再裁决），实测三颗入口点名的本地路径
+10 / 32 / 16 个，公开版**一个都不存在**——作者自己写明数据层要到 v1.1 才开源。这类正文发给使用者，
+得到的只是"教 Agent 去撞一条跑不通的指令"。所以我们从这颗只取两份口径文件（跨市场选线那两条 overlay，
+正文只含纯文本代码块、零私有路径、零跨文件引用），收录那颗的入口流程由本仓自己写。
+这也是本仓**第一次在外部快照里放一份自持正文**，许可口径因此要说清：MIT 只要求随包保留版权与许可声明，
+不要求"被改过的文件带显著声明"（上面 Apache 那一份多出来的那条义务在这颗不适用），
+而上游那两份原文我们一个字都没改，逐字节一致的核对方式记在该快照的 `UPSTREAM.md` 里。
 
 **五处对上游正文的改写都是合规改写，不是编辑**：上游 skill 写给"什么工具都在手边"的宿主——前三份成规模地要求
 分析角色自己去 `web search` 取实时行情，其中两份还留着"取不到就凭印象估一个"的逃生口；第五份一次 `web search`
@@ -51,7 +61,7 @@ python 模块"；第六颗（本颗）把形态摊成全量：每份正文自带
 改了什么、影响几篇，逐条记在对应快照的 `UPSTREAM.md`；改写结果由仓库自带的回归测试逐条复查。
 方法论、评分表、输出模板与分析结论一字未改。
 
-**本颗是七份里唯一的 Apache-2.0 快照**（其余六份为 MIT），许可义务也因此多一条：Apache-2.0 第 4 条 (b) 款要求
+**本颗是八份里唯一的 Apache-2.0 快照**（其余七份为 MIT），许可义务也因此多一条：Apache-2.0 第 4 条 (b) 款要求
 "修改过的文件本身带上显著声明"，而不只是在他处说明。所以被改写的那 12 份正文在标题下各留了一句可见的改动声明，
 点名所钉 commit 并指回该快照的 `UPSTREAM.md`；与上游逐字节相同的 51 份不带这一行。上游没有 `NOTICE` 文件，
 因此随包保留 `LICENSE` 原件与这份清单即可。

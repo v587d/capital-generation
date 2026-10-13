@@ -1134,3 +1134,28 @@ test('具名来源的输出预算必须留在宿主剪枝阈值内（两处必�
     `SOURCE_OUTPUT_BUDGET_CHARS（${SOURCE_OUTPUT_BUDGET_CHARS}）必须低于 preset 的 thresholdChars（${threshold}）：`
     + '越过阈值的工具结果会被剪成 head + [middle pruned] + tail，而 JSON 头部的 count 仍写着原来的条数')
 })
+
+test('核查分级（2026-10-10 真机）：核心事实逐条、外围一句话清单、异常触发才深挖', () => {
+  // 真机教训：财务健康诊断的外部核查按审计级清单全量核验，产出 18 条情报 / 39K 输出 tokens，
+  // 拖慢主结论。分级口径三处齐写：委派方（orchestration）、证据计划（equity-research）、
+  // 回传格式（web-protocol）——少一处就会在某一侧退化回逐条审计级。
+  const orchestration = readFileSync(`${SKILL_DIR}capital-orchestration/SKILL.md`, 'utf8')
+  const webProtocol = readFileSync(`${SKILL_DIR}capital-web-protocol/SKILL.md`, 'utf8')
+  const equity = readFileSync(`${SKILL_DIR}capital-equity-research/SKILL.md`, 'utf8')
+  for (const [text, name] of [[orchestration, 'capital-orchestration'], [webProtocol, 'capital-web-protocol'], [equity, 'capital-equity-research']]) {
+    assertRuleAny(text, [/核心事实/], `${name} 必须点名「核心事实」分级`)
+    assertRuleAny(text, [/外围事实/], `${name} 必须点名「外围事实」一句话清单`)
+  }
+  assertRule(webProtocol, /≤10 条/, '核心事实应有条数预算')
+  assertRule(webProtocol, /深挖只在触发时做/, 'web-protocol 必须写明深挖的触发条件')
+  assertRuleAny(orchestration, [/不预设.*审计级格式/], '委派侧必须禁止默认审计级清单')
+})
+
+test('bash 派生计算（2026-10-10 真机）：只敲标量、逐数核对，不整行复制', () => {
+  // 真机教训：bash 转写把整段聚合行逐数敲进脚本，笔误后又花 7.2K 字符发更正消息。
+  const dataProtocol = readFileSync(`${SKILL_DIR}capital-data-protocol/SKILL.md`, 'utf8')
+  assertRuleAny(dataProtocol, [/只敲最终参与计算的标量/], 'capital-data-protocol §3.3 必须限定只敲标量')
+  assertRuleAny(dataProtocol, [/逐一核对/], 'capital-data-protocol §3.3 必须要求转写后逐数核对')
+  assertRuleAny(dataProtocol, [/不整行\/?整表复制/], 'capital-data-protocol §3.3 必须禁止整行复制')
+  assertRuleAny(JUNIOR_PERSONA, [/逐数核对|逐一核对/], 'data_junior persona BASH DISCIPLINE 必须留核对硬规则')
+})

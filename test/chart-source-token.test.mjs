@@ -86,6 +86,28 @@ async function fixture() {
   return { fs, store, ref }
 }
 
+test('ChartSourceTokenStore：同 task_id + dataset_id 幂等复用，不再为同一 dataset 重签', async () => {
+  // 2026-10-10 真机回归（task_fh_300803_20261010）：data_junior 改视图方案后为同一 dataset
+  // 重签 token，紧跟着 7.9K 字符思考。skill 警告拦不住 → 幂等沉到工具层。
+  let counter = 0
+  const { store, ref } = await fixture()
+  const tokens = new ChartSourceTokenStore({ now: () => 1_700_000_000_000, newToken: () => `cs_seq_${++counter}` })
+
+  const first = await tokens.issue({ store, session: JUNIOR, dataset_id: ref.dataset_id, task_id: 'task-1' })
+  const again = await tokens.issue({ store, session: JUNIOR, dataset_id: ref.dataset_id, task_id: 'task-1' })
+  assert.equal(again.chart_source_ref, first.chart_source_ref, '重复签发必须返回同一个 token')
+  assert.equal(again.expires_at, first.expires_at, '幂等复用不得悄悄延长 TTL')
+  assert.equal(counter, 1, '幂等路径不应生成第二个 token')
+  assert.equal(tokens.size(), 1)
+
+  // 不同 task / 不同 session / 不同 dataset 仍是独立 token
+  const otherTask = await tokens.issue({ store, session: JUNIOR, dataset_id: ref.dataset_id, task_id: 'task-2' })
+  assert.notEqual(otherTask.chart_source_ref, first.chart_source_ref)
+  const otherSession = await tokens.issue({ store, session: { ...JUNIOR, id: 'junior-2' }, dataset_id: ref.dataset_id, task_id: 'task-1' })
+  assert.notEqual(otherSession.chart_source_ref, first.chart_source_ref)
+  assert.equal(tokens.size(), 3)
+})
+
 test('ChartSourceTokenStore：签发、任务绑定、过期和撤销', async () => {
   let now = 1_700_000_000_000
   const { store, ref } = await fixture()

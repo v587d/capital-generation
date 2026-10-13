@@ -1,0 +1,6 @@
+> **公开版适配说明（v1.0.0）**：本 skill 来自作者个人量化系统，命令和文件路径是
+> 作者技术栈的具体实现。使用前请先读术语表与适配指南：
+> https://github.com/Howard-Jerry/quant-agent-skills/blob/main/docs/adaptation-guide.md
+> `{{QUANT_ROOT}}` 是你的量化项目根目录；`RRS`/`research_report`/`Vault`/
+> `scripts/*.py` 等是作者配套组件，公开版不附带，请按指南替换为你自己的
+> 数据层与知识库（最小骨架见仓库 `template/` 目录）。
