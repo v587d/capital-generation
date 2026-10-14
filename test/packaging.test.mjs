@@ -65,6 +65,13 @@ test('打包闸门：vendored 图表库与构建产物都在发布清单里', (t
     'THIRD_PARTY_NOTICES.md',
     'preset/capital-generation/agent.patch.yml',
     'preset/capital-generation/skills/capital-chart-protocol/SKILL.md',
+    // 协议五册逐颗点名：persona 的 duty 行按名字加载，漏发一册的症状是"子 Agent 拿不到契约"，
+    // 而 catalog 反查只会说找不到文件，说不出少的是哪一册。
+    'preset/capital-generation/skills/capital-data-protocol/SKILL.md',
+    'preset/capital-generation/skills/capital-data-profile/SKILL.md',
+    'preset/capital-generation/skills/capital-data-query/SKILL.md',
+    'preset/capital-generation/skills/capital-web-protocol/SKILL.md',
+    'preset/capital-generation/skills/capital-web-evidence/SKILL.md',
     'cordis.patch.yml',
   ]) {
     assert.ok(paths.has(required), `发布清单里缺少 ${required}（npm run build 是否跑过？files 列表是否漏了？）`)

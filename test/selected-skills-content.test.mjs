@@ -1,8 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadBudget } from './preset-rows.mjs'
 import { SELECTED_SKILL_CATALOG, SELECTED_SKILL_SKILL_DIRS } from '../selected-skills/catalog.js'
 
 /**
@@ -113,6 +114,126 @@ const skills = SELECTED_SKILL_CATALOG.map((entry) => {
 
 const where = ({ entry, dir }, file) => `${entry.repository}/${entry.name}/${file.slice(dir.length + 1)}`
 
+/**
+ * 已按「入口册 + 分册 + 运行时 `read`」分层的 catalog 条目（这份清单只准变长）。
+ *
+ * `chars` 是该条目目录下全部 `.md` 的字符总量基线：分层的唯一许可是**搬家**，所以基线只准涨。
+ * `cards` 是卡片 ID 的应有色数（没有卡片结构的条目不填）。
+ * 登记进来就必须整棵树达标：目录下**任何** `.md`（含子目录）都不许再是厚册——只把入口
+ * 削薄而留着上游自带的第二层厚指南，等于把剪枝再往下挪一层（`peter-lynch-skill` 就是这种形状：
+ * 入口之外还有 4 份 8,750–21,342 的指南，各切成多册并把原路径留成索引）。
+ */
+const LAYERED = [
+  { name: 'buffett-investment-framework', chars: 117909, cards: 65 },
+  { name: 'china-idea-generation', chars: 9385 },
+  { name: 'china-sector-overview', chars: 9523 },
+  { name: 'china-catalyst-calendar', chars: 10512 },
+  { name: 'bear-case', chars: 15218 },
+  { name: 'stock-screener', chars: 12961 },
+  { name: 'peter-lynch-skill', chars: 85955 },
+]
+
+/**
+ * 宿主 `read` 的回执形状，与 `@deepseek-ai/dsh-tool-fs` 的 `formatReadOutput` 同形：每一行前面
+ * 是 `N: `，再包 `<path>…</path>` / `<type>file</type>` / `<content>` 与结尾"total N lines"那行。
+ *
+ * ⛔ 所以"这一册会不会被剪"看的是**渲染后**的长度，不是文件字符数——2026-10-14 实测：
+ * 7,302 字符 / 95 行的正文，read 回执 7,894 字符（差 592，几乎全是行号与标签）。
+ * 拿文件字符数当上限，会放过真会被剪的册子，症状与不分层一样。
+ * 路径长度按安装后的位置取：本机三种安装路径实测 178–184 字符，这里取 200 留余量。
+ */
+const READ_PATH_CHARS = 200
+const readEnvelopeChars = (text) => {
+  const lines = text.split('\n')
+  if (lines.at(-1) === '') lines.pop()
+  const body = lines.map((line, i) => `${i + 1}: ${line}`).join('\n')
+  return [...`<path>${'x'.repeat(READ_PATH_CHARS)}</path>\n<type>file</type>\n<content>\n`
+    + `${body}\n\n(End of file - total ${lines.length} lines)\n</content>`].length
+}
+
+/**
+ * 正文里点名过的文件：markdown 链接保留**原样路径**，裸 `` `xxx.md` `` 按文件名匹配。
+ * 入口册的分派列用裸名（每个链接省 20 字符），两种写法都得认——只认一种等于放行断链。
+ * 寻址按宿主的教法：相对 skill 目录解析（`references/deep/…` 这类嵌套路径要能走通）。
+ */
+const mentionedTargets = (text) => new Set([
+  ...[...text.matchAll(/\]\(([^)#]+\.md)\)/g)].map((m) => m[1]),
+  ...[...text.matchAll(/`([^`\s]+\.md)`/g)].map((m) => m[1]),
+])
+const resolveTarget = (skill, file, target) => (target.includes('/')
+  ? [join(skill.dir, target), join(dirname(file), target)]
+  : [join(dirname(file), target), join(skill.dir, 'references', target), join(skill.dir, target)]).find((p) => existsSync(p))
+const realTargets = (skill) => {
+  const found = new Set()
+  for (const file of skill.files) for (const target of mentionedTargets(readFileSync(file, 'utf8'))) {
+    const hit = resolveTarget(skill, file, target)
+    if (hit !== undefined) found.add(hit)
+  }
+  return found
+}
+
+test('内容闸门：分层条目的每一册、无论走 skill 还是 read，都必须一次加载全文带回', () => {
+  // 分层的意义就是"每一册都完整可见"：入口册达标了、分册照样超阈值的话，剪枝只是从 skill
+  // 结果挪到 read 结果上，静默节选的问题一个都没解决。
+  // 两条通道的上限不同：`skill` 的回执还要再包一层（≈512，见 loadBudget），所以正文上限是
+  // threshold − 512；`read` 的回执就是 readEnvelopeChars 算出来那一段本身，没有额外包装，
+  // 上限是 threshold。**不加人为 slack**——贴线多少字符要如实报出来（同 persona 那三道闸门）。
+  const { thresholdChars, visibleChars } = loadBudget()
+  for (const layer of LAYERED) {
+    const skill = skills.find(({ entry }) => entry.name === layer.name)
+    assert.ok(skill, `分层清单里的 ${layer.name} 不在 catalog：要么登记回来，要么把它从分层清单删掉`)
+    const over = []
+    for (const file of skill.files) {
+      const text = readFileSync(file, 'utf8')
+      const viaRead = readEnvelopeChars(text)
+      if (viaRead > thresholdChars) over.push(`${where(skill, file)} 被 read 打开：回执 ${viaRead} > ${thresholdChars}`)
+      if (file.endsWith('SKILL.md')) {
+        const viaSkill = [...text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '')].length
+        if (viaSkill > visibleChars) over.push(`${where(skill, file)} 被 skill 加载：正文 ${viaSkill} > ${visibleChars}（阈值减渲染包装）`)
+      }
+    }
+    assert.deepEqual(over, [],
+      `${layer.name} 分层后仍有册超过一次加载的可见上限：再切一册，`
+      + '不要留着一本厚册指望模型自己翻页（它只会在回执里看到 [middle pruned]，使用者看不到）。')
+    const broken = []
+    for (const file of skill.files) {
+      for (const target of mentionedTargets(readFileSync(file, 'utf8'))) {
+        if (resolveTarget(skill, file, target) !== undefined) continue
+        broken.push(`${where(skill, file)} → ${target}`)
+      }
+    }
+    assert.deepEqual(broken, [], `${layer.name} 点名了不存在的册：分层后册名是运行时唯一的寻址依据，点错一个等于那一册不在场`)
+    const targets = realTargets(skill)
+    // 入口册自己不算分册：它是 skill 工具的加载对象，不需要谁指过去。
+    const orphans = skill.files.filter((file) => !file.endsWith('SKILL.md') && !targets.has(file))
+    assert.deepEqual(orphans.map((file) => where(skill, file)), [],
+      `${layer.name} 有没人指过去的册：写进目录而没有任何入口指针的附件，模型永远读不到`)
+  }
+})
+
+test('内容闸门：分层只搬家——总量只准涨，卡片不重不漏，文件名声明的区间要与内容一致', () => {
+  for (const layer of LAYERED) {
+    const skill = skills.find(({ entry }) => entry.name === layer.name)
+    assert.ok(skill, `分层清单里的 ${layer.name} 不在 catalog`)
+    const total = skill.files.reduce((sum, file) => sum + [...readFileSync(file, 'utf8')].length, 0)
+    assert.ok(total >= layer.chars,
+      `${layer.name} 目录下 .md 总量 ${total} < 分层当天基线 ${layer.chars}：分层不许夹带删规则（§8.3 不准删断言变绿的同源纪律）`)
+    if (layer.cards === undefined) continue
+    const ids = skill.files.flatMap((file) => [...readFileSync(file, 'utf8').matchAll(/^### ([A-Z]\d\d) —/gm)].map((m) => m[1]))
+    assert.equal(new Set(ids).size, layer.cards,
+      `${layer.name} 的卡片应有色数 ${layer.cards} 张、实际去重后 ${new Set(ids).size} 张（含重复 ${ids.length - new Set(ids).size} 处）：`
+      + '同一张卡出现在两册迟早漂成两个版本，少一张就是搬家搬丢了')
+    for (const file of skill.files) {
+      const declared = basename(file).match(/([A-Z]\d\d)-([A-Z]\d\d)\.md$/)
+      if (declared === null) continue
+      const own = [...readFileSync(file, 'utf8').matchAll(/^### ([A-Z]\d\d) —/gm)].map((m) => m[1])
+      assert.equal(`${own[0]}-${own.at(-1)}`, `${declared[1]}-${declared[2]}`,
+        `${where(skill, file)} 的册名写着 ${declared[1]}–${declared[2]}、实际是 ${own[0]}–${own.at(-1)}：`
+        + '入口册靠册名判断该开哪一册，名字与内容不符就是让模型按错地图走路')
+    }
+  }
+})
+
 test('内容闸门：扫描面跟着 catalog 走，且不是空断言', () => {
   assert.ok(skills.length >= 30, `catalog 只有 ${skills.length} 条，这道闸门接近空断言`)
   for (const { entry, path } of skills) {
@@ -158,10 +279,14 @@ test('内容闸门：第六颗快照里被改写的正文必须各带一行 Apac
   // Apache-2.0 第 4(b) 条不同——它要求"修改过的文件带上显著的声明"。所以这颗快照里凡与上游不同的正文，
   // 正文第一行都得有一句可见声明指回该快照的 UPSTREAM.md。这一条不像取数那族会顺带撞别的断言，
   // 漏了没人响，所以单独钉住：漏一颗就点名那一颗。
+  // 分层（§8.6 第三个改写理由）之后**每一册都算被改写的正文**，所以问的是目录下全部 .md，
+  // 不只是 SKILL.md——只查入口册的话，新搬出去的分册就是这条义务的漏检面（AGENTS.md §9.7 同一族）。
   const sixth = skills.filter(({ entry }) => entry.repository === 'claude-for-financial-services-cn')
   assert.ok(sixth.length > 0, 'catalog 里没有第六颗快照的条目，这条闸门会退化成空断言')
-  for (const { entry, path } of sixth) {
-    assert.match(readFileSync(path, 'utf8'), /^> 本文件相对上游 `d7585ca` 快照做过合规改写/m,
-      `${entry.name}/SKILL.md 缺 §4(b) 的改动声明行（一级标题下那一句可见声明，指回快照根的 UPSTREAM.md）`)
+  for (const skill of sixth) {
+    for (const file of skill.files) {
+      assert.match(readFileSync(file, 'utf8'), /^> 本文件相对上游 `d7585ca` 快照做过合规改写/m,
+        `${where(skill, file)} 缺 §4(b) 的改动声明行（一级标题前那一句可见声明，指回快照根的 UPSTREAM.md）`)
+    }
   }
 })

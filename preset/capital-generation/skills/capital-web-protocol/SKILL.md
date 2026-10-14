@@ -1,19 +1,24 @@
 ---
 name: capital-web-protocol
-description: Use in Capital mode when retrieving or presenting external material — the anysearch / wind_docs source boundary and the rule to pick a source before searching, the search-convergence heuristic and how to read provider_tally / recent_retrievals, the three mandatory Wind query elements, the wind-to-anysearch fallback, the automatic local-fetch fallback and its via / local-http provenance labeling, the numbered evidence reply format, and the official-domain verification checklist for securities sources. Required reading for the web_retriever child before its first retrieval.
+description: Use in Capital mode when retrieving external material — the anysearch / wind_docs source boundary and the rule to pick a source before searching, the search-convergence heuristic and how to read provider_tally / recent_retrievals, the three mandatory Wind query elements, the wind-to-anysearch fallback, and the automatic local-fetch fallback with its via / local-http provenance labeling. Volume 1 of the Capital retrieval protocol; how you label what you return lives in capital-web-evidence.
 ---
 
-# Capital 检索协议（完整版）
+# Capital 检索协议 · 第一册：来源边界与收敛
 
-`web_retriever` 子 Agent 的工作细则；主 Agent 呈现检索结论时同样按第 5 节的回传格式保留来源标注。
+`web_retriever` 子 Agent 的工作细则；主 Agent 呈现检索结论时同样按 `capital-web-evidence` §5 的回传格式保留来源标注。
 persona 只保留硬规则（先定来源再动手、只用这十四个工具、一次一个 URL、无来源不作证据）；
 本文件是其余细节。
+
+本协议共两册，§编号跨册连续：**本册**管"去哪取、怎么调"（§1 来源边界 / §2 收敛 / §3 Wind 三要素 /
+§4 双来源降级），"取到的东西怎么标成证据"在 `capital-web-evidence`（§5 回传格式 / §6 官方域名核验 /
+§7 抓取与失败处置 / §8 文档解析 `ocr`）。要给出编号证据、判定 `verified_official`、处理抓取失败或
+解析 PDF，加载 `capital-web-evidence`。
 
 ## 1. 来源边界（两个 search_engine_provider + 九个具名来源工具 + 文档解析）
 
 **三类工作面，别混**：`search` / `fetch` 是**检索**（先发现候选，再按 URL 取正文）；
 下面九个工具是**来源查询**（具名来源 + 业务参数 → 确定、有序、可翻页、同参可复现的结果集）；
-`ocr` 是**文档解析**（PDF / 图片 → markdown 正文，见第 8 节——它是这批工具里**唯一要 token** 的）。
+`ocr` 是**文档解析**（PDF / 图片 → markdown 正文，见 `capital-web-evidence` §8——它是这批工具里**唯一要 token** 的）。
 
 | 来源 | 工具 | 性格 | 用途 |
 |---|---|---|---|
@@ -35,7 +40,7 @@ persona 只保留硬规则（先定来源再动手、只用这十四个工具、
 
 - `eastmoney_reports` / `sina_reports` 的列表**不含正文**（只有标题 / 机构 / 研究员 / 日期 / 评级）。
   东财的每条还直接给出 `pdf_url`（该篇研报 PDF 直链）与 `attach_pages`——**这不是死路：把那条
-  `pdf_url` 原样交 `ocr` 解析**（第 8 节），不要自己去拼或改链接。`ocr` 也拿不到时如实说明这个
+  `pdf_url` 原样交 `ocr` 解析**（`capital-web-evidence` §8），不要自己去拼或改链接。`ocr` 也拿不到时如实说明这个
   边界，**不要用标题当结论**。
 - `ths_eps_forecast` 是**一致预期**（观点聚合），不是官方事实、也不是已实现业绩。
   `institutions`（预测机构数）< 3 时参考价值有限，回传时必须把机构数一并向用户披露。
@@ -120,128 +125,3 @@ Wind 结构化查询同样是**花积分的**：先看 `data_collector` 的免�
 - 反向 fallback：anysearch 多轮探索仍找不到权威原文而 Wind 可用时，转 `wind_docs` 少走弯路。
 - 换 provider 前先看 `recent_retrievals` / `provider_tally`：该诉求是否已被回答、已有材料是否
   覆盖、目标来源还剩多少余量；切换原因写进回传。检索收敛法则按 provider 各自计。
-
-## 5. 回传格式（每条证据都要有来源）
-
-- **核查分级，不是每条都审计级**（2026-10-10 真机：逐条 URL+日期+双分类的全量核验产出 18 条情报、
-  39K 输出 tokens，拖慢主结论）：**核心事实**——直接影响结论或风险判断的（审计意见、商誉、
-  质押/担保/资金占用、现金流与利润背离、有息负债、再融资/重组、被监管调查等）——逐条编号、
-  每条一行来源，一般 ≤10 条；**外围事实**（分红方案、互动平台问答情况、媒体花絮等不改变判断的）
-  合并成一句话清单，来源在清单末一次性标注即可，不逐条取原文、不逐条贴 URL+日期。
-- **深挖只在触发时做**：核心事实里出现质押、商誉减值、现金流恶化、审计非标等异常线索，
-  才对该单项升级为公告全文级核验；不要开局就把全部条目按审计标准核一遍。
-- 回传的核心证据/情报逐条编号（情报1、情报2……），编号后紧跟来源标注。
-- 有网页链接的用 markdown 链接：方括号里列出**全部来源**（检索 provider 与具体媒体/机构名
-  都写上），**链接只放一条最权威的**即可，不必逐个贴链接。示例：
-  `情报1：公司今日召开临时股东会审议借款议案。[AnySearch, 新浪财经, 证券之星](https://…)`
-- 没有具体网页链接的证据（如 `wind_docs` 返回的公告/新闻正文），只标注来源与时间口径。示例：
-  `情报2：公司2024年年报披露净利润同比下降。（来源：万得 Wind 金融数据服务，2026-09-11）`
-  `wind_docs` 返回体内自带链接字段时可用那个链接；**不得编造链接**。
-- 来源标注要区分：候选来源（搜索摘要，未点开）、已获取正文（fetch 过）、wind_docs 官方文档
-  （来源：Wind）。**无来源的信息不得作为证据回传**；不编造来源。
-- 失败项与未核验项同样编号列出并注明原因，不与已证实证据混排；核心事实同一来源服务多条时逐条
-  重复标注，不要用"同上"（外围清单可整段合标）。
-- 主 Agent 向用户呈现时保留这些来源标注；网页数字只能标"媒体转述旁证"。
-- `via: 'local-http'`（本机直连抓取）取得的正文，来源标注用「官网直抓」措辞
-  （例如「AnySearch 受限，来源为本机直抓官网页面」），链接仍只放一条最权威的。
-
-## 6. 官方证券来源域名核验
-
-当任务涉及股票、证券、基金、监管机构、交易所、清算机构、上市公司或发行人的可信来源时，
-只核验官方网址和域名。
-
-- 仅使用 `web_retriever_fetch` 访问官方监管机构、交易所、清算机构、发行人、基金管理人、
-  官方披露系统或官方数据接口页面。
-- 不得使用搜索摘要、财经媒体、聚合网站、百科、论坛、社交媒体、域名评级网站或模型记忆作为
-  证据；不得调用 `anysearch_search` 替代 `web_retriever_fetch`。
-- 不得仅凭机构名称、域名后缀、网页外观或搜索结果判断官方归属。必须通过 fetch 页面确认机构
-  名称、域名归属和具体业务用途。
-- 主域名、子域名、API 域名、披露系统域名和下载域名必须**分别核验**；官方页面跳转或链接到
-  第三方域名，不代表该域名自动属于官方。
-- 只有官方页面能够直接证明归属和用途时，才能标记为 `verified_official`；否则标记为
-  `unverified` 或 `not_verified`，不得猜测或列入白名单。
-- 每个已核验域名输出：机构、司法辖区、机构类型、规范化域名、官方网址、核验用途、可信原因、
-  核验状态、证据网址、抓取时间和使用限制。
-- 将"已核验官方白名单"和"候选/未核验域名"分开；没有充分证据时明确写"未核验"，不得为了
-  完整性补全域名。
-- 域名属于官方机构，不等于该域名下所有数据都适合作为最终证券研究证据；实际使用不得超出已
-  核验的业务范围。
-- 本机直抓**不改变** `verified_official` 的授予条件（仍只属于官方域名核验路径）；但核验记录里
-  要写明该页面是经 AnySearch 清洗还是本机直抓取得的（看回执 `via` 字段）。
-
-## 7. 抓取与失败处置
-
-- 网页抓取成功后回传 URL、标题、正文和抓取结果；正文过长时按工具返回内容为准，不自行补全。
-- **自动本机回退（不是你的第二次调用）**：`web_retriever_fetch` 在 AnySearch 明确失败且"值得换路"、
-  **且本机直连回退已启用**（设置卡片开关「允许启动本地提取网页内容」，默认开启）时，会**自动**改由
-  本机直连抓取该页面；你不需要、也不应该为此再调用一次工具。未启用时 AnySearch 失败即回传失败，
-  照常按失败处置，不要为此改用其他抓取途径。回执里的 `via` 标明正文来源：
-  `via: 'anysearch'` = AnySearch 清洗正文；`via: 'local-http'` = 本机直连抓取。
-- **来源标注义务**：`local-http` ⇒ 来源标注用「官网直抓」措辞（必须写明
-  「AnySearch 受限，来源为本机直抓官网页面」），并保留 `fallback.code` 作为 AnySearch 失败原因；
-  `via: 'anysearch'` 时按第 5 节现状标注。
-- **本机直抓的能力边界**（不要以为它万能）：只处理公开可访问的文本页面（HTML / 文本 / JSON / XML）；
-  PDF 与二进制、需登录页面、内网地址仍会失败。正文超长时是**截断**（回执 `truncated: true`），不是失败。
-- **失败是工具错误，不是"正常返回"**：抓取失败时 `web_retriever_fetch` 以**工具错误**（`isError`）返回，
-  错误正文就是一份 JSON 回执（`ok: false` + `error` + `code` + `local_error` + `fallback` + 检索回声）。
-  **不要把它当成抓取成功**——先读 `local_error.code` / `code` 判明原因，再如实回传；不得编造标题或正文。
-- **与"最多重试一次"的关系**：自动回退**不算**你的第二次重试。模型层面的"重试一次"只适用于两条路
-  都失败之后的显式重试；网络或服务错误**最多重试一次**，仍失败则如实回传，并与其他已证实证据分开编号。
-- 搜索摘要只能用于发现候选来源，不能作为证券事实证据；报告中区分候选来源、已获取正文、
-  未核验内容和失败原因，不编造缺失信息。
-
-### 7.1 WAF 挑战型站点：如实报错，改走 Wind
-
-有些站点（政府网站尤其多）挂在 **WAF 的 JavaScript 挑战**后面。识别特征：
-
-- 回执 `local_error.code = 'HTTP'` 且消息是 **HTTP 521**（也可能是 403 / 503）；
-- 响应头带 `X-Via-Jsl`（加速乐 / Jiasule）、`Set-Cookie: __jsluid_h=...`；
-- 正文不是文章，而是一段**裸 `<script>`**（内容是 `document.cookie=...__jsl_clearance...`）。
-
-**原理**：服务器要求客户端**执行 JavaScript** 算出通行证 cookie 再重新请求。浏览器会自动完成这一步，
-而本机直抓是纯 HTTP 客户端，**不执行脚本**，所以永远拿不到正文。它**不是**超时、不是缺响应头、
-也不是重定向问题——**重试无用**（第二次只会拿到 20KB 以上的混淆脚本，需要 `window` / `document` 才能跑）。
-
-**处置（硬规则）**：
-
-1. **不重试、不尝试绕过**：不分析混淆脚本、不猜 cookie、不靠换 UA 碰运气。
-2. 如实回传：该 URL **未取得正文**，与其他已证实证据分开编号，域名核验状态写「未核验」。
-3. **改走 Wind**：同一份官方文件或权威新闻优先用 `wind_docs_announcements` / `wind_docs_news` 取
-   （`public_document`），标注「来源：万得 Wind 金融数据服务」与时间口径后即可作为证据。
-   Wind 也查不到时，再试同一内容的**其他官方入口**（中国政府网、部委主站镜像等），
-   并在回传里注明替代来源与原 URL 的关系。
-4. 不要因为一条被墙就放弃整个任务：把这一条标为「来源不可达」，其余结论照常给出。
-
-## 8. 文档解析（`ocr`：PDF / 图片 → 正文）
-
-第 1 节那三个"硬边界"里唯一被拆掉的就是**研报 / 公告正文拿不到**：现在有一条明确的通路，
-但它**要 token、按整篇计费**，所以用法比别的工具讲究。
-
-- **什么时候动它**：你手上有一条 `.pdf` 直链（`eastmoney_reports` 条目里的 `pdf_url`，或公告 /
-  招股书原文的直链），或委派消息给了一个工作目录内的本地文档路径（用户以 `@xxx.pdf` 推给
-  主 Agent 的那种）。`web_retriever_fetch` 拿到 PDF 是**能力边界**不是故障——不要重试 fetch，
-  改调 `ocr`。
-- **四种调用形态，一次只走一种**：`url`（外部 PDF 直链）/ `file`（工作目录相对路径的本地
-  pdf 或图片）/ `job_id` + `doc_id`（**续查**上一次没跑完的作业）/ `doc_id` + `pages` \| `query`
-  （**纯本地读已落盘正文**，不出网、不花钱）。同时给两种输入会被直接拒绝，不会替你选边。
-- **`pages` 不省钱**：一次作业总是解析**整篇**（上游口径最多 100 页），`pages` 只决定这次
-  给你读哪几页。想省钱靠**第二次起用 `doc_id`**，而不是靠少写几页。
-- **`status: 'pending'` 不是失败**：作业还在跑。回执带 `job_id` 与 `doc_id`，**再调一次只传
-  这两个**继续等；⛔ 不要重传 `url`——那是提交第二个作业、再花一次钱。
-- **`doc_id` 是 opaque 引用**：形如 `ocr_1a2b3c4d5e6f`，从回执里原样取用，不要猜、不要拼路径、
-  不要试图从它读出文档内容。同一份文档再次请求会**直接回读缓存**（不再出网），只有
-  `refresh: true` 才重跑；重跑**不是独立验证**（上游对同一份 PDF 给过 18% 与 19% 两种数字）。
-- **回执装不下整篇**：超出输出预算时只给**页索引**（每页 `chars` 与首个标题）+ 首页。
-  先按索引判断需要哪几页，再用 `pages`（`"1-3"` / `"2-4,9"`，一次最多 8 页）或 `query`
-  （关键词定位，回命中片段与页号）取回。**一律整页进整页出**——没有"半页正文"这种东西。
-- **表格与图片**：上游的表格已归一化成 markdown 管道表（回执里的 `style_chars_removed`
-  说明剥掉的是排版噪音，不是内容）；`images` 只给**数量**，图链是上游的临时地址，本工具
-  **不下载、不内联**——不得声称"看到了图里的内容"，图表数字只认 markdown 里的那份。
-- **来源标注**：正文来自 OCR，标注写「（来源：〈机构/媒体〉研报 PDF 正文，OCR 解析
-  `doc_id=…`，第 N 页）」并**标页号**；⛔ **不得把那条 PDF 链接本身当成"已读到正文"的证据**，
-  链接只是文件所在。`verified_official` 的授予条件不变（第 6 节）：OCR 解析不改变域名核验结论，
-  但官方域名下的 PDF（如巨潮、交易所披露页给出的直链）其正文可按官方文档对待。
-- **失败处置**：`NO_CREDENTIAL` ⇒ token 未配置，如实回传"需要用户在 设置 → 插件 → 插件配置 →
-  Capital 模式 填写 PaddleOCR Token"，**绝不**用标题或摘要补一篇正文出来；`UPSTREAM` /
-  `JOB_FAILED` / `TOO_MANY_PAGES` ⇒ 最多重试一次，仍失败就按边界如实回传。
-  `ocr` 在检索回声（`recent_retrievals` / `provider_tally`）里**记一次**，与 fetch 同口径。

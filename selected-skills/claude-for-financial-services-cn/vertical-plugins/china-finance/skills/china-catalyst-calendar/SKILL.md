@@ -11,64 +11,6 @@ description: Track upcoming catalysts for A-share coverage universe — earnings
 
 Build and maintain a **A股催化剂日历** tracking upcoming events that could materially impact stock prices within a coverage universe.
 
-## Catalyst Types (A-share Specific)
-
-### 1. Earnings & Financial Reports
-
-| Event | Typical Timing | Notes |
-|-------|---------------|-------|
-| 业绩预告 (earnings preview) | 1-4 weeks before | Mandatory if variance >50% from prior |
-| 季报 (quarterly report) | 1 month after quarter-end | 10-day grace period possible |
-| 中报 (semi-annual report) | 2 months after H1 | 15-day grace period |
-| 年报 (annual report) | 4 months after year-end | Most important event of the year |
-| 业绩说明会 (earnings call) | Same day or next trading day | 上证e互动 / 深交所互动易 |
-
-### 2. Regulatory & Policy Events
-
-| Event | Impact | Typical Timing |
-|-------|--------|---------------|
-| 央行MLF/LPR操作 | High (liquidity, rates) | 15th of each month (MLF) |
-| 央行降准/降息 | Very high | Ad-hoc, 国新办发布会 |
-| 国务院政策发布 | Sector-specific | Ad-hoc |
-| 部委监管政策 (NMPA, MIIT, etc.) | Industry-specific | Ad-hoc |
-| 集采结果 (volume-based procurement) | Pharma/medtech | Quarterly cycles |
-| 行业准入政策变化 | Sector-specific | Ad-hoc |
-| 反垄断调查 | Specific companies | Ad-hoc |
-
-### 3. Corporate Events
-
-| Event | Impact | Notes |
-|-------|--------|-------|
-| 股东大会 (AGM) | Low-medium | Voting on key items |
-| 分红/送股/转增 (dividend/rights) | Medium | Ex-dividend date matters |
-| 限售股解禁 (lock-up expiry) | Medium-high | Watch large blocks |
-| 增减持公告 (shareholder transactions) | Low-medium | 5% threshold triggers disclosure |
-| 回购 (share buyback) | Low-medium | Implementation tracking |
-| 并购重组 (M&A announcements) | High | 停牌 until announcement |
-| 增发/配股 (seasoned equity) | High | Dilution impact |
-| 可转债发行/转股 | Medium | Conversion tracking |
-
-### 4. Sector / Industry Events
-
-| Event | Example Sectors | Notes |
-|-------|----------------|-------|
-| 行业展会/论坛 | 新能源, 半导体, 医药 | Networking, product announcements |
-| 政策研讨会 | 环保, 教育, 互联网 | Policy direction signals |
-| 行业协会数据发布 | 汽车, 光伏, 风电 | Monthly/quarterly stats |
-| 国际展会 (CES, IFA, etc.) | 消费电子 | New product launches |
-
-### 5. Macro Data Releases
-
-| Indicator | Frequency | Impact |
-|-----------|-----------|--------|
-| PMI (制造业/非制造业) | Monthly (1st) | Market-wide |
-| CPI / PPI | Monthly (9-10th) | Rates, commodities |
-| 社会融资规模 / M2 | Monthly (10-15th) | Liquidity |
-| 外汇储备 | Monthly | FX sentiment |
-| 工业增加值 | Monthly | Growth indicator |
-| 零售数据 | Monthly | Consumption |
-| 就业数据 | Quarterly | Labor market |
-
 ## Data Sources
 
 A calendar is a list of dates and documents, and this plugin obtains none of them from inside this step: retrieval has exactly one entry — the main agent delegating it to the role that owns market data or web and disclosure material — and a calendar holds no data-service key and issues no query of its own.
@@ -79,122 +21,9 @@ Hand over one brief per family, each naming the ticker or the indicator, the fie
 - 公司底色：profile, 股本结构, and the historical earnings pattern that tells you which quarter is material
 - 交易状态：current quote and trading context for each name on the calendar
 - 全市场：指数行情 as macro backdrop, and market-wide news flow
-- 宏观发布：the indicator calendar above (CPI / PMI / 工业增加值 / 零售 / 就业) with its release dates
+- 宏观发布：the indicator calendar in `references/10-catalyst-types.md` (CPI / PMI / 工业增加值 / 零售 / 就业) with its release dates
 
 The disclosure venues these briefs eventually resolve to — 巨潮公告、上交所公告、深交所公告 — are the host retrieval role's business, not a browsing task for this step: name the document type you need and let the retrieval path decide where it lives. In a role-split host, delegate rather than searching from here, then keep calendar entries that came back and mark the rest as unconfirmed dates.
-
-## Workflow
-
-### Step 1: Define Coverage Universe
-
-Identify the stocks and sectors to track. Typical A-share coverage universe:
-- 50-200 names
-- Organized by sector/industry
-- Priority tiers (P1 = must-track, P2 = watchlist)
-
-### Step 2: Build Calendar Entries
-
-**For each catalyst, record:**
-
-```json
-{
-  "date": "2024-04-25",
-  "type": "earnings",
-  "subtype": "季报",
-  "ticker": "{{TICKER}}",
-  "company": "{{COMPANY_NAME}}",
-  "importance": "high",
-  "notes": "Q1 2024 results; watch 批价 and inventory",
-  "status": "confirmed"
-}
-```
-
-**Catalyst types in JSON:**
-- `earnings` — quarterly/semi/annual reports
-- `earnings_call` — 业绩说明会
-- `regulatory` — 监管政策发布
-- `policy` — 宏观政策 (央行, 国务院)
-- `corporate` — 公司事件 (分红, 解禁, M&A)
-- `macro_data` — 经济数据发布
-- `sector_event` — 行业展会/论坛
-- `lockup_expiry` — 限售股解禁
-
-### Step 3: Prioritize Catalysts
-
-**Importance levels:**
-- **Critical**: Likely to move stock >10% (earnings, M&A, major policy)
-- **High**: Likely to move stock 5-10% (regulatory decisions, industry data)
-- **Medium**: Watch item, context-setting (dividend, conference participation)
-- **Low**: Background noise (routine filings, minor announcements)
-
-### Step 4: Pre-Catalyst Preparation
-
-**1 week before critical catalysts:**
-- Pull latest data and consensus
-- Prepare scenario analysis
-- Draft preliminary positioning note
-- Alert stakeholders if high-impact
-
-**1 day before critical catalysts:**
-- Final data check
-- Confirm release timing (morning vs afternoon)
-- Prepare pre-market positioning note
-- Set monitoring alerts
-
-### Step 5: Post-Catalyst Update
-
-After catalyst passes:
-- Record actual outcome
-- Compare vs scenario framework
-- Update price target / thesis if material
-- Move to "completed" section
-- Flag next catalyst in queue
-
-## Calendar Format
-
-### Weekly View
-
-```
-【本周催化剂日历】[YYYY-MM-DD 至 YYYY-MM-DD]
-
-周一 [Date]
-  - [Time] [Ticker] [Company] — [Event type] — [Importance]
-  - [Time] [Macro event] — [Impact assessment]
-
-周二 [Date]
-  ...
-
-本周重点：
-- [Top 2-3 catalysts to watch]
-- [Market-wide risk events]
-```
-
-### Monthly View
-
-```
-【X月重要事件日历】
-
-财报窗口:
-- [Week 1]: [Sector] Q[X] results: [List of companies]
-- [Week 2]: [Sector] Q[X] results: [List of companies]
-
-政策窗口:
-- [Date]: [Policy event] — [Expected impact]
-
-解禁窗口:
-- [Date]: [Ticker] — [Amount] shares unlocking — [Risk assessment]
-
-宏观数据:
-- [Date]: [Indicator] — [Consensus] — [Previous]
-```
-
-### Upcoming Catalysts Table
-
-| Date | Company | Event | Importance | Watch Item |
-|------|---------|-------|------------|------------|
-| {{DATE}} | {{COMPANY_NAME}} ({{TICKER}}) | {{EVENT_TYPE}} | {{IMPORTANCE}} | {{WATCH_ITEMS}} |
-| Example | 贵州茅台 (600519) | Q1 年报 | Critical | 批价, 动销 |
-| 04-30 | 工信部 | 新能源车月度数据 | Medium | 销量, 渗透率 |
 
 ## China-Specific Considerations
 
@@ -235,18 +64,6 @@ After catalyst passes:
 - 分红实施公告: typically 2-4 weeks after AGM approval
 - 高送转 (high bonus issue): historically market-positive event
 
-## Integration with Other Skills
-
-| Related Skill | Integration Point |
-|---------------|-------------------|
-| china-earnings-analysis | Post-earnings catalyst review |
-| china-earnings-preview | Pre-earnings scenario setup |
-| china-thesis-tracker | Catalyst milestone tracking |
-| china-morning-note | Daily catalyst briefing |
-| china-market-researcher | Sector catalyst themes |
-
-A skill named above is an option for the user, not a step this role can take: only the skills the user switched on exist in this session, and what this plugin deliberately does not offer — placing or amending an order on the user's behalf — is not reachable at all. Say what you would check next and let the user decide.
-
 ## Quality Checks
 
 Before delivering:
@@ -256,3 +73,18 @@ Before delivering:
 - [ ] Importance levels assigned consistently
 - [ ] Watch items specific and actionable
 - [ ] Pre-catalyst preparation tasks defined
+
+## Read the Parts
+
+Everything below the surface of this file lives in `references/`. Open a part with `read`,
+resolved against this skill's base directory; each part is sized to arrive complete in one
+`read`. If a receipt shows `[... tool result middle pruned ...]`, re-read it with `offset`
+before concluding anything is missing.
+
+- `references/10-catalyst-types.md` — Catalyst Types (A-share Specific)
+- `references/11-workflow-and-calendar.md` — Workflow; Calendar Format; Integration with Other Skills
+
+Loading this file is not reading the skill: the steps, templates, and thresholds exist only
+in the parts above. Say which parts you opened, name the ones you did not, and never report a
+step or a template you have not read in this session.
+

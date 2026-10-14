@@ -212,7 +212,7 @@ test('研发文档不外泄进使用者 Agent 的运行时文本', () => {
   for (const rel of skillFiles) {
     assertNotDevRef(read(rel), rel)
   }
-  assert.ok(skillFiles.length >= 5, `skills/ 下应有五个长协议 SKILL.md，实际：${skillFiles.join(', ')}`)
+  assert.ok(skillFiles.length >= 5, `skills/ 下应有长协议与任务 SKILL.md（≥5，实际数量以目录为准），实际：${skillFiles.join(', ')}`)
   const rows = presetRows()
   const texts = []
   for (const row of rows) {

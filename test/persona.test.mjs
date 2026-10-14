@@ -1,14 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { pathDirs } from '../scripts/lib/run-tool.mjs'
 import { resolveUserCustomizationSection } from '../lib/index.js'
 import { RETRIEVAL_DENIED_TOOLS } from '../lib/agents/root-tool-policy.js'
 import { SOURCE_OUTPUT_BUDGET_CHARS } from '../lib/web-retriever/tools.js'
-import { PRESET_PATCH_TEXT, presetRows } from './preset-rows.mjs'
-import { SELECTED_SKILL_CATALOG, SELECTED_SKILL_SKILL_DIRS } from '../selected-skills/catalog.js'
+import { PRESET_PATCH_TEXT, presetRows, loadBudget } from './preset-rows.mjs'
+import { SELECTED_SKILL_CATALOG, SELECTED_SKILL_SKILL_DIRS, SELECTED_SKILL_TASK_IDS, SELECTED_SKILLS_MAX_ENABLED, selectedSkillsForTask } from '../selected-skills/catalog.js'
+import { renderTaskSkillIndex } from '../lib/agents/selected-skills-provider.js'
 
 // 预设装配行的读取（含 `!!js` 剥离）只在 test/preset-rows.mjs 有一份。
 const COMPOSITION_TEXT = PRESET_PATCH_TEXT
@@ -173,6 +174,29 @@ const dedent = (value) => value.split('\n').map((line) => line.trimStart()).join
 const SKILL_DIR = fileURLToPath(new URL('../preset/capital-generation/skills/', import.meta.url))
 const INDEX_SOURCE = readFileSync(fileURLToPath(new URL('../src/index.ts', import.meta.url)), 'utf8')
 
+// 数据协议拆三册、检索协议拆两册（正文超过剪枝阈值 8192 会被剪掉中间段，判据见
+// docs/dev/preset-persona.md §8.2）。"这条规则还在吗"按整族合起来查——清单的本意是
+// 搬家不丢句；"必须在哪一册"另有逐册点名，两者别混成一件事。
+const skillVolume = (name) => readFileSync(`${SKILL_DIR}${name}/SKILL.md`, 'utf8')
+const DATA_PROTOCOL = ['capital-data-protocol', 'capital-data-profile', 'capital-data-query']
+  .map(skillVolume).join('\n')
+const WEB_PROTOCOL = ['capital-web-protocol', 'capital-web-evidence'].map(skillVolume).join('\n')
+
+// ── 体积预算：一次加载必须完整可见 ────────────────────────────────────────────
+// 阈值读取只在 test/preset-rows.mjs 的 loadBudget() 有一份（§9.7），下面所有预算断言都以它为分母。
+const { thresholdChars: PRUNER_THRESHOLD, overheadChars: SKILL_RENDER_OVERHEAD, visibleChars: VISIBLE_CAP } = loadBudget()
+const stripFrontmatter = (text) => text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '')
+const SELECTED_DIR = fileURLToPath(new URL('../selected-skills/', import.meta.url))
+/** 去掉 frontmatter 的正文：加载给模型的就是这一段。 */
+const skillBody = (name) => stripFrontmatter(skillVolume(name))
+const selectedSkillFile = (entry) =>
+  `${SELECTED_DIR}${entry.repository}/${SELECTED_SKILL_SKILL_DIRS[entry.repository]}/${entry.name}/SKILL.md`
+/** catalog 条目在会话里被加载的正文（体积棘轮问的是这一段）。 */
+const selectedSkillBody = (entry) => stripFrontmatter(readFileSync(selectedSkillFile(entry), 'utf8'))
+/** catalog 条目在会话目录里那句话（索引块用的就是它，不是设置卡片里策展过的中文摘要）。 */
+const runtimeDescription = (entry) =>
+  readFileSync(selectedSkillFile(entry), 'utf8').match(/^description: (.+)$/m)?.[1] ?? ''
+
 test('preset 结构：persona 行为声明式行，插件不再占用 deployment:persona', () => {
   assert.equal(personaRow.name, '@deepseek-ai/dsh-persona')
   assert.ok(MAIN_PERSONA_TEXT.length > 2000, '主 persona 文本必须完整存在')
@@ -202,8 +226,13 @@ test('preset 结构：persona 行为声明式行，插件不再占用 deployment
   // data_junior 的上限随"可视化 gate + one-shot barrier"两条新职责上调（实测 2168），
   // 再随「BASH DISCIPLINE」（bash 只做纯计算、不读文件不联网）上调到 2650（实测 2574）：
   // 这条是"模型拿到 bash 之前就必须生效"的每轮硬规则，不是可外迁的协议正文；
-  // 载荷样例与 QuerySpec 细则仍一律留在 skill capital-data-protocol。
-  for (const [id, cap] of [['tool-subagent-data-collector', 1700], ['tool-subagent-data-junior', 2650], ['tool-subagent-web-retriever', 1300]]) {
+  // 载荷样例与 QuerySpec 细则仍一律留在 skill 里。
+  // 2026-10-14 数据协议拆成三册（正文超过剪枝阈值 8192 会被剪掉中间段），duty 行的技能名从
+  // capital-data-protocol 换成 capital-data-profile 并补一句"写 QuerySpec / 派生算术时加载
+  // capital-data-query"——多出的 51 字符是**册名**，不是新规则，所以这里 2650 → 2760（实测 2701）。
+  // web_retriever 同因：duty 行要点名第二册 capital-web-evidence，1300 → 1390（实测 1326）。
+  // 防回涨靠的是"删正文不许用来腾地方"：动 duty 之前先想清楚这句话是不是每轮都要生效。
+  for (const [id, cap] of [['tool-subagent-data-collector', 1700], ['tool-subagent-data-junior', 2760], ['tool-subagent-web-retriever', 1390]]) {
     const persona = rowById(id).config.persona
     assert.ok(persona.length < cap, `${id} 的 persona 过长（${persona.length} 字符）：协议细节应进 skills/`)
   }
@@ -321,7 +350,17 @@ test('skills：内置 skills 由组合行承载，selected skill 只注册到 Ca
 })
 
 test('skills：协议与任务 skill 文件存在且 frontmatter 合法，persona 指向它们', () => {
-  for (const name of ['capital-orchestration', 'capital-data-protocol', 'capital-chart-protocol', 'capital-visualization-protocol', 'capital-web-protocol', 'capital-equity-research', 'capital-event-impact', 'capital-portfolio-review']) {
+  // 名单从目录现算。写死名单在拆册之后就是"每加一册都要回来补一行"，漏补的表现是新册
+  // 完全不受检（frontmatter 缺 name 时 provider 只 warn 一行就跳过，卡片能勾、会话里不出现）。
+  // 被 catalog / provider / persona 按名字引用的那几颗必须真实在场，所以另加一条正向断言。
+  const onDisk = readdirSync(SKILL_DIR)
+    .filter((entry) => existsSync(`${SKILL_DIR}${entry}/SKILL.md`))
+    .sort()
+  for (const required of ['capital-orchestration', 'capital-equity-research', 'capital-event-impact',
+    'capital-portfolio-review', 'capital-data-protocol', 'capital-web-protocol']) {
+    assert.ok(onDisk.includes(required), `按名字被引用的 skill 不在盘上：${required}`)
+  }
+  for (const name of onDisk) {
     const file = `${SKILL_DIR}${name}/SKILL.md`
     assert.ok(existsSync(file), `缺少 skill 文件：skills/${name}/SKILL.md`)
     const text = readFileSync(file, 'utf8')
@@ -405,8 +444,9 @@ test('capital-portfolio-review：用户持仓不等于自选股，快照不等�
   assertNoRule(text, /final_report|capital-final-report-protocol|prepareTurnComposition/, '组合 skill 不得依赖已删除的报告通道')
 })
 
-test('capital-web-protocol：WAF 挑战型站点如实报错并改走 Wind（2026-09 实测教训）', () => {
-  const text = readFileSync(`${SKILL_DIR}capital-web-protocol/SKILL.md`, 'utf8')
+test('capital-web-evidence：WAF 挑战型站点如实报错并改走 Wind（2026-09 实测教训）', () => {
+  // §7 抓取与失败处置随拆分住在第二册；规则本身一字未动，只是册名变了。
+  const text = readFileSync(`${SKILL_DIR}capital-web-evidence/SKILL.md`, 'utf8')
   // scio.gov.cn 实测：HTTP 521 + X-Via-Jsl + __jsluid_h，正文是裸 <script> 挑战，
   // 第二阶段是 24KB 混淆脚本（需要 window/document）。规则落在 skill，不占 persona。
   assertRuleAny(text, [/X-Via-Jsl/, /加速乐/], 'skill 必须给出 WAF 挑战型站点的识别特征')
@@ -420,8 +460,8 @@ test('capital-web-protocol：WAF 挑战型站点如实报错并改走 Wind（202
 
 test('分流判据：进结论的数字走 collector、叙事文本走 retriever（归属要在委派前定死）', () => {
   const orchestration = readFileSync(`${SKILL_DIR}capital-orchestration/SKILL.md`, 'utf8')
-  const data = readFileSync(`${SKILL_DIR}capital-data-protocol/SKILL.md`, 'utf8')
-  const web = readFileSync(`${SKILL_DIR}capital-web-protocol/SKILL.md`, 'utf8')
+  const data = DATA_PROTOCOL
+  const web = WEB_PROTOCOL
   // 两面失败的样子根本不同：collector 给响亮错误码，retriever 是抓到什么算什么。判据若只写
   // "像不像数据"，事后迁移等于重写契约，所以四问与终判据都必须在委派前问得出来。
   assertRule(orchestration, /终判据是\*\*错法\*\*而不是形状/, '路由表必须给出"按错法判归属"这条终判据')
@@ -626,7 +666,10 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
   assertNoRule(RETRIEVER_PERSONA, /web_begin|web_latest|web_material|web_save|web_engines|wr_status|time_budget|from_cache/)
 
   // 外迁到 skill 的要点：一条都不能丢，只是换了承载面。
-  const webProtocol = readFileSync(`${SKILL_DIR}capital-web-protocol/SKILL.md`, 'utf8')
+  // 检索协议现已拆成两册（第一册 §1–§4「去哪取、怎么调」，第二册 §5–§8「怎么标成证据」）：
+  // 这张清单问的是「这条规则还在检索协议里吗」，所以按整族合起来查（WEB_PROTOCOL 只有一份实现）；
+  // 归属则由下面的逐册点名兜住。
+  const webProtocol = WEB_PROTOCOL
   for (const pattern of [
     /搜索收敛（经验法则，不是硬性配额）/, /5 次以内就该收敛/, /偶尔超过 5 次不是错误/,
     /公司实体（股票代码或公司全称/, /无主体泛查询/, /万得 Wind 金融数据服务/, /消耗积分/,
@@ -649,7 +692,17 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
     /不得把那条 PDF 链接本身当成/, /OCR 解析/, /`provider_tally`）里\*\*记一次/,
     /NO_CREDENTIAL/,
   ]) {
-    assertRule(webProtocol, pattern, `capital-web-protocol 缺少要点: ${pattern}`)
+    assertRule(webProtocol, pattern, `检索协议缺少要点: ${pattern}`)
+  }
+  // 归属点名：上面那张清单只问"还在不在协议里"，这四条钉"必须在哪一册"。
+  // 写错册不会让清单变红，只会让 web_retriever 加载了那一册却拿不到那条规则。
+  const protocolVolume1 = readFileSync(`${SKILL_DIR}capital-web-protocol/SKILL.md`, 'utf8')
+  const protocolVolume2 = readFileSync(`${SKILL_DIR}capital-web-evidence/SKILL.md`, 'utf8')
+  for (const pattern of [/来源边界/, /搜索收敛/, /Wind 查询要素/, /空结果是真事实/]) {
+    assertRule(protocolVolume1, pattern, `检索协议第一册（去哪取、怎么调）缺少: ${pattern}`)
+  }
+  for (const pattern of [/回传格式/, /verified_official/, /文档解析（`ocr`/, /加速乐/]) {
+    assertRule(protocolVolume2, pattern, `检索协议第二册（怎么标成证据）缺少: ${pattern}`)
   }
 })
 
@@ -793,11 +846,15 @@ test('data_junior persona：bash 是纯计算兜底，且禁区/出网纪律必�
   assertRuleAny(JUNIOR_PERSONA, [/只留结论数字/, /输出只留/], 'bash 输出体积纪律必须写明（工具结果同样过 pruner）')
 })
 
-test('子 Agent 按需协议：三个子 persona 都点名真实存在的 skill，写错名字会静默拿不到契约', () => {
+test('子 Agent 按需协议：子 persona 点名的每一册都真实存在，写错名字会静默拿不到契约', () => {
+  // 数据协议拆成三册、检索协议拆成两册之后，这张表同时是"加载矩阵"的登记处：
+  // 谁在什么时刻加载哪一册，只看这里；正文里点名而文件不存在 = 运行时静默失效。
   for (const [row, skillName] of [
     [collectorRow, 'capital-data-protocol'],
-    [juniorRow, 'capital-data-protocol'],
+    [juniorRow, 'capital-data-profile'],
+    [juniorRow, 'capital-data-query'],
     [retrieverRow, 'capital-web-protocol'],
+    [retrieverRow, 'capital-web-evidence'],
   ]) {
     assertRule(row.config.persona, new RegExp(`skill ${skillName}`), `${row.id} 的子 persona 必须点名 skill ${skillName}`)
     assert.ok(existsSync(`${SKILL_DIR}${skillName}/SKILL.md`), `${row.id} 点名的 skill 文件不存在：${skillName}`)
@@ -960,7 +1017,7 @@ test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质�
     /不会被\s*data_collector 创建/,
     /经主 Agent 中继/,
     /重试/,
-    /skill capital-data-protocol/,
+    /skill capital-data-profile/,
     // 四类事实必须点名，否则模型只会复述字段名，或把 min/max 讲成走势
     /time_facts/,
     /structure/,
@@ -977,8 +1034,8 @@ test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质�
   assertNoRule(JUNIOR_PERSONA, /data_key|list_schemas|get_latest|from_cache/, 'junior persona 不应包含 data_key/旧缓存协议')
   assertNoRule(JUNIOR_PERSONA, /官方|DSH|exec\.agent/, 'junior persona 不应出现框架术语')
 
-  // 统计项与四类事实的读法已外迁到 skill capital-data-protocol：规则一条都不能丢。
-  const dataProtocol = readFileSync(`${SKILL_DIR}capital-data-protocol/SKILL.md`, 'utf8')
+  // 统计项与四类事实的读法已外迁到数据协议（现三册）：规则一条都不能丢，逐册归属另有点名。
+  const dataProtocol = DATA_PROTOCOL
   for (const pattern of [
     /字段类型|observed.*contract/,
     /显式 null|missing|null/,
@@ -1096,7 +1153,7 @@ test('skill 内容：编排 skill 覆盖预检异常与清单，数据 skill 覆
   for (const pattern of [/list_agents\(scope="children"\)/, /running/, /idle/, /ready/, /diagnostic/, /委派清单/, /data_collector/, /data_junior/, /web_retriever/, /capital-data-protocol/, /Wind 能力暂不可用/, /dataset_session_mismatch/, /分钟级/, /ID 纪律/, /投错对象/, /waiting_data/, /data_gap/, /中途消息是工单/, /结算通知 ≠ 任务完成/, /Canonical task_id/, /中间隔了长回传/, /回传到达后集中核对/]) {
     assertMatches(orchestration, pattern, `capital-orchestration 缺少要点: ${pattern}`)
   }
-  const protocol = readFileSync(`${SKILL_DIR}capital-data-protocol/SKILL.md`, 'utf8')
+  const protocol = DATA_PROTOCOL
   for (const pattern of [/"type": "data_request"/, /"type": "dataset_ready"/, /"type": "data_failed"/, /"type": "profile_request"/, /"type": "dataset_profile_completed"/, /"type": "profile_failed"/, /"type": "query_request"/, /"type": "dataset_query_completed"/, /"type": "query_failed"/, /"type": "data_gap"/, /suggested_capability/, /blocking/, /schema/, /validation/, /violations/, /force_refresh/, /workspace_not_writable/, /captured_at/, /artifact_ref/, /time_facts/, /distinct_count/, /total_elements/, /文档型 Dataset/, /结束本轮 ≠ 任务完成/]) {
     assertMatches(protocol, pattern, `capital-data-protocol 缺少要点: ${pattern}`)
   }
@@ -1124,15 +1181,103 @@ test('主 persona：内置安全条目（不索取凭据、不承诺收益）', 
 })
 
 test('具名来源的输出预算必须留在宿主剪枝阈值内（两处必须同源）', () => {
-  // pruner 不是顶层行：它在 compaction 组里（compaction-basic 通过 ctx.get 读它，必须同 realm）。
-  const children = rowById('compaction')?.config ?? []
-  const pruner = children.find((row) => row?.id === 'tool-result-pruner')
-  assert.ok(pruner, 'preset 的 compaction 组必须有 tool-result-pruner 行：工具结果的剪枝阈值由它决定')
-  const threshold = Number(pruner.config?.thresholdChars)
-  assert.ok(Number.isInteger(threshold) && threshold > 0, `thresholdChars 必须是正整数，实际：${pruner.config?.thresholdChars}`)
-  assert.ok(SOURCE_OUTPUT_BUDGET_CHARS < threshold,
-    `SOURCE_OUTPUT_BUDGET_CHARS（${SOURCE_OUTPUT_BUDGET_CHARS}）必须低于 preset 的 thresholdChars（${threshold}）：`
+  // 阈值本身由 test/preset-rows.mjs 的 loadBudget() 读取：compaction 组里没有 tool-result-pruner
+  // 行、或 thresholdChars 不是正整数，它直接抛出点名原因——这里不再重复一遍取数形状（§9.7）。
+  const { thresholdChars } = loadBudget()
+  assert.ok(SOURCE_OUTPUT_BUDGET_CHARS < thresholdChars,
+    `SOURCE_OUTPUT_BUDGET_CHARS（${SOURCE_OUTPUT_BUDGET_CHARS}）必须低于 preset 的 thresholdChars（${thresholdChars}）：`
     + '越过阈值的工具结果会被剪成 head + [middle pruned] + tail，而 JSON 头部的 count 仍写着原来的条数')
+})
+
+// ── 三道体积闸门：一次加载必须完整可见 ──────────────────────────────────────
+// 2026-10-14 实测起点：capital-data-protocol 单册 16,264 字符、capital-web-protocol 10,664 字符，
+// 都超过剪枝阈值，加载时中间段被剪掉——`data_junior` 该读的 §3/§4 恰好整段在中间。
+// 拆册之后，这条闸门就是防止它悄悄涨回去的唯一东西。
+
+test('内置 skill 每一册加载后完整可见（正文 + 渲染包装 ≤ 剪枝阈值）', () => {
+  for (const name of readdirSync(SKILL_DIR).sort()) {
+    if (!existsSync(`${SKILL_DIR}${name}/SKILL.md`)) continue
+    const chars = skillBody(name).length
+    assert.ok(chars <= VISIBLE_CAP,
+      `${name} 正文 ${chars} 字符 > 可见上限 ${VISIBLE_CAP}（阈值 ${PRUNER_THRESHOLD} 减渲染包装 ${SKILL_RENDER_OVERHEAD}）：`
+      + '超出的中间段会被剪成 [middle pruned]，规则静默消失。协议要长就加一册（并在子 persona duty 里点名它），'
+      + '不要把这一册写长。')
+  }
+})
+
+test('三颗任务型内置 skill 还要给索引块留位置（勾选上限 6 的算术在此钉死）', () => {
+  // §8.7 拼进任务型 skill 的索引块与正文共用同一次加载，所以它们的预算是同一份。
+  // 索引必须由 renderTaskSkillIndex 现算（唯一实现）——自己拼一遍的话，框一变这条闸门就只钉住测试自己。
+  const allNames = SELECTED_SKILL_CATALOG.map(({ name }) => name)
+  for (const taskId of SELECTED_SKILL_TASK_IDS) {
+    const routed = selectedSkillsForTask(taskId, allNames)
+    const worst = routed
+      .map((entry) => ({ name: entry.name, description: runtimeDescription(entry) }))
+      .sort((a, b) => (b.description.length + b.name.length) - (a.description.length + a.name.length))
+      .slice(0, SELECTED_SKILLS_MAX_ENABLED)
+    const index = renderTaskSkillIndex(taskId, worst) ?? ''
+    const chars = skillBody(taskId).length
+    assert.ok(chars + SKILL_RENDER_OVERHEAD + index.length <= PRUNER_THRESHOLD,
+      `${taskId} 正文 ${chars} + 包装 ${SKILL_RENDER_OVERHEAD} + 最坏索引块 ${index.length}`
+      + `（${routed.length} 条可路由里最长的 ${SELECTED_SKILLS_MAX_ENABLED} 行）= ${chars + SKILL_RENDER_OVERHEAD + index.length}`
+      + ` > 阈值 ${PRUNER_THRESHOLD}：加载这一刻尾部规则会被剪掉。要么给索引减行（勾选上限），要么给正文瘦身。`)
+  }
+})
+
+test('外部精选正文的体积棘轮：新增条目必须完整可见，存量超限的那些只准减', () => {
+  // 上游正文我们不为口味改写（§8.6），所以这里不要求存量合规——
+  // 要求的是**别再加进来新的**，并且这份记名清单只会变短。
+  // 清单变短的唯一途径是真的处理掉一颗。2026-10-14 起走的处置是**可见性分层**（§8.6 第三个改写理由：
+  // 入口册 + 分册 + 运行时 `read`，一行规则都不删），已分层的 7 颗已从这里减掉：
+  // buffett-investment-framework、china-idea-generation、china-sector-overview、china-catalyst-calendar、
+  // bear-case、stock-screener、peter-lynch-skill。分层那一侧的断言见
+  // test/selected-skills-content.test.mjs「分层条目」两条；台账见 docs/dev/selected-skill-index.md。
+  const OVERSIZED_BASELINE = [
+    'stock-eval', 'technical-analysis', 'dividend-analysis', 'tax-lens', 'stock-valuation', 'position-ladder',
+    'fact-check', 'options-analysis', 'sector-analysis', 'competitor-analysis', 'etf-analysis', 'earnings-preview',
+    'learning-coach', 'financial-report-analyst', 'institutional-ownership', 'thesis-tracker', 'risk-stress-test',
+    'portfolio-review', 'short-interest', 'industry-map', 'economics-analysis', 'insider-trading',
+    'catalyst-calendar', '10k-digest', 'earnings-call-analysis',
+  ]
+  const oversized = SELECTED_SKILL_CATALOG
+    .filter((entry) => selectedSkillBody(entry).length > VISIBLE_CAP)
+    .map(({ name }) => name)
+  const added = oversized.filter((name) => !OVERSIZED_BASELINE.includes(name))
+  assert.deepEqual(added, [],
+    `新收录的精选条目正文超过可见上限 ${VISIBLE_CAP} 字符：${added.join('、')}。`
+    + '使用者勾选后加载到的是被剪掉中间段的节选——要么把方法论拆成多颗，要么别收。')
+  assert.ok(oversized.length <= OVERSIZED_BASELINE.length,
+    `存量超限清单变长了（现 ${oversized.length} > 基线 ${OVERSIZED_BASELINE.length}）：这条棘轮只准减不准加。`)
+})
+
+test('协议拆册只搬家不删规则：每一节都在某一册里，正文合计不许低于拆分基线', () => {
+  // §8.3：测试钉的是实测教训，不准删断言变绿。拆分的唯一许可是"搬家"——所以这里钉两件事：
+  // ① 原来每一节的标题都必须还在，而且**只在一册**里（两册都有同一节 = 迟早漂成两个版本）；
+  // ② 正文总字数只准涨不准跌（跌了就等于有人删了规则来腾地方）。
+  // 基线是 2026-10-14 拆册当天实测的行集比对结果（534 行原样可寻，只允许改写 3 行跨册指针）。
+  const families = [
+    { label: '数据协议', volumes: ['capital-data-protocol', 'capital-data-profile', 'capital-data-query'], floor: 17150,
+      sections: ['## 0. 谁读哪一节', '## 1. 数据请求', '## 1.1 能力发现', '## 2. 逐份回传', '## 3.0 读取 Dataset',
+        '## 3. 质检请求与回传', '### 3.2 时间轴', '## 3.3 bash', '## 3.1 数据缺口', '## 4. 受控查询',
+        '## 5. 重试纪律', '## 5. 输出必须披露的字段'] },
+    { label: '检索协议', volumes: ['capital-web-protocol', 'capital-web-evidence'], floor: 10822,
+      sections: ['## 1. 来源边界', '### 1.1 来源查询的纪律', '### 1.2 遇到结构化数值诉求', '## 2. 搜索收敛',
+        '## 3. Wind 查询要素', '## 4. 双来源纪律与降级', '## 5. 回传格式', '## 6. 官方证券来源域名核验',
+        '## 7. 抓取与失败处置', '### 7.1 WAF', '## 8. 文档解析'] },
+  ]
+  for (const { label, volumes, floor, sections } of families) {
+    const texts = volumes.map(skillVolume)
+    const total = volumes.reduce((sum, name) => sum + skillBody(name).length, 0)
+    assert.ok(total >= floor,
+      `${label}（${volumes.join(' / ')}）正文合计 ${total} < 拆册基线 ${floor}：拆册不许顺手删规则，`
+      + '要减字数就减 persona 里重复的那份，协议正文一律先搬家再谈精简。')
+    for (const section of sections) {
+      const owners = volumes.filter((_, i) => texts[i].includes(section))
+      assert.equal(owners.length, 1,
+        `${label} 的「${section}」应在且仅在某一册，实际命中 ${owners.length} 册（${owners.join('、') || '没有'}）：`
+        + '缺册就是规则丢了，两册都有则迟早漂成两个版本。')
+    }
+  }
 })
 
 test('核查分级（2026-10-10 真机）：核心事实逐条、外围一句话清单、异常触发才深挖', () => {
@@ -1140,9 +1285,9 @@ test('核查分级（2026-10-10 真机）：核心事实逐条、外围一句话
   // 拖慢主结论。分级口径三处齐写：委派方（orchestration）、证据计划（equity-research）、
   // 回传格式（web-protocol）——少一处就会在某一侧退化回逐条审计级。
   const orchestration = readFileSync(`${SKILL_DIR}capital-orchestration/SKILL.md`, 'utf8')
-  const webProtocol = readFileSync(`${SKILL_DIR}capital-web-protocol/SKILL.md`, 'utf8')
+  const webProtocol = WEB_PROTOCOL
   const equity = readFileSync(`${SKILL_DIR}capital-equity-research/SKILL.md`, 'utf8')
-  for (const [text, name] of [[orchestration, 'capital-orchestration'], [webProtocol, 'capital-web-protocol'], [equity, 'capital-equity-research']]) {
+  for (const [text, name] of [[orchestration, 'capital-orchestration'], [webProtocol, '检索协议（两册）'], [equity, 'capital-equity-research']]) {
     assertRuleAny(text, [/核心事实/], `${name} 必须点名「核心事实」分级`)
     assertRuleAny(text, [/外围事实/], `${name} 必须点名「外围事实」一句话清单`)
   }
@@ -1153,9 +1298,11 @@ test('核查分级（2026-10-10 真机）：核心事实逐条、外围一句话
 
 test('bash 派生计算（2026-10-10 真机）：只敲标量、逐数核对，不整行复制', () => {
   // 真机教训：bash 转写把整段聚合行逐数敲进脚本，笔误后又花 7.2K 字符发更正消息。
-  const dataProtocol = readFileSync(`${SKILL_DIR}capital-data-protocol/SKILL.md`, 'utf8')
-  assertRuleAny(dataProtocol, [/只敲最终参与计算的标量/], 'capital-data-protocol §3.3 必须限定只敲标量')
-  assertRuleAny(dataProtocol, [/逐一核对/], 'capital-data-protocol §3.3 必须要求转写后逐数核对')
+  // §3.3 随拆分住在数据协议第三册（与 §4 受控查询同一册——两节都是"拿聚合结果算东西"），
+  // 所以这里按册点名，不是"在任意一册里出现就行"。
+  const dataProtocol = skillVolume('capital-data-query')
+  assertRuleAny(dataProtocol, [/只敲最终参与计算的标量/], 'capital-data-query §3.3 必须限定只敲标量')
+  assertRuleAny(dataProtocol, [/逐一核对/], 'capital-data-query §3.3 必须要求转写后逐数核对')
   assertRuleAny(dataProtocol, [/不整行\/?整表复制/], 'capital-data-protocol §3.3 必须禁止整行复制')
   assertRuleAny(JUNIOR_PERSONA, [/逐数核对|逐一核对/], 'data_junior persona BASH DISCIPLINE 必须留核对硬规则')
 })

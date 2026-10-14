@@ -79,4 +79,5 @@
 - **上游风控 ≠ 没有内容**：报错按结构化错误码归类（`AUTH` / `RATE_LIMIT` / `NETWORK` / `UPSTREAM`），
   遇风控换来源或隔几分钟再试，不要重试同一路径。
 - 回传格式、`provider_tally` 与核验口径见
-  [capital-web-protocol](../preset/capital-generation/skills/capital-web-protocol/SKILL.md)。
+  [capital-web-protocol](../preset/capital-generation/skills/capital-web-protocol/SKILL.md)（来源边界与收敛）与
+  [capital-web-evidence](../preset/capital-generation/skills/capital-web-evidence/SKILL.md)（回传格式与域名核验）。

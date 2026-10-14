@@ -104,7 +104,7 @@ A 角色的请求投给 B 角色。官方机制是 **`list_agents` 即权威 id 
   商誉、质押/担保/资金占用、现金流与利润背离、有息负债、再融资/重组等）≤10 条逐条核验、每条一行
   来源；外围事实（分红方案、互动平台问答、媒体花絮）一句话清单即可。不预设"每条 URL+日期+原文/
   转述双分类"的审计级格式；发现质押、商誉、现金流异常再对该项深挖（回传格式同口径，见
-  `capital-web-protocol` §5）。
+  `capital-web-evidence` §5）。
 - 主 Agent 不自行调用任何网络检索/抓取/搜索类工具；外部检索入口只有 `web_retriever` 的回传。
 - 三个已定义角色禁止用通用 `subagent` 创建替代实例；通用委派只用于本 preset 没有专用角色的
   新任务，且同样必须先做本轮预检。
@@ -176,4 +176,5 @@ A 角色的请求投给 B 角色。官方机制是 **`list_agents` 即权威 id 
 | 任务需要分钟级数据 | 检查 `tencent_kline`：支持 m1/m5/m15/m30/m60，仅支持最近 `count` 根（最多 320），不支持 `start/end` 历史分钟区间；旧分钟/小时历史不可编造，不满足时再披露边界 |
 | 需要周期刷新（如每日收盘快照） | 用 `send_message` 指示 `data_collector` 再次获取并回传；不存在订阅机制——新需求 = 新消息，回传即唤醒 |
 
-载荷字段、`force_refresh` 语义与 dataset/profile 回传格式见 skill `capital-data-protocol`。
+载荷字段、`force_refresh` 语义与 dataset 逐份回传见 skill `capital-data-protocol`；profile 回传与
+时间轴见 `capital-data-profile`；`query_request` / QuerySpec 与派生算术见 `capital-data-query`。

@@ -31,3 +31,25 @@ export function presetRows() {
   if (!Array.isArray(plugins)) throw new Error('预设声明的 config.plugins 必须是行数组')
   return plugins
 }
+
+/**
+ * `renderSkillContent`（@deepseek-ai/dsh-skill）把正文塞进 `<skill_content name=…>` 并挂一行
+ * "Base directory for this skill: <绝对路径>"，实测约 500 字符；剪枝看的是包装后的工具结果。
+ */
+const SKILL_RENDER_OVERHEAD = 512
+
+/**
+ * 一次加载能**全文**带回的字节预算：`{ thresholdChars, overheadChars, visibleChars }`。
+ *
+ * pruner 不是顶层行，它在 compaction 组里（compaction-basic 通过 ctx.get 读它，必须同 realm）。
+ * `skill` 与 `read` 的回执走同一条 `tool/result` 面，没有逐工具豁免——所以"正文有没有被剪"
+ * 这一处算法只该有一份（AGENTS.md §9.7），本仓所有可见性断言都以它为分母。
+ * 注意剪枝器量的是 **Unicode 码点**（`codePointLength`），不是字节：中文正文用 `wc -c` 估会高估。
+ */
+export function loadBudget() {
+  const pruner = (presetRows().find((row) => row?.id === 'compaction')?.config ?? [])
+    .find((child) => child?.id === 'tool-result-pruner')
+  const thresholdChars = Number(pruner?.config?.thresholdChars)
+  if (!Number.isInteger(thresholdChars)) throw new Error('agent.patch.yml 的 compaction 组里找不到 tool-result-pruner 的 thresholdChars')
+  return { thresholdChars, overheadChars: SKILL_RENDER_OVERHEAD, visibleChars: thresholdChars - SKILL_RENDER_OVERHEAD }
+}

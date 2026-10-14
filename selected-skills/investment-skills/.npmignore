@@ -2,8 +2,10 @@
 # 装出去的用户只需要 skill 正文与溯源：README 用的成图与它自己的 viz 站点（2.3 MB，images/ 与
 # viz/out/ 是同一批 PNG 的两份拷贝）、上游自己的 CI 与文档站/roadmap、以及它的仓库 README 变体。
 # 上游自带的可执行面材料（skills/buffett-investment-framework/scripts/framework.py 与 Makefile）
-# 照旧随包保留：那颗 SKILL.md 把 router 写成方法论入口并同时给出"没有 shell 就直接读 references/
-# 对应文件"的退路，provider 与工具面从不执行它们（docs/dev/selected-skills.md §8.6）。
+# 照旧随包保留：router 那段（含四条 `python3 scripts/framework.py` 示例）现在住在
+# skills/buffett-investment-framework/references/11-deterministic-router.md，入口册只留两句"根角色
+# 没有 shell，跳过 router 直接读 references/ 对应文件"——provider 与工具面从不执行它们
+# （docs/dev/selected-skills.md §8.6 第 4 条）。
 # 全量快照仍然完整住在 git，github: 安装与"当时是哪个 commit"的复核都不受影响。
 images/
 viz/

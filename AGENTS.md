@@ -61,7 +61,7 @@ main Agent
 ```text
 capital-generation/
 ├── preset/capital-generation/    # 装配（agent.patch.yml = 一颗 @deepseek-ai/dsh-agent-preset
-│   └── skills/                   #   声明行 + README.md 设计理由，不注入模型）+ 五个长协议 skill
+│   └── skills/                   #   声明行 + README.md 设计理由，不注入模型）+ 长协议与任务 skill
 ├── src/
 │   ├── index.ts                  # 装配入口
 │   ├── tool-exec.ts              # callerSession / delegatedSession 唯一实现

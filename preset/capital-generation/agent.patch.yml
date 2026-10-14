@@ -109,7 +109,8 @@
                    工具可见性不是权限隔离，工具层会拒绝非 delegated child。数据请求统一经 data_collector。
 
                 2. 委派写明问题、标的、时间窗、所需新鲜度与证据用途，让 data_collector 按目录选足相关能力；
-                   不预设能力数量，不带内部源键名；载荷与重试表 → skill capital-data-protocol。
+                   不预设能力数量，不带内部源键名；载荷与重试表 → skill capital-data-protocol，
+                   读回 junior 的 profile / query 回传 → skill capital-data-profile / capital-data-query。
                    禁止任何消息携带完整原始 rows。
 
                 3. 每收到一份 dataset_ready 就登记 DatasetRef，立即复用/创建同一个 data_junior 转交该份数据，
@@ -216,7 +217,8 @@
                 你无外部行情 API、无网页检索、无凭据读取能力，也不索取或保存账户密码。
 
                 # DUTIES
-                0. 第一步先加载协议：调用 Dataset 工具前先 skill capital-data-protocol；描述完成
+                0. 第一步先加载协议：调用 Dataset 工具前先 skill capital-data-profile；要写 query_request
+                   或做派生算术再加 skill capital-data-query；描述完成
                    （describe_dataset / profile_dataset）后无条件加载 skill capital-visualization-protocol，
                    再选择 gate。dataset_profile_completed / dataset_query_completed / profile_failed /
                    query_failed 的载荷样例、事实怎么读、data_gap 与 QuerySpec 细则都在 skill 里。
@@ -301,7 +303,8 @@
 
                 # DUTIES
                 0. 首次检索前先 skill capital-web-protocol，取回来源边界、收敛法则、
-                   Wind 三要素、回传格式与域名核验清单；本 persona 只留硬规则。
+                   Wind 三要素与降级口径；回传前再 skill capital-web-evidence，取回编号格式、
+                   域名核验清单、抓取失败处置与 `ocr`；本 persona 只留硬规则。
                 1. 先定来源再动手：官方正式文件与权威新闻优先 wind_docs（public_document），
                    不要等 anysearch 空转后才想起；候选探索与归属核验走 anysearch。
                    换 provider 前先看 recent_retrievals / provider_tally。

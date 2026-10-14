@@ -60,6 +60,7 @@
   它不跨 Agent、不改本插件的角色分流，只在本颗的两条工作流之间选择（`china-stock-research-orchestrator`
   与 InvestSkill 的 `full-report` 是另一类东西）。也不触发 §7（报告交付链路已删除）与 §6.1（出图只走
   `render_chart`）：这颗的输出是**最终答复里的 markdown 报告**，不落文件、不出图。
+- Visibility layering（2026-10-14，§8.6 第三个改写理由）：这颗本来就有两层厚正文。第一层是 `SKILL.md`（8,777 字符）——流程六步、research brief 模板与失败处置搬进 `references/10-workflow.md`，入口只留 Routing 与 Required inputs。第二层是它上游自交的指南：`references/deep/methodology.md`（18,230）、`deep/web-research.md`（16,426）、`quick/web-research.md`（11,670）、`quick/methodology.md`（7,598）都超一次 `read` 的可见上限，各按 `##` 边界切成 2–4 册，**原路径保留成一份几百字符的索引**——那些指南之间互相点名（一处 workflow 指六份指南），留索引就不必改十几处指针，旧引用照用，模型多开一次几百字符的 read 而不是又开一本厚册。整棵树一共 23 份 `.md`，逐行核对原树**零行丢失**（入口那句 "The source tiers below" 改成点名 `references/10-workflow.md` 是唯一改写的一行），总量 78,244 → 85,955 字符（只增不减），每份都按 `read` 渲染后长度 ≤ 8,192 核过（判据与建模在 `test/selected-skills-content.test.mjs`）。MIT，不需要逐文件许可声明行。
 - Maintenance snapshot (checked 2026-10-11): 全仓两次提交，最后一次 2026-06-28，之后 105 天无提交；
   单人仓库、无 issue 响应记录。因此标 `watchlist`——与 `china-stock-research-skills` 同一口径
   （内容可用、维护薄，启用前请使用者自行复核来源），而不是内容缺陷。

@@ -95,7 +95,7 @@
 - **⛔ `/capital-skills/<名>.md` 是文件读旁路，三条底线**：① 认证围栏接 `connection.requestRejection`
   （与 `/capital-charts`、`/capital-watchlist` 同一写法，§6.1 那条），被拒时**连一次读盘都不许发生**；
   ② **闭集**——请求里的名字只当 `SKILL_DOCS` 这张表的键用，路径按 catalog × `SELECTED_SKILL_SKILL_DIRS`
-  在模块加载时现算成 `Map<名, file: URL>`，不参与任何拼接，所以 `%2F..%2F` 只会落到"表里没这个名字"；
+  在模块加载时现算成 `Map<名, file: URL>`，不参与任何拼接，所以 `%2F..%2F` 只会落到"表里没这个名字"，且这张表**只到 `SKILL.md` 一份**（分层条目的 `references/` 分册不接进来，卡片看原文只看入口册）；
   ③ 超限（`MAX_SKILL_DOC_BYTES`）**整份 413 拒绝、绝不截断**，且 `cache-control: no-store`——快照会随
   上游更新，缓存住就是拿旧原文说"这是原文"。路由经 `ctx.inject(['webServer'], …)` 挂（探测式写法会把
   正确性押在装配顺序上，2026-09-30 桌面端就是这么炸的两颗行）。**不新增 bundle 行**：它挂在已有的

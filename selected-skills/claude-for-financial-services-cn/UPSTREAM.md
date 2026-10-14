@@ -166,6 +166,7 @@
   而 catalog 反查只会说"包里找不到 SKILL.md"）。
   `package.json` 的 `files` 已登记 `selected-skills/claude-for-financial-services-cn`；随包的是 63 份
   `SKILL.md`（规范根 31 + 另五条线 32）+ `LICENSE` + 本文件，净增 65 个文件，整包未压缩 3.49 → 3.98 MiB。
+- Visibility layering（2026-10-14，§8.6 第三个改写理由）：`china-idea-generation`、`china-sector-overview`、`china-catalyst-calendar` 三颗的 `SKILL.md` 超过宿主一次加载的可见上限（剪枝阈值 8,192 码点，回执里中段换成 `[... tool result middle pruned ...]`），改成「入口册 + 分册」：流程与模板搬进 `references/10-*.md`、`11-*.md`，入口只留 Purpose、Data Sources、China-Specific 与 Quality Checks。三颗分别 8,475→9,385、8,600→9,523、9,121→10,512 字符（只增不减），逐行核对原正文**没有一行丢失**，只有入口里那几行分派指针是我改写的。**Apache-2.0 §4(b) 那行声明跟着搬**：每份新分册的第一行都带同一句可见声明（口径已定：凡被改写的正文各带一行，不留给入口册独占），`test/selected-skills-content.test.mjs` 现在逐份 `.md` 问这一行，不只问 `SKILL.md`。分层的体积判据是 `read` **渲染后**的长度（每行前缀 `N: ` + `<path>`/`<content>` 包装），不是文件字符数，建模只在那条闸门的 `readEnvelopeChars` 有一份。
 - Maintenance snapshot (checked 2026-10-11): 15 次提交里 10 次落在 2026-06-08 与 06-09 两天，
   此后三个月无动作，直到 2026-09-14 那一次修 AkShare 服务端返回空数组的 bug（也就是本 commit）。
   831 stars、3 open issue，无 release / tag。因此标 `watchlist`：内容成体系、维护靠一次性的集中搬运，

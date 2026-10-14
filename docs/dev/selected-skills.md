@@ -118,7 +118,7 @@ banking portals**`。上面那几条模式一条都不认（`code[\s-]execution`
 - `SKILL.md` 必须有可解析的 YAML frontmatter，且至少包含 provider 要求的 `name`、`description`。缺字段、YAML 格式错误或不符合 DSH skill name 规则的文件会被跳过，而不是作为普通文本加载。
 - **上游只写 `description` 是真实形态**（Claude Code 按目录名推导 skill 身份）。DSH provider 缺 `name` 时只 `logger.warn` 一行就跳过整颗文件，症状是"快照在仓库里、卡片能勾、会话里永远不出现"。接入前先 `head -4 <skill>/SKILL.md` 数一下字段；缺就在快照里机械补一行 `name: <目录名>`，并按下条记进 `UPSTREAM.md`。`name` 必须匹配 `/^[a-z0-9]+(?:-[a-z0-9]+)*$/`（`10k-digest` 这种数字开头是合法的）。
 - `name` 是运行时 skill 身份，不是展示标题。catalog 的 `name` 必须与 frontmatter `name` 完全一致；目录名也建议与该名称一致，便于从路径直接核对。发现文件但名字不一致时，catalog 过滤会把它隐藏。`test/persona.test.mjs` 逐条核对 catalog 每一条的 frontmatter `name` 与 `description`。
-- 上游正文**可以改，但只有两个理由**：上面清单里的合规项，以及运行时可发现性（补 `name`）。除此之外不为了口味改措辞、不改目录名、不改分析结论。每一次改写都要在该快照的 `UPSTREAM.md` 里逐条列出（改了哪一类句子、为什么、影响几颗）——`test/selected-skills-content.test.mjs` 钉住结果，`UPSTREAM.md` 钉住理由。
+- 上游正文**可以改，但只有三个理由**：上面清单里的合规项、运行时可发现性（补 `name`），以及**可见性分层**——把一份超过一次加载上限的正文切成「入口册 + 分册」，让模型按需用 `read` 取分册（上限的算法与实测见 `docs/dev/selected-skill-index.md` §8.7 末尾那条「精选条目自身的可见上限」）**切完必须逐条查指示词**：正文里的 `above` / `below` / `上面` / `第 N 节` 原来指同一份文件里的内容，切开之后就指向别的文件了，模型按错地图走路。这一条正则钉不住（`Price above MA50` 一类全是误伤），所以它是分层的工序步骤，不是闸门——本批 7 颗里查到并改掉 5 处。分层只准**搬家**：每份分册都要一次加载全文可见、每一册都得有人指过去、卡片/规则不重不漏、目录内 `.md` 总量只准涨；Apache-2.0 那一族的 §4(b) 声明行跟着搬进**每一份分册**（闸门逐份 `.md` 问，不只问 `SKILL.md`）。除此之外不为了口味改措辞、不改目录名、不改分析结论。每一次改写都要在该快照的 `UPSTREAM.md` 里逐条列出（改了哪一类句子、为什么、影响几颗）——`test/selected-skills-content.test.mjs` 钉住结果（分层那一侧两条：每册可见性 + 搬家不删规则），`UPSTREAM.md` 钉住理由。
 - 快照目录**不要带上游自己的 `.gitignore`**：它会在本仓继续生效，而 git 在被排除的父目录之下无法再 include（上游 `build/` + `!site/build/*.js` 那种写法实测挡掉三个文件）。留着一个与所钉 commit 不一致的快照，比少几个文件更糟；删掉它并记进 `UPSTREAM.md`。
 
 ### Catalog 与隔离边界

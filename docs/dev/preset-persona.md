@@ -44,6 +44,43 @@
   是否已有"）。任何进 `skills/` 的文件都会拿一条常驻目录项并可被模型加载——维护者文档不放这里。
 - 写错的代价：硬规则进 skill = 降级成"想起来才生效"；参考材料留 persona = 每轮付 token。
 
+### 内置 skill 与外部精选 skill 的分界（同一张 `skills/` 表里没画的那条线）
+
+`skills/` 那一行有**两个来源**，判据不同，混放会同时坏掉两边：
+
+| | 内置（`preset/capital-generation/skills/`） | 外部精选（`selected-skills/…`，catalog 条目） |
+|---|---|---|
+| 挂载 | 随 preset 默认在，`skill` 加载即用 | **默认关闭**，使用者在「精选 Skills」勾选后只对之后的 Capital 会话可见（子 Agent 不继承） |
+| 放什么 | **换个流派也成立**的东西：与已有数据源和主子 Agent 编排相适配的口径、勾稽、覆盖边界、结构性偏差、呈现与交付契约，以及符合经济 / 金融规律的方法 | **一家之言**：分档、阈值、阶段划分、触发词、流派化检查表（例：某行业集中度到多少算拥挤、持仓超过 35% 触发分散） |
+| 允许不包对吗 | 不允许——它对所有会话生效，写进去就是本插件的说法 | 允许——不保证对，但开放给使用者试；代价是必须带 `tags` + `status` + `riskNote` 说明它是方法推演、本插件不据它执行（§8.6 第 7 条） |
+| 怎么被看见 | persona 的第一条 duty 点名加载 | 靠 §8.7 的索引拼进三颗任务型内置 skill 的正文 |
+
+- **一条内容两边都想要就拆开**：规律那半进内置，数字那半进精选。"周期股在盈利峰值会让 TTM PE
+  创历史新低、看起来最便宜其实最贵"是规律；"位置 >0.8 且量比 >2 判定加速期"是一家之言。
+- ⛔ **共用一次加载的字节预算**：三颗任务型内置 skill 的正文与拼进去的索引块**在同一次 `skill`
+  结果里**，剪枝闸门是 `thresholdChars: 8192`（保留 `head 4096` + `tail 1024`，配在
+  `preset/capital-generation/agent.patch.yml` 的 `tool-result-pruner` 行），
+  超过就**中间静默消失**。索引每行带的是运行时 description（几十到几百字符），
+  所以 `SELECTED_SKILLS_MAX_ENABLED = 6` 是这个算术的结果而不好抬；往任务型内置加句子花的
+  是同一份预算。**动内置正文前先 `node -e` 数一遍该文件的字符数**，别用行数当预算（中文一行
+  抵得上英文三行的字符量）。
+- ⛔ **协议正文按"册"分，不按"篇"写长**：`skill` 正文走的正是上面那个剪枝器——
+  `@deepseek-ai/dsh-skill` 的 `renderSkillContent` 把正文塞进 `<skill_content>` / `<skill_instructions>`
+  并挂一行 base directory，**渲染包装实测约 512 字符**，超阈值就被剪成 head 4096 + `[middle pruned]` +
+  tail 1024，中间的规则静默消失。2026-10-14 在已安装的 dsh 包里核过实现
+  （`@deepseek-ai/dsh-compaction-tool-result-pruner`）：它遍历当前 surface 的**所有**工具结果节点，
+  配置项只有 `thresholdChars` / `headChars` / `tailChars` 三个，**没有按工具名豁免的口子**，
+  所以 `skill` 那一颗不会例外。2026-10-14 实测起点（正文口径，与上面那条上限同一把尺）：
+  `capital-data-protocol` 单册 16,264 字符、`capital-web-protocol` 10,324 字符，
+  `data_junior` 按 §0 该读的 §3/§4 恰好整段在被剪掉的中间。
+  现在数据协议三册（`capital-data-protocol` / `-profile` / `-query`）、检索协议两册
+  （`capital-web-protocol` / `-evidence`），§编号跨册连续。**要长就加一册并在 duty 行点名它，
+  不要把某一册写回去**：闸门 `test/persona.test.mjs`「内置 skill 每一册加载后完整可见」
+  按 `正文 + 512 ≤ thresholdChars` 逐册拦，另两条拦索引块与拆册不丢句。
+- 同一把尺子量到外部精选：catalog 条目正文同样受这条物理限制，**存量 32 颗**（最大 31,755 字符）
+  今天被勾选后只能拿到节选。本轮不改写上游，闸门按棘轮拦"别再加新的超限条目"；
+  存量处置记在 `docs/dev/selected-skill-index.md` 的「已知边界」。
+
 ## 8.4 不许改（除非有明确设计决策，并同步测试）
 
 - **persona 只放每轮硬规则**（判据 §8.2）：`list_agents` 每轮预检、label 精确复用、同角色复用
