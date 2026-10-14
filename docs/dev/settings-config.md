@@ -10,7 +10,7 @@
 
 - **为什么独立嵌套包**：卡片属 host 平面（bundle 必须在页面启动那一刻进 boot graph），主插件行
   在 preset / session 平面；由 `cordis.patch.yml` insert 行挂载，行名必须 path-like 相对路径
-  （坑见该文件注释与账本）。这颗行的目录与包名自 2026-10-14 起是 `config/` = `@v587d/config`，**与行 id 无关**：id 才是命名空间，动它就等于改掉用户已保存的配置。
+  （坑见该文件注释与账本）。这颗行的目录与包名自 2026-10-14 起是 `config/` = `@v587d/config`，**与行 id 无关**：id 才是命名空间，动它就等于改掉用户已保存的配置。⛔ 但**改目录名也不免费**：`dsh-config-editor` 每次保存都把**当时解析出的模块路径**连同 `id` 一起盖进 profile 的用户层 `cordis.patch.yml`（`{ id, name, config }`），而 `cordis-plugin-include` 遇 `name` 不匹配是**整行跳过**（默认日志连那句 `name mismatch … skipping` 的 warn 都不落到终端），条目静默回落 schema 默认——2.7.11 就是这样把用户已勾选的精选 Skills 打回默认值的（A/B 实测与恢复口径见账本 2026-10-14 行）。再要动这颗行的目录名，先写迁移说明，别当纯改名。
 - **⛔ 座位只有包级一处**：卡片注册进 `plugins.bundle.config`（`kind: 'keyed'`，key = **组合包的
   包名**）。这是本项目对**所有**可编辑配置的固定落点——新增字段只改条目 Config 的 `.volatile()`
   投影，**不开第二个座位**。不用行级 `plugins.row.config`（key `<包名>#<行 id>`）：那把座位埋在
