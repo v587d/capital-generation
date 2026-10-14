@@ -7,7 +7,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { SEARCH_ASSET_TYPES, SEARCH_BRANCH_LIMITS, createWatchlistService, keyFormOf, normalizeThscode } from '../capital-watchlist/index.js'
+import { SEARCH_ASSET_TYPES, SEARCH_BRANCH_LIMITS, createWatchlistService, keyFormOf, normalizeThscode } from '../watchlist/index.js'
 import { fetchSmartbox, parseSmartbox } from '../lib/sources/tencent-public-core.js'
 import { FIXTURES, SMARTBOX_ROWS, createFakeDomain, stubFuyao } from './watchlist-harness.mjs'
 

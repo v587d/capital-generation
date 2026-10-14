@@ -17,7 +17,7 @@ const { SELECTED_SKILL_CATALOG, SELECTED_SKILL_TAG_LABELS, SELECTED_SKILLS_MAX_E
  * 卡片读的是**配置条目 id**，坐的是**组合包自己的页面**——两个不同的字符串，各自钉在不同地方：
  *
  *  - `ENTRY_ID` 是 settings 命名空间（0.1.7 起命名空间恒等于 profile 条目 id），四处必须同字：
- *    `cordis.patch.yml` 的行 id、`capital-config/index.js` 的 `SETTINGS_ENTRY_ID`、主插件
+ *    `cordis.patch.yml` 的行 id、`config/index.js` 的 `SETTINGS_ENTRY_ID`、主插件
  *    `src/index.ts` 的 `CAPITAL_CONFIG_ENTRY_ID`、这里。
  *  - `BUNDLE_NAME` 是槽 `plugins.bundle.config` 的 key：页面按**组合包的包名**取该包的配置段
  *    （`renderSlot(..., { entryKey: pkg.name })`），所以它必须逐字等于根 `package.json` 的 `name`。
@@ -60,7 +60,7 @@ const PADDLE_OCR_DEFAULT_REF = 'PADDLE_OCR_TOKEN'
  */
 const TABS_ID = 'capital-config-tabs'
 /**
- * 「详情」悬浮里那份 `SKILL.md` 原文的来路：host 半边（`capital-config/index.js`）注册的
+ * 「详情」悬浮里那份 `SKILL.md` 原文的来路：host 半边（`config/index.js`）注册的
  * 只读旁路，按 catalog 的 skill 名寻址——闭集在服务器那侧，这里只拼地址。
  * 这条字符串与 host 的 `SKILL_DOC_ROUTE` 同字（客户端 import 不到那一层，所以由测试对着
  * 两侧产物比）：漂移的表现是「详情」永远读不到，且不报错。

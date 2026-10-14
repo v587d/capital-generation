@@ -33,7 +33,7 @@ const walk = (dir) => {
     }
   }
 }
-for (const dir of ['src', 'test', 'scripts', 'chart-ui', 'capital-config', 'capital-watchlist']) walk(dir)
+for (const dir of ['src', 'test', 'scripts', 'chart-ui', 'config', 'watchlist']) walk(dir)
 
 /** 闸门自己也不能"扫到 0 个文件还报通过"——那正是它要防的失效形态。 */
 test('跨平台闸门确实扫到了源码（扫描范围失效就等于没有闸门）', () => {

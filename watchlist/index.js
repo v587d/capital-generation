@@ -1,5 +1,5 @@
 /**
- * `@v587d/capital-watchlist` 的 host half。
+ * `@v587d/watchlist` 的 host half。
  *
  * 用户自选股是**宿主级（跨 workspace）的用户侧资产**：清单与报价快照住在官方
  * `storage-domain` 域 `capital_watchlist`（`~/.dsh/storages/capital_watchlist.json`），

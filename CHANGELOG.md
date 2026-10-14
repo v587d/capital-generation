@@ -7,6 +7,29 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [2.7.11] - 2026-10-14
+
+内部整理：插件包里两颗 host 平面组件的目录与包名收短了——`capital-config/` → `config/`（`@v587d/config`）、
+`capital-watchlist/` → `watchlist/`（`@v587d/watchlist`）。**没有一项你看得见的东西跟着变**：设置卡片
+还在老位置（「插件」→ Capital Generation → 顶部三格），「包含的组件」里那四行的名字仍是
+`capital-config` / `capital-charts` / `capital-watchlist` / `preset-capital-generation`，已保存的凭据引用名、
+已勾选的精选 Skills、自选股清单与你自己标的持仓比例**全部原样读得到**——那两行的身份、配置的命名空间、
+自选股的存储域名和 `/capital-watchlist` 路由都刻意没改，就是为了升级不产生迁移。
+
+宿主要求与 2.7.10 相同（DSH`@0.2.0-rc.2`），升级无需迁移。唯一要自己动手的情形：如果你手改过 profile
+文件、在里面写了 `./capital-config/index.js` 这类路径，改成 `./config/index.js`（自选股那颗同理）；
+由宿主自己生成的那份会在重装时重写，不用管。
+
+### Changed
+
+- **两颗嵌套包的目录与包名**（研发侧可见）：`config/` = `@v587d/config`、`watchlist/` = `@v587d/watchlist`；
+  生成两份客户端 bundle 的脚本一并改名 `scripts/build-config-client.mjs` / `scripts/build-watchlist-client.mjs`。
+- **`npm run smoke:boot` 的 bundle 检查改成现读包名**。它原先在首页 HTML 里 grep `capital-config` 这一串
+  来确认客户端 bundle 进了启动图，而那串实际是**包名**（宿主按最近的 `package.json` 归属 bundle 身份）、
+  不是行 id——改名之后这条会一直报 ⚠️ 且非零退出。现在三颗嵌套包的身份都从各自 `package.json` 现读，
+  下次再改名不必修探针。真机复核：三颗 bundle 均报告送达，四行组件、`capital-config` 命名空间与两条
+  路由围栏照常通过。
+
 ## [2.7.10] - 2026-10-13
 
 精选 Skill 从"会话目录里的一行摘要"升级为**任务级索引**：主 Agent 加载单一标的投研 / 事件影响 /

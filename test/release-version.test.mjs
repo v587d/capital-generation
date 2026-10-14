@@ -25,7 +25,7 @@ const rootVersion = () => JSON.parse(readFileSync(join(ROOT, 'package.json'), 'u
 
 test('发版闸门：随包嵌套包（chart-ui / capital-config / capital-watchlist）的 version 必须与主包一致', () => {
   const version = rootVersion()
-  for (const manifestPath of ['chart-ui/package.json', 'capital-config/package.json', 'capital-watchlist/package.json']) {
+  for (const manifestPath of ['chart-ui/package.json', 'config/package.json', 'watchlist/package.json']) {
     const manifest = JSON.parse(readFileSync(join(ROOT, manifestPath), 'utf8'))
     assert.equal(
       manifest.version,

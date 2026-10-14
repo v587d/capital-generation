@@ -1,5 +1,5 @@
 /**
- * 客户端半边闸门（`capital-watchlist/client.js`）。
+ * 客户端半边闸门（`watchlist/client.js`）。
  *
  * 这一层最要紧的三条，都是"错了不报错、只是行为不对"的那种：
  *  1. 座位常驻——非 Capital 会话里组件也会 mount，所以 mount 必须零 fetch；
@@ -15,7 +15,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
 
-const source = readFileSync(new URL('../capital-watchlist/client.js', import.meta.url), 'utf8')
+const source = readFileSync(new URL('../watchlist/client.js', import.meta.url), 'utf8')
 
 /** 排版用例反复用的一条有报价行（价格位数故意超出两位，好验证 toFixed 收口）。 */
 const QUOTED = {
@@ -324,7 +324,7 @@ function mountedCss(options = {}) {
 
 test('bundle 身份：id 等于包名，导出 name / inject / apply', () => {
   const entry = loadBundle()
-  assert.equal(entry.id, '@v587d/capital-watchlist')
+  assert.equal(entry.id, '@v587d/watchlist')
   const mod = entry.factory(factoryRequire)
   assert.equal(mod.name, 'capital-watchlist')
   assert.deepEqual([...mod.inject].sort(), ['commandUi', 'locale', 'sessions', 'slots'])
@@ -338,7 +338,7 @@ test('bundle 身份：id 等于包名，导出 name / inject / apply', () => {
  * bundle 这一侧对账，失配就点名要跑哪条命令。
  */
 test('⛔ 源码已改、bundle 还是旧的：字典值与 CSS 规则必须在 client.js 里逐字命中', () => {
-  const srcSource = readFileSync(new URL('../capital-watchlist/client.src.cjs', import.meta.url), 'utf8')
+  const srcSource = readFileSync(new URL('../watchlist/client.src.cjs', import.meta.url), 'utf8')
   const srcBlock = (needle, endNeedle) => {
     const start = srcSource.indexOf(needle)
     const end = srcSource.indexOf(endNeedle, start + needle.length)
@@ -1592,7 +1592,7 @@ test('⛔ 面板不画币种（喂带 HKD / USD / CNY 的回包），三市徽�
 
   // 三档底色必须来自三个不同的 state 族（A=红 / 港=琥珀 / 美=绿，用户按"钞票主色"点的名）：
   // 两档撞回同一个族就回到"分不开"那一症，而色值本身归主题包，源码里能判的只有族的归属。
-  const css = readFileSync(new URL('../capital-watchlist/client.src.cjs', import.meta.url), 'utf8')
+  const css = readFileSync(new URL('../watchlist/client.src.cjs', import.meta.url), 'utf8')
   const families = ['cn', 'hk', 'us'].map((market) => {
     const rule = css.split('\n').find((line) => line.startsWith('.capital-watchlist-tag-' + market + ' {'))
     assert.ok(rule, '底色规则 .capital-watchlist-tag-' + market + ' 不见了（徽标会退化成没有底的字）')
@@ -2113,7 +2113,7 @@ test('⛔ 步进边界：0 是用户真填的数、100 到顶置灰、37.5 不�
 test('⛔ 合计封顶 120%：其余持仓吃掉额度之后 + 置灰，placeholder 说的就是剩余额度', async () => {
   // 用户点名"我居然可以针对多只标的都填超过 50%"。只做多、没有 put，所以全组合加起来有额度：
   // 这一格的上限 = min(100, 120 − 其余持仓之和)。面板把 `+` 置灰与宿主拒绝用的是同一个减法
-  // （`capital-watchlist/holding-rules.js`），所以这里红了先去查那份模块。
+  // （`watchlist/holding-rules.js`），所以这里红了先去查那份模块。
   const rows = [
     heldRow(),
     heldRow({ thscode: '600519.SH', ticker: '600519', name: '贵州茅台', exchange: 'SH', holding: { weight_pct: 100, marked_at: 3 } }),
@@ -2255,7 +2255,7 @@ test('⛔ 失败只弹回那一行：连点失败回到最近一次宿主确认�
 })
 
 test('⛔ 指数没有持仓入口；一条遗留的指数持仓仍然退得掉、仍然标红', async () => {
-  // 判据来自 `capital-watchlist/holding-rules.js` 那一份，所以这里红了就说明两个半边脱钩了。
+  // 判据来自 `watchlist/holding-rules.js` 那一份，所以这里红了就说明两个半边脱钩了。
   const rows = [
     indexRow(),
     { thscode: '000001.SH', ticker: '000001', name: '上证指数', exchange: 'SH', asset_type: 'a-share-index', added_at: 2, source: 'seed', quote: null },

@@ -22,7 +22,7 @@ import {
   SKILL_DOCS,
   SKILL_DOC_ROUTE,
   skillDocUrl,
-} from '../capital-config/index.js'
+} from '../config/index.js'
 import { SELECTED_SKILL_CATALOG, SELECTED_SKILL_SKILL_DIRS } from '../selected-skills/catalog.js'
 import { fakeCtx } from './cordis-fake.mjs'
 import { httpFixture } from './watchlist-harness.mjs'
@@ -101,7 +101,7 @@ test('只放行 GET；其余 405', async () => {
 
 test('路径一律按表查：不在 catalog 里的名字、越界写法、缺后缀都只得到 404', async () => {
   for (const url of [
-    `${SKILL_DOC_ROUTE}/../capital-config/index.js`,
+    `${SKILL_DOC_ROUTE}/../config/index.js`,
     `${SKILL_DOC_ROUTE}/..%2F..%2Fetc%2Fpasswd.md`,
     `${SKILL_DOC_ROUTE}/%2e%2e.md`,
     `${SKILL_DOC_ROUTE}/no-such-skill.md`,
@@ -175,7 +175,7 @@ test('apply：原文旁路只经 inject 挂到 webServer 上（探测式写法�
   assert.equal(typeof registered[0].handler, 'function')
 
   // 路由字符串是同字链的两端：客户端 bundle 里那份必须逐字等于这一份。
-  const clientSource = readFileSync(join(ROOT, 'capital-config', 'client.src.cjs'), 'utf8')
+  const clientSource = readFileSync(join(ROOT, 'config', 'client.src.cjs'), 'utf8')
   const clientRoute = /^const SKILL_DOC_ROUTE = '([^']+)'/m.exec(clientSource)?.[1]
   assert.equal(clientRoute, SKILL_DOC_ROUTE, '客户端拼的地址与 host 注册的前缀漂移 = 「详情」永远读不到，且零报错')
   assert.match(clientSource, /fetch\(skillDocUrl\(name\)/, '客户端只经这一处出口取原文')

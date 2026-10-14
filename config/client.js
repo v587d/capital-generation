@@ -1,6 +1,6 @@
-// 由 scripts/build-capital-config-client.mjs 生成，请勿手改；源码见 capital-config/client.src.cjs。
+// 由 scripts/build-config-client.mjs 生成，请勿手改；源码见 config/client.src.cjs。
 window.__ModuleLoader__.load({
-  id: '@v587d/capital-config',
+  id: '@v587d/config',
   factory: (require) => {
     var module = { exports: {} }
     var exports = module.exports

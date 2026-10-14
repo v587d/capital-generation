@@ -1,5 +1,5 @@
 /**
- * `@v587d/capital-watchlist` 的浏览器半边。
+ * `@v587d/watchlist` 的浏览器半边。
  *
  * 两个 surface，缺一都不成立：
  *  1. `ctx.commandUi` 的一条 **contribution**（不是 decoration——我们没有同名宿主命令），
@@ -65,7 +65,7 @@ const { createSnapshotStore } = require('@deepseek-ai/dsh-client-store')
 // 组件与文本减号。⛔ 也不用 `IconCheckCircle*`：那两支圆心里都画着东西，未勾选挂着它就像已经被
 // 选中（2026-10-09 实机点名的正是这个错觉）。
 const { IconChecklistOutlineRegular, IconCloseOutlineRegular, IconDatabaseOutlineRegular, IconEllipsisOutlineRegular, IconGoalOutlineRegular, IconListPenOutlineRegular, IconPinOutlineRegular, IconRefreshOutlineRegular, IconSearchOutlineRegular, IconTrashOutlineRegular, Menu, MenuItemButton, Modal, Switch } = require('@deepseek-ai/dsh-client-ui-primitives')
-// 「哪些标的可以是一个仓位」与「占比合计封顶多少」都来自 `capital-watchlist/holding-rules.js`
+// 「哪些标的可以是一个仓位」与「占比合计封顶多少」都来自 `watchlist/holding-rules.js`
 // （构建期由 esbuild 内联进来）：面板画不画那一行、`+` 什么时候置灰，与 `/holding` 收不收这一格
 // 不许各说一套。
 const { isHoldable, weightCeiling } = require('./holding-rules.js')

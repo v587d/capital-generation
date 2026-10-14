@@ -1,6 +1,6 @@
 # settings 配置纪律（`capital-config`，host 平面）
 
-> 索引见仓库根 `AGENTS.md` §5。改 `capital-config/`、`cordis.patch.yml` 的 insert 行或设置卡片
+> 索引见仓库根 `AGENTS.md` §5。改 `config/`、`cordis.patch.yml` 的 insert 行或设置卡片
 > 字段之前读这里。§编号沿用 `AGENTS.md` 的全局命名空间。
 >
 > 本节按 **DSH 0.1.7** 的 settings 面重写（0.1.5 的 `settings.register` / `settingsScope` /
@@ -10,7 +10,7 @@
 
 - **为什么独立嵌套包**：卡片属 host 平面（bundle 必须在页面启动那一刻进 boot graph），主插件行
   在 preset / session 平面；由 `cordis.patch.yml` insert 行挂载，行名必须 path-like 相对路径
-  （坑见该文件注释与账本）。
+  （坑见该文件注释与账本）。这颗行的目录与包名自 2026-10-14 起是 `config/` = `@v587d/config`，**与行 id 无关**：id 才是命名空间，动它就等于改掉用户已保存的配置。
 - **⛔ 座位只有包级一处**：卡片注册进 `plugins.bundle.config`（`kind: 'keyed'`，key = **组合包的
   包名**）。这是本项目对**所有**可编辑配置的固定落点——新增字段只改条目 Config 的 `.volatile()`
   投影，**不开第二个座位**。不用行级 `plugins.row.config`（key `<包名>#<行 id>`）：那把座位埋在
@@ -21,7 +21,7 @@
   ⛔ 一个 volatile 字段都没有 ⇒ `volatileForm` 返回 `undefined`，该条目**不进** describe 镜像；
   写非 volatile 路径被 `Config field "…" is not volatile` 拒绝（那样就还是只能改 profile 文件）。
   `.volatile()` 要 schemastery ≥ 3.18.4，两处清单都跟着抬。
-- **两处同字链**：条目 id 是 **四处同字**——`cordis.patch.yml` 的行 id ≡ `capital-config/index.js`
+- **两处同字链**：条目 id 是 **四处同字**——`cordis.patch.yml` 的行 id ≡ `config/index.js`
   的 `SETTINGS_ENTRY_ID` ≡ `src/index.ts` 的 `CAPITAL_CONFIG_ENTRY_ID` ≡ `client.src.cjs` 的
   `ENTRY_ID`（它决定 `configForms.get()` 取得到取不到）。包名是**另一条链**：`client.src.cjs` 的
   `BUNDLE_NAME` ≡ 根 `package.json` 的 `name`，页面按 `entryKey: pkg.name` 渲染该段，且

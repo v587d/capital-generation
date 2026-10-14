@@ -1,6 +1,6 @@
-// 由 scripts/build-capital-watchlist-client.mjs 生成，请勿手改；源码见 capital-watchlist/client.src.cjs。
+// 由 scripts/build-watchlist-client.mjs 生成，请勿手改；源码见 watchlist/client.src.cjs。
 window.__ModuleLoader__.load({
-  id: '@v587d/capital-watchlist',
+  id: '@v587d/watchlist',
   factory: (require) => {
     var module = { exports: {} }
     var exports = module.exports

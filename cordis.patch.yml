@@ -33,9 +33,13 @@
 #     locatePkgJson 随后按"最近的 package.json"归属，正好是 chart-ui/package.json，
 #     包身份为 @v587d/capital-charts，与主包不撞名。
 # 回归断言见 test/chart-composition.test.mjs（name 必须是字面量且 path-like，并真的解析一次）。
+#
+# ⚠ 目录名 / 包名与**行 id 是两条独立的链**（AGENTS.md §5.1）：下面两颗行住在 `config/` 与
+# `watchlist/`，行 id 却仍是 `capital-config` / `capital-watchlist`——后者是 settings 命名空间与
+# 「包含的组件」里那两行的身份，改了就会吃掉用户已保存的配置。不许"顺手对齐"。
 - insert:
     - id: capital-config
-      name: './capital-config/index.js'
+      name: './config/index.js'
       config:
         customPersona: ''
         fuyaoCredentialRef: FUYAO_API_KEY
@@ -64,9 +68,9 @@
 # `test/watchlist-quote.test.mjs` 的**模块同一性探针**钉住：两处 import 必须拿到同一实例，
 # 探针不过就重新设计，而不是先上线再说。
 #
-# `id` 与 `./capital-watchlist/index.js` 的 path-like 字面量规则同上（!!js / subpath 两个坑
+# `id` 与 `./watchlist/index.js` 的 path-like 字面量规则同上（!!js / subpath 两个坑
 # 对这颗行同样成立）。
 - insert:
     - id: capital-watchlist
-      name: './capital-watchlist/index.js'
+      name: './watchlist/index.js'
 

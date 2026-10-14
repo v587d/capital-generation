@@ -17,7 +17,7 @@
   `LICENSE` 的版权行是 **`Copyright (c) 2026 KOMVIA`**；`marketplace.json` 的 `publisher` 也是 `KOMVIA`，
   上游 `AGENTS.md:11` 自述 `**Creator**: KOMVIA`；而仓库 owner 与 `README.md:5` 的 "Built by" 都是
   **Ayotunde Oso（账号 `GAJETOso`）**。catalog 的 `owner` 用仓库账号 `GAJETOso`——设置卡片那条
-  上游链接是按 `https://github.com/${owner}/${repository}` 拼的（`capital-config/client.src.cjs:576`），
+  上游链接是按 `https://github.com/${owner}/${repository}` 拼的（`config/client.src.cjs:576`），
   换成品牌名就是死链。MIT 与 Apache-2.0 的差别在本仓有实际后果，见下面"许可义务"一节。
 - Imported content: 只带 `skills/` 这一棵树（48 颗，337 个文件 / 2.4 MB）与 `LICENSE` 原件，
   与所钉 commit 逐字节相同（除下面列出的 10 份）。**上游仓库根其余材料整个不复制进本仓**，

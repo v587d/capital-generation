@@ -5,15 +5,15 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runInNewContext } from 'node:vm'
 import { load as yamlLoad } from 'js-yaml'
-import { apply as hostApply, Config as CapitalConfig, SETTINGS_ENTRY_ID } from '../capital-config/index.js'
+import { apply as hostApply, Config as CapitalConfig, SETTINGS_ENTRY_ID } from '../config/index.js'
 import { fakeCtx as hostFakeCtx } from './cordis-fake.mjs'
 import { CAPITAL_CONFIG_ENTRY_ID, Config as MainConfig, LOCAL_FETCH_DEFAULTS, resolveLocalFetchConfig } from '../lib/index.js'
 import { LOCAL_FETCH_CLIENT_VERSION } from '../lib/web-retriever/local-fetch.js'
 import { SELECTED_SKILL_CATALOG, SELECTED_SKILL_TAG_LABELS, SELECTED_SKILLS_MAX_ENABLED } from '../selected-skills/catalog.js'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
-const CLIENT = join(ROOT, 'capital-config', 'client.js')
-const CLIENT_SRC = join(ROOT, 'capital-config', 'client.src.cjs')
+const CLIENT = join(ROOT, 'config', 'client.js')
+const CLIENT_SRC = join(ROOT, 'config', 'client.src.cjs')
 
 /**
  * 0.1.7 的 settings 面里**条目 id 就是命名空间**：host 半边不再有 `settings.register`，
@@ -25,7 +25,7 @@ const CLIENT_SRC = join(ROOT, 'capital-config', 'client.src.cjs')
  */
 test('条目 id 四处一致 + 槽 key = 组合包包名：settings 命名空间与卡片座位各自同字', () => {
   const patch = yamlLoad(readFileSync(join(ROOT, 'cordis.patch.yml'), 'utf8').replace(/!!js\s+/g, ''))
-  const row = patch.flatMap((entry) => entry?.insert ?? []).find((item) => item?.name === './capital-config/index.js')
+  const row = patch.flatMap((entry) => entry?.insert ?? []).find((item) => item?.name === './config/index.js')
   assert.ok(row, 'cordis.patch.yml 必须有 capital-config 这颗 host 平面行')
   assert.equal(row.id, SETTINGS_ENTRY_ID, 'settings 命名空间就是 profile 条目 id：行 id 必须等于 SETTINGS_ENTRY_ID')
   assert.equal(SETTINGS_ENTRY_ID, CAPITAL_CONFIG_ENTRY_ID, '主插件读配置用的条目 id 必须与 host 半边一致')
@@ -85,7 +85,7 @@ test('capital-config Host：可编辑面全靠 Config 的 .volatile() 字段，�
     assert.ok(flags.includes(`selectedSkills.${key}`), `selectedSkills.${key} 必须 .volatile()`)
   }
 
-  const hostSource = codeOnly(readFileSync(join(ROOT, 'capital-config', 'index.js'), 'utf8'))
+  const hostSource = codeOnly(readFileSync(join(ROOT, 'config', 'index.js'), 'utf8'))
   assert.doesNotMatch(hostSource, /settings\.register|settingsScope|SETTINGS_NAMESPACE/,
     '0.1.7 已删除 settings.register / settingsScope；代码里再出现就是把卡片改回了退休的旧面')
 
@@ -1205,7 +1205,7 @@ test('capital-config Client：详情页外链只认本包，两枚图标各去 G
 })
 
 test('capital-config 包清单：声明运行期 schemastery 依赖，且客户端 bundle 会随包发布', () => {
-  const manifest = JSON.parse(readFileSync(join(ROOT, 'capital-config', 'package.json'), 'utf8'))
+  const manifest = JSON.parse(readFileSync(join(ROOT, 'config', 'package.json'), 'utf8'))
   // index.js 顶部 `import z from '@deepseek-ai/schemastery'` 是运行期外部导入，必须声明；
   // 且版本必须够新——`.volatile()` 是 3.18.4 才有的（3.18.2 上整颗行在 import 期就抛错）。
   assert.equal(manifest.dependencies?.['@deepseek-ai/schemastery'], '^3.18.4')

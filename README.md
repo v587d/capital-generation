@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.7.10-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.7.11-9cf" alt="Version"></a>
   <a href="https://www.npmjs.com/package/@v587d/capital-generation"><img src="https://img.shields.io/npm/v/%40v587d%2Fcapital-generation" alt="npm version"></a>
 </p>
 
@@ -167,7 +167,7 @@ https://github.com/v587d/capital-generation
 
 - **安装后找不到 Capital 模式？** 确认插件出现在「插件」→ 已安装列表；Web / CLI profile 安装后要重启该 profile，并在新会话选择模式。
 - **配置在哪？** 打开「插件」→ 已安装的 **Capital Generation**，页面顶部就是「数据源 / 精选 Skills / 包含的组件」三格，四把密钥都在第一格；不在 DSH 的普通「设置」页面，也不用点进任何一行组件。保存密钥后新建会话再试。
-- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.7.10` 或 `@2.7.10`。
+- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.7.11` 或 `@2.7.11`。
 - **刚发布的新版本装不到？** 桌面端取包时会跳过**刚发布不久**的版本（宿主侧包管理器的发布冷却策略，实测会静默装成上一个版本），国内镜像的同步也可能滞后一段时间。急着用最新代码，改用仓库地址安装最直接。
 - **网页抓取失败？** 配置卡片中的「允许启动本地提取网页内容」默认开启：AnySearch 提取失败时可尝试本机直连。关闭后，本机直连的具名来源查询也不可用；请检查该开关和网络连接。
 - **Wind 那部分会消耗积分？** 会。公告与新闻检索、宏观 / 行业 / 汇率指标、按日期区间取的历史 K 线都按次消耗你在 Wind 侧的额度；额度与条款以 Wind 为准，插件不做用量封顶。没配 `WIND_API_KEY` 时这几类不可用，其余功能照常。

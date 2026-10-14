@@ -7,7 +7,7 @@ export declare const name = "capital-generation";
  * 取数配置所在的 **profile 条目 id**（随包的 `capital-config` 行）。0.1.7 的 settings 面
  * 以条目 id 为命名空间，本插件经 `settings.describe()` 按它读回用户配的引用名与开关。
  *
- * 这个字符串有三处必须一致：`cordis.patch.yml` 的行 id、`capital-config/index.js` 的
+ * 这个字符串有三处必须一致：`cordis.patch.yml` 的行 id、`config/index.js` 的
  * `SETTINGS_ENTRY_ID`、以及浏览器半边 `client.src.cjs` 的 `ENTRY_ID`；由
  * `test/capital-config.test.mjs` 逐一对齐（漂移的表现为卡片静默消失）。
  */

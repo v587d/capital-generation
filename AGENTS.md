@@ -73,7 +73,7 @@ capital-generation/
 │   ├── web-retriever/            # anysearch / wind-client / 具名来源 / 检索工具
 │   ├── ocr/                      # PaddleOCR job / markdown 归一 / 落盘（§4.3）
 │   └── time/tools.ts             # get_local_datetime
-├── chart-ui/ capital-config/     # host 平面嵌套包（图表 UI + 序列旁路；settings 卡片 §5）
+├── chart-ui/ config/ watchlist/  # host 平面嵌套包（图表 UI + 序列旁路；settings 卡片 §5）
 ├── vendor/                       # 固定版本第三方前端库（lightweight-charts）
 ├── docs/                         # dev/ = 本文详情层；reference/dsh-surface-ledger.md = 扩展面账本
 └── lib/ test/ scripts/ assets/   # 构建产物 / *.test.mjs / session-trace 等 / README 素材

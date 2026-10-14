@@ -7,7 +7,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { MAX_ITEMS, SEED_ITEMS, createWatchlistService, domainSpec } from '../capital-watchlist/index.js'
+import { MAX_ITEMS, SEED_ITEMS, createWatchlistService, domainSpec } from '../watchlist/index.js'
 import { createFakeDomain, HOLDABLE_ROWS, stubFuyao, withHoldable } from './watchlist-harness.mjs'
 
 function service(options = {}) {

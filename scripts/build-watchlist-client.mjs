@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// 生成 capital-watchlist/client.js（浏览器半边的 esbuild 产物，随包发布，勿手改）。
-// 与 build-capital-config-client.mjs 同一封装协议：ModuleLoader.load({id, factory})。
+// 生成 watchlist/client.js（浏览器半边的 esbuild 产物，随包发布，勿手改）。
+// 与 build-config-client.mjs 同一封装协议：ModuleLoader.load({id, factory})。
 import { build } from 'esbuild'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
-const DIR = join(ROOT, 'capital-watchlist')
+const DIR = join(ROOT, 'watchlist')
 const manifest = JSON.parse(readFileSync(join(DIR, 'package.json'), 'utf8'))
 const result = await build({
   entryPoints: [join(DIR, 'client.src.cjs')],
@@ -24,7 +24,7 @@ const result = await build({
 const body = result.outputFiles[0].text.trimEnd()
 const indented = body.split('\n').map((line) => line.length > 0 ? `    ${line}` : line).join('\n')
 const wrapped = [
-  '// 由 scripts/build-capital-watchlist-client.mjs 生成，请勿手改；源码见 capital-watchlist/client.src.cjs。',
+  '// 由 scripts/build-watchlist-client.mjs 生成，请勿手改；源码见 watchlist/client.src.cjs。',
   'window.__ModuleLoader__.load({',
   `  id: '${manifest.name}',`,
   '  factory: (require) => {',
@@ -38,4 +38,4 @@ const wrapped = [
   '',
 ].join('\n')
 writeFileSync(join(DIR, 'client.js'), wrapped)
-console.log(`build-capital-watchlist-client: 已生成 capital-watchlist/client.js（${wrapped.length} 字符）`)
+console.log(`build-watchlist-client: 已生成 watchlist/client.js（${wrapped.length} 字符）`)

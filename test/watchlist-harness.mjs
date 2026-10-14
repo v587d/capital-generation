@@ -14,7 +14,7 @@
  * 只 stub 一家等于让单测碰真网络。默认回"上游正常但这一路没有这个票"（smartbox 的 `N` 哨兵、
  * 快照的 `v_pv_none_match`），要港美股候选或报价的用例自己传 fixture。
  */
-import { domainSpec } from '../capital-watchlist/index.js'
+import { domainSpec } from '../watchlist/index.js'
 import { SMARTBOX_ROWS, tencentSnapshotText } from './tencent-fixtures.mjs'
 
 export { SMARTBOX_ROWS, tencentSnapshotText } from './tencent-fixtures.mjs'

@@ -53,14 +53,14 @@ test('打包闸门：vendored 图表库与构建产物都在发布清单里', (t
     'chart-ui/package.json',
     'chart-ui/index.js',
     'chart-ui/client.js',
-    'capital-config/package.json',
-    'capital-config/index.js',
-    'capital-config/client.js',
-    'capital-watchlist/package.json',
-    'capital-watchlist/index.js',
+    'config/package.json',
+    'config/index.js',
+    'config/client.js',
+    'watchlist/package.json',
+    'watchlist/index.js',
     // 类型表被 host 半边 import、被浏览器半边内联：漏进包 = 装出去的插件整条 /capital-watchlist 起不来。
-    'capital-watchlist/holding-rules.js',
-    'capital-watchlist/client.js',
+    'watchlist/holding-rules.js',
+    'watchlist/client.js',
     // 第三方清单要点得到文件：写了 `xxx/LICENSE` 却没随包发，等于把署名义务发丢了。
     'THIRD_PARTY_NOTICES.md',
     'preset/capital-generation/agent.patch.yml',
@@ -163,7 +163,7 @@ test('打包闸门：selected-skills 的运行时半边逐条落在发布清单�
 
 test('打包闸门：声明 dsh.client 的包，其客户端 bundle 必须真的在包里', () => {
   // 主包与随包携带的嵌套包都要查：漏发 chart-ui/client.js 会让整个 web profile 起不来。
-  const manifests = ['package.json', 'chart-ui/package.json', 'capital-config/package.json', 'capital-watchlist/package.json']
+  const manifests = ['package.json', 'chart-ui/package.json', 'config/package.json', 'watchlist/package.json']
   const paths = packedFilePaths()
   let checked = 0
 

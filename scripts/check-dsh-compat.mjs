@@ -69,7 +69,7 @@ const probes = [
     title: '声明 dsh.client 的包（主包与随包携带的嵌套包），exports["./client"] 必须真实存在且在 files 里',
     why: 'bundle 缺失会让 ClientPackageCompositionError 在注册表构造时抛出——整个 web profile 起不来，不是图表坏掉。',
     run() {
-      const manifests = ['package.json', 'chart-ui/package.json', 'capital-config/package.json', 'capital-watchlist/package.json']
+      const manifests = ['package.json', 'chart-ui/package.json', 'config/package.json', 'watchlist/package.json']
       const declared = []
       for (const relativeManifest of manifests) {
         const manifestPath = join(process.cwd(), relativeManifest)

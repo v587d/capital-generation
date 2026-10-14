@@ -13,7 +13,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { DEFAULT_FUYAO_BASE_URL, FuyaoError } from '../lib/sources/fuyao-core.js'
 import { fetchSmartbox, sourceError } from '../lib/sources/tencent-public-core.js'
-import { MAX_ITEMS, REFRESH_CONCURRENCY, SEED_ITEMS, createWatchlistService, readCredentialRef, refreshBudgetFor, watchlistErrorCode } from '../capital-watchlist/index.js'
+import { MAX_ITEMS, REFRESH_CONCURRENCY, SEED_ITEMS, createWatchlistService, readCredentialRef, refreshBudgetFor, watchlistErrorCode } from '../watchlist/index.js'
 import { createFakeDomain, fakeCtx, stubFuyao, tencentSnapshotText } from './watchlist-harness.mjs'
 
 const ETF_CODES = ['510300.SH', '159915.SZ', '588000.SH']
@@ -214,7 +214,7 @@ test('credential ref 从 capital-config 卡片读，不是硬编码 FUYAO_API_KE
 })
 
 test('⚠️ 模块同一性探针：host 半边与插件侧用的是同一个 fuyao-core 实例', async () => {
-  // 跨包相对导入（`capital-watchlist/index.js` → `../lib/sources/fuyao-core.js`）在本仓没有先例。
+  // 跨包相对导入（`watchlist/index.js` → `../lib/sources/fuyao-core.js`）在本仓没有先例。
   // 一旦出现第二份实例，`instanceof` 会静默失效、错误归类全部退化成兜底 code：
   // 这条用例就是那个退化的检测器，探针不过就重新设计（设计文档 §3.1 / §3.6 红线 3）。
   const error = new FuyaoError('rate_limited', 'Fuyao HTTP error 429', { status: 429 })

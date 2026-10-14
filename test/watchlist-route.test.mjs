@@ -7,7 +7,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { apply, createRouteHandler, createWatchlistService, ROUTE_PATH, SEED_ITEMS } from '../capital-watchlist/index.js'
+import { apply, createRouteHandler, createWatchlistService, ROUTE_PATH, SEED_ITEMS } from '../watchlist/index.js'
 import { fakeCtx } from './cordis-fake.mjs'
 import { createFakeDomain, httpFixture, stubFuyao, withHoldable } from './watchlist-harness.mjs'
 

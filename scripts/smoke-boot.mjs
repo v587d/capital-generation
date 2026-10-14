@@ -55,11 +55,23 @@ if (DSH_CLI === undefined) {
 }
 
 /** 预设身份与 settings 条目 id —— 与 `preset/capital-generation/agent.patch.yml`、
- *  `capital-config/index.js` 必须同字，测试另有断言（`test/capital-config.test.mjs`）。 */
+ *  `config/index.js` 必须同字，测试另有断言（`test/capital-config.test.mjs`）。 */
 const PRESET_ID = 'capital-generation'
 const SETTINGS_ENTRY_ID = 'capital-config'
 /** bundle 名以 package.json 为准（插件面板按它列出这颗包的行）。 */
 const PACKAGE_NAME = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).name
+/**
+ * 三颗 host 平面嵌套包的客户端 bundle。`__DSH_BOOT__` 里带的是**包名**（`dsh-client-modules`
+ * 的 locatePkgJson 按"最近的 package.json"归属 bundle 身份），不是 profile 行 id——所以这里
+ * 按包名问，并且**从各包的 package.json 现读**。2026-10-14 目录改名之后，原先硬写的
+ * `capital-*` 在 index.html 里永不命中：真机照样报 ⚠️ 并以非零退出，闸门没瞎，但它量的
+ * 已经不是"bundle 有没有送达"。派生而不抄字符串，下次改名就不必再来修这里。
+ */
+const CLIENT_BUNDLES = [
+  { dir: 'chart-ui', label: '图表客户端 bundle' },
+  { dir: 'config', label: 'settings 卡片 bundle' },
+  { dir: 'watchlist', label: '自选股客户端 bundle' },
+].map((entry) => ({ ...entry, id: JSON.parse(readFileSync(join(ROOT, entry.dir, 'package.json'), 'utf8')).name }))
 
 /** 探针在 boot 内打印这一行（JSON），父进程按它判定。 */
 const PROBE_MARKER = 'capital-boot-probe: '
@@ -185,11 +197,7 @@ async function bootGraphHasCapitalBundles(url) {
   try {
     const response = await fetchIndex(url)
     const html = await response.text()
-    const hasBundles = {
-      'capital-config': html.includes('capital-config'),
-      'capital-charts': html.includes('capital-charts'),
-      'capital-watchlist': html.includes('capital-watchlist'),
-    }
+    const hasBundles = Object.fromEntries(CLIENT_BUNDLES.map((bundle) => [bundle.id, html.includes(bundle.id)]))
     return { fetched: true, hasBundles, status: response.status, bytes: html.length, cookie: response.cookie ?? '' }
   } catch (error) {
     return { fetched: false, hasBundles: {}, error: error instanceof Error ? error.message : String(error) }
@@ -420,9 +428,11 @@ try {
     const url = urls.find((entry) => entry.includes('token=')) ?? urls[urls.length - 1]
     bundles = await bootGraphHasCapitalBundles(url)
     if (bundles.fetched) {
-      console.log(`smoke-boot: ${bundles.hasBundles['capital-config'] ? '✅' : '⚠️ '} boot graph 中的 Capital settings bundle：${bundles.hasBundles['capital-config'] ? '存在' : '未找到'}`)
-      console.log(`smoke-boot: ${bundles.hasBundles['capital-charts'] ? '✅' : '⚠️ '} boot graph 中的图表客户端 bundle：${bundles.hasBundles['capital-charts'] ? '存在' : '未找到'}（HTTP ${bundles.status}，${bundles.bytes} 字节）`)
-      console.log(`smoke-boot: ${bundles.hasBundles['capital-watchlist'] ? '✅' : '⚠️ '} boot graph 中的自选股客户端 bundle：${bundles.hasBundles['capital-watchlist'] ? '存在' : '未找到'}`)
+      console.log(`smoke-boot: index.html HTTP ${bundles.status}，${bundles.bytes} 字节`)
+      for (const bundle of CLIENT_BUNDLES) {
+        const found = bundles.hasBundles[bundle.id] === true
+        console.log(`smoke-boot: ${found ? '✅' : '⚠️ '} boot graph 中的${bundle.label}：${bundle.id} ${found ? '存在' : '未找到'}`)
+      }
       // 自选股的 host 半边（storage-domain + prefix 路由）只有在这里才被证明"真的挂载并工作"。
       try {
         fence = await watchlistFenceProbe(url, bundles.cookie ?? '')
@@ -512,7 +522,7 @@ if (gateFired) {
 
 const positiveOk = result.ok
   && (result.probeProblems?.length ?? 1) === 0
-  && (bundles?.fetched !== true || (!!bundles.hasBundles['capital-charts'] && !!bundles.hasBundles['capital-config'] && !!bundles.hasBundles['capital-watchlist']))
+  && (bundles?.fetched !== true || CLIENT_BUNDLES.every((bundle) => bundles.hasBundles[bundle.id] === true))
   // ⛔ 自选股路由必须"匿名拒绝 + 带 cookie 可读"：prefix 路由自己不接 requestRejection
   // 就是任何本机进程凭路径即可读写用户自选股（docs/dev/chart-presentation.md §6.1 那条硬约束的同一族）。
   && (bundles?.fetched !== true || fence?.ok === true)

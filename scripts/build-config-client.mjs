@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
-const DIR = join(ROOT, 'capital-config')
+const DIR = join(ROOT, 'config')
 const manifest = JSON.parse(readFileSync(join(DIR, 'package.json'), 'utf8'))
 const result = await build({
   entryPoints: [join(DIR, 'client.src.cjs')],
@@ -22,7 +22,7 @@ const result = await build({
 const body = result.outputFiles[0].text.trimEnd()
 const indented = body.split('\n').map((line) => line.length > 0 ? `    ${line}` : line).join('\n')
 const wrapped = [
-  '// 由 scripts/build-capital-config-client.mjs 生成，请勿手改；源码见 capital-config/client.src.cjs。',
+  '// 由 scripts/build-config-client.mjs 生成，请勿手改；源码见 config/client.src.cjs。',
   'window.__ModuleLoader__.load({',
   `  id: '${manifest.name}',`,
   '  factory: (require) => {',
@@ -36,4 +36,4 @@ const wrapped = [
   '',
 ].join('\n')
 writeFileSync(join(DIR, 'client.js'), wrapped)
-console.log(`build-capital-config-client: 已生成 capital-config/client.js（${wrapped.length} 字符）`)
+console.log(`build-config-client: 已生成 config/client.js（${wrapped.length} 字符）`)

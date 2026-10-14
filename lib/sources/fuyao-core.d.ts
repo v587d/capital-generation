@@ -1,7 +1,7 @@
 /**
  * Fuyao REST 的最小请求内核：**零 import 的叶子模块**。
  *
- * 为什么单独一份：host 平面的嵌套包（`capital-watchlist/index.js`）与插件侧的数据能力
+ * 为什么单独一份：host 平面的嵌套包（`watchlist/index.js`）与插件侧的数据能力
  * （`fuyao-rest.ts`）必须共用同一套 base URL、鉴权头、信封 `code` 判定与错误文案——
  * "同一知识只有一份实现"（AGENTS.md §9.7）。这一层一旦被别的模块拖进来，host 半边
  * 就会顺带加载整棵插件依赖树，所以这里不放校验器、能力定义、也不放任何类型依赖。
