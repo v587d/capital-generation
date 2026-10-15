@@ -100,8 +100,9 @@
   抛错被跳过，对它们目前只剩 persona 文案这一层。**宿主若把它们挂出来，加回
   `ROOT_AGENT_DENIED_TOOLS`（逐名 restrict 能容忍"没这个名字"），不要加进 `toolFilter`。**
 - **四组结构件，删任一处该闸门就退回"persona 软建议"**：① 可视化 gate（§6.1 三件套 + §6.3 两处
-  联动 → `chart-presentation.md` / `chart-delivery-events.md`）；② bash 闸门（§1.6 两结构件 +
-  shell 槽位 → `bash-gate.md`）；③ 出网只有一个入口：`RETRIEVAL_DENIED_TOOLS`
+  联动 → `chart-presentation.md` / `chart-delivery-events.md`）；② shell 闸门与 fs 写口
+  （shell 槽位 + 升级 guard + `write`/`edit` 的根侧名单与全局 guard，2026-10-15「开 read、
+  同时保留 bash」→ `bash-gate.md` §1.6）；③ 出网只有一个入口：`RETRIEVAL_DENIED_TOOLS`
   （`src/agents/root-tool-policy.ts`，13 个检索 / 来源工具名的**唯一事实来源**，spread 进
   `ROOT_AGENT_DENIED_TOOLS`，**新增来源只改这一处**）+ 通用 subagent deny + 主 persona 禁直连
   文案；④ 本地回退开关支配九个具名来源（§4.2 → `web-retriever.md`）。②③ 由

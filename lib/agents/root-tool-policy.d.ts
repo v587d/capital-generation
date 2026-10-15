@@ -47,11 +47,15 @@ export declare function rootOcrGuardReason(exec: GuardedExecution | undefined): 
  * `tool-pwsh`，靠 `process.platform === 'win32'` 互斥 `disabled`），所以名字由平台决定。
  *
  * ⛔ 但**闸门必须认全集**：只认本平台那一个，另一端就是静默放行——同一个能力两个入口，
- * 本地测试只覆盖了接好的那个（AGENTS.md §9.7 的第三种形状）。根侧 deny 与
- * `bash-guard.ts` 的子会话 guard 都从这里取名字，不再各写一份。
+ * 本地测试只覆盖了接好的那个（AGENTS.md §9.7 的第三种形状）。`bash-guard.ts` 的升级闸门
+ * 从这里取名字，不再各写一份。
+ *
+ * 2026-10-15 用户决策「开 read、同时保留 bash」：shell **不再**进 {@link ROOT_AGENT_DENIED_TOOLS}
+ * ——主 Agent 保留 bash / pwsh（读 skill 分册、纯计算）；子会话侧仍由委派行的 `toolFilter`
+ * 与 `bash-guard.ts` 的升级闸门收敛。
  */
 export declare const SHELL_TOOL_NAMES: readonly ["bash", "pwsh"];
-export declare const ROOT_AGENT_DENIED_TOOLS: readonly ["render_chart", "subagent_visualization_specialist", "prepare_chart_source", "anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "sina_reports", "ths_eps_forecast", "bash", "pwsh"];
+export declare const ROOT_AGENT_DENIED_TOOLS: readonly ["render_chart", "subagent_visualization_specialist", "prepare_chart_source", "anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "sina_reports", "ths_eps_forecast", "write", "edit"];
 /** 本 preset 的 id（`composedPreset` 的返回值）。 */
 export declare const CAPITAL_PRESET_ID = "capital-generation";
 interface ToolRestriction {
@@ -154,6 +158,28 @@ export declare function restrictRootAgentTools(agent: AgentLike | undefined, rec
  * 已经完成的 deny 收敛（宁可少一层闸门，不能挡住建 agent）。
  */
 export declare function installRootOcrGuard(agent: AgentLike | undefined): (() => void) | undefined;
+/** `tool-fs` 的写口工具名（唯一一份）：`read` / `read_image` 是只读口，不在名单。 */
+export declare const FS_WRITE_TOOL_NAMES: readonly ["write", "edit"];
+/** fs 写口拒绝文案：指回正确路径（读用 read，落盘走工具回传），并留可恢复的余地。 */
+export declare const FS_WRITE_READ_ONLY: string;
+/**
+ * `tool-fs` 写口的调用级闸门（**全局**装在插件 ctx 上，一次安装管住本 preset 所有 agent）。
+ *
+ * 为什么装全局而不是像 `ocr` 那样按 agent 装：`agent/created` 的落层时机随宿主形状漂移
+ * （桌面端 restrict 不写进链路层，见 `docs/dev/bash-gate.md` 的实测记录），而 guard 按
+ * `exec.agent` 取链路、与实例绑哪层无关——这正是那份文档里声明的备选方向，先在写口上落地。
+ *
+ * ⛔ 全局 guard 会吃到本进程**所有**调用，所以判据必须 fail-**open**：registry 读不到、
+ * `composedPreset` 抛错、拿不到 agent 的形状一律放行——宁可少拦一层（`ROOT_AGENT_DENIED_TOOLS`
+ * 还在视图层兜着），也绝不能把别的 preset（开发会话的 read / write / edit）吃掉。
+ * 拒绝只发生在"能确证调用方属于本 preset"时。
+ */
+export declare function fsWriteGuardReasonFor(ctx: PolicyContext): (execution: GuardedExecution) => string | undefined;
+/**
+ * 装 {@link fsWriteGuardReasonFor}。guard 不可用或安装异常都不外抛（调用方是装配路径）；
+ * disposer 由 `ctx.effect` 持有，随本 fiber 释放。
+ */
+export declare function registerFsWriteGuard(ctx: PolicyContext): void;
 /**
  * 注册 `agent/created` 监听。监听器只做一件事：对本 preset 的根 Agent 收敛一次。
  *

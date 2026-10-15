@@ -120,33 +120,40 @@
   coding 工具；插件注册 `read_profile`（allow 里的名字必须先真实存在）；更新 `AGENTS.md` 与 `docs/dev/data-roles.md`
   的角色边界与 `test/persona.test.mjs` 的预留期断言。
 
-## 5.1 bash：为什么只给 data_junior，以及它到底能做什么
+## 5.1 shell 与文件口：开 read、保留 bash、不给写（2026-10-15 用户决策）
 
 - **动机**：`query_dataset` 只有 `count/min/max/avg/sum`，变化量 / 增幅 / CAGR / 比值这类派生
   指标没有宿主工具；模型只能拿 `time_facts.first/last` 心算——那正是 §1.3 那次 41,961 字符
   时间戳心算的同型浪费。所以给 data_junior 一个纯计算兜底。**不是**给它开取数通道。
-- **为什么主 Agent 不给**：主 Agent 今天没有任何通用执行 / 文件 / 网络工具（Web 平面把 host 层
-  的 `tool-bash` / `tool-fs` / `tool-web` 都 `disabled` 了，本 preset 也不挂回来）。这是一条
-  结构性事实，不是 persona 约定：主 Agent 唯一对用户说话、又会读到子 Agent 回传（含网页材料），
-  一旦拥有 bash 就等于拿到"注入 → 执行 → 读凭据 → 出网"的完整链路。收敛靠
-  `ROOT_AGENT_DENIED_TOOLS`（含 `bash` / `pwsh`）。
+- **2026-10-15 起主 Agent 也持有 shell 与 `read`**（用户决策「开 read、同时保留 bash」，推翻
+  2026-09-30 的"主 Agent 不给 shell"）：主 Agent 需要 `read` 读 skill 分册与工作区文件
+  （此前只能 `bash cat`，能力等价但绕远），shell 保留纯计算兜底。`ROOT_AGENT_DENIED_TOOLS`
+  里的 `bash` / `pwsh` 随之移出，名单改为出图三件套 + 十三个出网工具 + `write` / `edit`。
+- **文件写口不开**：`write` / `edit` 被两层拦住——根侧逐名收敛（主 Agent 视图层）+ 全局
+  `tools.guard()`（`registerFsWriteGuard`，调用期按 `composedPreset` 认领，fail-open，细节见
+  `docs/dev/bash-gate.md` §1.6）。理由：主 Agent 唯一对用户说话、又会读到子 Agent 回传（含网页
+  材料），写文件等于给"注入 → 落盘 → 被别的环节读回"开口；业务落盘本来就有正路
+  （`store.writeContext` 等工具实现），模型手里的写口没有正当用途。通用 `subagent` 行的
+  `toolFilter.deny` 同步含 `read` / `write` / `edit`（通用 child 不得读 raw.json，原始 rows
+  永不出工具层）。
 - **平台成对挂载**：Windows 上 host 层挂的是 `pwsh-sandbox`，没有 `bash-sandbox`；只挂
   `tool-bash` 会让名为 bash 的工具实际执行 PowerShell。所以两行互补 `disabled`，allow / deny
   里的名字用 `!!js` 三元表达式按平台选。`tools.restrict()` 对未注册名字报错，所以表达式与行必须
   同进同退（回归：`test/persona.test.mjs`「shell 行：平台成对挂载……」）。
 - **不给后台执行**：`enableRunInBackground: false`。本 preset 不挂 `tool-jobs`，开着后台只会让
   模型拿到一个永远读不回来的 jobId（`job_output` / `job_kill` 不在任何 allow 里）。
-- **闸门只有两层，且都不是安全边界**（`src/agents/bash-guard.ts`）：
-  ① 只对**被委派**子会话开放（镜像 `tool-exec.ts` 的 `delegatedSession`，执行层兜住可见性被改坏）；
-  ② 拦掉 `sandbox_permissions`——委派会话的审批策略由框架固定为 `never`，升级必然失败，而且模型
-  会收到「the user rejected…」这种把系统拒绝说成用户拒绝的文案。
-  **刻意不解析 `command`**：本仓实测沙箱只拦写、不拦读（`~/.dsh/.credentials.yaml` 与
-  `sessions/**` 整机可读）、不拦网络（`curl` 直连 200），而正则挡不住 `node -e` / `python3 -c`
-  ——那正是引入 bash 的目的。禁区与出网纪律是 data_junior persona 的 `# BASH DISCIPLINE` 软约束。
-- **写边界收不窄**：`store.writeContext()` 用**调用方 session** 的 policy 且要求
+- **shell 闸门只剩一层，且不是安全边界**（`src/agents/bash-guard.ts`）：拦掉
+  `sandbox_permissions` / `justification`——被委派会话的审批策略由框架固定为 `never`，升级必然
+  失败，而且模型会收到「the user rejected…」这种把系统拒绝说成用户拒绝的文案；被委派或身份
+  不可考的调用方 fail closed。主 Agent 的升级走正常 ask 审批（2026-10-15 前的"只对被委派子会话
+  开放"一层随决策移除，断言迁移见 `test/bash-guard.test.mjs`）。**刻意不解析 `command`**：本仓
+  实测沙箱只拦写、不拦读（`~/.dsh/.credentials.yaml` 与 `sessions/**` 整机可读）、不拦网络
+  （`curl` 直连 200），而正则挡不住 `node -e` / `python3 -c`——那正是引入 bash 的目的。禁区与
+  出网纪律是 data_junior persona 的 `# BASH DISCIPLINE` 软约束。
+- **写边界收不窄到会话**：`store.writeContext()` 用**调用方 session** 的 policy 且要求
   `mode ∈ {workspace-write, danger-full-access}`，而 `describe_dataset` 会用 data_junior 的会话写
   `profile.json`；把它的会话钉成 `read-only` 会直接打断 describe_dataset。bash 与 Dataset 管线
-  共用同一把尺子（session policy）。
+  共用同一把尺子（session policy），所以模型侧写口只能靠上一条的调用期闸门收。
 - **要真正收紧**只有两条路：换掉 `ctx.shell`（容器 / 微 VM / 远端执行器），或给 dsh 进程做出网
   限制。两者都不是 `ctx.sandbox` 能提供的。
 

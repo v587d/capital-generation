@@ -69,8 +69,12 @@ export function rootOcrGuardReason(exec: GuardedExecution | undefined): string |
  * `tool-pwsh`，靠 `process.platform === 'win32'` 互斥 `disabled`），所以名字由平台决定。
  *
  * ⛔ 但**闸门必须认全集**：只认本平台那一个，另一端就是静默放行——同一个能力两个入口，
- * 本地测试只覆盖了接好的那个（AGENTS.md §9.7 的第三种形状）。根侧 deny 与
- * `bash-guard.ts` 的子会话 guard 都从这里取名字，不再各写一份。
+ * 本地测试只覆盖了接好的那个（AGENTS.md §9.7 的第三种形状）。`bash-guard.ts` 的升级闸门
+ * 从这里取名字，不再各写一份。
+ *
+ * 2026-10-15 用户决策「开 read、同时保留 bash」：shell **不再**进 {@link ROOT_AGENT_DENIED_TOOLS}
+ * ——主 Agent 保留 bash / pwsh（读 skill 分册、纯计算）；子会话侧仍由委派行的 `toolFilter`
+ * 与 `bash-guard.ts` 的升级闸门收敛。
  */
 export const SHELL_TOOL_NAMES = ['bash', 'pwsh'] as const
 
@@ -97,10 +101,19 @@ export const ROOT_AGENT_DENIED_TOOLS = [
    */
   ...RETRIEVAL_DENIED_TOOLS,
   /**
-   * bash 只给 data_junior（它是数据侧的"纯计算兜底"）。主 Agent 不需要它，而且一旦拥有
-   * 就等于拿到通用执行 + 整机读 + 出网能力，会绕过数据调度与出图两道结构 gate。
+   * 文件写口收敛：preset 挂 `tool-fs` 一颗（read / write / edit），主 Agent 只留 `read`
+   * （2026-10-15 用户决策「开 read、同时保留 bash」）。`write` / `edit` 这里逐名 deny 是
+   * **视图层**（restrict 落对层的形状里主 Agent 根本看不见写口）；由于 restrict 落层依赖
+   * 宿主形状（桌面端不写进链路层，见 `docs/dev/bash-gate.md`），调用层还有
+   * {@link fsWriteGuardReasonFor} 兜底——两层拦同一件事：业务落盘只走工具实现
+   * （`store.writeContext` 等），模型不直接写文件。
+   *
+   * `read_image` 刻意不点名：它只读、且条件注册（依赖宿主 `attachments` 服务），照
+   * `web_search` / `web_fetch` 的教训不该在名单里养 `failed` 记录。`tool-fs-search`
+   * （glob / grep）本轮不挂：需求只是"读得动"，发现面等真需求再开。
    */
-  ...SHELL_TOOL_NAMES,
+  'write',
+  'edit',
 ] as const
 
 /** 本 preset 的 id（`composedPreset` 的返回值）。 */
@@ -157,23 +170,35 @@ export function agentSessionId(agent: AgentLike | undefined): string | undefined
   return typeof id === 'string' && id.length > 0 ? id : undefined
 }
 
-/** 只有本 preset 的 agent 才收敛：别的 preset 的 agent 不该被我们碰。 */
-export function isCapitalAgent(ctx: PolicyContext, agent: AgentLike | undefined): boolean {
+/** registry 认领结果：字符串 = `composedPreset` 的原样返回值，`'no-registry'` = registry 或方法不在。 */
+const NO_REGISTRY = 'no-registry'
+
+/**
+ * 读 `agentPresets` registry 对某个 agent 的认领结果——**registry 读取只此一份**
+ * （两个判据的差异只在"读不到时认领还是放行"，见各自调用点）。
+ * `composedPreset` 抛错按"不认领"返回 undefined（不能吞进 `'no-registry'`：那会改变缺省方向）。
+ */
+function presetClaimOf(ctx: PolicyContext, agent: AgentLike | undefined): string | undefined | typeof NO_REGISTRY {
   let presets: { composedPreset?: (agentCtx: unknown) => string | undefined } | undefined
   try {
     presets = ctx.get?.('agentPresets') as typeof presets
   } catch {
-    presets = undefined
+    return NO_REGISTRY
   }
-  if (presets === undefined || typeof presets.composedPreset !== 'function') {
-    // 读不到 registry 时保守放行：逐名 restrict 本身会拒绝未知工具名，不会误伤别的 preset。
-    return true
-  }
+  if (presets === undefined || typeof presets.composedPreset !== 'function') return NO_REGISTRY
   try {
-    return presets.composedPreset(agent?.ctx) === CAPITAL_PRESET_ID
+    return presets.composedPreset(agent?.ctx)
   } catch {
-    return false
+    return undefined
   }
+}
+
+/** 只有本 preset 的 agent 才收敛：别的 preset 的 agent 不该被我们碰。 */
+export function isCapitalAgent(ctx: PolicyContext, agent: AgentLike | undefined): boolean {
+  const claim = presetClaimOf(ctx, agent)
+  // 读不到 registry 时保守**认领**：逐名 restrict 本身会拒绝未知工具名，不会误伤别的 preset。
+  if (claim === NO_REGISTRY) return true
+  return claim === CAPITAL_PRESET_ID
 }
 
 /**
@@ -279,6 +304,68 @@ export function installRootOcrGuard(agent: AgentLike | undefined): (() => void) 
   } catch {
     return undefined
   }
+}
+
+/** `tool-fs` 的写口工具名（唯一一份）：`read` / `read_image` 是只读口，不在名单。 */
+export const FS_WRITE_TOOL_NAMES = ['write', 'edit'] as const
+
+const fsWriteNames: ReadonlySet<string> = new Set(FS_WRITE_TOOL_NAMES)
+
+/** fs 写口拒绝文案：指回正确路径（读用 read，落盘走工具回传），并留可恢复的余地。 */
+export const FS_WRITE_READ_ONLY
+  = 'write / edit 不开放（主 Agent 与子会话都不直接写文件）：读文件用 read；'
+    + '数据与产物走工具回传（DatasetRef / chart_ref / send_message），需要落盘的由工具实现完成。'
+    + '若你判断确需写文件，用 send_message 把 data_gap 与已有证据发回主 Agent 协调。'
+
+/**
+ * `tool-fs` 写口的调用级闸门（**全局**装在插件 ctx 上，一次安装管住本 preset 所有 agent）。
+ *
+ * 为什么装全局而不是像 `ocr` 那样按 agent 装：`agent/created` 的落层时机随宿主形状漂移
+ * （桌面端 restrict 不写进链路层，见 `docs/dev/bash-gate.md` 的实测记录），而 guard 按
+ * `exec.agent` 取链路、与实例绑哪层无关——这正是那份文档里声明的备选方向，先在写口上落地。
+ *
+ * ⛔ 全局 guard 会吃到本进程**所有**调用，所以判据必须 fail-**open**：registry 读不到、
+ * `composedPreset` 抛错、拿不到 agent 的形状一律放行——宁可少拦一层（`ROOT_AGENT_DENIED_TOOLS`
+ * 还在视图层兜着），也绝不能把别的 preset（开发会话的 read / write / edit）吃掉。
+ * 拒绝只发生在"能确证调用方属于本 preset"时。
+ */
+export function fsWriteGuardReasonFor(ctx: PolicyContext): (execution: GuardedExecution) => string | undefined {
+  return (execution) => {
+    const name = execution?.name
+    if (typeof name !== 'string' || !fsWriteNames.has(name)) return undefined
+    if (presetClaimOf(ctx, execution.agent) !== CAPITAL_PRESET_ID) return undefined
+    return FS_WRITE_READ_ONLY
+  }
+}
+
+/**
+ * 装 {@link fsWriteGuardReasonFor}。guard 不可用或安装异常都不外抛（调用方是装配路径）；
+ * disposer 由 `ctx.effect` 持有，随本 fiber 释放。
+ */
+export function registerFsWriteGuard(ctx: PolicyContext): void {
+  const install = (): (() => void) | undefined => {
+    let tools: RestrictedToolRuntime | undefined
+    try {
+      const direct = ctx.tools
+      const viaGet = typeof ctx.get === 'function' ? ctx.get('tools') : undefined
+      const candidate = direct !== undefined ? direct : viaGet
+      tools = candidate as RestrictedToolRuntime | undefined
+    } catch {
+      return undefined
+    }
+    if (tools === undefined || typeof tools.guard !== 'function') return undefined
+    try {
+      const dispose = tools.guard(fsWriteGuardReasonFor(ctx))
+      return typeof dispose === 'function' ? (dispose as () => void) : undefined
+    } catch {
+      return undefined
+    }
+  }
+  if (typeof ctx.effect === 'function') {
+    ctx.effect(() => install() ?? (() => {}), 'capital-generation.fs-write-guard()')
+    return
+  }
+  install()
 }
 
 /**

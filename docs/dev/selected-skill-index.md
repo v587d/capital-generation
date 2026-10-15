@@ -105,8 +105,11 @@ provider（`src/agents/selected-skills-provider.ts`）在 `list()` 里多做一�
 分层两批做尽 32 颗（2026-10-14 七颗 + 2026-10-15 二十五颗），记名基线 `OVERSIZED_BASELINE` 已清空。
 闸门「外部精选正文的体积棘轮」（`test/persona.test.mjs`）因此从"别再加新的超限条目"**升级成硬闸门**：
 任何 catalog 条目正文超过可见上限就红。处置走**可见性分层**——把正文切成「入口册 + 分册」，
-分册由模型用 `read` 按需打开（实测：`read` 在宿主工具层挂载、根角色未被 deny，且工作区外的绝对路径可读；
-宿主回执本来就教它"Resolve relative paths against the base directory, load referenced resources only as needed"）。
+分册由模型用 `read` 按需打开。⚠️ 通道以**产品挂载**为准，别拿宿主实测当产品承诺：`read` 此前只在宿主
+工具层挂着、本 preset 没挂，真机上主 Agent 只能 `bash cat` 开分册（用户 2026-10-15 观察到的正是这个）；
+同日决策后 preset 挂上 `tool-fs`，`read` 才是产品里真实存在的通道（宿主回执本来就教它 "Resolve relative
+paths against the base directory, load referenced resources only as needed"；"工作区外的绝对路径可读"
+是宿主层实测，属沙箱"不拦读"那一族，见 `bash-gate.md` §1.6）。
 
 ⛔ **分层的上限不能按文件字符数定**。`read` 的回执是带行号的窗口（`formatReadOutput`：每行前缀
 `N: `，外加 `<path>` / `<type>` / `<content>` 与结尾"total N lines"），实测 7,302 字符 / 95 行的正文

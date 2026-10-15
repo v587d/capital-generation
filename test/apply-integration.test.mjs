@@ -15,6 +15,7 @@ import { collectUndeclaredRequired } from './output-contract.mjs'
 /** 最小 ctx：只实现 apply() 真正触达的服务与生命周期方法。 */
 function fakeCtx({ credentials, settings } = {}) {
   const tools = []
+  const pluginGuards = []
   const services = new Map()
   const effectResults = []
   const listeners = []
@@ -22,7 +23,11 @@ function fakeCtx({ credentials, settings } = {}) {
   const warnings = []
   const ctx = {
     get: (name) => {
-      if (name === 'tools') return { register: (definition) => { tools.push(definition); return () => {} } }
+      if (name === 'tools') return {
+        register: (definition) => { tools.push(definition); return () => {} },
+        // 插件 ctx 上的 guard 注册（fs 写口闸门是**全局**装的，不走 agent/created）
+        guard: (guard) => { pluginGuards.push(guard); return () => {} },
+      }
       if (name === 'credentials') return credentials
       // settings 允许晚到（services.set 之后才可见）：宿主 boot 里 fibers 并行 apply，
       // 服务注册顺序不保证，读取面必须经得起"装配期没有、调用期才有"。
@@ -35,7 +40,7 @@ function fakeCtx({ credentials, settings } = {}) {
     logger: { info() {}, warn(message) { warnings.push(String(message)) }, error() {}, debug() {} },
     systemPrompt: { section: (section) => { sections.push(section); return () => {} } },
   }
-  return { ctx, tools, services, effectResults, listeners, sections, warnings }
+  return { ctx, tools, pluginGuards, services, effectResults, listeners, sections, warnings }
 }
 
 const toolNamed = (tools, name) => tools.find((definition) => definition.name === name)
@@ -451,11 +456,11 @@ test('apply()：注册根 Agent 工具收敛监听（只拿掉主 Agent 的专�
     await Promise.all(effectResults)
 
     const created = listeners.filter((entry) => entry.event === 'agent/created')
-    // 三个监听是三件事，不能合并：① 根 Agent 工具收敛（render_chart 等）；
-    // ② data_junior 的 bash 闸门（身份 + 必然失败的升级）；③ selected skills 的 provider
+    // 三个监听是三件事，不能合并：① 根 Agent 工具收敛（出图三件套 / 出网 / 写口）；
+    // ② shell 闸门（只拦被委派会话必然失败的沙箱升级）；③ selected skills 的 provider
     // 注册（2026-10-13 起不再按"有没有 settings 服务"走快路径跳过——那正是静默锁死的根子）。
     // 顺序即 apply() 里的注册顺序，但这里不去依赖它——逐个调用、按行为断言。
-    assert.equal(created.length, 3, 'apply 必须注册三个 agent/created 监听：根收敛 + bash 闸门 + selected skills')
+    assert.equal(created.length, 3, 'apply 必须注册三个 agent/created 监听：根收敛 + shell 闸门 + selected skills')
     const notifyCreated = (agent) => { for (const entry of created) entry.listener({ agent }) }
 
     const restricted = []
@@ -471,25 +476,56 @@ test('apply()：注册根 Agent 工具收敛监听（只拿掉主 Agent 的专�
     notifyCreated({ session: { header: { cwd: '/w', parentSession: 'main-1' } }, ctx: agentCtx })
     assert.equal(restricted.length, ROOT_AGENT_DENIED_TOOLS.length, '根 Agent 逐名收敛；子 Agent 一次都不碰')
     assert.deepEqual(restricted.map((filter) => filter.deny[0]).sort(), [...ROOT_AGENT_DENIED_TOOLS].sort())
-    // 3 = bash 闸门每 agent 一次（根 + 子）+ `ocr` 的 `url` 形态闸门**只装根**一次。
+    // 3 = shell 闸门每 agent 一次（根 + 子）+ `ocr` 的 `url` 形态闸门**只装根**一次
+    //（fs 写口闸门不在此列：它装在插件 ctx 上、全局一次，见下面的专属用例）。
     // 按行为分流而不是按顺序取下标：注册顺序不该被测试钉死（§8.5），但"谁装了什么闸门"必须可指认。
     const rootBashCall = () => ({ name: 'bash', agent: { session: { header: { cwd: '/w' } } }, arguments: { command: 'date' } })
     const rootOcrCall = (arguments_) => ({ name: 'ocr', agent: { session: { header: { cwd: '/w' } } }, arguments: arguments_ })
-    const bashGuards = guarded.filter((guard) => /只对被委派/.test(String(guard(rootBashCall()))))
+    const childBashEscalation = () => ({ name: 'bash', agent: { session: { header: { cwd: '/w', parentSession: 'main-1' } } }, arguments: { command: 'date', sandbox_permissions: 'x' } })
+    const bashGuards = guarded.filter((guard) => /沙箱升级/.test(String(guard(childBashEscalation()))))
     const ocrGuards = guarded.filter((guard) => guard(rootOcrCall({ url: 'https://pdf.dfcfw.com/H3_x_1.pdf' })) !== undefined)
-    assert.equal(bashGuards.length, 2, '每个 agent 各装一次 bash 闸门（同一实现，按调用身份判定）')
+    assert.equal(bashGuards.length, 2, '每个 agent 各装一次 shell 闸门（同一实现，按调用身份判定）')
     assert.equal(bashGuards[0], bashGuards[1], '闸门必须是同一个函数：判定只有一份实现')
     assert.equal(ocrGuards.length, 1, '⛔ `ocr` 的 url 闸门只装根 Agent：主 Agent 不自己抓外链，但本地文档解析留给它')
     assert.equal(ocrGuards[0](rootOcrCall({ file: 'refs/茅台研报.pdf' })), undefined, 'file 形态放行：那是主 Agent 的正当入口')
     assert.equal(ocrGuards[0](rootOcrCall({ doc_id: 'ocr_000000000000', pages: '1' })), undefined, '读盘形态放行')
     assert.equal(ocrGuards.every((guard) => !bashGuards.includes(guard)), true, '两份闸门互不冒充')
-    // 闸门本身按调用身份判定：根会话的 bash 调用被拒，被委派子会话的算术命令放行。
-    assert.match(String(bashGuards[0](rootBashCall())), /只对被委派/)
+    // 闸门按调用身份判定（2026-10-15 决策「开 read、同时保留 bash」）：主 Agent 的 shell 放行，
+    // 被委派会话的沙箱升级被拒（迁移旧断言"根会话的 bash 调用被拒"）。
+    assert.equal(bashGuards[0](rootBashCall()), undefined, '主 Agent 的 shell 调用放行')
+    assert.match(String(bashGuards[0](childBashEscalation())), /不会去问用户/)
     assert.equal(bashGuards[0]({ name: 'bash', agent: { session: { header: { cwd: '/w', parentSession: 'main-1' } } }, arguments: { command: 'node -e 1' } }), undefined)
 
     // 收敛失败（工具名未知 / ctx 缺工具）不得抛出：调用方是 agent 创建路径。
     assert.doesNotThrow(() => notifyCreated({ agent: { session: { header: {} }, ctx: { tools: { restrict: () => { throw new Error('unknown tool') } } } } }))
     assert.doesNotThrow(() => notifyCreated({ agent: { session: { header: {} }, ctx: {} } }))
+  } finally {
+    if (SAVED_KEY === undefined) delete process.env.FUYAO_API_KEY
+    else process.env.FUYAO_API_KEY = SAVED_KEY
+  }
+})
+
+test('apply()：fs 写口闸门装在插件 ctx（全局一次），只拦本 preset 的 write / edit', async () => {
+  // 这是 docs/dev/bash-gate.md §1.6 里声明的备选方向在写口上的落地：guard 按调用身份判定，
+  // 与实例绑哪层无关，所以全局装一次就够。⛔ 反面钉子：fail-open 必须真的放行别的 preset——
+  // 全局 guard 判错一次，会把同一进程里开发会话的正当写口一起吃掉。
+  process.env.FUYAO_API_KEY = 'smoke-key'
+  try {
+    const { ctx, pluginGuards, effectResults } = fakeCtx()
+    ctx.provide('agentPresets', { composedPreset: (agentCtx) => agentCtx?.preset })
+    apply(ctx, { customPersona: '', retriever: { baseURL: '', credentialRef: '', windDocs: { endpoint: '', credentialRef: '', timeoutMs: 0 } } })
+    await Promise.all(effectResults)
+
+    assert.equal(pluginGuards.length, 1, '全局 fs 写口 guard 只装一次，不走 agent/created')
+    const guard = pluginGuards[0]
+    const capital = { ctx: { preset: 'capital-generation' } }
+    assert.notEqual(guard({ name: 'write', agent: capital, arguments: { file_path: '/w/a.md' } }), undefined, '本 preset 的 write 被拦')
+    assert.notEqual(guard({ name: 'edit', agent: capital }), undefined, '本 preset 的 edit 被拦')
+    assert.equal(guard({ name: 'read', agent: capital }), undefined, 'read 放行（2026-10-15 决策新开的口）')
+    assert.equal(guard({ name: 'write', agent: { ctx: { preset: 'standard' } } }), undefined, '别的 preset 照常写（fail-open）')
+    assert.equal(guard({ name: 'write', agent: { ctx: {} } }), undefined, '认领不出 preset 就放行')
+    // 没有 agentPresets 服务时也是 fail-open（registry 不可读不得殃及全进程）
+    assert.doesNotThrow(() => fakeCtx().pluginGuards)
   } finally {
     if (SAVED_KEY === undefined) delete process.env.FUYAO_API_KEY
     else process.env.FUYAO_API_KEY = SAVED_KEY

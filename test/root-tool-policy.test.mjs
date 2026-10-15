@@ -2,13 +2,18 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   CAPITAL_PRESET_ID,
+  FS_WRITE_READ_ONLY,
+  FS_WRITE_TOOL_NAMES,
   OCR_ROOT_URL_DENIED,
   OCR_TOOL_NAME,
   RETRIEVAL_DENIED_TOOLS,
   ROOT_AGENT_DENIED_TOOLS,
+  SHELL_TOOL_NAMES,
+  fsWriteGuardReasonFor,
   installRootOcrGuard,
   isCapitalAgent,
   isRootAgent,
+  registerFsWriteGuard,
   registerRootToolPolicy,
   resetRootPolicyProbes,
   restrictRootAgentTools,
@@ -30,12 +35,19 @@ import {
 const childAgent = (tools) => ({ session: { header: { cwd: '/w', parentSession: 'main-1' } }, ctx: { tools } })
 const rootAgent = (tools) => ({ session: { header: { cwd: '/w' } }, ctx: { tools } })
 
-test('ROOT_AGENT_DENIED_TOOLS：bash/pwsh 必须点名（主 Agent 不得继承 shell）', () => {
-  // preset 的 shell 行注册在 standing 层，主 Agent 会直接继承——收敛只能靠这份名单。
-  // 按平台选名，所以两个名字都点名（未注册的那个由逐名 restrict 的 try/catch 跳过）。
-  for (const name of ['bash', 'pwsh']) {
-    assert.ok(ROOT_AGENT_DENIED_TOOLS.includes(name), `主 Agent 不得看到 ${name}：那是通用执行 + 整机读 + 出网能力`)
+test('ROOT_AGENT_DENIED_TOOLS：2026-10-15 用户决策「开 read、同时保留 bash」——shell 不点名，写口点名', () => {
+  // 旧钉子（2026-09-30 起）是"bash / pwsh 必须点名（主 Agent 不得继承 shell）"。
+  // 2026-10-15 用户决策反过来：主 Agent 保留 shell（读 skill 分册、纯计算），文件口只开 read。
+  // 断言跟着规则迁移（不是删除）：shell 名**不许**再进名单，否则就是把决策改回去了。
+  for (const name of SHELL_TOOL_NAMES) {
+    assert.ok(!ROOT_AGENT_DENIED_TOOLS.includes(name), `主 Agent 保留 ${name}（2026-10-15 决策）：名单里不许再点名`)
   }
+  for (const name of ['write', 'edit']) {
+    assert.ok(ROOT_AGENT_DENIED_TOOLS.includes(name), `主 Agent 不得看到 ${name}：业务落盘只走工具实现（store.writeContext 等）`)
+  }
+  assert.ok(!ROOT_AGENT_DENIED_TOOLS.includes('read'), 'read 是 2026-10-15 决策新开的正当能力，不得进名单')
+  // read_image 刻意不点名：条件注册的名字进名单只会养 failed 记录（web_search / web_fetch 教训），且它只读。
+  assert.ok(!ROOT_AGENT_DENIED_TOOLS.includes('read_image'), 'read_image 不点名：条件注册 + 只读')
 })
 
 test('RETRIEVAL_DENIED_TOOLS：十三个出网工具全部从根 Agent 拿掉（出网只有一个入口）', () => {
@@ -272,4 +284,51 @@ test('isCapitalAgent：按 composedPreset 筛本 preset', () => {
 
 test('registerRootToolPolicy：ctx 没有 on 时安静跳过（不改装配结果）', () => {
   assert.doesNotThrow(() => registerRootToolPolicy({}))
+})
+
+test('fsWriteGuardReasonFor：write / edit 只对本 preset 拒；读口与别的 preset 一律放行', () => {
+  const ctx = { get: () => ({ composedPreset: (agentCtx) => agentCtx?.preset }) }
+  const guard = fsWriteGuardReasonFor(ctx)
+  const capital = { ctx: { preset: CAPITAL_PRESET_ID } }
+  assert.deepEqual([...FS_WRITE_TOOL_NAMES], ['write', 'edit'], '写口名单就是这两个名字；改动它要有明确设计决策')
+  for (const name of FS_WRITE_TOOL_NAMES) {
+    assert.equal(guard({ name, agent: capital, arguments: { file_path: '/w/a.md' } }), FS_WRITE_READ_ONLY)
+    // ⛔ 全局 guard 绝不能吃掉别的 preset 的正当写口：那是开发会话每天在用的能力
+    assert.equal(guard({ name, agent: { ctx: { preset: 'standard' } } }), undefined)
+    assert.equal(guard({ name, agent: { ctx: {} } }), undefined, 'composedPreset 返回 undefined 时不认领、放行')
+  }
+  for (const name of ['read', 'read_image', 'bash', 'describe_dataset', undefined]) {
+    assert.equal(guard({ name, agent: capital }), undefined, `${name} 不是写口，闸门不得插手`)
+  }
+  // fail-open 三形状：registry 读不到 / composedPreset 抛错 / 拿不到 agent——一律放行
+  //（fail closed 会把同一进程里所有会话的 write / edit 一起吃掉，这是全局 guard 的红线）
+  assert.equal(fsWriteGuardReasonFor({ get: () => undefined })({ name: 'write', agent: capital }), undefined)
+  assert.equal(fsWriteGuardReasonFor({ get: () => ({ composedPreset: () => { throw new Error('boom') } }) })({ name: 'write', agent: capital }), undefined)
+  assert.equal(guard({ name: 'write' }), undefined)
+  assert.equal(guard(undefined), undefined)
+  // 文案必须指回正确路径（读用 read、落盘走工具回传），并把两个写口都点名
+  assert.match(FS_WRITE_READ_ONLY, /read/)
+  assert.match(FS_WRITE_READ_ONLY, /data_gap/)
+  assert.match(FS_WRITE_READ_ONLY, /write/)
+  assert.match(FS_WRITE_READ_ONLY, /edit/)
+})
+
+test('registerFsWriteGuard：全局装一次（不按 agent 装），guard 不可用 / 抛错都不外抛', () => {
+  const guards = []
+  const disposed = []
+  const tools = { guard: (guard) => { guards.push(guard); return () => { disposed.push('guard') } } }
+  const ctx = {
+    get: (name) => (name === 'agentPresets' ? { composedPreset: (agentCtx) => agentCtx?.preset } : undefined),
+    tools,
+    effect: (callback) => { const dispose = callback(); dispose(); return () => {} },
+  }
+  registerFsWriteGuard(ctx)
+  assert.equal(guards.length, 1, '全局 guard 只装一次：它按调用身份判定，不需要按 agent 装')
+  assert.equal(guards[0]({ name: 'write', agent: { ctx: { preset: CAPITAL_PRESET_ID } } }), FS_WRITE_READ_ONLY,
+    '装的必须是 fs 写口闸门（同一份判定实现）')
+  assert.deepEqual(disposed, ['guard'], 'disposer 由 ctx.effect 持有并随 fiber 释放')
+  // guard 不可用 / 拿不到 tools / guard 抛错：都不外抛（调用方是装配路径）
+  assert.doesNotThrow(() => registerFsWriteGuard({}))
+  assert.doesNotThrow(() => registerFsWriteGuard({ get: () => undefined }))
+  assert.doesNotThrow(() => registerFsWriteGuard({ tools: { guard: () => { throw new Error('boom') } } }))
 })

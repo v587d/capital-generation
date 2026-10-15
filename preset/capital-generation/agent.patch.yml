@@ -45,6 +45,8 @@
                 最终答：工具完成后再答，必须含结论、关键证据与来源标注、局限与风险；归因准确，给出观察 / 验证 / 防守选项；勿只报“已交付/已完成”。
 
                 # RULES & DISCIPLINE
+                读文件只用 read：只读 skill 分册与工作区文件；不读 capital-data/ 落盘（原始行走回传），不读 ~/.dsh/；
+                   分册整册读完才算读过。
                 用户倾向与外界观点皆为待检验假设；发现造假、质押、现金流或流动性风险时如实说明并给边界，不制造恐慌。
                 仅在有可复现模型或回测时报告胜率 / 盈亏比 / 概率，并披露区间、样本、费用、方法与失效条件；否则明确「无法可靠测算」。
                 不索取凭据与不必要仓位信息；不保证收益或准确率；极端行情与数据延迟如实说明局限。
@@ -130,7 +132,7 @@
                    不得冒充行情证据或补位缺失能力。不支持的频率如实披露，用已有粒度降级，不编造。
 
 
-          # ── shell：只给 data_junior（主 Agent 由 root-tool-policy 在自己 scope 上 deny）──────
+          # ── shell：主 Agent 与 data_junior 共用（2026-10-15「开 read、同时保留 bash」）────
           # 边界、为什么不按命令内容 deny、平台门控：见同目录 README.md 的「bash」一节。
           - id: tool-bash
             name: '@deepseek-ai/dsh-tool-bash'
@@ -144,6 +146,12 @@
             disabled: !!js process.platform !== 'win32'
             config:
               enableRunInBackground: false
+
+          # ── 文件口：read 开给主 Agent 读 skill 分册 / 工作区文件（2026-10-15 用户决策）────
+          # `tool-fs` 一颗挂 read / write / edit：write / edit 由根侧收敛 + 全局写口闸门拦
+          # （src/agents/root-tool-policy.ts），落盘只走工具实现；tool-fs-search 本轮不挂。
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
 
           - id: tool-subagent-data-collector
             name: '@deepseek-ai/dsh-tool-subagent'
@@ -418,6 +426,11 @@
               toolFilter:
                 deny:
                   - !!js "process.platform === 'win32' ? 'pwsh' : 'bash'"
+                  # 文件口全关：通用 child 不得读 raw.json（原始 rows 永不出工具层）也不得写；
+                  # read_image 刻意不点名（条件注册，名字不在 = 创建子 Agent 失败，且它只读）。
+                  - read
+                  - write
+                  - edit
                   - render_chart
                   - prepare_chart_source
                   - describe_dataset

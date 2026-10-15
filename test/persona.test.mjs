@@ -143,6 +143,9 @@ const PRESET_TOOLS = [
   // shell 工具由 preset 自己挂（web 平面把 host 层的 tool-bash/tool-pwsh 都 disabled 了）；
   // 平台二选一，两个名字都是真实注册的全局名。
   'bash', 'pwsh',
+  // 文件口（2026-10-15 用户决策「开 read、同时保留 bash」）：tool-fs 一颗挂 read / write / edit，
+  // 三个名字都无条件注册；read_image 条件注册（依赖宿主 attachments 服务），不进这份清单。
+  'read', 'write', 'edit',
 ]
 const KNOWN_TOOLS = new Set([...PLUGIN_TOOLS, ...PRESET_TOOLS])
 
@@ -219,8 +222,12 @@ test('preset 结构：persona 行为声明式行，插件不再占用 deployment
   // 2026-09-26 迁到 0.1.7 的声明式预设行（agent.patch.yml）：闸门量的是**正文**，所以先去缩进
   // 再数——包装那一层 10 空格 × 500 行是格式成本，不是协议正文，让它计入预算等于凭空吃掉
   // 5,000 字符的额度，下次真要放宽闸门时谁也说不清是内容涨了还是缩进涨了。
+  // 2026-10-15 放宽到 18,200：开出 `read`（tool-fs 行 + 视图层只 deny 写口）之后必须配一条**每轮
+  // 生效**的读取边界——原始行落盘目录与宿主凭据不许直读。这条拦不住工具层（沙箱只拦写不拦读，
+  // bash 的 cat 也绕得过任何按参数的读闸门，见 docs/dev/bash-gate.md §1.6），所以它只能住在这里；
+  // 实测正文 18,008。防回涨仍靠下面两条：主 persona < 5000、子 persona 骨架上限。
   const compositionChars = dedent(COMPOSITION_TEXT).length
-  assert.ok(compositionChars < 18000, `agent.patch.yml 正文过长（${compositionChars} 字符 / 目标 <18000）：参考材料进 skills/，设计理由进 preset README.md`)
+  assert.ok(compositionChars < 18200, `agent.patch.yml 正文过长（${compositionChars} 字符 / 目标 <18200）：参考材料进 skills/，设计理由进 preset README.md`)
   // 子 persona 只留硬规则骨架：协议正文在 skills/（子 Agent 通过 skill 按需加载），
   // 与工具 description/schema 重复的事实不再抄一遍。
   // data_junior 的上限随"可视化 gate + one-shot barrier"两条新职责上调（实测 2168），
@@ -786,6 +793,8 @@ test('通用 subagent 行：必须 deny Capital 数据/出图管线、十四个�
   }
   for (const name of [
     SHELL_SLOT,
+    // 文件口（2026-10-15 决策挂上 tool-fs 后补齐）：通用 child 不得读 raw.json、不得写文件。
+    'read', 'write', 'edit',
     'render_chart', 'prepare_chart_source',
     'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile',
     'request_data', 'list_capabilities', 'describe_capability', 'dc_status',
@@ -803,16 +812,16 @@ test('通用 subagent 行：必须 deny Capital 数据/出图管线、十四个�
   // 多写名字 = 砍掉通用 child 的正当能力，少写一个 = 通用 child 自己读得到用户的仓位。
   assert.deepEqual(
     [...deny].sort(),
-    [SHELL_SLOT, 'render_chart', 'prepare_chart_source', 'describe_dataset', 'inspect_dataset', 'profile_dataset',
+    [SHELL_SLOT, 'read', 'write', 'edit', 'render_chart', 'prepare_chart_source', 'describe_dataset', 'inspect_dataset', 'profile_dataset',
       'query_dataset', 'write_profile', 'request_data', 'list_capabilities', 'describe_capability', 'dc_status',
       'get_watchlist',
       ...NETWORK_TOOLS, 'ocr', 'subagent_data_collector', 'subagent_data_junior', 'subagent_visualization_specialist',
       'subagent_web_retriever'].sort(),
-    '通用 subagent 的 deny 必须恰好是「数据/出图管线 + 十四个联网工具 + 用户自选股 + 专用角色创建工具 + shell」',
+    '通用 subagent 的 deny 必须恰好是「数据/出图管线 + 文件口 + 十四个联网工具 + 用户自选股 + 专用角色创建工具 + shell」',
   )
 })
 
-test('shell 行：平台成对挂载、只给 data_junior，且不给后台执行', () => {
+test('shell 行：平台成对挂载（主 Agent 与 data_junior 共用），且不给后台执行', () => {
   const bashRow = rowById('tool-bash')
   const pwshRow = rowById('tool-pwsh')
   assert.ok(bashRow, 'preset 必须自己挂 tool-bash（web 平面把 host 层那一行 disabled 了）')
@@ -829,9 +838,19 @@ test('shell 行：平台成对挂载、只给 data_junior，且不给后台执�
     assert.equal(row.config?.enableRunInBackground, false, `${id} 必须关掉后台执行（preset 没有 tool-jobs）`)
   }
 
-  // 主 Agent 的收敛在 src/agents/root-tool-policy.ts（ROOT_AGENT_DENIED_TOOLS），不在 preset 层：
-  // preset 层 deny 会把子 Agent 一起砍掉（allow 是交集过滤，加不回来）。
+  // 2026-10-15 决策「开 read、同时保留 bash」：shell 主 Agent 与 data_junior 共用，preset 层
+  // **不得**在这两行上加 deny——preset 层 deny 会把子 Agent 一起砍掉（allow 是交集过滤，加不回来）。
+  // 主 Agent 的 write / edit 收敛在 src/agents/root-tool-policy.ts（ROOT_AGENT_DENIED_TOOLS）。
   assertNotMatches(COMPOSITION_TEXT, /id: tool-bash[\s\S]{0,80}deny/)
+})
+
+test('tool-fs 行：文件口一颗挂载 read / write / edit（2026-10-15 决策），write / edit 靠闸门拦', () => {
+  const fsRow = rowById('tool-fs')
+  assert.ok(fsRow, 'preset 必须挂 tool-fs，否则主 Agent 只能 bash cat 读 skill 分册（2026-10-15 决策新开 read）')
+  assert.equal(fsRow.name, '@deepseek-ai/dsh-tool-fs')
+  // 不加 config：tool-fs 无配置即全量注册三个名字；工具包内部的 read_image 是条件注册，
+  // 不在本行控制范围（也不许在 deny 里点它的名——名字不在就等于创建子 Agent 失败）。
+  assert.equal(fsRow.config, undefined, 'tool-fs 用默认配置：一行挂全三个名字，别做行级裁剪')
 })
 
 test('data_junior persona：bash 是纯计算兜底，且禁区/出网纪律必须写明（软约束）', () => {
@@ -1178,6 +1197,16 @@ test('resolveUserCustomizationSection：独立 section，不能覆盖核心约�
 test('主 persona：内置安全条目（不索取凭据、不承诺收益）', () => {
   assertRule(MAIN_PERSONA, /不索取或保存账户密码|不主动索取账户密码|不索取凭据|不索取账户密码/)
   assertRule(MAIN_PERSONA, /不承诺收益|不保证收益/)
+})
+
+test('主 persona：read 的边界（2026-10-15 开出文件口，纪律跟着开）', () => {
+  // tool-fs 挂载 + 视图层 deny + 全局写口闸门只拦得住"写"；"读"这一侧拦不住 bash 的 cat
+  // （沙箱只拦写不拦读，docs/dev/bash-gate.md §1.6），所以这三条只能住在 persona。
+  // 断言不锁措辞：每条给等价说法，任一命中即过；全部落空应当补人设而不是删断言（AGENTS.md §8.3）。
+  assertRuleAny(MAIN_PERSONA, [/读文件只用 read|读文件走 read|只用 read 读文件/], 'read 的正当用途没写进人设')
+  assertRuleAny(MAIN_PERSONA, [/不读 ?capital-data/, /原始行.{0,12}回传/], '原始行落盘目录的读取禁区没写进人设')
+  assertRuleAny(MAIN_PERSONA, [/不读 ~\/\.dsh/, /宿主配置.{0,12}不读/], '宿主配置与凭据的读取禁区没写进人设')
+  assertRuleAny(MAIN_PERSONA, [/整册读完|整册读|切一段不算读过/], '分层正文"整册才算读过"没写进人设')
 })
 
 test('具名来源的输出预算必须留在宿主剪枝阈值内（两处必须同源）', () => {

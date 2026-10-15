@@ -864,6 +864,39 @@ const probes = [
         : { status: FAIL, detail: `官方 SegmentedControl 契约变了：${missing.join(' / ')}（见账本 L28；改本仓 adapter，不要改探针）` }
     },
   },
+  {
+    id: 'L29',
+    title: '宿主文件口 `@deepseek-ai/dsh-tool-fs`：四颗工具名（read / write / edit / read_image）与 `read` 的回执包络（`<path>`/`<type>`/`<content>` + 每行 `N: ` 行号）+ 三条读取上限常量',
+    why: '2026-10-15 决策「开 read、同时保留 bash」把这一行测进依赖面：preset 挂 `tool-fs` 一行，'
+      + '主 Agent 用 `read` 读精选 Skill 的方法论分册与工作区文件（`write` / `edit` 由视图层 deny + '
+      + '全局写口闸门两层拦）。三种漂移都静默：① 工具改名或 `read_image` 从条件注册变成无条件注册 ⇒ '
+      + '`ROOT_AGENT_DENIED_TOOLS` 与通用 subagent 的 `toolFilter.deny` 里那几个名字对不上，'
+      + '`restrict()` 对未注册名字的表现是"创建子 Agent 失败"；② 回执不再带行号或换一套包装 ⇒ '
+      + '`test/selected-skills-content.test.mjs` 的 `readEnvelopeChars` 与整册预算（240 字符路径 + '
+      + '每行 `N: `）全部算错方向，分册会在使用者看不见的地方被剪中段；③ 三条上限改小 '
+      + '（`READ_LIMIT` / `READ_MAX_BYTES` / `READ_MAX_LINE_LENGTH`）⇒ 一册读不全而工具不报错，'
+      + '模型拿到的是截断的正文。',
+    run() {
+      const file = join(PKG('dsh-tool-fs'), 'lib/index.js')
+      const text = readIfPresent(file)
+      if (text === undefined) return { status: FAIL, detail: `读不到 ${file}（宿主换了这颗文件口包？账本 L29 与两处 deny 名单要一起改）` }
+      const checks = [
+        ['read 回执仍带 `<path>` 包装（readEnvelopeChars 按它算预算）', /<path>/, text, file],
+        ['read 回执仍带 `<content>` 包装（同上）', /<content>/, text, file],
+        ['行数上限常量仍在（一册读不全的隐性截断层）', /READ_LIMIT/, text, file],
+        ['单行长度上限常量仍在', /READ_MAX_LINE_LENGTH/, text, file],
+        ['字节上限常量仍在', /READ_MAX_BYTES/, text, file],
+      ]
+      const missing = checks.filter(([, pattern, source]) => !pattern.test(source))
+        .map(([label, , , source]) => `${label}（${source}）`)
+      const renamed = ['read', 'write', 'edit', 'read_image']
+        .filter((name) => !new RegExp(`name: ["']${name}["']`).test(text))
+      if (renamed.length) missing.push(`工具名 ${renamed.join(' / ')} 不再在这颗包里按原名注册（${file}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: '四颗工具名、read 的 <path>/<content> 包络与三条读取上限都仍在' }
+        : { status: FAIL, detail: `宿主文件口契约变了：${missing.join(' / ')}（见账本 L29；改本仓名单与包络建模，不要改探针）` }
+    },
+  },
 ]
 
 const results = []
