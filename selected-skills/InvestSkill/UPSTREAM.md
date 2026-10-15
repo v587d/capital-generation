@@ -60,6 +60,23 @@
 - Maintenance snapshot（checked 2026-10-10）：251 次提交；近 90 天 47 次非机器人提交、近 180 天 111 次；
   最新 release `v1.12.0`（2026-09-25）。维护活跃，因此标 `experimental`。
   See [GitHub commit history](https://github.com/yennanliu/InvestSkill/commits/main/).
+- Visibility layering, second batch (2026-10-15, same §8.6 reason): the remaining **25** catalogued entries in this
+  snapshot were single-file bodies of 15,437–31,754 characters — every one of them arrived as a truncated excerpt
+  (head 4,096 + tail 1,024) once a user ticked it. All 25 are now entry file plus parts under `skills/<name>/references/`:
+  the entry keeps only what holds on every round (`⚠️ Data Verification`, `📋 Data & Sources Header`, and
+  `⚠️ Read This First` where upstream wrote one), gains an index of the part filenames, and states that loading the
+  entry is not reading the skill. Everything else moves **in section order** into `references/10…`, splitting a
+  section that still overflows at `###`, then `####`, then blank-line paragraphs — and a section cut across two parts
+  gets a one-line pointer at the cut (`This section is not finished here: … continues in references/NN-….md`), which
+  is why prose like "the following sections" still lands: across the whole batch exactly **one** real dangling pointer
+  had to be rewritten (`learning-coach`: "the quiz block from §4" → the part that now holds §4). Nothing was deleted —
+  a line-set check per entry found zero lost lines apart from that rewrite, and each directory's `.md` total grew
+  (e.g. `stock-eval` 31,754 → 34,135, `earnings-call-analysis` 15,437 → 16,873; 98 new parts in total). Sizes are judged
+  on the **rendered** `read` receipt, with the part header itself reserved inside the envelope. Two upstream quirks are
+  deliberately left alone: `institutional-ownership` mentions "the smart-money list above" that upstream never defines,
+  and `fact-check`'s example table cites `§1…§5` of **the report being verified**, not of this skill — neither is a
+  layering artefact. `test/selected-skills-content.test.mjs` (LAYERED, now 32 entries) and the ratchet in
+  `test/persona.test.mjs` (baseline emptied, so any future oversized entry fails outright) hold the result.
 - Visibility layering (2026-10-14, third allowed reason in `docs/dev/selected-skills.md` §8.6): `bear-case` and `stock-screener` had a single `SKILL.md` over the host load cap (8,192 code points; the middle of a longer tool result comes back as `[... tool result middle pruned ...]`). Each is now an entry file plus parts under `skills/<name>/references/`: `bear-case` 13,816 → 15,218 characters with `10-analysis-framework.md`, `11-output-and-signal.md`, `12-thesis-invalidation.md`; `stock-screener` 11,588 → 12,961 with `10-scoring-framework.md`, `11-output-format.md`, `12-invalidation-and-signal.md`. The entry keeps its per-round discipline sections (Data Verification, the Data & Sources header, Read This First / Accepted Inputs) and gains an index of the parts plus a line saying that loading the entry is not reading the skill. No line of upstream text was deleted: a line-set check against this commit found only the rewritten pointer lines, plus two cross-file pointers fixed (`pillars 1–7 above` → the file that now holds them, and the same for `The Score above`). MIT, so no per-file licence notice is required. Sizes are judged on the **rendered** `read` receipt (each line gains an `N: ` prefix), not on file characters — see `test/selected-skills-content.test.mjs`.
 - Runtime status: `experimental` / 显式实验。默认全关，只在使用者于「插件」→ Capital Generation →「配置」
   逐格打开后，对**之后新建**的 Capital 根 Agent 可见；子 Agent 不继承。

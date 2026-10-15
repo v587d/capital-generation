@@ -1224,28 +1224,21 @@ test('三颗任务型内置 skill 还要给索引块留位置（勾选上限 6 �
   }
 })
 
-test('外部精选正文的体积棘轮：新增条目必须完整可见，存量超限的那些只准减', () => {
-  // 上游正文我们不为口味改写（§8.6），所以这里不要求存量合规——
-  // 要求的是**别再加进来新的**，并且这份记名清单只会变短。
-  // 清单变短的唯一途径是真的处理掉一颗。2026-10-14 起走的处置是**可见性分层**（§8.6 第三个改写理由：
-  // 入口册 + 分册 + 运行时 `read`，一行规则都不删），已分层的 7 颗已从这里减掉：
-  // buffett-investment-framework、china-idea-generation、china-sector-overview、china-catalyst-calendar、
-  // bear-case、stock-screener、peter-lynch-skill。分层那一侧的断言见
-  // test/selected-skills-content.test.mjs「分层条目」两条；台账见 docs/dev/selected-skill-index.md。
-  const OVERSIZED_BASELINE = [
-    'stock-eval', 'technical-analysis', 'dividend-analysis', 'tax-lens', 'stock-valuation', 'position-ladder',
-    'fact-check', 'options-analysis', 'sector-analysis', 'competitor-analysis', 'etf-analysis', 'earnings-preview',
-    'learning-coach', 'financial-report-analyst', 'institutional-ownership', 'thesis-tracker', 'risk-stress-test',
-    'portfolio-review', 'short-interest', 'industry-map', 'economics-analysis', 'insider-trading',
-    'catalyst-calendar', '10k-digest', 'earnings-call-analysis',
-  ]
+test('外部精选正文的体积棘轮：每一颗 catalog 条目都必须一次加载完整可见', () => {
+  // 上游正文我们不为口味改写（§8.6），所以这条历史上是**棘轮**：存量超限的记名清单只准变短，
+  // 变短的唯一途径是真的处理掉一颗（可见性分层：入口册 + 分册 + 运行时 `read`，一行规则都不删）。
+  // 2026-10-15 清单清空——32 颗全部处理完（最后 25 颗是 InvestSkill 的单文件厚册），于是它从
+  // "别再加新的超限条目"升级成硬闸门：**任何** catalog 条目正文超过可见上限就在这里失败。
+  // 台账与断言在 test/selected-skills-content.test.mjs「分层条目」两条；处置口径见
+  // docs/dev/selected-skill-index.md 的「已知边界」。
+  const OVERSIZED_BASELINE = []
   const oversized = SELECTED_SKILL_CATALOG
     .filter((entry) => selectedSkillBody(entry).length > VISIBLE_CAP)
     .map(({ name }) => name)
   const added = oversized.filter((name) => !OVERSIZED_BASELINE.includes(name))
   assert.deepEqual(added, [],
-    `新收录的精选条目正文超过可见上限 ${VISIBLE_CAP} 字符：${added.join('、')}。`
-    + '使用者勾选后加载到的是被剪掉中间段的节选——要么把方法论拆成多颗，要么别收。')
+    `精选条目正文超过可见上限 ${VISIBLE_CAP} 字符：${added.join('、')}。`
+    + '使用者勾选后加载到的是被剪掉中间段的节选——要么按 §8.6 的可见性分层切册，要么别收。')
   assert.ok(oversized.length <= OVERSIZED_BASELINE.length,
     `存量超限清单变长了（现 ${oversized.length} > 基线 ${OVERSIZED_BASELINE.length}）：这条棘轮只准减不准加。`)
 })

@@ -124,6 +124,7 @@ const where = ({ entry, dir }, file) => `${entry.repository}/${entry.name}/${fil
  * 入口之外还有 4 份 8,750–21,342 的指南，各切成多册并把原路径留成索引）。
  */
 const LAYERED = [
+  // 第一颗样板与第一批（2026-10-14）
   { name: 'buffett-investment-framework', chars: 117909, cards: 65 },
   { name: 'china-idea-generation', chars: 9385 },
   { name: 'china-sector-overview', chars: 9523 },
@@ -131,6 +132,32 @@ const LAYERED = [
   { name: 'bear-case', chars: 15218 },
   { name: 'stock-screener', chars: 12961 },
   { name: 'peter-lynch-skill', chars: 85955 },
+  // InvestSkill 的 25 颗单文件厚册（2026-10-15，按原正文从厚到薄排）
+  { name: 'stock-eval', chars: 34135 },
+  { name: 'technical-analysis', chars: 33656 },
+  { name: 'dividend-analysis', chars: 33200 },
+  { name: 'tax-lens', chars: 32972 },
+  { name: 'stock-valuation', chars: 31829 },
+  { name: 'position-ladder', chars: 30026 },
+  { name: 'fact-check', chars: 29102 },
+  { name: 'options-analysis', chars: 28548 },
+  { name: 'sector-analysis', chars: 28029 },
+  { name: 'competitor-analysis', chars: 27449 },
+  { name: 'etf-analysis', chars: 25656 },
+  { name: 'earnings-preview', chars: 25486 },
+  { name: 'learning-coach', chars: 25342 },
+  { name: 'financial-report-analyst', chars: 24638 },
+  { name: 'institutional-ownership', chars: 23944 },
+  { name: 'thesis-tracker', chars: 22712 },
+  { name: 'risk-stress-test', chars: 22220 },
+  { name: 'portfolio-review', chars: 22431 },
+  { name: 'short-interest', chars: 21668 },
+  { name: 'industry-map', chars: 20206 },
+  { name: 'economics-analysis', chars: 19438 },
+  { name: 'insider-trading', chars: 19152 },
+  { name: 'catalyst-calendar', chars: 18360 },
+  { name: '10k-digest', chars: 17931 },
+  { name: 'earnings-call-analysis', chars: 16873 },
 ]
 
 /**
@@ -156,9 +183,17 @@ const readEnvelopeChars = (text) => {
  * 入口册的分派列用裸名（每个链接省 20 字符），两种写法都得认——只认一种等于放行断链。
  * 寻址按宿主的教法：相对 skill 目录解析（`references/deep/…` 这类嵌套路径要能走通）。
  */
+/**
+ * 册地址 vs **产物路径**：上游正文里也写 `.md`，但那是"把分析存成哪个文件"的示例
+ * （`<TICKER>-10k-digest.md`、`output/thesis/NVDA.md`），不是分层后的寻址。把它们当断链
+ * 是假阳性——2026-10-15 在 `10k-digest` 与 `thesis-tracker` 上各撞到一种。判据按形状：
+ * 册地址要么是裸文件名，要么以 `references/` 打头；带别的第一段目录的就是产物路径。
+ * 裸名照旧全查（入口册的分派列正是裸名，点错一个字符必须失败）。
+ */
+const isPartAddress = (target) => !/[<>]/.test(target) && (!target.includes('/') || /^(?:\.\/)?references\//.test(target))
 const mentionedTargets = (text) => new Set([
-  ...[...text.matchAll(/\]\(([^)#]+\.md)\)/g)].map((m) => m[1]),
-  ...[...text.matchAll(/`([^`\s]+\.md)`/g)].map((m) => m[1]),
+  ...[...text.matchAll(/\]\(([^)#]+\.md)\)/g)].map((m) => m[1]).filter(isPartAddress),
+  ...[...text.matchAll(/`([^`\s]+\.md)`/g)].map((m) => m[1]).filter(isPartAddress),
 ])
 const resolveTarget = (skill, file, target) => (target.includes('/')
   ? [join(skill.dir, target), join(dirname(file), target)]
