@@ -23,7 +23,7 @@ import {
   CONTRACT_PROBES, KNOWN_GAP_CODES, PROBE_FAMILIES, stateOf, secretRefOf, probesForTier, resolveTier,
   lastScheduledDue, previousScheduledDue, beijingDateOf, resolveDayShifts,
 } from '../scripts/lib/contract-registry.mjs'
-import { withResolvedDates } from '../scripts/lib/contract-probe.mjs'
+import { withResolvedDates, FAMILY_ORDER } from '../scripts/lib/contract-probe.mjs'
 
 /** 生产里真注册出来的 DataSource 能力全集——覆盖数的分母，不数注册表自己。 */
 const registered = new Map()
@@ -104,7 +104,7 @@ test('每条 active/shadow 都有延迟预算，且是正有限数', () => {
  */
 const ANCHOR = new Date('2026-10-11T20:00:00Z')   // 北京周一 04:00 那一档的名义时刻
 /** requires 的 id 由 runner 运行时从真实响应解析；这里只要形状合法，⛔ 绝不发出去（§10.3）。 */
-const ID_PLACEHOLDER = { manager_id: 'PLACEHOLDER_ID', company_id: 'PLACEHOLDER_ID', ticker: '000001.SZ' }
+const ID_PLACEHOLDER = { manager_id: 'PLACEHOLDER_ID', company_id: 'PLACEHOLDER_ID', ticker: '000001.SZ', trade_date: '2026-10-09', date: '2026-10-14' }
 function requestShape(entry) {
   const params = resolveDayShifts(entry.params ?? {}, ANCHOR)
   if (!entry.requires) return params
@@ -227,6 +227,19 @@ test('家族只能是限速分组里那几个，且每个家族都有条目', ()
   for (const family of PROBE_FAMILIES) {
     assert.ok(CONTRACT_PROBES.some((e) => e.family === family), `家族 ${family} 一条都没有，要么补条目要么从 PROBE_FAMILIES 删掉`)
   }
+})
+
+test('⛔ 注册表有真打条目的家族，runner 的出网顺序里必须也有它（§9.7 漏接入口）', () => {
+  // 两份名单：`PROBE_FAMILIES`（注册表侧）与 `FAMILY_ORDER`（runner 侧的出网循环）。
+  // 只在前者加家族的症状不是报错，是**静默少打一族**：`--family ftshare` 照旧打印
+  // "档位 daily：7 条真打"，循环却一条都不进，报告"共 0 条 · 不合格 0 条"——退出码 0，CI 绿。
+  // 2026-10-15 批次 A 就是这样整族没打过一次，直到 B 批才看见。
+  const live = new Set(probesForTier('daily').map((entry) => entry.family))
+  const missing = [...live].filter((family) => !FAMILY_ORDER.includes(family))
+  assert.deepEqual(missing, [], `这些家族有 daily 条目却不在 FAMILY_ORDER 里，巡检会静默跳过它们：${missing.join(', ')}`)
+  // 反方向也要核：顺序表里留着一个已经没有条目的家族，等于替一个不存在的东西分配出网节奏。
+  const stale = FAMILY_ORDER.filter((family) => !live.has(family) && !CONTRACT_PROBES.some((e) => e.family === family))
+  assert.deepEqual(stale, [], `FAMILY_ORDER 里有注册表完全不认识的家族：${stale.join(', ')}`)
 })
 
 test('能力名全表唯一（跨 face）', () => {

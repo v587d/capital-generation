@@ -281,16 +281,47 @@ const PADDLE = [
   out('paddle', 'paddle_ocr_job', '端到端要一份长期可公开访问的样本 PDF，样本未选定；选定后升级为 weekly 真跑', '2026-10-08'),
 ]
 
-// ── FTShare（非凸科技）同花顺资金流那一族（4 颗，每天）────────────────────────
-// 日期一律相对量：这一族上游只保留最近约 40 个交易日（实测 T-40 有数、T-50 起 total=0），
+// ── FTShare（非凸科技）资金流 + 报价快照那一族（9 颗，每天）────────────────────
+// 日期一律相对量：日度那族上游只保留最近约 45 个交易日（实测 T-45 有数、T-46 起 total=0），
 // 窗口每天都在往前滚，写死绝对日期等于让巡检自己变成永久 EMPTY。
-const FT_RANGE = { start_date: dayShift(-10), end_date: dayShift(-1), page: 1, size: 3 }
+// `page` 实测生效（六页 × 1000 去重 = total_items 5574），但响应里的 `pageNum` 恒 1，
+// 所以巡检只用 page=1 打最小切片，翻页正确性交给离线测试的桩信封。
+const FT_RANGE = { start_date: dayShift(-10), end_date: dayShift(-1), size: 3 }
 const FT = [
-  ds('ftshare', 'ftshare_stock_daily_flow', 'daily', FT_RANGE, { expect: { minRows: 1 }, note: '同花顺个股日度资金流；金额单位亿元（与全市场快照成交额交叉核对过）' }),
+  // 带 code 打：这一条同时在验"过滤真的生效"（producer 会逐行核返回身份，被吞掉时回 invalid_response）。
+  ds('ftshare', 'ftshare_stock_daily_flow', 'daily', { ...FT_RANGE, code: A_SHARE }, { expect: { minRows: 1 }, note: '同花顺个股日度资金流；金额单位亿元（与全市场快照成交额交叉核对过）' }),
   ds('ftshare', 'ftshare_industry_daily_flow', 'daily', FT_RANGE, { expect: { minRows: 1 }, note: '同花顺一级行业 90 个板块的资金滚动，是 eastmoney_cashflow_rotation 的第二家上游' }),
   ds('ftshare', 'ftshare_concept_daily_flow', 'daily', FT_RANGE, { expect: { minRows: 1 }, note: '概念板块天然重叠，禁止跨板块相加' }),
   // 不给 date/time 就打"最新切片"，所以这一条永远落在有数的那一档上。
-  ds('ftshare', 'ftshare_main_capital_flow', 'daily', { page: 1, size: 3 }, { expect: { minRows: 1 }, note: '15 分钟切片主力资金，单位元；免费档限流 10 QPS / burst 20' }),
+  ds('ftshare', 'ftshare_main_capital_flow', 'daily', { size: 3 }, { expect: { minRows: 1 }, note: '15 分钟切片主力资金，单位元；免费档限流 10 QPS / burst 20' }),
+  ds('ftshare', 'ftshare_ashare_quote', 'daily', { board: 'bjse', size: 3 }, { expect: { minRows: 1 }, note: '北证口径单独一条：本仓只有这一族与日 K 截面含北交所（腾讯那一路明确拒 BJ）' }),
+  ds('ftshare', 'ftshare_market_breadth', 'daily', {}, { expect: { minRows: 1 }, note: '单行；九档家数之和实测 = 报价面 total_items（跨能力对账点）' }),
+  ds('ftshare', 'ftshare_daily_kline_snapshot', 'daily', { size: 3 }, {
+    requires: 'trade_date',
+    // 编一个周末日期进去会得到上游 400「不是交易日」，那是巡检自己造的失败——日期由日历供。
+    resolveFrom: { capability: 'ftshare_trading_calendar', params: { start_date: dayShift(-20), end_date: dayShift(-1) }, path: 'item.0.trade_date' },
+    expect: { minRows: 1 },
+  }),
+  ds('ftshare', 'ftshare_prev_close', 'daily', { code: A_SHARE, start_date: dayShift(-20), end_date: dayShift(-1) }, { expect: { minRows: 1 }, note: '响应没有身份列，本层核日期是否落在请求区间内' }),
+  ds('ftshare', 'ftshare_trading_calendar', 'daily', { market: 'cn', start_date: dayShift(-20), end_date: dayShift(20) }, { expect: { minRows: 1 } }),
+  // 批次 C 的五颗。⛔ 依旧一律相对日期 / 真实 id：写死绝对日期等于让巡检自己变成永久 EMPTY。
+  // 不给 date 就落在"上游最新有数的一天"，当日入库时刻实测不固定（19:32 还没有、20:03 已有），不给它反而稳。
+  ds('ftshare', 'ftshare_block_trades', 'daily', { size: 3 }, { expect: { minRows: 1 }, note: '一笔一行；premium_ratio 是比例值（-0.0885 = 折价 8.85%）' }),
+  // 预告 / 快报按期披露、**没有滚动窗口**（实测预告回到 2000 年、快报回到 2005 年），所以写过去的报告期不会腐烂。
+  // 两颗各测一种查法：这颗走 modeB，顺带让 producer 的 year / report_type 逐行核对每天跑一遍。
+  ds('ftshare', 'ftshare_performance_forecast', 'daily', { year: 2024, report_type: 'annual', size: 3 }, { expect: { minRows: 1 }, note: 'modeB 全市场实测 3150 行；别名 q4/h1 在参数层就拒' }),
+  ds('ftshare', 'ftshare_performance_express', 'daily', { code: A_SHARE }, { expect: { minRows: 1 }, note: 'modeA 单票不分页；上期为负时 net_profit_yoy_pct 的符号是反的，别拿它判方向' }),
+  ds('ftshare', 'ftshare_sw_industry_overview', 'daily', { size: 3 }, {
+    requires: 'date',
+    // 窗口只到最近约 94 个交易日，且必须真的是交易日——日期同样从日历里取，不自己编。
+    resolveFrom: { capability: 'ftshare_trading_calendar', params: { start_date: dayShift(-20), end_date: dayShift(-1) }, path: 'item.0.trade_date' },
+    expect: { minRows: 1 },
+    note: '全部层级实测 497~498 行 = 一级 31 + 二级 131 + 三级 335/336',
+  }),
+  ds('ftshare', 'ftshare_sw_industry_metrics', 'daily', { industry_code: '801010.SI', start_date: dayShift(-10), end_date: dayShift(-1), size: 3 }, {
+    expect: { minRows: 1 },
+    note: '42 列宽表；聚合列（amount / total_mv 等）实测自 2026-08-26 起为 null，所以这条只核行数不核数值',
+  }),
 ]
 
 /** 全量注册表。覆盖测试拿它对着 `lib/` 的真实注册数逐条核。 */

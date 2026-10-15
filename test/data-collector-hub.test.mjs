@@ -389,7 +389,7 @@ test('能力目录体积预算：必须留在 DSH 剪枝阈值（8192）以内�
   const { hub } = makeHub()
   for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources(), ...createWindSources(async () => 'key'), ...createFtshareSources(async () => 'key')]) hub.registerSource(dataSource)
   const directory = hub.capabilityDirectory()
-  assert.equal(hub.capabilityNames().length, 98, '端点数量回归：目录预算断言必须覆盖 Fuyao、Tencent、Eastmoney、Wind 与 FTShare 全部已注册能力')
+  assert.equal(hub.capabilityNames().length, 108, '端点数量回归：目录预算断言必须覆盖 Fuyao、Tencent、Eastmoney、Wind 与 FTShare 全部已注册能力')
 
   // 预算的来源（实测本机 dsh 0.1.5-rc.1，不是拍脑袋的数字）：
   // - 真实上限是 dsh-compaction-tool-result-pruner 的 `thresholdChars`（preset 里配 8192）。
@@ -454,11 +454,14 @@ test('宽表详情预算：字段字典让 72 列的能力留在预算内（直�
 
 test('单能力详情体积预算：字典投影后仍不许逼近剪枝阈值', async () => {
   const { hub } = makeHub()
-  for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources(), ...createWindSources(async () => 'key')]) hub.registerSource(dataSource)
+  for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources(), ...createWindSources(async () => 'key'), ...createFtshareSources(async () => 'key')]) hub.registerSource(dataSource)
   // 详情是逐次调用、单条返回，所以用比目录更紧的 4096 做护栏。体积此前几乎等于 output_schema
   // 体积（按列数线性增长），字典把它和列数解耦：2026-10-05 实测最大详情是可转债表
   // （29 列 + 2081 字符描述）= 3738 字符 = 预算 91.3%；两融 42 列 2993 = 73%，dragon_tiger 2771 = 68%
   // （逐列 JSON Schema 形态下两融是 4479 = 109%）。瓶颈已经从"列数"挪到"描述"，收窄就从这里收。
+  // 2026-10-15：FTShare 报价面 3668 = 89.6%（32 列 + 1873 字符描述）曾是新第二名，现在最紧的是
+  // 申万行业日度指标 3901 = 95.2%（43 列 + 1756 字符描述 + 464 参数面）——宽表再想加一列，就得从描述里等量减回来。
+  // ⛔ 这条登记了本闸门，之前只登记四族，新接一族不进来等于给这族开了免检。
   const details = hub.capabilityNames().map((capability) => JSON.stringify(hub.describeCapability(capability)))
   const largest = Math.max(...details.map((detail) => detail.length))
   assert.ok(largest < 4096, `最大的能力详情已达 ${largest} 字符：会被剪枝截断，需要精简或拆分`)

@@ -169,7 +169,10 @@ async function runWindProtocol(entry) {
 }
 
 /** 家族顺序 = 出网顺序：一家打完再换下一家，绝不让两家的请求交错。 */
-const FAMILY_ORDER = ['fuyao', 'eastmoney', 'tencent', 'retriever', 'anysearch', 'wind']
+// ⛔ 这份清单与注册表的 `PROBE_FAMILIES` 是**两份名单**，漏一家不会报错、只会**静默少打一族**
+// （`--family ftshare` 打印"7 条真打"却收 0 条结果，2026-10-15 就这么漏过整批 A 的实机验证）。
+// 覆盖由 `test/contract-registry.test.mjs` 钉住：每个有真打条目的家族都必须在这里出现。
+export const FAMILY_ORDER = ['fuyao', 'eastmoney', 'tencent', 'retriever', 'anysearch', 'wind', 'ftshare']
 
 /**
  * ⚠️ 东财 / 腾讯 / 具名来源**绝不能再包一层节流**：它们的 `execute()` 内部已经过
@@ -182,7 +185,7 @@ const NO_PACE = (task) => task()
 function pacerFor(family) {
   // Fuyao 生产侧是裸 fetch、没有任何最小间隔（只靠 Hub 串行），巡检进程里没有 Hub，所以自己加地板。
   if (family === 'fuyao') return createRequestThrottle(FUYAO_PROBE_GAP_MS)
-  if (family === 'eastmoney' || family === 'tencent' || family === 'retriever') return NO_PACE
+  if (family === 'eastmoney' || family === 'tencent' || family === 'retriever' || family === 'ftshare') return NO_PACE
   return createRequestThrottle(1_000)
 }
 

@@ -56,7 +56,7 @@ const GROUPS = [
   ['东方财富 HTTP（宏观指标）', (p) => MACRO_PATHS.has(p)],
   ['东方财富 HTTP（资金与筹码）', (p) => p.startsWith('/eastmoney/') && !MACRO_PATHS.has(p) && !MUTUAL_PATHS.has(p)],
   ['Wind 金融数据服务（MCP）', (p) => p.startsWith('/wind/')],
-  ['FTShare 资金流（同花顺口径，plan B）', (p) => p.startsWith('/ftshare/')],
+  ['FTShare（资金流 + 行情与日 K 截面 + 快照与日历 + 大宗交易、业绩预告/快报、申万行业，plan B）', (p) => p.startsWith('/ftshare/')],
 ]
 
 const paramsOf = (source) => {
@@ -106,10 +106,11 @@ L.push('## 不在覆盖范围')
 L.push('')
 L.push('| 模块 | 原因 |')
 L.push('|---|---|')
-L.push('| A 股主力资金 `capital-flow/*`（Fuyao 侧） | 上游返回 `code=2004`：同花顺 AI 客户端专用，未开放外部接入。**这一块的覆盖已由 FTShare 那四条 `ftshare_*` 补上**（同花顺口径日度 + 15 分钟切片主力五档），所以它不再是空白，只是不来自 Fuyao |')
+L.push('| A 股主力资金 `capital-flow/*`（Fuyao 侧） | 上游返回 `code=2004`：同花顺 AI 客户端专用，未开放外部接入。**这一块的覆盖已由 FTShare 的 `ftshare_stock_daily_flow` / `industry` / `concept` / `main_capital_flow` 四颗补上**（同花顺口径日度 + 15 分钟切片主力五档），所以它不再是空白，只是不来自 Fuyao |')
 L.push('| 高频动向 `high-frequency/*` | 同上（`code=2004`） |')
 L.push('| 全市场 Parquet 导出 `dump/market-dumps/*` | 预签名链接 + Parquet 二进制，需独立的下载/落盘链路，本阶段不接入 |')
 L.push('| 期货 `futures/*`、期权 `options/*`、贵金属 | **2026-10-15 修订**：此前排除的真实原因是项目初期没有稳定数据源，不是产品定位——当时这句写成了"角色边界只覆盖股票/指数/基金"，是错的。现在只要拿到稳定且免费的上游就应当接入；FTShare 免费档已提供 10 条期货与 1 条贵金属接口，尚未注册，排在后续批次。**注意**：`ticker_search` / `ticker_list` 一直可按官方契约检索 `futures` / `options` 代码（元数据域全量放开），缺的只是行情/财务端点 |')
+L.push('| FTShare 的北交所资金流 | 上游那三条同花顺日度资金流实测**不含北交所**（`920992` 返回 0 条、单日 5214 行无 BJ 尾码）；北证的**行情**已由 `ftshare_ashare_quote` / `ftshare_daily_kline_snapshot` 覆盖（含 349 只 BJ），缺的只是资金流 |')
 L.push('| 基金新闻 `fund/news/article-list` | 非结构化内容，已由 `web_retriever` 的检索能力覆盖 |')
 L.push('| Wind 的自然语言工具（选股 / 档案 / 财务 / 事件 / 风险，bond 域与 `analytics_data` 同类） | 返回哪些列**由 `question` 的措辞决定**，同一问法换个说法就换一套列——输出契约无处锚定，护栏等于没有。数值需求走 `wind_edb_search` / `wind_edb_query` / `wind_stock_kline`，公告与新闻正文才用 NL 工具（在 `web_retriever` 的 `wind_docs_*`） |')
 L.push('| Wind 行情指标截面 `get_stock_price_indicators` | 中文键快照，腾讯与东财同位能力已覆盖；`indexes` 没有可核对的指标集文档，口径无法验 |')
