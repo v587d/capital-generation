@@ -167,9 +167,12 @@ const LAYERED = [
  * ⛔ 所以"这一册会不会被剪"看的是**渲染后**的长度，不是文件字符数——2026-10-14 实测：
  * 7,302 字符 / 95 行的正文，read 回执 7,894 字符（差 592，几乎全是行号与标签）。
  * 拿文件字符数当上限，会放过真会被剪的册子，症状与不分层一样。
- * 路径长度按安装后的位置取：本机三种安装路径实测 178–184 字符，这里取 200 留余量。
+ * 路径长度按**装机形态**取，不许取成本机开发树的长度：`~/.dsh/profiles/{web,desktop}/node_modules/
+ * @v587d/capital-generation/…` 最长 203 / 207 字符，Windows 那种 `C:\Users\<name>\.dsh\…` 218，
+ * 而 profile 用 `link:` 软链回工作树时只有 174——按 174 建模会"dev 绿、装机红"。取 240 连最长用户名也留在内。
+ * 包络随**行数**增长（每行 `N: ` 前缀，行号过百再各多一字符），随路径只 1:1 增长。
  */
-const READ_PATH_CHARS = 200
+const READ_PATH_CHARS = 240
 const readEnvelopeChars = (text) => {
   const lines = text.split('\n')
   if (lines.at(-1) === '') lines.pop()
@@ -225,11 +228,21 @@ test('内容闸门：分层条目的每一册、无论走 skill 还是 read，�
       if (file.endsWith('SKILL.md')) {
         const viaSkill = [...text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '')].length
         if (viaSkill > visibleChars) over.push(`${where(skill, file)} 被 skill 加载：正文 ${viaSkill} > ${visibleChars}（阈值减渲染包装）`)
+      } else if ([...text].length > visibleChars) {
+        // 模型未必要用 `read`：实测有会话直接 bash `cat` 整册。cat 回执**不带行号**，所以它比
+        // read 更宽松，但剪枝器照样只看总数——按 skill 通道那条线（threshold − 512）一并拦。
+        over.push(`${where(skill, file)} 原文件 ${[...text].length} > ${visibleChars}（bash cat 通道没有行号包装）`)
       }
     }
     assert.deepEqual(over, [],
       `${layer.name} 分层后仍有册超过一次加载的可见上限：再切一册，`
       + '不要留着一本厚册指望模型自己翻页（它只会在回执里看到 [middle pruned]，使用者看不到）。')
+    const discipline = readFileSync(join(skill.dir, 'SKILL.md'), 'utf8')
+    assert.match(discipline, /no line window/,
+      `${layer.name} 的入口册没有"整册开、不许用行窗口"那句：真机实测（2026-10-15）它会读 18–45 行`
+      + '然后说"我打开了这一册"，规则的分层纪律就是从这句话开始塌的')
+    assert.match(discipline, /Loading this file is not reading/,
+      `${layer.name} 的入口册缺反谎报那句（加载入口不等于读过本 skill）`)
     const broken = []
     for (const file of skill.files) {
       for (const target of mentionedTargets(readFileSync(file, 'utf8'))) {

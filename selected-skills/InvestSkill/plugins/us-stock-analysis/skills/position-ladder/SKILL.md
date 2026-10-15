@@ -54,8 +54,9 @@ State all three, then produce the plan. Never present the ladder as a way to gua
 
 ## Read the Parts
 
-Everything below the surface of this file lives in `references/`. Open a part with `read`,
-one whole part at a time — the file names below are the only addressing this entry has.
+Everything below the surface of this file lives in `references/`. **whole, with no line window** — quoting a rule or a template out of a slice of one is how a
+file gets reported as read when it was only skimmed. The file names below are the only
+addressing this entry has.
 
 - `references/10-overview.md` — Overview; 1. Inputs; 2. Phase 1 — Position Control (控倉): Set the Bounds First; 3. Phase 2 — Build the Entry Ladder
 - `references/11-phase-3-the-trim.md` — 4. Phase 3 — The Trim / Re-Add Cycle; 5. Phase 4 — Lot Accounting, Taxes & Wash Sales; 6. Phase 5 — Reality Check: Total Return vs. Average Cost

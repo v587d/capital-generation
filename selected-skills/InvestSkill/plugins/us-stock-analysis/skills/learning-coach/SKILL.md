@@ -44,8 +44,9 @@ For this skill: **reproduce the pasted analysis's own header** at the top of the
 
 ## Read the Parts
 
-Everything below the surface of this file lives in `references/`. Open a part with `read`,
-one whole part at a time — the file names below are the only addressing this entry has.
+Everything below the surface of this file lives in `references/`. **whole, with no line window** — quoting a rule or a template out of a slice of one is how a
+file gets reported as read when it was only skimmed. The file names below are the only
+addressing this entry has.
 
 - `references/10-overview.md` — Overview; 1. Modes; 2. Inputs; 3. Framework — Explain Mode
 - `references/11-phase-2-explanation-card.md` — (continued) 3. Framework — Explain Mode; 4. Framework — Quiz Mode (`--quiz <lesson>`); Quiz — <Lesson name>  (5 questions · --level <level>); Answers

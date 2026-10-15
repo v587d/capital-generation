@@ -64,7 +64,7 @@ An industry label does not load every overlay.
 Card definitions, workflows, and the output contract live in `references/`: the modules are
 listed in the table above, [`09-workflows.md`](references/09-workflows.md) holds the three card
 sequences with their required inputs and the output contract, and [`10-method.md`](references/10-method.md)
-the decomposition method. Open each with `read`, resolved against this skill's base directory.
+the decomposition method. Open each with `read` **whole, with no line window** — a slice of a part must never be reported as the whole of it. Resolve each name against this skill's base directory.
 Parts are sized to arrive complete in one `read`; if a receipt shows
 `[... tool result middle pruned ...]`, re-read it with `offset` before concluding a card is
 absent, and never reconstruct a card from its ID or from a file you did not open.

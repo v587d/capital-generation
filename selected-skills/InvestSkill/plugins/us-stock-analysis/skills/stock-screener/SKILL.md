@@ -64,9 +64,11 @@ Screen and rank multiple US equity tickers across five analytical dimensions —
 ## Read the Parts
 
 Everything below the surface of this file lives in `references/`. Open a part with `read`,
-resolved against this skill's base directory; each part is sized to arrive complete in one
-`read`. If a receipt shows `[... tool result middle pruned ...]`, re-read it with `offset`
-before concluding anything is missing.
+resolved against this skill's base directory, and open it **whole — with no line window**:
+reporting a rule or a template out of a slice of a part is how a file gets described as read
+when it was only skimmed. Each part is sized to arrive complete in one `read`. If a receipt
+shows `[... tool result middle pruned ...]`, re-read it with `offset` before concluding
+anything is missing.
 
 - `references/10-scoring-framework.md` — Scoring Framework
 - `references/11-output-format.md` — Output Format

@@ -113,10 +113,12 @@ provider（`src/agents/selected-skills-provider.ts`）在 `list()` 里多做一�
 渲染成 7,894——**同一份文件走 `skill` 与走 `read` 占的字节不同，行越多差得越多**。所以两条通道各自的
 上限是：`skill` 看正文 ≤ `threshold − 512`，`read` 看**渲染后** ≤ `threshold`。按字符数定的上限会放过
 真会被剪的册子（反证：往一册里加 200 行空内容，文件字符仍在 7,680 内而 read 回执破 8,192，闸门红）。
-建模只在 `test/selected-skills-content.test.mjs` 的 `readEnvelopeChars` 有一份。
+建模只在 `test/selected-skills-content.test.mjs` 的 `readEnvelopeChars` 有一份。还有**第三种通道**：真机实测模型不一定按你说的用 `read`，它会直接 bash `cat` 整册——`cat` 回执没有行号包装，看着更宽松，但剪枝器只看总数，所以每册的**原文件字符**也一并拦在 `threshold − 512` 内（2026-10-15 实测最长一册 7,087）。
 
 台账是 `test/selected-skills-content.test.mjs` 的 `LAYERED`（32 颗，只准变长）。**第一批 7 颗**（2026-10-14）：`buffett-investment-framework`（入口 11,296 → 6,605；`references/` 9 → 22 份，65 张卡按卡片边界切）、三颗 A 股 `china-idea-generation` / `china-sector-overview` / `china-catalyst-calendar`（流程搬进一份分册，每册都带 Apache §4(b) 那行声明）、`bear-case` 与 `stock-screener`（各 3 册）、`peter-lynch-skill`——最后一颗是**两层厚正文**：入口之外上游自交的 4 份指南（8,750–21,342）也超限，各切成多册并把**原路径留成几百字符的索引**，这样十几处互指的旧指针一个都不用改。
 
 **第二批 25 颗**（2026-10-15，全部是 InvestSkill 的单文件厚册，15,437–31,754 字符）用同一套工序批量重排：入口只留**每轮都成立的那三节**（`⚠️ Data Verification` / `📋 Data & Sources Header` / 有的话 `⚠️ Read This First`）+ 一列分册名 + 那两句反谎报硬话，其余按 `##` **保序**搬进 `references/10…`，单节渲染破上限就依次降级到 `###` / `####` / 空行段落。三条实测结论：① 分册抬头那 4 行也要进 `read` 包络，宁可按 500 字符预留多切一册，也不许事后剪尾凑数（凑数=删内容）；② 一节被切到下一册时**册末自动留一句"This section is not finished here: … continues in `references/NN-….md`"**，所以 `following sections` 这类回指不会落到空气上——第二批 25 颗只查到 1 处真断链（`learning-coach` 的 "the quiz block from §4"，改成点名那一册），远低于第一批的 5 处；③ 闸门的断链判据只认**裸文件名或以 `references/` 打头**的路径：上游正文里也写 `.md`，但那是产物名模板（`<TICKER>-10k-digest.md`）或输出目录示例（`output/thesis/NVDA.md`），当断链就是假阳性（两颗各撞一种）。逐行核对：两批都零行丢失，只有改写的分派指针例外。
 
 ⛔ **分层引入的唯一新失效面：模型会不会真去开分册。** 真机样本（2026-10-14 新会话）里它只加载了入口册，却回答"已经读入全文了"，并把入口里那段 router 当成可选项兜售给使用者——摘要每一条都逐字来自入口册，只在分册里的卡片正文、workflow 步骤、输出契约一项没提。所以每一颗分层的入口都写着两句话：**加载入口不等于读过本 skill**，以及说清哪些册开过、哪些没开，没读过的步骤/阈值/模板一律不得转述。router 那段执行示例也照 §8.6 第 4 条从入口搬走了。这条只能真机复验，闸门管不到"它去不去读"；第二批 25 颗用的是同一套入口话术，开一次真机会话即可同时覆盖两批（2026-10-15 尚未复验）。
+
+2026-10-15 真机复验做完了（web profile 用 `link:` 软链回开发树，所以跑的就是工作树）：**会去开册、开对册、跨册续读三条成立**——`dividend-analysis` 的 FCF payout 档位与五项权重、`tax-lens` 的 61 天窗口四条检查点、`10k-digest` 的输出文档 1–10 节（前 3 节在 10 册、4–10 在 11 册，两册都被打开且明说了第三册与本问无关）逐字对回文件全中；被追问"读全了吗"时它答"没有读全"并列出未开的册名。**两处失效也实测到了**：① 它用行窗口只读了 `10-analysis-framework.md` 的 18–45 行，回答却写"我打开了这个文件"，追问才更正为节选；② 它把一句**任何一册里都不存在**的免责声明用引用格式当原文交出来（`Educational illustration of how the rules generally work…`——最近的两条真句子是入口的 `This is not tax advice` 与 `14-thesis-invalidation.md` 的 `Educational analysis only.`，而它明说 14 没开）。所以入口那句"整册开、不许用行窗口"（`whole — with no line window`）是这两处的直接处置，`test/selected-skills-content.test.mjs` 现在逐颗点名这句与那句反谎报，缺一颗就具名失败。

@@ -42,8 +42,9 @@ Draw an industry's supply and value chain as a directed graph — from raw input
 
 ## Read the Parts
 
-Everything below the surface of this file lives in `references/`. Open a part with `read`,
-one whole part at a time — the file names below are the only addressing this entry has.
+Everything below the surface of this file lives in `references/`. **whole, with no line window** — quoting a rule or a template out of a slice of one is how a
+file gets reported as read when it was only skimmed. The file names below are the only
+addressing this entry has.
 
 - `references/10-overview.md` — Overview; 1. The Value Chain Model; 2. Step 1 — Define the Scope; 3. Step 2 — Build the Chain Map (the graph)
 - `references/11-step-3-position-locator.md` — 4. Step 3 — Position Locator; 5. Step 4 — Chokepoint & Bottleneck Analysis; 6. Step 5 — Value-Pool & Margin Migration; 7. Step 6 — Concentration & Supply-Chain Risk; 8. Step 7 — Investment Idea Generation; 9. Worked Example — AI Compute Stack; 10. Input Formats

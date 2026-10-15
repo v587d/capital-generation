@@ -42,8 +42,9 @@ Perform technical analysis of US stocks using price action, chart patterns, and 
 
 ## Read the Parts
 
-Everything below the surface of this file lives in `references/`. Open a part with `read`,
-one whole part at a time — the file names below are the only addressing this entry has.
+Everything below the surface of this file lives in `references/`. **whole, with no line window** — quoting a rule or a template out of a slice of one is how a
+file gets reported as read when it was only skimmed. The file names below are the only
+addressing this entry has.
 
 - `references/10-chart-pattern-analysis.md` — Chart Pattern Analysis; Technical Indicators; Price Levels; Market Context; Moving Average Chart Analysis; Trade Recommendation from MA Analysis
 - `references/11-chart-visualization-support.md` — Chart Visualization Support

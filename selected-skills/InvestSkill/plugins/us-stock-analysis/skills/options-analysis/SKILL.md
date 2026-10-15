@@ -44,8 +44,9 @@ Comprehensive analysis of options Greeks, implied volatility dynamics, strategy 
 
 ## Read the Parts
 
-Everything below the surface of this file lives in `references/`. Open a part with `read`,
-one whole part at a time — the file names below are the only addressing this entry has.
+Everything below the surface of this file lives in `references/`. **whole, with no line window** — quoting a rule or a template out of a slice of one is how a
+file gets reported as read when it was only skimmed. The file names below are the only
+addressing this entry has.
 
 - `references/10-analysis-framework.md` — Analysis Framework
 - `references/11-implied-volatility-iv-analysis.md` — (continued) Analysis Framework

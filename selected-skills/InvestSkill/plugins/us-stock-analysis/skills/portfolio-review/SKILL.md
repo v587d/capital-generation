@@ -27,8 +27,9 @@ Comprehensive portfolio analysis and optimization recommendations.
 
 ## Read the Parts
 
-Everything below the surface of this file lives in `references/`. Open a part with `read`,
-one whole part at a time — the file names below are the only addressing this entry has.
+Everything below the surface of this file lives in `references/`. **whole, with no line window** — quoting a rule or a template out of a slice of one is how a
+file gets reported as read when it was only skimmed. The file names below are the only
+addressing this entry has.
 
 - `references/10-phase-1-portfolio-snapshot.md` — Phase 1 — Portfolio Snapshot; Phase 2 — Performance Analysis; Phase 3 — Asset Allocation Review; Phase 4 — Holdings Review; Phase 5 — Concentration Risk Scoring
 - `references/11-phase-6-correlation-diversification.md` — Phase 6 — Correlation & Diversification Analysis; Phase 7 — Tax-Loss Harvesting Opportunities; Phase 8 — Factor Exposure Analysis
