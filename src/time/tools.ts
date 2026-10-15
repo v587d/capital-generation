@@ -99,6 +99,13 @@ const DATA_TIME_CONTRACTS: Record<string, DataTimeContract> = {
     maxDays: TEN_YEAR_DAYS,
     warning: '分钟档（m1/m5/m15/m30）区间上限 10 天，超出会在参数层被拒；adjust=qfq 时 end_date 不得晚于当日（afdate 由本能力锁成当日）',
   },
+  // FTShare 免费档那三条日度资金流：实测窗口只有最近约 40 个交易日（T-40 有数、T-50 起 total=0）。
+  // ⛔ 这里刻意**不设 maxDays**：maxDays 会在参数层抛错，而这个窗口是每天都在往前滚的观测值，
+  // 写成天数常量等于造一个会腐烂的闸门（窗口变宽就误拒合法请求）。只给 warning 提示模型别循环重试。
+  ftshare_stock_daily_flow: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: '上游只保留最近约 40 个交易日：早于窗口的日期返回 total=0，是合法空结果、不是取数失败，不要换日期循环重试' },
+  ftshare_industry_daily_flow: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: '上游只保留最近约 40 个交易日：早于窗口的日期返回 total=0，是合法空结果、不是取数失败' },
+  ftshare_concept_daily_flow: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: '上游只保留最近约 40 个交易日：早于窗口的日期返回 total=0，是合法空结果、不是取数失败' },
+  ftshare_main_capital_flow: { kind: 'date', fields: ['date'], warning: 'date 必须是交易日；省略时取上游最新切片（实测为当日 15:30 那一次）' },
 }
 
 export function getDataTimeContract(capability: string): DataTimeContract | undefined {

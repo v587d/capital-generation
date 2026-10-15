@@ -13,6 +13,7 @@
 import { createRequestThrottle } from '../../lib/net/throttle.js'
 import { sharedEastmoneyThrottle, createEastmoneyClient } from '../../lib/net/eastmoney-client.js'
 import { createFuyaoRestSources } from '../../lib/sources/fuyao-rest.js'
+import { createFtshareSources } from '../../lib/sources/ftshare-rest.js'
 import { createEastmoneySources } from '../../lib/sources/eastmoney-http.js'
 import { createTencentSources } from '../../lib/sources/tencent-http.js'
 import {
@@ -120,8 +121,9 @@ function pickPath(root, path) {
 
 function buildSources() {
   const fuyaoKey = resolveCredential('FUYAO_API_KEY')
+  const ftshareKey = resolveCredential('FTSHARE_API_KEY')
   const map = new Map()
-  for (const source of [...createFuyaoRestSources(async () => fuyaoKey), ...createEastmoneySources(), ...createTencentSources()]) {
+  for (const source of [...createFuyaoRestSources(async () => fuyaoKey), ...createEastmoneySources(), ...createTencentSources(), ...createFtshareSources(async () => ftshareKey)]) {
     map.set(source.schema.capability, source)
   }
   return map

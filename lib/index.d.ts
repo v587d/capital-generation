@@ -86,6 +86,8 @@ export interface Config {
     selectedSkills?: SelectedSkillSelection;
     /** Fuyao credentials 引用名；空值回退到 FUYAO_API_KEY。 */
     fuyaoCredentialRef?: string;
+    /** FTShare（非凸科技）credentials 引用名；空值回退到 FTSHARE_API_KEY。 */
+    ftshareCredentialRef?: string;
     /** web_retriever 配置（可选；缺省使用 AnySearch 默认地址与凭据名）。 */
     retriever?: RetrieverConfig;
 }
@@ -98,6 +100,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
         [k: string]: z<boolean, boolean, "defined">;
     }>>, "defined">;
     fuyaoCredentialRef: z<string, string, "defined">;
+    ftshareCredentialRef: z<string, string, "defined">;
     retriever: z<Schemastery.ObjectS<NoInfer<{
         baseURL: z<string, string, "defined">;
         credentialRef: z<string, string, "defined">;
@@ -183,6 +186,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
         [k: string]: z<boolean, boolean, "defined">;
     }>>, "defined">;
     fuyaoCredentialRef: z<string, string, "defined">;
+    ftshareCredentialRef: z<string, string, "defined">;
     retriever: z<Schemastery.ObjectS<NoInfer<{
         baseURL: z<string, string, "defined">;
         credentialRef: z<string, string, "defined">;

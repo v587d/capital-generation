@@ -1,10 +1,10 @@
 # data_collector 能力总表
 
-> 本表由 `npm run docs:capabilities` 从 Fuyao、Tencent、Eastmoney 与 Wind source 定义生成，并由 `test/data-collector-capabilities.test.mjs` 断言与实现同步：新增端点若忘了重新生成，测试会失败。
+> 本表由 `npm run docs:capabilities` 从 Fuyao、Tencent、Eastmoney、Wind 与 FTShare source 定义生成，并由 `test/data-collector-capabilities.test.mjs` 断言与实现同步：新增端点若忘了重新生成，测试会失败。
 
-当前共 **94 个 capability**：同花顺 Fuyao 61 个，腾讯公开 HTTP 9 个，东方财富 HTTP 21 个，Wind 金融数据服务 3 个。参数后带 **\*** 表示必填。
+当前共 **98 个 capability**：同花顺 Fuyao 61 个，腾讯公开 HTTP 9 个，东方财富 HTTP 21 个，Wind 金融数据服务 3 个，FTShare（非凸科技）4 个。参数后带 **\*** 表示必填。
 
-**复核方式**：Fuyao 能力可用 `npm run smoke:fuyao` 真实复核；Tencent 能力使用最小 smoke fixture 或按需真实请求复核；Eastmoney 能力使用固定 fixture，并按需执行公开网页 JSON smoke；Wind 能力用 `npm run smoke:wind` 真实复核（需要 `WIND_API_KEY`，**按次消耗上游积分**）。
+**复核方式**：Fuyao 能力可用 `npm run smoke:fuyao` 真实复核；Tencent 能力使用最小 smoke fixture 或按需真实请求复核；Eastmoney 能力使用固定 fixture，并按需执行公开网页 JSON smoke；Wind 能力用 `npm run smoke:wind` 真实复核（需要 `WIND_API_KEY`，**按次消耗上游积分**）。FTShare 那几条走 `npm run contract:probe` 的 daily 档巡检（需要 `FTSHARE_API_KEY`；**免费档限流 10 QPS / burst 20**，取数一律经本模块的进程级节流链）。
 
 ## 怎么用
 
@@ -31,10 +31,10 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 
 | 模块 | 原因 |
 |---|---|
-| A 股主力资金 `capital-flow/*` | 上游返回 `code=2004`：同花顺 AI 客户端专用，未开放外部接入 |
+| A 股主力资金 `capital-flow/*`（Fuyao 侧） | 上游返回 `code=2004`：同花顺 AI 客户端专用，未开放外部接入。**这一块的覆盖已由 FTShare 那四条 `ftshare_*` 补上**（同花顺口径日度 + 15 分钟切片主力五档），所以它不再是空白，只是不来自 Fuyao |
 | 高频动向 `high-frequency/*` | 同上（`code=2004`） |
 | 全市场 Parquet 导出 `dump/market-dumps/*` | 预签名链接 + Parquet 二进制，需独立的下载/落盘链路，本阶段不接入 |
-| 期货 `futures/*`、期权 `options/*` | 与本 preset 的产品定位不符（角色边界只覆盖股票/指数/基金），共 30 个端点主动排除。**注意**：`ticker_search` / `ticker_list` 仍可按官方契约检索 `futures` / `options` 代码（元数据域全量放开），但本 preset 不提供它们的行情/财务数据端点 |
+| 期货 `futures/*`、期权 `options/*`、贵金属 | **2026-10-15 修订**：此前排除的真实原因是项目初期没有稳定数据源，不是产品定位——当时这句写成了"角色边界只覆盖股票/指数/基金"，是错的。现在只要拿到稳定且免费的上游就应当接入；FTShare 免费档已提供 10 条期货与 1 条贵金属接口，尚未注册，排在后续批次。**注意**：`ticker_search` / `ticker_list` 一直可按官方契约检索 `futures` / `options` 代码（元数据域全量放开），缺的只是行情/财务端点 |
 | 基金新闻 `fund/news/article-list` | 非结构化内容，已由 `web_retriever` 的检索能力覆盖 |
 | Wind 的自然语言工具（选股 / 档案 / 财务 / 事件 / 风险，bond 域与 `analytics_data` 同类） | 返回哪些列**由 `question` 的措辞决定**，同一问法换个说法就换一套列——输出契约无处锚定，护栏等于没有。数值需求走 `wind_edb_search` / `wind_edb_query` / `wind_stock_kline`，公告与新闻正文才用 NL 工具（在 `web_retriever` 的 `wind_docs_*`） |
 | Wind 行情指标截面 `get_stock_price_indicators` | 中文键快照，腾讯与东财同位能力已覆盖；`indexes` 没有可核对的指标集文档，口径无法验 |
@@ -223,3 +223,12 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 | `wind_edb_search` | `/wind/edb_search` | `question`\* | 否 | Wind EDB 宏观/行业/汇率指标检索（只找码不取数） |
 | `wind_edb_query` | `/wind/edb_query` | `indicator`\* `start_date`\* `end_date`\* | 否 | Wind EDB 指标时间序列（宏观/行业/汇率，按日期区间） |
 | `wind_stock_kline` | `/wind/stock_kline` | `code`\* `start_date`\* `end_date`\* `period` `adjust` | 否 | Wind 日周月与 1–30 分钟 K 线（按日期区间，A股+港股+美股） |
+
+## FTShare 资金流（同花顺口径，plan B）
+
+| capability | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|
+| `ftshare_stock_daily_flow` | `/ftshare/stock_daily_flow` | `start_date`\* `end_date`\* `page` `size` `code` | 是 | 同花顺个股日度资金流（近 40 交易日，亿元） |
+| `ftshare_industry_daily_flow` | `/ftshare/industry_daily_flow` | `start_date`\* `end_date`\* `page` `size` `board_name` | 是 | 同花顺行业板块日度资金流（近 40 交易日，亿元） |
+| `ftshare_concept_daily_flow` | `/ftshare/concept_daily_flow` | `start_date`\* `end_date`\* `page` `size` `board_name` | 是 | 同花顺概念板块日度资金流（近 40 交易日，亿元） |
+| `ftshare_main_capital_flow` | `/ftshare/main_capital_flow` | `date` `time` `page` `size` | 是 | 个股主力资金五档（15 分钟切片，元） |

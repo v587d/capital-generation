@@ -27,7 +27,7 @@ export const ISSUE_VERDICTS = Object.freeze(['GUARD', 'ENVELOPE', 'HTTP_STATUS']
 export const DEFAULT_BUDGET_MS = 20_000
 
 /** 家族 = 限速分组。同组串行、组间留 gap；跨组**绝不并发**（两份独立节流 = 没节流）。 */
-export const PROBE_FAMILIES = ['fuyao', 'eastmoney', 'tencent', 'retriever', 'anysearch', 'wind', 'paddle']
+export const PROBE_FAMILIES = ['fuyao', 'eastmoney', 'tencent', 'retriever', 'anysearch', 'wind', 'paddle', 'ftshare']
 
 /** 组间间隔：让上一个上游的连接与风控计数先冷下来。 */
 export const PROVIDER_GAP_MS = 2_000
@@ -45,6 +45,7 @@ export const FAMILY_SECRET = {
   anysearch: 'ANYSEARCH_API_KEY',
   wind: 'WIND_API_KEY',
   paddle: 'PADDLE_OCR_TOKEN',
+  ftshare: 'FTSHARE_API_KEY',
 }
 
 /** 已知数据缺口的上游码：命中它不算失败，但每天在正文列一次（§10.4）。 */
@@ -280,8 +281,20 @@ const PADDLE = [
   out('paddle', 'paddle_ocr_job', '端到端要一份长期可公开访问的样本 PDF，样本未选定；选定后升级为 weekly 真跑', '2026-10-08'),
 ]
 
+// ── FTShare（非凸科技）同花顺资金流那一族（4 颗，每天）────────────────────────
+// 日期一律相对量：这一族上游只保留最近约 40 个交易日（实测 T-40 有数、T-50 起 total=0），
+// 窗口每天都在往前滚，写死绝对日期等于让巡检自己变成永久 EMPTY。
+const FT_RANGE = { start_date: dayShift(-10), end_date: dayShift(-1), page: 1, size: 3 }
+const FT = [
+  ds('ftshare', 'ftshare_stock_daily_flow', 'daily', FT_RANGE, { expect: { minRows: 1 }, note: '同花顺个股日度资金流；金额单位亿元（与全市场快照成交额交叉核对过）' }),
+  ds('ftshare', 'ftshare_industry_daily_flow', 'daily', FT_RANGE, { expect: { minRows: 1 }, note: '同花顺一级行业 90 个板块的资金滚动，是 eastmoney_cashflow_rotation 的第二家上游' }),
+  ds('ftshare', 'ftshare_concept_daily_flow', 'daily', FT_RANGE, { expect: { minRows: 1 }, note: '概念板块天然重叠，禁止跨板块相加' }),
+  // 不给 date/time 就打"最新切片"，所以这一条永远落在有数的那一档上。
+  ds('ftshare', 'ftshare_main_capital_flow', 'daily', { page: 1, size: 3 }, { expect: { minRows: 1 }, note: '15 分钟切片主力资金，单位元；免费档限流 10 QPS / burst 20' }),
+]
+
 /** 全量注册表。覆盖测试拿它对着 `lib/` 的真实注册数逐条核。 */
-export const CONTRACT_PROBES = [...FUYAO, ...EM, ...TX, ...WIND_DATA, ...RETRIEVER, ...WIND_PROTOCOL, ...ANYSEARCH, ...PADDLE]
+export const CONTRACT_PROBES = [...FUYAO, ...EM, ...TX, ...WIND_DATA, ...RETRIEVER, ...WIND_PROTOCOL, ...ANYSEARCH, ...PADDLE, ...FT]
 
 /** 该条真打时需要的凭据（`excluded` 返回空——它永远不发请求）。 */
 export function secretRefOf(entry) {

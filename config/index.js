@@ -94,6 +94,7 @@ export const Config = z.object({
   customPersona: z.string().default('').volatile().description('Capital 模式附加人设文本'),
   selectedSkills: SelectedSkillsSchema.default(SELECTED_SKILL_DEFAULTS).description('Explicitly selected community experiments; default off and visible only to the Capital root Agent'),
   fuyaoCredentialRef: z.string().default('FUYAO_API_KEY').volatile().description('Fuyao credentials 引用名'),
+  ftshareCredentialRef: z.string().default('FTSHARE_API_KEY').volatile().description('FTShare（非凸科技）credentials 引用名'),
   retriever: z.object({
     baseURL: z.string().default('').volatile().description('AnySearch API 地址'),
     credentialRef: z.string().default('ANYSEARCH_API_KEY').volatile().description('AnySearch credentials 引用名'),

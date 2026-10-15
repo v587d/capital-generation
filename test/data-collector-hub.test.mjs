@@ -6,6 +6,7 @@ import { createFuyaoRestSources } from '../lib/sources/fuyao-rest.js'
 import { createTencentSources } from '../lib/sources/tencent-http.js'
 import { createEastmoneySources } from '../lib/sources/eastmoney-http.js'
 import { createWindSources } from '../lib/sources/wind-mcp.js'
+import { createFtshareSources } from '../lib/sources/ftshare-rest.js'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const SESSION = { id: 'session-1', header: { cwd: '/workspace/proj' } }
@@ -386,9 +387,9 @@ test('describeCapability：返回单个能力详情，未知名字返回 undefin
 
 test('能力目录体积预算：必须留在 DSH 剪枝阈值（8192）以内，否则中间能力会被截断', async () => {
   const { hub } = makeHub()
-  for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources(), ...createWindSources(async () => 'key')]) hub.registerSource(dataSource)
+  for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources(), ...createWindSources(async () => 'key'), ...createFtshareSources(async () => 'key')]) hub.registerSource(dataSource)
   const directory = hub.capabilityDirectory()
-  assert.equal(hub.capabilityNames().length, 94, '端点数量回归：目录预算断言必须覆盖 Fuyao、Tencent、Eastmoney 与 Wind 全部已注册能力')
+  assert.equal(hub.capabilityNames().length, 98, '端点数量回归：目录预算断言必须覆盖 Fuyao、Tencent、Eastmoney、Wind 与 FTShare 全部已注册能力')
 
   // 预算的来源（实测本机 dsh 0.1.5-rc.1，不是拍脑袋的数字）：
   // - 真实上限是 dsh-compaction-tool-result-pruner 的 `thresholdChars`（preset 里配 8192）。

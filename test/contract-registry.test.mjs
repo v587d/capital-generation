@@ -18,6 +18,7 @@ import { createFuyaoRestSources } from '../lib/sources/fuyao-rest.js'
 import { createEastmoneySources } from '../lib/sources/eastmoney-http.js'
 import { createTencentSources } from '../lib/sources/tencent-http.js'
 import { createWindSources } from '../lib/sources/wind-mcp.js'
+import { createFtshareSources } from '../lib/sources/ftshare-rest.js'
 import {
   CONTRACT_PROBES, KNOWN_GAP_CODES, PROBE_FAMILIES, stateOf, secretRefOf, probesForTier, resolveTier,
   lastScheduledDue, previousScheduledDue, beijingDateOf, resolveDayShifts,
@@ -31,6 +32,7 @@ for (const [factory, list] of [
   ['eastmoney', createEastmoneySources()],
   ['tencent', createTencentSources()],
   ['wind', createWindSources()],
+  ['ftshare', createFtshareSources(async () => 'coverage-check-only')],
 ]) {
   for (const source of list) {
     assert.ok(!registered.has(source.schema.capability), `能力 ${source.schema.capability} 被注册了两次`)

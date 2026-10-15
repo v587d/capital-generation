@@ -6,6 +6,7 @@ import { createFuyaoRestSources } from '../lib/sources/fuyao-rest.js'
 import { createTencentSources } from '../lib/sources/tencent-http.js'
 import { createEastmoneySources } from '../lib/sources/eastmoney-http.js'
 import { createWindSources } from '../lib/sources/wind-mcp.js'
+import { createFtshareSources } from '../lib/sources/ftshare-rest.js'
 import { DataCollectorHub } from '../lib/data-collector/hub.js'
 
 /**
@@ -23,7 +24,7 @@ const documented = [...table.matchAll(/^\|\s`([a-z0-9_]+)`\s\|/gm)].map((match) 
 
 function registered() {
   const hub = new DataCollectorHub({ store: { async save() { throw new Error('unused') } } })
-  for (const source of [...createFuyaoRestSources(async () => 'unused'), ...createTencentSources(), ...createEastmoneySources(), ...createWindSources(async () => 'unused')]) hub.registerSource(source)
+  for (const source of [...createFuyaoRestSources(async () => 'unused'), ...createTencentSources(), ...createEastmoneySources(), ...createWindSources(async () => 'unused'), ...createFtshareSources(async () => 'unused')]) hub.registerSource(source)
   return hub
 }
 
@@ -44,7 +45,7 @@ test('能力总表：每个 capability 都带端点路径、参数列与非空�
     const row = table.split('\n').find((line) => line.startsWith(`| \`${capability}\` |`))
     assert.ok(row, `${capability} 缺少表格行`)
     const cells = row.split('|').map((cell) => cell.trim())
-    assert.ok(cells[2].startsWith('`/api/') || cells[2].startsWith('`/tencent/') || cells[2].startsWith('`/eastmoney/') || cells[2].startsWith('`/wind/'), `${capability} 的端点列应为 Fuyao、Tencent、Eastmoney 或 Wind 路径`)
+    assert.ok(cells[2].startsWith('`/api/') || cells[2].startsWith('`/tencent/') || cells[2].startsWith('`/eastmoney/') || cells[2].startsWith('`/wind/') || cells[2].startsWith('`/ftshare/'), `${capability} 的端点列应为 Fuyao、Tencent、Eastmoney、Wind 或 FTShare 路径`)
     assert.ok(cells[3].length > 0, `${capability} 的参数列不应为空（无参数写「无参数」）`)
     assert.equal(cells[4], hub.describeCapability(capability).paginated ? '是' : '否', `${capability} 的分页列与实现不一致`)
     assert.ok(cells[5].length > 0, `${capability} 的用途列不应为空`)

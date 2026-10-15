@@ -69,6 +69,7 @@ jobs:
           ANYSEARCH_API_KEY: ${{ secrets.ANYSEARCH_API_KEY }}
           WIND_API_KEY: ${{ secrets.WIND_API_KEY }}
           PADDLE_OCR_TOKEN: ${{ secrets.PADDLE_OCR_TOKEN }}
+          FTSHARE_API_KEY: ${{ secrets.FTSHARE_API_KEY }}
         run: npm run contract:probe -- --tier "${TIER:-auto}" --json contract-report.json --markdown contract-report.md
 
       # 明细留 90 天（Actions 默认保留期）。跨天趋势从 Issue 历史读，这里只是"当天到底返回了什么"的存照。
