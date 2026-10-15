@@ -17,7 +17,7 @@
 |---|---|
 | 角色边界、Dataset 消息 / 返回边界、capability 目录预算 | `docs/dev/data-roles.md`（§1.1 §1.2 §1.4 §1.5）|
 | 时间轴、日期归一、session 读取 | `docs/dev/time-axis.md`（§1.3）|
-| data_junior 的 bash 闸门与 shell 挂载 | `docs/dev/bash-gate.md`（§1.6）|
+| shell 闸门、fs 写口与挂载 | `docs/dev/bash-gate.md`（§1.6）|
 | web_retriever、本地回退、九个具名来源、文档解析 `ocr` | `docs/dev/web-retriever.md`（§4.1 §4.2 §4.3）|
 | settings 卡片（host 平面嵌套包，座位在「插件」页） | `docs/dev/settings-config.md`（§5.1–§5.4）|
 | `render_chart` 准入与呈现 | `docs/dev/chart-presentation.md`（§6.1 §6.2）|
