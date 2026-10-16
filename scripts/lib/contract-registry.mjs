@@ -281,7 +281,7 @@ const PADDLE = [
   out('paddle', 'paddle_ocr_job', '端到端要一份长期可公开访问的样本 PDF，样本未选定；选定后升级为 weekly 真跑', '2026-10-08'),
 ]
 
-// ── FTShare（非凸科技）资金流 + 报价快照那一族（9 颗，每天）────────────────────
+// ── FTShare（非凸科技）资金流 / 报价快照 / 披露 / 宏观 / 期货那一整族（每天）───────────
 // 日期一律相对量：日度那族上游只保留最近约 45 个交易日（实测 T-45 有数、T-46 起 total=0），
 // 窗口每天都在往前滚，写死绝对日期等于让巡检自己变成永久 EMPTY。
 // `page` 实测生效（六页 × 1000 去重 = total_items 5574），但响应里的 `pageNum` 恒 1，
@@ -376,6 +376,56 @@ const FT = [
   ds('ftshare', 'ftshare_financial_calendar', 'daily', { start_date: dayShift(-3), end_date: dayShift(-1), size: 100 }, {
     expect: { minRows: 1 },
     note: '⛔ 窗上限 3 天差由参数层拦（实测 4 天 400），巡检只打 3 天窗内；event_time 上游给秒，本层转毫秒',
+  }),
+  // 批次 F 的十颗（2026-10-16，期货与贵金属——本仓此前是整块空白）。⛔ 合约代码一律**从清单那颗现取**：
+  // 期货合约会到期，写死一只 2610 就把巡检做成几个月后的永久 EMPTY（同那条转债代码的教训）。
+  ds('ftshare', 'ftshare_futures_contracts', 'daily', {}, {
+    expect: { minRows: 1 },
+    note: '一日全量快照实测 1812 行 = 906 只合约 × 两份 future_type 副本（null 与 2），按行计数会翻倍；无分页',
+  }),
+  ds('ftshare', 'ftshare_futures_contract_detail', 'daily', {}, {
+    requires: 'symbol',
+    // 代码从同族清单的第一行现取（实测首行 IC2610.CFE，短后缀），本层按交易所换成 K 线要的长后缀。
+    resolveFrom: { capability: 'ftshare_futures_contracts', params: {}, path: 'item.0.symbol' },
+    expect: { minRows: 1 },
+    note: '带 symbol 打时这条同时在验过滤真的生效（上游大小写不敏感，本层比的是大写后的值）',
+  }),
+  ds('ftshare', 'ftshare_futures_kline', 'daily', { interval: 'daily', start_date: dayShift(-60), end_date: dayShift(-1) }, {
+    requires: 'symbol',
+    expect: { minRows: 1 },
+    note: '单合约日 K；12 个自然月的跨度上限由上游 400 说话，本层不换算成天数闸门。⛔ interval 只四档，1d 一类会被静默回空',
+  }),
+  ds('ftshare', 'ftshare_futures_limit_price', 'daily', { exchange: 'SHFE', size: 3 }, {
+    requires: 'trade_date',
+    expect: { minRows: 1 },
+    note: '⛔ size 压在 50（实测 SHFE 60 起整页 400「missing pre-settlement price」，缺前结算价的是上游合约而不是参数）；m_ratio 原样透出不解读',
+  }),
+  ds('ftshare', 'ftshare_futures_settle', 'daily', { exchange: 'SHFE', size: 3 }, {
+    requires: 'trade_date',
+    expect: { minRows: 1 },
+    note: 'exchange 必填；区间跨度上限 31 天由参数层拦（实测超一天就 400）。四档保证金率是比例值，另外四列 fee 单位未披露',
+  }),
+  ds('ftshare', 'ftshare_futures_warrant', 'daily', { size: 3 }, {
+    requires: 'trade_date',
+    expect: { minRows: 1 },
+    note: '一日全市场实测 1469 行；⛔ unit 随行而变（张 / 吨 / 手 / 桶，INE 一所之内就有两种），跨品种相加前先按 unit 分组',
+  }),
+  ds('ftshare', 'ftshare_futures_weekly', 'daily', { prd: 'CU', size: 3 }, {
+    expect: { minRows: 1 },
+    note: '只给 prd 就能打（实测 CU 一个品种 total=92 周）；⛔ 周报有发布滞后，最新一期实测比当天晚两周，别按"本周"打',
+  }),
+  ds('ftshare', 'ftshare_futures_index_kline', 'daily', { code: 'AG_NH', start_date: dayShift(-20), end_date: dayShift(-1), size: 3 }, {
+    expect: { minRows: 1 },
+    note: '南华商品指数；⛔ 聚合指数不保证 high ≥ open（实测 30 行里 1 行违例），别拿单根 K 的自洽性判数据坏了',
+  }),
+  ds('ftshare', 'ftshare_futures_member_rank', 'daily', { exchange: 'CFFEX', size: 3 }, {
+    requires: 'trade_date',
+    expect: { minRows: 1 },
+    note: '⛔ 上游那族 exchange 只认小写且广期所真名是 gfe（GFEX / gfex 都静默 0 行），本层负责换写法；排名列与数值列同时为空才是"没有这个口径"',
+  }),
+  ds('ftshare', 'ftshare_bullion_price', 'daily', { symbol: 'AU9999', start_date: dayShift(-400), end_date: dayShift(-1), size: 3 }, {
+    expect: { minRows: 1 },
+    note: '⛔ 序列实测停在 2026-08 中旬（AU9999 大窗首行 2026-08-14），所以窗要开到 400 天，按"最近一周"打永远 EMPTY；单位上游未披露，只做同 symbol 内比较',
   }),
 ]
 

@@ -123,6 +123,17 @@ const DATA_TIME_CONTRACTS: Record<string, DataTimeContract> = {
   ftshare_shibor: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: 'start_date / end_date 必填。历史起点实测在 2006-10-08（2006 全年 63 行、首行就是它；2006-01-01..06-30、07-01..09-30、1999 与 2004 全年都 0 行）；周末、节假日与未发布日没有行，上游不插值也不前值填充，所以序列天然不连续' },
   ftshare_hibor: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: 'start_date / end_date 必填。实测 2010 全年 249 行（首行 2010-01-04）、2000-01-01..2001-12-31 两年 0 行，起点是否滚动未核出；香港假日与未发布日没有行。⛔ m4 / m5 / m7..m11 七档实测整列为 null（HIBOR 只公布部分期限），null 不是 0，别补值' },
   ftshare_financial_calendar: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: '⛔ 单次窗上限是 3 天差（实测 4 天就 400「时间范围不能超过3天」，本层在参数层拒）——要更长区间请分段请求，本层不循环取。覆盖是**滚动窗**：实测 2026-08-03 / 09-01 / 09-15 / 10-05 / 10-12 / 10-19 / 10-26 各日都有事件（40 / 59 / 45 / 37 / 21 / 25 / 10 行），2026-11-02 与 11-16 / 12-01 / 2026-01-05 回空数组（total=0），2020 / 2023 / 2024 / 2025 里的整天直接回 data:null——边界随日期前移；两种空都是合法空，不要换日期重试' },
+  // 批次 F（2026-10-16 真报文）：期货与贵金属。⛔ `ftshare_futures_weekly` 刻意不挂契约——它的参数面
+  // 只有 `YYYYWW` 周码（没有日期列），行内日期是 `week_date`，挂上去只会让归一层去找不存在的列。
+  ftshare_futures_contracts: { kind: 'date', fields: ['trade_date'], warning: 'trade_date 省略 = 上游按 CST 取**前一交易日**。⛔ 当日在 20:20 前是**合法拒绝**：实测 2026-10-16 上午打 trade_date=20261016 → 400「当日期货数据将在上海时间 20:20 后开放查询」，那不是取数故障、不要重试' },
+  ftshare_futures_contract_detail: { kind: 'date', fields: ['trade_date'], warning: '同上：省略 = 前一交易日，当日 20:20 前 400（实测与清单那颗同一句话）。`symbol` 是短后缀全码（AG2610.SHF），大小写都收；认不出的代码不回错、只回空 items' },
+  ftshare_futures_kline: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: '⛔ 跨度上限 12 个自然月，本层不换算成天数闸门（实测 300 天正常、365 与 399 天被上游 400「日 K 及以上周期查询范围不能超过 12 个自然月」拒）。只给 end_date 不给 start_date 在参数层拒（上游同样 400）。周/月/季是区间内日 K 聚合的，窗口没盖满周期那一根不完整。当日在收盘前是 200 + 0 行（不是那句 20:20 的 400）' },
+  ftshare_futures_limit_price: { kind: 'date_range', fields: ['start_date', 'end_date', 'trade_date'], warning: '单日 trade_date 或区间二选一，混给在参数层拒。⛔ 当日实测是 **200 + total=0**（合法空），与清单那颗的 400 不同。区间模式实测行按 trade_date **降序**给，最新一天在第一页' },
+  ftshare_futures_settle: { kind: 'date_range', fields: ['start_date', 'end_date', 'trade_date'], warning: '单日或区间二选一；⛔ **区间跨度上限 31 天**（实测超一天就 400「start_date and end_date must be at most 31 days apart」，本层在参数层拦），要更长序列请分段取。当日实测 200 + total=0' },
+  ftshare_futures_warrant: { kind: 'date_range', fields: ['start_date', 'end_date', 'trade_date'], warning: 'trade_date / 区间 / symbol 至少给一个（实测全空 400「证券代码、交易日期、开始日期或结束日期至少需要提供一个」）。一日全市场实测 1469 行。当日实测 200 + total=0（20:20 前本就还没有当日仓单）' },
+  ftshare_futures_index_kline: { kind: 'date_range', fields: ['start_date', 'end_date', 'trade_date'], warning: 'code 与 trade_date 至少给一个；传 trade_date 是**单日截面**、区间参数被忽略（实测只回 1 行）。区间实测按 trade_date 升序、20260817..20261015 共 total=38' },
+  ftshare_futures_member_rank: { kind: 'date_range', fields: ['start_date', 'end_date', 'trade_date'], warning: '三个日期参数可叠加（AND）。⛔ 不给任何日期 = 全表实测 1,435,879 行，一次返回必然超闸：请至少给 trade_date，最好再加 contract_code（实测一日 6911 行、单合约 20 行）' },
+  ftshare_bullion_price: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: 'start_date / end_date 在本层是必填（实测上游对缺 `symbol`、缺 `page` 都回 400 点名缺哪一样）。⛔ 序列停在 2026-08 中旬：实测 AU9999 大窗首行 2026-08-14、XAUUSD 2026-08-12，按"最近一周"打永远 total=0——那是上游没有新数据，不是取数失败。返回按日期降序' },
 }
 
 export function getDataTimeContract(capability: string): DataTimeContract | undefined {

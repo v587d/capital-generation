@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.8.2-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.8.3-9cf" alt="Version"></a>
   <a href="https://www.npmjs.com/package/@v587d/capital-generation"><img src="https://img.shields.io/npm/v/%40v587d%2Fcapital-generation" alt="npm version"></a>
 </p>
 
@@ -72,7 +72,7 @@ https://github.com/v587d/capital-generation
    | [AnySearch](https://www.anysearch.com/docs) | 网页搜索和正文提取 |
    | [Wind Alice](https://market.windalice.com/#/home) | 公告与新闻检索，以及宏观/行业/汇率指标与按日期区间取的历史 K 线 |
    | [PaddleOCR AIStudio](https://aistudio.baidu.com/paddleocr) | 解析 PDF 和图片中的文字 |
-   | [FTShare（非凸科技）](https://market.ft.tech/gateway/doc/p/pb8eizu3) | A 股行情与日 K 截面、主力资金流、涨跌停、龙虎榜席位、股东人数、指数权重、可转债行情与宏观利率等第二家上游口径 |
+   | [FTShare（非凸科技）](https://market.ft.tech/gateway/doc/p/pb8eizu3) | A 股行情与日 K 截面、主力资金流、涨跌停、龙虎榜席位、股东人数、指数权重、可转债行情、宏观利率，以及期货合约与贵金属行情等第二家上游口径 |
 
     这些都是第三方服务的密钥，需分别向服务方申请；额度和条款以各服务方为准。
     保存后**新建 Capital 模式会话**即可生效，无需重启。
@@ -131,7 +131,7 @@ https://github.com/v587d/capital-generation
 
 ## 还能做什么
 
-- **查数据和资料：** 覆盖A股、港股、美股，由 Agents 按需获取行情、财务、指数、基金与宏观行业数据，检索公告、新闻和研报。共计 **118** 个数据收集能力和 **14** 个网页检索能力，部分公开数据源无需额外密钥；具体覆盖范围见 [数据收集能力表](docs/data-collector-capabilities.md) 和 [网页检索能力表](docs/web-retriever-capabilities.md)。
+- **查数据和资料：** 覆盖 A 股、港股、美股与期货等品种，由 Agents 按需获取行情、财务、指数、基金与宏观行业数据，检索公告、新闻和研报。共计 **128** 个数据收集能力和 **14** 个网页检索能力，部分公开数据源无需额外密钥；具体覆盖范围见 [数据收集能力表](docs/data-collector-capabilities.md) 和 [网页检索能力表](docs/web-retriever-capabilities.md)。
 - **数据分析：** 所有 Agents 均不直接接触原始结构数据，Agents 按需读取数据、校验数据，并写脚本挖掘数据背后含义。 
 - **可视化：** Agent 视情况将校验后数据交给可视化专家生成可交互图表。图表会作为本轮交付物出现在会话中，可在侧栏查看或离线打开。了解处理流程可看 [Agent 角色说明](docs/agent-roles.md)。
 

@@ -2,7 +2,7 @@
 
 > 本表由 `npm run docs:capabilities` 从 Fuyao、Tencent、Eastmoney、Wind 与 FTShare source 定义生成，并由 `test/data-collector-capabilities.test.mjs` 断言与实现同步：新增端点若忘了重新生成，测试会失败。
 
-当前共 **118 个 capability**：同花顺 Fuyao 61 个，腾讯公开 HTTP 9 个，东方财富 HTTP 21 个，Wind 金融数据服务 3 个，FTShare（非凸科技）24 个。参数后带 **\*** 表示必填。
+当前共 **128 个 capability**：同花顺 Fuyao 61 个，腾讯公开 HTTP 9 个，东方财富 HTTP 21 个，Wind 金融数据服务 3 个，FTShare（非凸科技）34 个。参数后带 **\*** 表示必填。
 
 **复核方式**：Fuyao 能力可用 `npm run smoke:fuyao` 真实复核；Tencent 能力使用最小 smoke fixture 或按需真实请求复核；Eastmoney 能力使用固定 fixture，并按需执行公开网页 JSON smoke；Wind 能力用 `npm run smoke:wind` 真实复核（需要 `WIND_API_KEY`，**按次消耗上游积分**）。FTShare 那几条走 `npm run contract:probe` 的 daily 档巡检（需要 `FTSHARE_API_KEY`；**免费档限流 10 QPS / burst 20**，取数一律经本模块的进程级节流链）。
 
@@ -253,3 +253,13 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 | `ftshare_shibor` | `/ftshare/shibor` | `start_date`\* `end_date`\* `page` `size` | 是 | SHIBOR 日度八档（2006-10 起，百分数） |
 | `ftshare_hibor` | `/ftshare/hibor` | `start_date`\* `end_date`\* `page` `size` | 是 | HIBOR 日度十五档（七档实测整列 null） |
 | `ftshare_financial_calendar` | `/ftshare/financial_calendar` | `start_date`\* `end_date`\* `page` `size` | 是 | 全球财经日历（≤3 天窗口，含发布时刻与前值） |
+| `ftshare_futures_contracts` | `/ftshare/futures_contracts` | `trade_date` | 否 | 期货合约清单（按交易日快照，含银行间） |
+| `ftshare_futures_contract_detail` | `/ftshare/futures_contract_detail` | `trade_date` `symbol` | 否 | 期货合约要素（乘数/单位/交割/上市摘牌日） |
+| `ftshare_futures_kline` | `/ftshare/futures_kline` | `symbol`\* `interval` `start_date` `end_date` `limit` | 否 | 期货合约历史 K 线（日/周/月/季，单合约） |
+| `ftshare_futures_limit_price` | `/ftshare/futures_limit_price` | `exchange`\* `trade_date` `start_date` `end_date` `ts_code` `cont` `page` `size` | 是 | 期货合约每日涨跌停价（按交易所，含最低保证金原值） |
+| `ftshare_futures_settle` | `/ftshare/futures_settle` | `exchange`\* `trade_date` `start_date` `end_date` `ts_code` `page` `size` | 是 | 期货每日结算参数（结算价/保证金率/手续费） |
+| `ftshare_futures_warrant` | `/ftshare/futures_warrant` | `trade_date` `start_date` `end_date` `symbol` `exchange` `page` `size` | 是 | 期货仓单日报（分交易所，数量单位随行而变） |
+| `ftshare_futures_weekly` | `/ftshare/futures_weekly` | `week` `start_week` `end_week` `prd` `exchange` `page` `size` | 是 | 期货主要品种交易周报（周码 YYYYWW，成交额亿元） |
+| `ftshare_futures_index_kline` | `/ftshare/futures_index_kline` | `code` `trade_date` `start_date` `end_date` `page` `size` | 是 | 南华期货商品指数日 K 线（按指数代码） |
+| `ftshare_futures_member_rank` | `/ftshare/futures_member_rank` | `exchange` `variety_code` `contract_code` `member_name_abbr` `trade_date` `start_date` `end_date` `page` `size` | 是 | 东财期货会员成交持仓排名（按合约×会员） |
+| `ftshare_bullion_price` | `/ftshare/bullion_price` | `symbol`\* `start_date`\* `end_date`\* `page` `size` | 是 | 贵金属价格（AU9999 / XAUUSD，单位未披露） |

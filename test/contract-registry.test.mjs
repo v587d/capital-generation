@@ -107,7 +107,7 @@ const ANCHOR = new Date('2026-10-11T20:00:00Z')   // 北京周一 04:00 那一�
 // ⛔ `code` 这一格现在是**转债形状**：唯一用 `requires: 'code'` 的是 ftshare_convertible_bond_kline，
 // 它的参数层按 6 位可转债码校验。将来若有个股能力也用 `requires: 'code'`，这一格会把它挡下来——
 // 那时要按族分格，而不是把这里改成最宽的形状（宽到不校验，等于这条回归失去意义）。
-const ID_PLACEHOLDER = { manager_id: 'PLACEHOLDER_ID', company_id: 'PLACEHOLDER_ID', ticker: '000001.SZ', trade_date: '2026-10-09', date: '2026-10-14', code: '113042.SH' }
+const ID_PLACEHOLDER = { manager_id: 'PLACEHOLDER_ID', company_id: 'PLACEHOLDER_ID', ticker: '000001.SZ', trade_date: '2026-10-09', date: '2026-10-14', code: '113042.SH', symbol: 'AG2610.SHF' }
 function requestShape(entry) {
   const params = resolveDayShifts(entry.params ?? {}, ANCHOR)
   if (!entry.requires) return params

@@ -2,7 +2,8 @@
  * FTShare（非凸科技）source 的离线回归（`src/sources/ftshare-rest.ts`）。
  *
  * fixture 全部来自**真报文实测**（批次 A/B/C 是 2026-10-15，批次 D 是 2026-10-16 早 07:36–07:44 的
- * 176 份落盘报文，批次 E 是同日 08:25–08:29 与 08:44 的 109 份；都不是供应商文档的转述）：
+ * 176 份落盘报文，批次 E 是同日 08:25–08:29 与 08:44 的 109 份，批次 F 是同日 13:56–15:55 的
+ * 175 份（`raw/` 与 `raw2`…`raw17`）；都不是供应商文档的转述）：
  * 字段名、类型、日期写法、分页信封与错误信封都按返回原样写死。
  * 改这些形状属于"上游改版"，必须连同本文件的断言一起改（§10：未验不注册，验过的不许漂）。
  *
@@ -16,6 +17,9 @@
  * 三处——回查后第一处是凭空加的（实际 109 份），第二处把**跨多次响应的累计**当成单次读数（单次最多 17 个），
  * 第三处根本与报文相反（八份响应的缺失值全是 `""`，null 型字段 0 个）。三条都已按原文改正，
  * HIBOR 与 SHIBOR 缺的三条 400 是 08:44 补打才落进日志的。**没打进日志的数字不算实测**，这句话是本文件的第二道闸门。
+ * 批次 F 记的是探针自己的错：中间一轮 27 次请求全回 `401 api_key_malformed`，我先按"限流或密钥被改"去解释，
+ * 实际是脚本把密钥取成 `undefined` 又原样发进请求头——那 27 份响应一律作废、不作任何断言的依据，
+ * 从那一轮起所有探针先断言"取不到密钥就停手"（同一个坑的第三次变体：错误信息不可信时先怀疑自己发出去的东西）。
  *
  * 三条只能用断言钉住的事实（2026-10-15 逐条复现）：
  * 1. `page` 生效、信封回显也正确，但本层页码一律**按请求自己算**——不把自己的输出押在上游状态上。
@@ -37,6 +41,9 @@ const FT_CAPABILITIES = [
   'ftshare_sw_industry_overview', 'ftshare_sw_industry_metrics',
   'ftshare_limit_price', 'ftshare_dragon_tiger_seats', 'ftshare_holder_number', 'ftshare_index_weight', 'ftshare_convertible_bond_kline',
   'ftshare_lpr', 'ftshare_chinabond_yield', 'ftshare_shibor', 'ftshare_hibor', 'ftshare_financial_calendar',
+  'ftshare_futures_contracts', 'ftshare_futures_contract_detail', 'ftshare_futures_kline', 'ftshare_futures_limit_price',
+  'ftshare_futures_settle', 'ftshare_futures_warrant', 'ftshare_futures_weekly', 'ftshare_futures_index_kline',
+  'ftshare_futures_member_rank', 'ftshare_bullion_price',
 ]
 /** 上游真按页给行的那些颗；快照类一次一行，没有翻页这回事。 */
 const PAGED = [
@@ -44,6 +51,9 @@ const PAGED = [
   'ftshare_block_trades', 'ftshare_performance_forecast', 'ftshare_performance_express', 'ftshare_sw_industry_overview', 'ftshare_sw_industry_metrics',
   'ftshare_limit_price', 'ftshare_dragon_tiger_seats', 'ftshare_holder_number', 'ftshare_index_weight',
   'ftshare_chinabond_yield', 'ftshare_shibor', 'ftshare_hibor', 'ftshare_financial_calendar',
+  // 批次 F：清单、要素、期货 K 线三颗**没有分页**（实测多发 page_size 仍回全量 / 只有 limit），其余七颗有。
+  'ftshare_futures_limit_price', 'ftshare_futures_settle', 'ftshare_futures_warrant', 'ftshare_futures_weekly',
+  'ftshare_futures_index_kline', 'ftshare_futures_member_rank', 'ftshare_bullion_price',
 ]
 
 function request(capability, params = {}) {
@@ -131,6 +141,46 @@ const CALENDAR_EARNINGS_ROW = { stat_date: '2026-10-15', tab_type: 'earnings', e
 /** 有前值与预测的那一行：三个读数都是**文本**（单位随事件本身变，上游不给列级单位）。 */
 const CALENDAR_MACRO_ROW = { stat_date: '2026-10-15', tab_type: 'general', event_time: '1792067400', region: '美国', event: '10月10日当周首次申请失业救济人数(万人)', importance: '3', actual_value: '19.9', forecast_value: '20', previous_value: '19.7', link: 'https://wallstreetcn.com/calendar/US121055/overview' }
 
+// ── 批次 F 的真报文样本（2026-10-16 上午，期货与贵金属）───────────────────────────────
+/** 合约清单行：`data.items` + `data.trade_date`，行内**没有日期列**；身份是**短后缀**，`future_type` 一半是 null。 */
+const FUTURES_LIST_ROW = { exchange: 'CFFEX', future_type: null, product: 'IC', symbol: 'IC2610.CFE', symbol_cn_name: '中证500股指期货' }
+const FUTURES_LIST_ROW_COPY = { exchange: 'CFFEX', future_type: 2, product: 'IC', symbol: 'IC2610.CFE', symbol_cn_name: '中证500股指期货' }
+/** 合约要素行（AG2610.SHF 原文 28 列）：⛔ `delivery_date` 与 `last_trade_date` 装的是**规则文字**，不是日期。 */
+const FUTURES_DETAIL_ROW = { de_list_tdate: 20261015, delivery_date: '最后交易日后连续二个工作日', delivery_mean: '实物交割', delivery_site: '交易所指定交割仓库', exchange: 'SHFE', future_type: null, last_trade_date: '合约月份的15日(遇国家法定节假日顺延,春节月份等最后交易日交易所可另行调整并通知)', last_trade_date_hour: '', list_date: 20251016, margin_info: '最低交易保证金:合约价值的4%', mean_cal_value: 1, min_put_price_info: '1人民币元/千克', multiplier: 15, position_limit_info: '', price_fluctuation_info: '不超过上一交易日结算价±3%', price_unit: 15, product: 'AG', put_price: '人民币元/千克', spot_symbol: null, sub_type_code: 703001001, symbol: 'AG2610.SHF', symbol_cn_name: '白银', trade_date: 20261015, trade_hours_info: '上午9:00-11:30,下午13:30-15:00,下午21:00-次日2:30(夜盘)', trade_months_info: '1,2,3,4,5,6,7,8,9,10,11,12', trade_unit: '千克', type_code: 703001000, value_info: '' }
+/** 期货 K 线行：`symbol` 是**去后缀转小写**，`datetime` 毫秒、`trade_date` YYYYMMDD 整数；三列复权/主力恒 null。 */
+const FUTURES_KLINE_ROW = { symbol: 'cu2612', datetime: 1792047600000, trade_date: 20261015, open: 110200, high: 110290, low: 108260, close: 108290, volume: 75498, amount: 41189137900, vwap: 545565.9474423163, open_interest: 163309, dominant_contract: null, forward_factor: null, backward_factor: null }
+/** 涨跌停行：价与 `m_ratio` 都是**字符串**，`ts_code` 是 SHFE 的短后缀写法。 */
+const FUTURES_LIMIT_ROW = { trade_date: 20261015, ts_code: 'AD2610.SHF', name: '铸造铝合金2610', up_limit: '25165', down_limit: '21435', m_ratio: '20', cont: 'AD', exchange: 'SHFE' }
+/** 中金所的涨跌停行：⛔ 后缀写 `.CFX`（清单那边是 `.CFE`），同一个交易所两种拼法。 */
+const FUTURES_LIMIT_ROW_CFFEX = { trade_date: 20261015, ts_code: 'IC2610.CFX', name: '中证500指数2610', up_limit: '7674.8', down_limit: '6279.6', m_ratio: '12', cont: 'IC', exchange: 'CFFEX' }
+/** 结算参数行：数值列全是字符串；套保两档（0.2）低于投机两档（0.2）时 `m_ratio` 跟着套保走。 */
+const FUTURES_SETTLE_ROW = { ts_code: 'AD2610.SHF', trade_date: 20261015, settle: '23000', trading_fee_rate: '0.05', trading_fee: '0', delivery_fee: '0', b_hedging_margin_rate: '0.2', s_hedging_margin_rate: '0.2', long_margin_rate: '0.2', short_margin_rate: '0.2', offset_today_fee: '0.025', exchange: 'SHFE' }
+/** 仓单行（CZCE 棉花）：`unit` 是「张」，`wh_id` / `year` / `place` 有值而 `area` / `brand` 全 null。 */
+const WARRANT_ROW_CZCE = { trade_date: 20261015, symbol: 'CF', fut_name: '棉花', warehouse: '中储棉库尔勒', wh_id: '0330', pre_vol: '1', vol: '1', vol_chg: '0', area: null, year: '2526', grade: '2130', brand: null, place: '新疆', pd: null, is_ct: null, unit: '张', exchange: 'CZCE' }
+/** 仓单行（SHFE 铜）：⛔ 同表里 `unit` 换成了「吨」，`wh_id` / `year` / `grade` / `place` 全 null，只有 `area` 有值。 */
+const WARRANT_ROW_SHFE = { trade_date: 20261015, symbol: 'CU', fut_name: '铜', warehouse: '上港云仓安达', wh_id: null, pre_vol: '2315', vol: '4635', vol_chg: '2320', area: '上海', year: null, grade: null, brand: null, place: null, pd: null, is_ct: null, unit: '吨', exchange: 'SHFE' }
+/** 周报行：⛔ 同比列上游键名拼错成 `amout_yoy`（少一个 n），本层改名 `amount_yoy_pct` 透出。 */
+const FUTURES_WEEKLY_ROW = { exchange: 'CFFEX', prd: 'IC', name: '中证500股指期货', vol: 347502, vol_yoy: '6.6401934549', amount: '4958.3263736000', amout_yoy: '3.2722978028', cumvol: 32245753, cumvol_yoy: '62.7569551547', cumamt: '516120.6686184000', cumamt_yoy: '115.2038058534', open_interest: 314035, interest_wow: '15.0707569639', mc_close: '7111.0000000000', close_wow: '-2.7675226297', week: '202639', week_date: 20261009 }
+/** 当周无成交的那一行（粳稻）：数量列是 0，而**派生列全是 null**——0 与 null 在这张表里是两件事。 */
+const FUTURES_WEEKLY_ROW_IDLE = { exchange: 'CZCE', prd: 'JR', name: '粳稻', vol: 0, vol_yoy: null, amount: '0.0000000000', amout_yoy: null, cumvol: 0, cumvol_yoy: null, cumamt: '0.0000000000', cumamt_yoy: null, open_interest: 0, interest_wow: null, mc_close: null, close_wow: null, week: '202639', week_date: 20261009 }
+/** 南华指数行：日期是**字符串** YYYYMMDD、数值全是字符串；⛔ 这一行 `high < open`（实测 30 行里就有 1 行这样）。 */
+const NANHUA_ROW = { code: 'AG_NH', trade_date: '20260928', open: '1758.7800', high: '1724.7500', low: '1649.3100', close: '1650.3000', pre_close: '1724.7500', change: '-74.4500', pct_chg: '-4.3166', vol: 420843, amount: '958.5600' }
+/** 会员持仓行：全列字符串，净多那一组是**空串**（实测排名列与数值列同时为空）。 */
+const MEMBER_RANK_ROW = { exchange: 'cffex', variety_code: 'ic', contract_code: 'IC2610', trade_date: '2026-10-15', org_code: '10058975', member_name_abbr: '中信期货(代客)', volume_rank: '1', volume: '17904', volume_change: '-3858', lp_rank: '1', long_position: '5077', lp_change: '-2198', sp_rank: '1', short_position: '5167', sp_change: '-3798', nlp_rank: '', net_long_position: '', nlp_change: '', nsp_rank: '4', net_short_position: '90', nsp_change: '-1600', lp_up_rank: '25', lp_down_rank: '2', sp_up_rank: '26', sp_down_rank: '1', settle_price: '6750.8', lp_avg_price: '7486.8424', sp_avg_price: '7477.8163' }
+/** 多空两头都没有的那一行：六列里只有增减仓排名与结算价有值。 */
+const MEMBER_RANK_ROW_EMPTY = { exchange: 'cffex', variety_code: 'if', contract_code: 'IF2610', trade_date: '2026-10-15', org_code: '10074307', member_name_abbr: '宏源期货(代客)', volume_rank: '20', volume: '487', volume_change: '90', lp_rank: '', long_position: '', lp_change: '', sp_rank: '', short_position: '', sp_change: '', nlp_rank: '', net_long_position: '', nlp_change: '', nsp_rank: '', net_short_position: '', nsp_change: '', lp_up_rank: '15', lp_down_rank: '15', sp_up_rank: '10', sp_down_rank: '20', settle_price: '4139.2', lp_avg_price: '', sp_avg_price: '' }
+/** 贵金属行：只有两列，读数上游是字符串，日期已带横杠。 */
+const BULLION_ROW = { date: '2026-08-14', value: '940.72' }
+
+/** 批次 F 那两颗"一次给全 + 回显采集日"的信封：`data.items` + `data.trade_date`，没有分页字段。 */
+function itemsSnapshot(items, over = {}) {
+  return { code: 200, message: 'success', data: { items, trade_date: 20261015, ...over } }
+}
+/** 期货 K 线的信封：`data.items` + `data.total`（第五套之外的又一形：既无 pageNum 也无 pages）。 */
+function itemsTotal(items, total = items.length) {
+  return { code: 200, message: 'success', data: { items, total } }
+}
+
 /** 资金流与日 K 那两族的信封：`data.records` + `pageNum/pageSize/total/pages`。桩一律回显第 1 页，好钉住"不信回显"。 */
 function paged(records, over = {}) {
   return { code: 200, message: 'success', data: { pageNum: 1, pageSize: records.length, total: records.length, pages: 1, records, ...over } }
@@ -193,6 +243,17 @@ function minimalParams(capability) {
   if (capability === 'ftshare_chinabond_yield' || capability === 'ftshare_shibor' || capability === 'ftshare_hibor') return { start_date: '2026-10-01', end_date: '2026-10-15' }
   // ⛔ 日历的窗上限是 3 天差，所以不能用默认那六天窗（会被参数层拒）。
   if (capability === 'ftshare_financial_calendar') return { start_date: '2026-10-15', end_date: '2026-10-17' }
+  // 批次 F：fixture 行都是 2026-10-15 那一天的真报文，窗口必须罩得住它们。
+  if (capability === 'ftshare_futures_contracts') return {}
+  if (capability === 'ftshare_futures_contract_detail') return { symbol: 'AG2610.SHF' }
+  if (capability === 'ftshare_futures_kline') return { symbol: 'CU2612.SHFE', start_date: '2026-10-08', end_date: '2026-10-15' }
+  if (capability === 'ftshare_futures_limit_price') return { exchange: 'SHFE', trade_date: '2026-10-15' }
+  if (capability === 'ftshare_futures_settle') return { exchange: 'SHFE', trade_date: '2026-10-15' }
+  if (capability === 'ftshare_futures_warrant') return { trade_date: '2026-10-15' }
+  if (capability === 'ftshare_futures_weekly') return { week: '202639' }
+  if (capability === 'ftshare_futures_index_kline') return { code: 'AG_NH', start_date: '2026-08-17', end_date: '2026-10-15' }
+  if (capability === 'ftshare_futures_member_rank') return { trade_date: '2026-10-15' }
+  if (capability === 'ftshare_bullion_price') return { symbol: 'AU9999', start_date: '2026-08-01', end_date: '2026-08-14' }
   return { start_date: '2026-10-08', end_date: '2026-10-14' }
 }
 
@@ -218,13 +279,23 @@ function envelopeFor(capability) {
   if (capability === 'ftshare_shibor') return paged([SHIBOR_ROW], { total: 6 })
   if (capability === 'ftshare_hibor') return paged([HIBOR_ROW], { total: 6 })
   if (capability === 'ftshare_financial_calendar') return paged([CALENDAR_EARNINGS_ROW, CALENDAR_MACRO_ROW], { total: 113 })
+  if (capability === 'ftshare_futures_contracts') return itemsSnapshot([FUTURES_LIST_ROW, FUTURES_LIST_ROW_COPY])
+  if (capability === 'ftshare_futures_contract_detail') return itemsSnapshot([FUTURES_DETAIL_ROW, { ...FUTURES_DETAIL_ROW, future_type: 2 }])
+  if (capability === 'ftshare_futures_kline') return itemsTotal([FUTURES_KLINE_ROW], 198)
+  if (capability === 'ftshare_futures_limit_price') return paged([FUTURES_LIMIT_ROW], { total: 301 })
+  if (capability === 'ftshare_futures_settle') return paged([FUTURES_SETTLE_ROW], { total: 301 })
+  if (capability === 'ftshare_futures_warrant') return paged([WARRANT_ROW_CZCE, WARRANT_ROW_SHFE], { total: 1469 })
+  if (capability === 'ftshare_futures_weekly') return paged([FUTURES_WEEKLY_ROW, FUTURES_WEEKLY_ROW_IDLE], { total: 360 })
+  if (capability === 'ftshare_futures_index_kline') return paged([NANHUA_ROW], { total: 38 })
+  if (capability === 'ftshare_futures_member_rank') return paged([MEMBER_RANK_ROW, MEMBER_RANK_ROW_EMPTY], { total: 6911 })
+  if (capability === 'ftshare_bullion_price') return paged([BULLION_ROW], { total: 635 })
   if (capability === 'ftshare_industry_daily_flow' || capability === 'ftshare_concept_daily_flow') {
     return paged([{ board_name: 'IT服务', trade_date: '2026-10-14', board_index: 11410.9, change_pct: -1.77, company_count: 129, inflow: 57.06, outflow: 72.88, net_amount: -15.82, leader_name: '华是科技', leader_change_pct: 4.12, leader_price: 69.04 }], { total: 90 })
   }
   return paged([STOCK_FLOW_ROW], { total: 5214 })
 }
 
-test('注册面：二十四颗能力都在，前缀与 source_label 一致，目录与详情两条口径都够格', () => {
+test('注册面：三十四颗能力都在，前缀与 source_label 一致，目录与详情两条口径都够格', () => {
   const sources = createFtshareSources(async () => 'unused')
   assert.deepEqual(sources.map((s) => s.schema.capability), FT_CAPABILITIES)
   for (const source of sources) {
@@ -591,7 +662,7 @@ test('限流：并发进来也要拉成一条链，相邻请求间隔不小于 F
   }
 })
 
-test('输出契约：二十四颗能力返回的每一个列名都必须在声明的 output_schema 里（§9.6）', async () => {
+test('输出契约：三十四颗能力返回的每一个列名都必须在声明的 output_schema 里（§9.6）', async () => {
   for (const capability of FT_CAPABILITIES) {
     const source = sourceFor(capability)
     await withFetch(async () => jsonResponse(envelopeFor(capability)), async () => {
@@ -1036,7 +1107,7 @@ test('⛔ 申万日度：行业代码没生效或日期出区间时失败（两�
   })
 })
 
-test('⛔ size 上限按上游逐颗对齐：1000 / 500 / 200 / 100 四种都在，不许一视同仁', () => {
+test('⛔ size 上限按上游逐颗对齐：1000 / 500 / 200 / 100 / 50 / 4000 六种都在，不许一视同仁', () => {
   const CAPS = {
     ftshare_stock_daily_flow: 1000, ftshare_industry_daily_flow: 1000, ftshare_concept_daily_flow: 1000, ftshare_ashare_quote: 1000,
     ftshare_main_capital_flow: 500, ftshare_daily_kline_snapshot: 500, ftshare_block_trades: 500,
@@ -1048,6 +1119,12 @@ test('⛔ size 上限按上游逐颗对齐：1000 / 500 / 200 / 100 四种都在
     // 批次 E：曲线与两路拆借利率都是 1000（1001 是响亮 400，实测三份报文），日历真实上限 500（文档写 200，
     // 传 1000 回显 pageSize=500）。⛔ LPR 不在表里：它一颗参数都没有，分页座位是假的（见下面那颗的用例）。
     ftshare_chinabond_yield: 1000, ftshare_shibor: 1000, ftshare_hibor: 1000, ftshare_financial_calendar: 500,
+    // 批次 F：仓单 / 周报 / 结算参数传 5000 → **静默**夹到 4000；会员持仓传 5000 → **响亮** 400「1 and 500」；
+    // 南华指数传 201 → 响亮 400「1 and 200」；贵金属传 1001 → 静默夹到 1000；
+    // ⛔ 涨跌停压到 50——不是页宽限制而是上游数据（SHFE 60 起整页 400「missing pre-settlement price」），
+    // 所以这一颗的上限比文档写的 200 低一个量级，见它的 description。
+    ftshare_futures_warrant: 4000, ftshare_futures_weekly: 4000, ftshare_futures_settle: 4000,
+    ftshare_futures_member_rank: 500, ftshare_futures_index_kline: 200, ftshare_bullion_price: 1000, ftshare_futures_limit_price: 50,
   }
   for (const [capability, max] of Object.entries(CAPS)) {
     const source = sourceFor(capability)
@@ -1449,3 +1526,304 @@ test('⛔ 财经日历的 3 天窗是硬闸门：4 天在参数层拒，本层�
   assert.throws(() => source.normalizeParams({ start_date: '2026-10-15', end_date: '2026-10-17', size: 0 }), /1 to 500/, '实测 page_size=0 静默只回 1 行（信封还回显 pageSize=1），会被读成"这一天只有一个事件"')
   assert.throws(() => source.normalizeParams({ start_date: '2026-10-15', end_date: '2026-10-17', region: '美国' }), /unsupported parameter/, '上游没有地区参数，这个过滤器是假的')
 })
+
+// ── 批次 F 的十颗（期货与贵金属，2026-10-16 真报文）─────────────────────────────────
+// ⛔ 断言同样只钉两样东西：报文里出现过的形状，与 producer 该怎样失败。
+
+test('期货清单快照：items + 回显交易日补写时间轴、两份 future_type 副本原样都带出、没有分页座位', async () => {
+  const source = sourceFor('ftshare_futures_contracts')
+  await withFetch(async () => jsonResponse(itemsSnapshot([FUTURES_LIST_ROW, FUTURES_LIST_ROW_COPY])), async (calls) => {
+    const result = await source.execute(request('ftshare_futures_contracts', { trade_date: '2026-10-15' }), new AbortController().signal)
+    assert.match(calls[0].url, new RegExp(`^${BASE}/api/v1/market/data/futures/futures-lists\\?trade_date=20261015$`))
+    assert.deepEqual(result.data.item, [
+      { symbol: 'IC2610.CFE', exchange: 'CFFEX', product: 'IC', contract_name: '中证500股指期货', future_type: null, trade_date: '2026-10-15', trade_date_ms: Date.parse('2026-10-15T00:00:00+08:00') },
+      { symbol: 'IC2610.CFE', exchange: 'CFFEX', product: 'IC', contract_name: '中证500股指期货', future_type: 2, trade_date: '2026-10-15', trade_date_ms: Date.parse('2026-10-15T00:00:00+08:00') },
+    ], '同一只合约的两份副本原样都带出：本层不替模型去重，也不悄悄丢掉 null 那一份')
+    assert.deepEqual(result.data.pagination, { page: 1, size: 2, pages: 1, total: 2 })
+  })
+  // 不给日期就不发 trade_date（实测默认 = 前一交易日），且信封回显的那个交易日才是行的日期。
+  await withFetch(async () => jsonResponse(itemsSnapshot([FUTURES_LIST_ROW], { trade_date: 20261015 })), async (calls) => {
+    const result = await source.execute(request('ftshare_futures_contracts', {}), new AbortController().signal)
+    assert.equal(calls[0].url.includes('trade_date'), false, '省略时一个日期参数都不发')
+    assert.equal(result.data.item[0].trade_date, '2026-10-15', '行内没有日期列，时间轴只能取 data.trade_date 的回显')
+  })
+  assert.throws(() => source.normalizeParams({ page: 2 }), /unsupported parameter/, '实测 page_size=10 仍回全量 1812 行：分页座位是假的')
+})
+
+test('期货合约要素：规则文字改名成 *_rule、被丢弃的列不带出、symbol 大小写都收且发给上游是大写', async () => {
+  const source = sourceFor('ftshare_futures_contract_detail')
+  await withFetch(async () => jsonResponse(itemsSnapshot([FUTURES_DETAIL_ROW, { ...FUTURES_DETAIL_ROW, future_type: 2 }])), async (calls) => {
+    const result = await source.execute(request('ftshare_futures_contract_detail', { trade_date: '2026-10-15', symbol: 'ag2610.shf' }), new AbortController().signal)
+    assert.match(calls[0].url, /symbol=AG2610.SHF/, '上游大小写不敏感（实测小写也命中），本层统一转大写发出去')
+    assert.match(calls[0].url, /trade_date=20261015/)
+    const row = result.data.item[0]
+    assert.equal(row.delivery_date_rule, '最后交易日后连续二个工作日', '⛔ 这一列装的是规则文字：改名后它不会被当成日期列')
+    assert.equal(row.last_trade_date_rule.startsWith('合约月份的15日'), true)
+    assert.equal(row.list_date, '2025-10-16'); assert.equal(row.list_date_ms, Date.parse('2025-10-16T00:00:00+08:00'))
+    assert.equal(row.delist_date, '2026-10-15')
+    assert.equal(row.quote_unit, '人民币元/千克', 'put_price 是报价单位文字，命名成 quote_unit 免得读成价格')
+    assert.equal(row.trade_unit, '千克'); assert.equal(row.multiplier, 15)
+    assert.equal(row.spot_symbol, null, '空串与 null 都不补值')
+    for (const dropped of ['price_unit', 'mean_cal_value', 'type_code', 'sub_type_code', 'value_info', 'position_limit_info', 'last_trade_date_hour']) {
+      assert.ok(!(dropped in row), `${dropped} 是本层按实测丢弃的列（口径未披露或整列为空串），不许悄悄带出`)
+    }
+  })
+  // ⛔ 上游认不出的代码不回错、只回空 items（实测 ZZZZ9999.SHF）：那是合法空，不是失败。
+  await withFetch(async () => jsonResponse(itemsSnapshot([])), async () => {
+    const result = await source.execute(request('ftshare_futures_contract_detail', { symbol: 'ZZZZ9999.SHF' }), new AbortController().signal)
+    assert.deepEqual(result.data.item, [])
+  })
+  // 回来的行不是那只合约时必须响亮失败（这一族的过滤失败是静默的）。
+  await withFetch(async () => jsonResponse(itemsSnapshot([{ ...FUTURES_DETAIL_ROW, symbol: 'AU2612.SHF' }])), async () => {
+    await assert.rejects(
+      () => source.execute(request('ftshare_futures_contract_detail', { symbol: 'AG2610.SHF' }), new AbortController().signal),
+      (error) => { assert.equal(error.kind, 'invalid_response'); assert.match(error.message, /symbol/); return true },
+    )
+  })
+  assert.throws(() => source.normalizeParams({ symbol: '600519.SH' }), /期货合约代码/, '个股代码不许打到这里（实测上游对认不出的写法只回空）')
+})
+
+test('期货 K 线：后缀映射表把四颗短后缀换成 CTP 全称、裸码放行、银行间响亮拒', () => {
+  const source = sourceFor('ftshare_futures_kline')
+  assert.equal(source.normalizeParams({ symbol: 'AG2610.SHF' }).symbol, 'AG2610.SHFE')
+  assert.equal(source.normalizeParams({ symbol: 'IC2610.CFE' }).symbol, 'IC2610.CFFEX')
+  assert.equal(source.normalizeParams({ symbol: 'IC2610.CFX' }).symbol, 'IC2610.CFFEX', '涨跌停与结算那颗把中金所写成 .CFX，也得能打到 K 线')
+  assert.equal(source.normalizeParams({ symbol: 'AP610.ZCE' }).symbol, 'AP610.CZCE', '同一所三种拼法实测都存在')
+  assert.equal(source.normalizeParams({ symbol: 'LC2610.GFE' }).symbol, 'LC2610.GFEX')
+  assert.equal(source.normalizeParams({ symbol: 'A2611.DCE' }).symbol, 'A2611.DCE')
+  assert.equal(source.normalizeParams({ symbol: 'A2611' }).symbol, 'A2611', '实测裸码上游认（219 行），但它没有交易所身份，本层不补')
+  assert.equal(source.normalizeParams({ symbol: 'cu2612.shfe' }).symbol, 'CU2612.SHFE', '实测大小写不敏感，本层统一大写')
+  // ⛔ 银行间品种在清单里有行、行情端没有：实测 .NIB → 400，所以这里点名拒，不放行成"试一下"。
+  assert.throws(() => source.normalizeParams({ symbol: 'ADBC10_2612.IB' }), /银行间/, '银行间债券远期不在这颗上游')
+  assert.throws(() => source.normalizeParams({ symbol: 'AG2610.XYZ' }), /认不出/)
+})
+
+test('期货 K 线：interval 白名单、end 不许单独给、limit 0 与负数都拦、日期只收串', () => {
+  const source = sourceFor('ftshare_futures_kline')
+  for (const interval of ['daily', 'weekly', 'monthly', 'quarterly', 'DAILY']) {
+    assert.ok(['daily', 'weekly', 'monthly', 'quarterly'].includes(source.normalizeParams({ symbol: 'CU2612.SHFE', interval }).interval), interval)
+  }
+  // 实测 1d / 1w / week 上游回 200 + 0 行——放行等于把"写法不认"伪装成"这段时间没行情"。
+  for (const interval of ['1d', '1w', 'week', 'day', '1M', '1Q', '60m', '1h', '']) {
+    assert.throws(() => source.normalizeParams({ symbol: 'CU2612.SHFE', interval }), /interval must be one of/, interval)
+  }
+  assert.throws(() => source.normalizeParams({ symbol: 'CU2612.SHFE', end_date: '2026-10-15' }), /end_date 不能单独给/)
+  assert.throws(() => source.normalizeParams({ symbol: 'CU2612.SHFE', start_date: '2026-10-15', end_date: '2026-10-08' }), /must not be later/)
+  assert.throws(() => source.normalizeParams({ symbol: 'CU2612.SHFE', limit: 0 }), /limit must be an integer >= 1/, '实测 limit=0 回 1 行而 total 仍报 198')
+  assert.throws(() => source.normalizeParams({ symbol: 'CU2612.SHFE', limit: -5 }), /limit must be an integer >= 1/)
+  assert.throws(() => source.normalizeParams({ symbol: 'CU2612.SHFE', start_date: 20260906 }), /YYYY-MM-DD/, '⛔ 上游要毫秒整数，把 YYYYMMDD 直接转过去实测回 0 行，所以本层只收日期串')
+  assert.equal(source.normalizeParams({ symbol: 'CU2612.SHFE', start_date: '2026-10-08' }).start_date, '2026-10-08', '实测只给 start 上游照样返回')
+})
+
+test('期货 K 线执行：日期换毫秒、身份按剥后缀比、total 用上游那个而不是行数', async () => {
+  const source = sourceFor('ftshare_futures_kline')
+  await withFetch(async () => jsonResponse(itemsTotal([FUTURES_KLINE_ROW], 198)), async (calls) => {
+    const result = await source.execute(request('ftshare_futures_kline', { symbol: 'CU2612.SHF', interval: 'daily', start_date: '2026-10-08', end_date: '2026-10-15', limit: 500 }), new AbortController().signal)
+    assert.match(calls[0].url, /symbol=CU2612\.SHFE/, '发给上游的是映射后的全称后缀（实测短后缀 400）')
+    assert.match(calls[0].url, new RegExp(`start=${Date.parse('2026-10-08T00:00:00+08:00')}`))
+    assert.match(calls[0].url, new RegExp(`end=${Date.parse('2026-10-15T23:59:59+08:00')}`))
+    assert.deepEqual(result.data.item, [{
+      contract: 'CU2612.SHFE', symbol: 'cu2612', trade_date: '2026-10-15', trade_date_ms: Date.parse('2026-10-15T00:00:00+08:00'),
+      bar_time_ms: 1792047600000, open_price: 110200, high_price: 110290, low_price: 108260, close_price: 108290,
+      volume_lots: 75498, turnover_yuan: 41189137900, vwap_per_lot_yuan: 545565.9474423163, open_interest_lots: 163309,
+    }])
+    assert.deepEqual(result.data.pagination, { page: 1, size: 1, pages: 1, total: 198 }, '⛔ limit 截断要看得见：上游报的区间根数不能被子丢')
+    for (const dropped of ['dominant_contract', 'forward_factor', 'backward_factor']) assert.ok(!(dropped in result.data.item[0]), `${dropped} 实测 194 行全 null，不收录`)
+  })
+  await withFetch(async () => jsonResponse(itemsTotal([{ ...FUTURES_KLINE_ROW, symbol: 'cu2610' }], 198)), async () => {
+    await assert.rejects(
+      () => source.execute(request('ftshare_futures_kline', { symbol: 'CU2612.SHFE', start_date: '2026-10-08', end_date: '2026-10-15' }), new AbortController().signal),
+      (error) => { assert.equal(error.kind, 'invalid_response'); assert.match(error.message, /cu2612|CU2612/, error.message); return true },
+      '行里的 symbol 是去后缀小写写法，核身份要比剥掉后缀的那一半',
+    )
+  })
+  await withFetch(async () => jsonResponse(itemsTotal([{ ...FUTURES_KLINE_ROW, trade_date: 20260901 }], 198)), async () => {
+    await assert.rejects(
+      () => source.execute(request('ftshare_futures_kline', { symbol: 'CU2612.SHFE', start_date: '2026-10-08', end_date: '2026-10-15' }), new AbortController().signal),
+      /outside the requested/,
+    )
+  })
+})
+
+test('期货涨跌停：exchange 必填、单日与区间互斥、页宽 50 是实测上限', () => {
+  const source = sourceFor('ftshare_futures_limit_price')
+  assert.throws(() => source.normalizeParams({ trade_date: '2026-10-15' }), /exchange/, '实测缺失上游 400「缺少必填参数：交易所」')
+  assert.equal(source.normalizeParams({ exchange: 'shfe', trade_date: '2026-10-15' }).exchange, 'SHFE')
+  assert.throws(() => source.normalizeParams({ exchange: 'CFX', trade_date: '2026-10-15' }), /must be one of/, '行里出现 .CFX 写法，但 exchange 这一档只认六家常规名')
+  assert.throws(() => source.normalizeParams({ exchange: 'SHFE', trade_date: '2026-10-15', start_date: '2026-10-08' }), /二选一/)
+  assert.throws(() => source.normalizeParams({ exchange: 'SHFE' }), /至少要给一组/)
+  assert.throws(() => source.normalizeParams({ exchange: 'SHFE', start_date: '2026-10-08' }), /必须同时给/)
+  assert.equal(source.normalizeParams({ exchange: 'SHFE', trade_date: '2026-10-15', size: 50 }).size, 50)
+  assert.throws(() => source.normalizeParams({ exchange: 'SHFE', trade_date: '2026-10-15', size: 51 }), /1 to 50/, '实测 SHFE 60 起整页 400「missing pre-settlement price」')
+  assert.equal(source.normalizeParams({ exchange: 'SHFE', trade_date: '2026-10-15', ts_code: 'ag2610.shf' }).ts_code, 'AG2610.SHF')
+  assert.equal(source.normalizeParams({ exchange: 'SHFE', trade_date: '2026-10-15', cont: 'ag' }).cont, 'AG')
+})
+
+test('期货涨跌停执行：字符串价转数值、m_ratio 改名带百分数口径、行内 .CFX 也核得住', async () => {
+  const source = sourceFor('ftshare_futures_limit_price')
+  await withFetch(async () => jsonResponse(paged([FUTURES_LIMIT_ROW], { total: 301 })), async (calls) => {
+    const result = await source.execute(request('ftshare_futures_limit_price', { exchange: 'SHFE', trade_date: '2026-10-15', page: 2, size: 50 }), new AbortController().signal)
+    assert.match(calls[0].url, /exchange=SHFE&.*trade_date=20261015|trade_date=20261015.*exchange=SHFE/)
+    assert.match(calls[0].url, /page=2&page_size=50|page_size=50.*page=2/)
+    assert.deepEqual(result.data.item, [{
+      ts_code: 'AD2610.SHF', exchange: 'SHFE', product: 'AD', contract_name: '铸造铝合金2610',
+      trade_date: '2026-10-15', trade_date_ms: Date.parse('2026-10-15T00:00:00+08:00'),
+      up_limit_price: 25165, down_limit_price: 21435, m_ratio_pct: 20,
+    }])
+    assert.deepEqual(result.data.pagination, { page: 2, size: 1, pages: 7, total: 301 })
+  })
+  // 中金所那 28 行的 ts_code 写 .CFX：本层核的是剥后缀的半边，所以照样过。
+  await withFetch(async () => jsonResponse(paged([FUTURES_LIMIT_ROW_CFFEX], { total: 28 })), async () => {
+    const result = await source.execute(request('ftshare_futures_limit_price', { exchange: 'CFFEX', trade_date: '2026-10-15' }), new AbortController().signal)
+    assert.equal(result.data.item[0].ts_code, 'IC2610.CFX')
+    assert.equal(result.data.item[0].exchange, 'CFFEX', '行里的 exchange 列本来就是全称写法，核身比的是它')
+  })
+  await withFetch(async () => jsonResponse(paged([{ ...FUTURES_LIMIT_ROW, ts_code: 'AG2612.SHF' }], { total: 301 })), async () => {
+    await assert.rejects(
+      () => source.execute(request('ftshare_futures_limit_price', { exchange: 'SHFE', trade_date: '2026-10-15', ts_code: 'AG2610.SHFE' }), new AbortController().signal),
+      (error) => { assert.equal(error.kind, 'invalid_response'); assert.match(error.message, /ts_code/); return true },
+      '发给上游的是长后缀、行里给的是短后缀：核身必须比剥后缀的半边，否则正确返回会被判成过滤没生效',
+    )
+  })
+})
+
+test('期货结算参数：31 天区间是硬闸门、保证金率按小数比例转数值、fee 四列原样不带单位后缀', async () => {
+  const source = sourceFor('ftshare_futures_settle')
+  assert.equal(source.normalizeParams({ exchange: 'SHFE', start_date: '2026-09-15', end_date: '2026-10-15' }).end_date, '2026-10-15', '实测 31 天以内通过')
+  assert.throws(() => source.normalizeParams({ exchange: 'SHFE', start_date: '2026-09-10', end_date: '2026-10-15' }), /不能超过 31 天/, '实测 35 天上游 400「at most 31 days apart」')
+  await withFetch(async () => jsonResponse(paged([FUTURES_SETTLE_ROW], { total: 301 })), async (calls) => {
+    const result = await source.execute(request('ftshare_futures_settle', { exchange: 'SHFE', trade_date: '2026-10-15', ts_code: 'AD2610.SHF', size: 4000 }), new AbortController().signal)
+    assert.match(calls[0].url, /page_size=4000/, '实测 5000 被静默夹到 4000，所以上限要真发得出去')
+    const row = result.data.item[0]
+    assert.equal(row.settle_price, 23000)
+    assert.deepEqual([row.long_margin_rate, row.b_hedging_margin_rate], [0.2, 0.2], '四档保证金率是**小数比例**（0.2 = 20%）')
+    assert.deepEqual([row.trading_fee_rate, row.trading_fee, row.delivery_fee, row.offset_today_fee], [0.05, 0, 0, 0.025], '⛔ 这四列单位未披露：原样透出、键名不加单位后缀')
+  })
+})
+
+test('期货仓单：至少一个条件、unit 随行原样带出、两种单位混在一页不视为异常', async () => {
+  const source = sourceFor('ftshare_futures_warrant')
+  assert.throws(() => source.normalizeParams({}), /至少要给一个条件|至少/)
+  await withFetch(async () => jsonResponse(paged([WARRANT_ROW_CZCE, WARRANT_ROW_SHFE], { total: 1469 })), async () => {
+    const result = await source.execute(request('ftshare_futures_warrant', { trade_date: '2026-10-15' }), new AbortController().signal)
+    assert.deepEqual(result.data.item.map((row) => row.unit), ['张', '吨'], '⛔ 同一页里两种单位都有，任何相加都要先按 unit 分组')
+    const cotton = result.data.item[0]
+    assert.deepEqual([cotton.prev_warrant_volume, cotton.warrant_volume, cotton.warrant_change], [1, 1, 0])
+    assert.equal(cotton.warehouse_id, '0330'); assert.equal(cotton.place, '新疆'); assert.equal(cotton.area, null)
+    const copper = result.data.item[1]
+    assert.ok(!('pd' in copper) && !('is_ct' in copper), '实测五所 463 行全 null 的两列不收录')
+    assert.deepEqual([copper.warehouse_id, copper.area, copper.year_label], [null, '上海', null], '列位随交易所而不随数据缺口')
+  })
+  assert.equal(source.normalizeParams({ exchange: 'gfex', trade_date: '2026-10-15' }).exchange, 'GFEX')
+  assert.throws(() => source.normalizeParams({ exchange: 'CFFEX', trade_date: '2026-10-15' }), /must be one of/, '中金所不发仓单（实测五所有行、这一家没有座位）')
+})
+
+test('期货周报：上游拼错的 amout_yoy 改名透出、无成交行的 null 不补 0、周码只收 YYYYWW', async () => {
+  const source = sourceFor('ftshare_futures_weekly')
+  await withFetch(async () => jsonResponse(paged([FUTURES_WEEKLY_ROW, FUTURES_WEEKLY_ROW_IDLE], { total: 360 })), async (calls) => {
+    const result = await source.execute(request('ftshare_futures_weekly', { week: '202639' }), new AbortController().signal)
+    assert.match(calls[0].url, /week=202639/)
+    const ic = result.data.item[0]
+    assert.equal(ic.amount_yoy_pct, 3.2722978028, '⛔ 上游键名是 amout_yoy（少一个 n），本层改名成 amount_yoy_pct 透出')
+    assert.ok(!('amout_yoy' in ic))
+    assert.deepEqual([ic.volume_lots, ic.amount_yi, ic.cum_amount_yi], [347502, 4958.3263736, 516120.6686184])
+    assert.equal(ic.week_date, '2026-10-09', 'week_date 是周期截止日（实测 202639 落在周五，202637 落在周四），不许按自然周推')
+    assert.equal(ic.week_date_ms, Date.parse('2026-10-09T00:00:00+08:00'))
+    const idle = result.data.item[1]
+    assert.deepEqual([idle.volume_lots, idle.open_interest_lots], [0, 0], '当周无成交的那一行数量确实是 0')
+    assert.deepEqual([idle.volume_yoy_pct, idle.amount_yoy_pct, idle.week_close_price, idle.close_wow_pct], [null, null, null, null], '而派生列是 null：0 与 null 在这张表里是两件事')
+  })
+  assert.throws(() => source.normalizeParams({ week: '2026-39' }), /YYYYWW/, '实测别的写法上游 400「week must use YYYYWW format」')
+  assert.throws(() => source.normalizeParams({}), /至少要给一个/)
+  assert.throws(() => source.normalizeParams({ week: '202639', start_week: '202638' }), /二选一/)
+  assert.equal(source.normalizeParams({ prd: 'cu,al' }).prd, 'CU,AL', '实测逗号分隔可用（CU,AL + 两周 → 4 行）')
+  // prd 是多值过滤：拿单值比会把正确返回判成"过滤没生效"，所以要按集合核。
+  await withFetch(async () => jsonResponse(paged([{ ...FUTURES_WEEKLY_ROW, prd: 'AL' }, { ...FUTURES_WEEKLY_ROW, prd: 'CU' }], { total: 4 })), async () => {
+    const ok = await source.execute(request('ftshare_futures_weekly', { prd: 'CU,AL', start_week: '202638', end_week: '202641' }), new AbortController().signal)
+    assert.equal(ok.data.item.length, 2)
+  })
+  await withFetch(async () => jsonResponse(paged([{ ...FUTURES_WEEKLY_ROW, prd: 'ZN' }], { total: 4 })), async () => {
+    await assert.rejects(
+      () => source.execute(request('ftshare_futures_weekly', { prd: 'CU,AL' }), new AbortController().signal),
+      (error) => { assert.equal(error.kind, 'invalid_response'); assert.match(error.message, /prd/); return true },
+    )
+  })
+  await withFetch(async () => jsonResponse(paged([{ ...FUTURES_WEEKLY_ROW, week: '202650' }], { total: 4 })), async () => {
+    await assert.rejects(
+      () => source.execute(request('ftshare_futures_weekly', { start_week: '202638', end_week: '202641' }), new AbortController().signal),
+      /outside the requested/, '周码定宽，字典序就是时间序：越界必须响',
+    )
+  })
+})
+
+test('南华指数：high < open 原样带出不修、金额列按亿元命名、code 与 trade_date 至少一个', async () => {
+  const source = sourceFor('ftshare_futures_index_kline')
+  assert.throws(() => source.normalizeParams({ start_date: '2026-08-17', end_date: '2026-10-15' }), /code 与 trade_date 至少/)
+  await withFetch(async () => jsonResponse(paged([NANHUA_ROW], { total: 38 })), async (calls) => {
+    const result = await source.execute(request('ftshare_futures_index_kline', { code: 'ag_nh', start_date: '2026-08-17', end_date: '2026-10-15' }), new AbortController().signal)
+    assert.match(calls[0].url, /code=AG_NH/, '指数代码统一大写发给上游')
+    const row = result.data.item[0]
+    assert.ok(row.high < row.open, '⛔ 实测 30 行里就有 1 行 high < open：聚合指数不保证高低自洽，本层不修也不报错')
+    assert.deepEqual([row.open, row.high, row.low, row.close, row.pre_close], [1758.78, 1724.75, 1649.31, 1650.3, 1724.75])
+    assert.deepEqual([row.change_value, row.change_pct], [-74.45, -4.3166], 'change ≡ close − pre_close、pct_chg 是百分数（实测 30/30 成立）')
+    assert.equal(row.amount_yi, 958.56, '文档写「千元」，实测那条对不上：见 description 的 CU_NH 交叉核对')
+    assert.equal(row.trade_date, '2026-09-28', '行内日期是字符串 YYYYMMDD，本层归一并给毫秒轴')
+  })
+  assert.throws(() => source.normalizeParams({ code: 'AG_NH', size: 201 }), /1 to 200/, '实测 201 → 响亮 400「page_size must be between 1 and 200」')
+})
+
+test('会员持仓排名：GFEX 换成上游的 gfe、品种转小写、空串转 null 且排名与数值同时空', async () => {
+  const source = sourceFor('ftshare_futures_member_rank')
+  assert.equal(source.normalizeParams({ exchange: 'GFEX', trade_date: '2026-10-15' }).exchange, 'gfe', '⛔ 实测 GFEX 与 gfex 都静默 0 行，上游真名是 gfe')
+  assert.equal(source.normalizeParams({ exchange: 'shfe' }).exchange, 'shfe')
+  assert.equal(source.normalizeParams({ variety_code: 'AG' }).variety_code, 'ag', '实测大写 AG 回 0 行、小写有数')
+  assert.equal(source.normalizeParams({ contract_code: 'ag2610' }).contract_code, 'AG2610', '合约码实测大写命中')
+  await withFetch(async () => jsonResponse(paged([MEMBER_RANK_ROW, MEMBER_RANK_ROW_EMPTY], { total: 6911 })), async (calls) => {
+    const result = await source.execute(request('ftshare_futures_member_rank', { exchange: 'CFFEX', trade_date: '2026-10-15', size: 500 }), new AbortController().signal)
+    assert.match(calls[0].url, /exchange=cffex/)
+    assert.match(calls[0].url, /trade_date=2026-10-15/, '这一族的日期实测两种写法都收，本层原样发带横杠那种')
+    const first = result.data.item[0]
+    assert.equal(first.member_name, '中信期货(代客)')
+    assert.deepEqual([first.volume_rank, first.volume_lots, first.volume_change], [1, 17904, -3858])
+    assert.deepEqual([first.net_long_rank, first.net_long_position, first.net_long_change], [null, null, null], '空串 = 这一行没有这个口径，不补 0')
+    assert.deepEqual([first.net_short_rank, first.net_short_position], [4, 90])
+    assert.deepEqual([first.settle_price, first.long_avg_price], [6750.8, 7486.8424])
+    assert.equal(first.trade_date_ms, Date.parse('2026-10-15T00:00:00+08:00'))
+    const empty = result.data.item[1]
+    assert.deepEqual([empty.long_rank, empty.long_position, empty.short_rank, empty.short_position, empty.net_short_position], [null, null, null, null, null], '两头都没有的那一行仍然带着增减仓排名与结算价')
+    assert.deepEqual([empty.long_increase_rank, empty.long_decrease_rank, empty.short_increase_rank, empty.short_decrease_rank], [15, 15, 10, 20])
+    assert.deepEqual([empty.long_avg_price, empty.short_avg_price], [null, null])
+  })
+  // 行里是小写：拿用户给的写法去比会把正确返回判成过滤没生效，比的是**发出去的那个小写值**。
+  await withFetch(async () => jsonResponse(paged([{ ...MEMBER_RANK_ROW, exchange: 'dce' }], { total: 1 })), async () => {
+    await assert.rejects(
+      () => source.execute(request('ftshare_futures_member_rank', { exchange: 'CFFEX', trade_date: '2026-10-15' }), new AbortController().signal),
+      (error) => { assert.equal(error.kind, 'invalid_response'); assert.match(error.message, /exchange/); return true },
+    )
+  })
+  await withFetch(async () => jsonResponse(paged([MEMBER_RANK_ROW_EMPTY], { total: 1 })), async (calls) => {
+    await assert.rejects(
+      () => source.execute(request('ftshare_futures_member_rank', { variety_code: 'IC', trade_date: '2026-10-15' }), new AbortController().signal),
+      (error) => { assert.equal(error.kind, 'invalid_response'); assert.match(error.message, /variety_code/); return true },
+      '品种过滤被吞时同样要响：实测大写 IC 上游只回 0 行，所以本层转成 ic 之后还要回来核这一列',
+    )
+    assert.match(calls[0].url, /variety_code=ic/)
+  })
+})
+
+test('贵金属：五样参数都得到、size 上限 1000、降序行原样、单位不进列名', async () => {
+  const source = sourceFor('ftshare_bullion_price')
+  assert.throws(() => source.normalizeParams({ symbol: 'AU9999', end_date: '2026-08-14' }), /start_date must be YYYY-MM-DD/)
+  assert.throws(() => source.normalizeParams({ start_date: '2026-08-01', end_date: '2026-08-14' }), /symbol 不能为空/)
+  assert.throws(() => source.normalizeParams({ symbol: 'AU9999', start_date: '2026-08-14', end_date: '2026-08-01' }), /must not be later/)
+  assert.throws(() => source.normalizeParams({ symbol: 'AU9999', start_date: '2026-08-01', end_date: '2026-08-14', size: 1001 }), /1 to 1000/, '实测 1001 静默夹到 1000（回显 pageSize=1000）')
+  await withFetch(async () => jsonResponse(paged([BULLION_ROW], { total: 635 })), async (calls) => {
+    const result = await source.execute(request('ftshare_bullion_price', { symbol: 'au9999', start_date: '2026-08-01', end_date: '2026-08-14', page: 2, size: 10 }), new AbortController().signal)
+    assert.match(calls[0].url, /symbol=AU9999/)
+    assert.match(calls[0].url, /start_date=20260801.*end_date=20260814/, '发给上游的是 YYYYMMDD')
+    assert.deepEqual(result.data.item, [{ quote_date: '2026-08-14', quote_date_ms: Date.parse('2026-08-14T00:00:00+08:00'), price_value: 940.72 }])
+    assert.deepEqual(result.data.pagination, { page: 2, size: 1, pages: 64, total: 635 })
+    assert.ok(!('price_yuan' in result.data.item[0] && !('price_cny_per_gram' in result.data.item[0])), '⛔ 单位上游未披露：列名里不许出现任何一种单位')
+  })
+})
+
