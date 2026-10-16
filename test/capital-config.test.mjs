@@ -16,6 +16,29 @@ const CLIENT = join(ROOT, 'config', 'client.js')
 const CLIENT_SRC = join(ROOT, 'config', 'client.src.cjs')
 
 /**
+ * ⛔ 条目 schema 与卡片之间的**清单一致性**：这把闸门是给 2026-10-16 那一次漏接补的。
+ * 当时 `ftshareCredentialRef` 已经是 host Config 里的 volatile 字段、主插件也按它现取密钥，
+ * 唯独卡片没有那一格——24 项能力在目录里，密钥却没有输入口，而**零报错**（用户只能去改 profile 文件，
+ * 且界面上看不见这把密钥）。schema 与卡片是两份清单，"少补一处"正是本项目最忌讳的那一族。
+ * 比的是**解析后的引用名集合**，不是行数：多一行同样要失败（界面上会出现一格永远存不了东西的输入框）。
+ */
+test('capital-config：条目 Config 里每个凭据引用名，卡片都必须有一行密钥', () => {
+  const names = []
+  const walk = (value) => {
+    for (const [key, item] of Object.entries(value ?? {})) {
+      if (/credentialref$/i.test(key) && typeof item === 'string') names.push(item)
+      else if (item && typeof item === 'object') walk(item)
+    }
+  }
+  walk(plainConfig(CapitalConfig({})))
+  const clientNames = [...readFileSync(CLIENT_SRC, 'utf8').matchAll(/^const \w*DEFAULT_REF = '([^']+)'/gm)]
+    .map((match) => match[1])
+  assert.deepEqual([...new Set(names)].sort(), [...new Set(clientNames)].sort(),
+    '凭据引用名不齐：卡片少一格 = 这把密钥没有输入口，多一格 = 界面上永远存不了东西')
+  assert.ok(names.length >= 5, `密钥行只剩 ${names.length} 把，闸门多半被架空了`)
+})
+
+/**
  * 0.1.7 的 settings 面里**条目 id 就是命名空间**：host 半边不再有 `settings.register`，
  * 可编辑面是条目 Config 的 `.volatile()` 投影；浏览器半边按 `configForms.get(条目 id)` 读写。
  * 卡片坐的是**组合包自己的页面**：槽 `plugins.bundle.config` 的 key 是组合包的**包名**
@@ -70,7 +93,7 @@ test('capital-config Host：可编辑面全靠 Config 的 .volatile() 字段，�
   // 镜像 ⇒ 卡片读不到命名空间；写非 volatile 路径被 `Config field "…" is not volatile` 拒绝。
   const flags = volatilePaths(CapitalConfig)
   for (const path of [
-    'customPersona', 'fuyaoCredentialRef',
+    'customPersona', 'fuyaoCredentialRef', 'ftshareCredentialRef',
     'retriever.baseURL', 'retriever.credentialRef',
     'retriever.windDocs.credentialRef', 'retriever.localFetch.enabled', 'retriever.paddleOcr.credentialRef',
   ]) {
@@ -369,7 +392,7 @@ function cardRenderer(registrations) {
 /** 排空一层宏任务：事件处理器里的 async 取数没有可 await 的句柄，别靠微任务数数。 */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
 
-test('capital-config Client：四个密钥按序渲染，本机回退与 selected skill 开关依次收尾', () => {
+test('capital-config Client：五个密钥按序渲染，本机回退与 selected skill 开关依次收尾', () => {
   const scope = readyScope()
   const { mod } = loadClient({ scope })
   const { ctx, registrations } = fakeCtx({ scope })
@@ -398,10 +421,11 @@ test('capital-config Client：四个密钥按序渲染，本机回退与 selecte
   const secrets = collect(page, 'SettingsSecretField').map((node) => node.props.id)
   assert.deepEqual(secrets, [
     'capital-config-fuyao-key',
+    'capital-config-ftshare-key',
     'capital-config-anysearch-key',
     'capital-config-wind-key',
     'capital-config-paddleocr-key',
-  ], '四个密钥行的顺序与 CREDENTIAL_FIELDS 一致')
+  ], '五个密钥行的顺序与 CREDENTIAL_FIELDS 一致')
   const switches = collect(card, 'Switch')
   assert.equal(switches.length, SELECTED_SKILL_CATALOG.length + 1, '本机回退一颗开关，catalog 每项各一颗')
   assert.equal(switches[0].props.checked, true, '段缺省 ⇒ 本机回退默认开')
@@ -419,13 +443,14 @@ test('capital-config Client：四个密钥按序渲染，本机回退与 selecte
   walk(card)
   assert.deepEqual(order, [
     'capital-config-fuyao-key',
+    'capital-config-ftshare-key',
     'capital-config-anysearch-key',
     'capital-config-wind-key',
     'capital-config-paddleocr-key',
     'save',
     'local-fetch',
     ...SELECTED_SKILL_CATALOG.map(() => 'selected-skill'),
-  ], '数据源格内：四个密钥 → 保存 → 回退开关；精选 Skills 的 35 行随后（hidden 也在树上）')
+  ], '数据源格内：五个密钥 → 保存 → 回退开关；精选 Skills 的 35 行随后（hidden 也在树上）')
 })
 
 test('capital-config Client：catalog 用到的每个能力标签都有中英两套显示名', () => {
@@ -460,7 +485,7 @@ test('capital-config Client：精选 Skills 每行给复制技能名与仓库链
   const page = render()
   const links = collect(page, 'a')
   const docsLinks = links.filter((link) => link.props['data-capital-config-doc'] === 'true')
-  assert.equal(docsLinks.length, 4, '四个密钥行各一个文档链接')
+  assert.equal(docsLinks.length, 5, '五个密钥行各一个文档链接')
   for (const link of docsLinks) {
     assert.equal(link.props.target, '_blank', '文档链接新标签打开')
     assert.match(String(link.props.rel), /noopener/, '外链必须切断 opener')

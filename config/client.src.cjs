@@ -51,6 +51,7 @@ const REPO_URL = 'https://github.com/v587d/capital-generation'
 const NPM_URL = `https://www.npmjs.com/package/${BUNDLE_NAME}`
 
 const FUYAO_DEFAULT_REF = 'FUYAO_API_KEY'
+const FTSHARE_DEFAULT_REF = 'FTSHARE_API_KEY'
 const ANYSEARCH_DEFAULT_REF = 'ANYSEARCH_API_KEY'
 const WIND_DEFAULT_REF = 'WIND_API_KEY'
 const PADDLE_OCR_DEFAULT_REF = 'PADDLE_OCR_TOKEN'
@@ -68,6 +69,7 @@ const TABS_ID = 'capital-config-tabs'
 const SKILL_DOC_ROUTE = '/capital-skills'
 const DOC_URLS = {
   fuyao: 'https://fuyao.aicubes.cn/docs/',
+  ftshare: 'https://market.ft.tech/gateway/doc/p/pb8eizu3',
   anysearch: 'https://www.anysearch.com/docs/auth',
   wind: 'https://market.windalice.com/',
   paddleocr: 'https://aistudio.baidu.com/paddleocr',
@@ -76,11 +78,13 @@ const DOC_URLS = {
 /**
  * 密钥字段清单（渲染顺序 = 数组顺序）。读状态、寻 ref 名、写草稿、事件刷新都遍历这一份：
  * 加一个 Key 以前要在九处各补一遍，漏掉的那处不会报错，只会让用户填了却不生效。
+ * FTShare 排在 Fuyao 之后：两家是同一格里的两个结构化数据上游（互为第二家），检索与解析跟在后面。
  */
-const CREDENTIAL_FIELDS = ['fuyao', 'anysearch', 'wind', 'paddleocr']
+const CREDENTIAL_FIELDS = ['fuyao', 'ftshare', 'anysearch', 'wind', 'paddleocr']
 const SELECTED_SKILL_FIELDS = SELECTED_SKILL_CATALOG.map(({ key }) => key)
 const DEFAULT_REFS = {
   fuyao: FUYAO_DEFAULT_REF,
+  ftshare: FTSHARE_DEFAULT_REF,
   anysearch: ANYSEARCH_DEFAULT_REF,
   wind: WIND_DEFAULT_REF,
   paddleocr: PADDLE_OCR_DEFAULT_REF,
@@ -97,6 +101,8 @@ const zh = {
   componentsHint: '组件清单由 DSH 绘制，显示在下方。',
   fuyaoLabel: 'Fuyao API Key',
   fuyaoHint: '同花顺 Fuyao 结构化数据接口。保存后新 Capital 模式会话生效。',
+  ftshareLabel: 'FTShare API Key',
+  ftshareHint: '非凸科技 FTShare 结构化数据接口（免费档）。保存后新 Capital 模式会话生效。',
   anysearchLabel: 'AnySearch API Key',
   anysearchHint: 'AnySearch 网页搜索 / 提取接口。保存后新 Capital 模式会话生效。',
   localFetchLabel: '允许启动本地提取网页内容',
@@ -141,6 +147,8 @@ const en = {
   componentsHint: 'The component list is drawn by DSH and appears below.',
   fuyaoLabel: 'Fuyao API Key',
   fuyaoHint: 'Tonghuashun Fuyao structured-data API. Takes effect in new Capital mode sessions.',
+  ftshareLabel: 'FTShare API Key',
+  ftshareHint: 'Feikon FTShare structured-data API (free tier). Takes effect in new Capital mode sessions.',
   anysearchLabel: 'AnySearch API Key',
   anysearchHint: 'AnySearch web search / extract interface. Takes effect in new Capital mode sessions.',
   localFetchLabel: 'Allow local web page extraction',
@@ -179,6 +187,7 @@ function text(value, fallback) {
 
 function refOf(snapshot, field) {
   if (field === 'fuyao') return text(snapshot.value?.fuyaoCredentialRef, DEFAULT_REFS.fuyao)
+  if (field === 'ftshare') return text(snapshot.value?.ftshareCredentialRef, DEFAULT_REFS.ftshare)
   if (field === 'wind') return text(snapshot.value?.retriever?.windDocs?.credentialRef, DEFAULT_REFS.wind)
   if (field === 'paddleocr') return text(snapshot.value?.retriever?.paddleOcr?.credentialRef, DEFAULT_REFS.paddleocr)
   return text(snapshot.value?.retriever?.credentialRef, DEFAULT_REFS.anysearch)
@@ -765,6 +774,7 @@ function CapitalCard(props) {
     onDiscard: props.discard,
   },
     h(SecretRow, { field: 'fuyao', label: t('fuyaoLabel'), hint: t('fuyaoHint'), docsUrl: DOC_URLS.fuyao, state: state.fuyao, disabled: disabled || state.saving || !state.fuyao.writable, onEdit: (value) => props.edit('fuyao', value), t }),
+    h(SecretRow, { field: 'ftshare', label: t('ftshareLabel'), hint: t('ftshareHint'), docsUrl: DOC_URLS.ftshare, state: state.ftshare, disabled: disabled || state.saving || !state.ftshare.writable, onEdit: (value) => props.edit('ftshare', value), t }),
     h(SecretRow, { field: 'anysearch', label: t('anysearchLabel'), hint: t('anysearchHint'), docsUrl: DOC_URLS.anysearch, state: state.anysearch, disabled: disabled || state.saving || !state.anysearch.writable, onEdit: (value) => props.edit('anysearch', value), t }),
     h(SecretRow, { field: 'wind', label: t('windLabel'), hint: t('windHint'), docsUrl: DOC_URLS.wind, state: state.wind, disabled: disabled || state.saving || !state.wind.writable, onEdit: (value) => props.edit('wind', value), t }),
     h(SecretRow, { field: 'paddleocr', label: t('paddleocrLabel'), hint: t('paddleocrHint'), docsUrl: DOC_URLS.paddleocr, state: state.paddleocr, disabled: disabled || state.saving || !state.paddleocr.writable, onEdit: (value) => props.edit('paddleocr', value), t }),
