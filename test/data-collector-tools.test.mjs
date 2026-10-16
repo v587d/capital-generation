@@ -97,6 +97,21 @@ test('工具注册：request_data + list_capabilities + describe_capability；ge
   assert.ok(withDiag.definitions.some((d) => d.name === 'dc_status'), '注入 diagnostics 时 dc_status 应注册')
 })
 
+test('⛔ 并发声明只在纯读的发现面：list / describe 可并发，request_data 不声明', () => {
+  // 省往返的机制是 `isConcurrencySafe` + 框架并发池（`docs/dev/data-roles.md` §1.1），不是把多份结果合并成一个载荷。
+  // 发现面读的是内存注册表，没有副作用，所以多域 / 多能力的探索付一次往返。
+  const { toolRuntime } = makeHubAndTools()
+  const definition = (name) => toolRuntime.definitions.find((d) => d.name === name)
+  for (const name of ['list_capabilities', 'describe_capability']) {
+    assert.equal(typeof definition(name).isConcurrencySafe, 'function', `${name} 必须声明并发安全，否则模型只能一份一份串行等`)
+    assert.equal(definition(name).isConcurrencySafe({}), true)
+  }
+  // request_data 刻意不声明：Hub 的执行器是 FIFO 串行（`hub.ts` 的 Phase 1 注释），上游节流与
+  // in-flight 合并都建立在"一次执行一条"上；把它放进并发池等于替节流链承诺一个没验过的并发形状。
+  assert.equal(definition('request_data').isConcurrencySafe, undefined,
+    'request_data 不许顺手标并发安全——要标就得先重验 Hub 串行与各家节流链')
+})
+
 test('request_data schema：只接受 capability/params/force_refresh/task_id，无任何内部字段', () => {
   const { toolRuntime } = makeHubAndTools()
   const parameters = toolRuntime.definitions.find((d) => d.name === 'request_data').parameters

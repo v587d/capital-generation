@@ -11,6 +11,15 @@ import { createFtshareSources } from '../lib/sources/ftshare-rest.js'
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const SESSION = { id: 'session-1', header: { cwd: '/workspace/proj' } }
 
+/**
+ * 体积口径与宿主**同源**：`dsh-compaction-tool-result-pruner` 量的是 Unicode 码点
+ * （`lib/index.js:26`：`Array.from(text).length`），不是 UTF-16 码元，也不是字节。
+ * `.length` 在出现代理对（emoji、CJK 扩展 B 及以后）时会**多算**，所以它只会让护栏提前失败、
+ * 不会低估——但两条线不同尺就没有"逼近上限"的可追认性，测试因此一律按码点计。
+ * 中文正文用 `wc -c` 估会高估三倍，见 `test/preset-rows.mjs` 的同一条注记。
+ */
+const codePoints = (text) => Array.from(text).length
+
 /** 已注册的 Fuyao capability（Phase 1 四个 + Phase 2 十四个）。 */
 const PHASE2_CAPABILITIES = [
   'ticker_list', 'corporate_actions', 'income_statement', 'balance_sheet', 'cash_flow',
@@ -389,15 +398,19 @@ test('能力目录体积预算：必须留在 DSH 剪枝阈值（8192）以内�
   const { hub } = makeHub()
   for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources(), ...createWindSources(async () => 'key'), ...createFtshareSources(async () => 'key')]) hub.registerSource(dataSource)
   const directory = hub.capabilityDirectory()
-  assert.equal(hub.capabilityNames().length, 113, '端点数量回归：目录预算断言必须覆盖 Fuyao、Tencent、Eastmoney、Wind 与 FTShare 全部已注册能力')
+  assert.equal(hub.capabilityNames().length, 118, '端点数量回归：目录预算断言必须覆盖 Fuyao、Tencent、Eastmoney、Wind 与 FTShare 全部已注册能力')
 
   // 预算的来源（实测本机 dsh 0.1.5-rc.1，不是拍脑袋的数字）：
-  // - 真实上限是 dsh-compaction-tool-result-pruner 的 `thresholdChars`（preset 里配 8192）。
+  // ⛔ 先分清两件事：**下面这两道（6144 / 4096）都是 CI 护栏，生产路径上不存在任何体积检查**
+  //   （`tools.ts` 的 `list_capabilities` 直接返回 `hub.capabilityDirectory()`；`SAFE_RESULT_CHARS=7000`
+  //   只守 `describe_dataset` 那条）。真正的运行时上限只有宿主那一道，而且是**回溯式**的。
+  // - 真实上限是 dsh-compaction-tool-result-pruner 的 `thresholdChars`（preset 里配 8192，量**码点**）。
   //   它**不可按 Agent 区分**：全仓只有这一个包持有该配置，且主 Agent 与子 Agent 共用
   //   同一份 standing composition（同一个 pruner 实例），所以"只给 data_collector 提高预算"
   //   在 DSH 里没有配置路径。
   // - 超过 8192 的后果：保留 head 4096 + tail 1024、中间替换为 PRUNE_MARKER，
-  //   即目录**中间段的能力会在发现阶段消失**。
+  //   即目录**中间段的能力会在发现阶段消失**——但这是压缩触发后回头改写历史工具结果，
+  //   不是第一次调用就被切；所以 6144 守的是"永远不给它可切的机会"，不是"当前请求会不会失败"。
   // - 因此这里取 8192 的 75%（6144），留 2048 字符余量：逼近真实上限时先让测试失败，
   //   而不是运行时静默截断。
   // - 编码口径（2026-10-05 实测，见 docs/design/data-capability-expansion.md §2.1）：89 条紧凑
@@ -409,9 +422,19 @@ test('能力目录体积预算：必须留在 DSH 剪枝阈值（8192）以内�
   //   2026-10-07 加港美股指数两条后复测见下面的失败信息里的实测值（summary 短，目录只按条数涨）。
   //   2026-10-16 批次 D 之后（113 条）复测：**4469 字符 = 自预算 6144 的 72.7%、剪枝阈值 8192 的 54.6%**，
   //   均摊 39.5 字符/条——比 37 略高是因为新几颗的 summary 带上"含北证""按采集期"这类发现必需的限定词。
+  //   同日批次 E 之后（118 条）再复测：**4698 码点 = 自预算的 76.5%、剪枝阈值的 57.3%**，均摊 39.8。
+  //   体积构成实测：名字 2142 + 摘要 2085 + 分隔与换行 471——名字只比摘要多 57，
+  //   ⛔ 所以"目录涨的是名字不是摘要"这种单因说法不成立，两者共同构成；能省的只有摘要那一半，
+  //   而摘要里"含北证""按采集期"这类限定词是发现必需的，砍它就是拿召回换字符。
+  //   余量按实测算给下一条红线：从 4698 起，按本族新能力的均摊 47.7 码点/条，
+  //   **还能加约 30 条才撞 6144、约 87 条才撞宿主的 8192**。期货十条 + D 批剩八颗（+18）
+  //   ≈ 5557 = 90.4%，仍在 CI 护栏之内——所以那两批**不需要**先改发现形态。
+  //   ⛔ 真要重谈形态（分域 / 只列名字 / 检索）的触发线写在设计文档 §2.5：目录 ≥ 5800 码点
+  //   或条数 ≥ 145，且必须先有一次真实任务集的选能力回归做证据，不许凭字符数直觉换协议。
   const DIRECTORY_BUDGET = 6144
-  assert.ok(directory.length < DIRECTORY_BUDGET, `能力目录已达 ${directory.length} 字符（预算 ${DIRECTORY_BUDGET}，剪枝阈值 8192）：请精简 summary，或按设计文档 §2.3 讨论分域发现`)
-  assert.ok(directory.length < 8192, '目录绝不允许越过剪枝阈值')
+  const directoryChars = codePoints(directory)
+  assert.ok(directoryChars < DIRECTORY_BUDGET, `能力目录已达 ${directoryChars} 码点（预算 ${DIRECTORY_BUDGET}，剪枝阈值 8192）：请精简 summary，或按设计文档 §2.3 / §2.5 讨论发现形态`)
+  assert.ok(directoryChars < 8192, '目录绝不允许越过剪枝阈值')
   // 一行一条是编码的全部承诺：行数等于注册数，摘要里撞见分隔符也不会多出一条能力。
   assert.equal(directory.split('\n').length, hub.capabilityNames().length)
 })
@@ -434,10 +457,10 @@ test('宽表详情预算：字段字典让 72 列的能力留在预算内（直�
     execute: async () => ({ data: {} }),
   })
   const detail = JSON.stringify(hub.describeCapability('cb_profile'))
-  assert.ok(detail.length < 4096, `宽表详情 ${detail.length} 字符，已打穿单能力 4096 预算：字典投影失效会被剪枝截断`)
+  assert.ok(codePoints(detail) < 4096, `宽表详情 ${codePoints(detail)} 码点，已打穿单能力 4096 预算：字典投影失效会被剪枝截断`)
   assert.equal(hub.describeCapability('cb_profile').output_fields.split('\n').filter((line) => line.startsWith('item[].')).length, 72)
   // 这条断言钉的是"为什么需要字典"：同一份 schema 原样交给模型就超预算（实测 4464 字符）。
-  assert.ok(JSON.stringify(outputSchema).length > 4096, '这份合成 schema 必须真的比字典大，否则回归没有意义')
+  assert.ok(codePoints(JSON.stringify(outputSchema)) > 4096, '这份合成 schema 必须真的比字典大，否则回归没有意义')
   // 但字典不是免死金牌：**列数与描述共用同一个 4096**。上面这条能过，是因为它的 description 只有一句
   // 占位话；把描述换成真实契约的长度（转债表实测 2081 字符），72 列就必然打穿（实测 4995）。
   // 记下这条是为了让下一个"再多加十列"的人先看见代价，而不是等运行时被剪枝截断。
@@ -451,7 +474,7 @@ test('宽表详情预算：字段字典让 72 列的能力留在预算内（直�
     execute: async () => ({ data: {} }),
   })
   const verbose = JSON.stringify(hub.describeCapability('cb_profile_verbose'))
-  assert.ok(verbose.length > 4096, `72 列 + 真实长度描述的详情只有 ${verbose.length} 字符，这条回归失去意义（说明预算耦合没被钉住）`)
+  assert.ok(codePoints(verbose) > 4096, `72 列 + 真实长度描述的详情只有 ${codePoints(verbose)} 码点，这条回归失去意义（说明预算耦合没被钉住）`)
 })
 
 test('单能力详情体积预算：字典投影后仍不许逼近剪枝阈值', async () => {
@@ -463,9 +486,12 @@ test('单能力详情体积预算：字典投影后仍不许逼近剪枝阈值',
   // （逐列 JSON Schema 形态下两融是 4479 = 109%）。瓶颈已经从"列数"挪到"描述"，收窄就从这里收。
   // 2026-10-15：FTShare 报价面 3668 = 89.6%（32 列 + 1873 字符描述）曾是新第二名，现在最紧的是
   // 申万行业日度指标 3901 = 95.2%（43 列 + 1756 字符描述 + 464 参数面）——宽表再想加一列，就得从描述里等量减回来。
+  // 2026-10-16 批次 E 之后复测：**最大仍是那一条 3901，没动**。新五颗都在下半区
+  // （日历 2381 = 58.1%、曲线 1935、HIBOR 1522、SHIBOR 1482、LPR 1151）：这一族列少，
+  // 长描述换来的体积比宽表小得多——瓶颈仍住在那条 43 列的申万宽表上。
   // ⛔ 这条登记了本闸门，之前只登记四族，新接一族不进来等于给这族开了免检。
   const details = hub.capabilityNames().map((capability) => JSON.stringify(hub.describeCapability(capability)))
-  const largest = Math.max(...details.map((detail) => detail.length))
+  const largest = Math.max(...details.map((detail) => codePoints(detail)))
   assert.ok(largest < 4096, `最大的能力详情已达 ${largest} 字符：会被剪枝截断，需要精简或拆分`)
 })
 

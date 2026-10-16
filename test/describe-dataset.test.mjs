@@ -174,6 +174,18 @@ test('describe_dataset：注册、一次一份、并发声明与 schema 根形�
   for (const name of ['inspect_dataset', 'profile_dataset', 'query_dataset']) assert.ok(names.includes(name), `${name} 必须保留`)
 })
 
+test('⛔ 读 Dataset 的五颗里只有 describe_dataset 声明并发', () => {
+  // 宿主是 fail-closed 的：不声明就串行（真机核过，账本 L30）。所以"标不标"是**按工具**定的决定，
+  // 每一颗都要有理由，不许顺手补——`query_dataset` 不标的理由写在注册处注释（单颗中位 17 毫秒，
+  // 成本主体是 JSON.parse + 聚合，Node 单线程下并发也不重叠；多份数据的诉求由 describe_dataset 的
+  // queries 承接）。`write_profile` 更不待言：它写盘。
+  const declared = definitionsFor(makeStore().store)
+    .filter((definition) => definition.isConcurrencySafe !== undefined)
+    .map((definition) => definition.name)
+  assert.deepEqual(declared, ['describe_dataset'],
+    '并发声明的面只能收在这一颗；要加新的一颗，先量它单颗的墙钟成本、再回到 docs/dev/data-roles.md §1.1')
+})
+
 test('describe_dataset：一次调用完成 inspect + profile + queries', async () => {
   const { store, fs } = makeStore()
   const ref = await saveRows(store, closeRows(30))

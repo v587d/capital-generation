@@ -59,7 +59,7 @@ description: Use when composing or reading a Capital data message — data_reque
 | 步 | 工具 | 得到什么 | 调用纪律 |
 |----|------|----------|----------|
 | ① | `list_capabilities()` | 纯文本能力目录：**一行一条** `capability\|summary\|paginated`（1=分页、0=不分页） | **一个任务只调一次**；目录已在本 session 历史里，重复调用只会白占上下文 |
-| ② | `describe_capability({ capability })` | 该能力的完整 `description` / `input_schema` / `output_fields`（逐行字段字典） | 一次只传**一个**名字、**不传逗号**；同一个能力描述一次即可；要几个能力就分别调用几次 |
+| ② | `describe_capability({ capability })` | 该能力的完整 `description` / `input_schema` / `output_fields`（逐行字段字典） | 一次只传**一个**名字、**不传逗号**；同一个能力描述一次即可；要几个能力就在**同一条消息里一次发出多个调用**（纯读、可并发），不要一份一份等 |
 
 - 读目录时**按行切**：一行就是一条能力，取第一个 `|` 前面的部分当 `capability` 原样复制；摘要里出现的
   `\|`、`\n` 是转义字符，不是分隔符。
@@ -69,6 +69,9 @@ description: Use when composing or reading a Capital data message — data_reque
 - 目录刻意不含参数与输出结构：全量 schema 约 23KB，会被工具结果剪枝器（阈值 8192）截断中间
   部分，导致排在中间的能力在发现阶段不可见。目录只负责"选哪个"，详情负责"怎么填"。
 - **一个任务只调一次 `list_capabilities`**；**同一个能力只描述一次**，重复调用只会白占上下文。
+- `list_capabilities` 与 `describe_capability` 都是**纯读**：本轮要看几个能力，就在**同一条消息里一次发出
+  这几个 `describe_capability` 调用**，它们在框架并发池里并行执行、在同一个下一步一起返回；一份一份等
+  等于把一次往返付成 N 次。这不改变上一条"每个能力只描述一次"，也不改变"一次只传一个名字"。
 - 不查 `input_schema` 就填 `params` 属于违规；`params` 的取值与约束一律以 `describe_capability` 为准。
 
 `describe_capability` 的错误按 code 处置，不要盲目重试：

@@ -936,6 +936,9 @@ test('data_collector persona：覆盖 Phase 1 数据集协议全部必须要点'
   assertRule(dataProtocol, /一个任务只调一次/, 'skill 必须限定 list_capabilities 一个任务只调一次')
   assertRule(dataProtocol, /只描述一次/, 'skill 必须限定同一个能力只描述一次')
   assertRule(dataProtocol, /一次只传一个名字|不传逗号|一次只传一个 capability/, 'skill 必须限定 describe_capability 一次一个名字')
+  // 发现面标了并发安全之后，"要几个能力就分开调用"必须同时改成"同一条消息一次发完"，
+  // 否则 skill 会把模型推回 N 次串行往返（省往返的机制本身见 `docs/dev/data-roles.md` §1.1）。
+  assertRule(dataProtocol, /同一条消息里一次发出\s*\n?.*describe_capability|describe_capability[^\n]*同一条消息/, 'skill 必须要求多个 describe_capability 调用在同一条消息里一次发出')
   // 分类错误必须按 code 处置，而不是盲目重试
   for (const code of ['capability_required', 'capability_invalid', 'capability_unknown', 'capability_catalog_empty']) {
     assertRule(dataProtocol, new RegExp(code), `skill 必须给出 ${code} 的处置指引`)

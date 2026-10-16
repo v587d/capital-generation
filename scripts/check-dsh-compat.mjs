@@ -897,6 +897,44 @@ const probes = [
         : { status: FAIL, detail: `宿主文件口契约变了：${missing.join(' / ')}（见账本 L29；改本仓名单与包络建模，不要改探针）` }
     },
   },
+  {
+    id: 'L30',
+    title: '框架并发池的分类器契约：`ToolDefinition.isConcurrencySafe?(args)` —— **只有严格返回 `true` 才判 parallel**，未声明 / 非 true / 抛错 / 工具不可见一律 exclusive（fail-closed）；调度门是 exclusive 要求 `inFlight.size === 0`、parallel 可凑到 `maxParallel`（`maxParallelSubCalls` 默认 10）',
+    why: '`docs/dev/data-roles.md` §1.1 把整条"省往返"路线押在这一个判定上：不合并多份结果、不做 digest 与裁剪阶梯，'
+      + '而是让模型在同一条消息里发多个调用、由框架放进有界并发池。消费这条的三处都在本仓'
+      + '（`describe_dataset`、`list_capabilities`、`describe_capability`），而 `request_data` 刻意**不**声明'
+      + '——Hub 的执行器是 FIFO 串行，上游节流与 in-flight 合并都建立在"一次执行一条"上。四种漂移都静默：'
+      + '① 字段改名（换成 `concurrency` 之类）⇒ `executionMode()` 读不到我们裸 definition 上的声明，'
+      + '三处纯读工具退回串行，一次多能力任务的往返从 1 变 N，没有任何报错；② 语义从"默认 exclusive"'
+      + '翻成"默认 parallel"⇒ 没声明的 `request_data` 会并行起来，FTShare 10 QPS / Fuyao 节流地板这类'
+      + '按串行写的约束当场失效；③ 严格 `=== true` 放宽成 truthy ⇒ 返回值形状一改， exclusive 变成 parallel'
+      + '（方向与 ① 相反，同样静默）；④ 池上限降到 1 ⇒ "一条消息发 N 个"退化回串行，而 skill 里的纪律'
+      + '还在教模型那么发。真机回证 **2026-10-16 已补上**：一次性 headless 探针（两颗除声明与否外逐字相同的'
+      + '假工具、各挂 700 毫秒）跑三种批次——已声明三颗在 1 毫秒内一起派发、整批 706 毫秒；未声明三颗严格 '
+      + 'call→result 交替、整批 1426 毫秒；混发三条各自独占、整批 2116 毫秒（池在第一颗未声明的调用处断开）。'
+      + '0.1.5-rc.1 的 `executionMode` 源码与今天同为 fail-closed，所以默认串行这条不是本版才有的行为。',
+    run() {
+      const file = join(PKG('dsh-tools'), 'lib/index.js')
+      const text = readIfPresent(file)
+      if (text === undefined) return { status: FAIL, detail: `读不到 ${file}（框架换了并发池的实现位置？账本 L30 要跟着改）` }
+      const typesFile = join(PKG('dsh-tools'), 'lib/types/index.d.ts')
+      const types = readIfPresent(typesFile)
+      if (types === undefined) return { status: FAIL, detail: `读不到 ${typesFile}` }
+      const checks = [
+        ['ToolDefinition 仍带这条可选并发声明', /isConcurrencySafe\?\(args: unknown\): boolean;/, types, typesFile],
+        ['未声明就是 exclusive（fail-closed 的方向：默认串行）', /if \(!tool\?\.isConcurrencySafe\) return \{ kind: "exclusive" \};/, text, file],
+        ['仍然只有严格 === true 才判 parallel', /tool\.isConcurrencySafe\(exec\.arguments\) === true \? \{ kind: "parallel" \}/, text, file],
+        ['分类器抛错回落 exclusive（不吞成 parallel）', /catch \{\s*return \{ kind: "exclusive" \};/, text, file],
+        ['调度门仍是"exclusive 要空池、parallel 到 maxParallel"', /mode === "exclusive" \? inFlight\.size === 0 : inFlight\.size < maxParallel/, text, file],
+        ['并发池默认上限仍是 10（改成 1 就等于把模型的批量纪律作废）', /maxParallelSubCalls = value \?\? 10/, text, file],
+      ]
+      const missing = checks.filter(([, pattern, source]) => !pattern.test(source))
+        .map(([label, , , source]) => `${label}（${source}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: '并发分类器仍是"严格 true 才 parallel、其余 fail-closed"，池默认上限 10' }
+        : { status: FAIL, detail: `框架并发池契约变了：${missing.join(' / ')}（见账本 L30；改本仓的并发声明与 skill 纪律，不要改探针）` }
+    },
+  },
 ]
 
 const results = []

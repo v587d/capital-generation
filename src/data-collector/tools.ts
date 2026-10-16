@@ -77,8 +77,27 @@ function render(_args: unknown, value: unknown): Array<{ type: 'text'; text: str
   return [{ type: 'text', text: JSON.stringify(value) }]
 }
 
-function tool(name: string, description: string, parameters: object, schema: object, execute: (args: Record<string, unknown>, exec: ToolExecLike) => Promise<unknown>) {
-  return { name, description, parameters, output: { schema, render }, execute }
+function tool(
+  name: string,
+  description: string,
+  parameters: object,
+  schema: object,
+  execute: (args: Record<string, unknown>, exec: ToolExecLike) => Promise<unknown>,
+  options: { concurrencySafe?: boolean } = {},
+) {
+  return {
+    name,
+    description,
+    parameters,
+    output: { schema, render },
+    execute,
+    // 与 `dataset-tools.ts` 的 `describe_dataset` 同一机制：框架把同一条消息里的多个调用
+    // 放进有界并发池，N 份结果在同一个下一步一起返回（宿主 fail-closed：不标就串行，2026-10-16
+    // 一次性 headless 探针核过，账本 L30）。⛔ 只给**纯读**的发现面开：
+    // `request_data` 刻意不标——Hub 的执行器是 FIFO 串行（`hub.ts` 的 Phase 1 注释），
+    // 让模型并行发取数等于把上游节流与 in-flight 合并放在我们没承诺过的位置上。
+    ...(options.concurrencySafe === true ? { isConcurrencySafe: () => true } : {}),
+  }
 }
 
 /**
@@ -211,10 +230,11 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
       jsonObject(),
       { type: 'string' },
       async (_args, exec) => { delegatedSession(exec, 'list_capabilities'); return hub.capabilityDirectory() },
+      { concurrencySafe: true },
     ),
     tool(
       'describe_capability',
-      '读取**一个**能力的完整契约：description（单位、null 语义、时间与分页口径）、input_schema（params 的取值与约束）、output_fields（返回字段的逐行字典 `路径:类型[:说明]`，类型后缀 `?` 为可为 null、`[].` 为数组元素的字段）与 paginated。request_data 的 params 必须按这里返回的 input_schema 填写；request_data 若返回 request_params_invalid，应回到这里重新读取后再重试。一个能力描述一次即可：结果已在本 session 历史里，重复描述同一个能力只会白占上下文；需要几个能力就分别调用几次，不要用逗号把多个名字塞进一次调用。错误按 code 引导：capability_required（没给名字，先 list_capabilities()）、capability_invalid（不是字符串/超长/含逗号，改为目录中的单个名字）、capability_catalog_empty（数据源未注册，别重试，回告主 Agent）、capability_unknown（名字不存在，错误里会列出全部可用能力名并要求原样复制）。',
+      '读取**一个**能力的完整契约：description（单位、null 语义、时间与分页口径）、input_schema（params 的取值与约束）、output_fields（返回字段的逐行字典 `路径:类型[:说明]`，类型后缀 `?` 为可为 null、`[].` 为数组元素的字段）与 paginated。request_data 的 params 必须按这里返回的 input_schema 填写；request_data 若返回 request_params_invalid，应回到这里重新读取后再重试。一个能力描述一次即可：结果已在本 session 历史里，重复描述同一个能力只会白占上下文；需要几个能力就**在同一条消息里一次发出多个调用**（本工具是纯读、可并发执行，框架会把它们放进并发池、在同一个下一步一起返回），但一次仍只传**一个**名字，不要用逗号把多个名字塞进一条调用。错误按 code 引导：capability_required（没给名字，先 list_capabilities()）、capability_invalid（不是字符串/超长/含逗号，改为目录中的单个名字）、capability_catalog_empty（数据源未注册，别重试，回告主 Agent）、capability_unknown（名字不存在，错误里会列出全部可用能力名并要求原样复制）。',
       jsonObject({ capability: { type: 'string' } }, ['capability']),
       jsonObject({
         capability: { type: 'string' },
@@ -231,6 +251,7 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
         if (!detail) throw capabilityError('capability_unknown', `未注册的能力 "${capability}"。`)
         return detail
       },
+      { concurrencySafe: true },
     ),
     ...(diagnostics ? [
       tool('dc_status', '诊断工具：返回数据管道运行状态 —— at/call 为本次真实执行的时间戳与计数（防伪）、api_key 为**本次调用现取**的凭据解析结果（present/source，不含密钥值）、registered_capabilities 为当前已注册 capability 列表、root_tool_policy 为根 Agent 工具收敛的现场记录（preset_id / outcome / denied / failed，排查"主 Agent 为什么看得见本该收敛掉的工具"用）。数据源注册不依赖 key：api_key.present=false 时同花顺能力仍在目录里，但每次取数会点名 FUYAO_API_KEY 失败。排障时优先调用。', jsonObject(),
