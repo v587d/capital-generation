@@ -322,6 +322,38 @@ const FT = [
     expect: { minRows: 1 },
     note: '42 列宽表；聚合列（amount / total_mv 等）实测自 2026-08-26 起为 null，所以这条只核行数不核数值',
   }),
+  // 批次 D 的五颗（2026-10-16）。日期继续从日历里解析、id 继续从真响应里解析——
+  // ⛔ `requires` 是**按名字共享**的：同名条目共用注册表里第一条的 resolveFrom，
+  // 所以下面这三条 'date' 都必须指向同一份交易日历；谁改了第一条，另外两条会跟着静默换供。
+  ds('ftshare', 'ftshare_limit_price', 'daily', { size: 3 }, {
+    requires: 'date',
+    resolveFrom: { capability: 'ftshare_trading_calendar', params: { start_date: dayShift(-20), end_date: dayShift(-1) }, path: 'item.0.trade_date' },
+    expect: { minRows: 1 },
+    note: '全市场单日模式；stock/etf/cb 三类相加实测正好等于 total（7587 = 5576+1696+315）',
+  }),
+  ds('ftshare', 'ftshare_dragon_tiger_seats', 'daily', { size: 500 }, {
+    requires: 'date',
+    // 必须是真交易日：非交易日的信封是 data:null（合法空），编个周末进去就是巡检自己造的 EMPTY。
+    resolveFrom: { capability: 'ftshare_trading_calendar', params: { start_date: dayShift(-20), end_date: dayShift(-1) }, path: 'item.0.trade_date' },
+    expect: { minRows: 1 },
+    note: '前五买入/卖出席位；响应行内没有日期列，trade_date 由本层按请求补写；一天实测 44–72 行，一页取全',
+  }),
+  ds('ftshare', 'ftshare_holder_number', 'daily', { code: A_SHARE }, {
+    expect: { minRows: 1 },
+    note: '单票全部历史（实测 600519.SH 107 期，回到 1995 年）；is_last 那档是"各票自己的最新一期"，不是同一报告期截面',
+  }),
+  ds('ftshare', 'ftshare_index_weight', 'daily', { index_code: '000300', size: 3 }, {
+    expect: { minRows: 1 },
+    note: '省略 date = 最新一期（实测 2026-09-30）；weight_pct 是百分数，000300 全期 300 行相加 = 100.002',
+  }),
+  ds('ftshare', 'ftshare_convertible_bond_kline', 'daily', { start_date: dayShift(-60), end_date: dayShift(-1), period: 'day' }, {
+    requires: 'code',
+    // ⛔ 不写死单只券：转债会提前赎回与摘牌，写死就把巡检做成永久 EMPTY。代码从本仓涨跌停那颗
+    // 当日在册的 cb 清单里取（实测同日 315 只），拿到的必然是一只今天还在交易的债。
+    resolveFrom: { capability: 'ftshare_limit_price', params: { instrument_type: 'cb', size: 1 }, path: 'item.0.thscode' },
+    expect: { minRows: 1 },
+    note: '单只可转债日 K；跨度上限 12 个自然月由上游 400 说话，本层不换算成天数闸门',
+  }),
 ]
 
 /** 全量注册表。覆盖测试拿它对着 `lib/` 的真实注册数逐条核。 */

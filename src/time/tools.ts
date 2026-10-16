@@ -112,6 +112,12 @@ const DATA_TIME_CONTRACTS: Record<string, DataTimeContract> = {
   ftshare_block_trades: { kind: 'date', fields: ['date'], warning: 'date 必须是交易日；省略 = 上游最新有数的一天，**当日入库时刻不固定**（实测 2026-10-15 19:32 打 date=当天 total=0，同一晚 20:03 重打已有 80 行）——傍晚拿到当天为空先按「还没入库」理解，不是取数失败、不要循环重试。历史不连续：实测 2016-01-04（交易日历确认是交易日）整天为 0' },
   ftshare_sw_industry_overview: { kind: 'date', fields: ['date'], warning: 'date 必填且必须是交易日（非交易日与未来日期回 total=0，合法空）。⛔ 窗口实测只到最近约 94 个交易日：2026-10-15 实测最早有数的是 2026-05-28，更早的交易日全部 total=0——那是窗口外，不要换日期重试；更早序列请用 ftshare_sw_industry_metrics' },
   ftshare_sw_industry_metrics: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: '最早一天实测 2021-05-31（更早区间回 total=0、不报错）；start_date 晚于 end_date 也是静默空，本层已在参数层拒。⛔ 聚合列有断供：amount / total_mv / constituent_count / close_price / below_net_asset_count 与多数 *_quantile 实测自 2026-08-26 起为 null（2026-10-14 仍为 null，但 PE/PB/股息率有值），三级行业的 amount / index_close / 拥挤度恒为 null——null 不是 0，别补值也别循环重试' },
+  // 批次 D（2026-10-16 真报文）。⛔ `fields` 的顺序是有主的：resolve_data_time_range 把 period 写成
+  // fields[0] / fields[1]，所以 date_range 必须是 [start, end]，多出来的日期参数只能排在后面。
+  ftshare_limit_price: { kind: 'date_range', fields: ['start_date', 'end_date', 'date'], warning: '单票区间模式：start_date / end_date 必须与 code 一起给（实测只给区间不给标的 → 400「start_date/end_date 需配合 symbol 使用」），跨度不超过 3 年（实测 2020..2026 → 400）。全市场模式用 date（单日）。⛔ 混用 date 与区间上游 400；非交易日、未来日期与早于窗口的日期都只回 total=0、不报错（实测 600519.SH 2009 全年空、2010-01-04 起有数）' },
+  ftshare_dragon_tiger_seats: { kind: 'date', fields: ['date'], warning: 'date 必填且必须是交易日：上游本来允许省略（回"最新快照"），但响应行里**没有日期列**，所以这颗能力要求显式日期来写时间轴。实测非交易日 / 未来日期 / 早于窗口都回 data:null（合法空、不是失败）；窗口起点实测在 2022-01-04（2021-12-31 及更早为空），分不清是滚动还是固定起点' },
+  ftshare_index_weight: { kind: 'date', fields: ['date'], warning: 'date 是**权重采集期**且必须精确命中：实测 2026-06-15 / 2026-09-30 各回该期，而 2026-10-01 / 2026-01-01 这种没有采集的日期 total=0（**不会**回退到最近一期）；省略时取最新一期。请按数据里出现过的 collect_date 挑期，别按自然日猜' },
+  ftshare_convertible_bond_kline: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: '⛔ 跨度上限是 12 个自然月，本层不换算成天数闸门（换算规则未核出）：实测 364 天的区间正常、365 天被上游 400「日 K 及以上周期查询范围不能超过 12 个自然月」。start_date 晚于 end_date 在参数层拒（上游同样 400）。要更长序列请分段取，注意周/月/年档是按请求区间内日 K 聚合的，窗口没盖满周期那根不完整' },
 }
 
 export function getDataTimeContract(capability: string): DataTimeContract | undefined {

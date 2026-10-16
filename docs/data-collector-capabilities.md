@@ -2,7 +2,7 @@
 
 > 本表由 `npm run docs:capabilities` 从 Fuyao、Tencent、Eastmoney、Wind 与 FTShare source 定义生成，并由 `test/data-collector-capabilities.test.mjs` 断言与实现同步：新增端点若忘了重新生成，测试会失败。
 
-当前共 **108 个 capability**：同花顺 Fuyao 61 个，腾讯公开 HTTP 9 个，东方财富 HTTP 21 个，Wind 金融数据服务 3 个，FTShare（非凸科技）14 个。参数后带 **\*** 表示必填。
+当前共 **113 个 capability**：同花顺 Fuyao 61 个，腾讯公开 HTTP 9 个，东方财富 HTTP 21 个，Wind 金融数据服务 3 个，FTShare（非凸科技）19 个。参数后带 **\*** 表示必填。
 
 **复核方式**：Fuyao 能力可用 `npm run smoke:fuyao` 真实复核；Tencent 能力使用最小 smoke fixture 或按需真实请求复核；Eastmoney 能力使用固定 fixture，并按需执行公开网页 JSON smoke；Wind 能力用 `npm run smoke:wind` 真实复核（需要 `WIND_API_KEY`，**按次消耗上游积分**）。FTShare 那几条走 `npm run contract:probe` 的 daily 档巡检（需要 `FTSHARE_API_KEY`；**免费档限流 10 QPS / burst 20**，取数一律经本模块的进程级节流链）。
 
@@ -225,7 +225,7 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 | `wind_edb_query` | `/wind/edb_query` | `indicator`\* `start_date`\* `end_date`\* | 否 | Wind EDB 指标时间序列（宏观/行业/汇率，按日期区间） |
 | `wind_stock_kline` | `/wind/stock_kline` | `code`\* `start_date`\* `end_date`\* `period` `adjust` | 否 | Wind 日周月与 1–30 分钟 K 线（按日期区间，A股+港股+美股） |
 
-## FTShare（资金流 + 行情与日 K 截面 + 快照与日历 + 大宗交易、业绩预告/快报、申万行业，plan B）
+## FTShare（资金流 + 行情与日 K 截面 + 快照与日历 + 大宗交易、业绩预告/快报、申万行业 + 涨跌停价、龙虎榜席位、股东人数、指数权重、可转债 K 线，plan B）
 
 | capability | 端点 | 主要参数 | 分页 | 用途 |
 |---|---|---|---|---|
@@ -243,3 +243,8 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 | `ftshare_performance_express` | `/ftshare/performance_express` | `code` `year` `report_type` `page` `size` | 是 | A 股业绩快报（按报告期或单票，含更正） |
 | `ftshare_sw_industry_overview` | `/ftshare/sw_industry_overview` | `date`\* `level` `page` `size` | 是 | 申万行业估值快照（全部层级，按交易日） |
 | `ftshare_sw_industry_metrics` | `/ftshare/sw_industry_metrics` | `industry_code`\* `start_date`\* `end_date`\* `page` `size` | 是 | 申万单行业日度估值与量价序列（2021-05-31 起） |
+| `ftshare_limit_price` | `/ftshare/limit_price` | `date` `code` `start_date` `end_date` `instrument_type` `page` `size` | 是 | 每日涨跌停价与昨收（含北证，按日或单票区间） |
+| `ftshare_dragon_tiger_seats` | `/ftshare/dragon_tiger_seats` | `date`\* `page` `size` | 是 | 龙虎榜前五买入/卖出席位（按交易日，含北证） |
+| `ftshare_holder_number` | `/ftshare/holder_number` | `code` `is_last` `page` `size` | 是 | 股东人数历史（单票全期）与全市场最新一期 |
+| `ftshare_index_weight` | `/ftshare/index_weight` | `index_code`\* `date` `page` `size` | 是 | 中证系列指数成分权重（按采集期，百分数） |
+| `ftshare_convertible_bond_kline` | `/ftshare/convertible_bond_kline` | `code`\* `period` `adjust` `start_date`\* `end_date`\* `limit` | 否 | 可转债历史 K 线（日/周/月/年，单只，元） |

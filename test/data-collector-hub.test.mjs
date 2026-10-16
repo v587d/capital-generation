@@ -389,7 +389,7 @@ test('能力目录体积预算：必须留在 DSH 剪枝阈值（8192）以内�
   const { hub } = makeHub()
   for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources(), ...createWindSources(async () => 'key'), ...createFtshareSources(async () => 'key')]) hub.registerSource(dataSource)
   const directory = hub.capabilityDirectory()
-  assert.equal(hub.capabilityNames().length, 108, '端点数量回归：目录预算断言必须覆盖 Fuyao、Tencent、Eastmoney、Wind 与 FTShare 全部已注册能力')
+  assert.equal(hub.capabilityNames().length, 113, '端点数量回归：目录预算断言必须覆盖 Fuyao、Tencent、Eastmoney、Wind 与 FTShare 全部已注册能力')
 
   // 预算的来源（实测本机 dsh 0.1.5-rc.1，不是拍脑袋的数字）：
   // - 真实上限是 dsh-compaction-tool-result-pruner 的 `thresholdChars`（preset 里配 8192）。
@@ -407,6 +407,8 @@ test('能力目录体积预算：必须留在 DSH 剪枝阈值（8192）以内�
   // - 2026-10-06 加 Wind 三条后实测 **3434 字符 = 预算的 55.9%**（均摊仍是 37 字符/条）：
   //   摘要写得住就几乎不涨，逼近上限的是"能力数"不是"描述长度"。
   //   2026-10-07 加港美股指数两条后复测见下面的失败信息里的实测值（summary 短，目录只按条数涨）。
+  //   2026-10-16 批次 D 之后（113 条）复测：**4469 字符 = 自预算 6144 的 72.7%、剪枝阈值 8192 的 54.6%**，
+  //   均摊 39.5 字符/条——比 37 略高是因为新几颗的 summary 带上"含北证""按采集期"这类发现必需的限定词。
   const DIRECTORY_BUDGET = 6144
   assert.ok(directory.length < DIRECTORY_BUDGET, `能力目录已达 ${directory.length} 字符（预算 ${DIRECTORY_BUDGET}，剪枝阈值 8192）：请精简 summary，或按设计文档 §2.3 讨论分域发现`)
   assert.ok(directory.length < 8192, '目录绝不允许越过剪枝阈值')

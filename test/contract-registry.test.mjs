@@ -104,7 +104,10 @@ test('每条 active/shadow 都有延迟预算，且是正有限数', () => {
  */
 const ANCHOR = new Date('2026-10-11T20:00:00Z')   // 北京周一 04:00 那一档的名义时刻
 /** requires 的 id 由 runner 运行时从真实响应解析；这里只要形状合法，⛔ 绝不发出去（§10.3）。 */
-const ID_PLACEHOLDER = { manager_id: 'PLACEHOLDER_ID', company_id: 'PLACEHOLDER_ID', ticker: '000001.SZ', trade_date: '2026-10-09', date: '2026-10-14' }
+// ⛔ `code` 这一格现在是**转债形状**：唯一用 `requires: 'code'` 的是 ftshare_convertible_bond_kline，
+// 它的参数层按 6 位可转债码校验。将来若有个股能力也用 `requires: 'code'`，这一格会把它挡下来——
+// 那时要按族分格，而不是把这里改成最宽的形状（宽到不校验，等于这条回归失去意义）。
+const ID_PLACEHOLDER = { manager_id: 'PLACEHOLDER_ID', company_id: 'PLACEHOLDER_ID', ticker: '000001.SZ', trade_date: '2026-10-09', date: '2026-10-14', code: '113042.SH' }
 function requestShape(entry) {
   const params = resolveDayShifts(entry.params ?? {}, ANCHOR)
   if (!entry.requires) return params

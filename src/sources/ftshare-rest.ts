@@ -43,6 +43,8 @@ const MAX_PAGE_SIZE = 1000
  * ⛔ 上游有两处把 `page_size` 压在 500：日 K 快照是**响亮拒绝**（实测 501 → HTTP 400
  * `page_size must be between 1 and 500`），主力五档是**静默截断**（实测 1000/2000 都只回 500 行）。
  * 两种都不许本层放宽——静默那一半尤其只能靠参数层先拦住，否则模型以为拿到了整页。
+ * 2026-10-16 补：大宗交易（传 1000/2000 回显 500）与龙虎榜明细（同形）也走这一档；
+ * 业绩预告 / 快报则是 501 → 响亮 400「page_size 不能超过 500」。**同一档里两种形状都有**。
  */
 const MAX_PAGE_SIZE_500 = 500
 /**
@@ -50,6 +52,8 @@ const MAX_PAGE_SIZE_500 = 500
  * （201 也一样被截成 200），同样是**静默**截断。
  */
 const MAX_PAGE_SIZE_200 = 200
+/** 指数权重那一族：实测 101 → 回显 `page_size=100` 并只回 100 行（**静默**夹断，文档这条难得与实测一致）。 */
+const MAX_PAGE_SIZE_100 = 100
 
 const FLOW_PATHS = {
   stock: '/api/v1/market/data/ths-stock-daily-flow',
@@ -240,18 +244,26 @@ export function createFtshareClient(resolveApiKey: () => Promise<string | undefi
 }
 
 /**
- * 行数组与总数。上游三套信封（实测），只认一套就会把另一套静默读成空集：
+ * 行数组与总数。上游四套信封（实测），只认一套就会把另一套静默读成空集：
  * - 资金流与日 K 族：`data.records` + `pageNum/pageSize/pages/total`
- * - daec 报价族：`data.items` + `page/page_size/total_pages/total_items`
- * - 昨收价：`data` **直接是数组**，那时分页完全由本层合成
- * 只取 `total`（两个名字都要读，实测与逐日全市场计数对得上）；页码不从信封取，见 `pageParams` 的 ⛔。
+ * - daec 报价族、涨跌停价、股东人数：`data.items` + `total_items/total_pages`（**不回显页码**）
+ * - 指数权重：`data.index_weights` + `total/page/page_size`（没有 pages）
+ * - 昨收价与可转债 K 线：`data` **直接是数组**，那时分页完全由本层合成
+ * ⛔ `data` 还可能是 **`null`**：实测龙虎榜明细在"非交易日 / 未来日期 / 早于窗口"三种情况下都回
+ * `{"code":200,"message":"success","data":null}`——那是**合法空结果**而不是坏信封，
+ * 读成失败就等于让模型对着一个日历事实反复换参数重试。
+ * 只取 `total`（三个名字都要读，实测与逐日全市场计数对得上）；页码不从信封取，见 `pageParams` 的 ⛔。
  */
 function readPaged(envelope: JsonRecord): { rows: JsonRecord[], total: number } {
   const data = envelope.data
+  if (data === null) return { rows: [], total: 0 }
   if (Array.isArray(data)) return { rows: data.filter(isRecord), total: data.length }
   if (!isRecord(data)) throw new FtshareError('invalid_response', 'FTShare envelope is missing data')
-  const raw = Array.isArray(data.records) ? data.records : Array.isArray(data.items) ? data.items : null
-  if (raw === null) throw new FtshareError('invalid_response', `FTShare envelope has no records/items array (data keys: ${Object.keys(data).join(',') || 'none'})`)
+  const raw = Array.isArray(data.records) ? data.records
+    : Array.isArray(data.items) ? data.items
+      : Array.isArray(data.index_weights) ? data.index_weights
+        : null
+  if (raw === null) throw new FtshareError('invalid_response', `FTShare envelope has no records/items/index_weights array (data keys: ${Object.keys(data).join(',') || 'none'})`)
   const rows = raw.filter(isRecord)
   return { rows, total: integerOrNull(data.total) ?? integerOrNull(data.total_items) ?? rows.length }
 }
@@ -717,7 +729,7 @@ function createKlineSnapshotSource(client: FtshareRequester): DataSource {
     paginated: true,
     rowShape: { rowKey: 'item' },
     summary: '全市场某交易日日 K 截面（含北交所）',
-    description: '按**单个交易日**获取全市场普通 A 股的日 K 截面，一行一票。⛔ 必须是**普通股票**：实测不含 ETF、可转债与指数——要指数日线请用 `index_history` / `tencent_kline`，要 ETF 请用 `fund_history`。`trade_date` 必填，格式 YYYY-MM-DD；**非交易日会在参数层响亮失败**（实测上游 400「trade_date 不是交易日」，如 20261011），未来交易日返回 `total=0`（合法空，不是失败）。当日截面**收盘后就能取**：实测 2026-10-15 15:51（北京）打 `trade_date=20261015` 已回 5565 行。历史深度很好（实测 2020-01-06 有 3762 行、2016-06-27 有 2864 行、2015-01-05 有 2589 行），这一条**不受**资金流那族「只留约 45 个交易日」的限制。⛔ **截面不含当日停牌票**：实测 2026-10-14 全市场 5563 行 = 报价面 `ftshare_ashare_quote` 的 5574 减去当日 `status = Suspended` 的 11 只——所以「少了几只」是停牌事实，不要当成丢行。含北交所（这 5563 行里有 `920xxx.BJ`）。列口径：`open/high/low/close` 元（上游用字符串给出，如 "11.5000"，本层转成数值）、`volume_shares` 股、`turnover_yuan` 元（同样是字符串）、`turnover_ratio` 是**比例值不是百分数**（实测 000001.SZ 为 0.004993804240610122，即 0.499%）——⛔ 与同花顺日度资金流那族的 `turnover_pct`（百分数原值）不是一套口径；`close_time_ms` 与 `session_open_ms` 是上游给的时刻轴（实测 = 该交易日北京 15:00 与 09:30），`trade_date` / `trade_date_ms` 是本层按 `ts_millis` 补的日轴（上海时区零点），做时间序列请用后者；本层会核对补出来的日轴与请求的 `trade_date` 是否同一天，不一致报 `invalid_response`（防止拿到别的日期的数据却按请求日期落库）。`thscode` 沿用上游短后缀。分页：`page` 实测生效，`size` 由上游限死 **1～500**（实测 501 → HTTP 400「page_size must be between 1 and 500」），全市场 5563 行需 12 页（实测末页只剩 63 行）。',
+    description: '按**单个交易日**获取全市场普通 A 股的日 K 截面，一行一票。⛔ 必须是**普通股票**：实测不含 ETF、可转债与指数——要指数日线请用 `index_history` / `tencent_kline`，要 ETF 请用 `fund_history`，要可转债历史 K 线请用 `ftshare_convertible_bond_kline`。`trade_date` 必填，格式 YYYY-MM-DD；**非交易日会在参数层响亮失败**（实测上游 400「trade_date 不是交易日」，如 20261011），未来交易日返回 `total=0`（合法空，不是失败）。当日截面**收盘后就能取**：实测 2026-10-15 15:51（北京）打 `trade_date=20261015` 已回 5565 行。历史深度很好（实测 2020-01-06 有 3762 行、2016-06-27 有 2864 行、2015-01-05 有 2589 行），这一条**不受**资金流那族「只留约 45 个交易日」的限制。⛔ **截面不含当日停牌票**：实测 2026-10-14 全市场 5563 行 = 报价面 `ftshare_ashare_quote` 的 5574 减去当日 `status = Suspended` 的 11 只——所以「少了几只」是停牌事实，不要当成丢行。含北交所（这 5563 行里有 `920xxx.BJ`）。列口径：`open/high/low/close` 元（上游用字符串给出，如 "11.5000"，本层转成数值）、`volume_shares` 股、`turnover_yuan` 元（同样是字符串）、`turnover_ratio` 是**比例值不是百分数**（实测 000001.SZ 为 0.004993804240610122，即 0.499%）——⛔ 与同花顺日度资金流那族的 `turnover_pct`（百分数原值）不是一套口径；`close_time_ms` 与 `session_open_ms` 是上游给的时刻轴（实测 = 该交易日北京 15:00 与 09:30），`trade_date` / `trade_date_ms` 是本层按 `ts_millis` 补的日轴（上海时区零点），做时间序列请用后者；本层会核对补出来的日轴与请求的 `trade_date` 是否同一天，不一致报 `invalid_response`（防止拿到别的日期的数据却按请求日期落库）。`thscode` 沿用上游短后缀。分页：`page` 实测生效，`size` 由上游限死 **1～500**（实测 501 → HTTP 400「page_size must be between 1 and 500」），全市场 5563 行需 12 页（实测末页只剩 63 行）。',
     input_schema: {
       type: 'object',
       properties: {
@@ -1055,19 +1067,25 @@ function createDisclosureSource(options: {
       // 上游这一族把单票参数叫 `stock_code`：只在出网那一刻改名，`normalizeParams` 的输出仍用 `code`
       // （§10.7 幂等——第二遍归一化的输入就是第一遍的输出，改名会让它自己报 unsupported parameter）。
       const stockCode = params.code
-      const search = query({
-        stock_code: stockCode, year: params.year, report_type: params.report_type,
-        page: params.page, page_size: params.size,
-      }, ['stock_code', 'year', 'report_type', 'page', 'page_size'])
+      // ⛔ modeA（单票）**上游不翻页**：一次给完全量历史（实测 000001.SZ 16 行、600519 的股东人数 107 行
+      // 连 page=2 / page_size=10 都照样给全部），所以这里不把 page 发出去——发了等于对外宣称能翻页，
+      // 而 `pages = ceil(total ÷ size)` 会把一份完整历史算成两页，模型翻第二页会拿到重复的一整份。
+      const search = query(
+        stockCode !== undefined
+          ? { stock_code: stockCode, year: params.year, report_type: params.report_type }
+          : { year: params.year, report_type: params.report_type, page: params.page, page_size: params.size },
+        ['stock_code', 'year', 'report_type', 'page', 'page_size'])
       const { rows, total } = readPaged(await options.client.getJson(options.path, search, signal))
       // 防改版：这一族的过滤失败是静默的（写法不对只回空），所以回来之后逐行核身份。
+      // ⛔ 核的是**上游原始列名**（stock_code / year / report_type），映射后的行已经把身份列改名了。
       if (stockCode !== undefined) {
         assertFiltered(rows, { field: 'stock_code', expected: String(stockCode), label: 'code' })
-      } else {
-        assertFiltered(rows, { field: 'year', expected: String(params.year), label: 'year' })
-        assertFiltered(rows, { field: 'report_type', expected: String(params.report_type), label: 'report_type' })
+        return { data: snapshotEnvelope(rows.map(options.mapRow)), schema: output(options.row) }
       }
-      return { data: pagedEnvelope(rows.map(options.mapRow), total, Number(params.page), Number(params.size)), schema: output(options.row) }
+      assertFiltered(rows, { field: 'year', expected: String(params.year), label: 'year' })
+      assertFiltered(rows, { field: 'report_type', expected: String(params.report_type), label: 'report_type' })
+      const item = rows.map(options.mapRow)
+      return { data: pagedEnvelope(item, total, Number(params.page), Number(params.size)), schema: output(options.row) }
     },
   }
 }
@@ -1330,6 +1348,599 @@ const FORECAST_DESCRIPTION = '按报告期获取 A 股**业绩预告**（含北�
 
 const EXPRESS_DESCRIPTION = '按报告期获取 A 股**业绩快报**（已披露快报的核心财务指标），一行是「一只票 × 一个报告期」。查法与 `ftshare_performance_forecast` 完全一致（`code` 单票不分页 / `year` + `report_type` 全市场翻页，两组互斥、`report_type` 只认 q1/q2/q3/annual，越界写法参数层拒）。⛔ **快报是稀薄披露**：实测 2024 annual 全市场只有 1192 行（预告同口径 3150 行）、2024 q1 只有 8 行、2005 annual 104 行；什么都不给时上游回 total_items=0 且不报错，取到空是常态而不是失败。同一只票同一报告期可有**多条**更正披露：实测 2024 annual 首页 500 行里 477 个「票×年×期」组合中有 23 个占两行，两行的 `publish_date` 与数值都不同（ST帕瓦 2024：净利 −1,097,147,600 发布于 2025-02-28、−726,501,500 发布于 2025-04-30）。⛔ modeB 的排序实测是 **`publish_date` 递减**（500 行逐行单调），同一票的原披露与更正披露因此相距很远（实测那两条分别落在第 1 行与第 316 行）——要"最新口径"必须按 `publish_date` 分组取最大，**不能按行序或页序猜**。单票 modeA 实测是一期一行（000001.SZ 共 4 条 = 2018 / 2019 / 2021 / 2022 年报各一条）。单位与口径：`eps_yuan`（每股收益）、`net_assets_per_share_yuan`（每股净资产）、`total_revenue_yuan` / `net_profit_yuan` 及各自 `_prev` 上期值都由上游以字符串给出、单位元，本层转数值；`*_yoy_pct` 与 `roe_pct` 是**百分数原值**。⛔ **`net_profit_yoy_pct` 在上期亏损时符号是反的**：实测 2024 / 2023 / 2021 三个年度各取 500 行（共 1500 行）按 (本期 − 上期) ÷ |上期| × 100 逐行核——上期**为正**的 1260 行全部相符（平安银行 2022 年报：(45516000000 − 36336000000) ÷ 36336000000 × 100 = 25.2642 = 字段值），上期**为负**的 240 行**全部与该数符号相反**（ST帕瓦 2024：本期 −726,501,500、上期 −247,643,300 是亏损扩大，算得 −193.3661 而字段是 +193.3661；亚信安全 2024 扭亏，算得 +103.2949 而字段是 −103.2949）。⛔ 所以**别拿这个字段判方向**，要"亏损扩大还是收窄"请自己用本期与上期比。`total_revenue_yoy_pct` 在 499 行（上期均为正）内全部相符，没出现上期为负的样本，规律不外推。`roe_pct` 与同行其它列的算法关系**未核出**（股本要另取 `ftshare_ashare_quote` 的 `shares`，而那是当前股本、不是报告期股本）。⛔ `total_revenue_yoy_pct` 实测出现过 null（46 行里 1 行）——**null 不是 0**，也不是"没增长"。分页 `page` 实测生效，`size` 上限 500（实测 501 → HTTP 400「page_size 不能超过 500」；`page` 或 `size` 给 0 也 400「page/page_size 必须大于 0」，这条比预告那族更响）。防改版：带 code 逐行核 `stock_code`，按报告期核 `year` 与 `report_type`。'
 
+/**
+ * 批次 D（2026-10-16 07:36–07:44 北京时间，176 份落盘报文）：涨跌停价、龙虎榜席位、股东人数、
+ * 指数成分权重、可转债历史 K 线。五颗都是逐条对照本仓现有能力后挑的**真缺口**，不是"同族再加一颗"：
+ * 涨跌停此前只有 `tencent_quote` 的当日口径且明确拒北证；席位此前任何一颗都没有；股东人数只有
+ * 东财最新一期截面；成分权重只有名单没有数；转债只有发行条款没有价格序列。
+ */
+
+const LIMIT_INSTRUMENT_TYPES = ['stock', 'etf', 'cb'] as const
+
+const limitPriceRow = {
+  type: 'object',
+  properties: {
+    thscode: { type: 'string' },
+    trade_date: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    trade_date_ms: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    instrument_type: { type: 'string' },
+    pre_close_yuan: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    up_limit_yuan: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    down_limit_yuan: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+  },
+  additionalProperties: false,
+}
+
+function mapLimitPriceRow(row: JsonRecord): JsonRecord {
+  const { iso, ms } = normalizeDateCell(row.trade_date)
+  return {
+    thscode: String(row.ts_code ?? ''),
+    trade_date: iso,
+    trade_date_ms: ms,
+    instrument_type: String(row.instrument_type ?? ''),
+    pre_close_yuan: numberOrNull(row.pre_close),
+    up_limit_yuan: numberOrNull(row.up_limit),
+    down_limit_yuan: numberOrNull(row.down_limit),
+  }
+}
+
+const LIMIT_DESCRIPTION = '按交易日获取全市场或单只标的的**涨跌停价与昨收价**，一行是「一只标的 × 一个交易日」。补的两处空白都经过实测：本仓此前只有 `tencent_quote` 的**当日**涨跌停，而它在参数层明确拒北交所；这一条实测 2026-10-15 全市场 7587 行里含 **350 只 `.BJ`**，而且能翻历史（600519.SH 单票 2010-01-04 起有数，2009 全年 total=0）。两种查法：不给 `code` = 按 `date` 取该日全市场并翻页；给 `code`（须带市场后缀，本层归一成 `000001.SZ` 写法）= 单票，配 `date` 取一天、或配 `start_date` + `end_date` 取区间。⛔ 三条上游硬规则在参数层先拦，话术比它的 400 更具体：区间必须配 `code`（实测不带 code 只给区间 → 400「start_date/end_date 需配合 symbol 使用」）、`date` 与区间不可混用（实测 400「trade_date 不能与 start_date/end_date 同时使用」）、区间跨度不超过 3 年（实测 2020..2026 → 400「start_date 与 end_date 间隔不能超过 3 年」）。裸 6 位在上游是**按深市个股解释**的（实测 `000001` → 平安银行一行），本层不接受这种猜测、要求显式后缀；指数后缀会被上游点名拒（实测 `000001.SH` → 400「index has no limit price」）。`instrument_type` ∈ stock / etf / cb，实测过滤生效且**三类相加正好等于全市场**（2026-10-15：5576 + 1696 + 315 = total 7587），越界写法上游 400「instrument_type 仅支持 stock、etf、cb」。⛔ **`up_limit_yuan` / `down_limit_yuan` 不是交易所口径的精确价**：上游以字符串给最多 6 位小数，实测同日有 852/5576 只股票的涨停价带尾巴（000001.SZ 昨收 11.50 × 1.1 = 12.65，字段却是 12.649999），转债 259/315、ETF 1541/1696 更多（它们昨收本来就是 3～4 位）——要判"是否封板"请先按最小价格单位取整再比。幅度实测分桶（同日全市场）：主板 ±10%、创业板与科创板 ±20%、北证 ±30%、转债 ±20%、ETF 多为 ±10%。⛔ 有 3 行的涨停价与跌停价**同时为 null**（920162.BJ / 301569.SZ / 301660.SZ），这三只在 2026-09-01..10-15 区间里**只出现在 10-15 这一天**，形状像上市首日不设限制，但成因未获对方确认——请按"无限制"而不是"数据缺失"读。非交易日与未来日期都只回 total=0、不报错（实测 20261011 周日、20270101）。防改版：带 `code` 逐行核身份，其余逐行核返回日期落在请求区间内。'
+
+/**
+ * 每日涨跌停价（`/market/data/stk-limit`）。⛔ 这一颗的**列值不是交易所精确价**：实测 852/5576 只
+ * 股票的涨停价是 `x.649999` 这种带尾巴的字符串，本层原样转数值、不做任何取整——取整口径属于分析层。
+ */
+function createLimitPriceSource(client: FtshareRequester): DataSource {
+  const capability = 'ftshare_limit_price'
+  const allowed = ['date', 'code', 'start_date', 'end_date', 'instrument_type', 'page', 'size']
+  const schema: SchemaDescriptor = {
+    capability,
+    time_contract: getDataTimeContract(capability),
+    name: 'get_stk_limit',
+    source: 'http:ftshare.stk_limit',
+    data_key: buildDataKey('ftshare', 'http', capability),
+    source_label: 'ftshare',
+    paginated: true,
+    rowShape: { rowKey: 'item' },
+    summary: '每日涨跌停价与昨收（含北证，按日或单票区间）',
+    description: LIMIT_DESCRIPTION,
+    input_schema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: '交易日 YYYY-MM-DD；省略且给了 code = 该票最新一天（实测默认口径是上一交易日）' },
+        code: { type: 'string', description: '单只标的，必须带市场后缀（600519.SH / 920000.BJ / 110075.SH）；省略 = 按 date 取全市场' },
+        start_date: { type: 'string', description: '单票历史区间起始日 YYYY-MM-DD，必须与 end_date、code 一起给' },
+        end_date: { type: 'string', description: '单票历史区间截止日 YYYY-MM-DD（上游限跨度 3 年）' },
+        instrument_type: { type: 'string', enum: [...LIMIT_INSTRUMENT_TYPES], description: '标的类型过滤；实测三类相加正好等于全市场' },
+        page: { type: 'integer', minimum: 1 },
+        size: { type: 'integer', minimum: 1, maximum: MAX_PAGE_SIZE },
+      },
+      required: [], additionalProperties: false,
+    },
+    output_schema: output(limitPriceRow),
+  }
+  const normalize = (params: Params): Params => {
+    const { page, size } = pageParams(params, allowed, MAX_PAGE_SIZE)
+    const code = params.code === undefined ? undefined : parseSecurityCode(params.code, 'code').canonical
+    const hasStart = params.start_date !== undefined
+    const hasEnd = params.end_date !== undefined
+    // 实测上游对这三种混用都是**响亮 400**，本层先拦是为了把话说到"该改哪一个参数"这一层。
+    if ((hasStart || hasEnd) && code === undefined) {
+      throw new FtshareError('invalid_parameter', 'parameters start_date/end_date require code — 上游没有"全市场历史区间"这种查法（实测 400「start_date/end_date 需配合 symbol 使用」）')
+    }
+    if (hasStart !== hasEnd) throw new FtshareError('invalid_parameter', 'parameters start_date and end_date must be provided together（实测上游 400「start_date 与 end_date 需同时提供」）')
+    if (params.date !== undefined && hasStart) {
+      throw new FtshareError('invalid_parameter', 'parameter date cannot combine with start_date/end_date（实测上游 400「trade_date 不能与 start_date/end_date 同时使用」）')
+    }
+    const normalized: Params = { page, size }
+    if (params.date !== undefined) normalized.date = date(params.date, 'date')
+    if (code !== undefined) normalized.code = code
+    if (hasStart) {
+      const start_date = date(params.start_date, 'start_date')
+      const end_date = date(params.end_date, 'end_date')
+      if (start_date > end_date) throw new FtshareError('invalid_parameter', 'parameter start_date must not be later than end_date')
+      normalized.start_date = start_date
+      normalized.end_date = end_date
+    }
+    if (params.instrument_type !== undefined) {
+      const kind = String(params.instrument_type)
+      if (!LIMIT_INSTRUMENT_TYPES.includes(kind as typeof LIMIT_INSTRUMENT_TYPES[number])) {
+        throw new FtshareError('invalid_parameter', `parameter instrument_type must be one of ${LIMIT_INSTRUMENT_TYPES.join(' / ')}`)
+      }
+      normalized.instrument_type = kind
+    }
+    return normalized
+  }
+  return {
+    schema,
+    normalizeParams: normalize,
+    validateOutput: (data) => isRecord(data) && Array.isArray(data.item) && isRecord(data.pagination),
+    execute: async (request: DataRequest, signal: AbortSignal) => {
+      const params = normalize(request.params)
+      const search = query({
+        instrument_type: params.instrument_type,
+        symbol: params.code,
+        trade_date: params.date === undefined ? undefined : compactDate(String(params.date)),
+        start_date: params.start_date === undefined ? undefined : compactDate(String(params.start_date)),
+        end_date: params.end_date === undefined ? undefined : compactDate(String(params.end_date)),
+        page: params.page,
+        page_size: params.size,
+      }, ['instrument_type', 'symbol', 'trade_date', 'start_date', 'end_date', 'page', 'page_size'])
+      const { rows, total } = readPaged(await client.getJson('/api/v1/market/data/stk-limit', search, signal))
+      const item = rows.map(mapLimitPriceRow)
+      assertFiltered(item, params.code === undefined ? undefined : { field: 'thscode', expected: String(params.code), label: 'code' })
+      if (params.date !== undefined) assertInRange(item, String(params.date), String(params.date), (row) => row.trade_date)
+      else if (params.start_date !== undefined) assertInRange(item, String(params.start_date), String(params.end_date), (row) => row.trade_date)
+      return { data: pagedEnvelope(item, total, Number(params.page), Number(params.size)), schema: output(limitPriceRow) }
+    },
+  }
+}
+
+const SEAT = {
+  type: 'object',
+  properties: {
+    name: { type: 'string' },
+    buy_yuan: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    sell_yuan: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    net_yuan: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+  },
+  additionalProperties: false,
+}
+
+const dragonTigerSeatRow = {
+  type: 'object',
+  properties: {
+    thscode: { type: 'string' },
+    trade_date: { type: 'string' },
+    trade_date_ms: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    change_ratio: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    close_yuan: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    turnover_yuan: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    top_buyers: { type: 'array', items: SEAT },
+    top_sellers: { type: 'array', items: SEAT },
+  },
+  additionalProperties: false,
+}
+
+function mapSeats(value: unknown): JsonRecord[] {
+  if (!Array.isArray(value)) return []
+  return value.filter(isRecord).map((seat) => ({
+    name: String(seat.name ?? ''),
+    buy_yuan: numberOrNull(seat.buy),
+    sell_yuan: numberOrNull(seat.sell),
+    net_yuan: numberOrNull(seat.net),
+  }))
+}
+
+function mapDragonTigerSeatRow(row: JsonRecord, tradeDate: string): JsonRecord {
+  return {
+    thscode: String(row.symbol ?? ''),
+    trade_date: tradeDate,
+    trade_date_ms: dateMs(tradeDate),
+    change_ratio: numberOrNull(row.change_rate),
+    close_yuan: numberOrNull(row.close),
+    turnover_yuan: numberOrNull(row.turnover),
+    top_buyers: mapSeats(row.top_buyers),
+    top_sellers: mapSeats(row.top_sellers),
+  }
+}
+
+const SEATS_DESCRIPTION = '按**单个交易日**获取龙虎榜明细：一行是一只上榜票，带**买入额前五与卖出额前五的营业部席位**。这一层本仓此前没有——`dragon_tiger` 只给到票级榜单、`eastmoney_top_buy_sell_*` 只给汇总，都没有席位名字；⛔ 所以这三条口径不同，不能拿来互相核对条数。`date` 必填（YYYY-MM-DD，本层转成上游的 YYYYMMDD）：上游允许省略（回"最新快照"），但**响应行里没有日期列**，省略时落库的行就没有时间轴，本能力因此要求显式日期、`trade_date` 由本层按请求补写。实测规模很小：2026-10-14 全日 68 行（SH 26 / SZ 37 / **BJ 5**）、2026-10-15 57 行、2023-01-03 44 行，`size` 给到 201 以上就**一页拿全**。⛔ 历史窗口实测起点在 2022 年初：2022-01-04 有 67 行，而 2021-12-31 与更早（2021-01-04 / 2020-01-02 / 2016-01-04 / 2012-01-04）都是 **0 行**，信封长这样 `{"code":200,"message":"success","data":null}`——那是合法空、不是取数失败；是滚动窗口还是固定起点未核出。非交易日与未来日期同样是 `data:null`（实测 20261011、20270101）。单位与口径：⛔ `change_ratio` 是**比例值不是百分数**（实测 002696.SZ 给 0.10045146726862288，与本仓 `ftshare_limit_price` 的昨收算 (9.75 ÷ 8.86 − 1) 差 3.2e-16），与日度资金流那族的 `change_pct` 不是一套、禁止直接比；`close_yuan` / `turnover_yuan` 与席位三列都是**元**（上游字符串，本层转数值）。`net_yuan = buy_yuan − sell_yuan` 实测 2026-10-14 的 68 行 × 10 席 = 680 条**违例 0**；⛔ 但同一天有 1 行的前五买入额合计**大于**当日成交额，所以席位金额与成交额不能互相闭合。`top_buyers` / `top_sellers` 通常各 5 条，上游缺名次时**不补位**（实测 2025-12-31 的 600343.SH 两边都只有 4 条），统计前先判长度。⛔ **更要紧的是：这两组不保证是营业部**。同一天的 600343.SH 那 4 条的 `name` 是**投资者分类**（机构 / 其他自然人 / 中小投资者 / 沪股通），`top_buyers` 与 `top_sellers` 两组内容**完全相同**，其中「机构」的 `buy_yuan` 是 67,487,960,000 而同行 `turnover_yuan` 只有 7,120,896,372.22——那是交易所按分类口径披露的行，**别按"前五营业部"解读，也别拿 buy ÷ turnover 算占比**。席位名是原文，「机构专用」是营业部口径里的一种取值。⛔ **不支持按票过滤**：实测把 `symbol` 发给上游不报错也不过滤（total 仍是全日 68 行），单票请整日取回后在 Dataset 里筛。`size` 的真实上限是 500 且超限**静默夹断**（文档写 200；实测传 1000 → 回显 pageSize=500）。'
+
+/**
+ * 龙虎榜前五席位（`/market/data/abnormal-trading-details`）。
+ * ⛔ `date` 是必填而不是可选：响应行内**没有日期列**（实测列集合就是 symbol/change_rate/close/turnover/
+ * top_buyers/top_sellers），省略日期就等于落一份没有时间轴的 Dataset——这一条是本层加的，不是上游的限制。
+ */
+function createDragonTigerSeatsSource(client: FtshareRequester): DataSource {
+  const capability = 'ftshare_dragon_tiger_seats'
+  const allowed = ['date', 'page', 'size']
+  const schema: SchemaDescriptor = {
+    capability,
+    time_contract: getDataTimeContract(capability),
+    name: 'get_abnormal_trading_details',
+    source: 'http:ftshare.abnormal_trading_details',
+    data_key: buildDataKey('ftshare', 'http', capability),
+    source_label: 'ftshare',
+    paginated: true,
+    rowShape: { rowKey: 'item' },
+    summary: '龙虎榜前五买入/卖出席位（按交易日，含北证）',
+    description: SEATS_DESCRIPTION,
+    input_schema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: '交易日 YYYY-MM-DD，必填（响应里没有日期列，本层要它来写时间轴）' },
+        page: { type: 'integer', minimum: 1 },
+        size: { type: 'integer', minimum: 1, maximum: MAX_PAGE_SIZE_500 },
+      },
+      required: ['date'], additionalProperties: false,
+    },
+    output_schema: output(dragonTigerSeatRow),
+  }
+  const normalize = (params: Params): Params => {
+    const { page, size } = pageParams(params, allowed, MAX_PAGE_SIZE_500)
+    return { page, size, date: date(params.date, 'date') }
+  }
+  return {
+    schema,
+    normalizeParams: normalize,
+    validateOutput: (data) => isRecord(data) && Array.isArray(data.item) && isRecord(data.pagination),
+    execute: async (request: DataRequest, signal: AbortSignal) => {
+      const params = normalize(request.params)
+      const search = query({ date: compactDate(String(params.date)), page: params.page, page_size: params.size }, ['date', 'page', 'page_size'])
+      const { rows, total } = readPaged(await client.getJson('/api/v1/market/data/abnormal-trading-details', search, signal))
+      const item = rows.map((row) => mapDragonTigerSeatRow(row, String(params.date)))
+      return { data: pagedEnvelope(item, total, Number(params.page), Number(params.size)), schema: output(dragonTigerSeatRow) }
+    },
+  }
+}
+
+const holderNumberRow = {
+  type: 'object',
+  properties: {
+    thscode: { type: 'string' },
+    stock_name: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    publish_date: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    report_date: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    report_date_ms: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    holder_num: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    holder_num_change_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    per_capita_circ_share: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    per_capita_share_change_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    chip_concentration: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    close_price_yuan: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    per_capita_hold_amount_yuan: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    ten_holder_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    ften_holder_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+  },
+  additionalProperties: false,
+}
+
+function mapHolderNumberRow(row: JsonRecord): JsonRecord {
+  const { iso, ms } = normalizeDateCell(row.report_date)
+  return {
+    thscode: String(row.stock_code ?? ''),
+    stock_name: textOrNull(row.stock_name),
+    publish_date: normalizeDateCell(row.publish_date).iso,
+    report_date: iso,
+    report_date_ms: ms,
+    holder_num: integerOrNull(row.holder_num),
+    holder_num_change_pct: numberOrNull(row.holder_num_change_ratio),
+    per_capita_circ_share: numberOrNull(row.per_capita_circ_share),
+    per_capita_share_change_pct: numberOrNull(row.per_capita_share_change_ratio),
+    chip_concentration: numberOrNull(row.chip_concentration),
+    close_price_yuan: numberOrNull(row.close_price),
+    per_capita_hold_amount_yuan: numberOrNull(row.per_capita_hold_amount),
+    ten_holder_pct: numberOrNull(row.ten_holder_ratio),
+    ften_holder_pct: numberOrNull(row.ften_holder_ratio),
+  }
+}
+
+const HOLDER_DESCRIPTION = '两种互斥查法：给 `code`（须带市场后缀）= 该票**全部历史**、一次给完不翻页（实测 000001.SZ 122 期回到 1995-12-31、600519.SH 107 期、920001.BJ 25 期）；给 `is_last=true` = 全市场**各只票自己的最新一期**并翻页（实测 total_items=5926）。补的空白：本仓此前只有 `eastmoney_holder_number_snapshot` 的最新一期截面，**股东人数的历史序列一直是空的**。⛔ `is_last` **不是"同一报告期截面"**：实测同一页里 report_date 就有 2026-06-30 / 2026-09-30 / 2026-10-09 / 2026-03-31 好几种，做横切面统计请按 `report_date` 自己分组。两组参数同时给会被上游**静默只按单票查**（实测 code + is_last=true 仍回那 122 行），本层在参数层拒混用。写法敏感全是静默的：裸 6 位（`000001`）、聚宽后缀（`000001.XSHE`）、**小写后缀**（`600519.sh`）都回 0 行且不报错（实测），本层统一归一成 `600519.SH` 再发。⛔ **没有日期参数**：实测多发一个 `report_date` 上游不报错也不过滤（仍回 122 行），所以按报告期筛请取回全量后在 Dataset 里做，本层不提供也不会替它假装过滤。单位与口径：`holder_num` 是人；⛔ `holder_num_change_pct` 是**百分数原值**，口径 (本期 ÷ 上期 − 1) × 100 —— 实测 600519.SH 自 2002-06-30 起的 15 期逐期核对，与算式差 ≤1e-4；`ten_holder_pct` / `ften_holder_pct` 同为百分数（十大股东 / 十大流通股东持股比例，上游列名里的 `ften` 是它自己的拼写，本层不改名）；`per_capita_circ_share` 是人均流通股（股），`per_capita_hold_amount_yuan` 是人均持股市值（元），`close_price_yuan` 元，`publish_date` / `report_date` 是 YYYY-MM-DD 原文并另有 `report_date_ms` 供时间轴。⛔ **`close_price_yuan` 的 0 不是价格**：实测 is_last 首页 500 行里 2 行为 0（如 603361.SH：股东数 27、报告期 2022-12-31），同行的 `per_capita_hold_amount_yuan` 会跟着是 0。整列为空是常态而不是坏数据：实测 600519.SH 的 107 期里 `per_capita_share_change_pct` 与 `chip_concentration` **107/107 全为 null**，`per_capita_circ_share` 83 期 null、`ten_holder_pct` 30 期 null、`ften_holder_pct` 17 期 null、`holder_num_change_ratio` 首期 1 行 null——⛔ null 不是 0，不要补值。`size` 上限 1000（实测 2000 / 5000 上游照给，但粗页会把一次调用变成几万行，本层不放）。防改版：带 `code` 逐行核 `stock_code` 与请求同一只票。'
+
+/**
+ * 股东人数（`/holder/stock-holder-nums`）。⛔ 参数面**刻意没有日期**：实测上游收到多余的 `report_date`
+ * 不报错也不过滤，那一句"我按报告期筛过了"是假的——要筛就取回全量在 Dataset 里筛。
+ */
+function createHolderNumberSource(client: FtshareRequester): DataSource {
+  const capability = 'ftshare_holder_number'
+  const allowed = ['code', 'is_last', 'page', 'size']
+  const schema: SchemaDescriptor = {
+    capability,
+    name: 'get_stock_holders_number',
+    source: 'http:ftshare.stock_holders_number',
+    data_key: buildDataKey('ftshare', 'http', capability),
+    source_label: 'ftshare',
+    paginated: true,
+    rowShape: { rowKey: 'item' },
+    summary: '股东人数历史（单票全期）与全市场最新一期',
+    description: HOLDER_DESCRIPTION,
+    input_schema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: '单只标的，必须带市场后缀（600519.SH / 920001.BJ）；给了它 = 该票全部历史' },
+        is_last: { type: 'boolean', description: 'true = 全市场每只票各自的最新一期（分页）；与 code 互斥' },
+        page: { type: 'integer', minimum: 1 },
+        size: { type: 'integer', minimum: 1, maximum: MAX_PAGE_SIZE },
+      },
+      required: [], additionalProperties: false,
+    },
+    output_schema: output(holderNumberRow),
+  }
+  const normalize = (params: Params): Params => {
+    const code = params.code === undefined ? undefined : parseSecurityCode(params.code, 'code').canonical
+    // 实测 code + is_last=true 时上游静默只按单票查（total 仍是那 122 行），等于让模型以为筛过。
+    if (code !== undefined && params.is_last === true) {
+      throw new FtshareError('invalid_parameter', 'parameters code and is_last are mutually exclusive — 上游这时静默只按单票查（实测 total 仍是单票那 122 行），不会替你按 is_last 取全市场')
+    }
+    const isLast = params.is_last === undefined ? undefined : booleanParam(params.is_last)
+    if (code === undefined && isLast !== true) throw new FtshareError('invalid_parameter', 'one of code / is_last is required — 什么都不给时上游回 total_items=0 且不报错（实测），那一份不是数据')
+    const { page, size } = pageParams(params, allowed, MAX_PAGE_SIZE)
+    const normalized: Params = { page, size }
+    if (code !== undefined) normalized.code = code
+    if (isLast !== undefined) normalized.is_last = isLast
+    return normalized
+  }
+  return {
+    schema,
+    normalizeParams: normalize,
+    validateOutput: (data) => isRecord(data) && Array.isArray(data.item) && isRecord(data.pagination),
+    execute: async (request: DataRequest, signal: AbortSignal) => {
+      const params = normalize(request.params)
+      // ⛔ 单票模式上游**不翻页**（实测 page=2 / page_size=10 都照样给全部 107 期），所以不发分页参数，
+      // 也不给 `pages = ceil(total ÷ size)`——那会把一份完整历史说成两页，翻页只会拿到重复的一整份。
+      const search = params.code === undefined
+        ? query({ is_last: 'true', page: params.page, page_size: params.size }, ['is_last', 'page', 'page_size'])
+        : query({ stock_code: params.code }, ['stock_code'])
+      const { rows, total } = readPaged(await client.getJson('/api/v1/market/data/holder/stock-holder-nums', search, signal))
+      const item = rows.map(mapHolderNumberRow)
+      assertFiltered(item, params.code === undefined ? undefined : { field: 'thscode', expected: String(params.code), label: 'code' })
+      return {
+        data: params.code === undefined ? pagedEnvelope(item, total, Number(params.page), Number(params.size)) : snapshotEnvelope(item),
+        schema: output(holderNumberRow),
+      }
+    },
+  }
+}
+
+/** `is_last` 在上游是字符串 'true'（实测 `false` 回 0 行、`zzz` 才 400）；这里只放行真正的布尔 true。 */
+function booleanParam(value: unknown): boolean {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'string' && /^(true|false)$/i.test(value)) return value.toLowerCase() === 'true'
+  throw new FtshareError('invalid_parameter', 'parameter is_last must be a boolean (true / false)')
+}
+
+const indexWeightRow = {
+  type: 'object',
+  properties: {
+    index_code: { type: 'string' },
+    collect_date: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    collect_date_ms: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    component_code: { type: 'string' },
+    component_name: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    weight_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+  },
+  additionalProperties: false,
+}
+
+function mapIndexWeightRow(row: JsonRecord): JsonRecord {
+  const { iso, ms } = normalizeDateCell(row.date)
+  return {
+    index_code: String(row.index_code ?? ''),
+    collect_date: iso,
+    collect_date_ms: ms,
+    component_code: String(row.component_code ?? ''),
+    component_name: textOrNull(row.component_name),
+    weight_pct: numberOrNull(row.weight),
+  }
+}
+
+const INDEX_WEIGHT_DESCRIPTION = '按**中证系列指数**取某一采集期的成份股权重，一行是「一个指数 × 一个采集期 × 一只成分股」。补的是**权重数值**这一维度：`index_constituents` 给的是成分名单、不带权重，也不按采集期。`index_code` 必填，本层接受裸 6 位与 `000300.SH` / `399001.SZ` 这类带后缀写法并**统一成裸 6 位再发**——⛔ 上游对带后缀的写法是**静默回 0 行**、不报错（实测 `000300.SH` 与 `000001.SH` 都回 `index_weights:[]` 且 total=0），空值才是响亮 400「index_code 不能为空」，而不认识的写法（`ZZZZ`）同样只回 0 行。⛔ 后缀与号段矛盾（`000001.SZ`）在参数层拒：折成裸码就是上证综指，等于本层替你把一只深市身份换成另一个指数。⛔ 这里的 `000001` 是**上证综合指数**（实测 total=2230 只成分，首行 600000 浦发银行），不是平安银行——裸 6 位在行情类能力里通常指个股，本能力整个命名空间都是指数。实测条数与指数名正好对得上：000300 → 300 行、000905 → 500 行、932000 → 2000 行；而**申万行业码 `801010` 回 0 行**（行业口径请用 `ftshare_sw_industry_overview` / `ftshare_sw_industry_metrics`）。`date` 可选，是**采集期**且必须精确命中：实测 2026-06-15 与 2026-09-30 各回该期 300 行，而 2026-10-01 / 2026-01-01 这种没有采集的日期 total=0（**不会**回退到"最近一期"），省略时取最新一期（实测 2026-10-16 打 000300 的最新期是 2026-09-30）。⛔ `weight_pct` 是**百分数原值**，文档写的"小数字符串（如 0.0609）、非百分比"与实测不符：000300 最新期 300 行逐行相加 = **100.002**，单只形如 0.453000 就是 0.453%——别再乘 100。`component_code` 是**裸 6 位、不带交易所后缀**，本层不替它猜市场（需要后缀请用行情类能力或 `ticker_search`）。上游每行还有 `url_hash`（该期 xlsx 的下载 hash），本层不透出。`size` 上限 100，实测超限**静默夹断**（传 101 → 回显 page_size=100 并只回 100 行）：宽指数务必按 `ceil(total ÷ size)` 翻页取满，只读第一页会把 2000 只当成 100 只。防改版：逐行核 `index_code` 与请求一致，带 `date` 时再核采集期等于请求。'
+
+/**
+ * 中证指数成分权重（`/index/index_weight`）。
+ * ⛔ 第四套信封：行数组叫 `data.index_weights`，分页字段是 `total/page/page_size`（**没有 pages**）。
+ */
+function createIndexWeightSource(client: FtshareRequester): DataSource {
+  const capability = 'ftshare_index_weight'
+  const allowed = ['index_code', 'date', 'page', 'size']
+  const schema: SchemaDescriptor = {
+    capability,
+    time_contract: getDataTimeContract(capability),
+    name: 'get_index_weight_list',
+    source: 'http:ftshare.index_weight_list',
+    data_key: buildDataKey('ftshare', 'http', capability),
+    source_label: 'ftshare',
+    paginated: true,
+    rowShape: { rowKey: 'item' },
+    summary: '中证系列指数成分权重（按采集期，百分数）',
+    description: INDEX_WEIGHT_DESCRIPTION,
+    input_schema: {
+      type: 'object',
+      properties: {
+        index_code: { type: 'string', description: '指数代码：裸 6 位或带后缀都收（000300 / 000300.SH / 000905 / 932000），本层统一成裸 6 位再发——上游对带后缀写法静默回 0 行' },
+        date: { type: 'string', description: '权重采集期 YYYY-MM-DD，必须精确命中某一期；省略 = 最新一期' },
+        page: { type: 'integer', minimum: 1 },
+        size: { type: 'integer', minimum: 1, maximum: MAX_PAGE_SIZE_100 },
+      },
+      required: ['index_code'], additionalProperties: false,
+    },
+    output_schema: output(indexWeightRow),
+  }
+  const normalize = (params: Params): Params => {
+    const { page, size } = pageParams(params, allowed, MAX_PAGE_SIZE_100)
+    const indexCode = bareIndexCode(params.index_code)
+    const normalized: Params = { index_code: indexCode, page, size }
+    if (params.date !== undefined) normalized.date = date(params.date, 'date')
+    return normalized
+  }
+  return {
+    schema,
+    normalizeParams: normalize,
+    validateOutput: (data) => isRecord(data) && Array.isArray(data.item) && isRecord(data.pagination),
+    execute: async (request: DataRequest, signal: AbortSignal) => {
+      const params = normalize(request.params)
+      const search = query({
+        index_code: params.index_code,
+        date: params.date === undefined ? undefined : compactDate(String(params.date)),
+        page: params.page,
+        page_size: params.size,
+      }, ['index_code', 'date', 'page', 'page_size'])
+      const { rows, total } = readPaged(await client.getJson('/api/v1/market/data/index/index_weight', search, signal))
+      const item = rows.map(mapIndexWeightRow)
+      assertFiltered(item, { field: 'index_code', expected: String(params.index_code), label: 'index_code' })
+      if (params.date !== undefined) assertFiltered(item, { field: 'collect_date', expected: String(params.date), label: 'date' })
+      return { data: pagedEnvelope(item, total, Number(params.page), Number(params.size)), schema: output(indexWeightRow) }
+    },
+  }
+}
+
+/**
+ * ⛔ 与 `parseSecurityCode` 不是一回事：那一颗是给**个股/ETF**消歧的（裸 000xxx 在指数与个股之间
+ * 有歧义所以它拒），而这里的整个命名空间就是指数——`000001` 在上游是上证综指（实测 2230 只成分）。
+ * 带后缀的写法上游**静默回 0 行**（实测 `000300.SH` 与 `000001.SH` 都是 `index_weights:[]` 且 total=0），
+ * 所以本层把合法后缀折成裸码再发；但后缀与号段互相矛盾的写法（`000001.SZ` 折过去会变成上证综指）
+ * 一律在参数层拒——宁可不发，也不悄悄把用户写的身份换成另一个指数。
+ */
+function bareIndexCode(value: unknown, name = 'index_code'): string {
+  const raw = typeof value === 'string' ? value.trim() : ''
+  const match = /^(\d{6})(?:\.(SH|SZ|XSHG|XSHE))?$/i.exec(raw)
+  if (match === null) throw new FtshareError('invalid_parameter', `parameter ${name} must be a six-digit index code, bare or with an exchange (for example 000300, 000905.SH, 399001.SZ, 932000)`)
+  const digits = match[1]
+  const suffix = (match[2] ?? '').toUpperCase()
+  const market = suffix === 'XSHG' ? 'SH' : suffix === 'XSHE' ? 'SZ' : suffix
+  const isShenzhenIndex = digits.startsWith('399')
+  if (market !== '' && market !== (isShenzhenIndex ? 'SZ' : 'SH')) {
+    throw new FtshareError('invalid_parameter', `parameter ${name} ${JSON.stringify(raw)} conflicts: 399xxx 是深市指数、其余号段（000xxx / 93xxxx / 95xxxx）走沪市与中证口径；本层不替你换成另一个指数`)
+  }
+  return digits
+}
+
+const cbKlineRow = {
+  type: 'object',
+  properties: {
+    thscode: { type: 'string' },
+    trade_date: { type: 'string' },
+    trade_date_ms: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    ts_millis: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    ts_millis_open: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    open_yuan: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    high_yuan: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    low_yuan: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    close_yuan: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    turnover_yuan: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    volume_tickets: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+  },
+  additionalProperties: false,
+}
+
+function mapCbKlineRow(row: JsonRecord, thscode: string): JsonRecord {
+  const ms = numberOrNull(row.ts_millis)
+  return {
+    thscode,
+    trade_date: ms === null ? '' : shanghaiParts(ms).trade_date,
+    trade_date_ms: ms,
+    ts_millis: ms,
+    ts_millis_open: numberOrNull(row.ts_millis_open),
+    open_yuan: numberOrNull(row.open),
+    high_yuan: numberOrNull(row.high),
+    low_yuan: numberOrNull(row.low),
+    close_yuan: numberOrNull(row.close),
+    turnover_yuan: numberOrNull(row.turnover),
+    volume_tickets: integerOrNull(row.volume),
+  }
+}
+
+const CB_KLINE_DESCRIPTION = '按**单只可转债**与日期区间取历史 K 线（日 / 周 / 月 / 年），一行一根 K，按时间升序。补的是硬空白：本仓此前只有 `eastmoney_convertible_bond_list` 的**发行条款与要素**，转债的**价格序列此前为零**。`code` 必填（6 位，裸码或带 `.SH` / `.SZ` 都收；实测裸码与带正确后缀**逐字节相同**，113042 = 113042.SH、127045 = 127045.SZ），⛔ 非转债代码与"后缀和代码不配对"都由上游点名拒（实测 600519.SH → 400「symbols [600519.XSHG] are not convertible bonds」；113042.SZ → 400「symbols [113042.XSHE] are not convertible bonds」），所以身份核对是上游做的、本层**不按代码首位猜交易所**（沪市转债是 11xxxx，2007-2009 还有 126 段老沪债，套个股那套自然市场规则会判错）。`start_date` / `end_date` 必填，本层按北京时间 +08:00 转成上游的 `since_ts_millis`（当日 00:00）与 `until_ts_millis`（当日 23:59:59）。⛔ **跨度上限是 12 个自然月，而且边界卡在"整整 12 个月"之外**：实测 2025-10-16..2026-10-15（364 天）正常回 242 行，而 2025-10-15..2026-10-15（365 天）被 400 拒「日 K 及以上周期查询范围不能超过 12 个自然月」——本层**不把它换算成天数闸门**（换算规则没核出，写成常量就是造一个会腐烂的闸门），超限时把上游这句话原样交回。`period` ∈ day / week / month / year（实测上游大小写不敏感，`DAY` 也收）；⛔ `adjust` ∈ none / forward / backward，而这一列上游**大小写敏感**（文档写"大小写不敏感"，实测发 `NONE` 与 `Forward` 都被 400 拒），所以本层统一转小写再发、写法不用操心。⛔ 本层**不宣称 forward / backward 就是前复权 / 后复权**：实测 113042.SH 在 2026-08-01..08-14 三种写法返回逐字节相同（该券该窗口没有复权事件），要原始行情核对请显式给 `none`。时间与单位：`ts_millis` 是这根 K 的**结束**时刻（实测日档落在北京时间 15:00）、`ts_millis_open` 是开始时刻（09:30），`trade_date` / `trade_date_ms` 由本层按 +08:00 从 `ts_millis` 推出；四档价格是元（上游字符串 4 位小数，本层转数值）、`turnover_yuan` 是元；⛔ `volume_tickets` 的单位是**张**（1 张面值 100 元）而不是手：实测同行 `turnover ÷ volume` 落在 [low, high] 区间内（113042.SH 2026-09-01..10-15 的 27 行违例 0，比值 117.824），按"手"乘 1000 会把它推出价格区间三个数量级。实测这 27 行 OHLC 自洽（high ≥ max(open,close) ≥ min(open,close) ≥ low）违例 0，且**八列都没有 null**。`limit` 可选，保留**最新若干根**（实测 limit=3 恰等于不传 limit 那一次的末三行）；⛔ `limit=0` 回 0 行且不报错，本层要求正整数。周 / 月 / 年是**按请求区间内的日 K 聚合**，窗口没盖满一个周期时那根不是完整周期（实测 year 档在 2026-01-01..08-14 只给 1 根）。`interval_value` 实测对日档不改变结果（给 2 仍是每个交易日一根），本层不提供。当日日 K 收盘后即有（实测 2026-10-15 打当天回 1 行）。⛔ 响应 `data` **直接是数组**、没有分页信封，本层合成的 pagination 就是"一次取满"。各券历史起点以其实际上市与上游入库为准，本层未逐券核。'
+
+/**
+ * 可转债历史 K 线（`/convertible-bond-candlesticks`）。
+ * ⛔ 复权口径只透出不解释：实测 none / forward / backward 在无复权事件的券上逐字节相同，
+ * 把它们写成"前复权 / 后复权"就是没有依据的断言（本族批次 B 那一课）。
+ */
+function createCbKlineSource(client: FtshareRequester): DataSource {
+  const capability = 'ftshare_convertible_bond_kline'
+  const allowed = ['code', 'period', 'adjust', 'start_date', 'end_date', 'limit']
+  const CB_PERIODS = ['day', 'week', 'month', 'year'] as const
+  const CB_ADJUST = ['none', 'forward', 'backward'] as const
+  const schema: SchemaDescriptor = {
+    capability,
+    time_contract: getDataTimeContract(capability),
+    name: 'get_convertible_bond_candlesticks',
+    source: 'http:ftshare.convertible_bond_candlesticks',
+    data_key: buildDataKey('ftshare', 'http', capability),
+    source_label: 'ftshare',
+    paginated: false,
+    rowShape: { rowKey: 'item' },
+    summary: '可转债历史 K 线（日/周/月/年，单只，元）',
+    description: CB_KLINE_DESCRIPTION,
+    input_schema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: '单只可转债，6 位可带 .SH / .SZ（113042.SH / 127045.SZ）' },
+        period: { type: 'string', enum: [...CB_PERIODS], description: 'K 线周期；缺省 day' },
+        adjust: { type: 'string', enum: [...CB_ADJUST], description: '复权写法（大小写都收，本层转小写发给上游）；不宣称它与前/后复权的对应关系，原始行情核对请用 none' },
+        start_date: { type: 'string', description: '起始自然日 YYYY-MM-DD（北京时间）' },
+        end_date: { type: 'string', description: '截止自然日 YYYY-MM-DD；与起始相距不超过 12 个自然月' },
+        limit: { type: 'integer', minimum: 1, description: '保留最新 N 根；省略 = 窗口内全部' },
+      },
+      required: ['code', 'start_date', 'end_date'], additionalProperties: false,
+    },
+    output_schema: output(cbKlineRow),
+  }
+  const normalize = (params: Params): Params => {
+    for (const key of Object.keys(params)) if (!allowed.includes(key)) throw new FtshareError('invalid_parameter', `unsupported parameter: ${key}`)
+    const normalized: Params = { code: convertibleBondCode(params.code) }
+    if (params.period !== undefined) {
+      const period = String(params.period).toLowerCase()
+      if (!CB_PERIODS.includes(period as typeof CB_PERIODS[number])) throw new FtshareError('invalid_parameter', `parameter period must be one of ${CB_PERIODS.join(' / ')}`)
+      normalized.period = period
+    }
+    if (params.adjust !== undefined) {
+      const adjust = String(params.adjust).toLowerCase()
+      if (!CB_ADJUST.includes(adjust as typeof CB_ADJUST[number])) throw new FtshareError('invalid_parameter', `parameter adjust must be one of ${CB_ADJUST.join(' / ')}（上游这一列大小写敏感：实测 NONE / Forward 都 400）`)
+      normalized.adjust = adjust
+    }
+    const start_date = date(params.start_date, 'start_date')
+    const end_date = date(params.end_date, 'end_date')
+    if (start_date > end_date) throw new FtshareError('invalid_parameter', 'parameter start_date must not be later than end_date（实测上游对倒转区间也 400「since_ts_millis 不能晚于 until_ts_millis」）')
+    normalized.start_date = start_date
+    normalized.end_date = end_date
+    if (params.limit !== undefined) {
+      const limit = Number(params.limit)
+      // 实测 limit=0 不报错、只回 0 行；那会被读成"这只券没有行情"。
+      if (!Number.isSafeInteger(limit) || limit < 1) throw new FtshareError('invalid_parameter', 'parameter limit must be an integer >= 1（实测 0 静默回 0 行、负数被上游 400 拒）')
+      normalized.limit = limit
+    }
+    return normalized
+  }
+  return {
+    schema,
+    normalizeParams: normalize,
+    validateOutput: (data) => isRecord(data) && Array.isArray(data.item) && isRecord(data.pagination),
+    execute: async (request: DataRequest, signal: AbortSignal) => {
+      const params = normalize(request.params)
+      const search = query({
+        symbol: params.code,
+        interval_unit: params.period ?? 'day',
+        adjust_kind: params.adjust,
+        since_ts_millis: Date.parse(`${params.start_date}T00:00:00+08:00`),
+        until_ts_millis: Date.parse(`${params.end_date}T23:59:59+08:00`),
+        limit: params.limit,
+      }, ['symbol', 'interval_unit', 'adjust_kind', 'since_ts_millis', 'until_ts_millis', 'limit'])
+      const envelope = await client.getJson('/api/v1/market/data/convertible-bond-candlesticks', search, signal)
+      if (!Array.isArray(envelope.data)) throw new FtshareError('invalid_response', 'FTShare CB kline envelope is not an array — 这一族没有分页信封，读不到数组就无法判断是不是空结果')
+      const rows = envelope.data.filter(isRecord)
+      // ⛔ 响应行内没有身份列（八列都是行情），所以"上游返回的到底是这只券"无法在返回后核对；
+      // 本层能核的最强事实是时间：回来的每根 K 都必须落在请求的区间内。
+      assertInRange(rows, String(params.start_date), String(params.end_date), (row) => {
+        const ms = numberOrNull(row.ts_millis)
+        return ms === null ? null : shanghaiParts(ms).trade_date
+      })
+      const item = rows.map((row) => mapCbKlineRow(row, String(params.code)))
+      return { data: snapshotEnvelope(item), schema: output(cbKlineRow) }
+    },
+  }
+}
+
+/**
+ * 可转债代码。⛔ **不按代码首位猜交易所**（`parseSecurityCode` 那套自然市场规则在这儿是错的：
+ * 它会把 11xxxx 判成 SZ，而沪市转债正是 11xxxx，还有 2007-2009 的 126 段老沪债）。
+ * 实测上游自己会把写法折成内部 symbol 再判类别：`113042.SZ` 与 `127045.SH` 这种**后缀与代码不配对**
+ * 的输入是响亮 400 点名（「symbols [113042.XSHE] are not convertible bonds」），不会静默解析成别的证券；
+ * 裸 6 位与带正确后缀的写法实测**逐字节相同**（113042 = 113042.SH、127045 = 127045.SZ）。
+ * 所以本层只做写法归一，身份与类别判断交给上游那句 400。
+ */
+function convertibleBondCode(value: unknown, name = 'code'): string {
+  const raw = typeof value === 'string' ? value.trim() : ''
+  const match = /^(\d{6})(?:\.(SH|SZ|BJ|XSHG|XSHE))?$/i.exec(raw)
+  if (match === null) throw new FtshareError('invalid_parameter', `parameter ${name} must be a six-digit convertible bond code, bare or with an exchange (113042.SH / 127045.SZ / 113042)`)
+  const digits = match[1]
+  const suffix = (match[2] ?? '').toUpperCase()
+  const market = suffix === 'XSHG' ? 'SH' : suffix === 'XSHE' ? 'SZ' : suffix
+  return market === '' ? digits : `${digits}.${market}`
+}
+
 export function createFtshareSources(resolveApiKey: () => Promise<string | undefined>): DataSource[] {
   const client = createFtshareClient(resolveApiKey)
   return [
@@ -1388,6 +1999,11 @@ export function createFtshareSources(resolveApiKey: () => Promise<string | undef
     }),
     createSwOverviewSource(client),
     createSwMetricsSource(client),
+    createLimitPriceSource(client),
+    createDragonTigerSeatsSource(client),
+    createHolderNumberSource(client),
+    createIndexWeightSource(client),
+    createCbKlineSource(client),
   ]
 }
 

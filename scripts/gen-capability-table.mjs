@@ -56,7 +56,7 @@ const GROUPS = [
   ['东方财富 HTTP（宏观指标）', (p) => MACRO_PATHS.has(p)],
   ['东方财富 HTTP（资金与筹码）', (p) => p.startsWith('/eastmoney/') && !MACRO_PATHS.has(p) && !MUTUAL_PATHS.has(p)],
   ['Wind 金融数据服务（MCP）', (p) => p.startsWith('/wind/')],
-  ['FTShare（资金流 + 行情与日 K 截面 + 快照与日历 + 大宗交易、业绩预告/快报、申万行业，plan B）', (p) => p.startsWith('/ftshare/')],
+  ['FTShare（资金流 + 行情与日 K 截面 + 快照与日历 + 大宗交易、业绩预告/快报、申万行业 + 涨跌停价、龙虎榜席位、股东人数、指数权重、可转债 K 线，plan B）', (p) => p.startsWith('/ftshare/')],
 ]
 
 const paramsOf = (source) => {
