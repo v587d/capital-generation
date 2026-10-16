@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.8.0-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.8.1-9cf" alt="Version"></a>
   <a href="https://www.npmjs.com/package/@v587d/capital-generation"><img src="https://img.shields.io/npm/v/%40v587d%2Fcapital-generation" alt="npm version"></a>
 </p>
 
@@ -72,10 +72,12 @@ https://github.com/v587d/capital-generation
    | [AnySearch](https://www.anysearch.com/docs) | 网页搜索和正文提取 |
    | [Wind Alice](https://market.windalice.com/#/home) | 公告与新闻检索，以及宏观/行业/汇率指标与按日期区间取的历史 K 线 |
    | [PaddleOCR AIStudio](https://aistudio.baidu.com/paddleocr) | 解析 PDF 和图片中的文字 |
+   | [FTShare（非凸科技）](https://market.ft.tech/gateway/doc/p/pb8eizu3) | A 股行情与日 K 截面、主力资金流、涨跌停、龙虎榜席位、股东人数、指数权重、可转债行情与宏观利率等第二家上游口径 |
 
     这些都是第三方服务的密钥，需分别向服务方申请；额度和条款以各服务方为准。
     保存后**新建 Capital 模式会话**即可生效，无需重启。
-    也可以将密钥写入 `~/.dsh/.credentials.yaml`，名称依次为 `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`、`PADDLE_OCR_TOKEN`。
+    也可以将密钥写入 `~/.dsh/.credentials.yaml`，名称依次为 `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`、`PADDLE_OCR_TOKEN`、`FTSHARE_API_KEY`。
+    其中 **FTShare 这一把暂时只能走这份文件**：卡片上那一格还没给它留输入框，没配时目录里这 24 项仍在，但每次取数都会点名 `FTSHARE_API_KEY` 失败。
     密钥由 DSH 凭据服务保存，不会显示在会话配置中。
 
    <p align="center">
@@ -130,7 +132,7 @@ https://github.com/v587d/capital-generation
 
 ## 还能做什么
 
-- **查数据和资料：** 覆盖A股、港股、美股，由 Agents 按需获取行情、财务、指数、基金与宏观行业数据，检索公告、新闻和研报。共计 **113** 个数据收集能力和 **14** 个网页检索能力，部分公开数据源无需额外密钥；具体覆盖范围见 [数据收集能力表](docs/data-collector-capabilities.md) 和 [网页检索能力表](docs/web-retriever-capabilities.md)。
+- **查数据和资料：** 覆盖A股、港股、美股，由 Agents 按需获取行情、财务、指数、基金与宏观行业数据，检索公告、新闻和研报。共计 **118** 个数据收集能力和 **14** 个网页检索能力，部分公开数据源无需额外密钥；具体覆盖范围见 [数据收集能力表](docs/data-collector-capabilities.md) 和 [网页检索能力表](docs/web-retriever-capabilities.md)。
 - **数据分析：** 所有 Agents 均不直接接触原始结构数据，Agents 按需读取数据、校验数据，并写脚本挖掘数据背后含义。 
 - **可视化：** Agent 视情况将校验后数据交给可视化专家生成可交互图表。图表会作为本轮交付物出现在会话中，可在侧栏查看或离线打开。了解处理流程可看 [Agent 角色说明](docs/agent-roles.md)。
 
@@ -166,9 +168,9 @@ https://github.com/v587d/capital-generation
 ## 常见问题
 
 - **安装后找不到 Capital 模式？** 确认插件出现在「插件」→ 已安装列表；Web / CLI profile 安装后要重启该 profile，并在新会话选择模式。
-- **配置在哪？** 打开「插件」→ 已安装的 **Capital Generation**，页面顶部就是「数据源 / 精选 Skills / 包含的组件」三格，四把密钥都在第一格；不在 DSH 的普通「设置」页面，也不用点进任何一行组件。保存密钥后新建会话再试。
+- **配置在哪？** 打开「插件」→ 已安装的 **Capital Generation**，页面顶部就是「数据源 / 精选 Skills / 包含的组件」三格，密钥都在第一格；不在 DSH 的普通「设置」页面，也不用点进任何一行组件。保存密钥后新建会话再试。只有 **FTShare** 那一把目前不在卡片上，要写进 `~/.dsh/.credentials.yaml`（名称 `FTSHARE_API_KEY`）。
 - **升级到 2.7.11 后，卡片里的开关回到默认值了？** 这一版把插件内部两个组件换了目录名，宿主按旧路径记住的那份保存值因此接不上。四把 API Key、你的自选股清单与持仓标记都不受影响；「精选 Skills」的勾选、附加人设与「本机直连」开关需要重新设一次并保存，之后就稳定了。已经设过的话，旧的那份仍写在 DSH 的 profile 文件里，手改那一行的路径也能取回来。
-- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.8.0` 或 `@2.8.0`。
+- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.8.1` 或 `@2.8.1`。
 - **刚发布的新版本装不到？** 桌面端取包时会跳过**刚发布不久**的版本（宿主侧包管理器的发布冷却策略，实测会静默装成上一个版本），国内镜像的同步也可能滞后一段时间。急着用最新代码，改用仓库地址安装最直接。
 - **网页抓取失败？** 配置卡片中的「允许启动本地提取网页内容」默认开启：AnySearch 提取失败时可尝试本机直连。关闭后，本机直连的具名来源查询也不可用；请检查该开关和网络连接。
 - **Wind 那部分会消耗积分？** 会。公告与新闻检索、宏观 / 行业 / 汇率指标、按日期区间取的历史 K 线都按次消耗你在 Wind 侧的额度；额度与条款以 Wind 为准，插件不做用量封顶。没配 `WIND_API_KEY` 时这几类不可用，其余功能照常。
@@ -196,6 +198,6 @@ npm run smoke:boot  # 检查插件装配
 
 - 「精选 Skills」的研究、交易过程与财务方法 Skill 按固定 commit **快照收录**自 [finterm-ai/investment-skills](https://github.com/finterm-ai/investment-skills)、[spikeHongg/china-stock-research-skills](https://github.com/spikeHongg/china-stock-research-skills)、[yennanliu/InvestSkill](https://github.com/yennanliu/InvestSkill)、[DjNero11/peter-lynch-skill](https://github.com/DjNero11/peter-lynch-skill)、[marian2js/trading-skills](https://github.com/marian2js/trading-skills)、[GAJETOso/financeskills](https://github.com/GAJETOso/financeskills)、[Howard-Jerry/quant-agent-skills](https://github.com/Howard-Jerry/quant-agent-skills)（以上均 MIT License）与 [jwangkun/claude-for-financial-services-cn](https://github.com/jwangkun/claude-for-financial-services-cn)（Apache-2.0）。快照目录、收录口径与逐颗排除理由见 [selected-skills/](selected-skills/README.md)，第三方组件与许可见下面的清单文件。
 - 会话里的可交互图表由 [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts)（Apache-2.0）渲染，图上保留它自带的归属标识。
-- 行情、财务、公告与网页材料来自四类需自备密钥的服务（同花顺 Fuyao、Wind Alice、AnySearch、PaddleOCR）与一批公开口径的来源（东方财富、腾讯、新浪、财联社、华尔街见闻、巨潮互动易、上证 e互动、同花顺公开站点）；数据版权归各服务方，额度与条款以服务方为准，本项目不重新分发原始数据。
+- 行情、财务、公告与网页材料来自五类需自备密钥的服务（同花顺 Fuyao、Wind Alice、AnySearch、PaddleOCR、FTShare 非凸科技）与一批公开口径的来源（东方财富、腾讯、新浪、财联社、华尔街见闻、巨潮互动易、上证 e互动、同花顺公开站点）；数据版权归各服务方，额度与条款以服务方为准，本项目不重新分发原始数据。
 
 第三方组件、版本与许可，以及宿主提供哪部分、构建期用什么、各服务的数据会出到哪些地方，逐条列在 [第三方组件与许可](THIRD_PARTY_NOTICES.md)。
