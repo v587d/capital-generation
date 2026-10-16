@@ -2,7 +2,8 @@
  * FTShare（非凸科技）source 的离线回归（`src/sources/ftshare-rest.ts`）。
  *
  * fixture 全部来自**真报文实测**（批次 A/B/C 是 2026-10-15，批次 D 是 2026-10-16 早 07:36–07:44 的
- * 176 份落盘报文；都不是供应商文档的转述）：字段名、类型、日期写法、分页信封与错误信封都按返回原样写死。
+ * 176 份落盘报文，批次 E 是同日 08:25–08:29 与 08:44 的 109 份；都不是供应商文档的转述）：
+ * 字段名、类型、日期写法、分页信封与错误信封都按返回原样写死。
  * 改这些形状属于"上游改版"，必须连同本文件的断言一起改（§10：未验不注册，验过的不许漂）。
  *
  * ⛔ 这一族唯一的取样规矩：**写进注释与 description 的数字，必须能在原始报文里回查**。
@@ -11,6 +12,10 @@
  * **任何一次真报文里都没有这些值**——那是把不同接口的读数串成因果的编造，据此撤掉的两颗能力
  * 当晚已复验注册回来，那些说法已全部删除。下面的断言只钉两样东西：**报文里出现过的形状**，
  * 与**producer 该怎样失败**。
+ * 批次 E 又犯了一次同族的错：草稿里写了"232 份落盘报文""region 实测 25 个""缺失有 `""` 与 `null` 两种写法"
+ * 三处——回查后第一处是凭空加的（实际 109 份），第二处把**跨多次响应的累计**当成单次读数（单次最多 17 个），
+ * 第三处根本与报文相反（八份响应的缺失值全是 `""`，null 型字段 0 个）。三条都已按原文改正，
+ * HIBOR 与 SHIBOR 缺的三条 400 是 08:44 补打才落进日志的。**没打进日志的数字不算实测**，这句话是本文件的第二道闸门。
  *
  * 三条只能用断言钉住的事实（2026-10-15 逐条复现）：
  * 1. `page` 生效、信封回显也正确，但本层页码一律**按请求自己算**——不把自己的输出押在上游状态上。
@@ -31,12 +36,14 @@ const FT_CAPABILITIES = [
   'ftshare_block_trades', 'ftshare_performance_forecast', 'ftshare_performance_express',
   'ftshare_sw_industry_overview', 'ftshare_sw_industry_metrics',
   'ftshare_limit_price', 'ftshare_dragon_tiger_seats', 'ftshare_holder_number', 'ftshare_index_weight', 'ftshare_convertible_bond_kline',
+  'ftshare_lpr', 'ftshare_chinabond_yield', 'ftshare_shibor', 'ftshare_hibor', 'ftshare_financial_calendar',
 ]
 /** 上游真按页给行的那些颗；快照类一次一行，没有翻页这回事。 */
 const PAGED = [
   'ftshare_stock_daily_flow', 'ftshare_industry_daily_flow', 'ftshare_concept_daily_flow', 'ftshare_main_capital_flow', 'ftshare_ashare_quote', 'ftshare_daily_kline_snapshot',
   'ftshare_block_trades', 'ftshare_performance_forecast', 'ftshare_performance_express', 'ftshare_sw_industry_overview', 'ftshare_sw_industry_metrics',
   'ftshare_limit_price', 'ftshare_dragon_tiger_seats', 'ftshare_holder_number', 'ftshare_index_weight',
+  'ftshare_chinabond_yield', 'ftshare_shibor', 'ftshare_hibor', 'ftshare_financial_calendar',
 ]
 
 function request(capability, params = {}) {
@@ -103,8 +110,29 @@ const HOLDER_OLD_ROW = { stock_code: '600519.SH', stock_name: '贵州茅台', pu
 const WEIGHT_ROW = { component_code: '000001', component_name: '平安银行', date: '2026-09-30', index_code: '000300', url_hash: 'e5a11b970350c373a501ef57b6f0bfc97f0d413576336f21c3319133d3357980', weight: '0.453000' }
 /** 可转债 K 线：`data` 直接是数组、价格字符串 4 位、`volume` 是**张**（实测 turnover ÷ volume 落在 [low, high] 内）。 */
 const CB_ROW = { close: '116.8380', high: '117.5000', low: '116.8010', open: '117.1980', ts_millis: 1786345200000, ts_millis_open: 1786325400000, turnover: '204117771.8300', volume: 1741950 }
+/** LPR：`data` 直接是数组（第四种形状），利率是**四位小数字符串**、日期列叫 `date`。 */
+const LPR_ROW = { date: '2026-09-20', lpr_1y: '3.0000', lpr_5y: '3.5000' }
+/** ⛔ 2019-08-20 之前 `lpr_5y` 整列为 null（实测 2125 / 2661 行），那一行的 1y 还是老口径 4.31。 */
+const LPR_NULL_ROW = { date: '2019-08-19', lpr_1y: '4.3100', lpr_5y: null }
+/** 5y 那档的首个非空（实测就是 2019-08-20 的 4.8500）。 */
+const LPR_5Y_FIRST_ROW = { date: '2019-08-20', lpr_1y: '4.2500', lpr_5y: '4.8500' }
+/** 中债收益率曲线：八档期限是**数值**（不是字符串），国债那条 30y 有值。 */
+const CHINABOND_GOV_ROW = { curve_name: '中债国债收益率曲线', trade_date: '2026-10-15', y_3m: 1.1618, y_6m: 1.1625, y_1y: 1.1803, y_3y: 1.2694, y_5y: 1.39, y_7y: 1.4866, y_10y: 1.6601, y_30y: 2.07 }
+/** ⛔ 中短期票据那条的 `y_30y` **整列为 null**（实测 2015-2016 抽 500 行非空 0 / 500，另两条 500 / 500 都有值）。 */
+const CHINABOND_NOTE_ROW = { curve_name: '中债中短期票据收益率曲线(AAA)', trade_date: '2026-10-15', y_3m: 1.4322, y_6m: 1.4694, y_1y: 1.4794, y_3y: 1.5965, y_5y: 1.668, y_7y: 1.7807, y_10y: 1.9, y_30y: null }
+/** 曲线自己的早期那一行：30y 之外还有四档是 null（期限点是随日期长出来的）。 */
+const CHINABOND_EARLY_ROW = { curve_name: '中债中短期票据收益率曲线(AAA)', trade_date: '2006-12-25', y_3m: 2.97, y_6m: 3.12, y_1y: 3.4, y_3y: null, y_5y: null, y_7y: null, y_10y: null, y_30y: null }
+/** SHIBOR：一行八个期限，实测 2026-10-15 隔夜 1.266（百分数原值）。 */
+const SHIBOR_ROW = { trade_date: '2026-10-15', on_rate: 1.266, w1: 1.346, w2: 1.3493, m1: 1.4111, m3: 1.43, m6: 1.4478, m9: 1.463, y1: 1.474 }
+/** ⛔ HIBOR 十五档里 m4 / m5 / m7..m11 七档实测整列为 null（HIBOR 就公布这些档），m12 是 `4.0` 这种写法。 */
+const HIBOR_ROW = { trade_date: '2026-10-08', on_rate: 2.16821, w1: 2.38679, w2: 2.5, m1: 2.76494, m2: 2.9997, m3: 3.29816, m4: null, m5: null, m6: 3.54149, m7: null, m8: null, m9: null, m10: null, m11: null, m12: 4.0 }
+/** 财经日历：`event_time` 是**秒级字符串**，缺失一律写成**空字符串**（实测八份响应里 null 型字段 0 个）。 */
+const CALENDAR_EARNINGS_ROW = { stat_date: '2026-10-15', tab_type: 'earnings', event_time: '1791993600', region: '香港', event: '赣锋锂业', importance: '', actual_value: '0', forecast_value: '0', previous_value: '', link: '' }
+/** 有前值与预测的那一行：三个读数都是**文本**（单位随事件本身变，上游不给列级单位）。 */
+const CALENDAR_MACRO_ROW = { stat_date: '2026-10-15', tab_type: 'general', event_time: '1792067400', region: '美国', event: '10月10日当周首次申请失业救济人数(万人)', importance: '3', actual_value: '19.9', forecast_value: '20', previous_value: '19.7', link: 'https://wallstreetcn.com/calendar/US121055/overview' }
 
-/** 资金流与日 K 那两族的信封：`data.records` + `pageNum/pageSize/total/pages`。桩一律回显第 1 页，好钉住"不信回显"。 */function paged(records, over = {}) {
+/** 资金流与日 K 那两族的信封：`data.records` + `pageNum/pageSize/total/pages`。桩一律回显第 1 页，好钉住"不信回显"。 */
+function paged(records, over = {}) {
   return { code: 200, message: 'success', data: { pageNum: 1, pageSize: records.length, total: records.length, pages: 1, records, ...over } }
 }
 /** daec 报价族的信封：`data.items` + `page/page_size/total_pages/total_items`。 */
@@ -160,6 +188,11 @@ function minimalParams(capability) {
   if (capability === 'ftshare_holder_number') return { code: '600519.SH' }
   if (capability === 'ftshare_index_weight') return { index_code: '000300' }
   if (capability === 'ftshare_convertible_bond_kline') return { code: '113042.SH', start_date: '2026-08-10', end_date: '2026-08-14' }
+  if (capability === 'ftshare_lpr') return {}
+  // 曲线与两路拆借利率的 fixture 行都是 2026-10-15 那天（实测报文原文），窗口必须罩得住它。
+  if (capability === 'ftshare_chinabond_yield' || capability === 'ftshare_shibor' || capability === 'ftshare_hibor') return { start_date: '2026-10-01', end_date: '2026-10-15' }
+  // ⛔ 日历的窗上限是 3 天差，所以不能用默认那六天窗（会被参数层拒）。
+  if (capability === 'ftshare_financial_calendar') return { start_date: '2026-10-15', end_date: '2026-10-17' }
   return { start_date: '2026-10-08', end_date: '2026-10-14' }
 }
 
@@ -180,13 +213,18 @@ function envelopeFor(capability) {
   if (capability === 'ftshare_holder_number') return itemsPaged([HOLDER_ROW], { total_items: 107 })
   if (capability === 'ftshare_index_weight') return weightsPaged([WEIGHT_ROW], { total: 300 })
   if (capability === 'ftshare_convertible_bond_kline') return { code: 200, message: 'success', data: [CB_ROW] }
+  if (capability === 'ftshare_lpr') return { code: 200, message: 'success', data: [LPR_ROW, LPR_5Y_FIRST_ROW, LPR_NULL_ROW] }
+  if (capability === 'ftshare_chinabond_yield') return paged([CHINABOND_GOV_ROW, CHINABOND_NOTE_ROW], { total: 18 })
+  if (capability === 'ftshare_shibor') return paged([SHIBOR_ROW], { total: 6 })
+  if (capability === 'ftshare_hibor') return paged([HIBOR_ROW], { total: 6 })
+  if (capability === 'ftshare_financial_calendar') return paged([CALENDAR_EARNINGS_ROW, CALENDAR_MACRO_ROW], { total: 113 })
   if (capability === 'ftshare_industry_daily_flow' || capability === 'ftshare_concept_daily_flow') {
     return paged([{ board_name: 'IT服务', trade_date: '2026-10-14', board_index: 11410.9, change_pct: -1.77, company_count: 129, inflow: 57.06, outflow: 72.88, net_amount: -15.82, leader_name: '华是科技', leader_change_pct: 4.12, leader_price: 69.04 }], { total: 90 })
   }
   return paged([STOCK_FLOW_ROW], { total: 5214 })
 }
 
-test('注册面：十九颗能力都在，前缀与 source_label 一致，目录与详情两条口径都够格', () => {
+test('注册面：二十四颗能力都在，前缀与 source_label 一致，目录与详情两条口径都够格', () => {
   const sources = createFtshareSources(async () => 'unused')
   assert.deepEqual(sources.map((s) => s.schema.capability), FT_CAPABILITIES)
   for (const source of sources) {
@@ -553,7 +591,7 @@ test('限流：并发进来也要拉成一条链，相邻请求间隔不小于 F
   }
 })
 
-test('输出契约：十九颗能力返回的每一个列名都必须在声明的 output_schema 里（§9.6）', async () => {
+test('输出契约：二十四颗能力返回的每一个列名都必须在声明的 output_schema 里（§9.6）', async () => {
   for (const capability of FT_CAPABILITIES) {
     const source = sourceFor(capability)
     await withFetch(async () => jsonResponse(envelopeFor(capability)), async () => {
@@ -1007,6 +1045,9 @@ test('⛔ size 上限按上游逐颗对齐：1000 / 500 / 200 / 100 四种都在
     // 批次 D：涨跌停实测 1000 可用（2000 静默夹断成 1000）、席位 500（文档写 200）、
     // 股东人数 1000（上游连 5000 都给，本层不放）、指数权重 100（超限静默夹断）。
     ftshare_limit_price: 1000, ftshare_dragon_tiger_seats: 500, ftshare_holder_number: 1000, ftshare_index_weight: 100,
+    // 批次 E：曲线与两路拆借利率都是 1000（1001 是响亮 400，实测三份报文），日历真实上限 500（文档写 200，
+    // 传 1000 回显 pageSize=500）。⛔ LPR 不在表里：它一颗参数都没有，分页座位是假的（见下面那颗的用例）。
+    ftshare_chinabond_yield: 1000, ftshare_shibor: 1000, ftshare_hibor: 1000, ftshare_financial_calendar: 500,
   }
   for (const [capability, max] of Object.entries(CAPS)) {
     const source = sourceFor(capability)
@@ -1239,4 +1280,172 @@ test('可转债 K 线：不做首位猜测、复权与周期枚举、limit 与�
   assert.throws(() => source.normalizeParams({ ...base, end_date: undefined }), /end_date must be YYYY-MM-DD/)
   assert.throws(() => source.normalizeParams({ ...base, interval_value: 2 }), /unsupported parameter/, '实测 interval_value 对日档不改变结果，不给这个座位')
   assert.throws(() => source.normalizeParams({ ...base, page: 2 }), /unsupported parameter/)
+})
+
+// ── 批次 E 的五颗（LPR、中债收益率曲线、SHIBOR、HIBOR、财经日历）─────────────────────
+// 2026-10-16 08:25–08:29 与 08:44 的 109 份落盘报文；断言同样只钉报文里出现过的形状与"该怎样失败"。
+
+test('LPR：一颗参数都没有、一次给完全历史；多发参数在参数层拒', async () => {
+  const source = sourceFor('ftshare_lpr')
+  assert.deepEqual(source.schema.input_schema, { type: 'object', properties: {}, required: [], additionalProperties: false })
+  assert.equal(source.schema.paginated, false)
+  await withFetch(async () => jsonResponse({ code: 200, message: 'success', data: [LPR_ROW, LPR_5Y_FIRST_ROW, LPR_NULL_ROW] }), async (calls) => {
+    const result = await source.execute(request('ftshare_lpr', {}), new AbortController().signal)
+    assert.equal(calls.length, 1)
+    // ⛔ 一个查询串都不许拼出去：拼了就是在假装替用户筛过。
+    assert.equal(calls[0].url, `${BASE}/api/v1/market/data/economic/china-lpr`)
+    assert.deepEqual(result.data.item[0], {
+      trade_date: '2026-09-20', trade_date_ms: Date.parse('2026-09-20T00:00:00+08:00'), lpr_1y_pct: 3, lpr_5y_pct: 3.5,
+    })
+    assert.equal(result.data.item[1].lpr_5y_pct, 4.85, '实测 5y 那档的首个非空就是 2019-08-20 的 4.8500')
+    assert.equal(result.data.item[2].lpr_5y_pct, null, '⛔ 2019-08-20 之前整列为 null（实测 2125 / 2661 行），null 不是 0')
+    assert.deepEqual(result.data.pagination, { page: 1, size: 3, pages: 1, total: 3 }, '全量给完就是 1 页，不许按 100 行的默认值编出页数')
+  })
+  // 实测上游收到任何参数都静默忽略（多发 start_date / page / page_size 仍回同一份 2661 行），所以座位一个都不给。
+  for (const params of [{ start_date: '2026-01-01', end_date: '2026-10-01' }, { page: 2 }, { size: 10 }, { date: '2026-09-20' }]) {
+    assert.throws(() => source.normalizeParams(params), /unsupported parameter/, JSON.stringify(params))
+  }
+  assert.throws(() => source.normalizeParams({ start_date: '2026-01-01' }), /静默忽略/, '拒绝的理由要说清是上游吞参数，不是我们没有这个口径')
+  assert.deepEqual(source.normalizeParams({}), {})
+})
+
+test('中债收益率曲线：枚举把精确匹配搬到参数层、曲线名回 producer 里核、null 期限原样透出', async () => {
+  const source = sourceFor('ftshare_chinabond_yield')
+  await withFetch(async () => jsonResponse(paged([CHINABOND_GOV_ROW], { total: 6 })), async (calls) => {
+    const result = await source.execute(request('ftshare_chinabond_yield', { start_date: '2026-10-01', end_date: '2026-10-15', curve_name: '中债国债收益率曲线', page: 1, size: 1000 }), new AbortController().signal)
+    assert.match(calls[0].url, new RegExp(`^${BASE}/api/v1/market/data/chinabond-yield-daily\\?`))
+    assert.match(calls[0].url, /start_date=20261001(&|$)/)
+    assert.match(calls[0].url, /page_size=1000/, '实测上限 1000，1001 是响亮 400「page_size must be between 1 and 1000」')
+    assert.equal(decodeURIComponent(calls[0].url).includes('curve_name=中债国债收益率曲线'), true, '曲线名要真的发出去')
+    assert.deepEqual(result.data.item[0], {
+      curve_name: '中债国债收益率曲线', trade_date: '2026-10-15', trade_date_ms: Date.parse('2026-10-15T00:00:00+08:00'),
+      y_3m_pct: 1.1618, y_6m_pct: 1.1625, y_1y_pct: 1.1803, y_3y_pct: 1.2694, y_5y_pct: 1.39, y_7y_pct: 1.4866, y_10y_pct: 1.6601, y_30y_pct: 2.07,
+    })
+    assert.deepEqual(result.data.pagination, { page: 1, size: 1, pages: 1, total: 6 }, '实测同一三天窗里每条曲线各 6 行（三条合计 18 行）')
+  })
+  // ⛔ 两条曲线的 y_30y 有值、票据那条整列为 null（实测 2015-2016 抽 500 行非空 0 / 500），本层不补也不改列。
+  await withFetch(async () => jsonResponse(paged([CHINABOND_NOTE_ROW, CHINABOND_EARLY_ROW], { total: 2 })), async () => {
+    const result = await source.execute(request('ftshare_chinabond_yield', { start_date: '2002-01-01', end_date: '2026-10-15' }), new AbortController().signal)
+    assert.equal(result.data.item[0].y_30y_pct, null)
+    assert.equal(result.data.item[1].y_10y_pct, null, '期限点是随日期长出来的：票据曲线 2006-12-25 那一行只有三档有值')
+  })
+  // 上游是精确匹配：认不出的写法只回 0 行不报错，所以带 curve_name 的请求回来必须逐行核名。
+  await withFetch(async () => jsonResponse(paged([CHINABOND_NOTE_ROW], { total: 1 })), async () => {
+    await assert.rejects(
+      () => source.execute(request('ftshare_chinabond_yield', { start_date: '2026-10-01', end_date: '2026-10-15', curve_name: '中债国债收益率曲线' }), new AbortController().signal),
+      (error) => error instanceof FtshareError && /dropped the curve_name filter/.test(error.message),
+    )
+  })
+  await withFetch(async () => jsonResponse(paged([{ ...CHINABOND_GOV_ROW, trade_date: '2026-10-16' }], { total: 1 })), async () => {
+    await assert.rejects(
+      () => source.execute(request('ftshare_chinabond_yield', { start_date: '2026-10-01', end_date: '2026-10-15' }), new AbortController().signal),
+      /outside the requested/,
+    )
+  })
+})
+
+test('中债收益率曲线：三条枚举、空白写法、方向与日期写法都在参数层拦', () => {
+  const source = sourceFor('ftshare_chinabond_yield')
+  const base = { start_date: '2026-10-01', end_date: '2026-10-15' }
+  assert.equal(source.normalizeParams({ ...base, curve_name: '中债国债收益率曲线' }).curve_name, '中债国债收益率曲线')
+  // 实测上游对认不出的名字只回 0 行（`不存在` 空）、对空白写法才 400「curve_name must not be blank」：
+  // 两种都在参数层点名拒，不许模型拿一份空 Dataset 去猜自己哪里写错了。
+  for (const curve of ['中债国债', 'USDT', ' 中债国债收益率曲线 ', '']) {
+    assert.throws(() => source.normalizeParams({ ...base, curve_name: curve }), /must be exactly one of/, JSON.stringify(curve))
+  }
+  assert.throws(() => source.normalizeParams({ start_date: '2026-10-15', end_date: '2026-10-01' }), /must not be later/)
+  assert.throws(() => source.normalizeParams({ start_date: '20261001', end_date: '2026-10-15' }), /parameter start_date must be YYYY-MM-DD/, '上游要 YYYYMMDD、本层收 ISO，带横杠的写法在归一化这一层完成')
+  assert.throws(() => source.normalizeParams({ end_date: '2026-10-15' }), /parameter start_date must be YYYY-MM-DD/)
+  assert.equal(source.schema.input_schema.properties.curve_name.enum.length, 3, '⛔ 实测只有三条曲线（2002 起的窗口逐页取满也只这三条），枚举多写一条就是编造')
+})
+
+test('SHIBOR 与 HIBOR 同形不同档：列名逐字对齐报文，不许把另一路的期限表套过来', async () => {
+  const shibor = sourceFor('ftshare_shibor')
+  await withFetch(async () => jsonResponse(paged([SHIBOR_ROW], { total: 6 })), async (calls) => {
+    const result = await shibor.execute(request('ftshare_shibor', { start_date: '2026-10-01', end_date: '2026-10-15' }), new AbortController().signal)
+    assert.match(calls[0].url, new RegExp(`^${BASE}/api/v1/market/data/shibor-daily\\?`))
+    assert.deepEqual(result.data.item[0], {
+      trade_date: '2026-10-15', trade_date_ms: Date.parse('2026-10-15T00:00:00+08:00'),
+      on_rate_pct: 1.266, w1_pct: 1.346, w2_pct: 1.3493, m1_pct: 1.4111, m3_pct: 1.43, m6_pct: 1.4478, m9_pct: 1.463, y1_pct: 1.474,
+    })
+    assert.deepEqual(result.data.pagination, { page: 1, size: 1, pages: 1, total: 6 })
+  })
+  const hibor = sourceFor('ftshare_hibor')
+  await withFetch(async () => jsonResponse(paged([HIBOR_ROW], { total: 6 })), async (calls) => {
+    const result = await hibor.execute(request('ftshare_hibor', { start_date: '2026-10-01', end_date: '2026-10-15' }), new AbortController().signal)
+    assert.match(calls[0].url, /\/api\/v1\/market\/data\/hibor-daily\?/)
+    const row = result.data.item[0]
+    assert.equal(Object.keys(row).length, 17, '一行 = 日期两列 + 十五档，一档不多一档不少')
+    assert.equal(row.m4_pct, null, '⛔ m4 / m5 / m7..m11 七档实测整列为 null（HIBOR 就公布这些档），不是缺数据、不许补 0')
+    assert.equal(row.m12_pct, 4, '上游写 4.0，透出是数值 4')
+    assert.equal(row.on_rate_pct, 2.16821)
+    assert.equal('y1_pct' in row, false, '⛔ HIBOR 没有 y1 这一档：把 SHIBOR 的表套过来等于编一个不存在的读数')
+  })
+  await withFetch(async () => jsonResponse(paged([{ ...SHIBOR_ROW, trade_date: '2026-11-01' }], { total: 1 })), async () => {
+    await assert.rejects(
+      () => shibor.execute(request('ftshare_shibor', { start_date: '2026-10-01', end_date: '2026-10-15' }), new AbortController().signal),
+      /outside the requested/, '周末与未发布日没有行是上游事实，但区间外的行一定是上游改版'
+    )
+  })
+})
+
+test('SHIBOR / HIBOR 的参数面：日期必填、方向拦下、没有的座位一个不给', () => {
+  for (const capability of ['ftshare_shibor', 'ftshare_hibor']) {
+    const source = sourceFor(capability)
+    const base = { start_date: '2026-10-01', end_date: '2026-10-15' }
+    assert.throws(() => source.normalizeParams({ end_date: '2026-10-15' }), /parameter start_date must be YYYY-MM-DD/)
+    assert.throws(() => source.normalizeParams({ start_date: '2026-10-15', end_date: '2026-10-01' }), /must not be later/)
+    assert.throws(() => source.normalizeParams({ ...base, tenor: '3m' }), /unsupported parameter/, '期限是宽表列、不是过滤器（实测上游没有这个参数）')
+    assert.equal(source.normalizeParams(base).size, 100)
+  }
+})
+
+test('财经日历：秒转毫秒 + 北京时刻，importance 归一整数、空串归一 null、读数保持文本', async () => {
+  const source = sourceFor('ftshare_financial_calendar')
+  await withFetch(async () => jsonResponse(paged([CALENDAR_EARNINGS_ROW, CALENDAR_MACRO_ROW], { total: 113 })), async (calls) => {
+    const result = await source.execute(request('ftshare_financial_calendar', { start_date: '2026-10-15', end_date: '2026-10-17', size: 500 }), new AbortController().signal)
+    assert.match(calls[0].url, new RegExp(`^${BASE}/api/v1/market/data/finance/financial-calendar/wallstreetcn\\?`))
+    assert.match(calls[0].url, /start_date=20261015(&|$)/)
+    assert.match(calls[0].url, /page_size=500/, '实测真实上限 500（文档写 200），传 1000 会被静默夹成 500')
+    assert.deepEqual(result.data.item[0], {
+      stat_date: '2026-10-15', stat_date_ms: Date.parse('2026-10-15T00:00:00+08:00'),
+      event_time_ms: 1791993600000, event_time_beijing: '2026-10-15 00:00',
+      tab_type: 'earnings', region: '香港', event: '赣锋锂业',
+      importance: null, actual_value: '0', forecast_value: '0', previous_value: null, link: null,
+    })
+    assert.equal(result.data.item[0].event_time_ms, 1791993600 * 1000, '⛔ 上游给的是**秒**：直接当毫秒会差三个数量级')
+    assert.equal(result.data.item[0].actual_value, '0', '⛔ 财报占位的 0 原样透出，它不是"实际值为零"')
+    assert.deepEqual(result.data.item[1], {
+      stat_date: '2026-10-15', stat_date_ms: Date.parse('2026-10-15T00:00:00+08:00'),
+      event_time_ms: 1792067400000, event_time_beijing: '2026-10-15 20:30',
+      tab_type: 'general', region: '美国', event: '10月10日当周首次申请失业救济人数(万人)',
+      importance: 3, actual_value: '19.9', forecast_value: '20', previous_value: '19.7', link: 'https://wallstreetcn.com/calendar/US121055/overview',
+    })
+    assert.equal(typeof result.data.item[1].actual_value, 'string', '⛔ 单位随事件本身变（万人 / % / 点…），本层不转数值也不换算')
+    assert.deepEqual(result.data.pagination, { page: 1, size: 2, pages: 1, total: 113 })
+  })
+  // 窗口外的日期上游回 data:null（实测 2023 / 2024 / 2025 的整天），那是合法空
+  await withFetch(async () => jsonResponse(nullEnvelope()), async () => {
+    const result = await source.execute(request('ftshare_financial_calendar', { start_date: '2023-01-09', end_date: '2023-01-09' }), new AbortController().signal)
+    assert.deepEqual(result.data.item, [])
+    assert.deepEqual(result.data.pagination, { page: 1, size: 0, pages: 1, total: 0 })
+  })
+  await withFetch(async () => jsonResponse(paged([{ ...CALENDAR_MACRO_ROW, stat_date: '2026-10-20' }], { total: 1 })), async () => {
+    await assert.rejects(
+      () => source.execute(request('ftshare_financial_calendar', { start_date: '2026-10-15', end_date: '2026-10-17' }), new AbortController().signal),
+      /outside the requested/, '上游对窗口的遵守只能回来核：核不过就是改版，不许落错日期的盘',
+    )
+  })
+})
+
+test('⛔ 财经日历的 3 天窗是硬闸门：4 天在参数层拒，本层不替模型分段循环取', () => {
+  const source = sourceFor('ftshare_financial_calendar')
+  assert.equal(source.normalizeParams({ start_date: '2026-10-15', end_date: '2026-10-18' }).end_date, '2026-10-18', '实测 3 天差上游通过')
+  for (const end_date of ['2026-10-19', '2026-10-20', '2026-12-31']) {
+    assert.throws(() => source.normalizeParams({ start_date: '2026-10-15', end_date }), /spans \d+ days/, end_date)
+  }
+  assert.throws(() => source.normalizeParams({ start_date: '2026-10-18', end_date: '2026-10-15' }), /must not be later/, '实测上游同样 400「结束时间不能早于开始时间」')
+  assert.throws(() => source.normalizeParams({ start_date: '2026-10-15', end_date: '2026-10-17', size: 501 }), /1 to 500/)
+  assert.throws(() => source.normalizeParams({ start_date: '2026-10-15', end_date: '2026-10-17', size: 0 }), /1 to 500/, '实测 page_size=0 静默只回 1 行（信封还回显 pageSize=1），会被读成"这一天只有一个事件"')
+  assert.throws(() => source.normalizeParams({ start_date: '2026-10-15', end_date: '2026-10-17', region: '美国' }), /unsupported parameter/, '上游没有地区参数，这个过滤器是假的')
 })

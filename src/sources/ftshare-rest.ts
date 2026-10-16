@@ -1941,6 +1941,330 @@ function convertibleBondCode(value: unknown, name = 'code'): string {
   return market === '' ? digits : `${digits}.${market}`
 }
 
+/**
+ * 批次 E（2026-10-16 08:25–08:29 与 08:44 两轮，109 份落盘报文 + 18 份官方文档页）：LPR、中债收益率曲线、SHIBOR、HIBOR、财经日历。
+ * 五颗都是**整块空白**：本仓此前没有任何收益率曲线、没有任何拆借利率、没有 LPR 的免费通道
+ * （只有 Wind EDB 那一条按次计费的），也没有发布时刻表一类的日历。
+ * ⛔ 同一族里暂缓两颗，理由都写在报文里而不是文档里：`libor_daily` 的行只有
+ * `currency` / `tenor` / `rate`、**没有基准名列**，LIBOR 停发之后 USD 隔夜到底是 SOFR 还是别的读不出来；
+ * `us_economic` 的读数逐 `type` 单位上游不给、月份又是中文标签，锚不住输出契约。
+ * `baidu_financial_calendar` 实测是 A 股事件提醒（股东大会 / 分红 / 停复牌），**不是见闻那棵的第二家**。
+ */
+
+const LPR_DESCRIPTION = '一次性返回 **LPR（贷款市场报价利率）全历史**，一行一个日期，⛔ **无参数、无分页**：实测多发 `start_date` / `page` / `page_size` 上游不报错也不过滤（回的仍是同一份 2661 行），要区间请在 Dataset 里按 `trade_date` 筛——本层因此不给这些座位。返回**按日期降序**（实测首行 2026-09-20、末行 2013-10-25）。⛔ **行粒度前后不一致**：2013-10-25..2020-12-20 是**逐自然日填充**（含周末；实测 2016-06 整月每天都是 4.3000），2020-12-21 起只在每月报价日给一行（实测日位集中在 20 / 21 / 22 / 24，自 2020-12-21 含当日起共 70 行）。⛔ 所以**别把行数当报价次数**：全程 2661 行里 `lpr_1y_pct` 只有 **28 个不同取值**、28 次变化；要"报价历史"请按值变化分组或每月取一条。`lpr_5y_pct` 在 2019-08-20 之前**整列为 null**（实测 2125 / 2661 行为 null，首个非空就是 2019-08-20 的 4.8500），⛔ null 不是 0。单位是**百分数原值**（3.0000 读作 3.00%）——依据是上游文档口径与量级，不是本层算出来的；上游以 4 位小数字符串给出，本层转数值。`trade_date_ms` 是北京零点。这一颗是给"贷款利率基准 / 房贷定价"用的免费第二家：此前本仓只能走 Wind EDB（按次计费）。'
+
+const lprRow = {
+  type: 'object',
+  properties: {
+    trade_date: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    trade_date_ms: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    lpr_1y_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    lpr_5y_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+  },
+  additionalProperties: false,
+}
+
+function createLprSource(client: FtshareRequester): DataSource {
+  const capability = 'ftshare_lpr'
+  const schema: SchemaDescriptor = {
+    capability,
+    name: 'get_lpr_monthly',
+    source: 'http:ftshare.lpr_monthly',
+    data_key: buildDataKey('ftshare', 'http', capability),
+    source_label: 'ftshare',
+    paginated: false,
+    rowShape: { rowKey: 'item' },
+    summary: 'LPR 贷款市场报价利率全历史（百分数，无参数）',
+    description: LPR_DESCRIPTION,
+    input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    output_schema: output(lprRow),
+  }
+  const normalize = (params: Params): Params => {
+    // 实测上游收到任何参数都**静默忽略**，那一句"我按你的区间筛过了"会是假的。
+    const keys = Object.keys(params)
+    if (keys.length > 0) throw new FtshareError('invalid_parameter', `unsupported parameter: ${keys[0]} — 这颗上游收到任何参数都静默忽略（实测多发 start_date / page / page_size 仍回同一份 2661 行），要区间请在 Dataset 里按 trade_date 筛`)
+    return {}
+  }
+  return {
+    schema,
+    normalizeParams: normalize,
+    validateOutput: (data) => isRecord(data) && Array.isArray(data.item) && isRecord(data.pagination),
+    execute: async (request: DataRequest, signal: AbortSignal) => {
+      normalize(request.params)
+      const rows = readPaged(await client.getJson('/api/v1/market/data/economic/china-lpr', query({}, []), signal)).rows
+      const item = rows.map((row) => {
+        const { iso, ms } = normalizeDateCell(row.date)
+        return { trade_date: iso, trade_date_ms: ms, lpr_1y_pct: numberOrNull(row.lpr_1y), lpr_5y_pct: numberOrNull(row.lpr_5y) }
+      })
+      return { data: snapshotEnvelope(item), schema: output(lprRow) }
+    },
+  }
+}
+
+const CHINABOND_CURVES = ['中债国债收益率曲线', '中债中短期票据收益率曲线(AAA)', '中债商业银行普通债收益率曲线(AAA)'] as const
+
+const CHINABOND_DESCRIPTION = '按日期区间获取**中债收益率曲线**日度值，一行是「一条曲线 × 一个交易日」。补的是债券定价基准：本仓此前**没有任何收益率曲线**。⛔ 实测只有**三条曲线**（`中债国债收益率曲线` / `中债中短期票据收益率曲线(AAA)` / `中债商业银行普通债收益率曲线(AAA)`，在 2002 起的窗口里逐页取满也只这三条），`curve_name` 是**精确匹配**、认不出的名字只回 0 行不回错（实测 `不存在` 空），所以本层把这三条做成枚举：拼错在参数层就点名拒，而不是让你拿回一份空 Dataset；空白写法上游 400「curve_name must not be blank」。⛔ **各曲线起点不同**（实测同一个 2002-01-01..2010-12-31 窗口内）：国债 2006-03-01、中短期票据 2006-12-25、商业银行普通债 2009-12-24；早于各自起点的日期是合法空、不是失败，也别按"曲线名有缺失"去补。期限列 `y_3m` … `y_30y` 共八档，单位**百分数原值**（实测 2026-10-15 国债 10y = 1.6601、30y = 2.07）；⛔ `y_30y` 对**中短期票据那条曲线整列为 null**（实测 2015-2016 抽 500 行非空 0 / 500，另两条 500 / 500 都有值）——那条曲线本来没有 30 年期限点，不是缺数据。`start_date` / `end_date` 必填（实测缺 `start_date` 400「缺少必填参数：开始日期」、倒转 400「start_date must not be after end_date」，本层也先拦），上游日期要 YYYYMMDD（带横杠 400「start_date must be YYYYMMDD」）。`page_size` 上限实测 **1000**（1001 是**响亮 400**「page_size must be between 1 and 1000」，不是静默截断）。防改版：带 `curve_name` 逐行核曲线名，并逐行核返回日期落在请求区间内。'
+
+const chinabondYieldRow = {
+  type: 'object',
+  properties: {
+    curve_name: { type: 'string' },
+    trade_date: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    trade_date_ms: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    y_3m_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    y_6m_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    y_1y_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    y_3y_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    y_5y_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    y_7y_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    y_10y_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+    y_30y_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+  },
+  additionalProperties: false,
+}
+
+function createChinabondYieldSource(client: FtshareRequester): DataSource {
+  const capability = 'ftshare_chinabond_yield'
+  const allowed = ['start_date', 'end_date', 'curve_name', 'page', 'size']
+  const schema: SchemaDescriptor = {
+    capability,
+    time_contract: getDataTimeContract(capability),
+    name: 'get_chinabond_yield_daily',
+    source: 'http:ftshare.chinabond_yield_daily',
+    data_key: buildDataKey('ftshare', 'http', capability),
+    source_label: 'ftshare',
+    paginated: true,
+    rowShape: { rowKey: 'item' },
+    summary: '中债收益率曲线日度（国债/AAA 票据，八档期限）',
+    description: CHINABOND_DESCRIPTION,
+    input_schema: {
+      type: 'object',
+      properties: {
+        start_date: { type: 'string', description: '起始自然日 YYYY-MM-DD' },
+        end_date: { type: 'string', description: '截止自然日 YYYY-MM-DD' },
+        curve_name: { type: 'string', enum: [...CHINABOND_CURVES], description: '曲线名，精确匹配；实测只有这三条，省略 = 三条一起给' },
+        page: { type: 'integer', minimum: 1 },
+        size: { type: 'integer', minimum: 1, maximum: MAX_PAGE_SIZE },
+      },
+      required: ['start_date', 'end_date'], additionalProperties: false,
+    },
+    output_schema: output(chinabondYieldRow),
+  }
+  const normalize = (params: Params): Params => {
+    const { page, size } = pageParams(params, allowed, MAX_PAGE_SIZE)
+    const start_date = date(params.start_date, 'start_date')
+    const end_date = date(params.end_date, 'end_date')
+    if (start_date > end_date) throw new FtshareError('invalid_parameter', 'parameter start_date must not be later than end_date（实测上游同样 400「start_date must not be after end_date」）')
+    const normalized: Params = { start_date, end_date, page, size }
+    if (params.curve_name !== undefined) {
+      const curve = String(params.curve_name)
+      if (!CHINABOND_CURVES.includes(curve as typeof CHINABOND_CURVES[number])) {
+        throw new FtshareError('invalid_parameter', `parameter curve_name must be exactly one of ${CHINABOND_CURVES.join(' / ')} — 上游是精确匹配、认不出的写法只回 0 行不报错（实测）`)
+      }
+      normalized.curve_name = curve
+    }
+    return normalized
+  }
+  return {
+    schema,
+    normalizeParams: normalize,
+    validateOutput: (data) => isRecord(data) && Array.isArray(data.item) && isRecord(data.pagination),
+    execute: async (request: DataRequest, signal: AbortSignal) => {
+      const params = normalize(request.params)
+      const search = query({
+        start_date: compactDate(String(params.start_date)), end_date: compactDate(String(params.end_date)),
+        curve_name: params.curve_name, page: params.page, page_size: params.size,
+      }, ['start_date', 'end_date', 'curve_name', 'page', 'page_size'])
+      const { rows, total } = readPaged(await client.getJson('/api/v1/market/data/chinabond-yield-daily', search, signal))
+      const item = rows.map((row) => {
+        const { iso, ms } = normalizeDateCell(row.trade_date)
+        return {
+          curve_name: String(row.curve_name ?? ''), trade_date: iso, trade_date_ms: ms,
+          y_3m_pct: numberOrNull(row.y_3m), y_6m_pct: numberOrNull(row.y_6m), y_1y_pct: numberOrNull(row.y_1y),
+          y_3y_pct: numberOrNull(row.y_3y), y_5y_pct: numberOrNull(row.y_5y), y_7y_pct: numberOrNull(row.y_7y),
+          y_10y_pct: numberOrNull(row.y_10y), y_30y_pct: numberOrNull(row.y_30y),
+        }
+      })
+      assertFiltered(item, params.curve_name === undefined ? undefined : { field: 'curve_name', expected: String(params.curve_name), label: 'curve_name' })
+      assertInRange(item, String(params.start_date), String(params.end_date), (row) => row.trade_date)
+      return { data: pagedEnvelope(item, total, Number(params.page), Number(params.size)), schema: output(chinabondYieldRow) }
+    },
+  }
+}
+
+/**
+ * SHIBOR / HIBOR 同形（`records` 信封 + 一行一个交易日的多期限宽表），共用一颗工厂：
+ * ⛔ 两者的期限档**不一样**（SHIBOR 八档含 `y1`、HIBOR 十五档到 `m12`），所以 `tenors` 必须由调用方给、
+ * 不能猜——列名与实测报文逐字对齐，多给一档就会把 null 编成"这档存在"。
+ */
+const RATE_TENOR_ROW = (tenors: string[]) => ({
+  type: 'object',
+  properties: {
+    trade_date: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    trade_date_ms: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    ...Object.fromEntries(tenors.map((tenor) => [`${tenor}_pct`, { oneOf: [{ type: 'number' }, { type: 'null' }] }])),
+  },
+  additionalProperties: false,
+})
+
+function createRateSeriesSource(options: {
+  capability: string; name: string; upstreamApi: string; path: string
+  summary: string; description: string; tenors: string[]; client: FtshareRequester
+}): DataSource {
+  const row = RATE_TENOR_ROW(options.tenors)
+  const allowed = ['start_date', 'end_date', 'page', 'size']
+  const schema: SchemaDescriptor = {
+    capability: options.capability,
+    time_contract: getDataTimeContract(options.capability),
+    name: options.name,
+    source: `http:ftshare.${options.upstreamApi}`,
+    data_key: buildDataKey('ftshare', 'http', options.capability),
+    source_label: 'ftshare',
+    paginated: true,
+    rowShape: { rowKey: 'item' },
+    summary: options.summary,
+    description: options.description,
+    input_schema: {
+      type: 'object',
+      properties: {
+        start_date: { type: 'string', description: '起始自然日 YYYY-MM-DD' },
+        end_date: { type: 'string', description: '截止自然日 YYYY-MM-DD' },
+        page: { type: 'integer', minimum: 1 },
+        size: { type: 'integer', minimum: 1, maximum: MAX_PAGE_SIZE },
+      },
+      required: ['start_date', 'end_date'], additionalProperties: false,
+    },
+    output_schema: output(row),
+  }
+  const normalize = (params: Params): Params => {
+    const { page, size } = pageParams(params, allowed, MAX_PAGE_SIZE)
+    const start_date = date(params.start_date, 'start_date')
+    const end_date = date(params.end_date, 'end_date')
+    if (start_date > end_date) throw new FtshareError('invalid_parameter', 'parameter start_date must not be later than end_date')
+    return { start_date, end_date, page, size }
+  }
+  return {
+    schema,
+    normalizeParams: normalize,
+    validateOutput: (data) => isRecord(data) && Array.isArray(data.item) && isRecord(data.pagination),
+    execute: async (request: DataRequest, signal: AbortSignal) => {
+      const params = normalize(request.params)
+      const search = query({
+        start_date: compactDate(String(params.start_date)), end_date: compactDate(String(params.end_date)),
+        page: params.page, page_size: params.size,
+      }, ['start_date', 'end_date', 'page', 'page_size'])
+      const { rows, total } = readPaged(await options.client.getJson(options.path, search, signal))
+      const item = rows.map((entry) => {
+        const { iso, ms } = normalizeDateCell(entry.trade_date)
+        const row2: JsonRecord = { trade_date: iso, trade_date_ms: ms }
+        for (const tenor of options.tenors) row2[`${tenor}_pct`] = numberOrNull(entry[tenor])
+        return row2
+      })
+      assertInRange(item, String(params.start_date), String(params.end_date), (entry) => entry.trade_date)
+      return { data: pagedEnvelope(item, total, Number(params.page), Number(params.size)), schema: output(row) }
+    },
+  }
+}
+
+const SHIBOR_DESCRIPTION = '按日期区间获取 **SHIBOR（上海银行间同业拆放利率）** 日度值，一行一个交易日、八个期限一次给全（`on_rate_pct` 隔夜，`w1` / `w2` 一至两周，`m1` / `m3` / `m6` / `m9` 一至九个月，`y1_pct` 一年）。补的是货币市场基准：此前本仓没有任何拆借利率，要利率只能走 Wind EDB（按次计费）。⛔ 单位是**百分数原值**（实测 2026-10-15 隔夜 1.266 读作 1.266%）——依据只有量级（隔夜拆借不会是 1.266 个基点、也不会是 126.6%），**上游文档没有写这一列的单位**。历史起点实测在 **2006-10-08**（2006 全年给 63 行、首行就是它；2006-01-01..06-30 与 07-01..09-30、1999 / 2004 全年都是 0 行），早于起点是合法空，不要换年份重试。⛔ **周末、节假日与未发布日没有行**，上游也不插值、不补算、不前值填充——序列天然不连续，做时序前先声明对齐规则。列按可空声明：上游文档说某期限可能"源数据未发布"，而实测 2020-01-02 起 1000 行里一个 null 都没有；⛔ 真要出现缺失，本层也**不补 0**。`start_date` / `end_date` 必填（实测缺参数 400、倒转 400、带横杠 400），`page_size` 上限 1000（1001 是响亮 400）。防改版：逐行核返回日期落在请求区间内。'
+
+const HIBOR_DESCRIPTION = '按日期区间获取 **HIBOR（香港银行间同业拆放利率）** 日度值，一行一个交易日，十五个期限档（隔夜、一至两周、一至十二个月）。补的是港币资金面：此前本仓没有任何港币利率。⛔ 单位是**百分数原值**（实测 2026-10-08 隔夜 2.16821 读作 2.16821%）。⛔ **十五档里有七档实测整列为 null**：`m4` / `m5` / `m7` / `m8` / `m9` / `m10` / `m11` 在 2026-10-01..15 的 6 行里 6 / 6 全为 null，只有隔夜、一至两周、一至三月、六月、十二月有值——那是 HIBOR 实际公布的档位就这些，⛔ 不是缺数据，别补值也别把 null 读成 0。历史深度实测至少到 2010 年（2010 全年 249 行、首行 2010-01-04；2000-01-01..2001-12-31 两年 0 行），起点是滚动还是固定未核出。香港假日与未发布日没有行（上游声明不插值、不补算、不前值填充）。`start_date` / `end_date` 必填，`page_size` 上限 1000（实测 1001 → 响亮 400）。防改版：逐行核返回日期落在请求区间内。'
+
+const FINANCIAL_CALENDAR_DESCRIPTION = '按**最多 3 天的窗口**获取全球财经日历（华尔街见闻口径），一行一个事件。这块本仓**整块零覆盖**：此前既没有宏观数据发布时刻表，也没有"今天几点出 CPI"。⛔ **窗口上限是硬约束**：实测 `end_date` 比 `start_date` **晚四天及以上**才 400「时间范围不能超过3天」（2026-10-15..10-19 与 ..10-20 被拒，..10-18 那四天含首尾正常回 114 行），本层在参数层先拦；要更长区间请分段请求，本层**不替你循环取**——那会把一次取数变成 N 次出网却假装是一份 Dataset。⛔ **覆盖是滚动窗口**：实测 2026-08-03 / 09-01 / 09-15 / 10-05 / 10-12 / 10-19 / 10-26 各日都有事件（40 / 59 / 45 / 37 / 21 / 25 / 10 行），而 **2026-11-02 / 11-16 / 12-01 与 2026-01-05 都是 `records` 空数组 + `total=0`**，2020 / 2023 / 2024 / 2025 里的整天更是直接回 `data:null`——大约"过去 2.5 个月到未来 2 周"，边界随日期前移；两种空都是合法空、不是失败，不要换日期重试。列口径：`event_time_ms` 与 `event_time_beijing` 是同一时刻的两种写法（上游 `event_time` 是**秒级** Unix **字符串**，实测 1791993600 → 北京 2026-10-15 00:00；⛔ 直接当毫秒会差三个数量级），`tab_type` 实测只有 `general` 与 `earnings` 两值，`region` 是中文地区名（实测单次 113 行里 14 个：中国 / 美国 / 欧元区 / 日本 / 香港 …；跨多次请求累计见过 28 个），`importance` 上游给**字符串数字** "1".."4"，另有空字符串（实测 113 行里 2 行）——本层把空归一成 null，⛔ 不是 0。⛔ `actual_value` / `forecast_value` / `previous_value` **保持文本原样**：这些读数的单位随事件本身而变（指数、百分比、套…上游不给列级单位），本层不转数值、也不换算；缺失只有一种写法——**空字符串**（实测 19 份成功响应、1517 行里这三列加 `link` / `importance` 的空值全是 `""`，`null` 型字段 0 个），本层把它归一成 null。⛔ 财报类事件常给 `actual_value = "0"` 与 `forecast_value = "0"` 的占位（实测首行 赣锋锂业 earnings），那个 0 **不是"实际值为零"**。`link` 是原文链接（实测 113 行里 39 行为空）。`page_size` 真实上限实测 **500**（文档写 200；传 1000 → 回显 pageSize=500），实测最密的三天窗（2026-09-28..09-30）132 个事件、一页就给完；⛔ `page_size=0` 静默只回 1 行（实测），本层要求 ≥1。防改版：逐行核 `stat_date` 落在请求窗口内。'
+
+const financialCalendarRow = {
+  type: 'object',
+  properties: {
+    stat_date: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    stat_date_ms: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    event_time_ms: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    event_time_beijing: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    tab_type: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    region: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    event: { type: 'string' },
+    importance: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    actual_value: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    forecast_value: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    previous_value: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+    link: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+  },
+  additionalProperties: false,
+}
+
+function createFinancialCalendarSource(client: FtshareRequester): DataSource {
+  const capability = 'ftshare_financial_calendar'
+  const allowed = ['start_date', 'end_date', 'page', 'size']
+  const schema: SchemaDescriptor = {
+    capability,
+    time_contract: getDataTimeContract(capability),
+    name: 'get_wallstreetcn_financial_calendar',
+    source: 'http:ftshare.wallstreetcn_financial_calendar',
+    data_key: buildDataKey('ftshare', 'http', capability),
+    source_label: 'ftshare',
+    paginated: true,
+    rowShape: { rowKey: 'item' },
+    summary: '全球财经日历（≤3 天窗口，含发布时刻与前值）',
+    description: FINANCIAL_CALENDAR_DESCRIPTION,
+    input_schema: {
+      type: 'object',
+      properties: {
+        start_date: { type: 'string', description: '起始自然日 YYYY-MM-DD' },
+        end_date: { type: 'string', description: '截止自然日 YYYY-MM-DD；与起始相差不超过 3 天（上游硬约束）' },
+        page: { type: 'integer', minimum: 1 },
+        size: { type: 'integer', minimum: 1, maximum: MAX_PAGE_SIZE_500 },
+      },
+      required: ['start_date', 'end_date'], additionalProperties: false,
+    },
+    output_schema: output(financialCalendarRow),
+  }
+  const normalize = (params: Params): Params => {
+    const { page, size } = pageParams(params, allowed, MAX_PAGE_SIZE_500)
+    const start_date = date(params.start_date, 'start_date')
+    const end_date = date(params.end_date, 'end_date')
+    if (start_date > end_date) throw new FtshareError('invalid_parameter', 'parameter start_date must not be later than end_date（实测上游同样 400「结束时间不能早于开始时间」）')
+    const spanDays = Math.round((Date.parse(`${end_date}T00:00:00Z`) - Date.parse(`${start_date}T00:00:00Z`)) / 86400_000)
+    // ⛔ 这是**固定的上游契约**（不是会往前滚的观测窗口），所以写在参数层不会腐烂：
+    // 实测 3 天差通过、4 天差 400「时间范围不能超过3天」。
+    if (spanDays > 3) throw new FtshareError('invalid_parameter', `parameter start_date..end_date spans ${spanDays} days — 上游单次窗上限是 3 天差（实测 400「时间范围不能超过3天」），请分段请求`)
+    return { start_date, end_date, page, size }
+  }
+  return {
+    schema,
+    normalizeParams: normalize,
+    validateOutput: (data) => isRecord(data) && Array.isArray(data.item) && isRecord(data.pagination),
+    execute: async (request: DataRequest, signal: AbortSignal) => {
+      const params = normalize(request.params)
+      const search = query({
+        start_date: compactDate(String(params.start_date)), end_date: compactDate(String(params.end_date)),
+        page: params.page, page_size: params.size,
+      }, ['start_date', 'end_date', 'page', 'page_size'])
+      const { rows, total } = readPaged(await client.getJson('/api/v1/market/data/finance/financial-calendar/wallstreetcn', search, signal))
+      const item = rows.map((row) => {
+        const { iso, ms } = normalizeDateCell(row.stat_date)
+        // 上游 event_time 是**秒**级字符串：÷ 不换算就落进时间轴会差三个数量级（本族 ts_nanos 那一课）。
+        const seconds = numberOrNull(row.event_time)
+        const millis = seconds === null ? null : Math.round(seconds * 1000)
+        const parts = millis === null ? null : shanghaiParts(millis)
+        return {
+          stat_date: iso, stat_date_ms: ms,
+          event_time_ms: millis,
+          event_time_beijing: parts === null ? null : `${parts.trade_date} ${parts.slice_time}`,
+          tab_type: textOrNull(row.tab_type),
+          region: textOrNull(row.region),
+          event: String(row.event ?? ''),
+          importance: integerOrNull(row.importance),
+          actual_value: textOrNull(row.actual_value),
+          forecast_value: textOrNull(row.forecast_value),
+          previous_value: textOrNull(row.previous_value),
+          link: textOrNull(row.link),
+        }
+      })
+      assertInRange(item, String(params.start_date), String(params.end_date), (row) => row.stat_date)
+      return { data: pagedEnvelope(item, total, Number(params.page), Number(params.size)), schema: output(financialCalendarRow) }
+    },
+  }
+}
+
 export function createFtshareSources(resolveApiKey: () => Promise<string | undefined>): DataSource[] {
   const client = createFtshareClient(resolveApiKey)
   return [
@@ -2004,6 +2328,23 @@ export function createFtshareSources(resolveApiKey: () => Promise<string | undef
     createHolderNumberSource(client),
     createIndexWeightSource(client),
     createCbKlineSource(client),
+    createLprSource(client),
+    createChinabondYieldSource(client),
+    createRateSeriesSource({
+      capability: 'ftshare_shibor', name: 'get_shibor_daily', upstreamApi: 'shibor_daily',
+      path: '/api/v1/market/data/shibor-daily', client,
+      summary: 'SHIBOR 日度八档（2006-10 起，百分数）',
+      description: SHIBOR_DESCRIPTION,
+      tenors: ['on_rate', 'w1', 'w2', 'm1', 'm3', 'm6', 'm9', 'y1'],
+    }),
+    createRateSeriesSource({
+      capability: 'ftshare_hibor', name: 'get_hibor_daily', upstreamApi: 'hibor_daily',
+      path: '/api/v1/market/data/hibor-daily', client,
+      summary: 'HIBOR 日度十五档（七档实测整列 null）',
+      description: HIBOR_DESCRIPTION,
+      tenors: ['on_rate', 'w1', 'w2', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9', 'm10', 'm11', 'm12'],
+    }),
+    createFinancialCalendarSource(client),
   ]
 }
 

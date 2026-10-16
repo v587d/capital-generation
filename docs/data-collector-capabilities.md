@@ -2,7 +2,7 @@
 
 > 本表由 `npm run docs:capabilities` 从 Fuyao、Tencent、Eastmoney、Wind 与 FTShare source 定义生成，并由 `test/data-collector-capabilities.test.mjs` 断言与实现同步：新增端点若忘了重新生成，测试会失败。
 
-当前共 **113 个 capability**：同花顺 Fuyao 61 个，腾讯公开 HTTP 9 个，东方财富 HTTP 21 个，Wind 金融数据服务 3 个，FTShare（非凸科技）19 个。参数后带 **\*** 表示必填。
+当前共 **118 个 capability**：同花顺 Fuyao 61 个，腾讯公开 HTTP 9 个，东方财富 HTTP 21 个，Wind 金融数据服务 3 个，FTShare（非凸科技）24 个。参数后带 **\*** 表示必填。
 
 **复核方式**：Fuyao 能力可用 `npm run smoke:fuyao` 真实复核；Tencent 能力使用最小 smoke fixture 或按需真实请求复核；Eastmoney 能力使用固定 fixture，并按需执行公开网页 JSON smoke；Wind 能力用 `npm run smoke:wind` 真实复核（需要 `WIND_API_KEY`，**按次消耗上游积分**）。FTShare 那几条走 `npm run contract:probe` 的 daily 档巡检（需要 `FTSHARE_API_KEY`；**免费档限流 10 QPS / burst 20**，取数一律经本模块的进程级节流链）。
 
@@ -248,3 +248,8 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 | `ftshare_holder_number` | `/ftshare/holder_number` | `code` `is_last` `page` `size` | 是 | 股东人数历史（单票全期）与全市场最新一期 |
 | `ftshare_index_weight` | `/ftshare/index_weight` | `index_code`\* `date` `page` `size` | 是 | 中证系列指数成分权重（按采集期，百分数） |
 | `ftshare_convertible_bond_kline` | `/ftshare/convertible_bond_kline` | `code`\* `period` `adjust` `start_date`\* `end_date`\* `limit` | 否 | 可转债历史 K 线（日/周/月/年，单只，元） |
+| `ftshare_lpr` | `/ftshare/lpr` | 无参数 | 否 | LPR 贷款市场报价利率全历史（百分数，无参数） |
+| `ftshare_chinabond_yield` | `/ftshare/chinabond_yield` | `start_date`\* `end_date`\* `curve_name` `page` `size` | 是 | 中债收益率曲线日度（国债/AAA 票据，八档期限） |
+| `ftshare_shibor` | `/ftshare/shibor` | `start_date`\* `end_date`\* `page` `size` | 是 | SHIBOR 日度八档（2006-10 起，百分数） |
+| `ftshare_hibor` | `/ftshare/hibor` | `start_date`\* `end_date`\* `page` `size` | 是 | HIBOR 日度十五档（七档实测整列 null） |
+| `ftshare_financial_calendar` | `/ftshare/financial_calendar` | `start_date`\* `end_date`\* `page` `size` | 是 | 全球财经日历（≤3 天窗口，含发布时刻与前值） |

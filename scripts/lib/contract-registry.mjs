@@ -354,6 +354,29 @@ const FT = [
     expect: { minRows: 1 },
     note: '单只可转债日 K；跨度上限 12 个自然月由上游 400 说话，本层不换算成天数闸门',
   }),
+  // 批次 E 的五颗（2026-10-16，利率与日历这一整块空白）。同样一律相对日期：
+  // 日历那颗的覆盖是**滚动窗**（实测约"过去 2.5 个月到未来 2 周"，2026-11-02 起就 0 行），
+  // 写死绝对日期等于过两周自己变成永久 EMPTY。
+  ds('ftshare', 'ftshare_lpr', 'daily', {}, {
+    expect: { minRows: 1 },
+    note: '无参数无分页，一次给完全历史（实测 2661 行）；本层多发参数会在参数层拒，所以这条必须空参打',
+  }),
+  ds('ftshare', 'ftshare_chinabond_yield', 'daily', { curve_name: '中债国债收益率曲线', start_date: dayShift(-10), end_date: dayShift(-1), size: 3 }, {
+    expect: { minRows: 1 },
+    note: '带 curve_name 打：这一条同时在验曲线名过滤真的生效（producer 逐行核名）；三条曲线起点不同，早于起点是合法空',
+  }),
+  ds('ftshare', 'ftshare_shibor', 'daily', { start_date: dayShift(-10), end_date: dayShift(-1), size: 3 }, {
+    expect: { minRows: 1 },
+    note: '八档期限宽表；周末与未发布日没有行、上游不插值，所以这条只核有没有行不核连续性',
+  }),
+  ds('ftshare', 'ftshare_hibor', 'daily', { start_date: dayShift(-10), end_date: dayShift(-1), size: 3 }, {
+    expect: { minRows: 1 },
+    note: '十五档里 m4/m5/m7..m11 七档实测整列为 null（HIBOR 就公布这些档），不是数据缺口、别拿它当 EMPTY 以外的告警',
+  }),
+  ds('ftshare', 'ftshare_financial_calendar', 'daily', { start_date: dayShift(-3), end_date: dayShift(-1), size: 100 }, {
+    expect: { minRows: 1 },
+    note: '⛔ 窗上限 3 天差由参数层拦（实测 4 天 400），巡检只打 3 天窗内；event_time 上游给秒，本层转毫秒',
+  }),
 ]
 
 /** 全量注册表。覆盖测试拿它对着 `lib/` 的真实注册数逐条核。 */

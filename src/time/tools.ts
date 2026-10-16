@@ -118,6 +118,11 @@ const DATA_TIME_CONTRACTS: Record<string, DataTimeContract> = {
   ftshare_dragon_tiger_seats: { kind: 'date', fields: ['date'], warning: 'date 必填且必须是交易日：上游本来允许省略（回"最新快照"），但响应行里**没有日期列**，所以这颗能力要求显式日期来写时间轴。实测非交易日 / 未来日期 / 早于窗口都回 data:null（合法空、不是失败）；窗口起点实测在 2022-01-04（2021-12-31 及更早为空），分不清是滚动还是固定起点' },
   ftshare_index_weight: { kind: 'date', fields: ['date'], warning: 'date 是**权重采集期**且必须精确命中：实测 2026-06-15 / 2026-09-30 各回该期，而 2026-10-01 / 2026-01-01 这种没有采集的日期 total=0（**不会**回退到最近一期）；省略时取最新一期。请按数据里出现过的 collect_date 挑期，别按自然日猜' },
   ftshare_convertible_bond_kline: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: '⛔ 跨度上限是 12 个自然月，本层不换算成天数闸门（换算规则未核出）：实测 364 天的区间正常、365 天被上游 400「日 K 及以上周期查询范围不能超过 12 个自然月」。start_date 晚于 end_date 在参数层拒（上游同样 400）。要更长序列请分段取，注意周/月/年档是按请求区间内日 K 聚合的，窗口没盖满周期那根不完整' },
+  // 批次 E（2026-10-16 真报文）：利率族与财经日历。⛔ LPR 那颗**没有日期参数**（上游会静默忽略多发参数），所以不挂契约。
+  ftshare_chinabond_yield: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: 'start_date / end_date 必填。⛔ 三条曲线各自起点不同（实测同一 2002-2010 窗口内：国债 2006-03-01、中短期票据 2006-12-25、商业银行普通债 2009-12-24），早于某条曲线起点只是那一行缺席，是合法空、不是失败、不要按年份重试；起点是滚动还是固定未核出' },
+  ftshare_shibor: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: 'start_date / end_date 必填。历史起点实测在 2006-10-08（2006 全年 63 行、首行就是它；2006-01-01..06-30、07-01..09-30、1999 与 2004 全年都 0 行）；周末、节假日与未发布日没有行，上游不插值也不前值填充，所以序列天然不连续' },
+  ftshare_hibor: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: 'start_date / end_date 必填。实测 2010 全年 249 行（首行 2010-01-04）、2000-01-01..2001-12-31 两年 0 行，起点是否滚动未核出；香港假日与未发布日没有行。⛔ m4 / m5 / m7..m11 七档实测整列为 null（HIBOR 只公布部分期限），null 不是 0，别补值' },
+  ftshare_financial_calendar: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: '⛔ 单次窗上限是 3 天差（实测 4 天就 400「时间范围不能超过3天」，本层在参数层拒）——要更长区间请分段请求，本层不循环取。覆盖是**滚动窗**：实测 2026-08-03 / 09-01 / 09-15 / 10-05 / 10-12 / 10-19 / 10-26 各日都有事件（40 / 59 / 45 / 37 / 21 / 25 / 10 行），2026-11-02 与 11-16 / 12-01 / 2026-01-05 回空数组（total=0），2020 / 2023 / 2024 / 2025 里的整天直接回 data:null——边界随日期前移；两种空都是合法空，不要换日期重试' },
 }
 
 export function getDataTimeContract(capability: string): DataTimeContract | undefined {
