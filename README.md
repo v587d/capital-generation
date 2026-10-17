@@ -5,6 +5,9 @@
 <p align="center">
   <a href="https://github.com/v587d/capital-generation"><img src="https://img.shields.io/badge/Market-CN%20%7C%20HK%20%7C%20US-orange" alt="Market·CN+HK+US"></a>
   <a href="https://github.com/v587d/capital-generation"><img src="https://img.shields.io/badge/Financial-Agent-red" alt="Financial Agent"></a>
+  <a href="https://github.com/v587d/capital-generation">
+    <img src="https://img.shields.io/badge/%E5%93%81%E7%A7%8D-%E8%82%A1%E7%A5%A8%20%7C%E5%80%BA%E5%88%B8%20%7C%E6%9C%9F%E8%B4%A7%20%7C%E5%95%86%E5%93%81%20%7C%E8%A1%8D%E7%94%9F%E5%93%81-fedcba" alt="股票·债券·期货·商品·衍生品">
+  </a>
 </p>
 <p align="center">
   <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DeepSeek_Harness-plugin-blue" alt="DSH Plugin"></a>
