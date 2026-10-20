@@ -18,7 +18,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.8.3-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.9.0-9cf" alt="Version"></a>
   <a href="https://www.npmjs.com/package/@v587d/capital-generation"><img src="https://img.shields.io/npm/v/%40v587d%2Fcapital-generation" alt="npm version"></a>
 </p>
 
@@ -26,7 +26,7 @@
 
 > Next-Gen AI-Driven Capital Generation.
 
-Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 里的证券研究插件，面向关注 A股/港股/美股 的个人投资者。安装后，在新会话中选择 **自动模式**，就可以用自然语言查行情、财务数据、公告和新闻，整理分析并生成图表。它不是独立应用，需要先安装 DSH。
+Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 里的证券研究插件，面向关注 A 股、港股、美股的个体投资者。安装后，新会话的选择器里会多出 **自动模式**、**行情专家**、**资讯专员** 三个模式；日常研究选 **自动模式**，用自然语言查行情、财务数据、公告和新闻，由它安排取数、数据质检、资料检索与图表，最后给出带来源的结论。它不是独立应用，需要先安装 DSH。
 
 **🎞️视频演示：**[安装、配置与使用](https://www.bilibili.com/video/BV1fzaZ6CE9J/)。
 
@@ -78,7 +78,7 @@ https://github.com/v587d/capital-generation
    | [FTShare（非凸科技）](https://market.ft.tech/gateway/doc/p/pb8eizu3) | A 股行情与日 K 截面、主力资金流、涨跌停、龙虎榜席位、股东人数、指数权重、可转债行情、宏观利率，以及期货合约与贵金属行情等第二家上游口径 |
 
     这些都是第三方服务的密钥，需分别向服务方申请；额度和条款以各服务方为准。
-    保存后**新建自动模式会话**即可生效，无需重启。
+    保存后**新建会话**即可生效，无需重启。
     也可以不走卡片，直接把密钥写入 `~/.dsh/.credentials.yaml`，名称依次为 `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`、`PADDLE_OCR_TOKEN`、`FTSHARE_API_KEY`。
     密钥由 DSH 凭据服务保存，不会显示在会话配置中。
 
@@ -88,13 +88,31 @@ https://github.com/v587d/capital-generation
      </a>
    </p>
 
-3. **新建会话。** 在 Agent Preset 选择器中选 **自动模式**，然后直接描述研究问题。也可以到「设置」→「Agent 预设」把它设为默认模式。
+3. **新建会话。** 新会话的模式选择器里会看到三个自定义模式。日常研究选 **自动模式**，然后直接描述研究问题；也可以到「设置」→「Agent 预设」把它设为默认模式。
 
    <p align="center">
-     <a href="assets/mode_selector.png">
-       <img src="assets/mode_selector.png" alt="新会话选择自动模式" width="800">
+     <a href="assets/session-preset-selector.png">
+       <img src="assets/session-preset-selector.png" alt="新会话选择自动模式" width="800">
      </a>
    </p>
+
+## 三个模式怎么选
+
+<p align="center">
+  <a href="assets/settings-perset-selector.png">
+    <img src="assets/settings-perset-selector.png" alt="「Agent 预设」里的三个自定义模式" width="760">
+  </a>
+</p>
+
+| 模式 | 适合什么 | 会做什么 | 边界 |
+| --- | --- | --- | --- |
+| **自动模式**（推荐） | 投研报告、事件影响、持仓复盘，以及需要同时查数、查资料和出图的综合问题 | 统一调度取数、数据质检、资料检索与绘图，汇总证据后直接答复 | 自动模式不直接取数，也不直接画图；每个数字都要有来源与截止时间 |
+| **行情专家** | 只想拿一份结构化行情、财务或宏观数据 | 查询并保存到当前会话，返回数据引用、来源与截止时间 | 只负责取数，不读取数据内容、不做判断；数据只在当前会话可用 |
+| **资讯专员** | 只要公告、新闻或互动平台材料 | 检索公告与新闻，逐条标注来源与核验状态 | 不做投资分析，也不给买卖建议 |
+
+**分析师**与**绘图专员**是自动模式的内部角色，不出现在选择器里。自动模式会在需要时创建并调度它们；它们没有独立的取数入口，单独打开也读不到本次研究的数据。
+
+**每份结构化数据都会先做质检。** 无论你有没有提图表，自动模式收到行情或财务数据后都会先交给分析师检查结构、时间轴、缺失与基础统计；要不要图是检查之后的一个判断。明确说“不要图”时，质检照做，只是停在出图之前。
 
 ## 试试这么用
 
@@ -134,21 +152,21 @@ https://github.com/v587d/capital-generation
 
 ## 还能做什么
 
-- **查数据和资料：** 覆盖 A 股、港股、美股与期货等品种，由 Agents 按需获取行情、财务、指数、基金与宏观行业数据，检索公告、新闻和研报。共计 **128** 个数据收集能力和 **14** 个网页检索能力，部分公开数据源无需额外密钥；具体覆盖范围见 [数据收集能力表](docs/data-collector-capabilities.md) 和 [网页检索能力表](docs/web-retriever-capabilities.md)。
-- **数据分析：** 所有 Agents 均不直接接触原始结构数据，Agents 按需读取数据、校验数据，并写脚本挖掘数据背后含义。 
-- **可视化：** Agent 视情况将校验后数据交给可视化专家生成可交互图表。图表会作为本轮交付物出现在会话中，可在侧栏查看或离线打开。了解处理流程可看 [Agent 角色说明](docs/agent-roles.md)。
+- **查数据和资料：** 覆盖 A 股、港股、美股与期货等品种，由专用角色按需获取行情、财务、指数、基金、宏观行业与期货数据，检索公告、新闻和研报。共计 **128** 个数据收集能力和 **14** 个网页检索能力，部分公开数据源无需额外密钥；具体覆盖范围见 [数据收集能力表](docs/data-collector-capabilities.md) 和 [网页检索能力表](docs/web-retriever-capabilities.md)。
+- **数据质检：** 结构化数据不会直接进入模型上下文。每份数据先由分析师检查结构、时间轴、缺失与基础统计，再按受控方式汇总；原始数据行始终留在工具层。
+- **可视化：** 分析师判断数据适合图表，或你明确要图时，绘图专员会生成可交互图表；明确不要图时只完成质检。图表作为本轮交付物出现在会话里，可在侧栏查看或离线打开。了解处理流程可看 [Agent 角色说明](docs/agent-roles.md)。
 
 | 走势折线 | K 线与量价 |
 | :---: | :---: |
 | <a href="assets/chart-line-sidebar.png"><img src="assets/chart-line-sidebar.png" alt="侧栏折线图" width="400"></a> | <a href="assets/chart-candlestick-sidebar.png"><img src="assets/chart-candlestick-sidebar.png" alt="侧栏 K 线图" width="400"></a> |
 
-- **管理自选股：** 在 Capital 会话中输入 `/` 或点击输入框旁的 `+`，从「指令」中打开「自选股」。
+- **管理自选股：** 在任意 Capital Generation 会话中输入 `/` 或点击输入框旁的 `+`，从「指令」中打开「自选股」。
 
 | 管理自选股 | 标记持仓 |
 | :---: | :---: |
 | <a href="assets/watchlist-popup.png"><img src="assets/watchlist-popup.png" alt="管理自选股" width="400"></a> | <a href="assets/watchlist-more.png"><img src="assets/watchlist-more.png" alt="标记持仓" width="400"></a> |
 
-- **精选 Skills：** 当前收录 8 个开源项目、共 68 个 Skill（默认全部关闭，在配置页按需打开；随时切换，无需新建会话，正在使用的 Capital 会话下一条指令即生效）
+- **精选 Skills：** 当前收录 8 个开源项目、共 68 个 Skill（默认全部关闭，在配置页按需打开；随时切换，无需新建会话，正在使用的会话下一条指令即生效）
 
 | 项目名称 | 收录边界 |
 | :---: | :---: |
@@ -169,17 +187,17 @@ https://github.com/v587d/capital-generation
 
 ## 常见问题
 
-- **安装后找不到自动模式？** 确认插件出现在「插件」→ 已安装列表；Web / CLI profile 安装后要重启该 profile，并在新会话选择模式。
+- **安装后找不到模式？** 确认插件出现在「插件」→ 已安装列表；Web / CLI profile 安装后要重启该 profile，并在新会话选择模式。选择器里应看到自动模式、行情专家、资讯专员；分析师和绘图专员是自动模式的内部角色，不会出现在这里。
 - **配置在哪？** 打开「插件」→ 已安装的 **Capital Generation**，页面顶部就是「数据源 / 精选 Skills / 包含的组件」三格，五把密钥都在第一格；不在 DSH 的普通「设置」页面，也不用点进任何一行组件。保存密钥后新建会话再试。
-- **升级到 2.7.11 后，卡片里的开关回到默认值了？** 这一版把插件内部两个组件换了目录名，宿主按旧路径记住的那份保存值因此接不上。四把 API Key、你的自选股清单与持仓标记都不受影响；「精选 Skills」的勾选、附加人设与「本机直连」开关需要重新设一次并保存，之后就稳定了。已经设过的话，旧的那份仍写在 DSH 的 profile 文件里，手改那一行的路径也能取回来。
-- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.8.2` 或 `@2.8.2`。
+- **升级到 2.9.0 后，分析师和绘图专员去哪了？** 这一版把它们收进自动模式内部，不再出现在选择器与预设管理里，避免误开一个没有取数入口的空会话。旧会话仍能按原身份恢复；新任务直接用自动模式提出即可。
+- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.9.0` 或 `@2.9.0`。
 - **刚发布的新版本装不到？** 桌面端取包时会跳过**刚发布不久**的版本（宿主侧包管理器的发布冷却策略，实测会静默装成上一个版本），国内镜像的同步也可能滞后一段时间。急着用最新代码，改用仓库地址安装最直接。
 - **网页抓取失败？** 配置卡片中的「允许启动本地提取网页内容」默认开启：AnySearch 提取失败时可尝试本机直连。关闭后，本机直连的具名来源查询也不可用；请检查该开关和网络连接。
 - **Wind 那部分会消耗积分？** 会。公告与新闻检索、宏观 / 行业 / 汇率指标、按日期区间取的历史 K 线都按次消耗你在 Wind 侧的额度；额度与条款以 Wind 为准，插件不做用量封顶。没配 `WIND_API_KEY` 时这几类不可用，其余功能照常。
-- **运行时主 Agent 没有加载已打开的精选 Skill？** 由 LLM 判断是否值得加载精选 Skill，如果你需要强制使用某一种技能，可通过 `/技能名称` 斜杠命令的形式手动加载已在设置中打开的 Skill。
+- **自动模式没有加载已打开的精选 Skill？** 由 LLM 判断是否值得加载精选 Skill，如果你需要强制使用某一种技能，可通过 `/技能名称` 斜杠命令的形式手动加载已在设置中打开的 Skill。
 - **精选 Skill 的方法论很长，Agent 读得完吗？** 读得完。超过一次可读长度的正文已经重排成「入口 + 分册」：Agent 先看入口目录，需要具体规则、模板或阈值时把对应那一册整本读进来，并会告诉你它读了哪几册、哪些没读。设置卡片里的「看原文」仍然只给入口那一份，想看某一册直接问 Agent。
 
-目前 Windows 桌面端有一项[已知宿主差异](CHANGELOG.md)：主 Agent 的部分工具限制可能不生效。请特别留意它实际调用了哪些工具；结构化数据的取数限制仍由工具自身执行。
+目前 Windows 桌面端有一项[已知宿主差异](CHANGELOG.md)：自动模式的出图与检索限制可能不生效。请留意它实际调用了哪些工具；结构化数据的取数边界仍由工具层执行。
 
 ## 开发与贡献 
 普通用户不需要执行下面的命令。修改源码时请参考 [贡献指南](CONTRIBUTING.md) 和 [开发约定](AGENTS.md)：
