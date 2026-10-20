@@ -1,20 +1,9 @@
 #!/usr/bin/env node
 /**
- * 本地直连回退的真实网络冒烟（手工复核，**不接入 `npm test`**）。
- *
- * 为什么要这个脚本：用户实测"AnySearch 对很多网页 fetch 有诸多限制"，并给出一批
- * 它读不到的网址；这批网址就是本地回退的回归语料。本脚本用 `createLocalFetcher`
- * 逐条真实抓取，**只要能读到就算通过**（不要求像 AnySearch 那样干净）。
- *
- * 退出码语义：只要脚本自身没崩就返回 0 —— **某个网址读不到不算脚本失败**（这是报告，不是断言）。
- * 无网络（全部因 DNS 失败）时打印 `SKIPPED（无网络）`，同样返回 0。
- *
- * URL 列表优先级：① 命令行参数；② `scripts/local-fetch-fixture.txt`；③ 缺省 `https://www.gov.cn/`。
- *
- * 用法：
- *   npm run smoke:local-fetch
- *   npm run smoke:local-fetch -- https://example.com/ https://example.org/
- *   npm run smoke:local-fetch -- http://127.0.0.1:1/     # 应打印 BLOCKED_URL（闸门在真实进程里生效）
+ * Real-network smoke for the local fetch fallback (manual, not part of `npm test`).
+ * These URLs are the regression corpus: pages AnySearch cannot read, where plain fetch succeeding
+ * is enough. Any page failing is not a script failure — exit 0 unless the script itself crashes;
+ * DNS-only failures print SKIPPED and also exit 0. URLs: argv, then the fixture file, then gov.cn.
  */
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -39,7 +28,7 @@ function loadUrls() {
       .filter((line) => line.length > 0 && !line.startsWith('#'))
     if (urls.length > 0) return { urls, source: FIXTURE }
   } catch {
-    // 没有 fixture 时退回缺省 URL。
+    // No fixture: fall back to the default URL.
   }
   return { urls: DEFAULT_URLS, source: 'default' }
 }

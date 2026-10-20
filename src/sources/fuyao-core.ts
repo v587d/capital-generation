@@ -1,24 +1,17 @@
 /**
- * Fuyao REST 的最小请求内核：**零 import 的叶子模块**。
- *
- * 为什么单独一份：host 平面的嵌套包（`watchlist/index.js`）与插件侧的数据能力
- * （`fuyao-rest.ts`）必须共用同一套 base URL、鉴权头、信封 `code` 判定与错误文案——
- * "同一知识只有一份实现"（AGENTS.md §9.7）。这一层一旦被别的模块拖进来，host 半边
- * 就会顺带加载整棵插件依赖树，所以这里不放校验器、能力定义、也不放任何类型依赖。
- *
- * 错误文案逐字保持历史形态（Agent 与用户看到的字符串不能因抽取而漂移）；结构化的
- * `kind` / `code` 是给自选股那一类需要映射成自己错误码的消费者用的。
+ * Fuyao request kernel: zero-import leaf shared by the host-plane watchlist package and
+ * `fuyao-rest.ts` (base URL, auth header, envelope codes, error text). Do not add validators,
+ * capability definitions, or type dependencies here: host code would load the plugin tree.
  */
 
 export const DEFAULT_FUYAO_BASE_URL = 'https://fuyao.aicubes.cn'
 
-/** 单值参数长度上限；与历史 `MAX_PARAM_LENGTH` 同值。 */
 export const FUYAO_MAX_PARAM_LENGTH = 2048
 
 export type FuyaoApiEnvelope = { code?: number; message?: string; request_id?: string; data?: unknown }
 export type FuyaoParams = Record<string, unknown>
 
-/** 失败归类：`http_429` 与 `code=4001` 都是限流，`closed` 是能力级不可用（重试无意义）。 */
+/** Failure kinds: HTTP 429 and code=4001 are rate limits; `closed` is capability-level (retry is futile). */
 export type FuyaoFailureKind = 'credential_missing' | 'rate_limited' | 'capability_closed' | 'invalid_parameter' | 'http_error' | 'upstream_error'
 
 export class FuyaoError extends Error {
@@ -41,7 +34,7 @@ export function normalizeFuyaoBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/$/, '')
 }
 
-/** 只带上声明过的参数；类型与长度不符就拒，绝不把拼写错误的键悄悄发上去。 */
+/** Send only declared params; reject bad type/length so misspelled keys are never silently dropped. */
 export function fuyaoQuery(params: FuyaoParams, allowed: string[]): URLSearchParams {
   const search = new URLSearchParams()
   for (const name of allowed) {
@@ -57,10 +50,7 @@ export function fuyaoQuery(params: FuyaoParams, allowed: string[]): URLSearchPar
   return search
 }
 
-/**
- * 发一次 Fuyao 请求并返回信封。调用方自己决定如何消费 `data`；
- * 非 0 信封、非 2xx HTTP、2004 能力封闭都以 `FuyaoError` 抛出，文案与历史一致。
- */
+/** One Fuyao call returning the envelope; non-zero code, non-2xx and 2004 become `FuyaoError`. */
 export async function fuyaoRequest(input: {
   baseUrl: string
   apiKey: string | undefined
@@ -81,16 +71,15 @@ export async function fuyaoRequest(input: {
   }
   if (!response.ok) throw new FuyaoError('http_error', `Fuyao HTTP error ${response.status}`, { status: response.status })
   const envelope = await response.json() as FuyaoApiEnvelope
-  // 2004 = 该能力是同花顺 AI 客户端专用，未开放外部接入（实测 capital-flow / high-frequency 均如此）。
-  // 这是能力级不可用，不是瞬时故障：错误文案必须让调用方停止重试，否则会白烧配额与回合。
+  // 2004 = capability is AI-client-only and closed to external access; retrying burns quota.
   if (envelope.code === 2004) {
     throw new FuyaoError('capability_closed', 'Fuyao API error 2004: 该数据能力为同花顺 AI 客户端专用，当前未开放外部接入；不要重试，改用其他能力或如实告知用户该能力不可用', { code: 2004, requestId: envelope.request_id })
   }
-  // 4001 = 频率超限（官方口径：避免立即连续重试）。
+  // 4001 = rate limited; official guidance says do not retry immediately.
   if (envelope.code === 4001) {
     throw new FuyaoError('rate_limited', `Fuyao API error 4001: ${envelope.message ?? 'request failed'}${envelope.request_id ? ` (request_id: ${envelope.request_id})` : ''}`, { code: 4001, requestId: envelope.request_id })
   }
-  // 1002 / 1003 = 参数格式与取值域（自选股要靠它区分"这个标的取不到"与"请求写错了"）。
+  // 1002 / 1003 = parameter format/domain errors; watchlist maps these to its own codes.
   if (envelope.code === 1002 || envelope.code === 1003) {
     throw new FuyaoError('invalid_parameter', `Fuyao API error ${envelope.code}: ${envelope.message ?? 'request failed'}${envelope.request_id ? ` (request_id: ${envelope.request_id})` : ''}`, { code: envelope.code, requestId: envelope.request_id })
   }
@@ -100,14 +89,14 @@ export async function fuyaoRequest(input: {
   return envelope
 }
 
-/** 行数组位置：这些端点的行都在 `data.item` 下（信封里 `data` 可能为 null）。 */
+/** Row array lives at `data.item`; `data` may be null. */
 export function fuyaoItems(envelope: FuyaoApiEnvelope): FuyaoParams[] {
   const data = envelope.data as FuyaoParams | null | undefined
   const rows = data?.item
   return Array.isArray(rows) ? rows as FuyaoParams[] : []
 }
 
-/** `data.timestamp`（毫秒）；无有效数据时上游给 null，不补零。 */
+/** `data.timestamp` in ms; upstream returns null when there is no data (do not zero-fill). */
 export function fuyaoTimestamp(envelope: FuyaoApiEnvelope): number | null {
   const data = envelope.data as FuyaoParams | null | undefined
   return typeof data?.timestamp === 'number' ? data.timestamp : null

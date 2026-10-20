@@ -1,11 +1,9 @@
 /**
- * AnySearch 的最小 REST 客户端。
- *
- * web_retriever 目前只支持一个后端，因此不预留多引擎注册表、动态 loader 或
- * provider 目录。未来真正接入第二个后端时，再根据实际差异抽象接口。
+ * Minimal AnySearch REST client. No multi-engine registry or provider directory
+ * exists until a second backend introduces a real abstraction need.
  */
 
-/** 第三方页面的正文与链接：与本机直抓共用同一份不可见字符剥离与可展示链接口径。 */
+/** Shared invisible-text and link presentation rules with local fetching. */
 import { stripInvisibleText } from './html-markdown.js'
 import { safeUrl } from './local-fetch.js'
 
@@ -32,7 +30,7 @@ export interface FetchResult {
   error?: string
 }
 
-/** AnySearch 失败的结构化错误码。取值与拼写是下游回退判据的契约，勿随意改动。 */
+/** Structured error codes; spelling is part of the fallback contract. */
 export type AnySearchErrorCode =
   | 'ABORTED'
   | 'TIMEOUT'
@@ -47,7 +45,7 @@ export type AnySearchErrorCode =
   | 'UNSUPPORTED_CONTENT'
   | 'UPSTREAM'
 
-/** AnySearch 上游 error_code → 本地错误码映射。对齐官方 fetch-provider 的 webErrorCode 表。 */
+/** Map upstream error_code values, matching the official fetch-provider webErrorCode table. */
 const ERROR_CODE_MAP: Record<string, AnySearchErrorCode> = {
   invalid_extract_url: 'INVALID_URL',
   extract_target_blocked: 'TARGET_BLOCKED',
@@ -56,7 +54,7 @@ const ERROR_CODE_MAP: Record<string, AnySearchErrorCode> = {
   extract_timeout: 'TIMEOUT',
 }
 
-/** 带结构化错误码的 AnySearch 失败；message 沿用既有拼法，保证既有断言仍通过。 */
+/** Failure with a code; existing message wording remains part of the assertions. */
 export class AnySearchError extends Error {
   readonly code: AnySearchErrorCode
   readonly upstreamCode?: string
@@ -76,10 +74,7 @@ export class AnySearchError extends Error {
   }
 }
 
-/**
- * AnySearch 失败后是否值得改走本机直连回退。
- * 只有调用方取消、URL 非法与内容类型不受支持三类不回退；其余都回退。
- */
+/** Fall back except for cancellation, invalid URL, and unsupported content type. */
 export function shouldFallbackToLocalFetch(code: AnySearchErrorCode): boolean {
   return code !== 'ABORTED' && code !== 'INVALID_URL' && code !== 'UNSUPPORTED_CONTENT'
 }
@@ -109,7 +104,7 @@ function responseData(raw: unknown): Record<string, unknown> | null {
 export function normalizeSearchHit(raw: unknown): SearchHit | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const record = raw as Record<string, unknown>
-  // 候选链接不合法就整条丢掉：既不能 fetch、也不能作为引用给用户点。
+  // Drop invalid links entirely: they cannot be fetched or presented as citations.
   const url = safeUrl(record.url)
   if (url === '') return null
   return {
@@ -158,7 +153,7 @@ export function envKey(name: string): string | undefined {
   return processLike?.env?.[name] || undefined
 }
 
-/** 创建 AnySearch REST 客户端；API key 每次请求重新解析，不缓存。 */
+/** Resolve the API key on every request; do not cache it. */
 export function createAnySearchClient(
   baseURL = DEFAULT_BASE_URL,
   resolveApiKey: () => Promise<string | undefined> = async () => envKey('ANYSEARCH_API_KEY'),
@@ -219,7 +214,7 @@ export function createAnySearchClient(
           parsed = value as Record<string, unknown>
         }
       } catch {
-        // 非 JSON 响应转成下面的明确错误。
+        // Convert a non-JSON response into the structured error below.
       }
       const code = parsed?.code
       const message = typeof parsed?.message === 'string' && parsed.message ? parsed.message : undefined

@@ -5,15 +5,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { findSessionRecords, latestSessionFile } from '../scripts/lib/session-files.mjs'
 
-/**
- * `verify:sessions` 的闸门本身要有闸门。
- *
- * 起因（2026-09-30 实测）：`scripts/verify-sessions.mjs` 把会话文件名硬编码成
- * `session.v3.jsonl.zstd`，而 0.2.0-rc.2 的宿主写的是 `session.v4.jsonl.zstd`
- * ⇒ 本机 store 里 384 份 v3 + 47 份 v4，它一份都没读到，却打印"检查 0 份会话 ✅"。
- * 这类坏法的特点是**永不报错**：格式换代那天起，这道核对就绿着空转了。
- * 所以下面每个用例都按**当前宿主真实写入的文件名**建目录，而不是随手编一个。
- */
+// `verify:sessions` needed a gate on its own gate: scripts/verify-sessions.mjs hardcoded
+// `session.v3.jsonl.zstd` while the host writes `session.v4.jsonl.zstd` — no error ever, it read 0
+// sessions and printed "检查 0 份会话 ✅", running green and empty from the format change onward.
+// So every case below builds dirs from file names the current host really writes, not invented ones.
 
 function store() {
   const root = mkdtempSync(join(tmpdir(), 'cg-sessions-'))

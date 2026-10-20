@@ -77,7 +77,7 @@ failed
 
 ### 1.5 硬 gate 覆盖规则
 
-以下情况不得选择 `not_needed`：用户明确要求图表，或 profile 已确认存在时间序列、OHLC+volume、多期比较或多个可比数值序列。此时必须选择 `recommended`，完成 `prepare_chart_source → subagent_visualization_specialist → one-shot barrier`；只有字段/数据实际不足才可 `blocked`，只有合法工具已经失败才可 `failed`。不要把“本 Agent 没有 render_chart”当作跳过理由，render_chart 属于 specialist 的受控工具。
+以下情况不得选择 `not_needed`：用户明确要求图表，或 profile 已确认存在时间序列、OHLC+volume、多期比较或多个可比数值序列。此时必须选择 `recommended`，完成 `prepare_chart_source → subagent_visualization_specialist → 出图 barrier`；只有字段/数据实际不足才可 `blocked`，只有合法工具已经失败才可 `failed`。不要把“本 Agent 没有 render_chart”当作跳过理由，render_chart 属于 specialist 的受控工具。
 
 `recommended` 回答的是“这份数据该不该被画出来”，不是“这次委派要不要出图”。委派 prompt 显式限定范围（如「只到 profile」「不要图」）时，仍按上面的判据给出 `recommended`，但**停在结论不出图**，并在回传里写明未执行是**委派收窄**——它既不是 `blocked`（字段不足）也不是 `failed`（工具失败），三者混淆会让主 Agent 把范围决定误读成能力结论。范围下一轮放开时无需重新 profile，按同一结论直接走 `prepare_chart_source` 即可。
 
@@ -245,24 +245,19 @@ chart.html 内容
 如果收到 `chart_spec_invalid` 或 `chart_field_not_found`，只根据错误中的 allowed/available
 信息修正一次；第二次仍失败则回传 failed，不要循环试错。
 
-## 5. one-shot barrier 与回传
+## 5. 出图 barrier 与回传
 
-visualization_specialist 是前台 one-shot：
+visualization_specialist 是**异步**子 Agent：创建工具立即返回 id，它完成时以「回传正文 + 结算
+通知」两件事到达。data_junior 必须等**每颗** specialist 的回传与结算通知都齐（rendered /
+skipped / failed）再综合回传；只看到回传正文不等于出图环节结束。
 
 - 不调用 `send_message`；
 - 不创建下游 Agent；
 - 不启动 background Job；
 - 最终结果直接返回给 data_junior。
 
-data_junior 必须等本批次所有 specialist 都有终态：
-
-```text
-rendered
-skipped
-failed
-```
-
-之后才向主 Agent发送一次结构化汇总，至少包括：
+data_junior 等的是本批次每颗 specialist 都有终态：`rendered` / `skipped` / `failed`。齐了之后才向主
+Agent 发送一次结构化汇总，至少包括：
 
 ```text
 task_id

@@ -5,16 +5,9 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-/**
- * DSH 接口账本的**测试形态**：跑一遍 scripts/check-dsh-compat.mjs。
- *
- * 退出码约定：
- *   0 = 全部通过；1 = 有接口失配（真失败）；2 = 本机找不到 dsh（跳过，不应在无 dsh 的
- *   CI/容器里制造假失败）。
- *
- * 断言的是"账本还在"，不是我们自己的措辞——失配时按
- * docs/reference/dsh-surface-ledger.md 的"修复位置"改本仓 adapter，不要改探针。
- */
+// Runs scripts/check-dsh-compat.mjs as a test. Exit 0 = pass, 1 = surface drift (real failure),
+// 2 = dsh not found here → skipped, so CI/containers without dsh don't get a false failure.
+// Drift means fix our adapter per docs/reference/dsh-surface-ledger.md, never the probe.
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
 test('DSH 接口账本探针：上游扩展面未漂移', (t) => {
@@ -25,9 +18,9 @@ test('DSH 接口账本探针：上游扩展面未漂移', (t) => {
   })
 
   if (result.status === 2) {
-    // 必须是 skip 而不是 return：`t.diagnostic()` + return 会被 node:test 记成 **pass**，
-    // 于是"本机没有 dsh"（桌面端 harness 在 app.asar 里、探针读不到包目录就是这个状态）
-    // 报告里依然全绿，实际一条接口都没核对——账本要防的正是这种静默失效。
+    // skip, not diagnostic+return: node:test records a returned test as pass, so "no dsh here"
+    // (desktop harness lives in app.asar, probe can't read the package dir) would report all
+    // green while checking nothing — exactly the silent failure this ledger exists to catch.
     t.skip('本机未定位到 dsh 包目录，接口账本**未核对**（设置 DSH_PACKAGE_DIR 可启用）')
     return
   }
@@ -40,12 +33,8 @@ test('DSH 接口账本探针：上游扩展面未漂移', (t) => {
   )
 })
 
-/**
- * 账本条目与探针必须一一对应。历史教训：账本与 `scripts/check-dsh-compat.mjs` 各写一份，
- * 新增接口时只改一边（账本加了条目但没写探针，或探针加了 id 但账本没登记），
- * 就会退化成"账本看起来很全、实际没人探"——正是账本要防的静默失效。
- * 这条守卫让"往账本里加一条不存在的探针 id"直接失败。
- */
+// Ledger entries and probe ids must correspond 1:1: they live in two files, and adding an
+// interface on one side only degrades into "the ledger looks complete, nothing is probed".
 test('DSH 接口账本：条目与 check-dsh 探针一一对应（新增/改名必须两边同步）', () => {
   const ledger = readFileSync(join(ROOT, 'docs/reference/dsh-surface-ledger.md'), 'utf8')
   const script = readFileSync(join(ROOT, 'scripts/check-dsh-compat.mjs'), 'utf8')

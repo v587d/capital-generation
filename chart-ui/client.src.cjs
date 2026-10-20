@@ -1,17 +1,8 @@
 /**
- * `@v587d/capital-charts` browser half.
- *
- * 单一 surface：`tool.call.toolview['render_chart']` —— 图表生成过程的明细卡片
- * （子会话与展开视图里都能看）。数据经 `/capital-charts/<chart_id>.json` 旁路取，
- * 不进任何 Agent 上下文。
- *
- * ⚠️ 这里**没有** turn-tail 卡片，且不要再加回来（2026-09-18 事故，实测根因）：
- * 内嵌卡片依赖宿主往会话里追加自定义事件 `capital/chart-rendered`，而会话日志的事件
- * 词汇表是闭集——`Session.append` 无法设置 `ignorable`，非 first-party 事件写进去之后，
- * **整份会话在冷加载时会被 fail-closed 拒绝**（6 份会话 `failed to observe session`）。
- * 现在图表以官方 `deliverables/presented` 登记为「本轮交付」，用户在收尾的交付行点开
- * `chart.html`，由官方 document preview 的 script-enabled iframe 渲染自包含图表
- * （见 src/chart/events.ts）。**呈现走官方通道，客户端不再需要任何图表专属投影。**
+ * `@v587d/capital-charts` browser half: one `render_chart` toolview fed by the
+ * `/capital-charts/<id>.json` route. No turn-tail card or custom session event:
+ * the vocabulary is closed and non-first-party events make cold load fail closed.
+ * Delivery goes through `deliverables/presented`.
  */
 const { useEffect, useRef, useState, createElement: h } = require('react')
 const LightweightCharts = require('lightweight-charts')
@@ -28,7 +19,7 @@ function readReceipt(block) {
         const parsed = JSON.parse(item.text)
         if (parsed && typeof parsed === 'object') return parsed
       } catch {
-        // Not the structured receipt; continue scanning.
+        // Not the structured receipt; keep scanning.
       }
     }
   }
@@ -50,7 +41,7 @@ function ChartCanvas(props) {
       try {
         if (chart && typeof chart.remove === 'function') chart.remove()
       } catch {
-        // The host removed the card.
+        // The host already removed the card.
       }
     }
   }, [props.payload])
@@ -85,7 +76,7 @@ function useJson(url) {
   return { value, error }
 }
 
-/** 工具过程明细：保留在子会话与展开视图里。 */
+/** Tool detail card, also visible in child sessions and the expanded view. */
 function ChartView(props) {
   const block = props.block
   const settled = Boolean(block) && block.kind === 'tool-result'

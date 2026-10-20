@@ -1,10 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { type SessionLike, WorkspaceDatasetStore } from '../data-collector/store.js';
-/**
- * The registry is host-only and never serializes this handle into Agent output.
- * Keeping the live Session object is required because DSH sandbox policies use
- * session.snapshotEvents() when resolving workspace permissions.
- */
+/** Host-only; never serialized into agent output. Keep the live Session: sandbox policies call
+ * session.snapshotEvents() to resolve workspace permissions. */
 export interface ChartSourceTokenRef {
     chart_source_ref: string;
     dataset_id: string;
@@ -21,13 +18,8 @@ export interface ChartSourceTokenStoreOptions {
     ttlMs?: number;
     newToken?: () => string;
 }
-/**
- * Short-lived capability tokens for nested visualization children.
- *
- * The token captures the direct data-agent session rather than asking a nested
- * child to re-prove the Dataset's one-hop session scope. Possession of the
- * opaque token is the capability; it is never converted into a filesystem path.
- */
+/** Short-lived capability tokens for nested visualization children. Possession is the capability;
+ * the token never becomes a filesystem path or raw rows. */
 export declare class ChartSourceTokenStore {
     private readonly tokens;
     private readonly now;
@@ -51,7 +43,7 @@ export declare class ChartSourceTokenStore {
     revoke(chartSourceRef: string): boolean;
     size(): number;
 }
-/** Register the delegated-child-only token issuer. */
+/** Preset-based authorization; see authorizedChartSession. */
 export declare function registerChartSourceTool(ctx: Context, options: {
     store: WorkspaceDatasetStore;
     tokens: ChartSourceTokenStore;

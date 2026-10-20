@@ -7,11 +7,13 @@ import { pathDirs } from '../scripts/lib/run-tool.mjs'
 import { resolveUserCustomizationSection } from '../lib/index.js'
 import { RETRIEVAL_DENIED_TOOLS } from '../lib/agents/root-tool-policy.js'
 import { SOURCE_OUTPUT_BUDGET_CHARS } from '../lib/web-retriever/tools.js'
-import { PRESET_PATCH_TEXT, presetRows, loadBudget } from './preset-rows.mjs'
+import { PRESET_PATCH_TEXT, presetRows, presetDeclaration, allPresets, allRowsOf, capitalRowsOf, rolePersona, allPersonaTexts, delegationRow, loadBudget, ROOT_PRESET_ID } from './preset-rows.mjs'
+import { ROLE_PRESET_IDS, ROLE_TOOL_SURFACES, SIBLING_DENIED_TOOLS } from '../lib/agents/role-tool-policy.js'
+import { CAPITAL_ROW_TOOLS, faceOf } from './family-rows.mjs'
 import { SELECTED_SKILL_CATALOG, SELECTED_SKILL_SKILL_DIRS, SELECTED_SKILL_TASK_IDS, SELECTED_SKILLS_MAX_ENABLED, selectedSkillsForTask } from '../selected-skills/catalog.js'
 import { renderTaskSkillIndex } from '../lib/agents/selected-skills-provider.js'
 
-// 预设装配行的读取（含 `!!js` 剥离）只在 test/preset-rows.mjs 有一份。
+// Preset row parsing lives only in test/preset-rows.mjs.
 const COMPOSITION_TEXT = PRESET_PATCH_TEXT
 const rows = presetRows()
 assert.ok(Array.isArray(rows), 'agent.patch.yml 的 config.plugins 必须解析为行数组')
@@ -22,15 +24,7 @@ const rowByName = (name) => rows.find((row) => row?.name === name)
 const personaRow = rowByName('@deepseek-ai/dsh-persona')
 assert.ok(personaRow, 'preset 必须有 dsh-persona 行')
 
-/**
- * 人设文本字段的读取器（带诊断）。
- *
- * dsh-persona 0.1.5-rc.1 的配置字段是 `prefix`（另有可选 `suffix` / `complete` /
- * `includeRuntimeContext`，从来没有 `text`）。历史教训：harness 一旦换字段名，旧写法
- * 只会表现为一堆互不相关的"未匹配"，很难定位到底是字段没了还是正文改了。所以这里把
- * "取人设文本"收敛成一个读取器：找不到字段时立刻报出实际 config 字段名，而不是让
- * 下游断言集体失配。
- */
+/** Read the persona field; a renamed field must fail listing the actual config keys. */
 const PERSONA_TEXT_FIELDS = ['prefix', 'text']
 function readPersonaText(row) {
   const config = row?.config
@@ -49,43 +43,32 @@ const personaText = readPersonaText(personaRow)
 const MAIN_PERSONA_TEXT = personaText.text
 assert.equal(typeof MAIN_PERSONA_TEXT, 'string', 'dsh-persona 行必须用 config.prefix 承载人设文本')
 
-// 断言辅助：模式里的空格按"任意空白"匹配（文件结构类断言用）。
+// Pattern whitespace matches any whitespace (file-structure assertions).
 const assertMatches = (text, pattern, message) =>
   assert.ok(new RegExp(pattern.source.replace(/ /g, '\\s*'), pattern.flags).test(text), message ?? `未匹配：${pattern}`)
 const assertNotMatches = (text, pattern, message) =>
   assert.ok(!new RegExp(pattern.source.replace(/ /g, '\\s*'), pattern.flags).test(text), message ?? `不应匹配：${pattern}`)
 
-// 规则断言辅助：把文本与模式的空白一起折叠后再比。persona 是给人读的、会重排断行的
-// 长文本，一条规则被折成两行不该让断言失配；反过来，规则被拆行也不该逃过否定断言。
+// Rule matching ignores line wrapping so persona reflow neither breaks positive nor escapes negative assertions.
 const compact = (value) => value.replace(/\s+/g, '')
 const assertRule = (text, pattern, message) =>
   assert.ok(new RegExp(compact(pattern.source), pattern.flags).test(compact(text)), message ?? `未匹配：${pattern}`)
 const assertNoRule = (text, pattern, message) =>
   assert.ok(!new RegExp(compact(pattern.source), pattern.flags).test(compact(text)), message ?? `不应匹配：${pattern}`)
 
-/**
- * 规则断言：断"这条硬规则存在"，不锁具体措辞。
- *
- * persona 是会反复重写给人读的长文本，同一规则常有多种等价说法；锁死某一句会让每次
- * 改写都掉一片测试，而真正危险的相反情况——规则被整段删掉——反而淹没在噪声里。
- * 因此每条规则给出若干等价说法，任一命中即通过；全部落空时应当**补人设**，而不是删断言。
- */
+/** Assert that a hard rule exists, accepting any equivalent wording. */
 const assertRuleAny = (text, patterns, message) => {
   const matched = patterns.some((pattern) => new RegExp(compact(pattern.source), pattern.flags).test(compact(text)))
   assert.ok(matched, message ?? `规则缺失（任一等价说法都未命中）：${patterns.map(String).join(' | ')}`)
 }
 const MAIN_PERSONA = MAIN_PERSONA_TEXT
 
-/**
- * 定位本机已安装的 dsh-persona 类型声明，用于核对人设字段名仍然存在。
- * 找不到时返回 undefined（测试降级为诊断输出，不误判为失败）。
- */
+/** Find installed persona typings; absence downgrades this check to a diagnostic. */
 function locatePersonaTypes() {
   const candidates = [
     fileURLToPath(new URL('../node_modules/@deepseek-ai/dsh-persona/lib/types/index.d.ts', import.meta.url)),
   ]
-  // 分隔符交给 pathDirs()：Windows 的 PATH 用 `;`，写死 `.split(':')` 会把整条 PATH 拆成
-  // `['C','\\Program Files;C', …]` ⇒ 永远找不到 ⇒ 这条闸门静默退化成"跳过字段名核对"。
+  // PATH splitting must go through pathDirs(); hardcoded ':' silently skips Windows checks.
   for (const dir of pathDirs()) {
     candidates.push(join(dir, '..', 'lib', 'node_modules', '@deepseek-ai', 'dsh', 'node_modules', '@deepseek-ai', 'dsh-persona', 'lib', 'types', 'index.d.ts'))
     candidates.push(join(dir, 'node_modules', '@deepseek-ai', 'dsh', 'node_modules', '@deepseek-ai', 'dsh-persona', 'lib', 'types', 'index.d.ts'))
@@ -96,154 +79,126 @@ function locatePersonaTypes() {
   return undefined
 }
 
-const collectorRow = rowById('tool-subagent-data-collector')
-assert.ok(collectorRow, 'preset 必须有 subagent_data_collector 专用委派行')
-const COLLECTOR_PERSONA = collectorRow.config.persona
+/** A delegation row belongs to the calling preset; the wrong caller lets a role create its own grandchild. */
+const delegation = (toolName, expectedPresetId) => {
+  const found = delegationRow(toolName)
+  assert.ok(found, `preset 必须有 ${toolName} 专用委派行`)
+  assert.equal(found.presetId, expectedPresetId, `${toolName} 的委派行必须住在 ${expectedPresetId}，实际在 ${found.presetId}`)
+  return found
+}
 
-const juniorRow = rowById('tool-subagent-data-junior')
-assert.ok(juniorRow, 'preset 必须有 subagent_data_junior 专用委派行')
-const JUNIOR_PERSONA = juniorRow.config.persona
+const collectorRow = delegation('subagent_data_collector', ROOT_PRESET_ID).row
+const COLLECTOR_PERSONA = rolePersona(ROLE_PRESET_IDS.collector)
 
-const visualizationRow = rowById('tool-subagent-visualization-specialist')
-assert.ok(visualizationRow, 'preset 必须有 subagent_visualization_specialist 专用委派行')
-const VISUALIZATION_PERSONA = visualizationRow.config.persona
+const juniorRow = delegation('subagent_data_junior', ROOT_PRESET_ID).row
+const JUNIOR_PERSONA = rolePersona(ROLE_PRESET_IDS.junior)
 
-const retrieverRow = rowById('tool-subagent-web-retriever')
-assert.ok(retrieverRow, 'preset 必须有 subagent_web_retriever 专用委派行')
-const RETRIEVER_PERSONA = retrieverRow.config.persona
+const visualizationRow = delegation('subagent_visualization_specialist', ROLE_PRESET_IDS.junior).row
+const VISUALIZATION_PERSONA = rolePersona(ROLE_PRESET_IDS.specialist)
 
-const analystRow = rowById('tool-subagent-data-analyst')
-assert.ok(analystRow, 'preset 必须有 subagent_data_analyst 预留委派行')
-const ANALYST_PERSONA = analystRow.config.persona
+const retrieverRow = delegation('subagent_web_retriever', ROOT_PRESET_ID).row
+const RETRIEVER_PERSONA = rolePersona(ROLE_PRESET_IDS.retriever)
+
+const analystRow = delegation('subagent_data_analyst', ROOT_PRESET_ID).row
+const ANALYST_PERSONA = rolePersona(ROLE_PRESET_IDS.analyst)
 
 const childRows = [collectorRow, juniorRow, retrieverRow]
 
-// 插件真实注册 + preset 真实挂载的工具名。toolFilter.allow 里出现未知名字会在
-// 创建子 Agent 时被 tools.restrict() 拒绝，所以它必须与这份清单求交集。
+/** Delegation rows must use only the 0.2.1 shape; removed fields throw during preset load. */
+function assertDelegationRowShape(row, toolName, presetId) {
+  assert.equal(row.name, '@deepseek-ai/dsh-tool-subagent')
+  assert.equal(row.config.provider, 'spawn', `${toolName}：agentPreset 只被 spawn provider 支持`)
+  assert.equal(row.config.toolName, toolName)
+  assert.equal(row.config.agentPreset, presetId, `${toolName} 必须用 agentPreset 选角色 preset（名字与 preset 声明行同字）`)
+  for (const removed of ['persona', 'toolFilter', 'backgroundMode', 'enableRunInBackground']) {
+    assert.ok(!(removed in row.config), `${toolName}：0.2.1 已删除 config.${removed}，留着会在装载期抛错`)
+  }
+}
+
+/** Row composition, not `disabled`, is the only gate for manually opened role sessions. */
+const SURFACE_GATE_PRESETS = [
+  ROLE_PRESET_IDS.collector, ROLE_PRESET_IDS.junior, ROLE_PRESET_IDS.specialist, ROLE_PRESET_IDS.retriever,
+  ROLE_PRESET_IDS.analyst,
+]
+
+// Names must be both registered by a row contract and reachable from some preset row.
 const PLUGIN_TOOLS = [
   'request_data', 'list_capabilities', 'describe_capability', 'dc_status',
   'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile', 'prepare_chart_source', 'render_chart',
   'get_local_datetime',
   'resolve_data_time_range',
-  // 用户自选股（含自报持仓）：只读、只给主 Agent，通用 child 必须 deny（见下面的 deny 闸门）。
+  // Read-only and attached only to the Capital root row.
   'get_watchlist',
   'anysearch_search', 'web_retriever_fetch', 'ocr',
   'wind_docs_announcements', 'wind_docs_news',
-  // 具名来源查询面（provider + operation 命名，见 src/web-retriever/sources.ts）：
-  // 与 PLUGIN_TOOLS 里其余名字一样，allow 写了就必须真注册，否则 tools.restrict() 会在
-  // **创建子 Agent 的窗口**报错（表现是"创建子 Agent 失败"，不是挂载失败）。
+  // Named source query tools must resolve against real registrations; a phantom name hides the tool.
   'cls_telegraph', 'wscn_lives', 'cninfo_irm', 'sseinfo_qa',
-  // 东财 / 新浪 / 同花顺侧（2026-09-24 新增；同一族：写了就必须真注册）
   'eastmoney_724', 'eastmoney_stock_news', 'eastmoney_reports', 'sina_reports', 'ths_eps_forecast',
 ]
 const PRESET_TOOLS = [
   'send_message', 'interrupt_agent', 'list_agents',
-  'subagent', 'subagent_data_collector', 'subagent_data_junior', 'subagent_web_retriever', 'subagent_visualization_specialist',
+  // Only the four specialized delegation rows; the removed generic row must not reappear.
+  'subagent_data_collector', 'subagent_data_junior', 'subagent_web_retriever', 'subagent_visualization_specialist',
   'ask_user_question', 'todo_write', 'skill',
-  // shell 工具由 preset 自己挂（web 平面把 host 层的 tool-bash/tool-pwsh 都 disabled 了）；
-  // 平台二选一，两个名字都是真实注册的全局名。
+  // Platform-paired rows register exactly one shell name.
   'bash', 'pwsh',
-  // 文件口（2026-10-15 用户决策「开 read、同时保留 bash」）：tool-fs 一颗挂 read / write / edit，
-  // 三个名字都无条件注册；read_image 条件注册（依赖宿主 attachments 服务），不进这份清单。
+  // fs tool row always registers read/write/edit; conditionally registered read_image stays out.
   'read', 'write', 'edit',
 ]
 const KNOWN_TOOLS = new Set([...PLUGIN_TOOLS, ...PRESET_TOOLS])
 
-/**
- * 出网工具名清单（检索面 2 + wind 2 + 具名来源查询面 9 = 十三）。
- * 「出网只有一个入口（web_retriever）」是结构性约束，凡声明它的地方都必须是同一份名单：
- * 事实来源是 `src/agents/root-tool-policy.ts` 的 `RETRIEVAL_DENIED_TOOLS`（根 Agent 逐名 deny
- * 用的就是它），这里只是把它对齐到 preset 的 persona 禁直连清单与通用 subagent 的 deny——
- * 各自抄一份字面量的结果是漂移：deny 少一个名字，通用 child 就能自己抓网页。
- */
+/** Effective tool surface: row contracts × preset row mounts; extra mounts are fail-closed. */
+const capitalFace = (presetId) => faceOf(capitalRowsOf(presetId))
+
+/** A preset may mount a framework row nested in a group. */
+const mountsRow = (presetId, rowName) => allRowsOf(presetId).some((row) => row?.name === rowName)
+
+/** Network tool names must come from root-tool-policy; a copied list would drift and leak web access. */
 const NETWORK_TOOLS = [...RETRIEVAL_DENIED_TOOLS]
 
-/**
- * shell 槽位按平台选名（preset 里写成 `!!js "process.platform === 'win32' ? 'pwsh' : 'bash'"`）。
- *
- * 为什么必须按平台选：Windows 上没有 `bash-sandbox`，host 层挂的是 pwsh 执行器，
- * 于是 `tool-bash` 若在 Windows 上启用，名为 bash 的工具会实际执行 PowerShell；
- * 而 `tools.restrict()` 又对**未注册**的名字报错（表现是"创建子 Agent 失败"），
- * 所以 allow/deny 里的名字必须与平台行一致。结构化解析剥掉 `!!js` 标签后拿到的是
- * 表达式字符串，因此这里核验"原文里确实是 !!js 表达式"，并按同一条件解析出真实工具名。
- */
-const SHELL_SLOT = "process.platform === 'win32' ? 'pwsh' : 'bash'"
+/** Platform rows mount exactly one shell name; asserting the other name silently misleads the model. */
 const SHELL_TOOL = process.platform === 'win32' ? 'pwsh' : 'bash'
-const isShellSlot = (name) => name === SHELL_SLOT
 
-/** 去掉每行行首缩进：体积闸门量正文，不量 YAML 包装层级。 */
+/** Size gates measure content, not YAML indentation. */
 const dedent = (value) => value.split('\n').map((line) => line.trimStart()).join('\n')
 
 const SKILL_DIR = fileURLToPath(new URL('../preset/capital-generation/skills/', import.meta.url))
 const INDEX_SOURCE = readFileSync(fileURLToPath(new URL('../src/index.ts', import.meta.url)), 'utf8')
+const ROOT_EXTRAS_SOURCE = readFileSync(fileURLToPath(new URL('../src/root-extras-entry.ts', import.meta.url)), 'utf8')
 
-// 数据协议拆三册、检索协议拆两册（正文超过剪枝阈值 8192 会被剪掉中间段，判据见
-// docs/dev/preset-persona.md §8.2）。"这条规则还在吗"按整族合起来查——清单的本意是
-// 搬家不丢句；"必须在哪一册"另有逐册点名，两者别混成一件事。
+// Check a rule across the whole skill family; check its home per volume (docs/dev/preset-persona.md §8.2).
 const skillVolume = (name) => readFileSync(`${SKILL_DIR}${name}/SKILL.md`, 'utf8')
 const DATA_PROTOCOL = ['capital-data-protocol', 'capital-data-profile', 'capital-data-query']
   .map(skillVolume).join('\n')
 const WEB_PROTOCOL = ['capital-web-protocol', 'capital-web-evidence'].map(skillVolume).join('\n')
 
-// ── 体积预算：一次加载必须完整可见 ────────────────────────────────────────────
-// 阈值读取只在 test/preset-rows.mjs 的 loadBudget() 有一份（§9.7），下面所有预算断言都以它为分母。
+// Budget thresholds come only from loadBudget() (§9.7); all assertions share that denominator.
 const { thresholdChars: PRUNER_THRESHOLD, overheadChars: SKILL_RENDER_OVERHEAD, visibleChars: VISIBLE_CAP } = loadBudget()
 const stripFrontmatter = (text) => text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '')
 const SELECTED_DIR = fileURLToPath(new URL('../selected-skills/', import.meta.url))
-/** 去掉 frontmatter 的正文：加载给模型的就是这一段。 */
+/** Body loaded into the session, excluding frontmatter. */
 const skillBody = (name) => stripFrontmatter(skillVolume(name))
 const selectedSkillFile = (entry) =>
   `${SELECTED_DIR}${entry.repository}/${SELECTED_SKILL_SKILL_DIRS[entry.repository]}/${entry.name}/SKILL.md`
-/** catalog 条目在会话里被加载的正文（体积棘轮问的是这一段）。 */
+/** Loaded body measured by the size ratchet. */
 const selectedSkillBody = (entry) => stripFrontmatter(readFileSync(selectedSkillFile(entry), 'utf8'))
-/** catalog 条目在会话目录里那句话（索引块用的就是它，不是设置卡片里策展过的中文摘要）。 */
+/** Catalog description shown in the session index, not the curated card summary. */
 const runtimeDescription = (entry) =>
   readFileSync(selectedSkillFile(entry), 'utf8').match(/^description: (.+)$/m)?.[1] ?? ''
 
 test('preset 结构：persona 行为声明式行，插件不再占用 deployment:persona', () => {
   assert.equal(personaRow.name, '@deepseek-ai/dsh-persona')
   assert.ok(MAIN_PERSONA_TEXT.length > 2000, '主 persona 文本必须完整存在')
-  // 压缩上限：长协议已迁到 skills/，persona 不应再膨胀回改造前（6359 字符）。
   assert.ok(MAIN_PERSONA_TEXT.length < 5000, `主 persona 过长（${MAIN_PERSONA_TEXT.length} 字符）：协议细节应进 skills/`)
-  // 体积纪律（改造实测）：改造前 29,203 字符，目标是一半以内（14,601）。
-  // 参考材料进 skills/、设计理由进 preset README.md 之后，闸门曾卡在 14,600 字符。
-  // 2026-09 新增第四个角色 visualization_specialist（委派行 + persona + toolFilter），
-  // 并给 data_junior 增加可视化 gate、one-shot barrier 与 canonical task/report delivery 职责；这些是"模型还不知道本轮
-  // 要做什么之前就必须生效"的每轮硬规则，不是可外迁到 skills/ 的协议正文，所以闸门
-  // 放宽到 16,200。真正的防回涨靠下面两条：主 persona < 5000、
-  // 子 persona 骨架上限——协议细节回涨会先在那里失败。
-  // 2026-09 给 data_junior 配 bash（纯计算兜底）时再放宽到 17,600：新增三行
-  // （平台成对的 tool-bash / tool-pwsh 行 + data_junior 的 BASH DISCIPLINE 软约束），
-  // 设计理由一律进 preset README.md，不占这里。
-  // 2026-09-24 放宽到 18,000：通用 subagent 的 toolFilter.deny 补上 13 个出网工具名
-  // （「出网只有一个入口」此前只是 persona 文案，且文案里的 `web_retriever_*` 通配已失配）。
-  // 这 300 余字符是**结构件的工具名**（deny 里的名字必须真实注册，见上），不是可外迁的协议正文；
-  // 防回涨仍靠下面两条：主 persona < 5000、子 persona 骨架上限。
-  // 2026-09-26 迁到 0.1.7 的声明式预设行（agent.patch.yml）：闸门量的是**正文**，所以先去缩进
-  // 再数——包装那一层 10 空格 × 500 行是格式成本，不是协议正文，让它计入预算等于凭空吃掉
-  // 5,000 字符的额度，下次真要放宽闸门时谁也说不清是内容涨了还是缩进涨了。
-  // 2026-10-15 放宽到 18,200：开出 `read`（tool-fs 行 + 视图层只 deny 写口）之后必须配一条**每轮
-  // 生效**的读取边界——原始行落盘目录与宿主凭据不许直读。这条拦不住工具层（沙箱只拦写不拦读，
-  // bash 的 cat 也绕得过任何按参数的读闸门，见 docs/dev/bash-gate.md §1.6），所以它只能住在这里；
-  // 实测正文 18,008。防回涨仍靠下面两条：主 persona < 5000、子 persona 骨架上限。
+  // Two independent gates: total persona body, and composition file size (rationale belongs in skills / preset README).
+  const personaChars = allPersonaTexts().reduce((sum, entry) => sum + dedent(entry.persona).length, 0)
+  assert.ok(personaChars < 12000, `人设正文合计过长（${personaChars} 字符 / 目标 <12000）：协议细节应进 skills/`)
   const compositionChars = dedent(COMPOSITION_TEXT).length
-  assert.ok(compositionChars < 18200, `agent.patch.yml 正文过长（${compositionChars} 字符 / 目标 <18200）：参考材料进 skills/，设计理由进 preset README.md`)
-  // 子 persona 只留硬规则骨架：协议正文在 skills/（子 Agent 通过 skill 按需加载），
-  // 与工具 description/schema 重复的事实不再抄一遍。
-  // data_junior 的上限随"可视化 gate + one-shot barrier"两条新职责上调（实测 2168），
-  // 再随「BASH DISCIPLINE」（bash 只做纯计算、不读文件不联网）上调到 2650（实测 2574）：
-  // 这条是"模型拿到 bash 之前就必须生效"的每轮硬规则，不是可外迁的协议正文；
-  // 载荷样例与 QuerySpec 细则仍一律留在 skill 里。
-  // 2026-10-14 数据协议拆成三册（正文超过剪枝阈值 8192 会被剪掉中间段），duty 行的技能名从
-  // capital-data-protocol 换成 capital-data-profile 并补一句"写 QuerySpec / 派生算术时加载
-  // capital-data-query"——多出的 51 字符是**册名**，不是新规则，所以这里 2650 → 2760（实测 2701）。
-  // web_retriever 同因：duty 行要点名第二册 capital-web-evidence，1300 → 1390（实测 1326）。
-  // 防回涨靠的是"删正文不许用来腾地方"：动 duty 之前先想清楚这句话是不是每轮都要生效。
-  for (const [id, cap] of [['tool-subagent-data-collector', 1700], ['tool-subagent-data-junior', 2760], ['tool-subagent-web-retriever', 1390]]) {
-    const persona = rowById(id).config.persona
-    assert.ok(persona.length < cap, `${id} 的 persona 过长（${persona.length} 字符）：协议细节应进 skills/`)
+  assert.ok(compositionChars < 30000, `agent.patch.yml 正文过长（${compositionChars} 字符 / 目标 <30000）：参考材料进 skills/，设计理由进 preset README.md`)
+  for (const [presetId, cap] of [[ROLE_PRESET_IDS.collector, 1700], [ROLE_PRESET_IDS.junior, 2760], [ROLE_PRESET_IDS.retriever, 1390]]) {
+    const persona = rolePersona(presetId)
+    assert.ok(persona.length < cap, `${presetId} 的 persona 过长（${persona.length} 字符）：协议细节应进 skills/`)
   }
-  // 插件代码不得再注册 DEPLOYMENT_PERSONA 节（只允许注释里解释该设计）
   assertNotMatches(INDEX_SOURCE, /name:\s*['"]deployment:persona['"]/, 'src/index.ts 不应以 deployment:persona 为节名注册 section')
   assertNotMatches(INDEX_SOURCE, /PERSONA_SECTION/, 'src/index.ts 不应保留 PERSONA_SECTION 常量')
 })
@@ -255,8 +210,42 @@ test('persona 行字段：跟随本机 harness 版本，用 prefix 承载人设�
     t.diagnostic('未定位到本机 @deepseek-ai/dsh-persona 类型声明，跳过字段名核对（preset 侧已按 prefix 读取）')
     return
   }
-  // 本机安装的契约仍是唯一事实来源：字段名对不上时，这里先失败并点名文件。
+  // The installed contract is the source of truth; a renamed field fails here first.
   assertMatches(types.text, /prefix\s*:\s*string/, `${types.file} 中不再存在 prefix 字段：人设字段契约已变，请同步 preset 与 persona 测试`)
+})
+
+/** Read prompt variables from the installed dsh; a copied list lies after an upgrade. */
+function locatePromptVariables() {
+  const candidates = [
+    fileURLToPath(new URL('../node_modules/@deepseek-ai/dsh-agent-loop/lib/index.js', import.meta.url)),
+  ]
+  for (const dir of pathDirs()) {
+    candidates.push(join(dir, '..', 'lib', 'node_modules', '@deepseek-ai', 'dsh', 'node_modules', '@deepseek-ai', 'dsh-agent-loop', 'lib', 'index.js'))
+    candidates.push(join(dir, 'node_modules', '@deepseek-ai', 'dsh', 'node_modules', '@deepseek-ai', 'dsh-agent-loop', 'lib', 'index.js'))
+  }
+  for (const file of candidates) {
+    if (!existsSync(file)) continue
+    const names = [...readFileSync(file, 'utf8').matchAll(/systemPrompt\.variable\(\s*["']([a-z][a-z0-9_]*)["']/g)].map((match) => match[1])
+    return { file, names }
+  }
+  return undefined
+}
+
+test('persona 里的 {{变量}} 必须是本机 dsh 真注册的那几颗（写错 = 整场会话组装失败）', (t) => {
+  const located = locatePromptVariables()
+  if (located === undefined || located.names.length === 0) {
+    t.diagnostic('未定位到本机 dsh-agent-loop 的 variable() 注册，跳过插值闸门（persona 侧仍按现读结果断言）')
+    return
+  }
+  const refs = allPersonaTexts().flatMap(({ presetId, persona }) =>
+    [...persona.matchAll(/\{\{([^}]*)\}/g)].map((match) => ({ presetId, raw: match[0], name: match[1] })))
+  for (const ref of refs) {
+    assert.match(ref.name, /^[a-z][a-z0-9_]*$/, `${ref.presetId} 的人设正文有畸形变量引用 ${ref.raw}（只允许简单 {{name}}）`)
+    assert.ok(located.names.includes(ref.name),
+      `${ref.presetId} 的人设正文用了未注册的 prompt 变量 ${ref.raw}；本机 ${located.file} 只注册 ${located.names.join(' / ')}——`
+      + '症状不是这一段不显示，而是 Capital 会话直接起不来')
+  }
+  assert.ok(refs.length > 0, `闸门一个 {{变量}} 都没抓到：要么人设改写了，要么读取器又读错地方（本机注册的是 ${located.names.join(' / ')}）`)
 })
 
 test('skills：内置 skills 由组合行承载，selected skill 只注册到 Capital 主 Agent scope', () => {
@@ -265,14 +254,11 @@ test('skills：内置 skills 由组合行承载，selected skill 只注册到 Ca
   assert.equal(fsRow.name, '@deepseek-ai/dsh-skill-filesystem')
   const dirs = fsRow.config?.customSkillDirs
   assert.ok(Array.isArray(dirs) && dirs.length === 1, 'customSkillDirs 必须声明 preset 自带的 skills/ 目录')
-  // 0.1.7 的 `!!js` 插值里 baseUrl 指向 **profile 目录**（settings 住那儿），不再是行所在目录；
-  // 所以随包发布的 skills/ 只能按**包名**解析回去（写死绝对路径同样不可接受）。
-  // 漂移不是报错，而是 skill 静默消失、模型侧只剩 persona。
+  // Skills must resolve by package name from the profile-based interpolation path.
   const pkg = JSON.parse(readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'))
   assertMatches(dirs[0], new RegExp(`createRequire\\(baseUrl\\)\\.resolve\\('${pkg.name}/package\\.json'\\)`),
     `skills 目录必须经包名解析回本包（${pkg.name}）`)
-  // 截前缀（SKILL_DIR.slice(root.length)）在 Windows 上不成立：root 是 `D:\…\` 而 preset 行里
-  // 写的是 `preset/capital-generation/skills`，切出来的串带反斜杠、永远 includes 不进去。
+  // Compare normalized paths; prefix slicing breaks with Windows separators.
   const skillsRelative = relative(fileURLToPath(new URL('../', import.meta.url)), SKILL_DIR).split(sep).join('/')
   assert.ok(dirs[0].includes(`'${skillsRelative}'`), `customSkillDirs 必须拼出 ${skillsRelative}`)
   assert.ok(existsSync(SKILL_DIR), `本仓必须真有 ${skillsRelative}`)
@@ -282,7 +268,7 @@ test('skills：内置 skills 由组合行承载，selected skill 只注册到 Ca
   assert.equal(toolSkillRow.name, '@deepseek-ai/dsh-tool-skill')
 
   const selectedProvider = readFileSync(fileURLToPath(new URL('../src/agents/selected-skills-provider.ts', import.meta.url)), 'utf8')
-  assertMatches(INDEX_SOURCE, /registerRootSelectedSkills\(ctx/, '主插件必须接入按设置选择的 provider')
+  assertMatches(ROOT_EXTRAS_SOURCE, /registerRootSelectedSkills\(ctx/, 'tools/root-extras 必须接入按设置选择的 provider')
   assertMatches(selectedProvider, /agent\/created/, 'provider 必须在 Agent 建立后按需注册')
   assertMatches(selectedProvider, /isRootAgent\(agent\)/, '子 Agent 不得注册 selected skills provider')
   assertMatches(selectedProvider, /strictCapitalPreset\(ctx, agent\)/, '其他 preset 不得注册 selected skills provider')
@@ -296,9 +282,6 @@ test('skills：内置 skills 由组合行承载，selected skill 只注册到 Ca
   assert.ok(SELECTED_SKILL_CATALOG.some(({ name }) => name === 'financial-health'), 'catalog 必须包含可拆分的 China 模块')
    assert.ok(SELECTED_SKILL_CATALOG.every(({ tags, status }) => tags.length > 0 && ['experimental', 'watchlist'].includes(status)), '每个 catalog 条目都必须带状态和能力标签')
    assert.ok(!SELECTED_SKILL_CATALOG.some(({ name }) => name === 'china-stock-research-orchestrator'), '与 Capital 路由冲突的 orchestrator 不得进入 catalog')
-  // 快照正文缺 frontmatter `name` 时，DSH filesystem provider 只 warn 一声就**静默跳过**这颗 skill，
-  // 症状是"卡片上勾了、会话里没有"。InvestSkill 上游不带 name（Claude Code 从目录名推导），所以本仓
-  // 按 UPSTREAM.md 记录补了这一行；将来照 commit 重新覆盖快照时，这条会点名哪颗没补回去。
   for (const entry of SELECTED_SKILL_CATALOG) {
     const file = fileURLToPath(new URL(`../selected-skills/${entry.repository}/${SELECTED_SKILL_SKILL_DIRS[entry.repository]}/${entry.name}/SKILL.md`, import.meta.url))
     const front = readFileSync(file, 'utf8').match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/)
@@ -306,45 +289,31 @@ test('skills：内置 skills 由组合行承载，selected skill 只注册到 Ca
       `快照 ${entry.repository}/${entry.name} 的 frontmatter 必须带 name: ${entry.name}，否则 provider 不发现它`)
     assert.ok(front && /^description: \S/m.test(front[1]), `快照 ${entry.name} 的 frontmatter 必须带 description`)
   }
-  // 留在快照里当材料、但不进可选清单的三类：接管会话路由的编排 skill、自带报告输出口、自带出图。
   for (const excluded of ['full-report', 'report-generator', 'chart-master', 'research-bundle']) {
     assert.ok(!SELECTED_SKILL_CATALOG.some(({ name }) => name === excluded),
       `${excluded} 与 Capital 的既有契约冲突（路由 / 报告交付 / render_chart），不得进入 catalog`)
   }
-  // trading-skills 排除的是另外两类，同一族但形态新：券商 API 执行面（在对话里采集凭据、真实下单）、
-  // 上游自己按 "Workflow routing" 接管会话路由的编排 skill。**不含**给出仓位数字或持仓动作的那些颗——
-  // 本插件不收的是执行面，不是正文里的结论形状（判据见 docs/dev/selected-skills.md §8.6 第 7 条）。
-  // 逐条理由见 selected-skills/trading-skills/UPSTREAM.md；etoro 连发布包都不进（同目录 .npmignore）。
   for (const excluded of ['etoro', 'pre-trade-check']) {
     assert.ok(!SELECTED_SKILL_CATALOG.some(({ name }) => name === excluded),
       `${excluded} 与 Capital 的既有契约冲突（下单执行面 / 会话路由），不得进入 catalog`)
   }
-  // 第六颗（A 股 63 颗）排除的是另外两类：正文本身就是第二道取数入口（服务商工具名表 + 模式开关）、
-  // 元技能与上游自标的 alias（在本插件里再造一条 skill 生产线）。同样**不含**"给买卖方向与仓位"那一类。
-  // 逐条理由见 selected-skills/claude-for-financial-services-cn/UPSTREAM.md；四份 MCP 取数服务端连发布包都不进。
   for (const excluded of ['china-market-data', 'china-skill-creator', 'china-dcf-model']) {
     assert.ok(!SELECTED_SKILL_CATALOG.some(({ name }) => name === excluded),
       `${excluded} 与 Capital 的既有契约冲突（第二道取数入口 / 会话路由与 skill 生产线），不得进入 catalog`)
   }
-  // 第七颗（GAJETOso/financeskills，48 颗企业会计与公司金融）排除的 40 颗走的是**资产类别与领域**，
-  // 不是执行面：本插件不涉及加密资产，也不做个人理财与家庭报税；其余是编制视角的会计作业
-  // （总账、合并、结账、对账）与内部审计 / 司库 / FP&A 场景，使用者是证券研究者不是记账的人。
-  // 逐条理由见 selected-skills/financeskills/UPSTREAM.md；它的 scripts/ 与 evals/ 连发布包都不进。
   for (const excluded of ['crypto-accounting', 'personal-budgeting', 'tax-planning']) {
     assert.ok(!SELECTED_SKILL_CATALOG.some(({ name }) => name === excluded),
       `${excluded} 超出本插件的资产类别与服务范围（加密资产 / 个人理财 / 家庭报税），不得进入 catalog`)
   }
-  // catalog 身份冲突检查：多颗快照允许同名 skill，但 key 与 name 必须各自唯一，否则 provider 的
-  // enabled 集合与设置里的开关都会指错东西。
+  // Catalog keys and names must stay globally unique even when snapshots reuse a skill name.
   for (const field of ['key', 'name']) {
     const values = SELECTED_SKILL_CATALOG.map((entry) => entry[field])
     assert.equal(new Set(values).size, values.length, `catalog 的 ${field} 有重复`)
   }
 
-  // skills/ 必须随包分发：preset 目录已在 package.json 的 files 里。
+  // skills/ ships with the package: the preset dir is already listed in package.json files.
   assert.ok(pkg.files.includes('preset'), 'package.json 的 files 必须包含 preset（skills/ 在其中）')
-  // selected-skills 按仓库逐个登记，不是整目录：新接一份快照忘了加这一行时，装出去的包里 catalog
-  // 仍有条目、SKILL.md 却不在。这里比 npm pack 那侧的逐文件断言更早一步点名缺哪颗仓库。
+  // Catalog entries without a packaged repository are named earlier than npm pack checks.
   for (const repository of new Set(SELECTED_SKILL_CATALOG.map(({ repository }) => repository))) {
     assert.ok(pkg.files.includes(`selected-skills/${repository}`),
       `package.json 的 files 缺 selected-skills/${repository}（catalog 登记了它的 skill）`)
@@ -357,9 +326,7 @@ test('skills：内置 skills 由组合行承载，selected skill 只注册到 Ca
 })
 
 test('skills：协议与任务 skill 文件存在且 frontmatter 合法，persona 指向它们', () => {
-  // 名单从目录现算。写死名单在拆册之后就是"每加一册都要回来补一行"，漏补的表现是新册
-  // 完全不受检（frontmatter 缺 name 时 provider 只 warn 一行就跳过，卡片能勾、会话里不出现）。
-  // 被 catalog / provider / persona 按名字引用的那几颗必须真实在场，所以另加一条正向断言。
+  // Discover skill directories; referenced catalog names must also exist.
   const onDisk = readdirSync(SKILL_DIR)
     .filter((entry) => existsSync(`${SKILL_DIR}${entry}/SKILL.md`))
     .sort()
@@ -371,8 +338,7 @@ test('skills：协议与任务 skill 文件存在且 frontmatter 合法，person
     const file = `${SKILL_DIR}${name}/SKILL.md`
     assert.ok(existsSync(file), `缺少 skill 文件：skills/${name}/SKILL.md`)
     const text = readFileSync(file, 'utf8')
-    // `\r?` 不是装饰：仓库没有 .gitattributes 前，Windows 工作区拿到的是 CRLF 文件，
-    // 写死 `\n` 的正则匹配不上，症状是"skill 没有 frontmatter"——指向错的文件而不是真原因。
+    // Accept CRLF; a fixed `\n` pattern falsely reports missing frontmatter on Windows.
     const front = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/)
     assert.ok(front, `skills/${name}/SKILL.md 必须有 YAML frontmatter`)
     assertMatches(front[1], new RegExp(`^name: ${name}$`, 'm'), `frontmatter 的 name 必须是 ${name}`)
@@ -388,10 +354,10 @@ test('skills：协议与任务 skill 文件存在且 frontmatter 合法，person
   assertRule(MAIN_PERSONA, /实际持仓或投资组合复盘时先加载 skill capital-portfolio-review/)
   assertRule(MAIN_PERSONA, /自选股不等于持仓/)
   assertRule(MAIN_PERSONA, /重叠请求以主问题为准/)
-  // 载荷示例与 JSON 协议必须已经迁出 persona。
+  // Payload examples and JSON protocol must live outside persona.
   assertNoRule(MAIN_PERSONA, /"type":\s*"data_request"/, '主 persona 不应再内联 data_request JSON 示例')
   assertNoRule(MAIN_PERSONA, /"type":\s*"profile_request"/, '主 persona 不应再内联 profile_request JSON 示例')
-  // 组合文件只做接线：设计理由住在同目录 README.md（不会进 skill 目录、也不注入上下文）。
+  // Composition file contains wiring only; rationale stays in its README.
   const presetReadme = `${SKILL_DIR}../README.md`
   assert.ok(existsSync(presetReadme), 'preset 目录必须有 README.md 承接设计理由')
   assertMatches(readFileSync(presetReadme, 'utf8'), /isolate|realm/, 'preset README 应说明 realm 纪律')
@@ -452,15 +418,12 @@ test('capital-portfolio-review：用户持仓不等于自选股，快照不等�
 })
 
 test('capital-web-evidence：WAF 挑战型站点如实报错并改走 Wind（2026-09 实测教训）', () => {
-  // §7 抓取与失败处置随拆分住在第二册；规则本身一字未动，只是册名变了。
   const text = readFileSync(`${SKILL_DIR}capital-web-evidence/SKILL.md`, 'utf8')
-  // scio.gov.cn 实测：HTTP 521 + X-Via-Jsl + __jsluid_h，正文是裸 <script> 挑战，
-  // 第二阶段是 24KB 混淆脚本（需要 window/document）。规则落在 skill，不占 persona。
+  // WAF challenge signatures live in the skill, never in persona.
   assertRuleAny(text, [/X-Via-Jsl/, /加速乐/], 'skill 必须给出 WAF 挑战型站点的识别特征')
   assertRuleAny(text, [/__jsluid_h/, /__jsl_clearance/], 'skill 必须给出加速乐挑战的 cookie/脚本特征')
   assertRuleAny(text, [/不重试、不尝试绕过/, /重试无用/], 'skill 必须禁止对 WAF 挑战重试或绕过')
   assertRuleAny(text, [/改走 Wind/, /wind_docs_announcements/], 'skill 必须把 WAF 站点导向 Wind 取官方文件')
-  // 2026-09 实测缺陷：7 次失败的抓取在会话日志里全是 isError:false，UI/模型都当成成功。
   assertRuleAny(text, [/工具错误/, /isError/], 'skill 必须写明抓取失败以工具错误（isError）返回')
   assertRuleAny(text, [/不要把它当成抓取成功/, /不得编造标题或正文/], 'skill 必须禁止把失败当成功')
 })
@@ -469,8 +432,7 @@ test('分流判据：进结论的数字走 collector、叙事文本走 retriever
   const orchestration = readFileSync(`${SKILL_DIR}capital-orchestration/SKILL.md`, 'utf8')
   const data = DATA_PROTOCOL
   const web = WEB_PROTOCOL
-  // 两面失败的样子根本不同：collector 给响亮错误码，retriever 是抓到什么算什么。判据若只写
-  // "像不像数据"，事后迁移等于重写契约，所以四问与终判据都必须在委派前问得出来。
+  // Ownership must be decidable before delegating: collector fails with a loud code, retriever returns whatever it fetched.
   assertRule(orchestration, /终判据是\*\*错法\*\*而不是形状/, '路由表必须给出"按错法判归属"这条终判据')
   assertRule(orchestration, /凡要写进用户结论的数字，一律委派 `data_collector`/, '路由表必须把进结论的数字锁给 collector')
   assertRuleAny(orchestration, [/每行同构、可分页/, /同参数能复现出同形状/], '路由表必须问得出可复现性')
@@ -481,14 +443,14 @@ test('分流判据：进结论的数字走 collector、叙事文本走 retriever
   assertRuleAny(web, [/花积分的/, /免费能力能不能覆盖/], 'retriever 必须写明 Wind 积分只在免费源覆盖不了时才花')
 })
 
-test('capital-generation-scope 行：插件提供的会话级服务必须全部进 isolate realm', () => {
-  const scopeRow = rowById('capital-generation-scope')
-  assert.ok(scopeRow, 'preset 必须有 capital-generation-scope 组行')
+test('collector 的 capital-generation-scope：会话级服务必须全部进 isolate realm', () => {
+  const collector = allPresets().find((preset) => preset?.config?.id === ROLE_PRESET_IDS.collector)
+  const scopeRow = (collector?.config?.plugins ?? []).find((row) => row?.id === 'capital-generation-scope')
+  assert.ok(scopeRow, 'collector preset 必须有 capital-generation-scope 组行')
   assert.equal(scopeRow.name, 'cordis:group')
   assert.equal(scopeRow.group, true)
   const isolate = scopeRow.isolate ?? {}
-  // 插件在 apply 里 ctx.provide 的每个进程级服务都必须在这里声明，
-  // 否则切换 preset 会因 process-global service 被拒（datasetStore 曾漏声明）。
+  // Every process-level service ctx.provide()d in apply() must be declared here, or switching presets rejects it.
   for (const service of ['dataCollectorHub', 'datasetStore']) {
     assert.equal(isolate[service], true, `isolate 必须声明 ${service}`)
   }
@@ -522,21 +484,19 @@ test('主 persona：数据调度纪律——通过 list_agents + send_message �
   assertRule(MAIN_PERSONA, /# DATA COORDINATION/)
   assertRule(MAIN_PERSONA, /list_agents/)
   assertRule(MAIN_PERSONA, /send_message/)
-  // 实测教训：工具"可见"不等于可直调——工具层只放行 delegated child。
   assertRuleAny(MAIN_PERSONA, [/工具可见性不是权限隔离/, /工具层会拒绝非 delegated child/], '主 persona 需说明数据工具虽可见但只有 delegated child 能调用')
-  // 载荷契约（data_request / profile_request / dataset_ready / profile_failed 等）住在
-  // skill capital-data-protocol，主 persona 只需指向它——载荷名本身在 junior persona 与 skill 里断言。
+  // The payload contract lives in skill capital-data-protocol; persona only points at it.
   assertRuleAny(MAIN_PERSONA, [/capital-data-protocol/], '主 persona 必须指向数据载荷契约（skill capital-data-protocol）')
   assertRuleAny(MAIN_PERSONA, [/指示 data_collector/, /统一经 data_collector/], '主 persona 需说明数据请求统一经 data_collector')
   assertRule(MAIN_PERSONA, /source_label/)
   assertRule(MAIN_PERSONA, /capability/)
   assertRule(MAIN_PERSONA, /captured_at/)
-  // 主 Agent 协议只描述需求：委派消息不带内部数据源键名，回传只收 DatasetRef
+  // Delegation messages describe needs only: no internal source keys, and the return is a DatasetRef.
   assertRule(MAIN_PERSONA, /不带.*内部.*键名/)
   assertRule(MAIN_PERSONA, /DatasetRef/)
   assertRule(MAIN_PERSONA, /记入委派清单/)
   assertRule(MAIN_PERSONA, /list_capabilities/)
-  // 实测教训：主 Agent 不能直读 Dataset；所有内容和基础统计都必须委派 data_junior 使用 query_dataset。
+  // The main Agent never reads a Dataset: content and basic stats go through data_junior's query_dataset.
   assertRule(MAIN_PERSONA, /看内容或基础统计.*data_junior/)
   assertRuleAny(MAIN_PERSONA, [/绝不直接调用 Dataset 系列工具/, /禁止直调 Dataset 工具/], '主 persona 必须禁止直调 Dataset 系列工具')
   assertRuleAny(MAIN_PERSONA, [/data_analyst 尚未/, /data_analyst 未启用/], '主 persona 需说明 data_analyst 不可用')
@@ -545,38 +505,32 @@ test('主 persona：数据调度纪律——通过 list_agents + send_message �
   assertRule(MAIN_PERSONA, /媒体转述旁证/)
   assertRule(MAIN_PERSONA, /不得冒充行情证据/)
   assertRuleAny(MAIN_PERSONA, [/不得用网页数字/, /网页数字只能标/], '主 persona 需限制网页数字的使用方式')
-  // 实测教训：回传结构化数据按原样引用（防转写错位）、被唤醒后不重复输出
+  // Returned structured data is quoted verbatim; nothing is re-output after an answer.
   assertRule(MAIN_PERSONA, /按原样引用/, '主 persona 应要求回传数据按原样引用')
   assertRule(MAIN_PERSONA, /不(再)?重复输出/, '主 persona 应禁止已答复后的重复输出')
   assertRuleAny(MAIN_PERSONA, [/所有 Agent 消息一律禁止携带完整原始 rows/, /禁止任何消息携带完整原始 rows/], '主 persona 应禁止原始 rows 进消息')
-  // 人设是纯指令：不出现框架内部机制词（官方 / DSH / exec.agent）
   assertNoRule(MAIN_PERSONA, /官方|DSH|exec\.agent/, '主 persona 不应出现框架术语')
-  // 走偏产物必须消失：无 requester_agent_id 传参（协议字段）、无订阅机制、无 request_id 对账协议
+  // Drifted artefacts stay gone: requester_agent_id param, subscription mechanism, request_id reconciliation.
   assertNoRule(MAIN_PERSONA, /"requester_agent_id"/)
   assertNoRule(MAIN_PERSONA, /subscribe_data|unsubscribe_data/)
   assertNoRule(MAIN_PERSONA, /按 request_id 对账/)
   assertNoRule(MAIN_PERSONA, /get_request_status/, '主 persona 不应再引用已删除的 get_request_status')
-  // data_key、旧缓存工具与旧缓存语义不得出现在任何模型可见协议
   assertNoRule(MAIN_PERSONA, /data_key|list_schemas|get_latest|from_cache/, '主 persona 不应包含 data_key/旧缓存协议')
 })
 
 test('主 persona：图表由 data_junior 出品——主 Agent 不出图、不在正文罗列图表文件', () => {
-  // 2026-09-17 设计修订：主 Agent 不再持有 render_chart，final_report 整条链路删除。
-  // 2026-09-18 设计修订：呈现改走官方 deliverables/presented（交付行），内嵌卡片通道移除。
   assertRuleAny(MAIN_PERSONA, [/图表由 data_junior 的可视化 gate 统一出品/, /图表由 data_junior/], '主 persona 必须写明图表由 data_junior 出品')
   assertRuleAny(MAIN_PERSONA, [/你不画图/, /主 Agent 不出图/, /不直接出图/], '主 persona 必须写明主 Agent 不出图')
   assertRuleAny(MAIN_PERSONA, [/不在正文里罗列图表文件/, /不要?在正文里罗列/, /也不要罗列图表文件/], '主 persona 必须禁止在正文罗列图表文件')
-  // 呈现位置的说法必须与当前实现一致（旧说法"收尾卡片"已随卡片通道移除，不能再出现）。
+  // Presentation wording must match the current delivery-line implementation.
   assertRuleAny(MAIN_PERSONA, [/图表会在本轮答复后的「交付」行里自动出现/, /「交付」行/, /交付行/], '主 persona 必须说明图表在交付行呈现')
   assertNoRule(MAIN_PERSONA, /收尾卡片|本轮答复下方的卡片/, '卡片通道已移除，persona 不得再承诺"收尾卡片"')
   assertRuleAny(MAIN_PERSONA, [/正文不要提图表/, /不要在正文提图表/], '主 persona 必须禁止正文提图表本身（用户口径：不提，自己看）')
   assertRuleAny(MAIN_PERSONA, [/图表是呈现不是分析/, /呈现不是分析/], '主 persona 需说明图表是呈现不是分析')
   assertRuleAny(MAIN_PERSONA, [/不用图推断数字/, /不要用图去推断数字/], '主 persona 需禁止用图推断数字')
-  // 已删除的能力不得以任何形式复活
   assertNoRule(MAIN_PERSONA, /final_report|capital-final-report-protocol/, '主 persona 不应再引用已删除的 final_report 链路')
   assertNoRule(MAIN_PERSONA, /render_chart/, '主 persona 不应再引用 render_chart（主 Agent 已无此工具）')
   assertNoRule(MAIN_PERSONA, /present 声明 html_path/, '主 persona 不应再要求 present 图表文件')
-  // 图表协议细节（kind、错误码、下采样口径）住在 skill capital-chart-protocol，不在 persona。
   assertNoRule(MAIN_PERSONA, /chart_field_not_found|chart_spec_invalid|candlestick/, '图表协议细节应进 skill capital-chart-protocol')
 })
 
@@ -590,25 +544,17 @@ test('主 persona：预热与回合纪律——每会话一个 dc、等待期不
 })
 
 test('主 persona：最终结论前对账结算通知——排序规则，不等于任务完成', () => {
-  // 真机会话 01d6197b：data_junior 业务回传先到、结算通知约 2ms 后到，结论写在 step 1、
-  // 结算回执追加在同轮 step 2 —— 结论被尾部回执分割。修法是"对账"而不是猜轮号：
-  // DSH 没有"最终轮"概念（docs/dev/chart-delivery-events.md §6.3），但收齐最后一次交互后的全部结算通知后，
-  // 就不可能再有新通知到达，结论那一步必然是最后一步。
+  // No official "final turn" exists: once every settlement notice is in, the next step must be the final one.
   assertRuleAny(MAIN_PERSONA, [/写最终结论前对账/, /结论前先对账/], '主 persona 必须要求写最终结论前对账结算通知')
   assertRule(MAIN_PERSONA, /缺一条本轮只写等待行/, '对账不齐时本轮只写等待行，结论留到收齐那一步')
   assertRule(MAIN_PERSONA, /重新对账/, '结论之后又唤醒子 Agent 必须重新对账')
-  // 与 waiting_data 语义的边界：对账只约束顺序，绝不允许被读成完成判据。
+  // Reconciliation orders output; it is not a completion signal.
   assertRuleAny(MAIN_PERSONA, [/结算通知只用于排序/, /结算.*只用于排序/], '新规则必须写明结算通知只用于排序')
   assertRuleAny(MAIN_PERSONA, [/仍不等于任务完成/, /仍不等于完成/], '排序规则不得被读成完成判据')
 })
 
 test('主 persona + skill：对账必须是逐行产物（结算对账表），✗ 只由结算通知翻正', () => {
-  // 真机会话 cst7n9j3 turn 11：规则上一条已存在，仍被跳过——主 Agent 在 reasoning 里写
-  // "All three roles done" 就开始综合，把 data_junior 的回传正文（"7/7 profile 完成、
-  // pending = 0"）当成完成证据。实测回传先到、结算通知 14s 后到，结论本身生成 156s，
-  // 于是结算落在结论之后、框架只能再开一个 step 投递（step 边界 inbox 非空不结束 turn），
-  // 结论被切成两条并追加一段"无新增信息"。修法：把沉默的心算改成必须逐行写出来的表，
-  // 漏计表现为自相矛盾的行。细则住 skill capital-orchestration §6.1，persona 只留判据。
+  // Reconciliation must be an explicit per-role table (format lives in capital-orchestration); silent mental checking gets skipped.
   assertRule(MAIN_PERSONA, /逐行核对/, '对账必须是逐行的产物，不能是一句"都齐了"的印象')
   assertRuleAny(MAIN_PERSONA, [/回传正文再像完成也不算/, /回传正文.*不算 ✓/], '主 persona 必须写明回传正文不构成结算 ✓')
   assertRuleAny(MAIN_PERSONA, [/细则见 skill capital-orchestration/, /见 skill capital-orchestration/], '对账表格式必须指向 skill capital-orchestration')
@@ -627,44 +573,36 @@ test('主 persona：web_retriever 编排与检索路由', () => {
   assertRule(MAIN_PERSONA, /web_retriever/)
   assertRule(MAIN_PERSONA, /send_message/)
   assertRuleAny(MAIN_PERSONA, [/不再自行调用任何网络检索/, /禁止自行调用任何网络检索/, /主 Agent禁止自行检索/], '主 persona 应禁止主 Agent 自行检索')
-  // 2026-09-24 review：禁直连清单当时写 `web_retriever_*` 通配，工具改名后一个都不匹配 = 禁令名存实亡。
-  // 修法不是把 13 个名字再抄一遍（那只是把漂移从"文案"搬到"文案+名单"），而是：
-  // ① 十三个插件工具由 `RETRIEVAL_DENIED_TOOLS` 从根 Agent 工具表里结构摘除（下面的 deny 用例核验覆盖面）；
-  // ② persona 只点名**宿主**给的 web_search / web_fetch（那两个不由本插件注册，摘不到就得靠文案）。
+  // Structure removes plugin tools; persona only names host web_search / web_fetch.
   assertRule(MAIN_PERSONA, /web_search/, '主 persona 应点名宿主 web_search')
   assertRule(MAIN_PERSONA, /web_fetch/, '主 persona 应点名宿主 web_fetch')
   assert.ok(!/[a-z0-9_]{4,}_\*/.test(MAIN_PERSONA), '主 persona 不得出现 `工具前缀_*` 式通配（重命名后会静默失配）')
   assertRuleAny(MAIN_PERSONA, [/已消歧的标的与完整代码/, /已消歧标的与完整代码/], '主 persona 委派 web_retriever 应带上标的与代码（Wind 查询要素依赖）')
   assertRuleAny(MAIN_PERSONA, [/一律委派/, /外部检索只经/], '主 persona 应把外部检索收敛到委派')
-  // `ocr` 是根侧唯一保留的出网口子（只关 url 形态），人设必须说清哪一侧能自己用。
+  // OCR is the one root-side web exception, restricted to URL form.
   assertRule(MAIN_PERSONA, /本地 PDF \/ 图片可直接用 ocr 解析/, '主 persona 必须写明本地文档解析是主 Agent 的正当入口')
   assertRule(MAIN_PERSONA, /外部链接仍走委派/, '主 persona 必须把外部 PDF 链接留在委派那一侧')
   assertRuleAny(MAIN_PERSONA, [/并行委派/, /多需求可并行/, /可并行/], '主 persona 应说明多需求可并行委派')
 })
 
 test('subagent_web_retriever 行：只允许核心网页工具并包含官方域名核验规则', () => {
-  assert.equal(retrieverRow.name, '@deepseek-ai/dsh-tool-subagent')
-  assert.equal(retrieverRow.config.provider, 'spawn')
-  assert.equal(retrieverRow.config.toolName, 'subagent_web_retriever')
-  assert.equal(retrieverRow.config.backgroundMode, 'continuable')
-  assert.deepEqual(retrieverRow.config.toolFilter?.allow, [
-    'send_message', 'skill', 'anysearch_search', 'web_retriever_fetch', 'ocr', 'wind_docs_announcements', 'wind_docs_news',
-    // 具名来源查询面（provider + operation 命名）：缺一个，对应的来源在子 Agent 手里就是"看不见的能力"。
-    'cls_telegraph', 'wscn_lives', 'cninfo_irm', 'sseinfo_qa',
-    'eastmoney_724', 'eastmoney_stock_news', 'eastmoney_reports', 'sina_reports', 'ths_eps_forecast',
-    'resolve_data_time_range',
-  ])
-  // persona 只留每轮硬规则；检索法则、回传格式与官方域名核验清单在 skill capital-web-protocol。
+  assertDelegationRowShape(retrieverRow, 'subagent_web_retriever', ROLE_PRESET_IDS.retriever)
+  // Retriever surface: search tools, named sources, OCR, time tools.
+  assert.deepEqual(capitalFace(ROLE_PRESET_IDS.retriever), [
+    'anysearch_search', 'cls_telegraph', 'cninfo_irm', 'eastmoney_724', 'eastmoney_reports', 'eastmoney_stock_news',
+    'get_local_datetime', 'ocr', 'resolve_data_time_range', 'sina_reports', 'sseinfo_qa', 'ths_eps_forecast',
+    'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'wscn_lives',
+  ], 'web_retriever 的组合工具面必须恰好是这些：多挂一行就是越权，少挂一行等于能力消失')
+  // Persona keeps only per-turn hard rules; retrieval tactics, return format and the domain whitelist live in the skill.
   for (const pattern of [/金融数据分析师（web_retriever）/, /anysearch_search/, /web_retriever_fetch/, /先定来源再动手/, /不要等 anysearch 空转后才想起/, /禁止把搜索结果全部 fetch/, /一次只能提交一个 URL/, /search_engine_provider/, /Wind 三要素/, /public_document/, /wind_docs_announcements/, /wind_docs_news/, /recent_retrievals/, /provider_tally/, /不得重试 wind/, /每条证据都要有来源/, /不得编造链接/, /无来源的信息不得作为证据/, /verified_official 只能来自/, /verified_official/, /unverified/, /not_verified/, /不调用官方名称为 web_search 或 web_fetch/, /不索取或保存.*API Key/, /resolve_data_time_range/, /skill capital-web-protocol/]) {
     assertRule(RETRIEVER_PERSONA, pattern, `web_retriever persona 缺少要点: ${pattern}`)
   }
-  // 具名来源面的硬规则：九个工具名都要点名（否则模型不知道有这个能力），
-  // 且必须写明"确定/可复现 + 该翻页就翻到没有 + 空结果是真事实"与深沪不可互换。
+  // Named-source hard rules: all nine tool names, plus reproducibility, paging-to-empty and the SSE/SZSE split.
   for (const pattern of [
     /cls_telegraph/, /wscn_lives/, /cninfo_irm/, /sseinfo_qa/,
     /eastmoney_724/, /eastmoney_stock_news/, /eastmoney_reports/, /sina_reports/, /ths_eps_forecast/,
     /确定、可复现的结果集/, /空结果是真事实/, /深沪不可互换/, /北交所两边都没有/,
-    // `ocr`：正文形态 + "整篇计费" + "按 doc_id 取回"三条都在（少一条模型就会以为翻页省钱）。
+    // ocr trio in persona: PDF body goes to ocr, billing is whole-document, retrieval is by doc_id.
     /正文是 PDF 交 ocr/, /整篇计费/, /doc_id 用 pages\/query 取回/,
     /具名来源都是媒体或互动平台.*不得标 verified_official/,
   ]) {
@@ -672,10 +610,7 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
   }
   assertNoRule(RETRIEVER_PERSONA, /web_begin|web_latest|web_material|web_save|web_engines|wr_status|time_budget|from_cache/)
 
-  // 外迁到 skill 的要点：一条都不能丢，只是换了承载面。
-  // 检索协议现已拆成两册（第一册 §1–§4「去哪取、怎么调」，第二册 §5–§8「怎么标成证据」）：
-  // 这张清单问的是「这条规则还在检索协议里吗」，所以按整族合起来查（WEB_PROTOCOL 只有一份实现）；
-  // 归属则由下面的逐册点名兜住。
+  // Rules migrated into the two protocol volumes are checked across the family; per-volume ownership is pinned below.
   const webProtocol = WEB_PROTOCOL
   for (const pattern of [
     /搜索收敛（经验法则，不是硬性配额）/, /5 次以内就该收敛/, /偶尔超过 5 次不是错误/,
@@ -683,17 +618,15 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
     /链接只放一条最权威的/, /不得编造链接/, /每条证据都要有来源/, /无来源的信息不得作为证据/,
     /已核验官方白名单/, /候选\/未核验域名/, /verified_official/, /unverified/, /not_verified/,
     /不得重试 wind/, /recent_retrievals/, /provider_tally/, /public_document/,
-    // 具名来源面的协议：九个工具名 + 两类工作面的区分 + 空结果/深沪/status/note/截断口径。
-    // 这些是"检索纪律 vs 来源查询纪律"的差别所在，掉了就会退化成"搜不到就换来源重搜"。
+    // Named-source protocol: the two work surfaces, empty results, paging, status/note/truncation wording.
     /cls_telegraph/, /wscn_lives/, /cninfo_irm/, /sseinfo_qa/,
     /来源查询/, /该翻页就翻到没有/, /空结果是真事实/, /深沪不可互换/, /北交所两个平台都没有/,
     /status.*answered.*unanswered/, /回执 `note` 必须读/, /1200 字符/, /INVALID_RESPONSE/, /NOT_FOUND/,
-    // 输出预算 / 链接丢弃 / 代码写法 / TIMEOUT 语义：四条都是"模型会误读回执"的形态，必须写在 skill。
+    // Output budget, dropped links, code shape and TIMEOUT semantics: each is a receipt the model misreads.
     /整段丢掉/, /真放进回执的条数/, /省略其后/, /归一化成同一个查询/, /`code=TIMEOUT` 是上游慢/,
-    // 本地直连回退：来源标注、能力边界与"不算重试"三条硬约束（Task 8）。
+    // Local direct fallback: source labelling, capability limits, and "this is not a retry".
     /local-http/, /`via`/, /truncated/, /本机直连/, /官网直抓/, /PDF/, /不算.*重试/,
-    // `ocr`（第 8 节）：四条"模型一定会误读"的形态——pages 省不了钱、pending 不是失败、
-    // doc_id 是 opaque、PDF 链接不等于已读到正文。掉一条就是重复计费或伪造来源。
+    // ocr call shapes: pages saves no money, pending is not failure, doc_id is opaque, a PDF link is not its content.
     /四种调用形态/, /`pages` 不省钱/, /status: 'pending'` 不是失败/, /不要重传 `url`/,
     /`doc_id` 是 opaque 引用/, /一次最多 8 页/, /不下载、不内联/, /标页号/,
     /不得把那条 PDF 链接本身当成/, /OCR 解析/, /`provider_tally`）里\*\*记一次/,
@@ -701,8 +634,7 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
   ]) {
     assertRule(webProtocol, pattern, `检索协议缺少要点: ${pattern}`)
   }
-  // 归属点名：上面那张清单只问"还在不在协议里"，这四条钉"必须在哪一册"。
-  // 写错册不会让清单变红，只会让 web_retriever 加载了那一册却拿不到那条规则。
+  // Ownership: these four must sit in a named volume, not merely somewhere in the family.
   const protocolVolume1 = readFileSync(`${SKILL_DIR}capital-web-protocol/SKILL.md`, 'utf8')
   const protocolVolume2 = readFileSync(`${SKILL_DIR}capital-web-evidence/SKILL.md`, 'utf8')
   for (const pattern of [/来源边界/, /搜索收敛/, /Wind 查询要素/, /空结果是真事实/]) {
@@ -716,27 +648,28 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
 test('主 persona：每轮先查 direct children，按角色标签复用，确认无匹配才创建', () => {
   assertRuleAny(MAIN_PERSONA, [/每次新的用户请求或新一轮任务都必须先做一次委派预检/, /每轮预检/], '主 persona 必须写明每轮委派预检')
   assertRule(MAIN_PERSONA, /调用任何创建类?工具/)
-  // 委派工具清单：三个专用角色工具 + 通用 subagent 都必须点名，否则模型会拿通用工具兜底。
-  for (const tool of ['subagent_data_collector', 'subagent_data_junior', 'subagent_web_retriever', 'subagent']) {
+  // All three specialized delegation tools must be named in persona; an unnamed one effectively does not exist.
+  for (const tool of ['subagent_data_collector', 'subagent_data_junior', 'subagent_web_retriever']) {
     assertRule(MAIN_PERSONA, new RegExp(tool), `主 persona 应点名委派工具 ${tool}`)
   }
   assertRule(MAIN_PERSONA, /list_agents\(scope="children"\)/)
   assertRule(MAIN_PERSONA, /上一轮空?的?列表不能代替本轮/)
   assertRule(MAIN_PERSONA, /data_collector、data_junior、web_retriever/)
-  // 实测教训：长上下文里凭记忆复述 agent_id 会抄错甚至错投。官方 durable 注册表的
-  // 正确用法是——id 只从新鲜的 list_agents 输出复制，用前 freshly 查一次。
+  // agent_id is copied from a fresh list_agents output, never recalled from context.
   assertRule(MAIN_PERSONA, /agent_id.*从最近一次 list_agents.*复制/)
   assertRule(MAIN_PERSONA, /发送前核对 id、label.*三者对应/)
   assertRuleAny(MAIN_PERSONA, [/description 必须原样使用对应角色标签/, /description 必须等于角色标签/], '主 persona 应要求 description 用角色标签')
   assertRuleAny(MAIN_PERSONA, [/历史 child 的 label 即使仍?是旧(任务)?标题/], '主 persona 应说明历史 child 的 label 可沿用')
   assertRule(MAIN_PERSONA, /必须沿用/)
   assertRule(MAIN_PERSONA, /不得因(为)? ?label 非标准而新建/)
-  assertRule(MAIN_PERSONA, /running.*idle.*ready.*任一状态/)
+  // list_agents reports only running / inactive; idle and ready are states the model could never match.
+  assertRule(MAIN_PERSONA, /running 或 inactive.*立即 ?send_message/, '主 persona 的复用判据要跟随两态词汇')
+  assertNoRule(MAIN_PERSONA, /\bidle\b|\bready\b/, '主 persona 不得再写 0.2.0 的 idle / ready 状态名')
   assertRule(MAIN_PERSONA, /立即.*send_message/)
   assertRuleAny(MAIN_PERSONA, [/禁止因空闲.*(再建一个|创建第二个)/, /不得因为空闲.*创建第二个/], '主 persona 应禁止同角色重复创建')
   assertRuleAny(MAIN_PERSONA, [/(只有|仅当)本轮 list_agents 明确(没有|无)该角色/], '主 persona 应把创建限定为"本轮查无该角色"')
   assertRule(MAIN_PERSONA, /subagent_data_collector \/ subagent_data_junior \/ subagent_web_retriever/)
-  assertRule(MAIN_PERSONA, /禁止(使用)?(用)?通用 subagent/)
+  assertRule(MAIN_PERSONA, /没有通用委派出口/, '主 persona 必须写明只有专用委派出口（通用 subagent 已随通用 child 删除）')
   assertRule(MAIN_PERSONA, /durable (id|subagentId)/)
   assertRule(MAIN_PERSONA, /结算通知/)
   assertNoRule(MAIN_PERSONA, /创建前不需要先查 list_agents/)
@@ -744,82 +677,105 @@ test('主 persona：每轮先查 direct children，按角色标签复用，确�
   assertNoRule(MAIN_PERSONA, /第一个需要网页材料.*用 subagent_web_retriever 工具创建并全程复用/)
 })
 
-test('子 Agent 委派行：continuable、persona 覆盖、toolFilter 收敛工具集且允许按需读 skill', () => {
+test('子 Agent 委派行：选对角色 preset，工具面由行组合封闭且允许按需读 skill', () => {
   for (const row of childRows) {
-    assert.equal(row.name, '@deepseek-ai/dsh-tool-subagent')
-    assert.equal(row.config.provider, 'spawn')
-    assert.equal(row.config.backgroundMode, 'continuable', `${row.id} 必须 continuable`)
-    const allow = row.config.toolFilter?.allow
-    assert.ok(Array.isArray(allow), `${row.id} 的 toolFilter.allow 必须存在`)
-    // 子 Agent 默认读不到 skill：restriction 过滤的是**继承层**（全局 + 全部祖先 scope，
-    // 含 preset 层），只豁免"本 scope 自己注册的"工具（dsh-tools view() 的语义）。
-    // 所以要让子 Agent 按需加载协议，唯一开关就是把 skill 显式写进 allow。
-    assert.ok(allow.includes('skill'), `${row.id} 必须允许 skill，否则子 Agent 拿不到协议 skill`)
-    assert.ok(allow.includes('send_message'), `${row.id} 必须能回传`)
-    // 未知工具名会在创建子 Agent 时被 tools.restrict() 拒绝，必须与真实注册名一致。
-    // shell 槽位是唯一的例外：它是 !!js 表达式（按平台解析成 bash / pwsh），
-    // 结构化解析后拿到表达式字符串，所以单独核验"原文里确实是 !!js 表达式"。
-    for (const name of allow) {
-      if (isShellSlot(name)) {
-        assert.ok(COMPOSITION_TEXT.includes(`- !!js "${SHELL_SLOT}"`), `${row.id} 的 shell 槽位必须是 !!js 表达式`)
-        continue
-      }
-      assert.ok(KNOWN_TOOLS.has(name), `${row.id} 的 toolFilter 含未注册工具名：${name}`)
+    assertDelegationRowShape(row, row.config.toolName, row.config.agentPreset)
+    const presetId = row.config.agentPreset
+    const face = capitalFace(presetId)
+    assert.ok(face.length > 0, `${presetId} 一颗本仓工具行都没挂：这一颗角色等于没有能力`)
+    for (const name of face) {
+      assert.ok(KNOWN_TOOLS.has(name), `${presetId} 的组合里出现未注册的工具名 ${name}：行契约与代码已经对不上`)
+    }
+    // Skills are gated by row mounting, not an allow list: without the tool-skill row the named protocol volume never loads.
+    assert.ok(mountsRow(presetId, '@deepseek-ai/dsh-tool-skill'), `${row.id} 必须挂 tool-skill 行，否则子 Agent 拿不到协议 skill`)
+    // The control row buys send_message and also brings interrupt_agent, subtracted by name in role-tool-policy.
+    assert.ok(mountsRow(presetId, '@deepseek-ai/dsh-tool-subagent-control'), `${row.id} 必须挂 control 行才能 send_message 回传`)
+    // Shell rows must be declared as a platform pair; one row alone leaves the other platform without a shell entry.
+    const shellRows = allRowsOf(presetId).filter((row) => /^@deepseek-ai\/dsh-tool-(bash|pwsh)$/.test(row?.name ?? ''))
+    if (shellRows.length > 0) {
+      assert.equal(shellRows.length, 2, `${presetId} 的 shell 行必须成对：只挂一颗等于在另一平台上砍掉这个能力`)
     }
   }
 })
 
-test('通用 subagent 行：必须 deny Capital 数据/出图管线、十四个联网工具、用户自选股与专用角色创建工具', () => {
-  const genericRow = rowById('tool-subagent')
-  assert.ok(genericRow, 'preset 必须有通用 subagent 行')
-  assert.equal(genericRow.name, '@deepseek-ai/dsh-tool-subagent')
-  assert.equal(genericRow.config.toolName, 'subagent')
+test('委派出口只有专用角色：没有通用 subagent，也没有谁自己能出图 / 取数 / 抓网页', () => {
+  // Delegation exits are a positive list: an extra name is the overreach (fail-closed), unlike the old deny list.
+  assert.equal(rowById('tool-subagent'), undefined, '主 preset 里不许再有通用委派行：它是一切越权的入口')
+  assert.ok(!PRESET_TOOLS.includes('subagent'), 'KNOWN_TOOLS 里的 preset 工具名要如实：通用行已删')
 
-  // 2026-09 review 复现：只带 parentSession 的通用 child 能自己 prepare_chart_source
-  // 再 render_chart，绕过 data_junior 的 gate——因为 dsh-subagent 只在配了 toolFilter 时
-  // 才 restrict（dsh-subagent/lib/index.js `if (composition.toolFilter !== void 0)`），
-  // 而 child 用 composeFrom 加入父 Agent 同一份 standing composition，会继承它的全部工具。
-  const deny = genericRow.config.toolFilter?.deny
-  assert.ok(Array.isArray(deny), '通用 subagent 必须显式 deny，否则 child 继承 standing 全部工具、可视化 gate 失效')
-  assert.equal(genericRow.config.toolFilter.allow, undefined, '通用 subagent 只能用 deny 收口，不能改成 allow 白名单（那会砍掉它的通用工具）')
-
-  // deny 也是 tools.restrict()：名字必须真实注册，否则创建通用 child 时报错。
-  for (const name of deny) {
-    if (isShellSlot(name)) {
-      assert.ok(COMPOSITION_TEXT.includes(`- !!js "${SHELL_SLOT}"`), 'shell 槽位必须是 !!js 表达式，否则平台选名不会生效')
+  // Closed set: the root has exactly its four delegation tools, role presets are leaves except junior's chart row.
+  const delegationOf = (preset) => (preset.config.plugins ?? [])
+    .filter((entry) => entry?.name === '@deepseek-ai/dsh-tool-subagent')
+    .map((entry) => entry.config.toolName).sort()
+  for (const preset of allPresets()) {
+    if (preset.config.id === ROOT_PRESET_ID) {
+      assert.deepEqual(delegationOf(preset),
+        ['subagent_data_analyst', 'subagent_data_collector', 'subagent_data_junior', 'subagent_web_retriever'],
+        '主 preset 的委派出口必须恰好是这四颗专用工具')
       continue
     }
-    assert.ok(KNOWN_TOOLS.has(name), `通用 subagent 的 toolFilter.deny 含未注册工具名：${name}`)
+    assert.deepEqual(delegationOf(preset),
+      preset.config.id === ROLE_PRESET_IDS.junior ? ['subagent_visualization_specialist'] : [],
+      `${preset.config.id} 是叶子角色：除 junior 持有出图那一颗外，角色 preset 里不许出现委派行`)
   }
-  for (const name of [
-    SHELL_SLOT,
-    // 文件口（2026-10-15 决策挂上 tool-fs 后补齐）：通用 child 不得读 raw.json、不得写文件。
-    'read', 'write', 'edit',
-    'render_chart', 'prepare_chart_source',
-    'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile',
-    'request_data', 'list_capabilities', 'describe_capability', 'dc_status',
-    // 用户自选股与自报持仓：只有主 Agent 读它。这条 deny 是"仓位不下发子 Agent"的结构件。
-    'get_watchlist',
-    ...NETWORK_TOOLS,
-    // `ocr` 不在 NETWORK_TOOLS 里（主 Agent 刻意保留它的本地形态，见 root-tool-policy.ts），
-    // 但通用 child 连本地形态都不该有：它不是任何角色的正当能力，多一个名字就多一个出网口子。
-    'ocr',
-    'subagent_data_collector', 'subagent_data_junior', 'subagent_visualization_specialist', 'subagent_web_retriever',
-  ]) {
-    assert.ok(deny.includes(name), `通用 subagent 的 child 不得拿到 ${name}`)
+
+  // Family ownership: a tool family may appear only in the listed presets' composition; an extra row is overreach.
+  const owners = {
+    network: [ROLE_PRESET_IDS.retriever],
+    // Root mounting ocr is deliberate: local documents only, outbound URLs gated at the url shape check.
+    'ocr': [ROLE_PRESET_IDS.retriever, ROOT_PRESET_ID],
+    fetch: [ROLE_PRESET_IDS.collector],
+    dataset: [ROLE_PRESET_IDS.junior, ROLE_PRESET_IDS.analyst],
+    chart_issue: [ROLE_PRESET_IDS.junior],
+    chart_render: [ROLE_PRESET_IDS.specialist],
+    watchlist: [ROOT_PRESET_ID],
   }
-  // 出网只有一个入口、用户级私有数据只有一个读者：deny 的覆盖面就是上面这份名单，
-  // 多写名字 = 砍掉通用 child 的正当能力，少写一个 = 通用 child 自己读得到用户的仓位。
-  assert.deepEqual(
-    [...deny].sort(),
-    [SHELL_SLOT, 'read', 'write', 'edit', 'render_chart', 'prepare_chart_source', 'describe_dataset', 'inspect_dataset', 'profile_dataset',
-      'query_dataset', 'write_profile', 'request_data', 'list_capabilities', 'describe_capability', 'dc_status',
-      'get_watchlist',
-      ...NETWORK_TOOLS, 'ocr', 'subagent_data_collector', 'subagent_data_junior', 'subagent_visualization_specialist',
-      'subagent_web_retriever'].sort(),
-    '通用 subagent 的 deny 必须恰好是「数据/出图管线 + 文件口 + 十四个联网工具 + 用户自选股 + 专用角色创建工具 + shell」',
-  )
+  const groups = {
+    network: [...NETWORK_TOOLS],
+    'ocr': ['ocr'],
+    fetch: ['request_data', 'list_capabilities', 'describe_capability', 'dc_status'],
+    dataset: ['describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile'],
+    chart_issue: ['prepare_chart_source'],
+    chart_render: ['render_chart'],
+    // Only the main Agent reads the user's positions.
+    watchlist: ['get_watchlist'],
+  }
+  for (const presetId of [...SURFACE_GATE_PRESETS, ROOT_PRESET_ID]) {
+    const face = capitalFace(presetId)
+    for (const [group, names] of Object.entries(groups)) {
+      for (const name of names) {
+        if (!owners[group].includes(presetId)) {
+          assert.ok(!face.includes(name), `${presetId} 不该有 ${name}（这一族只归 ${owners[group].join(' / ')}）`)
+        }
+      }
+    }
+  }
+  // Host framework rows (fs / ask-user / todo) are row-decided too: roles mount none of them.
+  for (const presetId of SURFACE_GATE_PRESETS) {
+    for (const [rowName, names] of [
+      ['@deepseek-ai/dsh-tool-fs', ['read', 'write', 'edit']],
+      ['@deepseek-ai/dsh-tool-ask-user', ['ask_user_question']],
+      ['@deepseek-ai/dsh-tool-todo', ['todo_write']],
+    ]) {
+      assert.ok(!mountsRow(presetId, rowName), `${presetId} 不该挂 ${rowName}：它带来的 ${names.join(' / ')} 只有主 Agent 能用`)
+    }
+  }
 })
+
+test('行组合指认得出真东西：行名都在行契约里，且没有一颗 preset 还挂单体入口', () => {
+  // A wrong row name only warns at load time: the role silently loses a whole family.
+  const mounted = allPresets().flatMap((preset) => capitalRowsOf(preset.config.id))
+  assert.ok(mounted.length > 0, 'preset 里应存在族行；否则这条结构断言会空转')
+  for (const row of mounted) {
+    assert.ok(row.name in CAPITAL_ROW_TOOLS,
+      `${row.id} 挂了行契约之外的 ${row.name}：新增族行要同时改 test/family-rows.mjs 与 package.json 的 exports`)
+  }
+  for (const preset of allPresets()) {
+    assert.ok(!allRowsOf(preset.config.id).some((row) => row?.name === '@v587d/capital-generation'),
+      `${preset.config.id} 仍挂单体入口：那一行一次带出全部工具（连 hub 与 128 个数据源一起建），工具面就不再是行组合说的算了`)
+  }
+})
+
 
 test('shell 行：平台成对挂载（主 Agent 与 data_junior 共用），且不给后台执行', () => {
   const bashRow = rowById('tool-bash')
@@ -829,28 +785,25 @@ test('shell 行：平台成对挂载（主 Agent 与 data_junior 共用），且
   assert.equal(bashRow.name, '@deepseek-ai/dsh-tool-bash')
   assert.equal(pwshRow.name, '@deepseek-ai/dsh-tool-pwsh')
 
-  // 平台二选一：同一时刻只该有一个 shell 执行器（Windows 上是 pwsh-sandbox）
+  // Exactly one shell executor per platform (Windows runs pwsh-sandbox).
   assertMatches(COMPOSITION_TEXT, /id: tool-bash[\s\S]{0,200}process\.platform === 'win32'/)
   assertMatches(COMPOSITION_TEXT, /id: tool-pwsh[\s\S]{0,200}process\.platform !== 'win32'/)
 
-  // 本 preset 不挂 tool-jobs：给后台执行只会让模型拿到一个永远读不回来的 jobId
   for (const [row, id] of [[bashRow, 'tool-bash'], [pwshRow, 'tool-pwsh']]) {
     assert.equal(row.config?.enableRunInBackground, false, `${id} 必须关掉后台执行（preset 没有 tool-jobs）`)
   }
 
-  // 2026-10-15 决策「开 read、同时保留 bash」：shell 主 Agent 与 data_junior 共用，preset 层
-  // **不得**在这两行上加 deny——preset 层 deny 会把子 Agent 一起砍掉（allow 是交集过滤，加不回来）。
-  // 主 Agent 的 write / edit 收敛在 src/agents/root-tool-policy.ts（ROOT_AGENT_DENIED_TOOLS）。
+  // The preset layer must not deny these rows: a preset deny strips them from children too (allow is an intersection).
   assertNotMatches(COMPOSITION_TEXT, /id: tool-bash[\s\S]{0,80}deny/)
 })
 
-test('tool-fs 行：文件口一颗挂载 read / write / edit（2026-10-15 决策），write / edit 靠闸门拦', () => {
+test('tool-fs 行：本层变体只开 read；写口真正的拦阻住在全局 guard（宿主的 write/edit 删不掉）', () => {
   const fsRow = rowById('tool-fs')
-  assert.ok(fsRow, 'preset 必须挂 tool-fs，否则主 Agent 只能 bash cat 读 skill 分册（2026-10-15 决策新开 read）')
+  assert.ok(fsRow, 'preset 必须挂 tool-fs：这一行决定本层 read 变体（读取上限、以及本层要不要再注册写口）')
   assert.equal(fsRow.name, '@deepseek-ai/dsh-tool-fs')
-  // 不加 config：tool-fs 无配置即全量注册三个名字；工具包内部的 read_image 是条件注册，
-  // 不在本行控制范围（也不许在 deny 里点它的名——名字不在就等于创建子 Agent 失败）。
-  assert.equal(fsRow.config, undefined, 'tool-fs 用默认配置：一行挂全三个名字，别做行级裁剪')
+  // ⛔ This config only replaces the same-named variant: the host's global dsh-tool-fs still registers inherited
+  // write/edit, and registerFsWriteGuard is what actually blocks those writes.
+  assert.deepEqual(fsRow.config, { read: true, write: false, edit: false }, 'tool-fs 的本层变体只开 read；改动要有设计决策')
 })
 
 test('data_junior persona：bash 是纯计算兜底，且禁区/出网纪律必须写明（软约束）', () => {
@@ -866,32 +819,40 @@ test('data_junior persona：bash 是纯计算兜底，且禁区/出网纪律必�
 })
 
 test('子 Agent 按需协议：子 persona 点名的每一册都真实存在，写错名字会静默拿不到契约', () => {
-  // 数据协议拆成三册、检索协议拆成两册之后，这张表同时是"加载矩阵"的登记处：
-  // 谁在什么时刻加载哪一册，只看这里；正文里点名而文件不存在 = 运行时静默失效。
-  for (const [row, skillName] of [
-    [collectorRow, 'capital-data-protocol'],
-    [juniorRow, 'capital-data-profile'],
-    [juniorRow, 'capital-data-query'],
-    [retrieverRow, 'capital-web-protocol'],
-    [retrieverRow, 'capital-web-evidence'],
+  // This table is the load matrix: a volume named in persona but absent on disk fails silently at runtime.
+  for (const [persona, label, presetId, skillName] of [
+    [COLLECTOR_PERSONA, 'data_collector', ROLE_PRESET_IDS.collector, 'capital-data-protocol'],
+    [JUNIOR_PERSONA, 'data_junior', ROLE_PRESET_IDS.junior, 'capital-data-profile'],
+    [JUNIOR_PERSONA, 'data_junior', ROLE_PRESET_IDS.junior, 'capital-data-query'],
+    [RETRIEVER_PERSONA, 'web_retriever', ROLE_PRESET_IDS.retriever, 'capital-web-protocol'],
+    [RETRIEVER_PERSONA, 'web_retriever', ROLE_PRESET_IDS.retriever, 'capital-web-evidence'],
   ]) {
-    assertRule(row.config.persona, new RegExp(`skill ${skillName}`), `${row.id} 的子 persona 必须点名 skill ${skillName}`)
-    assert.ok(existsSync(`${SKILL_DIR}${skillName}/SKILL.md`), `${row.id} 点名的 skill 文件不存在：${skillName}`)
-    assert.ok(row.config.toolFilter.allow.includes('skill'), `${row.id} 未允许 skill，点名也无从加载`)
+    assertRule(persona, new RegExp(`skill ${skillName}`), `${label} 的子 persona 必须点名 skill ${skillName}`)
+    assert.ok(existsSync(`${SKILL_DIR}${skillName}/SKILL.md`), `${label} 点名的 skill 文件不存在：${skillName}`)
+    assert.ok(mountsRow(presetId, '@deepseek-ai/dsh-tool-skill'), `${label} 没挂 tool-skill 行，点名也无从加载`)
   }
 })
 
 test('subagent_data_collector 行：叶子执行器工具边界', () => {
-  const allow = collectorRow.config.toolFilter.allow
-  for (const requiredTool of ['send_message', 'request_data', 'list_capabilities', 'describe_capability', 'dc_status']) {
-    assert.ok(allow.includes(requiredTool), `toolFilter.allow 必须包含 ${requiredTool}`)
-  }
+  assertDelegationRowShape(collectorRow, 'subagent_data_collector', ROLE_PRESET_IDS.collector)
+  // Collector surface: four fetch tools plus two time tools, nothing else.
+  assert.deepEqual(capitalFace(ROLE_PRESET_IDS.collector),
+    ['dc_status', 'describe_capability', 'get_local_datetime', 'list_capabilities', 'request_data', 'resolve_data_time_range'],
+    'data_collector 的组合工具面必须恰好是这六颗')
+  const face = capitalFace(ROLE_PRESET_IDS.collector)
   for (const removedTool of ['get_latest', 'list_schemas', 'get_request_status', 'capability_detail', 'list_schemas_full']) {
-    assert.ok(!allow.includes(removedTool), `toolFilter.allow 不应包含已删除的 ${removedTool}`)
+    assert.ok(!face.includes(removedTool), `角色工具面不应包含已删除的 ${removedTool}`)
   }
-  // 叶子执行器：不应被允许委派/提问/网页/文件操作
-  for (const forbiddenTool of ['interrupt_agent', 'subagent', 'subagent_data_collector', 'ask_user_question', 'todo_write', 'web_search', 'web_fetch', 'anysearch_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'bash']) {
-    assert.ok(!allow.includes(forbiddenTool), `toolFilter.allow 不应包含 ${forbiddenTool}`)
+  // Leaf executor: no delegation / ask-user / todo / shell / file row.
+  for (const [rowName, label] of [
+    ['@deepseek-ai/dsh-tool-subagent', '委派出口'],
+    ['@deepseek-ai/dsh-tool-ask-user', 'ask_user_question'],
+    ['@deepseek-ai/dsh-tool-todo', 'todo_write'],
+    ['@deepseek-ai/dsh-tool-bash', 'bash'],
+    ['@deepseek-ai/dsh-tool-pwsh', 'pwsh'],
+    ['@deepseek-ai/dsh-tool-fs', '文件口'],
+  ]) {
+    assert.ok(!mountsRow(ROLE_PRESET_IDS.collector, rowName), `data_collector 是叶子执行器，不该挂 ${label} 那一行`)
   }
 })
 
@@ -921,12 +882,11 @@ test('data_collector persona：覆盖 Phase 1 数据集协议全部必须要点'
   assertRule(COLLECTOR_PERSONA, /绝不覆盖旧文件/)
   assertRule(COLLECTOR_PERSONA, /重试纪律/, 'dc 需含重试纪律')
   assertRule(COLLECTOR_PERSONA, /重试 2 次/, '重试上限需显式')
-  // 阻塞式 request_data 直接返回 DatasetRef，无状态查询工具
   assertNoRule(COLLECTOR_PERSONA, /get_request_status/, 'dc persona 不应再引用已删除的 get_request_status')
   assertRule(COLLECTOR_PERSONA, /阻塞/, 'dc persona 应说明 request_data 阻塞等待执行')
   assertRule(COLLECTOR_PERSONA, /30 秒|超时/, 'dc persona 应说明执行超时报错')
   assertRule(COLLECTOR_PERSONA, /skill capital-data-protocol/, 'dc persona 必须按需加载数据协议 skill')
-  // 能力发现与分类错误仍由 skill 承载；过时的固定能力上限改为问题驱动选数。
+  // Capability discovery and error codes are carried by the skill; the old fixed capability cap is gone.
   const dataProtocol = readFileSync(`${SKILL_DIR}capital-data-protocol/SKILL.md`, 'utf8')
   assertRule(dataProtocol, /没有单回合能力数量上限/, '旧五能力上限已不适用于当前目录')
   assertRule(dataProtocol, /证据价值/, '应按需求与证据价值选择能力')
@@ -936,15 +896,12 @@ test('data_collector persona：覆盖 Phase 1 数据集协议全部必须要点'
   assertRule(dataProtocol, /一个任务只调一次/, 'skill 必须限定 list_capabilities 一个任务只调一次')
   assertRule(dataProtocol, /只描述一次/, 'skill 必须限定同一个能力只描述一次')
   assertRule(dataProtocol, /一次只传一个名字|不传逗号|一次只传一个 capability/, 'skill 必须限定 describe_capability 一次一个名字')
-  // 发现面标了并发安全之后，"要几个能力就分开调用"必须同时改成"同一条消息一次发完"，
-  // 否则 skill 会把模型推回 N 次串行往返（省往返的机制本身见 `docs/dev/data-roles.md` §1.1）。
+  // Concurrent discovery means several describe_capability calls leave in one message, never N serial round trips.
   assertRule(dataProtocol, /同一条消息里一次发出\s*\n?.*describe_capability|describe_capability[^\n]*同一条消息/, 'skill 必须要求多个 describe_capability 调用在同一条消息里一次发出')
-  // 分类错误必须按 code 处置，而不是盲目重试
   for (const code of ['capability_required', 'capability_invalid', 'capability_unknown', 'capability_catalog_empty']) {
     assertRule(dataProtocol, new RegExp(code), `skill 必须给出 ${code} 的处置指引`)
   }
   assertRuleAny(dataProtocol, [/不要重试/, /不要反复重试/], 'catalog_empty 必须明确不要重试')
-  // 每份 Dataset 落盘后立即通知父 Agent，全部请求结束再发终结消息；不能退回批量等待。
   assertRule(COLLECTOR_PERSONA, /每次 request_data 成功.*立刻 send_message/, 'collector 应逐份发成功消息')
   assertRule(COLLECTOR_PERSONA, /包括缓存命中/, '缓存命中也必须通知')
   assertRule(COLLECTOR_PERSONA, /每次请求最终失败立刻发 data_failed/, '单次失败应即时上报')
@@ -958,9 +915,8 @@ test('data_collector persona：覆盖 Phase 1 数据集协议全部必须要点'
   assertRule(COLLECTOR_PERSONA, /禁止只回传/, 'dc persona 应禁止只回传 markdown 汇总')
   assertRule(COLLECTOR_PERSONA, /原样填入/, 'dc persona 应要求载荷字段按原样填入')
   assertRule(COLLECTOR_PERSONA, /串行推进|不存在并行/, 'dc persona 应说明 request_data 串行推进')
-  // 人设是纯指令：不出现框架内部机制词（官方 / DSH / exec.agent）
   assertNoRule(COLLECTOR_PERSONA, /官方|DSH|exec\.agent/, 'dc persona 不应出现框架术语')
-  // 走偏产物必须消失：data_key、旧缓存工具/语义、request_id 协议、订阅
+  // Drifted artefacts stay gone: data_key and legacy cache tools, request_id protocol, subscription.
   assertNoRule(COLLECTOR_PERSONA, /data_key|list_schemas|get_latest|from_cache/, 'dc persona 不应包含 data_key/旧缓存协议')
   assertNoRule(COLLECTOR_PERSONA, /"requester_agent_id"/)
   assertNoRule(COLLECTOR_PERSONA, /subscribe_data|unsubscribe_data|订阅/)
@@ -975,21 +931,23 @@ test('分钟数据路由：已启用的腾讯 m1-m60 K 线不能被旧日线降�
   assertNoRule(orchestration, /数据管道只支持日线/)
 })
 
-test('subagent_data_junior 行：continuable、persona 覆盖、toolFilter 只含只读 Dataset 工具', () => {
-  assert.equal(juniorRow.name, '@deepseek-ai/dsh-tool-subagent')
-  assert.equal(juniorRow.config.provider, 'spawn')
-  assert.equal(juniorRow.config.toolName, 'subagent_data_junior')
-  assert.equal(juniorRow.config.backgroundMode, 'continuable')
-  const allow = juniorRow.config.toolFilter?.allow
-  assert.ok(Array.isArray(allow), 'toolFilter.allow 必须存在')
-  assert.deepEqual([...allow].sort(), ['describe_dataset', 'get_local_datetime', 'inspect_dataset', 'prepare_chart_source', SHELL_SLOT, 'profile_dataset', 'query_dataset', 'resolve_data_time_range', 'send_message', 'skill', 'subagent_visualization_specialist'])
-  // data_junior 不得访问外部行情 API、网页检索、凭据或委派能力
-  for (const forbiddenTool of ['request_data', 'list_capabilities', 'dc_status', 'subagent', 'subagent_data_collector', 'subagent_data_junior', 'subagent_data_analyst', 'ask_user_question', 'todo_write', 'web_search', 'web_fetch', 'anysearch_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'python', 'write_profile', 'render_chart']) {
-    assert.ok(!allow.includes(forbiddenTool), `toolFilter.allow 不应包含 ${forbiddenTool}`)
+test('subagent_data_junior 行：选对角色 preset，工具面只含只读 Dataset 工具与出图创建权', () => {
+  assertDelegationRowShape(juniorRow, 'subagent_data_junior', ROLE_PRESET_IDS.junior)
+  // Junior surface: four Dataset readers, one chart-credential issuer, two time tools.
+  assert.deepEqual(capitalFace(ROLE_PRESET_IDS.junior), [
+    'describe_dataset', 'get_local_datetime', 'inspect_dataset', 'prepare_chart_source',
+    'profile_dataset', 'query_dataset', 'resolve_data_time_range',
+  ], 'data_junior 的组合工具面必须恰好是这七颗')
+  const face = capitalFace(ROLE_PRESET_IDS.junior)
+  // No external market API, web retrieval, credentials, or rendering: junior only issues the chart credential.
+  for (const forbiddenTool of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status', 'write_profile', 'render_chart', 'ocr', 'anysearch_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'python']) {
+    assert.ok(!face.includes(forbiddenTool), `角色工具面不应包含 ${forbiddenTool}`)
   }
-  // bash/pwsh 是唯一按平台选名的槽位：只认表达式本身，别把平台解析后的名字当成硬编码
-  assert.ok(allow.some(isShellSlot), `data_junior 的 allow 必须含 shell 槽位（当前平台解析为 ${SHELL_TOOL}）`)
-  assert.ok(!allow.includes(SHELL_TOOL), 'shell 槽位不要写成硬编码名字：Windows 上 restrict() 会因未注册而报错')
+  // Shell comes from a row: junior mounts the platform pair, the other half blocked by `disabled`.
+  assert.ok(mountsRow(ROLE_PRESET_IDS.junior, `@deepseek-ai/dsh-tool-${SHELL_TOOL}`),
+    `data_junior 必须挂本平台的 ${SHELL_TOOL} 行（纯计算兜底，persona 的 BASH DISCIPLINE 靠它落地）`)
+  assert.ok(mountsRow(ROLE_PRESET_IDS.junior, '@deepseek-ai/dsh-tool-skill') && mountsRow(ROLE_PRESET_IDS.junior, '@deepseek-ai/dsh-tool-subagent-control'),
+    'junior 要能按需加载协议册子并 send_message 回传：skill 行与 control 行都得挂')
 })
 
 test('主 persona：子 Agent 中途请求按工单处理——取数后发回同一个子 Agent，结算通知不等于完成', () => {
@@ -1040,10 +998,10 @@ test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质�
     /经主 Agent 中继/,
     /重试/,
     /skill capital-data-profile/,
-    // 四类事实必须点名，否则模型只会复述字段名，或把 min/max 讲成走势
+    // The four fact classes must be named, else the model only repeats field names or reads min/max as a trend.
     /time_facts/,
     /structure/,
-    // 数据缺口必须区分「数据里没有」与「没拿到数据」，且不得自行取数
+    // A gap must distinguish "absent from the data" from "not fetched", and never self-fetch.
     /数据里确实没有/,
     /不得自行取数/,
     /不得直接找 data_collector/,
@@ -1051,12 +1009,11 @@ test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质�
     /不要为了填空编造能力名/,
     /取不到原始行/,
   ]) assertRule(JUNIOR_PERSONA, pattern, `data_junior persona 缺少要点: ${pattern}`)
-  // 叶子质检器：不引用取数/委派工具名，不含内部路由键名与框架术语
   assertNoRule(JUNIOR_PERSONA, /request_data|list_capabilities|dc_status|subagent_data_collector|subagent_data_analyst/, 'junior persona 不应引用取数或委派工具')
   assertNoRule(JUNIOR_PERSONA, /data_key|list_schemas|get_latest|from_cache/, 'junior persona 不应包含 data_key/旧缓存协议')
   assertNoRule(JUNIOR_PERSONA, /官方|DSH|exec\.agent/, 'junior persona 不应出现框架术语')
 
-  // 统计项与四类事实的读法已外迁到数据协议（现三册）：规则一条都不能丢，逐册归属另有点名。
+  // Statistical reading rules migrated into the data-protocol family; none may be lost in the move.
   const dataProtocol = DATA_PROTOCOL
   for (const pattern of [
     /字段类型|observed.*contract/,
@@ -1080,7 +1037,7 @@ test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质�
     /只能是\*\*手上 DatasetRef 里出现过的 capability 原值\*\*|手上 DatasetRef 里出现过的 capability/,
     /`?time_facts`? 已经给了首末行取值/,
     /不得出现原始数据行|绝不把 rows 写进|不含任何数据行/,
-    // §3.0 describe_dataset：默认入口、一次一份、同一步批量、体积闸门与收窄手段
+    // describe_dataset: default entry, one per call, batched in one message, size gate and narrowing knobs.
     /describe_dataset/,
     /一次一份|一次调用只传一个/,
     /同一条 assistant 消息|同一条消息/,
@@ -1090,60 +1047,135 @@ test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质�
   ]) assertRule(dataProtocol, pattern, `capital-data-protocol 缺少要点: ${pattern}`)
 })
 
-test('visualization_specialist 行：one-shot 前台、只允许 skill + render_chart', () => {
-  assert.equal(visualizationRow.name, '@deepseek-ai/dsh-tool-subagent')
-  assert.equal(visualizationRow.config.provider, 'spawn')
-  assert.equal(visualizationRow.config.toolName, 'subagent_visualization_specialist')
-  assert.equal(visualizationRow.config.backgroundMode, 'one-shot')
-  assert.equal(visualizationRow.config.enableRunInBackground, false)
+test('visualization_specialist 行：创建权只在 data_junior 手里，工具面只允许 skill + render_chart', () => {
+  // The delegation row's host preset is the gate: the root never inherits that tool name.
+  assertDelegationRowShape(visualizationRow, 'subagent_visualization_specialist', ROLE_PRESET_IDS.specialist)
   assert.equal(visualizationRow.config.maxDepth, 2, 'specialist 位于 main → data_junior → specialist 的绝对深度 2')
-  assert.deepEqual(visualizationRow.config.toolFilter?.allow?.sort(), ['render_chart', 'skill'])
-  for (const pattern of [/可视化专家/, /one-shot/, /capital-visualization-protocol/, /capital-chart-protocol/, /chart_source_ref/, /chart_ref/, /不向主 Agent发送消息/, /不要?调用 send_message/, /不创建下游 Agent/, /不回传原始 rows/]) {
-    assertRule(VISUALIZATION_PERSONA, pattern, `visualization_specialist persona 缺少要点: ${pattern}`)
+  assert.ok(!rows.some((row) => row?.name === '@deepseek-ai/dsh-tool-subagent' && row?.config?.toolName === 'subagent_visualization_specialist'),
+    '根 preset 里不许再有出图委派行：那等于主 Agent 能绕过 data_junior 直接创建孙 Agent')
+  // Specialist composition: tools/chart-render plus tools/time — no monolith row, no runtime list.
+  const specialist = allPresets().find((preset) => preset?.config?.id === ROLE_PRESET_IDS.specialist)
+  assert.ok(specialist, '必须存在 visualization specialist 的 preset 声明')
+  assert.deepEqual(capitalFace(ROLE_PRESET_IDS.specialist),
+    ['get_local_datetime', 'render_chart', 'resolve_data_time_range'],
+    '出图角色只有 render_chart 加两颗时间工具：多一颗就读数据 / 自己取数，绕过 data_junior 的 gate')
+  assert.deepEqual(ROLE_TOOL_SURFACES[ROLE_PRESET_IDS.specialist].denySiblings, undefined,
+    'specialist 不挂 control 行，没有兄弟名字要减，也不该有任何清单')
+  const specialistPlugins = allRowsOf(ROLE_PRESET_IDS.specialist)
+  assert.deepEqual(
+    specialistPlugins.filter((row) => typeof row?.name === 'string' && row.name.startsWith('@v587d/capital-generation')).map((row) => row.name),
+    ['@v587d/capital-generation/tools/chart-render', '@v587d/capital-generation/tools/time'],
+    'specialist 只许挂 chart-render + time 两行，不许再挂单体 @v587d/capital-generation',
+  )
+  for (const forbiddenRow of ['@deepseek-ai/dsh-tool-subagent-control', '@deepseek-ai/dsh-tool-bash', '@deepseek-ai/dsh-tool-pwsh', '@deepseek-ai/dsh-tool-fs']) {
+    assert.ok(!specialistPlugins.some((row) => row?.name === forbiddenRow), `specialist 不应挂 ${forbiddenRow}`)
   }
-  for (const forbiddenTool of ['send_message', 'subagent', 'prepare_chart_source', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'bash', 'python']) {
-    assert.ok(!visualizationRow.config.toolFilter.allow.includes(forbiddenTool), `visualization_specialist 不应允许 ${forbiddenTool}`)
+  for (const pattern of [/可视化专家/, /委派创建/, /capital-visualization-protocol/, /capital-chart-protocol/, /chart_source_ref/, /chart_ref/, /不向主 Agent发送消息/, /不要?调用 send_message/, /不创建下游 Agent/, /不回传原始 rows/]) {
+    assertRule(VISUALIZATION_PERSONA, pattern, `visualization_specialist persona 缺少要点: ${pattern}`)
   }
   assert.ok(existsSync(`${SKILL_DIR}capital-visualization-protocol/SKILL.md`))
 })
 
-test('data_junior persona：profile 后负责可视化 gate、签发 token、等待 one-shot barrier', () => {
-  for (const pattern of [/可视化协议/, /capital-visualization-protocol/, /描述完成\s*（describe_dataset \/ profile_dataset）后无条件加载/, /用户明确要求图表/, /时间序列/, /OHLC\+volume/, /多个可比数值序列/, /必须选择 recommended/, /prepare_chart_source/, /subagent_visualization_specialist/, /not_needed/, /recommended/, /blocked/, /failed/, /one-shot barrier/, /chart_ref/, /rendered \/ skipped \/ failed/]) {
+/** Composition table: which family rows each preset mounts — the whole answer to "who can use what". */
+const PRESET_ROW_COMPOSITION = {
+  [ROLE_PRESET_IDS.collector]: ['@v587d/capital-generation/tools/collect', '@v587d/capital-generation/tools/time'],
+  [ROLE_PRESET_IDS.junior]: ['@v587d/capital-generation/tools/dataset-read', '@v587d/capital-generation/tools/chart-source', '@v587d/capital-generation/tools/time'],
+  [ROLE_PRESET_IDS.specialist]: ['@v587d/capital-generation/tools/chart-render', '@v587d/capital-generation/tools/time'],
+  [ROLE_PRESET_IDS.retriever]: [
+    '@v587d/capital-generation/tools/retrieve-search', '@v587d/capital-generation/tools/retrieve-sources',
+    '@v587d/capital-generation/tools/ocr', '@v587d/capital-generation/tools/time',
+  ],
+  // A disabled role preset can still be opened by hand, so reserved roles go through family rows too.
+  [ROLE_PRESET_IDS.analyst]: ['@v587d/capital-generation/tools/dataset-read', '@v587d/capital-generation/tools/time'],
+  // Root: time, local document parsing, watchlist, and root-extras (which registers no tool itself).
+  [ROOT_PRESET_ID]: [
+    '@v587d/capital-generation/tools/time', '@v587d/capital-generation/tools/ocr',
+    '@v587d/capital-generation/tools/watchlist', '@v587d/capital-generation/tools/root-extras',
+  ],
+}
+
+test('组合表：每颗 preset 挂的族行必须恰好是这几行', () => {
+  for (const [presetId, expected] of Object.entries(PRESET_ROW_COMPOSITION)) {
+    assert.deepEqual(capitalRowsOf(presetId).map((row) => row.name).sort(), [...expected].sort(),
+      `${presetId} 挂的族行变了：多挂一行是越权，少挂一行是能力消失，两种都不报错、只在会话里显形`)
+  }
+})
+
+test('data_collector preset：hub / store 仍住 isolate realm，realm 里只有 tools/collect 那一行', () => {
+  const collector = allPresets().find((preset) => preset?.config?.id === ROLE_PRESET_IDS.collector)
+  assert.ok(collector, '必须存在 data_collector 的 preset 声明')
+  const scope = (collector.config.plugins ?? []).find((row) => row?.id === 'capital-generation-scope')
+  assert.ok(scope, 'collector 仍需要 isolate realm 包住 hub/store')
+  assert.equal(scope.isolate?.dataCollectorHub, true)
+  assert.equal(scope.isolate?.datasetStore, true)
+  const custom = (scope.config ?? []).filter((row) => typeof row?.name === 'string' && row.name.startsWith('@v587d/capital-generation'))
+  assert.deepEqual(custom.map((row) => row.name), ['@v587d/capital-generation/tools/collect'],
+    'realm 里只许挂 tools/collect：hub 与 128 个数据源只能由它建，别挂进来就会跨 preset 重名')
+})
+
+test('data_junior preset：bash 与出图委派仍是 YAML 框架行，不靠运行期名单', () => {
+  const plugins = allRowsOf(ROLE_PRESET_IDS.junior)
+  assert.ok(!plugins.some((row) => row?.id === 'capital-generation-scope'), 'junior 不建 hub，也就不需要 collector 的 isolate 组')
+  assert.ok(plugins.some((row) => row?.name === '@deepseek-ai/dsh-tool-bash'), 'bash 仍由 YAML 框架行提供')
+  assert.ok(plugins.some((row) => row?.name === '@deepseek-ai/dsh-tool-subagent' && row?.config?.toolName === 'subagent_visualization_specialist'),
+    'specialist 委派行仍由 YAML 提供')
+})
+
+test('族行不带任何行配置：没有"以为裁了、其实没人读"的开关', () => {
+  // Family rows have no switches: general capability is not trimmed per role.
+  for (const preset of allPresets()) {
+    for (const row of capitalRowsOf(preset.config.id)) {
+      assert.equal(row.config, undefined, `${preset.config.id} 的 ${row.id} 带了行配置：行契约里没有开关`)
+    }
+  }
+})
+
+test('data_junior persona：profile 后负责可视化 gate、签发 token、等待出图 barrier', () => {
+  for (const pattern of [/可视化协议/, /capital-visualization-protocol/, /描述完成\s*（describe_dataset \/ profile_dataset）后无条件加载/, /用户明确要求图表/, /时间序列/, /OHLC\+volume/, /多个可比数值序列/, /必须选择 recommended/, /prepare_chart_source/, /subagent_visualization_specialist/, /not_needed/, /recommended/, /blocked/, /failed/, /出图 barrier/, /chart_ref/, /rendered \/ skipped \/ failed/]) {
     assertRule(JUNIOR_PERSONA, pattern, `data_junior persona 缺少可视化编排要点: ${pattern}`)
   }
   assertRuleAny(MAIN_PERSONA, [/visualization_specialist/, /可视化.*data_junior/], '主 persona 必须说明 visualization_specialist 由 data_junior 管理')
-  // 2026-09-26 实机冒烟：主 Agent 指示 data_junior「停在 profile」，被"gate 是硬步骤"覆盖并自动出图。
-  // 两侧必须同时有言——委派方要显式收窄，被委派方要认收窄并如实说明未出图的原因。
+  // Delegation narrowing must be stated by the caller and honoured by junior, which then says why no chart was drawn.
   assertRule(JUNIOR_PERSONA, /只到 profile/, 'data_junior 必须认委派 prompt 的显式收窄（只到 profile 就不出图）')
   assertRule(JUNIOR_PERSONA, /委派收窄/, 'data_junior 未出图时必须写明是委派收窄，不是数据不支持')
   assertRuleAny(MAIN_PERSONA, [/写明「只到 profile」/], '主 persona 必须要求"不要图就显式写明「只到 profile」"')
-  // 长协议必须与 persona 同口径，否则 skill 会把"硬步骤"写成无条件义务、把 persona 的收窄规则盖掉。
+  // The long protocol must keep persona's wording, or the skill rewrites the gate step into an unconditional duty.
   assertRule(readFileSync(`${SKILL_DIR}capital-visualization-protocol/SKILL.md`, 'utf8'),
     /委派收窄/, 'capital-visualization-protocol 必须写明委派收窄时仍给 recommended 但不出图')
 })
 
-test('subagent_data_analyst 行：仍在开发中——disabled，且预留工具名不得先行启用', () => {
-  assert.equal(analystRow.name, '@deepseek-ai/dsh-tool-subagent')
-  assert.equal(analystRow.config.provider, 'spawn')
-  assert.equal(analystRow.config.toolName, 'subagent_data_analyst')
+test('capital-generation preset：组合面只有时间 / 本地文档 / 自选股，tool-fs 行级只读', () => {
+  const root = allPresets().find((preset) => preset?.config?.id === ROOT_PRESET_ID)
+  assert.ok(root, '必须存在 Capital 根 preset')
+  const plugins = root.config.plugins ?? []
+  // The root orchestrates by dispatching: no fetch / retrieval / rendering tool may reach the main session.
+  assert.deepEqual(capitalFace(ROOT_PRESET_ID),
+    ['get_local_datetime', 'get_watchlist', 'ocr', 'resolve_data_time_range'],
+    '主 Agent 的本仓工具面必须恰好是这四颗；多一颗就是又开一个自己动手的入口（§1.1 的委派硬约束）')
+  assert.ok(!plugins.some((row) => row?.id === 'capital-generation-scope'), '根 preset 不再需要 collector 的 hub/store isolate 组')
+  const fsRow = plugins.find((row) => row?.id === 'tool-fs')
+  assert.ok(fsRow, '根 preset 仍保留只读文件口')
+  assert.deepEqual(fsRow.config, { read: true, write: false, edit: false }, 'write / edit 必须在组合期就不注册')
+})
+
+test('subagent_data_analyst 行：仍在开发中——preset 与委派行都 disabled，预留工具名不得先行启用', () => {
+  const analystPreset = allPresets().find((preset) => preset?.config?.id === ROLE_PRESET_IDS.analyst)
+  assert.equal(analystPreset?.disabled, true, '2026-10-18 用户要求先停用 analyst declaration，恢复时再去掉 disabled')
+  assertDelegationRowShape(analystRow, 'subagent_data_analyst', ROLE_PRESET_IDS.analyst)
   assert.equal(analystRow.disabled, true, 'data_analyst 仍在开发中，委派行必须 disabled')
-  const allow = analystRow.config.toolFilter?.allow ?? []
-  assert.ok(Array.isArray(allow), '预留行仍需登记未来工具边界')
-  for (const requiredTool of ['send_message', 'inspect_dataset', 'query_dataset', 'read_profile', 'get_local_datetime']) {
-    assert.ok(allow.includes(requiredTool), `预留行 toolFilter 应包含 ${requiredTool}`)
-  }
-  // read_profile 尚未注册：restrict() 对未知名字报错，启用该行会让"创建子 Agent"失败。
-  // 因此这里断言它是"预留名"，并断言它确实不在真实注册清单里（提醒启用前先实现）。
-  assert.ok(!KNOWN_TOOLS.has('read_profile'), 'read_profile 仍未注册：启用 data_analyst 前必须先实现它')
-  // 本阶段不实现 Python runtime：python/coding/产物工具不得进入预留行的工具边界
-  for (const forbiddenTool of ['python', 'run_code', 'write_analysis_artifact', 'bash']) {
-    assert.ok(!allow.includes(forbiddenTool), `预留期 toolFilter 不应包含 ${forbiddenTool}`)
+  // ⛔ A disabled delegation row cannot stop a hand-opened session; row composition is the gate that still holds.
+  assert.deepEqual(capitalFace(ROLE_PRESET_IDS.analyst),
+    ['describe_dataset', 'get_local_datetime', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'resolve_data_time_range'],
+    '预留行的工具面必须真注册：挂一行不存在的族 = 那一颗 preset 静默少一整族能力')
+  assert.ok(!KNOWN_TOOLS.has('read_profile'), 'read_profile 仍未注册：启用 data_analyst 前必须先实现它，再连同族行一起补回')
+  assert.ok(SURFACE_GATE_PRESETS.includes(ROLE_PRESET_IDS.analyst), '五颗角色清单全部进行组合闸门（手开路径也算）')
+  for (const forbiddenRow of ['@deepseek-ai/dsh-tool-bash', '@deepseek-ai/dsh-tool-pwsh', '@deepseek-ai/dsh-tool-fs']) {
+    assert.ok(!mountsRow(ROLE_PRESET_IDS.analyst, forbiddenRow), `预留期不该挂 ${forbiddenRow}`)
   }
   for (const pattern of [/金融工程研究员（data_analyst）/, /analysis_request/, /analysis_failed/, /DatasetRef/, /artifact_ref/, /经主 Agent 中继/, /不索取或保存账户密码/]) {
     assertRule(ANALYST_PERSONA, pattern, `data_analyst persona 缺少要点: ${pattern}`)
   }
   assertNoRule(ANALYST_PERSONA, /data_key|官方|DSH|exec\.agent/, 'analyst persona 不应包含内部键名/框架术语')
-  // 主 persona 必须写明该角色尚未启用（措辞可改，规则不可消失）
   assertRuleAny(MAIN_PERSONA, [/data_analyst 仍在开发中/, /data_analyst 未启用/], '主 persona 必须写明 data_analyst 未启用')
   assertRuleAny(MAIN_PERSONA, [/当前会话不创建、不使用/, /data_analyst 未启用：不创建/], '主 persona 必须写明当前会话不创建 data_analyst')
 })
@@ -1156,30 +1188,30 @@ test('主 persona：data_junior 是直接子 Agent，dc 不得创建它', () => 
   assertRuleAny(MAIN_PERSONA, [/质检 Agent 一律由你直接创建/, /data_junior 一律由你直接创建/], '主 persona 必须写明质检 Agent 由主 Agent 直接创建')
   assertRule(MAIN_PERSONA, /profile_ref/)
   assertRule(MAIN_PERSONA, /data_junior 不归 dc 创建\s*或指挥|data_collector 不得创建或指挥它/)
-  // 载荷名（profile_request / dataset_profile_completed / profile_failed）住在 skill 与
-  // data_junior persona：主 persona 只指向契约出处，不在正文里内联 JSON 示例。
+  // Payload names live in the skill and junior persona; the root only points at the contract.
   assertRuleAny(MAIN_PERSONA, [/capital-data-protocol/], '主 persona 必须指向数据载荷契约')
 })
 
 test('data_collector persona：叶子边界——不得创建/指挥 data_junior 等下游子 Agent', () => {
   assertRule(COLLECTOR_PERSONA, /不创建、不委派、不指挥任何下游子 Agent/)
   assertRule(COLLECTOR_PERSONA, /data_junior 由主\s*Agent 直接创建/)
-  // 请求归属规则在 dc 侧承载（主 persona 只描述"统一经 data_collector"）：
-  // 归属恒为调用者自身，不接受 requester_agent_id 之类的代理请求概念。
+  // Request ownership is always the caller itself; no proxied requester concept.
   assertRule(COLLECTOR_PERSONA, /请求归属恒为调用者自身/)
   assertNoRule(COLLECTOR_PERSONA, /subagent_data_junior|subagent_data_analyst/, 'dc persona 不应包含创建下游 Agent 的委派工具名')
 })
 
 test('skill 内容：编排 skill 覆盖预检异常与清单，数据 skill 覆盖三种载荷', () => {
   const orchestration = readFileSync(`${SKILL_DIR}capital-orchestration/SKILL.md`, 'utf8')
-  for (const pattern of [/list_agents\(scope="children"\)/, /running/, /idle/, /ready/, /diagnostic/, /委派清单/, /data_collector/, /data_junior/, /web_retriever/, /capital-data-protocol/, /Wind 能力暂不可用/, /dataset_session_mismatch/, /分钟级/, /ID 纪律/, /投错对象/, /waiting_data/, /data_gap/, /中途消息是工单/, /结算通知 ≠ 任务完成/, /Canonical task_id/, /中间隔了长回传/, /回传到达后集中核对/]) {
+  for (const pattern of [/list_agents\(scope="children"\)/, /running/, /inactive/, /只报两态/, /diagnostic/, /委派清单/, /data_collector/, /data_junior/, /web_retriever/, /capital-data-protocol/, /Wind 能力暂不可用/, /dataset_session_mismatch/, /分钟级/, /ID 纪律/, /投错对象/, /waiting_data/, /data_gap/, /中途消息是工单/, /结算通知 ≠ 任务完成/, /Canonical task_id/, /中间隔了长回传/, /回传到达后集中核对/]) {
     assertMatches(orchestration, pattern, `capital-orchestration 缺少要点: ${pattern}`)
   }
+  // Status vocabulary is a closed set (running / inactive): idle and ready are criteria the model can never satisfy.
+  assertNotMatches(orchestration, /\bidle\b|\bready\b/, 'capital-orchestration 还写着 0.2.0 的 idle / ready 状态')
   const protocol = DATA_PROTOCOL
   for (const pattern of [/"type": "data_request"/, /"type": "dataset_ready"/, /"type": "data_failed"/, /"type": "profile_request"/, /"type": "dataset_profile_completed"/, /"type": "profile_failed"/, /"type": "query_request"/, /"type": "dataset_query_completed"/, /"type": "query_failed"/, /"type": "data_gap"/, /suggested_capability/, /blocking/, /schema/, /validation/, /violations/, /force_refresh/, /workspace_not_writable/, /captured_at/, /artifact_ref/, /time_facts/, /distinct_count/, /total_elements/, /文档型 Dataset/, /结束本轮 ≠ 任务完成/]) {
     assertMatches(protocol, pattern, `capital-data-protocol 缺少要点: ${pattern}`)
   }
-  // 内部路由键名不得出现在任何模型可见文本
+  // Internal routing key names must stay out of every model-visible text.
   for (const text of [orchestration, protocol]) assertNotMatches(text, /data_key|list_schemas|get_latest|from_cache/)
 })
 
@@ -1203,9 +1235,7 @@ test('主 persona：内置安全条目（不索取凭据、不承诺收益）', 
 })
 
 test('主 persona：read 的边界（2026-10-15 开出文件口，纪律跟着开）', () => {
-  // tool-fs 挂载 + 视图层 deny + 全局写口闸门只拦得住"写"；"读"这一侧拦不住 bash 的 cat
-  // （沙箱只拦写不拦读，docs/dev/bash-gate.md §1.6），所以这三条只能住在 persona。
-  // 断言不锁措辞：每条给等价说法，任一命中即过；全部落空应当补人设而不是删断言（AGENTS.md §8.3）。
+  // Write gates cannot block reads (the sandbox only stops writes, not bash cat), so these rules live in persona.
   assertRuleAny(MAIN_PERSONA, [/读文件只用 read|读文件走 read|只用 read 读文件/], 'read 的正当用途没写进人设')
   assertRuleAny(MAIN_PERSONA, [/不读 ?capital-data/, /原始行.{0,12}回传/], '原始行落盘目录的读取禁区没写进人设')
   assertRuleAny(MAIN_PERSONA, [/不读 ~\/\.dsh/, /宿主配置.{0,12}不读/], '宿主配置与凭据的读取禁区没写进人设')
@@ -1213,18 +1243,14 @@ test('主 persona：read 的边界（2026-10-15 开出文件口，纪律跟着�
 })
 
 test('具名来源的输出预算必须留在宿主剪枝阈值内（两处必须同源）', () => {
-  // 阈值本身由 test/preset-rows.mjs 的 loadBudget() 读取：compaction 组里没有 tool-result-pruner
-  // 行、或 thresholdChars 不是正整数，它直接抛出点名原因——这里不再重复一遍取数形状（§9.7）。
+  // loadBudget() is the single source for the threshold and throws with the reason when the pruner row is missing.
   const { thresholdChars } = loadBudget()
   assert.ok(SOURCE_OUTPUT_BUDGET_CHARS < thresholdChars,
     `SOURCE_OUTPUT_BUDGET_CHARS（${SOURCE_OUTPUT_BUDGET_CHARS}）必须低于 preset 的 thresholdChars（${thresholdChars}）：`
     + '越过阈值的工具结果会被剪成 head + [middle pruned] + tail，而 JSON 头部的 count 仍写着原来的条数')
 })
 
-// ── 三道体积闸门：一次加载必须完整可见 ──────────────────────────────────────
-// 2026-10-14 实测起点：capital-data-protocol 单册 16,264 字符、capital-web-protocol 10,664 字符，
-// 都超过剪枝阈值，加载时中间段被剪掉——`data_junior` 该读的 §3/§4 恰好整段在中间。
-// 拆册之后，这条闸门就是防止它悄悄涨回去的唯一东西。
+// Size gates: a loaded skill must be fully visible under the pruner threshold, or its middle rules vanish silently.
 
 test('内置 skill 每一册加载后完整可见（正文 + 渲染包装 ≤ 剪枝阈值）', () => {
   for (const name of readdirSync(SKILL_DIR).sort()) {
@@ -1238,8 +1264,7 @@ test('内置 skill 每一册加载后完整可见（正文 + 渲染包装 ≤ �
 })
 
 test('三颗任务型内置 skill 还要给索引块留位置（勾选上限 6 的算术在此钉死）', () => {
-  // §8.7 拼进任务型 skill 的索引块与正文共用同一次加载，所以它们的预算是同一份。
-  // 索引必须由 renderTaskSkillIndex 现算（唯一实现）——自己拼一遍的话，框一变这条闸门就只钉住测试自己。
+  // The index block shares the task skill's load budget, and must come from renderTaskSkillIndex (the only implementation).
   const allNames = SELECTED_SKILL_CATALOG.map(({ name }) => name)
   for (const taskId of SELECTED_SKILL_TASK_IDS) {
     const routed = selectedSkillsForTask(taskId, allNames)
@@ -1257,12 +1282,8 @@ test('三颗任务型内置 skill 还要给索引块留位置（勾选上限 6 �
 })
 
 test('外部精选正文的体积棘轮：每一颗 catalog 条目都必须一次加载完整可见', () => {
-  // 上游正文我们不为口味改写（§8.6），所以这条历史上是**棘轮**：存量超限的记名清单只准变短，
-  // 变短的唯一途径是真的处理掉一颗（可见性分层：入口册 + 分册 + 运行时 `read`，一行规则都不删）。
-  // 2026-10-15 清单清空——32 颗全部处理完（最后 25 颗是 InvestSkill 的单文件厚册），于是它从
-  // "别再加新的超限条目"升级成硬闸门：**任何** catalog 条目正文超过可见上限就在这里失败。
-  // 台账与断言在 test/selected-skills-content.test.mjs「分层条目」两条；处置口径见
-  // docs/dev/selected-skill-index.md 的「已知边界」。
+  // Upstream bodies are not rewritten for size: any catalog entry over the visible cap fails here (ledger in
+  // test/selected-skills-content.test.mjs, handling in docs/dev/selected-skill-index.md).
   const OVERSIZED_BASELINE = []
   const oversized = SELECTED_SKILL_CATALOG
     .filter((entry) => selectedSkillBody(entry).length > VISIBLE_CAP)
@@ -1276,10 +1297,7 @@ test('外部精选正文的体积棘轮：每一颗 catalog 条目都必须一�
 })
 
 test('协议拆册只搬家不删规则：每一节都在某一册里，正文合计不许低于拆分基线', () => {
-  // §8.3：测试钉的是实测教训，不准删断言变绿。拆分的唯一许可是"搬家"——所以这里钉两件事：
-  // ① 原来每一节的标题都必须还在，而且**只在一册**里（两册都有同一节 = 迟早漂成两个版本）；
-  // ② 正文总字数只准涨不准跌（跌了就等于有人删了规则来腾地方）。
-  // 基线是 2026-10-14 拆册当天实测的行集比对结果（534 行原样可寻，只允许改写 3 行跨册指针）。
+  // Splitting may only move sections: every heading stays in exactly one volume, and the combined body never shrinks.
   const families = [
     { label: '数据协议', volumes: ['capital-data-protocol', 'capital-data-profile', 'capital-data-query'], floor: 17150,
       sections: ['## 0. 谁读哪一节', '## 1. 数据请求', '## 1.1 能力发现', '## 2. 逐份回传', '## 3.0 读取 Dataset',
@@ -1306,9 +1324,7 @@ test('协议拆册只搬家不删规则：每一节都在某一册里，正文�
 })
 
 test('核查分级（2026-10-10 真机）：核心事实逐条、外围一句话清单、异常触发才深挖', () => {
-  // 真机教训：财务健康诊断的外部核查按审计级清单全量核验，产出 18 条情报 / 39K 输出 tokens，
-  // 拖慢主结论。分级口径三处齐写：委派方（orchestration）、证据计划（equity-research）、
-  // 回传格式（web-protocol）——少一处就会在某一侧退化回逐条审计级。
+  // Tiering must appear on all three sides (delegation, evidence plan, return format) or one side drifts back to audit grade.
   const orchestration = readFileSync(`${SKILL_DIR}capital-orchestration/SKILL.md`, 'utf8')
   const webProtocol = WEB_PROTOCOL
   const equity = readFileSync(`${SKILL_DIR}capital-equity-research/SKILL.md`, 'utf8')
@@ -1322,12 +1338,60 @@ test('核查分级（2026-10-10 真机）：核心事实逐条、外围一句话
 })
 
 test('bash 派生计算（2026-10-10 真机）：只敲标量、逐数核对，不整行复制', () => {
-  // 真机教训：bash 转写把整段聚合行逐数敲进脚本，笔误后又花 7.2K 字符发更正消息。
-  // §3.3 随拆分住在数据协议第三册（与 §4 受控查询同一册——两节都是"拿聚合结果算东西"），
-  // 所以这里按册点名，不是"在任意一册里出现就行"。
+  // This section lives in capital-data-query, so it is checked by volume rather than anywhere in the family.
   const dataProtocol = skillVolume('capital-data-query')
   assertRuleAny(dataProtocol, [/只敲最终参与计算的标量/], 'capital-data-query §3.3 必须限定只敲标量')
   assertRuleAny(dataProtocol, [/逐一核对/], 'capital-data-query §3.3 必须要求转写后逐数核对')
   assertRuleAny(dataProtocol, [/不整行\/?整表复制/], 'capital-data-protocol §3.3 必须禁止整行复制')
   assertRuleAny(JUNIOR_PERSONA, [/逐数核对|逐一核对/], 'data_junior persona BASH DISCIPLINE 必须留核对硬规则')
+})
+
+test('preset 名册：六颗 preset、id 唯一、每颗角色都被某条委派行选中', () => {
+  const presets = allPresets()
+  const ids = presets.map((entry) => entry.config.id)
+  assert.equal(ids.length, 6, `应有主 preset + 五颗角色 preset，实际 ${ids.join(', ')}`)
+  assert.equal(new Set(ids).size, ids.length, 'preset id 不得重复（重复声明会让整颗预设 broken，症状延后到用户打开会话）')
+  assert.deepEqual([...ids].sort(), [ROOT_PRESET_ID, ...Object.values(ROLE_PRESET_IDS)].sort(),
+    'agent.patch.yml 的 preset 名册与 src/agents/role-tool-policy.ts 的角色名单必须同字')
+  // Identify the root preset by id: "first dsh-agent-preset row" would silently pick a role preset.
+  assert.equal(presetDeclaration().id, ROOT_PRESET_ID, 'presetDeclaration 必须返回主 preset')
+
+  // Every role preset must be selected by a delegation row, and by the right calling preset.
+  const selected = new Set(presets
+    .flatMap((preset) => (preset.config.plugins ?? [])
+      .filter((row) => row?.name === '@deepseek-ai/dsh-tool-subagent')
+      .map((row) => row.config?.agentPreset)))
+  for (const presetId of Object.values(ROLE_PRESET_IDS)) {
+    assert.ok(selected.has(presetId), `${presetId} 没有任何委派行选中它：它永远挂载不上`)
+  }
+  assert.ok(!selected.has(ROOT_PRESET_ID), '主 preset 不由委派行选中（它是会话预设，不是角色）')
+  assert.ok(!ids.includes('capital-generic-restricted'), '通用 child 已删除：没有明确场景就不该有「其他」这格（2026-10-18 用户决策）')
+})
+
+test('角色 preset 自带人设，通用 child 不自带：正文缺失就是人设整段消失', () => {
+  const texts = new Map(allPersonaTexts().map((entry) => [entry.presetId, entry.persona]))
+  for (const presetId of [ROLE_PRESET_IDS.collector, ROLE_PRESET_IDS.junior, ROLE_PRESET_IDS.specialist, ROLE_PRESET_IDS.retriever, ROLE_PRESET_IDS.analyst]) {
+    assert.ok(typeof texts.get(presetId) === 'string' && texts.get(presetId).length > 200,
+      `${presetId} 的人设正文缺失：0.2.1 起人设住在角色 preset 自己的 dsh-persona 行，委派行带不动它`)
+  }
+  assert.equal(texts.size, 6, `每颗 preset 都该自带人设，实际 ${texts.size} 段：${[...texts.keys()].join(', ')}`)
+})
+
+test('委派行不得把角色选择开放给模型：allowedAgentPresets 一个都不许出现', () => {
+  // A selectable role preset would let the main Agent demote itself; omission keeps model selection disabled.
+  assert.ok(!COMPOSITION_TEXT.includes('allowedAgentPresets'), '不许开放 agent_preset 给模型选择')
+})
+
+test('行契约里的每个名字都真实注册，而注册过的每一颗都要有行带它出门', () => {
+  const contracted = Object.values(CAPITAL_ROW_TOOLS).flat()
+  for (const name of contracted) {
+    assert.ok(KNOWN_TOOLS.has(name), `行契约里的 ${name} 不是真实注册的工具名：挂那行的 preset 看不见它`)
+  }
+  // Reverse check: a registered tool no row carries is unreachable; write_profile is parked on purpose.
+  const parked = ['write_profile']
+  assert.deepEqual(PLUGIN_TOOLS.filter((name) => !contracted.includes(name)).sort(), [...parked].sort(),
+    '新增工具必须同时决定它住哪一行：没人挂的那一颗只存在于代码里')
+  for (const name of SIBLING_DENIED_TOOLS) {
+    assert.ok(KNOWN_TOOLS.has(name), `SIBLING_DENIED_TOOLS 里的 ${name} 不存在：deny 它会静默跳过，收敛等于没做`)
+  }
 })

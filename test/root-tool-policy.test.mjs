@@ -10,35 +10,29 @@ import {
   ROOT_AGENT_DENIED_TOOLS,
   SHELL_TOOL_NAMES,
   fsWriteGuardReasonFor,
-  installRootOcrGuard,
   isCapitalAgent,
   isRootAgent,
+  ocrFormGuardReasonFor,
+  ocrUrlFormRequested,
   registerFsWriteGuard,
+  registerRootOcrGuard,
   registerRootToolPolicy,
   resetRootPolicyProbes,
   restrictRootAgentTools,
-  rootOcrGuardReason,
   rootPolicyProbes,
 } from '../lib/agents/root-tool-policy.js'
+import { ROLE_PRESET_IDS } from '../lib/preset-ids.js'
 
 /**
- * 根 Agent 工具收敛的契约测试。
- *
- * 为什么要有这套机制：preset 行注册在 standing 层，主 Agent 与子 Agent 的 scope 都是它的
- * 子节点。在 standing 层 deny 会把 visualization_specialist 一起 deny（allow 是交集过滤，
- * 加不回来）；所以只能在**根 Agent 自己的 scope** 上收敛。
- *
- * 2026-09-17 实测教训（本文件第 5 个用例）：`agent/created` 的路由键是 agent 对象本身，
- * 打标签的 standing-scope 监听器**收不到**这个事件，必须注册在未打标签的 Root context 上。
+ * Root Agent tool convergence contract: deny on the root's own scope and listen on
+ * the unscoped ctx.root. Standing-scope deny removes children and misses agent/created.
  */
 
 const childAgent = (tools) => ({ session: { header: { cwd: '/w', parentSession: 'main-1' } }, ctx: { tools } })
 const rootAgent = (tools) => ({ session: { header: { cwd: '/w' } }, ctx: { tools } })
 
 test('ROOT_AGENT_DENIED_TOOLS：2026-10-15 用户决策「开 read、同时保留 bash」——shell 不点名，写口点名', () => {
-  // 旧钉子（2026-09-30 起）是"bash / pwsh 必须点名（主 Agent 不得继承 shell）"。
-  // 2026-10-15 用户决策反过来：主 Agent 保留 shell（读 skill 分册、纯计算），文件口只开 read。
-  // 断言跟着规则迁移（不是删除）：shell 名**不许**再进名单，否则就是把决策改回去了。
+  // Current rule: root keeps shell; deny only file writes, so shell names must stay absent.
   for (const name of SHELL_TOOL_NAMES) {
     assert.ok(!ROOT_AGENT_DENIED_TOOLS.includes(name), `主 Agent 保留 ${name}（2026-10-15 决策）：名单里不许再点名`)
   }
@@ -46,34 +40,32 @@ test('ROOT_AGENT_DENIED_TOOLS：2026-10-15 用户决策「开 read、同时保�
     assert.ok(ROOT_AGENT_DENIED_TOOLS.includes(name), `主 Agent 不得看到 ${name}：业务落盘只走工具实现（store.writeContext 等）`)
   }
   assert.ok(!ROOT_AGENT_DENIED_TOOLS.includes('read'), 'read 是 2026-10-15 决策新开的正当能力，不得进名单')
-  // read_image 刻意不点名：条件注册的名字进名单只会养 failed 记录（web_search / web_fetch 教训），且它只读。
+  // read_image is read-only and conditional; naming it would create permanent failed records.
   assert.ok(!ROOT_AGENT_DENIED_TOOLS.includes('read_image'), 'read_image 不点名：条件注册 + 只读')
 })
 
 test('RETRIEVAL_DENIED_TOOLS：十三个出网工具全部从根 Agent 拿掉（出网只有一个入口）', () => {
-  // 2026-09-24 review：persona 的禁直连清单写成 `web_retriever_*` 通配，改名后一个都不匹配。
-  // 「外部检索只经 web_retriever」因此必须是结构件，而不是靠人设文案；名单长度也是断言的一部分
-  // ——少一个名字就等于主 Agent 仍能直连那个来源。
+  // External retrieval isolation must be structural; a missing name leaves that source reachable.
   assert.equal(RETRIEVAL_DENIED_TOOLS.length, 13, '检索面 2 + wind 2 + 具名来源 9 = 13')
   assert.equal(new Set(RETRIEVAL_DENIED_TOOLS).size, 13, '出网名单不得有重名')
   for (const name of RETRIEVAL_DENIED_TOOLS) {
     assert.ok(ROOT_AGENT_DENIED_TOOLS.includes(name), `主 Agent 不得看到出网工具 ${name}`)
   }
-  // 宿主的 web_search / web_fetch：2026-09-30 双端实测（Linux 根会话 22 颗 / 桌面端 40 颗的工具表）
-  // 里都没有这两个名字，restrict() 只会抛错被跳过 ⇒ 已从名单清掉，免得每次现场记录都固定多两条
-  // `failed`、把"真有名字 deny 不动"埋掉。**这不是"永远不该 deny"**：宿主把它们挂出来时就该加回。
+  // Host tools currently absent: keeping them would bury real failed denies. Re-add if mounted.
   for (const name of ['web_search', 'web_fetch']) {
     assert.ok(!ROOT_AGENT_DENIED_TOOLS.includes(name), `${name} 在当前宿主根作用域里不存在，不该留在名单里`)
   }
-  // `ocr` 是**刻意的例外**：主 Agent 要能解析用户放在工作目录的本地文档，名字级 deny 做不到
-  // "只关外部取数"，所以它不进名单，改由下面的调用级 guard 关掉 `url` 形态。
+  // OCR is an intentional exception: name-level deny cannot separate local files from external URLs.
   assert.ok(!RETRIEVAL_DENIED_TOOLS.includes('ocr'), 'ocr 不得整名 deny（否则本地 file / doc_id 形态一起没了）')
 })
 
-test('rootOcrGuardReason：主 Agent 只被关掉 ocr 的 url 形态，本地形态一律放行', () => {
-  assert.equal(rootOcrGuardReason({ name: 'ocr', arguments: { url: 'https://pdf.dfcfw.com/pdf/H3_x_1.pdf' } }), OCR_ROOT_URL_DENIED)
-  // 空串不是"提交了一个 URL"，交给工具自己的参数校验报响亮错误，这里不抢话。
-  assert.equal(rootOcrGuardReason({ name: 'ocr', arguments: { url: '' } }), undefined)
+test('ocrFormGuardReasonFor：只有**确证是主模式人设**的调用被关掉 url 形态，其余一律放行', () => {
+  const ctx = { get: () => ({ composedPreset: (agentCtx) => agentCtx?.preset }) }
+  const guard = ocrFormGuardReasonFor(ctx)
+  const capital = { ctx: { preset: CAPITAL_PRESET_ID } }
+  assert.equal(guard({ name: 'ocr', agent: capital, arguments: { url: 'https://pdf.dfcfw.com/pdf/H3_x_1.pdf' } }), OCR_ROOT_URL_DENIED)
+  // Empty URL is not a request; let tool validation report it.
+  assert.equal(guard({ name: 'ocr', agent: capital, arguments: { url: '' } }), undefined)
   for (const callArgs of [
     { file: 'refs/年报.pdf' },
     { doc_id: 'ocr_0123456789ab', pages: '1-3' },
@@ -81,27 +73,52 @@ test('rootOcrGuardReason：主 Agent 只被关掉 ocr 的 url 形态，本地形
     { doc_id: 'ocr_0123456789ab', job_id: 'j-1' },
     {},
   ]) {
-    assert.equal(rootOcrGuardReason({ name: 'ocr', arguments: callArgs }), undefined, `本地形态不该被拦：${JSON.stringify(callArgs)}`)
+    assert.equal(guard({ name: 'ocr', agent: capital, arguments: callArgs }), undefined, `本地形态不该被拦：${JSON.stringify(callArgs)}`)
   }
-  // 别的工具名一律不看（guard 是单调的，越界一次就可能吃掉别人的正当调用）。
-  assert.equal(rootOcrGuardReason({ name: 'web_retriever_fetch', arguments: { url: 'https://example.com/a.pdf' } }), undefined)
-  assert.equal(rootOcrGuardReason({ name: 'ocr' }), undefined)
-  assert.equal(rootOcrGuardReason(undefined), undefined)
-  // 拒绝文案必须给出正确路径（委派 / 本地形态），不能只说"不行"。
+  // The web_retriever role may submit the same URL; identity is preset-based, not topology-based.
+  assert.equal(guard({ name: 'ocr', agent: { ctx: { preset: 'capital-web-retriever' } }, arguments: { url: 'https://x/a.pdf' } }), undefined)
+  // ⛔ A global guard must fail open on unknown identity; it cannot consume another preset's valid calls.
+  assert.equal(guard({ name: 'ocr', agent: { ctx: { preset: 'standard' } }, arguments: { url: 'https://x/a.pdf' } }), undefined, '别的 preset 的 ocr 不归我们管')
+  assert.equal(ocrFormGuardReasonFor({ get: () => undefined })({ name: 'ocr', agent: capital, arguments: { url: 'https://x/a.pdf' } }), undefined, 'registry 读不到就放行')
+  assert.equal(ocrFormGuardReasonFor({ get: () => ({ composedPreset: () => { throw new Error('boom') } }) })({ name: 'ocr', agent: capital, arguments: { url: 'https://x/a.pdf' } }), undefined, 'composedPreset 抛错就放行')
+  // Ignore unrelated tool names; a monotonic guard must not deny what it cannot identify.
+  assert.equal(guard({ name: 'web_retriever_fetch', agent: capital, arguments: { url: 'https://example.com/a.pdf' } }), undefined)
+  assert.equal(guard({ name: 'ocr', agent: capital }), undefined)
+  assert.equal(guard(undefined), undefined)
+  assert.equal(ocrUrlFormRequested({ name: 'ocr', arguments: { file: 'a.pdf' } }), false, '形态判据本身可单测')
+  // Denial must name the correct path: delegate externally, use local forms directly.
   assert.match(OCR_ROOT_URL_DENIED, /subagent_web_retriever/)
   assert.match(OCR_ROOT_URL_DENIED, /file/)
 })
 
-test('installRootOcrGuard：只装在根 Agent，安装失败不外抛', () => {
-  const installed = []
-  const tools = { guard: (guard) => { installed.push(guard); return () => {} } }
-  assert.ok(installRootOcrGuard(rootAgent(tools)), '根 Agent 必须装上闸门')
-  assert.equal(installed.length, 1)
-  assert.equal(installRootOcrGuard(childAgent(tools)), undefined, '子 Agent 不装（url 形态归它们）')
-  assert.equal(installRootOcrGuard({ session: { header: {} }, ctx: { tools: {} } }), undefined, 'scope 没有 guard 时静默跳过')
-  const throwing = { session: { header: {} } }
-  Object.defineProperty(throwing, 'ctx', { get() { throw new Error('no ctx') } })
-  assert.equal(installRootOcrGuard(throwing), undefined)
+test('registerRootOcrGuard：全局装一次，且拒绝要留下现场记录', () => {
+  resetRootPolicyProbes()
+  const guards = []
+  const ctx = {
+    get: (name) => (name === 'agentPresets' ? { composedPreset: (agentCtx) => agentCtx?.preset } : undefined),
+    tools: { guard: (guard) => { guards.push(guard); return () => {} } },
+    effect: (callback) => { callback(); return () => {} },
+    logger: { warn() {} },
+  }
+  registerRootOcrGuard(ctx)
+  registerRootOcrGuard(ctx)
+  assert.equal(guards.length, 1, '全局 guard 只装一次：按调用身份判定，不需要按 agent 装')
+  const call = { name: 'ocr', agent: { session: { id: 's-capital' }, ctx: { preset: CAPITAL_PRESET_ID } }, arguments: { url: 'https://x/a.pdf' } }
+  assert.equal(guards[0](call), OCR_ROOT_URL_DENIED)
+  const probes = rootPolicyProbes()
+  assert.equal(probes.length, 1, '拦下一次必须记一条（文案之外还得能查"当时判定成谁"）')
+  assert.deepEqual(
+    { outcome: probes[0].outcome, preset_id: probes[0].presetId, agent_id: probes[0].agentId, root: probes[0].root, denied: probes[0].denied },
+    { outcome: 'guard-denied', preset_id: CAPITAL_PRESET_ID, agent_id: 's-capital', root: true, denied: ['ocr'] })
+  // Successful calls are not recorded; normal traffic would flush the bounded diagnostic ring.
+  guards[0]({ name: 'ocr', agent: { ctx: { preset: 'capital-web-retriever' } }, arguments: { url: 'https://x/b.pdf' } })
+  assert.equal(rootPolicyProbes().length, 1)
+  // Installation failures must not throw, but must be visible; silent no-op hides real bypasses.
+  const warns = []
+  assert.doesNotThrow(() => registerRootOcrGuard({
+    get: () => undefined, tools: {}, effect: (cb) => cb(), logger: { warn: (message) => warns.push(message) },
+  }))
+  assert.match(warns.join('\n'), /没装上/, '⛔ `ocr` 形态闸门装不上时必须 warn（capital-policy 漏 inject 就是这个形状）')
 })
 
 test('isRootAgent：只有没有 parentSession 的才是根 Agent', () => {
@@ -109,7 +126,7 @@ test('isRootAgent：只有没有 parentSession 的才是根 Agent', () => {
   assert.equal(isRootAgent(childAgent({})), false)
   assert.equal(isRootAgent({}), false)
   assert.equal(isRootAgent(undefined), false)
-  // 空串等同缺失（header 由宿主写入，防御性判断）
+  // Empty parentSession is equivalent to missing; defensive header handling.
   assert.equal(isRootAgent({ session: { header: { parentSession: '' } } }), true)
 })
 
@@ -159,7 +176,8 @@ test('registerRootToolPolicy：注册在 Root context 的 agent/created 上（sc
   scoped.root = { on: (event, listener) => { rootListeners.push({ event, listener }); return () => {} } }
   registerRootToolPolicy(scoped)
 
-  assert.deepEqual(rootListeners.map((entry) => entry.event), ['agent/created', 'agent/disposed'], '必须注册在 Root context 上（两个事件）')
+  assert.deepEqual(rootListeners.map((entry) => entry.event), ['agent/created'],
+    '视图层收敛只需要 created；`ocr` 形态闸门不再按 agent 装（手开模式的身份在 created 之后才选定）')
   assert.equal(scopedListeners.length, 0, '不得注册在 scoped context 上（那会静默失效）')
   assert.equal(rootListeners[0].event, 'agent/created')
 
@@ -172,14 +190,14 @@ test('registerRootToolPolicy：注册在 Root context 的 agent/created 上（sc
   rootListeners[0].listener({ agent: rootAgent(tools) })
   rootListeners[0].listener({ agent: childAgent(tools) })
   assert.equal(calls.length, ROOT_AGENT_DENIED_TOOLS.length, '只有根 Agent 被收敛')
-  assert.equal(guards.length, 1, '`ocr` 的调用级闸门只装在主 Agent 自己的 scope 上（子 Agent 保留 url 形态）')
+  assert.equal(guards.length, 0, 'created 监听不再装 `ocr` guard：那颗改成全局一次（registerRootOcrGuard），装在这里会漏掉手开模式')
 
-  // 收敛不可用必须留诊断，且不得抛回 agent 创建路径。
+  // Unavailable convergence must warn without throwing on the agent-creation path.
   assert.doesNotThrow(() => rootListeners[0].listener({ agent: { session: { header: {} } } }))
   assert.equal(warnings.length, 1)
   assert.match(warnings[0], /根 Agent 工具收敛未生效/)
 
-  // 载荷异常也不能炸（事件来自宿主，宁可少收敛）。
+  // Malformed host payloads cannot crash convergence; losing some restriction is safer.
   assert.doesNotThrow(() => rootListeners[0].listener({}))
   assert.doesNotThrow(() => rootListeners[0].listener(undefined))
 })
@@ -198,13 +216,8 @@ test('registerRootToolPolicy：别的 preset 的根 Agent 不动', () => {
 })
 
 /**
- * ⛔ 取证用例（2026-09-30 桌面端）。
- *
- * 桌面端 Capital 根会话的 `request.header.tools` 里 `pwsh` / `request_data` / `dc_status` /
- * `render_chart` **全都在**——收敛一步没走，而当时**没有任何一处能看出来为什么**：三条出口
- * （registry 读不到、`composedPreset` 判 false、逐名 `restrict()` 抛错被 catch）都不留痕迹，
- * 桌面端又不落盘 `ctx.logger`。这条用例钉的是"三条出口各自必须在现场记录里可分辨"——
- * 它不证明收敛成功，只保证下次再坏的时候**看得见坏在哪一步**。
+ * ⛔ Forensic cases: all three silent exits — registry read, preset mismatch, and per-name
+ * restrict failure — must be distinguishable in the bounded probe history.
  */
 test('registerRootToolPolicy：三条静默出口都要在现场记录里留下可分辨的痕迹', () => {
   resetRootPolicyProbes()
@@ -219,14 +232,13 @@ test('registerRootToolPolicy：三条静默出口都要在现场记录里留下�
     return rootPolicyProbes().at(-1)
   }
 
-  // 出口一：`composedPreset` 认不出这个根 Agent（桌面端最可疑的一条）。
+  // Exit 1: composedPreset cannot identify this root Agent.
   const judged = fire({ composedPreset: () => 'standard', restrict: () => {} })
   assert.equal(judged.presetId, 'standard', '现场记录要原样带出 composedPreset 的返回值，否则无法判断是不是判错了预设')
   assert.equal(judged.outcome, 'not-capital')
   assert.deepEqual(judged.denied, [])
 
-  // 出口二：逐名 `restrict()` 抛错被 catch 跳过——**旧实现连这条都不留**，
-  // outcome 照样是 restricted，看起来像"收敛成功了"。
+  // Exit 2: a per-name restrict throws and is caught; the failed list proves convergence was partial.
   const failed = fire({
     composedPreset: () => CAPITAL_PRESET_ID,
     restrict: () => { throw new Error('unknown tool name') },
@@ -235,12 +247,12 @@ test('registerRootToolPolicy：三条静默出口都要在现场记录里留下�
   assert.deepEqual(failed.failed, [...ROOT_AGENT_DENIED_TOOLS], '每一个被跳过的名字都必须点名')
   assert.deepEqual(failed.denied, [])
 
-  // 出口三：registry 压根读不到（保守放行分支）。
+  // Exit 3: registry is absent and the conservative claim path runs.
   const noRegistry = fire({ composedPreset: undefined, restrict: () => {} })
   assert.equal(noRegistry.presetId, 'no-registry')
   assert.equal(noRegistry.denied.length, ROOT_AGENT_DENIED_TOOLS.length, '保守放行也要如实记下 deny 成功的名')
 
-  // 子 Agent 不进这份窗口：它们是绝大多数 agent/created 的来源，会把唯一有意义的那行挤掉。
+  // Children are too numerous for the root-convergence window and would evict meaningful rows.
   resetRootPolicyProbes()
   const listeners = []
   registerRootToolPolicy({
@@ -271,7 +283,7 @@ test('registerRootToolPolicy：Root 监听器必须由本 fiber 持有 disposer�
     effect: (callback) => { const dispose = callback(); dispose(); return () => {} },
   }
   registerRootToolPolicy(scoped)
-  assert.deepEqual(disposed, ['agent/created', 'agent/disposed'], '两个 Root 监听器都要被本 fiber 释放')
+  assert.deepEqual(disposed, ['agent/created'], 'Root 监听器必须由本 fiber 释放（不释放就是跨实例泄漏）')
 })
 
 test('isCapitalAgent：按 composedPreset 筛本 preset', () => {
@@ -286,34 +298,37 @@ test('registerRootToolPolicy：ctx 没有 on 时安静跳过（不改装配结�
   assert.doesNotThrow(() => registerRootToolPolicy({}))
 })
 
-test('fsWriteGuardReasonFor：write / edit 只对本 preset 拒；读口与别的 preset 一律放行', () => {
+test('fsWriteGuardReasonFor：write / edit 对本插件的根与角色都拒；读口与别的 preset 一律放行', () => {
   const ctx = { get: () => ({ composedPreset: (agentCtx) => agentCtx?.preset }) }
   const guard = fsWriteGuardReasonFor(ctx)
   const capital = { ctx: { preset: CAPITAL_PRESET_ID } }
   assert.deepEqual([...FS_WRITE_TOOL_NAMES], ['write', 'edit'], '写口名单就是这两个名字；改动它要有明确设计决策')
   for (const name of FS_WRITE_TOOL_NAMES) {
     assert.equal(guard({ name, agent: capital, arguments: { file_path: '/w/a.md' } }), FS_WRITE_READ_ONLY)
-    // ⛔ 全局 guard 绝不能吃掉别的 preset 的正当写口：那是开发会话每天在用的能力
+    // ⛔ Row config cannot remove inherited write names; this call guard covers all Capital presets.
+    assert.equal(guard({ name, agent: { ctx: { preset: ROLE_PRESET_IDS.junior } } }), FS_WRITE_READ_ONLY,
+      '子角色同样不许直接写文件：业务落盘只走工具实现')
+    // ⛔ A global guard must not consume another preset's write access.
     assert.equal(guard({ name, agent: { ctx: { preset: 'standard' } } }), undefined)
     assert.equal(guard({ name, agent: { ctx: {} } }), undefined, 'composedPreset 返回 undefined 时不认领、放行')
   }
   for (const name of ['read', 'read_image', 'bash', 'describe_dataset', undefined]) {
     assert.equal(guard({ name, agent: capital }), undefined, `${name} 不是写口，闸门不得插手`)
   }
-  // fail-open 三形状：registry 读不到 / composedPreset 抛错 / 拿不到 agent——一律放行
-  //（fail closed 会把同一进程里所有会话的 write / edit 一起吃掉，这是全局 guard 的红线）
+  // ⛔ Unknown identity fails open; closing it would deny writes process-wide.
   assert.equal(fsWriteGuardReasonFor({ get: () => undefined })({ name: 'write', agent: capital }), undefined)
   assert.equal(fsWriteGuardReasonFor({ get: () => ({ composedPreset: () => { throw new Error('boom') } }) })({ name: 'write', agent: capital }), undefined)
   assert.equal(guard({ name: 'write' }), undefined)
   assert.equal(guard(undefined), undefined)
-  // 文案必须指回正确路径（读用 read、落盘走工具回传），并把两个写口都点名
+  // Denial text must name both write tools and the supported read/data_gap path.
   assert.match(FS_WRITE_READ_ONLY, /read/)
   assert.match(FS_WRITE_READ_ONLY, /data_gap/)
   assert.match(FS_WRITE_READ_ONLY, /write/)
   assert.match(FS_WRITE_READ_ONLY, /edit/)
 })
 
-test('registerFsWriteGuard：全局装一次（不按 agent 装），guard 不可用 / 抛错都不外抛', () => {
+test('registerFsWriteGuard：全局装一次（不按 agent 装），拒绝要留下现场记录，guard 不可用 / 抛错都不外抛', () => {
+  resetRootPolicyProbes()
   const guards = []
   const disposed = []
   const tools = { guard: (guard) => { guards.push(guard); return () => { disposed.push('guard') } } }
@@ -324,10 +339,17 @@ test('registerFsWriteGuard：全局装一次（不按 agent 装），guard 不�
   }
   registerFsWriteGuard(ctx)
   assert.equal(guards.length, 1, '全局 guard 只装一次：它按调用身份判定，不需要按 agent 装')
-  assert.equal(guards[0]({ name: 'write', agent: { ctx: { preset: CAPITAL_PRESET_ID } } }), FS_WRITE_READ_ONLY,
+  assert.equal(guards[0]({ name: 'write', agent: { session: { id: 's-fs' }, ctx: { preset: CAPITAL_PRESET_ID } } }), FS_WRITE_READ_ONLY,
     '装的必须是 fs 写口闸门（同一份判定实现）')
+  // Guard denials share the probe channel: "denied" and "no write tool" look identical to the model.
+  const last = rootPolicyProbes().at(-1)
+  assert.deepEqual(
+    { outcome: last.outcome, preset_id: last.presetId, agent_id: last.agentId, root: last.root, denied: last.denied },
+    { outcome: 'guard-denied', preset_id: CAPITAL_PRESET_ID, agent_id: 's-fs', root: true, denied: ['write'] })
+  guards[0]({ name: 'read', agent: { ctx: { preset: CAPITAL_PRESET_ID } } })
+  assert.equal(rootPolicyProbes().length, 1, '放行不记')
   assert.deepEqual(disposed, ['guard'], 'disposer 由 ctx.effect 持有并随 fiber 释放')
-  // guard 不可用 / 拿不到 tools / guard 抛错：都不外抛（调用方是装配路径）
+  // Guard unavailable or installation exceptions must not escape the assembly path.
   assert.doesNotThrow(() => registerFsWriteGuard({}))
   assert.doesNotThrow(() => registerFsWriteGuard({ get: () => undefined }))
   assert.doesNotThrow(() => registerFsWriteGuard({ tools: { guard: () => { throw new Error('boom') } } }))

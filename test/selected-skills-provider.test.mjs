@@ -6,78 +6,64 @@ import { fileURLToPath } from 'node:url'
 import { registerRootSelectedSkills, SELECTED_SKILL_CATALOG } from '../lib/agents/selected-skills-provider.js'
 import { SELECTED_SKILL_SKILL_DIRS, SELECTED_SKILL_TASK_IDS } from '../selected-skills/catalog.js'
 
-// 留在快照里、但不进可选清单的六颗，理由逐条写在 selected-skills/InvestSkill/UPSTREAM.md。
+// Kept in the snapshot but not selectable: aliases, orchestrators, report output, chart authoring.
 const INVESTSKILL_EXCLUDED = [
-  'fundamental-analysis', 'dcf-valuation', 'research-bundle', // 上游自己标注的 alias 残片
-  'full-report',       // 编排 skill：接管会话路由（与 china-stock orchestrator 同一条理由）
-  'report-generator',  // 上游输出口：与已删除、禁止恢复的报告交付链路冲突
-  'chart-master',      // 教 Agent 自己出图：出图只走 render_chart
+  'fundamental-analysis', 'dcf-valuation', 'research-bundle',
+  'full-report',
+  'report-generator',
+  'chart-master',
 ]
 
-// 第五颗 19 里开放 11：下面这些留在快照里当可审查材料（etoro 连发布包都不进），理由逐条写在
-// selected-skills/trading-skills/UPSTREAM.md 与 docs/reference/external-skill-scan-2026-10.md。
-// 注意这里**不含** position-sizing / position-management：那两颗给的是仓位数字与持仓加减建议，
-// 与本插件的冲突只可能在执行面，而本插件没有券商接口（§8.6 第 7 条的判据）。
+// Kept as review material; exclusions are execution surface (broker API, paid data, routing).
 const TRADING_SKILLS_EXCLUDED = [
-  '_lib',                      // 共享 python 计算模块：不是 skill，本插件也没有 shell 能跑它（§1.6）
-  'etoro',                     // 券商 API 执行面：在对话里采集凭据、真实下单（§8.6 第 4 与第 7 条）
-  'earnings-preview',          // 数据层写死付费 API（curl + 向用户要凭据），且与 InvestSkill 那颗同名
-  'macro-event-analysis',      // 同上：ask which supported provider + curl
-  'market-regime-analysis',    // 同上
-  'pre-trade-check',           // orchestrator：上游自己的 "Workflow routing" 段接管会话路由
-  'earnings-trade-prep',       // 同上
-  'portfolio-risk-review',     // 同上
-  'post-trade-debrief',        // 同上
+  '_lib',
+  'etoro',
+  'earnings-preview',
+  'macro-event-analysis',
+  'market-regime-analysis',
+  'pre-trade-check',
+  'earnings-trade-prep',
+  'portfolio-risk-review',
+  'post-trade-debrief',
 ]
 
-// 第六颗（jwangkun/claude-for-financial-services-cn）：上游有六个 skills 根，这里只登记规范根
-// vertical-plugins/china-finance/skills（31 颗），开放其中 12 颗。下面 19 颗留在快照里当可审查材料
-// （mcp-servers/ 四份取数服务端连发布包都不进），理由逐条写在
-// selected-skills/claude-for-financial-services-cn/UPSTREAM.md 与 docs/reference/external-skill-scan-2026-10.md。
-// 这里同样**不收**"给方向与仓位"那一类理由：本插件不收的是执行面（§8.6 第 7 条）。
+// Only the canonical skills root is registered; data catalogs, meta skills, workbook/deck
+// outputs and accounting workflows are excluded.
 const CHINA_FINANCE_EXCLUDED = [
-  'china-market-data',           // 它本身就是取数目录：服务商 MCP 工具名表 + export 模式开关，无分析产出
-  'china-skill-creator',         // 元技能：教造新 skill，模板里硬编码服务商阶梯，还要 python3 scripts/*.py 校验
-  'china-dcf-model',             // 上游自标的 alias（"redirects to china-dcf"）：§8.6 第 6 条
-  'china-comps',                 // 同题材的薄一份，且带两份 frontmatter
-  'china-tax-loss-harvesting',   // §8.6 第 8 条市场口径：wash-sale / 应税账户成本基础是美股税制产物，A 股无此制度
-  'china-3-statement-model',     // 要求产出 xlsx 工作簿（还有 OpenPyXL Formatting 一节）
-  'china-lbo-model',             // 同上：File named: …_LBO_Model_….xlsx
-  'china-xlsx-author',           // 交付物就是一份工作簿
-  'china-pptx-author',           // python3 scripts/generate_a_share_ppt.py + .pptx
-  'china-ppt-template-creator',  // .pptx 模板与 _Style_Guide.pdf
-  'china-deck-refresh',          // 读写既有 deck 并另存 .pptx + .pdf
-  'china-audit-xls',             // 审计对象是一份 xlsx 工作簿
-  'china-ib-check-deck',         // 质检对象是一份 pitch deck
-  'china-clean-data-xls',        // 表格清洗，对象同样是工作簿
-  'china-model-update',          // 维护本地模型文件并给新目标价
-  'china-roll-forward',          // 把工作簿滚动到新期间（"All cells formula-driven"）
-  'china-gl-recon',              // 总账对账：会计作业口径，不是本插件使用者的研究场景
-  'china-accrual-schedule',      // 计提计划，同上
-  'china-deal-screening',        // 一级市场标的筛选（PE / 投行语境）
+  'china-market-data',
+  'china-skill-creator',
+  'china-dcf-model',
+  'china-comps',
+  'china-tax-loss-harvesting',
+  'china-3-statement-model',
+  'china-lbo-model',
+  'china-xlsx-author',
+  'china-pptx-author',
+  'china-ppt-template-creator',
+  'china-deck-refresh',
+  'china-audit-xls',
+  'china-ib-check-deck',
+  'china-clean-data-xls',
+  'china-model-update',
+  'china-roll-forward',
+  'china-gl-recon',
+  'china-accrual-schedule',
+  'china-deal-screening',
 ]
 
-// 第七颗（GAJETOso/financeskills）：上游 48 颗扁平排列，这里开放 8 颗。下面 40 颗留在快照里当
-// 可审查材料（scripts/ 与 evals/ 连发布包都不进），理由逐条写在
-// selected-skills/financeskills/UPSTREAM.md 与 docs/reference/external-skill-scan-2026-10.md。
-// 排除的主族不是"给方向与仓位"（§8.6 第 7 条早就不收这一类理由），而是**领域外**：这批正文的
-// 角色是总账会计、内控经理、FP&A 经理与个人理财顾问，与本插件使用者的证券研究场景不是一件事。
+// Excluded as out of domain: accounting operations, personal finance, audit, private markets.
 const FINANCESKILLS_EXCLUDED = [
-  // 与既有 59 颗重叠：比率 / 现金周期 / VaR / 综合评估都已有更厚的一份
   'financial-analysis',
   'investment-analysis',
   'risk-assessment',
   'working-capital-analysis',
-  // 资产类别：本插件不涉及加密资产
   'crypto-accounting',
-  // 个人理财与美国 / 英国税制（401k、Roth、ISA）：不是证券投研，且市场口径不可迁移
   'personal-budgeting',
   'net-worth-tracker',
   'retirement-planning',
   'debt-payoff',
   'tax-planning',
   'tax-efficient-investing',
-  // 编制视角的会计作业：怎么把账记对、把报表做出来，不是怎么读别人的披露
   'journal-entry',
   'statement-preparation',
   'intercompany-accounting',
@@ -91,24 +77,20 @@ const FINANCESKILLS_EXCLUDED = [
   'fixed-asset-accounting',
   'aro-computation',
   'variance-analysis',
-  // 审计、内控与披露合规的执行面
   'audit-checklist',
   'sox-compliance',
   'esg-reporting',
-  // 企业内部经营与资金管理
   'budget-forecast',
   'predictive-burn-rate',
   'product-profitability',
   'cvp-breakeven',
   'treasury-management',
   'earned-value-mgmt',
-  // 私有公司与特殊融资语境：本插件没有非上市标的的取数面
   'startup-valuation',
   'lbo-modeling',
   'venture-debt',
   'debt-restructuring',
   'oil-gas-valuation',
-  // 依赖本插件不具备的模型 / 数据形态（transformers 情感模型、无监督异常检测）
   'ai-anomaly-detection',
   'nlp-earnings-sentiment',
 ]
@@ -117,12 +99,8 @@ function candidate(name) {
   return { name, description: name, invocation: { modelInvocable: true, userInvocable: true }, source: 'custom', provider: 'source', rank: 1, locator: name }
 }
 
-/**
- * provider 的 `list()` 现在多带一类候选：任务型内置 skill 的**遮蔽候选**（正文在读取期拼上
- * 外部精选 skill 索引）。它们与 fs provider 的同名候选并存，注册表按 rank 取本包这一份，
- * 所以"精选清单"类断言必须先把它们摘掉——不摘的话，量到的是两类东西的并集。
- * 遮蔽契约本身由文件末尾那组用例专门钉住，不靠这些断言顺手带上。
- */
+// list() also returns shadow candidates for task skills; catalog assertions strip them.
+// The shadowing contract itself is pinned by the cases at the end of this file.
 const selectedOnly = (names) => names.filter((name) => !SELECTED_SKILL_TASK_IDS.includes(name))
 
 function makeHarness() {
@@ -157,9 +135,7 @@ function makeHarness() {
     const preStepListeners = []
     let catalogSnapshot = []
     let remainingInjectFailures = injectFails
-    // 模拟 SkillRegistry 的 collect 缓存：list 结果按 revision 缓存，只有 control.invalidate()
-    // 才重算。少了这层缓存，"开关变了但没失效缓存"的回归永远抓不到（真注册表里的症状是
-    // 每轮 catalog 都还停在旧选择）。
+    // Mirrors SkillRegistry caching: list is cached until control.invalidate().
     const skills = {
       registerProvider(create) {
         providerRegistrationCount += 1
@@ -201,10 +177,8 @@ function makeHarness() {
       },
     }
     agent.ctx = agentCtx
-    // tool-skill 形状的快照监听：await next() 之后才取 catalog，与 dsh-tool-skill 同形状。
-    // 默认在 makeAgent 时先注册（= 运行期 preset 组合先挂、本包钩子在内层）；lateSnapshot
-    // 则推迟到 preStep 才挂（= 本包钩子在外层）。两种顺序下本包都必须赶在快照之前失效缓存，
-    // 否则这一轮目录仍停在旧选择。
+    // dsh-tool-skill-shaped snapshot listener. lateSnapshot mounts it later, putting this
+    // package's hook outside; cache invalidation must still happen before the snapshot.
     const snapshotListener = async (_payload, next) => {
       const decision = await next()
       catalogSnapshot = provider ? (await provider.list({})).map(({ name }) => name) : []
@@ -258,9 +232,7 @@ function makeHarness() {
 }
 
 test('selected skill provider: disabled by default and limited to the approved catalog', () => {
-  // 前两颗快照的清单逐条钉住：这些 key 已经发出去了，改名等于把使用者已拨开的开关清掉。
-  // 按仓库点名而不是"减去某一颗"：后面追加的快照不在这条的钉子范围内（InvestSkill 与 trading-skills
-  // 由下面「目录 − 排除清单」派生，peter-lynch-skill 只有一颗，由 test/persona.test.mjs 逐条核对身份）。
+  // Keys are already shipped; renaming one clears a user's toggle. Pin by repository.
   const pinnedRepositories = ['investment-skills', 'china-stock-research-skills']
   assert.deepEqual(SELECTED_SKILL_CATALOG.filter(({ repository }) => pinnedRepositories.includes(repository)).map(({ name }) => name), [
     'buffett-investment-framework',
@@ -271,8 +243,7 @@ test('selected skill provider: disabled by default and limited to the approved c
     'industry-competition-moat',
     'business-decomposition-order-quality',
   ])
-  // 第三颗是 34 颗的大快照，不写死名单：可选清单必须正好等于「目录里的 skill 减去排除的六颗」。
-  // 有人把 chart-master 或 report-generator 顺手加回 catalog，这条就红并点名差在哪。
+  // Large snapshot: catalog must equal snapshot dirs minus exclusions, and name any diff.
   const investSkillCatalog = SELECTED_SKILL_CATALOG
     .filter(({ repository }) => repository === 'InvestSkill')
     .map(({ name }) => name)
@@ -282,8 +253,7 @@ test('selected skill provider: disabled by default and limited to the approved c
     .sort()
   assert.deepEqual(investSkillCatalog, investSkillDirs,
     `InvestSkill 的可选清单与快照目录不符：多出或缺少 ${investSkillCatalog.filter((n, i) => n !== investSkillDirs[i]).join('、')}`)
-  // 第五颗同样是「目录 − 排除清单」的派生钉法，而且排除得多（19 里开放 9）：
-  // 有人把 etoro（券商下单）、position-sizing（仓位数字）或某颗 orchestrator 顺手加回 catalog，这条就红。
+  // Same dirs-minus-exclusions check; catches broker or orchestrator skills added back.
   const tradingSkillsCatalog = SELECTED_SKILL_CATALOG
     .filter(({ repository }) => repository === 'trading-skills')
     .map(({ name }) => name)
@@ -293,9 +263,7 @@ test('selected skill provider: disabled by default and limited to the approved c
     .sort()
   assert.deepEqual(tradingSkillsCatalog, tradingSkillDirs,
     `trading-skills 的可选清单与快照目录不符：多出或缺少 ${tradingSkillsCatalog.filter((n, i) => n !== tradingSkillDirs[i]).join('、')}`)
-  // 第六颗同样是派生钉法，两点不同：它排除得多（规范根 31 里开放 9），而且根路径**从映射现取**、不写死目录名。
-  // 这颗的 skills 根是 vertical-plugins/china-finance/skills（上游有六个根），写死就等于"映射漂了"
-  // 只能等 provider 装配时才被发现——正是 AGENTS.md §9.7 那一族。排除的 22 颗逐条理由见该快照 UPSTREAM.md。
+  // The skills root comes from the map, not a hardcoded dir, so mapping drift fails here.
   const chinaFinanceCatalog = SELECTED_SKILL_CATALOG
     .filter(({ repository }) => repository === 'claude-for-financial-services-cn')
     .map(({ name }) => name)
@@ -307,8 +275,7 @@ test('selected skill provider: disabled by default and limited to the approved c
   assert.deepEqual(chinaFinanceCatalog, chinaFinanceDirs,
     `claude-for-financial-services-cn 的可选清单与规范根（${chinaFinanceRoot}）不符：`
     + `多出或缺少 ${chinaFinanceCatalog.filter((n, i) => n !== chinaFinanceDirs[i]).join('、')}`)
-  // 第七颗同样是派生钉法（48 里开放 8）。它排除得最多，理由是**领域外**而不是执行面——所以这条
-  // 断言真正钉住的是"别把个人理财、加密与编制会计那几族顺手加回 catalog"：加一颗就红并点名差在哪。
+  // Same derivation; catches out-of-domain skills (personal finance, crypto, accounting) added back.
   const financeskillsCatalog = SELECTED_SKILL_CATALOG
     .filter(({ repository }) => repository === 'financeskills')
     .map(({ name }) => name)
@@ -320,10 +287,8 @@ test('selected skill provider: disabled by default and limited to the approved c
   assert.deepEqual(financeskillsCatalog, financeskillDirs,
     `financeskills 的可选清单与快照目录（${financeskillsRoot}）不符：`
     + `多出或缺少 ${financeskillsCatalog.filter((n, i) => n !== financeskillDirs[i]).join('、')}`)
-  // 第八颗（Howard-Jerry/quant-agent-skills）是另一种形状：上游那三颗自述的编排器**根本不在登记的
-  // skills 根里**（它们在快照根，本仓另起了 skills/ 只放我们自持的那一颗入口）。所以这里除了派生核对，
-  // 还要钉一句字面禁令：编排器不进 catalog，也不许被挪进 skills 根——后者是"改一行映射就整颗开门"的
-  // 那一族（AGENTS.md §9.7：同一能力两个入口，回归只喂了接好的那一个）。
+  // Upstream orchestrators are not in the registered skills root; they must stay out of the
+  // catalog and never be moved into that root, where a one-line mapping change would expose them.
   const quantCatalog = SELECTED_SKILL_CATALOG
     .filter(({ repository }) => repository === 'quant-agent-skills')
     .map(({ name }) => name)
@@ -368,8 +333,7 @@ test('selected skill provider: Capital root only, filtered catalog, scope cleanu
   assert.equal(harness.providerRegistrationCount, 1)
   assert.equal(root.preStepListenerCount, 2, 'pre-step 钩子必须在 agent/created settle 前落位（tool-skill 形状快照 + 本包刷新钩子）')
   assert.equal(harness.providerConfig.includeDefaultRoots, false)
-  // skills 根按 catalog 的「仓库 → 相对路径」现算：InvestSkill 的 skill 不在 <repo>/skills 底下，
-  // 而在 plugins/us-stock-analysis/skills。写死两颗的表现不是报错，是勾了那一格永远不出现。
+  // Skill roots are derived from the catalog; a hardcoded path silently hides enabled items.
   assert.deepEqual(harness.providerConfig.customSkillDirs.length, Object.keys(SELECTED_SKILL_SKILL_DIRS).length)
   for (const [repository, skillsDir] of Object.entries(SELECTED_SKILL_SKILL_DIRS)) {
     const expected = join(repository, ...skillsDir.split('/'))
@@ -394,12 +358,8 @@ test('selected skill provider: Capital root only, filtered catalog, scope cleanu
 })
 
 test('selected skill provider: 先建会话再切 preset（GUI 顺序）也必须注册 provider', async () => {
-  // 2026-10-13 实测（在真 boot graph 里跑的一次性探针，已清理）：GUI 建会话时先按 profile 默认
-  // preset（`cordis`）把 Agent 建好，随后才 `agentPresets.select('capital-generation')`——
-  // `agent/created` 在 select 之前就发完了，只挂那一条的实现在这条路径上 provider 从未注册：
-  // 设置卡 10 个开关全开，会话目录仍只有 preset 自带的 8 颗（对照：建会话时就 mount 同一 preset
-  // 是 18 颗）。preset registry 在 mount 完成后才 emit `agent-preset/selected`，而本插件的
-  // apply() 正是在这次 mount 里跑的，所以第二条监听一定早于事件落位。
+  // GUI creates the Agent under the default preset, then selects Capital, so agent/created
+  // fires first; the agent-preset/selected listener is the only path that registers there.
   const harness = makeHarness()
   registerRootSelectedSkills(harness.ctx, { buffettFramework: true }, harness.createFilesystemProvider)
   const selected = harness.listeners.get('agent-preset/selected')
@@ -423,7 +383,7 @@ test('selected skill provider: 先建会话再切 preset（GUI 顺序）也必�
   assert.deepEqual(selectedOnly((await harness.provider.list({})).map(({ name }) => name)), ['buffett-investment-framework'])
   assert.equal(root.preStepListenerCount, 2, '切换路径同样要落位每轮刷新钩子')
 
-  // 同一个 Agent 的重复事件（再 select 一次 / 与 agent/created 撞车）不许注册第二个 provider。
+  // Repeated events for one Agent must not register a second provider.
   await selected('session-root', 'capital-generation')
   await harness.listeners.get('agent/created')({ agent: root.agent })
   assert.equal(harness.providerRegistrationCount, 1, '同一个 Agent 只许注册一次')
@@ -433,7 +393,7 @@ test('selected skill provider: 先建会话再切 preset（GUI 顺序）也必�
 })
 
 test('selected skill provider: 切换路径注入失败要留重试余地', async () => {
-  // §9.7 的另一半：失败不许把该 Agent 钉成永久失败（rejection memoize 的教训）。
+  // A failed inject must stay retryable, not latch the Agent into permanent failure.
   const harness = makeHarness()
   registerRootSelectedSkills(harness.ctx, { buffettFramework: true }, harness.createFilesystemProvider)
   const selected = harness.listeners.get('agent-preset/selected')
@@ -450,8 +410,7 @@ test('selected skill provider: 切换路径注入失败要留重试余地', asyn
 })
 
 test('selected skill provider: 嵌套 skills 根里的名字走同一个 list/get 闸门', async () => {
-  // §9.7 那一族：只验证接好的那个入口，第二个入口就静默漏掉。InvestSkill 的 skill 住在
-  // plugins/us-stock-analysis/skills 底下，name 与顶层快照同级，必须同样被 list 过滤、被 get 复核。
+  // Nested skills root: its names must pass the same list filter and get check.
   const harness = makeHarness()
   registerRootSelectedSkills(harness.ctx, { factCheck: true }, harness.createFilesystemProvider)
   await harness.listeners.get('agent/created')({ agent: harness.makeAgent().agent })
@@ -465,8 +424,7 @@ test('selected skill provider: 嵌套 skills 根里的名字走同一个 list/ge
 })
 
 test('selected skill provider: 开关每轮现读，已有 Agent 的 catalog 跟随设置刷新', async () => {
-  // 会话先建、开关后拨是真实使用顺序。旧实现把 enabled 集合定格在 agent/created（而且全关时
-  // 干脆不注册 provider），于是"建好会话再打开开关"永远不出现——本次要修的就是这一族。
+  // Real order is create then toggle; the old code froze enabled state at agent/created.
   const harness = makeHarness()
   let selection = { buffettFramework: false }
   registerRootSelectedSkills(harness.ctx, () => selection, harness.createFilesystemProvider)
@@ -479,7 +437,6 @@ test('selected skill provider: 开关每轮现读，已有 Agent 的 catalog 跟
   assert.deepEqual((await harness.provider.list({})).map(({ name }) => name), [])
   assert.equal(harness.invalidateCount, 0)
 
-  // 会话已经存在，用户在设置里打开开关、发下一条指令：
   selection = { buffettFramework: true }
   await live.preStep()
   assert.deepEqual(selectedOnly(live.catalogSnapshot), ['buffett-investment-framework'],
@@ -500,8 +457,7 @@ test('selected skill provider: 开关每轮现读，已有 Agent 的 catalog 跟
     '关掉后 get 也必须拒绝（目录过滤与正文读取同一道闸门）',
   )
 
-  // 注册顺序反过来也要成立：tool-skill 形状的快照监听若是后挂的（本包钩子在外层），
-  // 钩子照样必须在放行 next() 之前失效缓存——两种顺序都要赶得上本轮快照。
+  // With the snapshot listener mounted later, invalidation must still precede next().
   selection = { factCheck: true }
   const innerOrder = harness.makeAgent({ lateSnapshot: true })
   await created({ agent: innerOrder.agent })
@@ -513,7 +469,7 @@ test('selected skill provider: 开关每轮现读，已有 Agent 的 catalog 跟
     '快照监听先注册或后注册都要赶得上：钩子必须在 next() 之前失效缓存')
   assert.equal(harness.invalidateCount, 3)
 
-  // 新建的 root Agent 同样读最新开关（这条不回退到"创建时定格"）。
+  // New root Agents read the latest switches too, not a creation-time snapshot.
   selection = { factCheck: true }
   const late = harness.makeAgent()
   await created({ agent: late.agent })
@@ -521,39 +477,27 @@ test('selected skill provider: 开关每轮现读，已有 Agent 的 catalog 跟
   assert.deepEqual(selectedOnly((await harness.provider.list({})).map(({ name }) => name)), ['fact-check'], '新 root Agent 必须读取最新开关')
 })
 
-/**
- * 任务型内置 skill 的索引：正文在**读取期**拼上"本轮可用的外部精选 Skill"。
- *
- * 三条判据，缺一条就会退化成另一件事：
- *   ① 一颗都没启用时**不遮蔽**：`list()` 为空，用户看到的与没有这个 provider 时逐字相同；
- *   ② 索引为空的那些任务型 skill **不遮蔽**（让给 fs provider 的原文）——遮蔽是加法不是替换，
- *      "没有索引"永远不许演变成"这颗 skill 不见了"（AGENTS.md §9.7 ⑤）；
- *   ③ `get()` 拿到的正文 = 磁盘正文 + 索引块，磁盘文件一个字节都不动；索引里的描述用**运行时那一份**
- *      （与会话目录同源），不是设置卡片里策展过的中文摘要。
- */
+// Task-skill index: get() returns disk body + index block, disk file unchanged.
+// Shadowing is additive: nothing enabled or no index means no shadow at all.
 test('任务型 skill 索引：只有"确实有索引可给"的那几颗才遮蔽，正文在读取期拼装', async () => {
   const harness = makeHarness()
   const skillsDir = fileURLToPath(new URL('../preset/capital-generation/skills', import.meta.url))
-  // 这个用例自带替身 fs 根，为的是让"每颗任务型 skill 分开算"量得出来：
-  // `china-comps-analysis`（valuation + competition）只进 equity / event，`tax-lens`（tax + portfolio）
-  // 只进 portfolio —— 共用 fixture 那三颗都带 `risk`，而 risk 三颗全收，量不出区别。
+  // Separate fixture roots so per-task index filtering is observable.
   const createFilesystemProvider = (_ctx, _control, config) => ({
     name: config.providerName,
     async list() { return [candidate('china-comps-analysis'), candidate('tax-lens')] },
     async get(value) { return { ...value, content: 'loaded' } },
     async dispose() {},
   })
-  // 读选择用**函数**形状（settings 读回就是每轮现读），静态全关会在注册前短路掉。
+  // Selection is a function because settings are read per turn.
   const selection = { chinaCompsAnalysis: false }
   registerRootSelectedSkills(harness.ctx, () => selection, createFilesystemProvider)
   const created = harness.listeners.get('agent/created')
 
-  // ① 默认全关：一条候选都不列，遮蔽为零。
   const off = harness.makeAgent()
   await created({ agent: off.agent })
   assert.deepEqual(await harness.provider.list({}), [], '一颗都没启用时不许遮蔽任何内置 skill')
 
-  // ② `china-comps-analysis` 只挂 equity + event ⇒ portfolio 那一颗不许被遮蔽（留给 fs provider 的原文）。
   selection.chinaCompsAnalysis = true
   const live = harness.makeAgent()
   await created({ agent: live.agent })
@@ -565,10 +509,9 @@ test('任务型 skill 索引：只有"确实有索引可给"的那几颗才遮�
   assert.ok(shadows.every(({ invocation }) => invocation.modelInvocable === true),
     '遮蔽候选必须自带 invocation：isModelInvocable 直接读它，缺了会在 tool-skill 里抛错')
 
-  // ③ 正文拼装：磁盘正文 + 索引块；索引行是「name: 运行时描述」（替身 fs 的 description 就是 name）。
   const definition = await harness.provider.get(candidate('capital-equity-research'), {})
   const raw = readFileSync(join(skillsDir, 'capital-equity-research', 'SKILL.md'), 'utf8')
-  // 换行一律写成可选 CR：Windows 工作区拿到的 SKILL.md 是 CRLF（test/cross-platform.test.mjs 钉着）。
+  // CR is optional: Windows checkouts return CRLF.
   const body = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim()
   assert.ok(definition.content.startsWith(body), '正文必须以磁盘原文开头，索引只往后接')
   assert.match(definition.content, /## 附：本轮可用的外部精选 Skill（索引）/)
@@ -578,9 +521,7 @@ test('任务型 skill 索引：只有"确实有索引可给"的那几颗才遮�
   assert.equal(definition.resourceBase.kind, 'directory', '正文里的相对链接仍要能按目录解析')
   assert.ok(definition.resourceBase.path.endsWith(join('skills', 'capital-equity-research')))
 
-  // ④ 换成只挂 portfolio 的那一颗：遮蔽对象跟着换，equity 回到"没有索引"。
-  // 开关变化要经**下一轮 pre-step** 才失效缓存（替身注册表按 revision 缓存 list 结果，与真注册表同形状），
-  // 所以这里先走一轮 pre-step——正是"用户拨开关、发下一条指令"的真实顺序。
+  // Switches take effect on the next pre-step, as in real use.
   selection.chinaCompsAnalysis = false
   selection.taxLens = true
   await live.preStep()

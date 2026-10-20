@@ -28,10 +28,7 @@ function isMarket(value: string): value is SecurityMarket {
   return value === 'SH' || value === 'SZ' || value === 'BJ'
 }
 
-/**
- * Parse an A-share/ETF/index code without dropping exchange information.
- * Bare 000xxx codes are rejected because they are ambiguous (e.g. 000001).
- */
+/** Parse an A-share/ETF/index code; bare 000xxx is rejected as ambiguous (000001). */
 export function parseSecurityCode(value: unknown, name = 'code'): SecurityCode {
   if (typeof value !== 'string' || value.trim().length === 0) throw new Error(`parameter ${name} must be a security code`)
   const raw = value.trim()
@@ -62,13 +59,10 @@ export function parseSecurityCode(value: unknown, name = 'code'): SecurityCode {
 }
 
 /**
- * 检索面的代码口径：只回答"把这串写法归一成 6 位数字"。
- *
- * 与 `parseSecurityCode` 的分工是刻意的：数据面必须消歧（裸 `000001` 在指数与个股之间
- * 有歧义），而**具名来源自己会回答"这台机器上有没有这只票"**——cninfo 只覆盖深市、
- * sseinfo 只覆盖沪市，越界返回 0 条并带 note 是真事实，不能在这一层把它拒掉。
- * 所以裸 `000001`（平安银行）在这里合法，`SH600519` / `600519.SH` 也合法（东财研报库
- * 实测只认纯数字，带前缀返回 0 条，因此归一化属于工具职责而不是模型的记性）。
+ * Search-side code normalization: reduce a spelling to 6 digits.
+ * Unlike `parseSecurityCode`, bare `000001` is legal: named sources cover one exchange
+ * (cninfo SZ-only, sseinfo SH-only) and must be allowed to answer "no rows" themselves.
+ * Eastmoney research reports accept digits only; prefixed input returns 0 rows.
  */
 export function bareAshareDigits(value: unknown, name = 'code'): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
@@ -81,7 +75,7 @@ export function bareAshareDigits(value: unknown, name = 'code'): string {
   return match[2] ?? match[3]
 }
 
-/** Normalize a list while preserving first-seen order and rejecting duplicates after normalization. */
+/** Dedupe after normalization, preserving first-seen order. */
 export function normalizeSecurityCodes(value: unknown, name = 'codes', maximum = 50): SecurityCode[] {
   const rawValues = Array.isArray(value)
     ? value

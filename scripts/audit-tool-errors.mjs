@@ -1,28 +1,9 @@
 #!/usr/bin/env node
 /**
- * 工具失败信号审计（只读）：找出"失败了却记成成功"的 tool/result。
- *
- * 为什么需要它：DSH 用工具结果的 `isError` 表达失败，而 `dsh-tools` 的
- * `createSuccessResult` **硬编码 `isError: false`**——工具的**返回值没有办法标记失败**，
- * 唯一通道是从 `execute` 抛出（`dispatchToolBody` 的 catch → `toolErrorResult`）。
- * 所以一个工具只要"把失败做成 `{ ok: false, error }` 信封正常返回"，它在会话日志里
- * 就与成功调用**完全无法区分**：UI 卡片显示成功、模型容易误判、任何基于 `isError`
- * 的重试/统计/压缩逻辑一并失效。
- *
- * 2026-09 实例：`web_retriever_fetch` 11 次结果里 7 次实际失败，**全部 `isError: false`**
- * （见 `docs/design/tool-result-error-signal.md`）。本脚本把同一判据推广到**全部会话、
- * 全部工具**，用来定位同类缺陷，而不是靠逐个读代码猜。
- *
- * 判据（两条，任一命中即"疑似失败被记成成功"）：
- *   ① 结果文本能解析成 JSON，且 `ok === false`；
- *   ② 结果文本能解析成 JSON，且有非空 `error`，同时 `ok` 不是 `true`。
- * 这条判据是**启发式**，会漏掉非 JSON 回执、也会误报"把 error 当正常字段"的工具；
- * 它是线索生成器，不是断言。
- *
- * 用法：
- *   node scripts/audit-tool-errors.mjs [--dir <sessions 根>] [--tool <名字>] [--json]
- *   npm run audit:tool-errors
- * 退出码：0 = 脚本自身跑完（**发现疑似项不算失败**，这是报告不是断言）。
+ * Read-only audit for tool results that failed but were recorded as success (isError false).
+ * dsh-tools' createSuccessResult hardcodes isError:false, so only a thrown error marks failure;
+ * a returned `{ ok:false }` envelope is indistinguishable from success in the session log.
+ * Heuristic lead generator, not an assertion: exit code stays 0 even when suspects are found.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { zstdDecompressSync } from 'node:zlib'
@@ -41,7 +22,7 @@ const AS_JSON = process.argv.includes('--json')
 
 const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
 
-/** 逐帧解压：Node 的 zstd 解码只吃第一帧，会话文件是追加式多帧。 */
+/** Node's zstd decoder stops after the first frame; session files append one frame per write. */
 function decodeSession(file) {
   const buffer = readFileSync(file)
   const offsets = []
@@ -56,13 +37,12 @@ function decodeSession(file) {
     try {
       text += zstdDecompressSync(buffer.subarray(offsets[index], offsets[index + 1])).toString('utf8')
     } catch {
-      // 压缩数据里出现巧合的 magic 会切错帧，跳过即可。
+      // A coincidental magic inside compressed data splits the frame wrong; skip it.
     }
   }
   return text
 }
 
-/** 结果文本是否"看起来是失败"，但 `isError` 却是 false。 */
 function looksLikeUnmarkedFailure(text) {
   const trimmed = text.trim()
   if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return false

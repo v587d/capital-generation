@@ -1,10 +1,8 @@
-// `src/ocr/client.ts` 的回归：PaddleOCR **异步 job** 协议的生命周期形状。
-//
-// 钉住的都是 2026-09-25 拿真报文才看得见的东西：上游把业务错误装在 HTTP 200 里、
-// `optionalPayload` 只认官方示例出现过的三个键、结果是一个 **JSONL** 而不是单个 JSON、
-// 自有等待预算耗尽不是失败而是 `pending`（花钱的提交只有一次）。
-// 这里注入的是 `options.request`（客户端的出网边界），不经过 `createHttpRequester` 的
-// SSRF/超时层——那一份实现在 `test/web-retriever-local-fetch.test.mjs` 里有对等断言（§9.7）。
+// Regression for `src/ocr/client.ts`: shape of the PaddleOCR async-job lifecycle.
+// Upstream quirks: business errors arrive inside HTTP 200; `optionalPayload` only honours the
+// three keys seen in the official examples; the result is JSONL, not one JSON; a spent wait
+// budget is `pending`, not failure — the costly submit happens exactly once.
+// Only `options.request` is injected; peer assertions for the fetch layer: test/web-retriever-local-fetch.test.mjs
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createPaddleOcrClient, OcrError, PADDLE_OCR_DEFAULT_MODEL } from '../lib/ocr/client.js'
@@ -12,7 +10,7 @@ import { createPaddleOcrClient, OcrError, PADDLE_OCR_DEFAULT_MODEL } from '../li
 const TOKEN = 'ba85ba-test-token-must-never-echo'
 const ENDPOINT = 'https://paddleocr.test/api/v2/ocr/jobs'
 
-/** 假出网口：记录每次请求，按调用顺序交给 responder 决定响应（Error 即传输层失败）。 */
+/** Fake egress: records every request, responder decides the reply per call order (an Error = transport failure). */
 function fakeRequest(responder) {
   const calls = []
   return {
@@ -38,7 +36,7 @@ function transportError(code, message) {
   return error
 }
 
-/** 假时钟：睡眠推进它，于是"预算耗尽"是算出来的而不是等出来的。 */
+/** Fake clock: sleeps advance it, so "budget spent" is computed rather than waited out. */
 function fakeClock(start = 0) {
   let at = start
   return {
@@ -56,9 +54,9 @@ function pollBody(state, extra = {}) {
 }
 
 /**
- * 上游 JSONL：一行一个**批次**（实测 15 页报告是 5 行 × 每行 3 页），`layoutParsingResults[]` 一项一页。
- * ⛔ 成功行**同样带** `errorCode: 0, errorMsg: 'Success'`（2026-09-25 实测）——夹具必须带上，
- *    否则"把 errorMsg 当失败"这类错根本测不出来（就是这样把每份成功文档报成 JOB_FAILED 的）。
+ * Upstream JSONL: one line per batch (15 pages came as 5 lines x 3 pages); `layoutParsingResults[]`
+ * = one entry per page. ⛔ Success lines also carry `errorCode: 0, errorMsg: 'Success'`, so fixtures
+ * must include them — else "errorMsg read as failure" (every doc as JOB_FAILED) goes untested.
  */
 function jsonl(pages) {
   return pages.map((page) => JSON.stringify({
@@ -148,7 +146,7 @@ test('wait：pending → running(进度) → done 才取结果，JSONL 多页拼
   assert.match(outcome.document.document, /<!-- page:2 -->/)
   assert.equal(outcome.document.pages[1].heading, undefined)
   assert.equal(outcome.document.pages[0].heading, '第一节')
-  // 页偏移必须能切片回原页正文（按页取回靠它，不再出网）。
+  // Page offsets must slice back into the original page text (per-page reads rely on it, no refetch).
   const { document, pages } = outcome.document
   assert.equal(document.slice(pages[1].start, pages[1].end), '第二节正文')
   const jsonCall = transport.calls.at(-1)
@@ -162,7 +160,7 @@ test('wait：pending → running(进度) → done 才取结果，JSONL 多页拼
 })
 
 test('结果行的 errorCode≠0 才是批次失败：errorMsg="Success" 的成功行不得被误判成失败', async () => {
-  // 实测：成功行的形状是 `{errorCode: 0, errorMsg: 'Success', result: {…}}`——`errorMsg` 一直在。
+  // Real success lines keep `errorMsg`; only `errorCode` decides (⛔ note on `jsonl()`).
   const { client } = makeClient({
     requests: [
       pollBody('done', { resultUrl: { jsonUrl: 'https://result.test/j.jsonl' } }),

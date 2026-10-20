@@ -1,13 +1,7 @@
 /**
- * 报价出网的分流、并发收口与"同一份实现"探针。
- *
- * 这个文件里最重要的用例是最后两条：
- *  - **模块同一性**：host 半边必须与插件侧用同一个 `fuyao-core` 实例。真出现第二份，
- *    症状不是报错，而是 `instanceof` 静默失效、错误归类一律退化成 `fuyao_unavailable`
- *    ——正是 AGENTS.md §9.7 那两次事故的同族。
- *  - **credential ref 从卡片读**：主插件按 `capital-config` 的 `fuyaoCredentialRef` 解析 key
- *    （`src/index.ts:397`），host 半边写死 `FUYAO_API_KEY` 的话，用户改过卡片后 Agent 照常
- *    取数、面板永远失败。
+ * Quote routing, concurrency bounds and "single implementation" probes: the host half must share one
+ * `fuyao-core` instance (a second copy breaks `instanceof` silently and degrades every error to the
+ * fallback code), and the credential ref must come from the `capital-config` card, not a hard-coded key.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -17,7 +11,7 @@ import { MAX_ITEMS, REFRESH_CONCURRENCY, SEED_ITEMS, createWatchlistService, rea
 import { createFakeDomain, fakeCtx, stubFuyao, tencentSnapshotText } from './watchlist-harness.mjs'
 
 const ETF_CODES = ['510300.SH', '159915.SZ', '588000.SH']
-/** 一次刷新的出网按家数分开数：三路扇出之后"总共几次"已经不是判据，"每家各一次"才是。 */
+/** Per-provider outbound counts: after the fan-out "how often each provider" is the judge, not the total. */
 const callsTo = (calls, needle) => calls.filter((call) => call.url.includes(needle))
 
 async function withList(service, extra = []) {
@@ -47,8 +41,7 @@ test('按 asset_type 分流：A 股一次批量、指数一次批量、ETF 逐�
 })
 
 test(`扇出的两道界：一次刷新的请求个数不超过清单上限 ${MAX_ITEMS}，同时在途不超过 ${REFRESH_CONCURRENCY}`, async () => {
-  // 上限抬到 30 之后，"扇出多少"由两件事界住：请求个数 = 清单条数（上限就是配额上界），
-  // 以及在途并发数——后者决定「刷新中…」最坏挂多久，不许无界放出去把同花顺打限流。
+  // Two bounds gate one refresh: request count = list size (the cap is the quota ceiling), and in-flight concurrency.
   const stub = stubFuyao()
   const outer = globalThis.fetch
   let inFlight = 0
@@ -84,7 +77,7 @@ test(`扇出的两道界：一次刷新的请求个数不超过清单上限 ${MA
 })
 
 test('刷新总预算随条数走：10 条仍是 45 秒（与 2.5.2 同档），30 条封顶 90 秒', () => {
-  // 抬上限不许把小清单一起拖长：下界保 45 秒，10 条这一档的算式结果与旧常量完全相等。
+  // Raising the cap must not stretch small lists: the floor stays 45s, and 10 items lands on the old constant.
   assert.equal(refreshBudgetFor(1), 45_000)
   assert.equal(refreshBudgetFor(10), 45_000, '20s + 2.5s×10 = 45s —— 与 2.5.2 的写死值同档')
   assert.equal(refreshBudgetFor(20), 70_000)
@@ -144,8 +137,7 @@ test('同一时刻只有一个 in-flight：并发 refresh 共用一个闸门', a
   const service = createWatchlistService({ openDomain: async () => fake.domain, resolveApiKey: async () => 'k', now: () => 1 })
   try {
     const [a, b] = await Promise.all([service.refresh(), service.refresh()])
-    // 四条种子分布在三个市场 ⇒ 一轮出网是"每家各一次"（A 股指数 / 港指数 / 美指数），
-    // 判据是并发不翻倍：第二次 refresh 拿到的是同一批结果，一家都不许多问一次。
+    // Seeds span three markets, so one round is "one call per provider"; the judge is that concurrency does not double it.
     assert.equal(callsTo(stub.calls, 'fuyao.aicubes.cn').length, 1, '开面板与点刷新同时发生也只出网一轮')
     assert.equal(callsTo(stub.calls, 'qt.gtimg.cn').length, 2, '港、美各一次，共用的那个闸门不许变成两次')
     assert.equal(a.items.length, b.items.length)
@@ -214,9 +206,7 @@ test('credential ref 从 capital-config 卡片读，不是硬编码 FUYAO_API_KE
 })
 
 test('⚠️ 模块同一性探针：host 半边与插件侧用的是同一个 fuyao-core 实例', async () => {
-  // 跨包相对导入（`watchlist/index.js` → `../lib/sources/fuyao-core.js`）在本仓没有先例。
-  // 一旦出现第二份实例，`instanceof` 会静默失效、错误归类全部退化成兜底 code：
-  // 这条用例就是那个退化的检测器，探针不过就重新设计（设计文档 §3.1 / §3.6 红线 3）。
+  // Cross-package relative import (`watchlist/index.js` → `../lib/sources/fuyao-core.js`) has no precedent here.
   const error = new FuyaoError('rate_limited', 'Fuyao HTTP error 429', { status: 429 })
   assert.equal(watchlistErrorCode(error), 'rate_limited', '拿不到 rate_limited 就说明存在第二份 FuyaoError')
   assert.equal(watchlistErrorCode(error, { perItem: true }), 'rate_limited')
@@ -227,16 +217,14 @@ test('⚠️ 模块同一性探针：host 半边与插件侧用的是同一个 f
 })
 
 test('上游用 null 表示"这个数没有"：绝不写成 0.00，也绝不顶掉上一次成功的快照', async () => {
-  // 2026-09-30 review 实测：`Number(null)` 是 **0**，一份 `last_price:null` 的停牌快照被写成
-  // "0.00 元 / 涨跌 0%"的新值——failure 里一个字都没有，页脚还报"刷新于此刻"。null 是上游表示
-  // 缺口的真实形态（本仓 `fuyao-rest.ts` 的 `matchesField` 就是专门为它放行 null 的）。
+  // `Number(null)` is 0, so a `last_price: null` snapshot would land as "0.00 / 0%" with no failure recorded.
   const stub = stubFuyao()
   const fake = createFakeDomain()
   const service = createWatchlistService({ openDomain: async () => fake.domain, resolveApiKey: async () => 'k', now: () => 1 })
   try {
     const first = await service.refresh()
     assert.equal(first.items[0].quote.price, 3823.62, '正常回包先落一份真快照')
-    // 同批再放一只 A 股个股：这一条测的正是"一行没数不拖垮整批"（`matchesField` 放行 null 的同一条理由）。
+    // Adding an A-share stock to the same batch: this is the "one empty row does not sink the batch" case.
     assert.equal((await service.add({ thscode: '300750.SZ' })).ok, true)
 
     stub.calls.length = 0
@@ -255,8 +243,7 @@ test('上游用 null 表示"这个数没有"：绝不写成 0.00，也绝不顶�
         '⛔ 停牌不许把上一次成功的快照覆盖成 0.00')
       assert.equal(fake.records.get('000001.SH').quote.price, 3823.62, '落盘的那份也还是上一次的数')
       assert.equal(second.items.find((item) => item.thscode === '300750.SZ').quote.price, 291.99, '同批有值的照常落地')
-      // 回包里多出来的行（清单里没有的 399001.SZ / 000300.SH）既不能占格子，也不能被当成本次的数：
-      // 写回只认清单里问出去的那些键。
+      // Rows the list never asked for must neither take a slot nor count as this round's numbers.
       assert.equal(fake.records.get('399001.SZ'), undefined, '⛔ 不许把回包里的陌生行落进清单')
       assert.notEqual(second.refreshed_at, null, '别的标的真取到了数，页脚那个时间就是真的')
     } finally {
@@ -268,9 +255,8 @@ test('上游用 null 表示"这个数没有"：绝不写成 0.00，也绝不顶�
 })
 
 test('⛔ 最新价有值、涨跌为 null（停牌 / 未开盘）：涨跌如实"没有"，不许补 0.00%', async () => {
-  // 上面那条测的是 last_price 为 null（整行没数）；这一条测的是**半张快照**——价有、涨跌没有。
-  // 旧写法 `change_pct: pct ?? 0` 在这一半上撒谎：停牌标的画成"+0.00%"（0 在 A 股口径里是
-  // 今日平盘这个**真值**），上一次真实的涨跌被这份假快照顶掉，failures 里一个字都没有。
+  // Half a snapshot: price present, change missing. `change_pct: pct ?? 0` lies there — 0 is the real
+  // value "flat today", and the previous true change is replaced with nothing recorded in failures.
   const stub = stubFuyao({
     '/api/a-share/prices/snapshot': {
       code: 0,
@@ -294,14 +280,12 @@ test('⛔ 最新价有值、涨跌为 null（停牌 / 未开盘）：涨跌如�
 })
 
 test('一次刷新有总预算：被切掉的行记 refresh_timeout，并且一次都不出网', async () => {
-  // 预算切在"领下一组之前"：没问到的行**根本没被问过**，所以不能记成 quote_unavailable
-  // （那是在说"这只票没价"），也不升格成整批失败（问到的那几行是真的）。
-  // 并发之后被切掉的不再是一个尾巴，而是"没轮到号的那些组"，所以断言只看两件事：
-  // 出网数不超过并发上界，而被记超时的代码在 calls 里一个都不许出现。
+  // The budget cuts before claiming the next group, so cut rows were never asked: never quote_unavailable,
+  // never a batch failure; assert outbound ≤ the bound and no timed-out code appears in calls.
   const TEN = Array.from({ length: 10 }, (_, index) => `5${String(10000 + index)}.SH`)
   let clock = 1_790_586_000_000
   const slowFund = (url) => {
-    clock += 20_000 // 每问一只就烧掉 20 秒：45 秒的预算只够第一波
+    clock += 20_000 // 20s burned per call: the 45s budget only covers the first wave
     const thscode = /[?&]thscode=([^&]+)/.exec(String(url))?.[1] ?? TEN[0]
     return { code: 0, data: { timestamp: 1, item: [{ thscode, last_price: 4.417, price_change_ratio_pct: -2.17 }] } }
   }
@@ -335,14 +319,9 @@ test('一次刷新有总预算：被切掉的行记 refresh_timeout，并且一�
 
 const FIXTURE_FUND = { code: 0, data: { timestamp: 1790586418000, item: [{ thscode: '510300.SH', last_price: 4.417, price_change_ratio_pct: -2.170543 }] } }
 
-/**
- * 港美股那两路的报价闸门（设计文档 §6.1 第二行）。夹具全部是 2026-10-07 实测回包的列位与数值，
- * 名称用 ASCII（GBK 解码由 `tencent-source.test.mjs` 与真机冒烟覆盖）。
- */
+// HK/US quote gates. Fixture bodies are ASCII; GBK decoding is covered by `tencent-source.test.mjs`.
 test('⛔ 模块同一性探针（腾讯这一家）：面板与插件侧共用同一条节流链', async () => {
-  // 这条测的不是"面板能不能取到数"，而是**有没有第二条 120ms 的链**。真出现第二份，
-  // 症状不是报错，而是两路各自串行、合起来打上游的速度翻倍（东财那次"两套独立限流等于没限"同族）。
-  // 与 `test/tencent-source.test.mjs` 那条"只有一条节流链"是同一判据的两半。
+  // The judge is "is there a second 120ms chain": two copies double the combined rate upstream.
   const stub = stubFuyao()
   const fake = createFakeDomain()
   const service = createWatchlistService({ openDomain: async () => fake.domain, resolveApiKey: async () => 'k', now: () => 1 })
@@ -360,7 +339,7 @@ test('⛔ 模块同一性探针（腾讯这一家）：面板与插件侧共用�
   }
   try {
     await service.list()
-    // 面板这一轮要走港指数 + 美指数两笔，同时外面再并发一笔检索：三条都必须排在同一条链上。
+    // This round needs the HK-index and US-index calls, plus two concurrent searches: all four queue on one chain.
     await Promise.all([service.refresh(), fetchSmartbox('腾讯', 'hk', AbortSignal.timeout(5000)), fetchSmartbox('苹果', 'us', AbortSignal.timeout(5000))])
     assert.equal(started.length, 4, '面板两笔 + 检索两笔')
     assert.equal(maxConcurrent, 1, '⛔ 同一时刻只允许一个腾讯请求在飞：拿到 2 就说明存在第二份节流实例')
@@ -374,8 +353,7 @@ test('⛔ 模块同一性探针（腾讯这一家）：面板与插件侧共用�
 })
 
 test('币种只从回包取：`00700` 是 HKD、`80700` 是 CNY、苹果是 USD、宁德时代是 CNY', async () => {
-  // ⛔ P10 的对照组：同一个港股列表里可以同时有 HKD 与 CNY 两行，所以"按市场猜币种"必错，
-  // "只在非本币时显示"也读错（相邻两行看起来一个有币种一个没有）。
+  // One HK list can hold HKD and CNY rows at once, so currency must be read from the body, never inferred by market.
   const stub = stubFuyao()
   const fake = createFakeDomain()
   const service = createWatchlistService({ openDomain: async () => fake.domain, resolveApiKey: async () => 'k', now: () => Date.now() })
@@ -396,7 +374,7 @@ test('币种只从回包取：`00700` 是 HKD、`80700` 是 CNY、苹果是 USD�
 })
 
 test('⛔ 指数行一律不带币种：上游在同一列给了 HKD / USD，也不接', async () => {
-  // 夹具里 `hkHSI` 第 75 位真是 `HKD`、`usIXIC` 第 35 位真是 `USD`——这一条测的就是"实现不听话时红"。
+  // The fixture really carries HKD / USD in those columns: this case exists to fail when the implementation disobeys.
   const stub = stubFuyao()
   const fake = createFakeDomain()
   const service = createWatchlistService({ openDomain: async () => fake.domain, resolveApiKey: async () => 'k', now: () => Date.now() })
@@ -415,8 +393,7 @@ test('⛔ 指数行一律不带币种：上游在同一列给了 HKD / USD，也
 })
 
 test('停牌 / 零成交那行：涨跌落 null，绝不写 0.00%（R10）', async () => {
-  // 实测 `hk00465`：价 3.200、开 0、量 0、额 0、涨跌 `0.00`。上游用 0.00 说"没有"，
-  // 判据只用内核算好的 `is_stale`（成交额 0 且现价等于昨收），不自建"接近 0 就当没有"的猜测。
+  // Upstream says "none" with 0.00 here; the judge is the kernel's `is_stale` (zero turnover, price = prev close).
   const stub = stubFuyao()
   const fake = createFakeDomain()
   const service = createWatchlistService({ openDomain: async () => fake.domain, resolveApiKey: async () => 'k', now: () => Date.now() })
@@ -462,8 +439,7 @@ test('一个市场一次批量：混市场清单既不拆成逐只，也不并�
   try {
     await withList(service, ['00700.HK', '80700.HK', '00465.HK', 'AAPL.OQ', 'BRK.B.N', 'TCEHY.PS'])
     const result = await service.refresh()
-    // 四条种子（A 股指数 + 港指数 + 两条美指数）也在这份清单里 ⇒ 一共六笔：A 股指数一次、
-    // 四个"市场 × 行类"各一次。判据是**每个 (市场, 行类) 只一笔**，不是总数最小。
+    // The four seeds are in this list too (six calls total); the judge is one call per (market, row class), not the smallest total.
     const offshore = callsTo(stub.calls, 'qt.gtimg.cn')
     assert.equal(offshore.length, 4, '港个股 / 港指数 / 美个股 / 美指数各一笔：比 A 股 ETF 逐只扇出便宜，也不许跨市场合表')
     const symbolsOf = (call) => /q=([^&]*)/.exec(call.url)[1].split(',')
@@ -472,7 +448,7 @@ test('一个市场一次批量：混市场清单既不拆成逐只，也不并�
     assert.deepEqual(symbolsOf(offshore.find((call) => call.url.includes('hkHSI'))), ['hkHSI'])
     assert.deepEqual(symbolsOf(offshore.find((call) => call.url.includes('usIXIC'))), ['usIXIC', 'usINX'])
     assert.deepEqual(result.failures, [])
-    // 美个股问出去的是剥掉交易所后缀的写法，回来的身份仍是带后缀那一只 ⇒ 一轮就问完。
+    // Offshore stocks are asked without the exchange suffix and come back identified with it: one round suffices.
     assert.equal(result.items.find((item) => item.thscode === 'BRK.B.N').quote.price, 505.54)
     assert.equal(result.items.find((item) => item.thscode === 'TCEHY.PS').quote.price, 54.5)
     assert.equal(offshore.length, 4, '⛔ 一轮问完：不许像参数层那样先猜带后缀的写法再重问一遍（第五笔就是它）')
@@ -482,8 +458,7 @@ test('一个市场一次批量：混市场清单既不拆成逐只，也不并�
 })
 
 test('⛔ 回包身份不是问出去的那只：整行不落价（P19 的 `SSPX` 对照）', async () => {
-  // 实测猜写法拿标普会拿到 `SSPX.AM`——Janus Henderson 一只真 ETF，且不报错。
-  // 形状判据在内核（读不懂这一份回包就一行都不写），身份判据在面板（不是问出去的那只就丢弃）。
+  // Guessing the code form for S&P returns `SSPX.AM`, a real unrelated ETF, with no error; shape checks live in the kernel.
   const stub = stubFuyao()
   const fake = createFakeDomain()
   const service = createWatchlistService({ openDomain: async () => fake.domain, resolveApiKey: async () => 'k', now: () => Date.now() })
@@ -494,8 +469,7 @@ test('⛔ 回包身份不是问出去的那只：整行不落价（P19 的 `SSPX
     assert.equal(before, 7818.93)
 
     stub.calls.length = 0
-    // 只把"美指数那一笔"换成猜错的回包（`usINX` 问到的是 `SSPX.AM` 那只 ETF），其余照默认路由走：
-    // 港那一路这次是好的，`scope` 才必须是 `us`。
+    // Only the US-index call carries the mis-guessed body; HK is healthy this round, so `scope` must be `us`.
     const trap = stubFuyao({
       'qt.gtimg.cn': (url) => (url.includes('usINX')
         ? tencentSnapshotText(['usSSPX'])
@@ -529,8 +503,7 @@ test('腾讯侧错误归类：畸形报文只逐条记缺口，传输层失败�
 })
 
 test('清单里出现形状与 `asset_type` 不认账的行：不进任何一组，照实记缺口', async () => {
-  // 磁盘上那一格是可以被人改的（`storage-domain` 的文件就在用户机器上）。分派只看键的形状，
-  // 所以"一条写着 `hk-stock` 的沪深代码"既不会去敲腾讯的门、也不会被当成 A 股静默处理。
+  // The stored cell is user-editable and dispatch keys only on shape: a mislabelled row hits no endpoint and passes as nothing.
   const stub = stubFuyao()
   const fake = createFakeDomain()
   const service = createWatchlistService({ openDomain: async () => fake.domain, resolveApiKey: async () => 'k', now: () => Date.now() })

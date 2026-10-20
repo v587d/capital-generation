@@ -106,23 +106,14 @@ function textOrNull(value: unknown): string | null { return value === undefined 
 function sourceError(message: string, code = 'eastmoney_source_error'): Error { const error = new Error(message); (error as Error & { code?: string }).code = code; return error }
 
 /**
- * 东财请求统一走**进程级共享**的东财客户端（`src/net/eastmoney-client.ts`）。
- *
- * 为什么必须共享：东财按**出口 IP** 风控（社区实测 >5 次/秒、1 分钟 ≥200 次、5 分钟 ≥300 次
- * 即临时封禁），而本仓曾经有**两份互不知情**的东财出口——数据面这里的裸 `fetch`，与
- * web_retriever 具名来源工具自己的一份。两份独立限流等于没有限流。
- * 现在两条数据面共用同一个节流器：数据面按"可复用性"分层（数值/分页走 Hub、流式文本走
- * web_retriever），但**网络面只有一份**。
- *
- * 本函数原有的错误码语义（`eastmoney_rate_limit` / `eastmoney_http_error` /
- * `eastmoney_invalid_response`）刻意保持不变——收敛的是网络面，不是调用方的契约。
+ * All Eastmoney calls use the process-wide client. Limits are per egress IP (>5/s, >=200/min,
+ * >=300/5min bans); two throttles mean no throttle. Error codes stay unchanged.
  */
 async function getJson(url: string, signal: AbortSignal, context: string): Promise<JsonRecord> {
   let payload: unknown
   try {
     payload = await sharedEastmoneyClient().fetchJson(url, { signal })
   } catch (error) {
-    // 调用方取消原样抛出；上游 HTTP 错误状态按既有口径归类。
     if (error instanceof Error && error.name === 'AbortError') throw error
     const status = error instanceof EastmoneyTransportError ? error.status : undefined
     throw sourceError(
@@ -137,9 +128,7 @@ async function getJson(url: string, signal: AbortSignal, context: string): Promi
 }
 
 function requireDatacenterResult(payload: JsonRecord, context: string): JsonRecord {
-  // 上游用 code 9201 表示"返回数据为空"（success:false），这是**真实数据缺口**而非上游故障：
-  // 节假日、或该窗口确实没有任何记录。归类成 eastmoney_upstream_error 会诱导模型反复重试
-  // （§10.4 明令"数据缺口不要重试"），也与单票路径把 9201 判成"无记录"自相矛盾。
+  // code 9201 = empty result (holiday/no records), a real data gap; treating it as a failure invites retries.
   if (payload.success !== true && Number(payload.code) === 9201) return { data: [], pages: 0, count: 0 }
   if (payload.success !== true || Number(payload.code) !== 0 || !isRecord(payload.result)) throw sourceError(`Eastmoney ${context} failed: ${String(payload.message ?? 'unknown upstream error')} (code ${String(payload.code ?? 'unknown')})`, 'eastmoney_upstream_error')
   return payload.result
@@ -205,9 +194,8 @@ function topFilter(params: Params, ticker?: string): string {
   return code ? `${base}(SECURITY_CODE="${code}")` : base
 }
 function parseTopRow(raw: JsonRecord): JsonRecord {
-  // ⚠️ 上游 `MARKET` 是自由文本（实测存在 `SZ` 之外的写法），而 SECUCODE 自带市场后缀时
-  // 它是冗余信息：只有 SECUCODE 不带市场时才拿它做必填校验，否则原文喂进硬白名单会把
-  // 整页龙虎榜判成错误（护栏误杀真实数据，§10.2）。行里的 `market` 字段仍原样保留。
+  // MARKET is free text and redundant when SECUCODE has a suffix; only require it for bare codes,
+  // otherwise a whitelist rejects valid billboard pages. Keep the raw `market` field.
   const secucode = typeof raw.SECUCODE === 'string' ? raw.SECUCODE : ''
   const identity = secucode.includes('.')
     ? normalizeEastmoneySecurityIdentity({ secucode })
@@ -289,14 +277,9 @@ async function executeBoard(params: Params, signal: AbortSignal, cashflow: boole
 }
 
 /**
- * 宏观指标表：一行 = 一个报告期。`MacroTable` 里的 `numbers` / `texts` / `dates` 就是
- * **显式键名映射表**（上游大写缩写 → 行键 snake_case，`docs/dev/tool-schema.md` §10.6）：没列出来的上游键
- * 一律丢弃。透传 `EXIT_BASE` 这类缩写还能读，透传中文名或全半角混排的键名就会让
- * `query_dataset` 的字符串列名匹配到零行——那是静默空结果，不是错误。
- *
- * 字段口径来自 2026-10-05 的真报文核验（每表 200 行：无缺键；社零有 15/200 行
- * `RETAIL_TOTAL` 为 null、存准率 30/58 行 `REMARK` 为 null），所以**数值与文本一律按可空声明**，
- * null 原样保留、不补 0。
+ * Macro table: `numbers`/`texts`/`dates` map uppercase upstream keys to snake_case; unmapped keys
+ * are dropped (Chinese/mixed-width keys make `query_dataset` matching silently return zero rows).
+ * Nullable fields keep null, never zero-fill.
  */
 interface MacroTable {
   capability: string
@@ -305,9 +288,9 @@ interface MacroTable {
   reportName: string
   summary: string
   description: string
-  /** 报告期键 → 行键；`datetime` 是 `2026-08-01 00:00:00`，`chinese` 是 `2025年05月07日`。 */
+  /** Report-period key → row key; formats are `2026-08-01 00:00:00` and `2025年05月07日`. */
   dates: Array<{ from: string; to: string; format: 'datetime' | 'chinese' }>
-  /** 东财原文期间标签（`2026年08月份`），原样存成 `period_label` 供回传引用。 */
+  /** Upstream period label stored verbatim as `period_label`. */
   labelFrom?: string
   numbers: Array<{ from: string; to: string }>
   texts?: Array<{ from: string; to: string }>
@@ -477,12 +460,7 @@ const MACRO_TABLES: MacroTable[] = [
   },
 ]
 
-/**
- * 沪深港通六个渠道（`docs/dev/tool-schema.md` §10.6：上游给的是 `001`…`006` 这种数字码，
- * 模型侧只认语义名）。渠道身份由上游自己标注的 `MUTUAL_TYPE_NAME` 核对，并用同日的
- * `DEAL_AMT` 加法复核过：`001+003=005`（北向合计）、`002+004=006`（南向合计），实测 2026-09-30
- * 两条等式都精确成立。
- */
+/** Stock Connect channels: upstream codes 001–006; 001+003=005 (north) and 002+004=006 (south) verified. */
 const MUTUAL_CHANNELS: Record<string, string> = {
   sh_stock_connect: '001',
   hk_connect_sh: '002',
@@ -575,7 +553,7 @@ const mutualQuotaRow = {
   },
   additionalProperties: true,
 }
-/** 上游 `MUTUAL_TYPE_NAME` → 我们的渠道名（额度表只给单渠道，没有合计档）。 */
+/** Quota table has single channels only, no totals. */
 const MUTUAL_QUOTA_CHANNELS: Record<string, string> = { 沪股通: 'sh_stock_connect', 深股通: 'sz_stock_connect', '港股通(沪)': 'hk_connect_sh', '港股通(深)': 'hk_connect_sz' }
 const MUTUAL_QUOTA_CODE_CHANNELS: Record<string, string> = { '001': 'sh_stock_connect', '002': 'hk_connect_sh', '003': 'sz_stock_connect', '004': 'hk_connect_sz' }
 
@@ -616,11 +594,7 @@ async function executeMutualQuota(params: Params, signal: AbortSignal): Promise<
   return { data: { item: parsed.rows.map(parseMutualQuotaRow), pagination: pagination(1, 10, parsed.pages, parsed.total) }, schema: datacenterOutput(mutualQuotaRow) }
 }
 
-/**
- * 个股主力资金快照。上游 `RPT_DMSK_TS_STOCKNEW` 实测**只保留最近一个交易日**的全市场一行一股
- * （count=5199、TRADE_DATE 单一；带旧日期过滤器返回 9201 空），所以这不是时序能力：
- * 契约里必须写死"按日期循环取不到历史"，否则模型会拿它当序列反复请求。
- */
+/** Main-capital snapshot: latest trading day only, one row per stock (5199, single TRADE_DATE); older dates return 9201. */
 const MAIN_CAPITAL_SORTS: Record<string, string> = {
   main_net_inflow: 'PRIME_INFLOW',
   change_pct: 'CHANGE_RATE',
@@ -675,8 +649,7 @@ function normalizeMainCapital(params: Params): Params {
 function parseMainCapitalRow(raw: JsonRecord): JsonRecord {
   const tradeDate = String(raw.TRADE_DATE ?? '').slice(0, 10)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(tradeDate)) throw sourceError('Eastmoney main capital row has invalid TRADE_DATE', 'eastmoney_invalid_response')
-  // SECUCODE 自带市场后缀（实测 200/200 行都有），不做"按代码首位猜市场"的兜底：猜错就是把一只
-  // 股票的数据挂到另一只上。缺了就说明上游形状变了，响亮失败。
+  // SECUCODE always has a market suffix; never guess from the first digit. A missing suffix is a shape change.
   if (typeof raw.SECUCODE !== 'string' || !raw.SECUCODE.includes('.')) {
     throw sourceError('Eastmoney main capital row lost its market suffix in SECUCODE', 'eastmoney_invalid_response')
   }
@@ -728,12 +701,7 @@ async function executeMainCapital(params: Params, signal: AbortSignal): Promise<
   return { data: { item: parsed.rows.map(parseMainCapitalRow), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(mainCapitalRow) }
 }
 
-/**
- * 分红送配方案：一行一个方案，按除权除息日过滤。`PRETAX_BONUS_RMB` / `BONUS_RATIO` / `IT_RATIO`
- * 的"每 10 股"标度由上游自己写在 `IMPL_PLAN_PROFILE` 原文里（实测 `10派280.2423元(含税)` 配
- * `PRETAX_BONUS_RMB=280.2423`、`10送4.00派3.00元` 配 `BONUS_RATIO=4`），所以照原值给出并保留原文。
- * `IS_KCB` 与 `PUBLISH_DATE` 实测 200/200 全为 null，不收录（描述里点名，免得当成取数失败）。
- */
+/** Dividend plans: per-10-share scale comes from `IMPL_PLAN_PROFILE` text; values kept as-is. `IS_KCB`/`PUBLISH_DATE` always null. */
 const dividendRow = {
   type: 'object',
   properties: {
@@ -761,7 +729,6 @@ const dividendRow = {
   additionalProperties: true,
 }
 
-/** 日期键归一：`2026-06-26 00:00:00` → `2026-06-26`；空值保留 null（12/200 行没有股权登记日）。 */
 function dayValue(value: unknown): string | null {
   const text = String(value ?? '').slice(0, 10)
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null
@@ -773,8 +740,7 @@ function parseDividendRow(raw: JsonRecord): JsonRecord {
   }
   const exDate = dayValue(raw.EX_DIVIDEND_DATE)
   if (exDate === null) throw sourceError('Eastmoney dividend row has invalid EX_DIVIDEND_DATE', 'eastmoney_invalid_response')
-  // 这三列实测 200/200 行都有值（缺了就是上游形状变了），所以按必填处理、缺一就响亮失败；
-  // equity_record_date 实测 12/200 为 null（方案还没定登记日），那一列才允许 null。
+  // These three are always populated; equity_record_date may be null until the plan sets one.
   const requiredDates = (['REPORT_DATE', 'PLAN_NOTICE_DATE', 'NOTICE_DATE'] as const).map((key) => {
     const day = dayValue(raw[key])
     if (day === null) throw sourceError(`Eastmoney dividend row is missing ${key}`, 'eastmoney_invalid_response')
@@ -833,9 +799,8 @@ async function executeDividend(params: Params, signal: AbortSignal): Promise<{ d
 }
 
 /**
- * 股东户数**最新一期截面**（`RPT_HOLDERNUMLATEST`）：一股一行，`END_DATE` 是**报告期**、
- * `HOLD_NOTICE_DATE` 才是披露日（实测茅台 END_DATE=2026-06-30 / 披露 2026-08-15），两者必须分开。
- * 新上市标的 `PRE_HOLDER_NUM=0` 且 `HOLDER_NUM_RATIO=null`（无上期可比），不是数据错误。
+ * Holder-count snapshot: `END_DATE` is the report period; `HOLD_NOTICE_DATE` is the disclosure date.
+ * New listings have `PRE_HOLDER_NUM=0` and null ratio (no prior period).
  */
 const holderRow = {
   type: 'object',
@@ -919,13 +884,8 @@ async function executeHolder(params: Params, signal: AbortSignal): Promise<{ dat
 }
 
 /**
- * 两融个股明细（`RPTA_WEB_RZRQ_GGMX`）。45 列里绝大多数是同一族的"余额 / 买入 / 偿还 / 净买入 ×
- * 当日 / 3 / 5 / 10 日"，所以按映射表成对声明，不逐列写 JSON Schema。
- *
- * 口径靠算术核对，不靠记忆（实测 600519，2026-09-30）：`RZRQYE = RZYE + RQYE`、
- * `RZRQYECZ = RZYE - RQYE`、`RZJME = RZMRE - RZCHE`、`RQJMG = RQMCL - RQCHL` 四式精确成立，
- * `RZYEZB = RZYE / SZ`（0.8617% 对得上），所以这几列的含义可以写进契约。
- * 披露新鲜度**跨市场不一致**：实测沪市已到 2026-09-30，深市（000001）最新只有 2026-09-29。
+ * Margin detail: verified identities RZRQYE=RZYE+RQYE, RZRQYECZ=RZYE-RQYE, RZJME=RZMRE-RZCHE,
+ * RQJMG=RQMCL-RQCHL. Disclosure freshness differs by market (SH one day ahead of SZ).
  */
 const MARGIN_COLUMNS: Array<[string, string]> = [
   ['RZYE', 'margin_balance'], ['RQYE', 'short_balance'], ['RZRQYE', 'total_balance'], ['RZRQYECZ', 'balance_gap'],
@@ -956,8 +916,7 @@ const marginRow: object = {
 function parseMarginRow(raw: JsonRecord, requestedThscode: string): JsonRecord {
   const day = dayValue(raw.DATE)
   if (day === null) throw sourceError('Eastmoney margin row has invalid DATE', 'eastmoney_invalid_response')
-  // SCODE 不带市场后缀，市场由请求的 ticker 决定：行身份取调用方传入的 canonical 代码，
-  // 再与上游 SECUCODE 对照，对不上就是上游把明细串行了。
+  // SCODE has no market suffix, so identity comes from the requested ticker; a mismatched SECUCODE is a row mix-up.
   const secucode = typeof raw.SECUCODE === 'string' ? raw.SECUCODE : ''
   if (secucode && secucode !== requestedThscode) {
     throw sourceError(`Eastmoney margin row SECUCODE ${secucode} does not match requested ${requestedThscode}`, 'eastmoney_invalid_response')
@@ -997,15 +956,7 @@ async function executeMargin(params: Params, signal: AbortSignal): Promise<{ dat
   return { data: { item: parsed.rows.map((raw) => parseMarginRow(raw, thscode)), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(marginRow) }
 }
 
-/**
- * 可转债发行清单（`RPT_BOND_CB_LIST`，实测全库 1059 只、起息日 2007-07-02 起）。
- *
- * 72 列里只有**条款与日期**有值：`CONVERT_STOCK_PRICE` / `CURRENT_BOND_PRICE`(_NEW) /
- * `TRANSFER_PRICE` / `TRANSFER_PREMIUM_RATIO` / `RESALE_TRIG_PRICE` / `REDEEM_TRIG_PRICE` /
- * `PBV_RATIO` / `MARKET` / `CONVERT_STOCK_PRICEHQ` 实测 **1059/1059 恒为 null**（东财页面上那些
- * 行情数是另一条接口现算的），`TRANSFER_VALUE` 只是 `INITIAL_TRANSFER_PRICE` 的副本（1051/1059 相同
- * 却多 8 个 null）。所以这张表**不承诺行情**，也不把那些 null 当成取数失败。
- */
+/** Bond list: only terms/dates are populated; price and premium columns are always null (computed elsewhere). */
 const BOND_MARKET_SUFFIX: Record<string, EastmoneyMarket | null> = { CNSESH: 'SH', CNSESZ: 'SZ', STAS00: null }
 
 function bondStockIdentity(raw: JsonRecord): JsonRecord {
@@ -1014,9 +965,7 @@ function bondStockIdentity(raw: JsonRecord): JsonRecord {
   return {
     stock_ticker: digits,
     stock_name: String(raw.SECURITY_SHORT_NAME ?? ''),
-    // 正股市场只取上游 TRADE_MARKET，**不按数字首位推**：实测 15 只 2007-2009 沪市老债代码是 126 开头
-    // （首位 1 也不等于沪），老三板退市债（STAS00）的正股 400266 更不是北交所标的——猜错就是把一只证券
-    // 挂到另一个市场名下。未知市场一律不给后缀（`stock_thscode` 为 null），不猜也不报错。
+    // Market only from TRADE_MARKET: 126-prefixed 2007–09 SH bonds and STAS00 stock 400266 would be misattributed. Unknown → null.
     stock_thscode: BOND_MARKET_SUFFIX[String(raw.TRADE_MARKET ?? '')] ? `${digits}.${BOND_MARKET_SUFFIX[String(raw.TRADE_MARKET ?? '')]}` : null,
   } as JsonRecord
 }
@@ -1052,7 +1001,6 @@ const bondRow: object = {
 }
 
 function parseBondRow(raw: JsonRecord): JsonRecord {
-  // 债券身份只认上游给的 SECUCODE（带 .SH/.SZ/.NQ 后缀）：本表 1059/1059 都有值，丢了后缀就是形状变了。
   if (typeof raw.SECUCODE !== 'string' || !raw.SECUCODE.includes('.')) {
     throw sourceError('Eastmoney convertible bond row lost its market suffix in SECUCODE', 'eastmoney_invalid_response')
   }
@@ -1091,7 +1039,7 @@ function parseBondRow(raw: JsonRecord): JsonRecord {
   } as JsonRecord
 }
 
-/** 债市代码是 11/12/13/40 等六位数；后缀只用于收窄（实测出现 .SH/.SZ/.NQ），一律剥掉再过滤，不给市场推断留口子。 */
+/** Strip .SH/.SZ/.NQ suffixes; never infer a market. */
 function bondCode(value: unknown, name: string): string {
   const raw = String(value).toUpperCase()
   const digits = raw.replace(/\.[A-Z]{2,3}$/u, '')
@@ -1114,8 +1062,7 @@ async function executeBondList(params: Params, signal: AbortSignal): Promise<{ d
   url.searchParams.set('columns', 'ALL')
   url.searchParams.set('source', 'WEB')
   url.searchParams.set('client', 'WEB')
-  // sortColumns 与过滤器都用 PUBLIC_START_DATE（实测该列可过滤、可排序，且与 VALUE_DATE 1059/1059 相同）；
-  // 只按其一是因为日期区间过滤实测只有这一列**从不为空**——LISTING_DATE 有 8 只未上市的债会被区间静默吞掉。
+  // Use PUBLIC_START_DATE: the only date filter never null (equals VALUE_DATE); LISTING_DATE would drop 8 unlisted bonds.
   url.searchParams.set('sortColumns', 'PUBLIC_START_DATE')
   url.searchParams.set('sortTypes', '-1')
   url.searchParams.set('pageNumber', String(params.page))

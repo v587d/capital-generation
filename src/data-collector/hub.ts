@@ -2,11 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { DataTimeContract } from '../time/tools.js'
 import type { DatasetRef, SaveDatasetInput, SessionLike } from './store.js'
 
-/**
- * 规范化内部 data_key 片段：斜杠/冒号等路径分隔符一律映射为点，其余非常规
- * 字符折叠为点、合并连续点、去掉首尾点。data_key 只是宿主内部路由/审计身份，
- * 不出现在模型可见协议、人设或工具输出中。
- */
+/** Normalize an internal data_key token; data_key is host-only and never model-visible. */
 export function normalizeKeyToken(value: string): string {
   return value.replace(/[\\/:]+/g, '.')
     .replace(/[^A-Za-z0-9._-]+/g, '.')
@@ -14,33 +10,21 @@ export function normalizeKeyToken(value: string): string {
     .replace(/^\.+|\.+$/g, '')
 }
 
-/**
- * 生成内部 data_key：provider.kind.resource（例如
- * buildDataKey('fuyao', 'api', '/api/a-share/prices/snapshot')
- * => 'fuyao.api.api.a-share.prices.snapshot'）。
- */
 export function buildDataKey(provider: string, kind: string, resource: string): string {
   return [provider, kind, resource].map(normalizeKeyToken).filter(Boolean).join('.')
 }
 
-/**
- * 数据请求：capability 是模型可见的短能力名（全局唯一），session 由工具层以
- * exec.agent.session 注入，不接受模型传参。内部 data_key 不出现在请求协议里。
- */
+/** capability is the model-visible unique key; session is injected by the tool layer, not supplied by the model. */
 export interface DataRequest {
   capability: string
   params: Record<string, unknown>
-  /** force_refresh=true 绕过已验证 manifest 并生成新的不可变 Dataset。 */
+  /** force_refresh bypasses manifest reuse and creates a new immutable Dataset. */
   force_refresh?: boolean
-  /** 本次用户任务关联 id（可复用）；只用于追溯，不要求模型理解。 */
   task_id?: string
   session: SessionLike
 }
 
-/**
- * 数据源契约：capability 为唯一注册键与模型可见名；name/source/data_key
- * 均为宿主内部字段（日志、路由、审计），不得进入工具 schema、输出或人设。
- */
+/** capability is the unique registration key; name/source/data_key stay host-internal (logs, routing, audit). */
 export interface SchemaDescriptor {
   capability: string
   name: string
@@ -48,40 +32,34 @@ export interface SchemaDescriptor {
   data_key: string
   source_label?: string
   paginated?: boolean
-  /** 可复用 Dataset 的最长采集年龄；未声明时仅受 Dataset 保留期约束。宿主内部字段。 */
+  /** Longest reusable Dataset age; defaults to the retention window. Host-only. */
   cacheMaxAgeMs?: number
-  /**
-   * 行数组位置的显式声明。龙虎榜这类响应的行数组不在 `item` 下（`stock_items`），
-   * 只靠形状推断会把整份数据判成「不可读的文档」。谁产出数据谁声明行在哪里，
-   * 存储层不再猜。
-   */
+  /** Where the row array lives; without it, envelopes such as `stock_items` look unreadable. */
   rowShape?: RowShapeHint
-  /** 一行摘要：只用于能力目录（选能力够用），控制在 ~50 字以内。 */
+  /** One-line catalog summary (~50 chars max). */
   summary?: string
-  /** 完整说明：只在 describe_capability 详情里返回（单位、null 语义、时间口径、分页口径）。 */
+  /** Full detail for describe_capability only (units, null semantics, time/pagination rules). */
   description?: string
   input_schema: object
-  /** 机器可读时间参数契约，由时间工具与数据源共同使用。 */
+  /** Machine-readable time-parameter contract shared with the time tools. */
   time_contract?: DataTimeContract
   output_schema?: object
 }
 
-/** 能力目录项：只带"选能力"所需的信息，体积必须远小于工具结果剪枝阈值。 */
+/** Catalog entry: just enough to pick a capability. */
 export interface CapabilitySummary {
   capability: string
   summary: string
   paginated: boolean
 }
 
-/** 单个能力的完整契约：参数与输出字段字典，调用前必读。 */
+/** Full contract for one capability; must be read before calling. */
 export interface CapabilityDetail extends CapabilitySummary {
   description: string
   input_schema: object
-  /** `output_schema` 的模型可见投影，见 renderOutputFields；声明不出字段时为 null。 */
   output_fields: string | null
 }
 
-/** 目录项摘要的兜底：描述缺失或没有 summary 时取首句并截断。 */
 function summarize(source: SchemaDescriptor): string {
   if (typeof source.summary === 'string' && source.summary.trim().length > 0) return source.summary.trim()
   const description = (source.description ?? '').trim()
@@ -90,10 +68,7 @@ function summarize(source: SchemaDescriptor): string {
   return firstSentence.length > 80 ? `${firstSentence.slice(0, 79)}…` : firstSentence
 }
 
-/**
- * 目录字段的转义：`|` 与换行是行编码的分隔符，撞上去的后果是**一条能力被读成两条**
- * （错了不报错、只是话说错那一族），所以由生产者转义而不是指望摘要里恰好没有。
- */
+/** Escape `|` and newlines: they delimit catalog lines, and one unescaped splits a capability in two. */
 function encodeDirectoryField(value: string): string {
   return value
     .replace(/\\/g, '\\\\')
@@ -107,20 +82,18 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** 说明段里不许有换行：一个字段变成两行会让字典的"一行一字段"承诺失效。 */
 function inlineFieldText(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
   const text = value.replace(/\s+/g, ' ').trim()
   return text.length === 0 ? undefined : text
 }
 
-/** 字段字典的递归上界：真实契约最深 3 层，留余量，也不给畸形 schema 无限展开的机会。 */
+/** Recursion bound for field dictionaries; real contracts are at most 3 deep. */
 const MAX_FIELD_DEPTH = 5
 
 interface FieldShape {
   label: string
   nullable: boolean
-  /** 需要继续展开的子字段：object 的 properties，或 array 元素的 properties。 */
   nested?: Record<string, unknown>
   nestedArray?: boolean
   description?: string
@@ -132,7 +105,7 @@ function inspectField(node: unknown): FieldShape {
   if (Array.isArray(node.oneOf)) {
     const branches = node.oneOf.filter((branch) => !isPlainRecord(branch) || branch.type !== 'null')
     const nullable = branches.length !== node.oneOf.length
-    // 可空字段的说明写在联合的外侧（{ oneOf: [...], description }），内侧分支的说明作兜底。
+    // Nullable unions carry their description on the outer node, not the null branch.
     const note = outerNote === undefined ? undefined : { description: outerNote }
     if (branches.length === 1) return { ...inspectField(branches[0]), nullable, ...(note ?? {}) }
     return { label: branches.map((branch) => inspectField(branch).label).join('/') || 'json', nullable, ...(note ?? {}) }
@@ -152,8 +125,7 @@ function inspectField(node: unknown): FieldShape {
   if (properties !== undefined) {
     return { label: typeof node.type === 'string' ? node.type : 'object', nullable: false, nested: properties, ...(description === undefined ? {} : { description }) }
   }
-  // 只有 `enum` 没写 `type` 的字段（龙虎榜渠道、板块类型这类）：按取值推断类型，并把取值列进说明段。
-  // 标成 `json` 是话说错——模型会以为取值开放，于是写出目录里不存在的值。
+  // Fields with enum but no type: infer type and list values instead of calling them open-ended json.
   if (typeof node.type !== 'string' && Array.isArray(node.enum) && node.enum.length > 0) {
     const kinds = new Set(node.enum.map((value) => (typeof value === 'number' && Number.isInteger(value) ? 'integer' : typeof value)))
     const values = node.enum.join('/')
@@ -175,14 +147,8 @@ function emitFields(properties: Record<string, unknown>, prefix: string, lines: 
 }
 
 /**
- * 把声明好的 `output_schema` 投影成字段字典：一行一个字段 `路径:类型[:说明]`，
- * 类型后缀 `?` 表示可为 null，`[].` 表示数组元素的字段，取值受限时说明段给出 `取值 a/b`。
- *
- * 为什么不直接把 JSON Schema 交给模型（实测）：详情体积几乎就等于 `output_schema` 体积，
- * 而它按每列 ~55 字符随**列数**线性增长——72 列的可转债档案光 schema 就 4699 字符，第一次
- * 注册就打穿单能力 4096 的预算。字典把每列压到 ~15 字符，列数不再卡住补录。
- * 权威声明仍住 `output_schema`：护栏与返回值契约照旧按 schema 校验，这里只是给模型看的投影，
- * 不是第二份真相。
+ * Project output_schema into one line per field. Raw JSON Schema costs ~55 chars per column and
+ * blows the per-capability budget; this is display-only, output_schema stays authoritative.
  */
 function renderOutputFields(schema: object | null | undefined): string | null {
   if (!isPlainRecord(schema)) return null
@@ -196,48 +162,39 @@ function renderOutputFields(schema: object | null | undefined): string | null {
 export interface DataSource {
   schema: SchemaDescriptor
   execute(request: DataRequest, signal: AbortSignal): Promise<{ data: unknown; schema?: object | null }>
-  /** Optional source-specific output guard; false rejects the result before persistence. */
+  /** Optional source guard; false rejects the result before persistence. */
   validateOutput?: (data: unknown) => boolean
   /**
-   * Optional parameter canonicalization. The Hub calls it BEFORE computing the
-   * in-flight merge key and params_digest, so requests that differ only in
-   * case/whitespace/list order/default values share one Dataset instead of
-   * writing several. It must be idempotent (execute calls it again) and may
-   * throw to reject invalid parameters before anything is queued. Sources that
-   * omit it keep their previous behaviour exactly.
+   * Optional canonicalization; the Hub calls it before merge key and params_digest, so equivalent
+   * requests share one Dataset. Must be idempotent (execute calls it again) and may throw.
    */
   normalizeParams?: (params: Record<string, unknown>) => Record<string, unknown>
 }
 
-/** Dataset 落盘器（Hub 的唯一成功出口）。 */
 export interface DatasetStoreLike {
   save(input: SaveDatasetInput): Promise<DatasetRef>
-  /** Optional for compatibility with lightweight test stores; production store implements manifest lookup. */
   findLatest?(input: { session: SessionLike; capability: string; params_digest: string; signal?: AbortSignal }): Promise<DatasetRef | undefined>
 }
 
-/** 数据源声明的行数组位置；缺省按 `item` 推断。 */
 export interface RowShapeHint {
-  /** 行数组所在的顶层键名（默认 `item`）。 */
+  /** Top-level key holding rows (default `item`). */
   rowKey?: string
-  /** 可选的多个行数组路径，支持 `[]` 展开并合并为一组 rows。 */
+  /** Multiple row paths; `[]` expands and merges them into one row set. */
   rowKeys?: string[]
-  /** 顶层本身就是行数组。 */
+  /** The top level is itself the row array. */
   rootArray?: boolean
 }
 
 export interface DataCollectorHubOptions {
-  /** 必需：宿主侧 Dataset store；缺失时 request 直接失败。 */
+  /** Required Dataset store; request fails without it. */
   store: DatasetStoreLike
-  /** 队列最大长度；默认 50。 */
+  /** Queue length (default 50). */
   maxQueueLength?: number
-  /** 传输层执行超时；默认 30_000 ms。只是请求超时，不是数据生命周期。 */
+  /** Transport timeout only (30s default), not data lifetime. */
   requestTimeoutMs?: number
-  /** 时钟注入（测试用）；默认 Date.now。 */
   now?: () => number
 }
 
-/** 一个等待者：阻塞式 request() 的结算承诺。 */
 type Waiter = {
   resolve: (ref: DatasetRef) => void
   reject: (error: Error) => void
@@ -271,7 +228,7 @@ function paramsDigest(request: DataRequest): string {
   return hash.toString(16).padStart(16, '0').repeat(4)
 }
 
-/** in-flight 合并键：同一 capability+params+task 的并发请求共享同一次执行。 */
+/** In-flight merge key: same capability + params + task share one execution. */
 function mergeKey(request: DataRequest): string {
   return `${request.capability}:${request.task_id ?? ''}:${stableSerialize(request.params)}`
 }
@@ -280,13 +237,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-/**
- * 把上游错误重新包装成 Error 时**保留稳定错误码**。
- *
- * DatasetStoreError 带 `code`（如 workspace_not_writable / dataset_expired），但此前一律被
- * 拍成纯文本 Error，调用方只能从消息前缀里猜。协议要求失败回传携带 `error` 与 `code`，
- * 因此这里把 code 原样挂到新 Error 上，工具层与上层消费者都可直接读取。
- */
+/** Preserve a stable error `code` when rewrapping upstream errors; callers read it directly. */
 function errorWithCode(message: string, source: unknown): Error {
   const failure = new Error(message)
   if (source && typeof source === 'object' && typeof (source as { code?: unknown }).code === 'string') {
@@ -296,15 +247,11 @@ function errorWithCode(message: string, source: unknown): Error {
 }
 
 /**
- * Phase 1 数据执行器：FIFO 串行执行外部数据源，成功后由宿主 store 立即
- * 原子落盘为不可变 Dataset，只回传 DatasetRef。
- *
- * 明确不做：长期 raw data 内存缓存、按 data_key 的查询、source_preference 路由。
- * 已验证 DatasetRef 的复用由 workspace manifest 提供，内存只保留 in-flight 队列。
+ * FIFO executor: success is persisted immediately as an immutable Dataset and only a DatasetRef is
+ * returned. In-flight queue is the only in-memory raw data; reuse comes from workspace manifests.
  */
 export class DataCollectorHub {
   private readonly queue: QueueItem[] = []
-  /** 正在执行的队列项（执行期间不在 queue 中，但仍参与合并与容量判断）。 */
   private active: QueueItem | null = null
   private readonly sources = new Map<string, DataSource>()
   private readonly cacheLookups = new Map<string, Promise<DatasetRef | undefined>>()
@@ -337,13 +284,8 @@ export class DataCollectorHub {
   }
 
   /**
-   * 入队并阻塞等待完成：先按 capability+params_digest 查找当前 session 下仍有效的
-   * manifest；force_refresh=true 或没有可复用 Dataset 时才进入数据源队列。相同的
-   * in-flight 请求仍共享一次执行，成功后立即由宿主 store 原子落盘。
-   *
-   * 参数规范化（source 可选）发生在这里：merge key 与 digest 都用规范化后的参数，
-   * 因此「大小写/空白/重复项不同、语义相同」的请求命中同一个 Dataset。未知
-   * capability 不做处理，仍由执行阶段抛出统一的 no data source 错误。
+   * Enqueue and wait: reuse a valid manifest unless force_refresh; identical in-flight requests share
+   * one execution. Params are normalized before merge key and digest.
    */
   async request(request: DataRequest, options: { signal?: AbortSignal } = {}): Promise<DatasetRef> {
     if (!request.capability) throw new Error('capability is required')
@@ -357,9 +299,7 @@ export class DataCollectorHub {
     if (normalized.force_refresh !== true && this.store.findLatest) {
       let lookup = this.cacheLookups.get(key)
       if (!lookup) {
-        // 这个 lookup 会被同一 mergeKey 的**所有**并发调用者共享，因此绝不能绑定
-        // 其中任何一个人的 AbortSignal：首个调用者取消会让其余调用者一起收到同一个
-        // lookup 失败，而不是各自独立等待。取消只作用于调用者自己的 waiter。
+        // Shared by every caller with this mergeKey, so it must not bind any caller's AbortSignal.
         lookup = this.store.findLatest({
           session: normalized.session,
           capability: normalized.capability,
@@ -386,14 +326,12 @@ export class DataCollectorHub {
     return pending
   }
 
-  /** 应用 source 的可选参数规范化；未声明或 capability 未注册时原样返回。 */
   private normalizeRequest(request: DataRequest): DataRequest {
     const source = this.sources.get(request.capability)
     if (!source?.normalizeParams) return request
     return { ...request, params: source.normalizeParams(request.params) }
   }
 
-  /** 挂一个等待者并返回其结算承诺；signal 触发时摘除等待者并拒绝（不影响共享执行）。 */
   private awaitSettlement(item: QueueItem, signal?: AbortSignal): Promise<DatasetRef> {
     return new Promise<DatasetRef>((resolve, reject) => {
       const waiter: Waiter = { resolve, reject, signal }
@@ -412,7 +350,6 @@ export class DataCollectorHub {
     })
   }
 
-  /** 结算一个等待者：无论成败都摘除监听，防止重复结算。 */
   private settleWaiter(item: QueueItem, waiter: Waiter, outcome: { kind: 'ok'; ref: DatasetRef } | { kind: 'error'; error: Error }): void {
     item.waiters.delete(waiter)
     if (waiter.onAbort && waiter.signal) waiter.signal.removeEventListener('abort', waiter.onAbort)
@@ -420,14 +357,7 @@ export class DataCollectorHub {
     else waiter.reject(outcome.error)
   }
 
-  /**
-   * 能力目录（模型可见的最外层发现入口）：只含 capability、一行摘要与是否分页。
-   *
-   * 目录刻意不带 input_schema / output_schema —— 全量 schema 一度达 23KB，
-   * 会被工具结果剪枝器截掉中间部分，导致排在中间的能力在发现阶段不可见。
-   * 目录必须一次性全部返回（体积预算由测试守住），详情走 describeCapability。
-   * 不含任何内部路由字段（name/source/data_key/source_label）。
-   */
+/** Catalog: capability, one-line summary, paginated only. Full schemas would be pruned; details come from describeCapability. */
   listCapabilities(): CapabilitySummary[] {
     return [...this.sources.values()].map((source) => ({
       capability: source.schema.capability,
@@ -436,28 +366,18 @@ export class DataCollectorHub {
     }))
   }
 
-  /** 当前已注册的能力名（用于未知名字的引导与诊断）。 */
   capabilityNames(): string[] {
     return [...this.sources.keys()]
   }
 
-  /**
-   * 能力目录的模型可见形态：一行一条 `capability|summary|paginated`（1=分页、0=不分页）。
-   * 同等信息量下 JSON 数组要 5530 字符（69 条实测，其中 58% 是键名与标点），行编码 2435、
-   * 均摊从 80 降到 35 字符——目录余量从 +7 条变成 +105 条。信息量没变、依然一次性全量返回，
-   * §1.1 那条"不分页、不裁剪"的硬约束原样成立。结构化形态仍由 listCapabilities 提供（测试与内部消费）。
-   */
+/** Model-visible catalog: one `capability|summary|paginated` line each; JSON costs about twice the tokens. */
   capabilityDirectory(): string {
     return this.listCapabilities()
       .map((entry) => `${encodeDirectoryField(entry.capability)}|${encodeDirectoryField(entry.summary)}|${entry.paginated ? 1 : 0}`)
       .join('\n')
   }
 
-  /**
-   * 单个能力的完整契约；名字未注册时返回 undefined，由工具层分类成可引导的错误。
-   * 返回值只含模型可见字段，是新建的普通对象，不回传内部 live data。
-   * `output_fields` 是 `output_schema` 的投影：详情体积按列数增长会被宽表打穿，见 renderOutputFields。
-   */
+/** Single capability contract; undefined for unknown names (the tool layer classifies it). */
   describeCapability(capability: string): CapabilityDetail | undefined {
     const source = this.sources.get(capability)
     if (!source) return undefined
@@ -484,9 +404,7 @@ export class DataCollectorHub {
       const controller = new AbortController()
       let timeout: ReturnType<typeof setTimeout> | undefined
       const operation = source.execute(item.request, controller.signal)
-      // Abort cooperative sources and also release the FIFO worker if a source
-      // ignores the signal. Observe the underlying promise to avoid an
-      // unhandled rejection after the timeout race has settled.
+      // Abort cooperative sources and release the FIFO worker even if a source ignores the signal.
       void operation.catch(() => {})
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeout = setTimeout(() => {
@@ -530,13 +448,7 @@ export class DataCollectorHub {
   }
 }
 
-/**
- * 从数据源声明的行形状推导存储 format 与行数；未声明时退化为形状推断。
- *
- * 之前只认 `data.item`，于是龙虎榜（行数组在 `stock_items`）被整份判成
- * `format: 'json'`，data_junior 连 inspect 都说不可读。行在哪里是数据源的
- * 契约知识，不该由存储层猜。
- */
+/** Derive storage format and row count from the declared row shape; fall back to inference. */
 function shapeOf(data: unknown, hint?: RowShapeHint): { format: 'json' | 'json_rows'; rowCount: number | null; rowKey?: string } {
   if (Array.isArray(data)) return { format: 'json_rows', rowCount: data.length }
   const keys = hint?.rowKeys ?? [hint?.rowKey ?? 'item']

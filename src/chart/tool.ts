@@ -1,16 +1,6 @@
-/**
- * `render_chart`：把已经取到的数据渲染成图，**只回一条小回执**。
- *
- * 上下文经济学（这是本工具存在的理由）：
- *  - 常驻成本 = 一条工具 schema；协议细节在 skill `capital-chart-protocol` 里按需加载；
- *  - 每次调用成本 = spec（几十到一百多 token）+ 回执（几十 token）；
- *  - 序列数据 **0 token**：由宿主写进 workspace 产物，浏览器走旁路取。
- * 对照：让模型把 250 点日线写进参数 ≈ 5–8k token，还会被工具结果剪枝器截断。
- *
- * 权限边界（docs/dev/data-roles.md §1.1「数据调度纪律」的显式豁免）：本工具是**呈现**工具，不是数据工具。
- * 它读 Dataset 只在宿主进程内进行，回执不含任何 rows —— 因此不越过"数据内容不进主 Agent
- * 上下文"这条真正的边界。需要数值结论仍走 data_junior 的 profile / query。
- */
+/** render_chart: render data into workspace artifacts and return only a small receipt.
+ * Series costs zero model tokens and rows stay host-side; numeric conclusions still go through
+ * data_junior. */
 import type { Context } from '@deepseek-ai/cordis'
 
 import { DatasetStoreError, WorkspaceDatasetStore } from '../data-collector/store.js'
@@ -83,10 +73,7 @@ function normalizeStoreError(error: unknown): ChartError | undefined {
   }
 }
 
-/**
- * 工具框架对 throw 的错误只保留 message；把 ChartError 的 details 在这里展开成
- * JSON 信封，模型才能拿到 array_keys / available 等一次修正所需的信息。
- */
+/** Errors keep only message; expand details into JSON so the model can self-correct. */
 function toolVisibleError(error: unknown): Error {
   const normalized = error instanceof ChartError ? error : normalizeStoreError(error)
   if (!normalized) return error instanceof Error ? error : new Error(String(error))
@@ -134,7 +121,7 @@ const parameters = jsonObject({
   title: { type: 'string', description: '可选：覆盖 spec.title 的图表标题' },
 }, ['spec'])
 
-/** 回执字段全部是可以进上下文的小元数据；序列本体永远不在这里。 */
+/** Receipt is small metadata only; series never appears here. */
 export interface ChartReceipt {
   chart_ref: string
   chart_id: string
@@ -165,22 +152,9 @@ export interface RenderChartInput {
   store: WorkspaceDatasetStore
   sourceTokens?: ChartSourceTokenStore
   artifacts?: ChartArtifactRegistry
-  /**
-   * 惰性解析 host 平面图表服务（`@v587d/capital-charts` 提供）。
-   *
-   * 每次画图时解析，而不是在 `apply` 时解析一次：host 平面行与本 preset 行的挂载先后
-   * 不由我们决定，一次性解析会把"服务稍后才可用"永久固化成 `chart_url=null`。
-   * 服务始终缺席（未安装/无 Web 载体/坏掉）时返回 undefined，整条链路照常降级：产物照样
-   * 落盘、`html_path` 照样可 present，只是 `chart_url` 为 null。
-   */
+  /** Resolve per render, not at apply: host rows may mount later; absence degrades to chart_url=null. */
   charts?: () => ChartPublisher | undefined
-  /**
-   * 惰性解析"图表 → 本轮交付"发布器（官方 `deliverables/presented`）。
-   *
-   * 与 `charts` 同理每次出图解析一次：宿主平面的 `sessions` / `sessionProjections`
-   * 不可用时返回 undefined，整条链路照常降级——图仍在 workspace 里，回执照样给 html_path，
-   * 只是本轮交付行不会登记这张图。
-   */
+  /** Same lazy rule: an absent publisher skips only the deliverable row. */
   chartEvents?: () => ChartEventPublisher | undefined
   now?: () => number
 }
@@ -207,13 +181,10 @@ export async function renderChart(input: RenderChartInput, args: Record<string, 
   const spec = normalizeChartSpec(args.spec)
   if (typeof args.title === 'string' && args.title.trim().length > 0) spec.title = args.title.trim().slice(0, 200)
 
-  // ── 取数：两条来源都在宿主进程内完成，rows 不进入任何消息 ────────────────────
+  // The token carries the direct data-agent session; the nested child never sees raw rows.
   let rows: readonly unknown[]
   let meta: { source_kind: 'dataset' | 'path'; dataset_id?: string; source_label?: string; captured_at?: number }
   if (datasetId !== undefined) {
-    // A chart_source_ref carries the direct data-agent session that already has
-    // access to the parent Dataset scope. The nested visualization child is
-    // only the caller of render_chart; it never receives raw rows.
     const readSession = tokenSource?.sourceSession ?? session
     const { ref, rows: datasetRows } = await input.store.readPresentationRows({ session: readSession, dataset_id: datasetId, signal: exec.signal })
     rows = datasetRows
@@ -225,7 +196,6 @@ export async function renderChart(input: RenderChartInput, args: Record<string, 
     meta = { source_kind: 'path' }
   }
 
-  // ── 有界化 ───────────────────────────────────────────────────────────────
   const chartId = newChartId()
   const payload = buildChartPayload({ chart_id: chartId, spec, rows, meta })
   const library = loadVendoredChartLibrary()
@@ -244,8 +214,7 @@ export async function renderChart(input: RenderChartInput, args: Record<string, 
   })
   const pathOf = (name: string): string => written.find((file) => file.name === name)?.path ?? `${dir}/${name}`
 
-  // 序列旁路：把 series.json 的**绝对路径**登记给 host 平面路由，客户端凭 chart_url 取数。
-  // 登记失败（服务缺失/实现异常）不阻断出图——图已经落盘了，降级成"只有文件路径"。
+  // Register the absolute series.json path with the host route; failure degrades to file paths only.
   let chartUrl: string | null = null
   const seriesFile = written.find((file) => file.name === 'series.json')
   if (input.charts && seriesFile !== undefined) {
@@ -273,15 +242,12 @@ export async function renderChart(input: RenderChartInput, args: Record<string, 
     html_path: pathOf('chart.html'),
     created_at: generatedAt,
   })
-  // Direct unit callers that do not install the production registry still get
-  // a stable receipt; production apply() always injects the registry.
+  // Unit callers without the registry still get a stable receipt.
   const chartRef = artifact?.chart_ref ?? `chart_${chartId.slice(3)}`
 
-  // 对话流呈现：把这张图登记为**用户正在看的那条会话**的本轮交付物
-  // （owner scope 与 chart_ref 同源，因此 specialist 出的图正好落在主会话）。
-  // 走官方 `deliverables/presented`——**不能**改回自定义事件类型：会话日志的事件词汇表
-  // 是闭集，非 first-party 类型会让整份会话在冷加载时打不开（事故记录见 src/chart/events.ts）。
-  // 事件不进模型消息历史。呈现通道可选：写不进去不影响图表产物与回执。
+  // Register as this turn's deliverable via first-party deliverables/presented — never a custom
+  // event type (closed vocabulary breaks cold load; see src/chart/events.ts). Owner scope matches
+  // chart_ref; these events never enter model message history.
   let deliverableTrace: string
   try {
     const publisher = input.chartEvents?.()
@@ -300,10 +266,7 @@ export async function renderChart(input: RenderChartInput, args: Record<string, 
   } catch (error) {
     deliverableTrace = `交付登记抛错（已吞掉，不影响出图）：${error instanceof Error ? error.message : String(error)}`
   }
-  // 诊断落盘**默认关闭**：交付行"静默不出现"是最难查的故障（2026-09-20 连查四轮），
-  // 而宿主终端不总能拿到（cordis logger 只进内存），所以留一条可从磁盘定位的出口；
-  // 但它属于调试产物，不该出现在对外版本的 workspace 里。
-  // 需要时用 `CAPITAL_CHART_TRACE=1` 启动宿主，图表产物目录会多出 deliverable-trace.txt。
+  // Trace file only under CAPITAL_CHART_TRACE=1; a debugging aid, not a release artifact.
   if (chartTraceEnabled()) {
     try {
       await input.store.writeWorkspaceFiles({
@@ -313,7 +276,7 @@ export async function renderChart(input: RenderChartInput, args: Record<string, 
         signal: exec.signal,
       })
     } catch {
-      // 诊断落盘失败不影响出图。
+      // Trace write failures never affect chart output.
     }
   }
 

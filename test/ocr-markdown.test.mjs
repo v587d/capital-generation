@@ -1,9 +1,8 @@
-// `src/ocr/markdown.ts` 的回归：把 PaddleOCR 的**内联 HTML 表格**变成模型读得懂的 GFM。
-//
-// 为什么单独钉一份（2026-09-25 真报文实测，贵州茅台 15 页研报）：上游 105,639 个字符里
-// 63,232 个（**60%**）是 `style='text-align: center; …'` 样板，表格整张是 HTML。本仓场景
-// 恰恰是"大量表格"，不处理就等于预算的六成买的是 HTML 属性；而 `prettifyMarkdown` 这类
-// 上游开关**未知键被静默忽略**，帮不上（见 `client.ts` 文件头 ⛔ 2）。
+// Regression for `src/ocr/markdown.ts`: turn PaddleOCR's inline HTML tables into GFM a model can read.
+// Pinned separately because on a real 15-page report 63,232 of 105,639 chars (60%) were
+// `style='text-align: center; …'` boilerplate and whole tables were HTML — this repo's workload is
+// table-heavy, so untreated that is 60% of the budget spent on HTML attributes. Upstream switches
+// like `prettifyMarkdown` cannot help: unknown keys are silently ignored (see `client.ts` header ⛔).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildOcrDocument, locateQuery, normalizeOcrMarkdown, parsePageRange, selectPages } from '../lib/ocr/markdown.js'
@@ -70,7 +69,7 @@ test('parsePageRange："1-3" / "5" / "2-4,9" 去重按序，越界响亮失败�
   assert.deepEqual(parsePageRange('2-4,9', 9), [2, 3, 4, 9])
   assert.deepEqual(parsePageRange('3,1-2,2', 5), [3, 1, 2], '重复页只给一次，顺序按请求')
   assert.deepEqual(parsePageRange('2–4', 5), [2, 3, 4], '中文连接号/全角波浪号同样是区间')
-  // "这页没有"和"我没给"在回执里必须能区分：两者都抛，且点名文档实际页数。
+  // "page missing" vs "page not requested" must stay distinct: both throw and name the real page count.
   assert.throws(() => parsePageRange('0-2', 5), /out of range/)
   assert.throws(() => parsePageRange('4-6', 5), /document has 5 pages/)
   assert.throws(() => parsePageRange('4-2', 5), /out of range/)
@@ -96,7 +95,7 @@ test('locateQuery 窗口停在页边界内：片段标第几页，就只能引�
     { page: 2, markdown: '营业收入 1,740.63 亿元（第 2 页末）。', images: 0 },
     { page: 3, markdown: '第二章 口径说明。', images: 0 },
   ])
-  // 窗口开得很大（1000 字符）也越不出去：命中在第 2 页，片段就只有第 2 页。
+  // Even a 1000-char window cannot spill past the page boundary: a page-2 hit yields page-2 text only.
   const hits = locateQuery(document, '营业收入', 5, 1_000)
   assert.equal(hits.length, 1)
   assert.equal(hits[0].page, 2)

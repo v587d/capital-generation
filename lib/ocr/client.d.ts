@@ -1,26 +1,17 @@
 /**
- * PaddleOCR AIStudio **异步 job** 客户端（`ocr` 的上游实现，唯一一份出网实现）。
+ * Async PaddleOCR jobs client — the plugin's only OCR egress implementation.
  *
- * 生命周期（2026-09-25 真报文实测，15 页贵州茅台研报，31 秒完成）：
- * `POST /api/v2/ocr/jobs` → `{code:0,msg:'Success',data:{jobId}}`
- * → `GET /api/v2/ocr/jobs/{jobId}` 轮询 `data.state`：`pending` → `running`
- * （带 `extractProgress.{totalPages,extractedPages}`）→ `done`（带 `resultUrl.jsonUrl`）
- * → `GET jsonUrl` 拿 **JSONL**（每行一个批次，`result.layoutParsingResults[]` 一项一页）。
+ * Flow: POST job → poll state → fetch result JSONL (one layout result per page).
  *
- * ⛔ 两条只能从真报文里拿到的事实，决定了本文件的形状：
- * 1. **上游把错误装在 HTTP 200 里**：模型名写错返回 `{code:10007,msg:'模型传参错误'}`
- *    且没有 `data.jobId`。只判 `status === 200` 会把失败当成功、`jobId` 变 `undefined`，
- *    然后拿 `undefined` 去轮询——所以每个响应都先看 `code`。
- * 2. **`optionalPayload` 的未知键被静默忽略**（塞 `zzzBogusKey` 照样返回 Success）。
- *    公开文档那页讲的其实是同步 `/layout-parsing`，`mergeTables` / `prettifyMarkdown`
- *    在 jobs 上是否生效无法证明，因此**只传官方示例里出现过的三个键**，
- *    不拿没验证过的开关换"看起来能配"的假象。表格噪音靠 `markdown.ts` 自己处理。
+ * ⛔ Two response-shape facts determine the code below:
+ * 1. Business failures arrive as HTTP 200 with `{ code: nonzero, jobId absent }`, so always check `code`.
+ * 2. Unknown `optionalPayload` keys are silently ignored; send only documented example keys.
  */
 import type { HttpOutcome, HttpRequest } from '../web-retriever/local-fetch.js';
 import { type OcrDocument } from './markdown.js';
 export declare const PADDLE_OCR_DEFAULT_ENDPOINT = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs";
 export declare const PADDLE_OCR_DEFAULT_MODEL = "PaddleOCR-VL-1.6";
-/** 上游文档口径：PDF 默认最多 100 页。超页是**上游会失败**，提前拦比事后猜便宜。 */
+/** Upstream PDF page limit; reject earlier than letting the remote job fail. */
 export declare const PADDLE_OCR_MAX_PAGES = 100;
 export type OcrErrorCode = 'NO_CREDENTIAL' | 'UPSTREAM' | 'JOB_FAILED' | 'RESULT_INVALID' | 'TOO_MANY_PAGES' | 'TIMEOUT';
 export declare class OcrError extends Error {
@@ -31,7 +22,7 @@ export interface OcrProgress {
     extracted_pages: number;
     total_pages: number;
 }
-/** 一次轮询看到的作业状态（只保留我们用得上的字段）。 */
+/** Poll status, narrowed to fields used here. */
 export interface OcrJobState {
     state: string;
     progress?: OcrProgress;
@@ -39,9 +30,9 @@ export interface OcrJobState {
     errorMsg?: string;
 }
 export interface OcrSubmitInput {
-    /** 公网可达的 `.pdf` 直链：由**上游**去取文件，本机不落任何字节。 */
+    /** Public PDF URL fetched by the provider; no local bytes are involved. */
     fileUrl?: string;
-    /** 本地文档字节（`file` 形态）：走 multipart 上传。 */
+    /** Local document bytes uploaded as multipart. */
     file?: {
         bytes: Uint8Array;
         filename: string;
@@ -53,7 +44,7 @@ export interface OcrWaitOutcome {
     status: 'done' | 'pending';
     job_id: string;
     progress?: OcrProgress;
-    /** `status === 'done'` 时一定有。 */
+    /** Present whenever status is done. */
     document?: OcrDocument;
     json_url?: string;
     elapsed_ms: number;
@@ -66,7 +57,7 @@ export interface PaddleOcrClientOptions {
     pollIntervalMs?: number;
     waitBudgetMs?: number;
     resultMaxBytes?: number;
-    /** 注入以便测试：睡眠必须可取消。 */
+    /** Injectable sleep keeps polling cancellable. */
     sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
     now?: () => number;
 }
@@ -75,7 +66,7 @@ export interface PaddleOcrClient {
     submit(input: OcrSubmitInput): Promise<string>;
     poll(jobId: string, signal: AbortSignal): Promise<OcrJobState>;
     wait(jobId: string, signal: AbortSignal, progress?: OcrProgress): Promise<OcrWaitOutcome>;
-    /** 提交并等到有结果（或自有预算耗尽回 pending）。 */
+    /** Submit and poll until terminal, or return pending when the wait budget is exhausted. */
     parse(input: OcrSubmitInput): Promise<OcrWaitOutcome>;
     load(jsonUrl: string, signal: AbortSignal): Promise<OcrDocument>;
 }

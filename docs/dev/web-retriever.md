@@ -70,8 +70,9 @@
 - **长任务靠声明，不靠后台**：工具自带 `timeoutMs: 240_000`，`dsh-tool-call-timeout-policy`
   据此给 `exec.signal` 挂 deadline；客户端**自有**等待预算 200s（`retriever.paddleOcr.pollBudgetMs`
   可覆盖）必须**小于**声明值，留出不确定返回与写盘的余量。预算耗尽**不是失败**：回
-  `{status:'pending', job_id, doc_id}`，模型照 `hint` 再调一次。委派侧无需改造——
-  `subagent_web_retriever` 本来就是 `backgroundMode: continuable`（立即返回、结算时收 notice）。
+  `{status:'pending', job_id, doc_id}`，模型照 `hint` 再调一次。委派侧无需改造——0.2.1 起
+  **子会话一律是 continuable 的异步委派**（立即返回、结算时收 notice；`backgroundMode` 已从委派行
+  删除，one-shot 与前台模式都不复存在）。
 - **产物一律落盘** `capital-data/ocr/<doc_id>/{document.md,meta.json}`（§3 布局），先写正文
   再写 meta ⇒ **meta 的在场即代表完整**；半件产物下次按未缓存重写，不把 `doc_id` 永久锁死。
   `doc_id` 是**内容寻址**的（`sha1(输入 + model + charts)` 前 12 位），同文档二次调用直接回读。
@@ -94,9 +95,12 @@
 - **不受 `localFetch.enabled` 支配**（与 anysearch / wind 同侧）：那个开关的文案是"允许启动
   本地提取网页内容"，管的是 HTML 回退；把 `ocr` 挂上去等于违背用户同意时划下的边界。
   缺 token 只让调用响亮失败（`NO_CREDENTIAL`，指明卡片位置），工具**无条件注册**——
-  少一个 key 就少十四个工具名，会让子 Agent 创建期报错。
+  少一个 key 就少十四个工具名，而"按配置少注册"正是 2026-09-30 桌面端那个事故的形状（整场进程
+  少一整族、不重试）。D0 之后这一族由 `tools/retrieve-search` / `tools/retrieve-sources` /
+  `tools/ocr` 三行带出来：注册只看行，开关只看调用期。
 - **根侧收敛的例外**：`ocr` **不进** `RETRIEVAL_DENIED_TOOLS`（主 Agent 要能解析用户
-  `@xxx.pdf` 推进来的本地文档），改由 `rootOcrGuardReason` 只拒它的 `url` 形态；
-  通用 `subagent` 的 `toolFilter.deny` 则连本地形态一起拿掉。名字级 deny 做不到这个区分。
+  `@xxx.pdf` 推进来的本地文档），改由 `rootOcrGuardReason` 只拒它的 `url` 形态。`tools/ocr` 那一行
+  因此被 `capital-web-retriever` 与主 preset **各挂一次**（运行期那份逐名 deny 只管 `interrupt_agent`，
+  不再管工具面）——名字级清单做不到"只给别人 `file` / `doc_id` 形态"这个区分，所以形态判定必须留在调用级 guard。
 - **密钥**：`PADDLE_OCR_TOKEN` 每次调用现解（credentials 优先、环境变量同名回退，与 Wind 同
   口径），永不出现在回执 / 日志 / 错误串（错误只点名 ref）。

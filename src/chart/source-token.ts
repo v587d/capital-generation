@@ -7,12 +7,12 @@ import {
   DatasetStoreError,
   WorkspaceDatasetStore,
 } from '../data-collector/store.js'
+// Authorization has one implementation (src/tool-exec.ts); the error shape stays chart-specific.
+import { authorizeToolSession, type AgentExecutionLike } from '../tool-exec.js'
+import { CHART_SOURCE_PRESET_IDS } from '../preset-ids.js'
 
 type ToolRuntimeLike = { register(definition: unknown): () => void }
-type AgentExecutionLike = {
-  session?: { id?: string; header?: { cwd?: string; parentSession?: string } }
-}
-type ToolExecLike = { agent?: AgentExecutionLike; signal: AbortSignal }
+type ToolExecLike = AgentExecutionLike
 
 const CHART_SOURCE_TOKEN_PATTERN = /^cs_[A-Za-z0-9_-]{1,128}$/
 const DEFAULT_CHART_SOURCE_TTL_MS = 15 * 60 * 1000
@@ -44,10 +44,14 @@ function sessionOf(exec: ToolExecLike): SessionLike {
   return session as SessionLike
 }
 
-function delegatedSession(exec: ToolExecLike): SessionLike {
+/** Shared preset-based authorizer; chart_source_scope_mismatch shape stays here (test-pinned). */
+function authorizedChartSession(ctx: unknown, exec: ToolExecLike): SessionLike {
   const session = sessionOf(exec)
-  if (typeof session.header?.parentSession !== 'string' || session.header.parentSession.length === 0) {
-    throw new ChartError('chart_source_scope_mismatch', 'prepare_chart_source is restricted to delegated data agents')
+  const decision = authorizeToolSession(ctx, exec, 'prepare_chart_source', CHART_SOURCE_PRESET_IDS)
+  if (!decision.allowed) {
+    throw new ChartError('chart_source_scope_mismatch', decision.via === 'preset'
+      ? `prepare_chart_source 不对人设 ${decision.presetId} 开放；签发出图读能力只属于数据角色`
+      : 'prepare_chart_source is restricted to delegated data agents')
   }
   return session
 }
@@ -77,12 +81,8 @@ function readToken(value: unknown): string {
   return value
 }
 
-/**
- * The registry is host-only and never serializes this handle into Agent output.
- * Keeping the live Session object is required because DSH sandbox policies use
- * session.snapshotEvents() when resolving workspace permissions.
- */
-
+/** Host-only; never serialized into agent output. Keep the live Session: sandbox policies call
+ * session.snapshotEvents() to resolve workspace permissions. */
 export interface ChartSourceTokenRef {
   chart_source_ref: string
   dataset_id: string
@@ -102,13 +102,8 @@ export interface ChartSourceTokenStoreOptions {
   newToken?: () => string
 }
 
-/**
- * Short-lived capability tokens for nested visualization children.
- *
- * The token captures the direct data-agent session rather than asking a nested
- * child to re-prove the Dataset's one-hop session scope. Possession of the
- * opaque token is the capability; it is never converted into a filesystem path.
- */
+/** Short-lived capability tokens for nested visualization children. Possession is the capability;
+ * the token never becomes a filesystem path or raw rows. */
 export class ChartSourceTokenStore {
   private readonly tokens = new Map<string, ChartSourceTokenRecord>()
   private readonly now: () => number
@@ -142,10 +137,8 @@ export class ChartSourceTokenStore {
     const now = this.now()
     this.purgeExpired(now)
 
-    // 幂等：同一 session + task_id + dataset_id 在 TTL 内重复签发返回**同一个** token。
-    // 2026-10-10 真机（task_fh_300803_20261010）：data_junior 改了视图方案后为同一 dataset
-    // 重签，跟着就是 7.9K 字符的思考回合——skill 里的"不要重签"警告拦不住，所以把幂等沉到
-    // 工具层。token 是读能力而非一次性凭证（resolve 不消费），复用没有语义损失。
+    // Idempotent within TTL for the same session+task+dataset: re-issuing triggers huge thinking
+    // turns, and resolve() does not consume the token, so reuse has no semantic cost.
     for (const record of this.tokens.values()) {
       if (record.dataset_id === datasetId && record.task_id === taskId && record.sourceSession.id === input.session.id) {
         return {
@@ -171,6 +164,7 @@ export class ChartSourceTokenStore {
     }
     if (this.tokens.has(token)) throw new ChartError('chart_source_invalid', 'generated chart_source_ref already exists')
 
+    // Never outlive the dataset's retention.
     const expiresAt = Math.min(inspection.retention_until, now + this.ttlMs)
     const record: ChartSourceTokenRecord = {
       chart_source_ref: token,
@@ -231,7 +225,7 @@ const outputSchema = jsonObject({
   expires_at: { type: 'integer' },
 }, ['chart_source_ref', 'dataset_id', 'task_id', 'expires_at'])
 
-/** Register the delegated-child-only token issuer. */
+/** Preset-based authorization; see authorizedChartSession. */
 export function registerChartSourceTool(
   ctx: Context,
   options: { store: WorkspaceDatasetStore; tokens: ChartSourceTokenStore },
@@ -241,7 +235,7 @@ export function registerChartSourceTool(
   const definition = {
     name: 'prepare_chart_source',
     description:
-      '为当前 delegated data agent 的指定 Dataset 签发短期 chart_source_ref，供 visualization_specialist 通过受控 render_chart 读取。' +
+      '为**当前数据角色会话**已授权的 Dataset 签发短期 chart_source_ref，供 visualization_specialist 通过受控 render_chart 读取（授权按人设判定，被委派与独立开启的数据模式都能签发）。' +
       '只返回 opaque token 和小型元数据，不返回原始数据、文件路径或数据行；必须提供 dataset_id，可选 task_id。' +
       '同一 task_id + dataset_id 重复调用幂等返回同一个 chart_source_ref（TTL 内），改了视图方案直接复用即可。',
     parameters: jsonObject({
@@ -251,7 +245,7 @@ export function registerChartSourceTool(
     output: { schema: outputSchema, render },
     async execute(args: Record<string, unknown>, exec: ToolExecLike): Promise<ChartSourceTokenRef> {
       try {
-        const session = delegatedSession(exec)
+        const session = authorizedChartSession(ctx, exec)
         return await options.tokens.issue({
           store: options.store,
           session,

@@ -1,16 +1,8 @@
 #!/usr/bin/env node
 /**
- * 离线图表 demo：不进 DSH、不依赖会话，直接跑通"数据 → 载荷 → 自包含 HTML"这条链路。
- *
- * 用途：
- *  - **肉眼验收**：`npm run demo:chart` 之后用浏览器打开输出的 HTML，确认配色、副图、
- *    标记点、明暗主题都符合预期（这一步在开发 Step 3 的对话流内嵌视图时同样要用）；
- *  - 在没有 dsh 会话的机器上复现渲染问题。
- *
- * 注意：这里**不**经过 WorkspaceDatasetStore（那是宿主侧、受沙箱约束的落盘路径）。
- * demo 只验证渲染链路，落盘用普通 fs 写到指定目录。
- *
- * 用法：node scripts/chart-demo.mjs [输出目录]   默认 ./capital-analysis/charts/demo
+ * Offline chart demo: runs data → payload → standalone HTML without DSH or a session, for
+ * eyeballing rendering, themes and sub-panels in a browser.
+ * Bypasses WorkspaceDatasetStore (host-side, sandboxed); only the render path is exercised.
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -23,7 +15,6 @@ import { normalizeChartSpec } from '../lib/chart/spec.js'
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const outDir = resolve(process.argv[2] ?? join(ROOT, 'capital-analysis', 'charts', 'demo'))
 
-/** 合成一段"像行情"的日线：几何随机游走 + 周期，只为把图形铺开看，不代表任何真实标的。 */
 function syntheticHistory(days = 260) {
   const rows = []
   let close = 100

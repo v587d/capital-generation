@@ -6,25 +6,14 @@ import {
   registerBashGuard,
 } from '../lib/agents/bash-guard.js'
 import { ROOT_AGENT_DENIED_TOOLS, SHELL_TOOL_NAMES } from '../lib/agents/root-tool-policy.js'
-import { PRESET_PATCH_TEXT, presetRows } from './preset-rows.mjs'
+import { PRESET_PATCH_TEXT, allPresets } from './preset-rows.mjs'
 
 /**
- * shell 闸门契约测试。
- *
- * 闸门认的是**两个名字**（`bash` / `pwsh`）：preset 里那两行按平台成对挂载，Windows 上模型
- * 调的是 `pwsh`。所以下面每个判定都必须对两个名字各跑一遍——AGENTS.md §9.7 的形状是
- * "本地测试只覆盖了接好的那个入口"，这次踩的正是它（只喂 `bash` 时，闸门在 Windows 上是死代码
- * 且零报错）。
- *
- * 2026-10-15 用户决策「开 read、同时保留 bash」后只剩**一层可靠判定**（必然失败的沙箱升级），
- * **不解析命令内容**：本仓实测沙箱只拦写、不拦读与网络（`~/.dsh/.credentials.yaml` 与
- * `sessions/**` 整机可读、`curl` 直连可通），而正则挡不住 `node -e`/`python3 -c`——那正是引入
- * shell 的目的。所以禁区与出网纪律是 data_junior 的 persona 软约束，不是这里的规则；
- * "命令内容不参与判定"那条用例专门把它锁住，防止以后有人偷偷加一层看起来像边界的正则。
- *
- * 旧契约（A 结构层"只对被委派子会话开放"）的断言**迁移**到下面的"根会话放行"用例：
- * 断言跟着规则走，不是删掉了事——那条钉子当年是为"主 Agent 不该有 shell"服务的，决策反过来，
- * 钉子就该反过来看住新边界。
+ * Shell gate contract: the gate recognizes both `bash` and `pwsh` (one per platform), so every case
+ * runs against both names -- feeding only `bash` once left it dead code on Windows with no error.
+ * Command content is deliberately not parsed (the sandbox blocks writes, not reads/network), so
+ * tests pin that a regex never poses as a boundary. The root-session case is the migrated form of
+ * the old "delegated child only" rule.
  */
 
 const shellNames = [...SHELL_TOOL_NAMES]
@@ -36,14 +25,12 @@ const childAgent = (overrides = {}) => ({
 const rootAgent = (overrides = {}) => ({ session: { id: 'main-1', header: { cwd: '/w' } }, ...overrides })
 
 test('bashGuardReason：只认 shell 两个名字，别的工具一律放行', () => {
-  // 名字过滤要用**会被拦的形状**验（被委派 + 带升级参数）：非 shell 的名字在这种形状下
-  // 若被拦才算露出"闸门在管这个名字"；不带升级参数时"不认这个名字"与"认了但放行"都是
-  // undefined，测不出名字过滤。
+  // Deny-shaped input (delegated + escalation) so "unknown name" is distinguishable from "known but allowed".
   for (const name of ['describe_dataset', 'query_dataset', 'render_chart', 'subagent_data_junior', undefined]) {
     assert.equal(bashGuardReason({ name, agent: childAgent(), arguments: { sandbox_permissions: 'x' } }), undefined,
       `${name} 不是 shell，闸门不得插手`)
   }
-  // 反过来：两个 shell 名字在同样形状下都必须被拦下（拦下 = 闸门认得它）
+  // Both shell names must be caught in the same shape, or the platform's check never fires.
   for (const name of shellNames) {
     assert.equal(bashGuardReason({ name, agent: childAgent(), arguments: { sandbox_permissions: 'x' } }), SHELL_ESCALATION_UNREACHABLE,
       `闸门必须认 ${name}：不认就意味着该平台的判定一次都不触发，而且不报错`)
@@ -51,11 +38,10 @@ test('bashGuardReason：只认 shell 两个名字，别的工具一律放行', (
 })
 
 test('bashGuardReason：主 Agent 的 shell 调用放行（2026-10-15 决策「开 read、同时保留 bash」）', () => {
-  // 这条用例迁移自旧的 A 结构层（"只有被委派的子会话能用 shell"）：决策反过来后，根会话
-  // 形状（含 parentSession 空串的防御形状）一律放行，不再返回 SHELL_DELEGATED_ONLY（已删）。
+  // Migrated from the old "delegated child only" rule: root-shaped sessions, including the empty-string guard, now pass.
   for (const name of shellNames) {
     assert.equal(bashGuardReason({ name, agent: rootAgent(), arguments: { command: 'date' } }), undefined, `主 Agent 保留 ${name}`)
-    // 空串等同缺失（header 由宿主写入，防御性判断）
+    // Empty string counts as absent (header is host-written).
     assert.equal(bashGuardReason({ name, agent: { session: { header: { parentSession: '' } } }, arguments: { command: 'date' } }), undefined)
     assert.equal(bashGuardReason({ name, agent: childAgent(), arguments: { command: 'date' } }), undefined)
   }
@@ -66,19 +52,18 @@ test('bashGuardReason：拦掉必然失败的沙箱升级——被委派 / 身�
   for (const name of shellNames) {
     const withEscalation = { name, agent: childAgent(), arguments: { command: 'node -e 1', sandbox_permissions: 'danger-full-access', justification: '需要写文件' } }
     assert.equal(bashGuardReason(withEscalation), SHELL_ESCALATION_UNREACHABLE)
-    // 只带 justification（工具层本来也会拒绝这种不成对传参）：这里提前给出可读理由
+    // justification without sandbox_permissions: the tool layer rejects it anyway; here it gets a readable reason.
     assert.equal(bashGuardReason({ name, agent: childAgent(), arguments: { justification: 'x' } }), SHELL_ESCALATION_UNREACHABLE)
-    // 没有 agent 就无法授权：升级 fail closed，不给"拿不到身份就放行"的口子
-    //（这条钉子迁移自 A 层的同名教训——升级场景里它是同一课）
+    // No agent means no authorization: escalation fails closed, never "unknown identity passes".
     assert.equal(bashGuardReason({ name, arguments: { sandbox_permissions: 'x' } }), SHELL_ESCALATION_UNREACHABLE)
-    // 主 Agent 的升级是正当用途：ask 审批流程可达，这里放行（审批交给宿主）
+    // Root escalation is legitimate: approval is reachable, leave it to the host.
     assert.equal(bashGuardReason({ name, agent: rootAgent(), arguments: { sandbox_permissions: 'danger-full-access', justification: '需要整机读' } }), undefined)
   }
-  // 文案必须说清"不是用户拒绝"，并给出正确路径（否则模型会向用户错误归因）
+  // Must say it is not a user refusal and point at data_gap instead, or the model misattributes.
   assert.match(SHELL_ESCALATION_UNREACHABLE, /never/)
   assert.match(SHELL_ESCALATION_UNREACHABLE, /data_gap/)
   assert.match(SHELL_ESCALATION_UNREACHABLE, /不会去问用户/)
-  // 两端都会读到这句话，所以不许只写其中一个工具名（两名字钉子继续住在这仅存的文案上）
+  // Both tools read this text, so it must name both.
   assert.match(SHELL_ESCALATION_UNREACHABLE, /bash/)
   assert.match(SHELL_ESCALATION_UNREACHABLE, /pwsh/)
 })
@@ -91,15 +76,22 @@ test('bashGuardReason：arguments 形状异常不抛（事件来自模型，宁�
   }
 })
 
-test('shell 名字只有一份定义：preset 挂的每一行 shell，闸门与根侧 deny 都必须认', () => {
-  // 上游若多挂一个 shell 工具包，这里会先红——症状（某平台的闸门静默失效）比红更难发现。
+test('shell 名字只有一份定义：preset 挂的每一行 shell，闸门都必须认', () => {
+  // An extra upstream shell row would otherwise silently bypass the gate on that platform.
   for (const name of shellNames) {
-    assert.ok(presetRows().some((row) => row?.name === `@deepseek-ai/dsh-tool-${name}`),
+    assert.ok(allPresets().some((preset) => (preset.config.plugins ?? []).some((row) => row?.name === `@deepseek-ai/dsh-tool-${name}`)),
       `preset 必须真有 @deepseek-ai/dsh-tool-${name} 行，否则这个名字是凭空加的`)
-    assert.ok(PRESET_PATCH_TEXT.includes(`'${name}'`), `agent.patch.yml 里要能看到 ${name}`)
-    // 2026-10-15 决策后根侧 deny **不得**再含 shell（旧钉子是"必须含"，迁移而不是删除）
+    assert.ok(PRESET_PATCH_TEXT.includes(`- id: tool-${name}`), `agent.patch.yml 里要能看到 tool-${name} 行`)
+    // Root deny must not list shell again; migrated from the old "must include" pin.
     assert.ok(!ROOT_AGENT_DENIED_TOOLS.includes(name), `根侧 deny 不得含 ${name}：主 Agent 保留 shell（2026-10-15 用户决策）`)
   }
+  // The allow list is gone (tool surface is expressed by mounted preset rows), so this is the only name/row alignment left.
+  const mountedShellNames = [...new Set(allPresets()
+    .flatMap((preset) => preset.config.plugins ?? [])
+    .map((row) => /^@deepseek-ai\/dsh-tool-(bash|pwsh|sh|zsh|cmd|powershell)$/.exec(row?.name ?? '')?.[1])
+    .filter((name) => name !== undefined))].sort()
+  assert.deepEqual(mountedShellNames, [...shellNames].sort(),
+    '挂出来的 shell 行必须全在 SHELL_TOOL_NAMES 里：多挂一行而名字没跟上，闸门对它一次都不会触发')
   assert.deepEqual(shellNames, ['bash', 'pwsh'], 'shell 名字集合就是这两行；改动它要有明确设计决策')
 })
 
@@ -115,7 +107,7 @@ test('bashGuardReason：命令内容不参与判定——禁区命令照样放�
     for (const command of commands) {
       assert.equal(bashGuardReason({ name, agent: childAgent(), arguments: { command } }), undefined,
         `不得按命令内容 deny（那会把绊线伪装成边界，并挡住 node/python 这类正当计算）：${name} ${command}`)
-      // 主 Agent 是 shell 的主要持有者（2026-10-15 决策）：禁区命令对它同样不是这里的规则
+      // The root agent is the main shell holder; a content rule would not apply there either.
       assert.equal(bashGuardReason({ name, agent: rootAgent(), arguments: { command } }), undefined,
         `主 Agent 侧同样不得按命令内容 deny：${name} ${command}`)
     }
@@ -140,13 +132,16 @@ test('registerBashGuard：注册在 Root context 的 agent/created 上（scoped 
 
   const tools = { guard: (guard) => { installs.push(guard); return () => {} } }
   const created = rootListeners[0].listener
-  created({ agent: childAgent({ ctx: { preset: 'capital-generation', tools } }) })
-  assert.equal(installs.length, 1, '本 preset 的子 Agent 必须装上 guard')
+  // Role presets compose a different id; matching only the root id installed no guard at all on real machines.
+  created({ agent: childAgent({ ctx: { preset: 'capital-data-junior', tools } }) })
+  assert.equal(installs.length, 1, '角色 preset 的子 Agent 也必须装上 guard')
+  created({ agent: rootAgent({ ctx: { preset: 'capital-generation', tools } }) })
+  assert.equal(installs.length, 2, '主 Agent 也保留 guard（升级走正常 ask 审批）')
   assert.equal(installs[0], bashGuardReason, '装的就是同一个判定函数（单一实现）')
 
-  // 别的 preset 不认领；异常载荷不抛
+  // Unknown presets are ignored; malformed payloads must not throw.
   created({ agent: childAgent({ ctx: { preset: 'standard', tools } }) })
-  assert.equal(installs.length, 1)
+  assert.equal(installs.length, 2)
   assert.doesNotThrow(() => created({}))
   assert.doesNotThrow(() => created(undefined))
 })
@@ -179,7 +174,7 @@ test('registerBashGuard：agent/disposed 释放该 agent 的 guard（不跨实�
   created({ agent: childAgent({ ctx: { preset: 'capital-generation', tools: { guard: () => () => disposed.push('guard') } } }) })
   agentDisposed({ agent: childAgent() })
   assert.deepEqual(disposed, ['guard'])
-  // 重复 disposed / 未知 agent 不得抛
+  // Repeated dispose / unknown agent must not throw.
   assert.doesNotThrow(() => agentDisposed({ agent: childAgent() }))
   assert.doesNotThrow(() => agentDisposed({}))
 })
@@ -191,8 +186,7 @@ test('registerBashGuard：Root 监听器必须由本 fiber 持有 disposer（否
     effect: (callback) => { const dispose = callback(); dispose(); return () => {} },
   }
   assert.doesNotThrow(() => registerBashGuard(ctx))
-  assert.equal(disposed.length >= 2, true, 'agent/created 与 agent/disposed 的 disposer 都要被持有')
-})
+  assert.equal(disposed.length >= 2, true, 'agent/created 与 agent/disposed 的 disposer 都要被持有')})
 
 test('registerBashGuard：ctx 没有 on 时安静跳过（不改装配结果）', () => {
   assert.doesNotThrow(() => registerBashGuard({}))

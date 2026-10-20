@@ -1,9 +1,7 @@
 /**
- * 生成 docs/data-collector-capabilities.md（能力总表）。
- *
- * 为什么是脚本而不是手写：69 个端点的表格手工维护必然漂移。本脚本从
- * `src/sources/fuyao-rest.ts`、`src/sources/tencent-http.ts`、`src/sources/eastmoney-http.ts` 与 `src/sources/wind-mcp.ts` 的端点定义直接生成表格，`test/data-collector-capabilities.test.mjs`
- * 再断言"文档 == 实现"，于是新增端点忘了同步时会在测试里失败，而不是在文档里悄悄过期。
+ * Generates docs/data-collector-capabilities.md from the source definitions in src/sources/*;
+ * test/data-collector-capabilities.test.mjs asserts doc == implementation, so a new endpoint
+ * that is not regenerated fails in tests instead of silently rotting in docs.
  *
  *   npm run docs:capabilities
  */
@@ -32,8 +30,8 @@ const pathOf = (source) => source.schema.source_label === 'tencent'
         ? `/ftshare/${source.schema.capability.replace(/^ftshare_/, '')}`
         : '/' + source.schema.data_key.replace('fuyao.api.', '').replace(/\./g, '/')
 
-// 东财按主题拆成宏观、沪深港通、资金与筹码三张表：分组是各自 filter（不互斥），
-// 所以通用组必须显式排除另两类的路径，否则一行会出现在两张表里。
+// Eastmoney is split into macro / mutual / capital tables with overlapping filters, so the
+// generic group must exclude the other two path sets or rows show up in two tables.
 const MACRO_PATHS = new Set(['/eastmoney/cpi', '/eastmoney/ppi', '/eastmoney/gdp', '/eastmoney/pmi', '/eastmoney/money_supply', '/eastmoney/rmb_loan', '/eastmoney/customs_trade', '/eastmoney/retail_sales', '/eastmoney/deposit_reserve'])
 const MUTUAL_PATHS = new Set(['/eastmoney/mutual_flow', '/eastmoney/mutual_quota'])
 

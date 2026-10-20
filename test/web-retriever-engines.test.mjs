@@ -20,7 +20,8 @@ test('normalizeSearchHit：容错字段缺失；无 url 判空', () => {
 })
 
 test('normalizeSearchHit：伪协议 URL 整条丢掉；标题与摘要剥掉不可见字符', () => {
-  // 候选链接既是要 fetch 的目标，也是给用户点的引用——不合法的 url 没有价值（与条目 url 同一口径）。
+  // A candidate url is both the fetch target and the citation shown to the user, so an invalid
+  // one is worthless — drop the whole hit (same rule as entry urls).
   assert.equal(normalizeSearchHit({ url: 'javascript:alert(1)', title: 'T' }), null)
   assert.equal(normalizeSearchHit({ url: '   ', title: 'T' }), null)
   const hit = normalizeSearchHit({ url: 'https://a.example', title: '浦发\u200B银行', snippet: 'RLO\u202E点', content: '正\u00AD文' })

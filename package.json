@@ -22,6 +22,66 @@
       "import": "./lib/index.js",
       "default": "./lib/index.js"
     },
+    "./runtime": {
+      "types": "./lib/runtime-entry.d.ts",
+      "import": "./lib/runtime-entry.js",
+      "default": "./lib/runtime-entry.js"
+    },
+    "./policy": {
+      "types": "./lib/policy-entry.d.ts",
+      "import": "./lib/policy-entry.js",
+      "default": "./lib/policy-entry.js"
+    },
+    "./tools/chart-render": {
+      "types": "./lib/chart-render-entry.d.ts",
+      "import": "./lib/chart-render-entry.js",
+      "default": "./lib/chart-render-entry.js"
+    },
+    "./tools/chart-source": {
+      "types": "./lib/chart-source-entry.d.ts",
+      "import": "./lib/chart-source-entry.js",
+      "default": "./lib/chart-source-entry.js"
+    },
+    "./tools/collect": {
+      "types": "./lib/collect-entry.d.ts",
+      "import": "./lib/collect-entry.js",
+      "default": "./lib/collect-entry.js"
+    },
+    "./tools/dataset-read": {
+      "types": "./lib/dataset-read-entry.d.ts",
+      "import": "./lib/dataset-read-entry.js",
+      "default": "./lib/dataset-read-entry.js"
+    },
+    "./tools/ocr": {
+      "types": "./lib/ocr-entry.d.ts",
+      "import": "./lib/ocr-entry.js",
+      "default": "./lib/ocr-entry.js"
+    },
+    "./tools/retrieve-search": {
+      "types": "./lib/search-entry.d.ts",
+      "import": "./lib/search-entry.js",
+      "default": "./lib/search-entry.js"
+    },
+    "./tools/retrieve-sources": {
+      "types": "./lib/sources-entry.d.ts",
+      "import": "./lib/sources-entry.js",
+      "default": "./lib/sources-entry.js"
+    },
+    "./tools/root-extras": {
+      "types": "./lib/root-extras-entry.d.ts",
+      "import": "./lib/root-extras-entry.js",
+      "default": "./lib/root-extras-entry.js"
+    },
+    "./tools/time": {
+      "types": "./lib/time-entry.d.ts",
+      "import": "./lib/time-entry.js",
+      "default": "./lib/time-entry.js"
+    },
+    "./tools/watchlist": {
+      "types": "./lib/watchlist-entry.d.ts",
+      "import": "./lib/watchlist-entry.js",
+      "default": "./lib/watchlist-entry.js"
+    },
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json"
   },
@@ -79,14 +139,14 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-skill": "0.2.0-rc.2",
-    "@deepseek-ai/dsh-skill-filesystem": "0.2.0-rc.2"
+    "@deepseek-ai/dsh-skill": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-skill-filesystem": "0.2.1-rc.2"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-skill": "^0.2.0-rc.2",
-    "@deepseek-ai/dsh-skill-filesystem": "^0.2.0-rc.2",
-    "@deepseek-ai/dsh-system-prompt": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-skill": "^0.2.1-rc.2",
+    "@deepseek-ai/dsh-skill-filesystem": "^0.2.1-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "^0.2.1-rc.2",
     "@deepseek-ai/schemastery": "^3.18.4",
     "esbuild": "^0.28.2",
     "js-yaml": "^5.4.1",

@@ -64,7 +64,7 @@ test('GFM 表格：3 列 thead 表 → 表头行 + --- 分隔行 + 数据行', (
   const result = htmlToMarkdown(html, 20_000)
   assert.equal(result.omitted, false)
   assert.equal(result.markdown, '| a   | b   | c   |\n| --- | --- | --- |\n| 1   | 2   | 3   |')
-  // 「| a | b | c |」形式的行（允许单元格内填充空格）与精确分隔行。
+  // A `| a | b | c |` row (cells may be padded) plus the exact separator row.
   assert.match(result.markdown, /^\| a\s+\|\s*b\s+\|\s*c\s+\|$/m)
   assert.match(result.markdown, /^\| --- \| --- \| --- \|$/m)
 })
@@ -155,12 +155,12 @@ test('输出上限：markdown 长度 ≤ maxChars；超长输入 truncated === t
   assert.ok(longInput.markdown.length <= 200, `输出长度 ${longInput.markdown.length} 不得超过 200`)
   assert.match(longInput.markdown, /^x+$/)
   assert.equal(longInput.omitted, false)
-  // 源不超限但转换输出超限（<hr> → "* * *" 共 5 字符 > 4）：只截输出。
+  // Source fits but the converted output does not (<hr> -> "* * *", 5 chars > 4): truncate output only.
   const expanded = htmlToMarkdown('<hr>', 4)
   assert.equal(expanded.truncated, true)
   assert.equal(expanded.markdown, '* * ')
   assert.equal(expanded.omitted, false)
-  // 正常路径不误报截断。
+  // The normal path must not report truncation.
   const normal = htmlToMarkdown('<p>hello</p>', 200)
   assert.equal(normal.truncated, false)
   assert.equal(normal.markdown, 'hello')
@@ -237,7 +237,7 @@ test('幂等与稳定：同一输入连续两次调用结果完全一致（共�
   const first = htmlToMarkdown(rich, 20_000)
   const second = htmlToMarkdown(rich, 20_000)
   assert.deepEqual(second, first)
-  // 交叉转换不同文档后再回来，结果仍一致（证明实例间无状态残留）。
+  // Converting another document in between must not leave state on the shared turndown instance.
   const other = htmlToMarkdown('<p>other</p><style>x{y:z}</style>', 20_000)
   const third = htmlToMarkdown(rich, 20_000)
   assert.deepEqual(third, first)
@@ -255,13 +255,13 @@ test('结果形状：无 title 时不携带 title 字段；有 title 时字段�
 })
 
 test('不可见字符：零宽 / 双向覆盖 / 软连字符不进上下文，实体写法同样剥掉', () => {
-  // 顺序要紧：先解码实体、后剥不可见字符，否则 `&#8206;` 解出来的是一个**活的** U+200E 方向标记。
+  // Order matters: decode entities first, then strip invisibles; else `&#8206;` decodes into a live U+200E mark.
   const html = '<title>浦发&#8206;银行&#xFEFF;</title><p>浦发\u200B银行\u202E反向\u00AD软</p>'
   const result = htmlToMarkdown(html, 20_000)
   assert.equal(result.title, '浦发银行', `title 里的不可见字符必须消失：${JSON.stringify(result.title)}`)
   assert.ok(!/[\u00AD\u200B-\u200F\u202E\uFEFF]/u.test(result.markdown), `正文里的不可见字符必须消失：${JSON.stringify(result.markdown)}`)
   assert.match(result.markdown, /浦发银行反向软/u, '可见文字与顺序不得受影响')
-  // 换行 / 回车 / 制表是呈现需要的，不能连带删掉。
+  // Newline / CR / tab are needed for presentation and must not be stripped along with them.
   assert.equal(stripInvisibleText('a\r\n\tb'), 'a\r\n\tb')
   assert.equal(extractTitle('<title>公告\u200B\u202A</title>'), '公告')
 })

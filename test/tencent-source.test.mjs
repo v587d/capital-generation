@@ -73,16 +73,11 @@ test('Tencent source registry uses nine non-conflicting capabilities and source 
     assert.ok(source.schema.output_schema)
     assert.match(source.schema.description, /腾讯/)
   }
-  // 港美股是**独立能力**，不是把 A 股的 quote/kline 换个参数：各表的字段位序互不通用。
-  // 六条 = 港个股快照 / 美个股快照 / 港指数点位 / 美指数点位 / 港 K 线 / 美 K 线。
+  // HK/US are separate capabilities: six tools, each with its own column layout.
   assert.equal(sources.filter((source) => /_(hk|us)_/.test(source.schema.capability)).length, 6)
 })
 
-/**
- * 港股快照 78 位（列位来自 live 实测；名称用 ASCII，GBK 解码由真机冒烟覆盖）。
- * 派生列（振幅 / 换手 / 均价 / 市值）按**上游自己的算术关系**算出来：手填一组好看的数字
- * 只会让断言变成"解析器读到了我编的数"，核不出列位错。
- */
+/** HK snapshot positions come from live data; derived values preserve upstream arithmetic so column errors cannot hide. */
 function hkQuoteText(symbol, values = {}) {
   const price = values.price ?? 423
   const lastClose = values.lastClose ?? 421.2
@@ -116,7 +111,7 @@ function hkQuoteText(symbol, values = {}) {
   return `v_${symbol}="${fields.join('~')}";`
 }
 
-/** 美股快照 73 位：币种在第 35 位（港股在 75），流通与总两列市值实测真的不相等，同样按算术派生。 */
+/** US positions differ from HK; currency is at 35 and the two market-cap columns genuinely differ. */
 function usQuoteText(symbol, values = {}) {
   const price = values.price ?? 333.69
   const lastClose = values.lastClose ?? 330.32
@@ -158,14 +153,14 @@ test('tencent_hk_quote：代码左补零、时间戳两种分隔符都吃，量�
   let requested
   globalThis.fetch = async (url) => {
     requested = new URL(url)
-    // 斜杠与横杠并存是实测形状（同一份响应里两行不同写法），只认一种就会把行情时间判成畸形。
+    // One response can mix `/` and `-`; accept both or valid timestamps look malformed.
     return response(
       hkQuoteText('hk00700', { timestamp: '2026/10/05 16:08:09' })
       + hkQuoteText('hk00005', { code: '00005', name: 'HSBC', price: 149.9, lastClose: 149.5, open: 150, volume: 11889096, amount: 1767921135.3, changeAmt: 0.4, changePct: 0.27, high: 150.3, low: 147.6, amplitude: 1.81, marketCapYi: 25695.7715, english: 'HSBC HOLDINGS', turnover: 0.07, boardLot: 400, totalShares: 17141942291, avgPrice: 148.701 }),
     )
   }
   try {
-    // 700 与 00700 是同一只（上游只认补零形态），99999 会被上游静默丢弃。
+    // `700` and `00700` name one symbol; only zero-padded HK codes receive a row.
     const result = await execute(sources.tencent_hk_quote, { codes: ['00700', '700', 'hk00005', '99999'] })
     assert.equal(requested.pathname.replace('/q=', ''), 'hk00700,hk00005,hk99999', '写法补齐去重；99999 形状合法照样请求出去，由上游决定有没有这只')
     assert.deepEqual(result.data.map((row) => row.code), ['00700', '00005'], '不存在的代码不编造行')
@@ -175,7 +170,7 @@ test('tencent_hk_quote：代码左补零、时间戳两种分隔符都吃，量�
     assert.equal(tencent.volume_shares, 8709438)
     assert.equal(tencent.amount_hkd, 3667028820.9)
     assert.equal(tencent.board_lot_shares, 100)
-    // 契约里承诺的量纲，必须在 fixture 上真的算得平（对不上就是描述说谎）。
+    // Promised units must reconcile against the fixture; otherwise the description is false.
     assert.ok(Math.abs(tencent.market_cap_yi_hkd - (tencent.total_shares * tencent.price) / 1e8) < 0.01)
     assert.ok(Math.abs(tencent.avg_price - tencent.amount_hkd / tencent.volume_shares) < 0.01)
     assert.ok(Math.abs(tencent.turnover_pct - (tencent.volume_shares / tencent.total_shares) * 100) < 0.01)
@@ -224,7 +219,7 @@ test('tencent_us_quote：交易所后缀由上游回答，换手率分母是总�
     requested = new URL(url)
     return response(
       usQuoteText('usAAPL')
-      // BRK.B 是关键样本：流通/总两个分母差一倍，只有总股本能对上上游给的 0.2。
+      // BRK.B distinguishes float from total shares; only total matches upstream turnover.
       + usQuoteText('usBRK.B', { code: 'BRK.B.N', price: 502.28, lastClose: 500, open: 501, volume: 4193461, amount: 2106289770, totalShares: 2140709794, floatShares: 1247613213, high: 503, low: 500 })
       + usQuoteText('usBABA', { code: 'BABA.N', price: 105.85 }),
     )
@@ -243,7 +238,7 @@ test('tencent_us_quote：交易所后缀由上游回答，换手率分母是总�
       assert.ok(Math.abs(row.float_market_cap_yi_usd - (row.float_shares * row.price) / 1e8) < 0.01)
       assert.ok(Math.abs(row.turnover_pct - (row.volume_shares / row.total_shares) * 100) < 0.01, `${row.code} 的分母必须是总股本`)
     }
-    // 多级股票用流通股本会算错（0.2 对 0.34），这条断言钉住"为什么描述里写的是总股本"。
+    // Using float shares would miss the multiplier-class sample; this pins the denominator in the description.
     const brk = rows['BRK.B.N']
     assert.ok(Math.abs(brk.turnover_pct - (brk.volume_shares / brk.float_shares) * 100) > 0.1)
   } finally { globalThis.fetch = originalFetch }
@@ -286,7 +281,7 @@ test('tencent_hk_kline：成交额是万港元，不复权少两列，上游拒�
     assert.equal(decodeURIComponent(urls[0].searchParams.get('param')), 'hk00700,day,,,1,')
     assert.deepEqual([raw.data[0].turnover_pct, raw.data[0].amount_wan_hkd], [null, null], '七列序列没有这两项，给 null 而不是 0')
 
-    // 上游把不合法的 param 判成 code:1 / bad params：那是我们这边写错了，不能算成机房故障。
+    // `code:1 / bad params` is a local request error, not an infrastructure failure.
     urls.length = 0
     payload = { code: 1, msg: 'bad params', data: [] }
     await assert.rejects(
@@ -327,7 +322,7 @@ test('tencent_us_kline：交易所后缀先由快照解析，hfq 一律拒绝（
   globalThis.fetch = async (url) => {
     const parsed = new URL(url)
     urls.push(parsed)
-    // 裸 usAAPL 会回一列 2011 年的陌生序列、错后缀静默回 0 行——所以身份必须由上游回答。
+    // Bare or guessed suffixes return unrelated or empty data; the upstream identity response is authoritative.
     if (parsed.pathname === '/q=usAAPL' || url.includes('qt.gtimg.cn')) return response(usQuoteText('usAAPL', { code: 'AAPL.OQ' }))
     return response(JSON.stringify({ code: 0, data: { 'usAAPL.OQ': { qfqday: [['2026-10-02', '333.26', '333.69', '334.54', '330.61', '33278552.00']] } } }))
   }
@@ -359,8 +354,7 @@ test('tencent_us_kline：交易所后缀先由快照解析，hfq 一律拒绝（
 test('港美股与 A 股快照不共用字段表：同一位序在两个市场是不同含义', () => {
   const sources = sourceMap()
   const declared = (capability) => Object.keys(sources[capability].schema.output_schema.items.properties)
-  // A 股快照第 44/45 位是流通/总市值，港股两列实测恒等、美股才真的不相等；
-  // 换手率在 A 股是第 38 位、港股第 59 位、美股第 38 位——所以只能各写一张表。
+  // HK and US layouts differ even where column names overlap; each market needs its own mapping.
   assert.ok(declared('tencent_hk_quote').includes('board_lot_shares'))
   assert.equal(declared('tencent_hk_quote').includes('limit_up'), false, '港股没有涨跌停')
   assert.equal(declared('tencent_us_quote').includes('limit_up'), false, '美股没有涨跌停')
@@ -369,8 +363,7 @@ test('港美股与 A 股快照不共用字段表：同一位序在两个市场�
   assert.deepEqual(declared('tencent_us_kline'), ['code', 'tencent_symbol', 'adjust', 'period', 'date', 'open', 'high', 'low', 'close', 'volume'])
   assert.ok(declared('tencent_hk_kline').includes('amount_wan_hkd'), '成交额列名带单位，避免与美股/ A 股跨表相加')
   assert.equal(declared('tencent_hk_kline').includes('amount_usd'), false)
-  // 指数表只声明点位那一族：实测指数行的量纲列不可读（港第 6/36/37 位两列相等且万元级、
-  // 美第 37 位给了 2.1e14、第 38/44/45/62/63 位为空），声明一列没把握的东西比少给一列更糟。
+  // Index amount columns are uninterpretable, so only point-family fields are declared.
   for (const capability of ['tencent_hk_index_quote', 'tencent_us_index_quote']) {
     const columns = declared(capability)
     for (const forbidden of ['volume_shares', 'amount_hkd', 'amount_usd', 'turnover_pct', 'market_cap_yi_hkd', 'market_cap_yi_usd', 'float_shares', 'is_stale', 'currency']) {
@@ -442,7 +435,7 @@ test('tencent_kline 取消原样抛出：不拉黑任何入口、不降级成 te
   } finally {
     globalThis.fetch = originalFetch
   }
-  // 取消不得把入口写进 hostDownUntil：紧随其后的正常调用一次命中。
+  // A caller cancellation must not blacklist the host used by the next normal request.
   let calls = 0
   globalThis.fetch = async () => {
     calls += 1
@@ -472,7 +465,7 @@ test('腾讯出口只有一条节流链：并发调用被串开，不重叠打�
     return response(quoteText('sh600519'))
   }
   try {
-    // 模型在一条消息里发多个调用时框架会并发执行——各自 sleep 仍会同时到达上游。
+    // The framework may run same-message calls concurrently, so host delays alone are not rate control.
     await Promise.all([
       execute(sources.tencent_quote, { codes: ['600519.SH'] }),
       execute(sources.tencent_quote, { codes: ['600519.SH'] }),

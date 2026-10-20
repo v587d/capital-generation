@@ -1,12 +1,7 @@
 /**
- * Wind MCP 的**协议级** JSON-RPC（`initialize` / `tools/list`）——两处共用的一份实现：
- * `scripts/spike-wind.mjs` 与契约巡检。
- *
- * 为什么单独一份而不是用生产的 `src/web-retriever/wind-client.ts`：那颗客户端只暴露
- * `callTool`，而 `callTool` 是 `initialize` + `tools/call` **两次往返**，第二次就是计费调用。
- * 巡检要的是**不计费**的协议面（设计 §10 第 1 条），两者刻意不是一回事，别互相顶替。
- *
- * ⛔ 只返回解析后的对象，任何调用方都不许把 `authorization` 头或响应正文写进日志。
+ * Protocol-level Wind MCP JSON-RPC (initialize / tools/list), shared by spike-wind and the probe.
+ * Intentionally not the production wind-client: its callTool is initialize + tools/call, and the
+ * second round trip is billable. ⛔ Never log the authorization header or response bodies.
  */
 
 export const WIND_BASE = 'https://mcp.wind.com.cn'
@@ -17,7 +12,7 @@ export const WIND_INITIALIZE_PARAMS = {
   clientInfo: { name: 'capital-generation', version: 'contract-probe' },
 }
 
-/** 响应可能是 plain JSON，也可能是 SSE（取最后一条 `data:`）——上游两种都发过。 */
+/** Upstream answers either plain JSON or SSE; take the last `data:` line. */
 export function parseRpcPayload(text) {
   const trimmed = text.trim()
   if (trimmed.startsWith('{')) return JSON.parse(trimmed)
@@ -39,7 +34,7 @@ export function createWindRpc({ endpoint, resolveApiKey, timeoutMs = 60_000 }) {
         'content-type': 'application/json',
         authorization: `Bearer ${apiKey}`,
       },
-      // 重定向会把 Bearer 带到第二个 origin 上去，等于凭据外流。
+      // A redirect would replay the Bearer header to another origin.
       redirect: 'error',
       body: JSON.stringify({ jsonrpc: '2.0', id: nextId++, method, params }),
       signal: AbortSignal.timeout(timeoutMs),

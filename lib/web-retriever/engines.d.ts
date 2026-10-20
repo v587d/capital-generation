@@ -1,8 +1,6 @@
 /**
- * AnySearch 的最小 REST 客户端。
- *
- * web_retriever 目前只支持一个后端，因此不预留多引擎注册表、动态 loader 或
- * provider 目录。未来真正接入第二个后端时，再根据实际差异抽象接口。
+ * Minimal AnySearch REST client. No multi-engine registry or provider directory
+ * exists until a second backend introduces a real abstraction need.
  */
 export interface SearchHit {
     url: string;
@@ -24,9 +22,9 @@ export interface FetchResult {
     truncated?: boolean;
     error?: string;
 }
-/** AnySearch 失败的结构化错误码。取值与拼写是下游回退判据的契约，勿随意改动。 */
+/** Structured error codes; spelling is part of the fallback contract. */
 export type AnySearchErrorCode = 'ABORTED' | 'TIMEOUT' | 'NETWORK' | 'AUTH' | 'RATE_LIMIT' | 'HTTP' | 'INVALID_RESPONSE' | 'INVALID_URL' | 'TARGET_BLOCKED' | 'CONTENT_TOO_LARGE' | 'UNSUPPORTED_CONTENT' | 'UPSTREAM';
-/** 带结构化错误码的 AnySearch 失败；message 沿用既有拼法，保证既有断言仍通过。 */
+/** Failure with a code; existing message wording remains part of the assertions. */
 export declare class AnySearchError extends Error {
     readonly code: AnySearchErrorCode;
     readonly upstreamCode?: string;
@@ -36,10 +34,7 @@ export declare class AnySearchError extends Error {
         status?: number;
     });
 }
-/**
- * AnySearch 失败后是否值得改走本机直连回退。
- * 只有调用方取消、URL 非法与内容类型不受支持三类不回退；其余都回退。
- */
+/** Fall back except for cancellation, invalid URL, and unsupported content type. */
 export declare function shouldFallbackToLocalFetch(code: AnySearchErrorCode): boolean;
 export interface AnySearchClient {
     search(request: {
@@ -57,5 +52,5 @@ export declare function normalizeSearchHit(raw: unknown): SearchHit | null;
 export declare function normalizeSearchResponse(query: string, raw: unknown): SearchResult;
 export declare function normalizeFetchResponse(url: string, raw: unknown): FetchResult;
 export declare function envKey(name: string): string | undefined;
-/** 创建 AnySearch REST 客户端；API key 每次请求重新解析，不缓存。 */
+/** Resolve the API key on every request; do not cache it. */
 export declare function createAnySearchClient(baseURL?: string, resolveApiKey?: () => Promise<string | undefined>): AnySearchClient;

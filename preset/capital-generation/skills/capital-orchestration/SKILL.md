@@ -11,8 +11,7 @@ description: Use when delegating in Capital mode — running the per-round list_
 ## 1. 每轮预检（不可跳过）
 
 - 触发点：**每次新的用户请求或新一轮任务**。在"本轮第一次调用任何创建工具"之前完成。
-- 创建工具指：`subagent_data_collector`、`subagent_data_junior`、`subagent_web_retriever`、
-  `subagent`，以及今后新增的任何委派工具。
+- 创建工具指：`subagent_data_collector`、`subagent_data_junior`、`subagent_web_retriever`，以及今后新增的任何**专用**委派工具。
 - 查询方式：`list_agents(scope="children")`，一次即可。
 - 不要把它当成"仅在会话恢复时才做的回忆步骤"：上一轮查到的空列表不能代替本轮查询。
 - 一次查询结果覆盖本轮所有角色，不要为每个角色重复查询；等待回传期间也不要轮询。
@@ -29,11 +28,9 @@ description: Use when delegating in Capital mode — running the per-round list_
 
 1. **标签非标准但已映射**：历史 child 的 label 仍是旧任务标题时，只要委派清单或工具回执
    已经把它映射到某个角色的 durable id，就必须沿用该 id，不得因为 label 非标准而新建。
-2. **状态判定**：同角色只要存在 `running`、`idle` 或 `ready` 任一状态，立即用该 id 调用
-   `send_message` 派发本次任务。
-   - `running` 会在其最近的 step 边界接收消息；
-   - `idle` 会开始一个新回合；
-   - `ready` 会冷恢复后继续。
+2. **状态判定**：`list_agents` 只报两态——`running` 与 `inactive`，**两种都可直接投**：同角色
+   只要出现在列表里，就用该 id 调 `send_message` 派发本次任务。`running` 在其最近的 step 边界
+   接收消息；`inactive` 带着自己的上下文开一个新回合。
    不得因为"空闲""上一任务已完成""任务标题变了""想并行"而创建第二个同角色 Agent。
 3. **诊断/暂时不可用**：已记录 id 但列表出现 diagnostic 或暂时不可用，先用该 id 尝试
    `send_message`，或重新 `list_agents` 核验；不得直接创建第二个同角色 Agent。
@@ -43,13 +40,13 @@ description: Use when delegating in Capital mode — running the per-round list_
 
 child id 是随机 UUID、无语义可校验，长会话里凭记忆/从历史轮次复述 id 极易抄错，甚至把
 A 角色的请求投给 B 角色。官方机制是 **`list_agents` 即权威 id 存储**——id 不需要被记住，
-只需要在用之前 freshly 查一次：
+只需要在用之前查一次：
 
 - `send_message` 的 `agent_id` 只从**最近一次 `list_agents` 的渲染输出**复制（每行就是
   `id [status] — label`）；不从早前轮次的上下文、委派清单或旧工具回执里复述 id。
 - `list_agents` 与 `send_message` 之间不要插入其他工具调用；中间隔了长回传或多轮消息，
   就重新 `list_agents` 一次再发。
-- 发送前三行核对：这一行 id 的 `label` 是不是目标角色、状态是否可投（running/idle/ready
+- 发送前三行核对：这一行 id 的 `label` 是不是目标角色、状态是否可投（`running` 与 `inactive`
   均可投）、本次任务是否确实属于该角色。
 - **错投补救**：若消息发出后目标 child 的回应与角色不符（例如行情请求被 data_junior
   认领），用 `interrupt_agent` 停其当前轮（已结束则为 no-op），重新 `list_agents` 后向
@@ -106,8 +103,7 @@ A 角色的请求投给 B 角色。官方机制是 **`list_agents` 即权威 id 
   转述双分类"的审计级格式；发现质押、商誉、现金流异常再对该项深挖（回传格式同口径，见
   `capital-web-evidence` §5）。
 - 主 Agent 不自行调用任何网络检索/抓取/搜索类工具；外部检索入口只有 `web_retriever` 的回传。
-- 三个已定义角色禁止用通用 `subagent` 创建替代实例；通用委派只用于本 preset 没有专用角色的
-  新任务，且同样必须先做本轮预检。
+- **没有通用委派出口**：直接子角色只有 `data_collector`、`data_junior`、`web_retriever` 三颗创建工具（专员归 junior）；不属于它们的活你自己做，或如实说明缺口。
 
 ## 6. 回合纪律与结算
 

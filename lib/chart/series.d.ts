@@ -1,7 +1,7 @@
 import type { ChartKind, ChartSeriesType, MarkerPosition, NormalizedChartSpec } from './spec.js';
-/** 单张图保留的最大点数（下采样后）。轻量图表在这个量级仍然流畅，且载荷只有几十 KB。 */
+/** Post-downsample point cap; keeps the payload tens of KB and rendering fluid. */
 export declare const MAX_CHART_POINTS = 2000;
-/** 字段候选清单最多回报多少个（错误路径本身也不能变成上下文炸弹）。 */
+/** Error-path hints are capped too; an error must not become a context bomb. */
 export declare const MAX_FIELD_HINTS = 15;
 export interface ChartSeriesPayload {
     id: string;
@@ -43,7 +43,7 @@ export interface ChartPayload {
         text: string;
         position: MarkerPosition;
     }>;
-    /** 分类轴专用：合成时间 → 原始标签，运行时用它做刻度与十字线文案。 */
+    /** Category axis: synthetic time → original label for ticks and crosshair. */
     labels?: Record<string, string>;
     meta: {
         points: number;
@@ -60,31 +60,24 @@ export interface ChartPayload {
     };
 }
 /**
- * 从解析好的 JSON 里取出行数组。
- *
- * 真实数据源的同花顺返回常常是 envelope（行数组在 `item` / `data` / `stock_items` …），
- * 所以这里不能只认顶层数组；但也不能乱猜——猜错会让用户看到一张空图或错图。
- * 策略：顶层数组直接用；否则在候选键里找；候选都没有时列出**全部**数组型顶层键让模型
- * 自己指定路径，而不是静默取第一个。
+ * Sources often wrap rows in an envelope (item/data/stock_items); prefer known keys, and list
+ * candidates instead of silently guessing when several arrays match.
  */
 export declare function extractRows(value: unknown): {
     rows: unknown[];
     shape: string;
 };
 interface ParsedTime {
-    /** 交给图表库的值：'YYYY-MM-DD' 字符串（业务日）或 UTC 秒数。 */
+    /** Value handed to the library: 'YYYY-MM-DD' business day, or UTC seconds. */
     display: string | number;
-    /** 用于排序/过滤/对齐的比较键（UTC 秒）。 */
+    /** Comparison key (UTC seconds) for sort/filter/alignment. */
     seconds: number;
-    /** 该值是否来自"纯日期"字符串（决定整张图是否用业务日显示）。 */
+    /** True when the value came from a date-only string; decides business-day rendering. */
     dateOnly: boolean;
 }
 /**
- * 时间值解析。规则必须**确定**（同一份数据在任何机器上得到同一张图）：
- *  - 纯日期 `YYYY-MM-DD` → 业务日字符串，交给图表库按业务日显示（不做时区换算，避免差一天）；
- *  - `YYYY-MM-DD HH:mm[:ss]` 无时区 → 按 UTC 解释（显式规则，不依赖宿主本地时区）；
- *  - 数字/纯数字字符串 → epoch；`>= 1e11` 视为毫秒，否则视为秒；
- *  - 其余字符串 → `Date.parse`；失败即视为该行没有时间。
+ * Deterministic across machines: date-only stays a business-day string (no TZ shift), naive
+ * datetime is UTC, numbers >= 1e11 are epoch ms, unparseable means the row has no time.
  */
 export declare function parseTimeValue(value: unknown): ParsedTime | undefined;
 export interface BuildChartPayloadInput {

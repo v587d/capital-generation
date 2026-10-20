@@ -2,49 +2,65 @@ import type { Context } from '@deepseek-ai/cordis';
 import { WebRetriever } from './retriever.js';
 import type { WindClient } from './wind-client.js';
 import type { LocalFetchOptions } from './local-fetch.js';
+import { type AgentExecutionLike } from '../tool-exec.js';
 import { type WorkspaceDatasetStore } from '../data-collector/store.js';
 import { type PaddleOcrClient } from '../ocr/client.js';
 /**
- * 注册 web_retriever 的检索工具：anysearch（广度）两工具 + wind_docs（public_document
- * 精准）两工具 + `ocr`（文档解析）一工具。wind 与 ocr 都**无条件注册**——Key 缺失/服务
- * 不可用只影响调用结果（错误信封），不影响工具注册与子 Agent 创建。
- *
- * `ocr` 与 `datasetStore` 共用 workspace 落盘，而检索回声（`recent_retrievals` /
- * `provider_tally`）**必须**与另外四个工具共享同一份闭包，所以它在这同一个 `definitions`
- * 数组里注册，不另起一个注册函数。
+ * Use the framework's exec shape (`src/tool-exec.ts`): `ocr` needs the caller
+ * session; a self-made shape would bypass the real `header.cwd` path.
+ */
+type ToolExecLike = AgentExecutionLike;
+interface RetrievalTrace {
+    provider: string;
+    tool: string;
+    query: string;
+    at: number;
+    via?: string;
+}
+/**
+ * Per-caller-session, in-memory: capped recent retrievals plus per-provider tally.
+ * Advisory only (never blocks); retriever/client stay stateless.
+ */
+interface RetrievalEcho {
+    recent: RetrievalTrace[];
+    tally: Record<string, number>;
+    /** The stored trace just written, so callers can backfill `via`. */
+    entry: RetrievalTrace;
+    /** Fresh snapshot after backfilling `entry.via`. */
+    snapshot: () => RetrievalTrace[];
+}
+/**
+ * Search family: anysearch search/fetch plus the two wind_docs tools. `echo` is
+ * per registration (one family row), so its receipts cover only this family.
+ */
+export declare function registerSearchTools(ctx: Context, retriever: WebRetriever, windClient: WindClient, echo?: (exec: ToolExecLike, entry: RetrievalTrace) => RetrievalEcho): void;
+/**
+ * Legacy single-bundle entry: search, wind and ocr tools share one echo, matching
+ * the old monolith behavior.
  */
 export declare function registerWebRetrieverTools(ctx: Context, retriever: WebRetriever, windClient: WindClient, ocr: OcrToolDependencies): void;
-/** `ocr` 的两项依赖：上游客户端 + workspace 落盘（与 Dataset 共用同一份实现）。 */
+/** Register only `ocr` (root keeps local document parsing, no search/source tools). */
+export declare function registerOcrTool(ctx: Context, ocr: OcrToolDependencies, echo?: (exec: ToolExecLike, entry: RetrievalTrace) => RetrievalEcho): void;
+/** `ocr` deps: upstream client + workspace store (shared with Dataset). */
 export interface OcrToolDependencies {
     store: WorkspaceDatasetStore;
     client: PaddleOcrClient;
-    /** 注入以便测试钉住 `created_at`。 */
+    /** Injectable for tests pinning `created_at`. */
     now?: () => number;
-    /**
-     * 注入以便测试：`url` 形态的公网性闸门默认走**真实 DNS**（与本机直连同一份实现，§9.7），
-     * 生产路径不传。生产代码里没有任何调用方给它赋值——它只是把 DNS 这一步挪出断言范围。
-     */
+    /** Test-only DNS override; production never sets it. */
     resolveAddresses?: LocalFetchOptions['resolveAddresses'];
 }
 /**
- * 一次具名来源输出的字符预算：取宿主 tool-result 剪枝阈值的 75%。
- * 阈值配在 `preset/capital-generation/agent.cordis.yml` 的 `thresholdChars: 8192`
- * （由 `test/persona.test.mjs` 钉住与本常量同源）。超过阈值的工具结果在会话历史里会被
- * `dsh-compaction-tool-result-pruner` 换成 head 4096 + `[... middle pruned ...]` + tail 1024，
- * 也就是**中间条目被无声吃掉**，而留在头部的 `count` 还写着原来的条数。
- * 留 25% 余量的做法与数据面能力目录的预算同一口径（`test/data-collector-hub.test.mjs`）。
+ * Source output budget = 75% of the host's 8192 tool-result pruning threshold.
+ * Over that, the middle is silently pruned while `count` still claims the full total.
  */
 export declare const SOURCE_OUTPUT_BUDGET_CHARS = 6144;
 /**
- * 注册九个具名来源工具（provider + operation 命名）。
- *
- * 为什么单独一个注册函数：这九个工具只依赖 HTTP 传输（`local-fetch` 的出口校验），
- * 不依赖 AnySearch / Wind；任何一路的配置缺失都不应连带影响另外几路的注册。
- *
- * `enabled`（设置卡片「允许启动本地提取网页内容」）**同时支配这九个工具的执行**：
- * 关闭时工具仍在注册面（不静默消失），但每次调用响亮失败并说明开关位置——
- * 卡片文案的字面语义对模型与用户都成立，用户同意不被旁路。
+ * Nine source tools depend only on HTTP egress, so they register independently of
+ * AnySearch/Wind config. `enabled=false` still registers but each call fails loudly
+ * naming the settings switch, so the switch semantics hold for user and model.
  */
 export declare function registerSourceTools(ctx: Context, localFetchOptions: LocalFetchOptions & {
     enabled?: boolean;
 }): void;
+export {};

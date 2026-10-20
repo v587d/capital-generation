@@ -1,21 +1,18 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { DataCollectorHub } from './hub.js'
-import type { DatasetRef, SessionLike } from './store.js'
+import type { DatasetRef } from './store.js'
+// Session reading and authorization have one implementation (src/tool-exec.ts); do not re-implement here.
+import { authorizedSession, sessionIdentityDecisions, type AgentExecutionLike as ToolExecLike } from '../tool-exec.js'
+import { DATA_COLLECTION_PRESET_IDS } from '../preset-ids.js'
 
 type ToolRuntimeLike = { register(definition: unknown): () => void }
-type AgentExecutionLike = {
-  id: string
-  /** 官方注入的调用方 session（exec.agent.session；与 dsh-tool-fs 取 workspace 同源）。 */
-  session?: { id?: string; header?: { cwd?: string } }
-}
-type ToolExecLike = { agent?: AgentExecutionLike; signal: AbortSignal }
 
-/** dc_status 诊断信息注入：探测凭据解析状态（只含有无/source，不含密钥值）。 */
+/** dc_status diagnostics: credential presence only, never values. */
 export interface DataCollectorDiagnostics {
   probeApiKey: () => Promise<{ present: boolean; source: string | null; error?: string }>
-  /**
-   * 根 Agent 工具收敛的现场记录（`src/agents/root-tool-policy.ts` 的 `RootPolicyProbe`）。
-   * 结构在这里重述一份（不按 import 拿类型）：data_collector 不该依赖 agents 层。
+/**
+   * Tool-surface restriction snapshot (root/role policies), restated locally so this layer does
+   * not depend on the agents layer. `allowed` stays empty now that allow-lists are gone.
    */
   rootPolicy?: () => Array<{
     agentId: string | undefined
@@ -23,9 +20,9 @@ export interface DataCollectorDiagnostics {
     presetId: string
     outcome: string
     denied: string[]
+    allowed?: string[]
     failed: string[]
   }>
-  /** 每次 dc_status 真实执行时回调（写执行痕迹用；模型可伪造文本，但宿主文件痕迹与计数无法伪造）。 */
   onCall?: (snapshot: { at: number; call: number; apiKey: unknown; capabilities: string[] }) => void
 }
 
@@ -53,10 +50,7 @@ function boundedParams(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 
-/**
- * DatasetRef 输出结构（模型可见协议）：只有元数据。任何 raw rows、内部
- * data_key、绝对路径字段都不允许出现。
- */
+/** Model-visible DatasetRef: metadata only; no raw rows, data_key or absolute paths. */
 const datasetRefSchema = (): object => jsonObject({
   dataset_id: { type: 'string' },
   task_id: { oneOf: [{ type: 'string' }, { type: 'null' }] },
@@ -73,7 +67,7 @@ const datasetRefSchema = (): object => jsonObject({
 }, ['dataset_id', 'task_id', 'session_id', 'artifact_ref', 'format', 'capability', 'source_label', 'schema', 'row_count', 'captured_at', 'retention_until', 'params_digest'])
 
 function render(_args: unknown, value: unknown): Array<{ type: 'text'; text: string }> {
-  // ToolOutputDefinition.render(args, value)：第一参是入参、第二参才是返回值。
+  // ToolOutputDefinition.render(args, value): the first parameter is the input, the second the output.
   return [{ type: 'text', text: JSON.stringify(value) }]
 }
 
@@ -91,45 +85,15 @@ function tool(
     parameters,
     output: { schema, render },
     execute,
-    // 与 `dataset-tools.ts` 的 `describe_dataset` 同一机制：框架把同一条消息里的多个调用
-    // 放进有界并发池，N 份结果在同一个下一步一起返回（宿主 fail-closed：不标就串行，2026-10-16
-    // 一次性 headless 探针核过，账本 L30）。⛔ 只给**纯读**的发现面开：
-    // `request_data` 刻意不标——Hub 的执行器是 FIFO 串行（`hub.ts` 的 Phase 1 注释），
-    // 让模型并行发取数等于把上游节流与 in-flight 合并放在我们没承诺过的位置上。
+    // Framework concurrency pool: mark pure-read discovery tools only. request_data stays serial
+    // because the Hub executes FIFO and upstream throttling/merging is not promised under parallelism.
     ...(options.concurrencySafe === true ? { isConcurrencySafe: () => true } : {}),
   }
 }
 
-/**
- * 调用方 Agent session（官方注入，不可由模型伪造）。请求归属恒为当前调用者，
- * 不存在"代理请求"概念。workspace cwd 由 session.header.cwd 提供。
- */
-const callerSession = (exec: ToolExecLike): SessionLike => {
-  const session = exec.agent?.session
-  if (session) return session as SessionLike
-  throw new Error('this tool requires a calling agent session (exec.agent.session was undefined)')
-}
-
-const delegatedSession = (exec: ToolExecLike, toolName: string): SessionLike => {
-  const session = callerSession(exec)
-  if (typeof session.header?.parentSession !== 'string' || session.header.parentSession.length === 0) {
-    throw new Error(`${toolName} is restricted to delegated data agents; the main Agent must delegate this request`)
-  }
-  return session
-}
-
-/** dc_status 真实执行计数（进程内递增，返回给模型可见）。 */
 const dcStatusCalls: { current: number } = { current: 0 }
 
-/**
- * describe_capability 的分类错误（稳定 code + 恢复指引）。
- *
- * 设计原则：这个名字来自模型而不是代码，所以失败必然是"模型写错了名字"或"数据源没注册"。
- * 两种情况的可恢复动作完全不同，因此不用模糊的 error message，而是给出：
- * - 稳定的 code，便于 persona/skill 与测试对照；
- * - 一句"下一步该做什么"的指引；
- * - 未知名字时附上全部可用能力名，让模型能自我纠正而不必猜。
- */
+/** Stable, guided errors: a model typo and an empty catalog need different recovery actions. */
 type CapabilityErrorCode =
   | 'capability_required'
   | 'capability_invalid'
@@ -148,11 +112,7 @@ function errorCode(error: unknown): string | undefined {
     : undefined
 }
 
-/**
- * 数据源在 normalizeParams 阶段抛出的错误对模型来说都是可修正的参数错误。
- * 保留数据源的字段级原因，同时把恢复动作固定成一次 describe -> 修正 -> 重试，
- * 避免子 Agent 只看到 "must be ..." 后凭记忆反复猜参数。
- */
+/** normalizeParams errors are model-fixable: keep the field reason and pin recovery to describe -> fix -> retry. */
 function requestParamsError(error: unknown, capability: string): Error | undefined {
   if (errorCode(error)) return undefined
   const message = error instanceof Error ? error.message : String(error)
@@ -206,7 +166,7 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
       datasetRefSchema(),
       async (args, exec) => {
         const requestedCapability = boundedString(args.capability, 'capability', MAX_ID_LENGTH)
-        const session = delegatedSession(exec, 'request_data')
+        const session = authorizedSession(ctx, exec, 'request_data', DATA_COLLECTION_PRESET_IDS)
         try {
           const params = boundedParams(args.params)
           // Fail early with the same catalog guidance as describe_capability instead of
@@ -229,7 +189,7 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
       '列出当前已注册的数据能力目录：**纯文本，一行一条** `capability|summary|paginated`，paginated 为 1（分页）/ 0（不分页）。名字或摘要里的 `|`、换行会转义成 `\\|`、`\\n`，所以一行就是一条能力，不要按冒号或空格拆分。目录是发现入口，**一个任务只需调用一次**：同一 session 的历史里已经保有这份目录，重复调用只会白占上下文。目录刻意不含参数与输出结构（完整 schema 约 23KB，会被剪枝截断）；确定要用的能力后，用 describe_capability 单独取那一个能力的 input_schema 后即可 request_data。request_data 的 capability 必须以本目录为准，不要自行编造。',
       jsonObject(),
       { type: 'string' },
-      async (_args, exec) => { delegatedSession(exec, 'list_capabilities'); return hub.capabilityDirectory() },
+      async (_args, exec) => { authorizedSession(ctx, exec, 'list_capabilities', DATA_COLLECTION_PRESET_IDS); return hub.capabilityDirectory() },
       { concurrencySafe: true },
     ),
     tool(
@@ -245,7 +205,7 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
         output_fields: { oneOf: [{ type: 'string' }, { type: 'null' }] },
       }, ['capability', 'summary', 'paginated', 'description', 'input_schema', 'output_fields']),
       async (args, exec) => {
-        delegatedSession(exec, 'describe_capability')
+        authorizedSession(ctx, exec, 'describe_capability', DATA_COLLECTION_PRESET_IDS)
         const capability = resolveCapability(hub, args.capability)
         const detail = hub.describeCapability(capability)
         if (!detail) throw capabilityError('capability_unknown', `未注册的能力 "${capability}"。`)
@@ -254,30 +214,38 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
       { concurrencySafe: true },
     ),
     ...(diagnostics ? [
-      tool('dc_status', '诊断工具：返回数据管道运行状态 —— at/call 为本次真实执行的时间戳与计数（防伪）、api_key 为**本次调用现取**的凭据解析结果（present/source，不含密钥值）、registered_capabilities 为当前已注册 capability 列表、root_tool_policy 为根 Agent 工具收敛的现场记录（preset_id / outcome / denied / failed，排查"主 Agent 为什么看得见本该收敛掉的工具"用）。数据源注册不依赖 key：api_key.present=false 时同花顺能力仍在目录里，但每次取数会点名 FUYAO_API_KEY 失败。排障时优先调用。', jsonObject(),
+      tool('dc_status', '诊断工具：返回数据管道运行状态 —— at/call 为本次真实执行的时间戳与计数（防伪）、api_key 为**本次调用现取**的凭据解析结果（present/source，不含密钥值）、registered_capabilities 为当前已注册 capability 列表、agent_tool_policy 为工具面收敛的现场记录（preset_id / root / outcome / allowed / denied / failed：`outcome=restricted` 是组合期那次减名字的账，`guard-denied` 是一次调用真的被调用级闸门拦下（`ocr` 的 url 形态、`write` / `edit`、角色的 `interrupt_agent`），`not-capital` / `skipped` / `unavailable` / `pending` 是四种没生效的原因；`root=true` 是用户手开出来的会话。工具面本身由该 preset 挂的工具行决定，allowed 恒为空。排查"某个 Agent 为什么看得见、或为什么用不了某颗工具"用）、session_identity 为最近的工具授权判据现场（tool / via=preset|topology / preset_id / allowed；`via:"topology"` 表示 registry 读不到身份、回落到"必须是被委派的子会话"这一旧判据）。数据源注册不依赖 key：api_key.present=false 时同花顺能力仍在目录里，但每次取数会点名 FUYAO_API_KEY 失败。排障时优先调用。', jsonObject(),
         jsonObject({
           at: { type: 'integer' },
           call: { type: 'integer' },
           api_key: jsonObject({ present: { type: 'boolean' }, source: { oneOf: [{ type: 'string' }, { type: 'null' }] }, error: { oneOf: [{ type: 'string' }, { type: 'null' }] } }, ['present']),
           registered_capabilities: { type: 'array', items: { type: 'string' } },
-          root_tool_policy: { type: 'array', items: jsonObject({
+          agent_tool_policy: { type: 'array', items: jsonObject({
             agent_id: { oneOf: [{ type: 'string' }, { type: 'null' }] },
             root: { type: 'boolean' },
             preset_id: { type: 'string' },
             outcome: { type: 'string' },
+            allowed: { type: 'array', items: { type: 'string' } },
             denied: { type: 'array', items: { type: 'string' } },
             failed: { type: 'array', items: { type: 'string' } },
-          }, ['agent_id', 'root', 'preset_id', 'outcome', 'denied', 'failed']) },
+          }, ['agent_id', 'root', 'preset_id', 'outcome', 'allowed', 'denied', 'failed']) },
+          session_identity: { type: 'array', items: jsonObject({
+            tool: { type: 'string' },
+            via: { type: 'string' },
+            preset_id: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+            allowed: { type: 'boolean' },
+          }, ['tool', 'via', 'preset_id', 'allowed']) },
         }, ['at', 'call', 'api_key', 'registered_capabilities']),
         async (_args, exec) => {
-           delegatedSession(exec, 'dc_status')
+           authorizedSession(ctx, exec, 'dc_status', DATA_COLLECTION_PRESET_IDS)
           const apiKey = await diagnostics.probeApiKey()
           const capabilities = hub.capabilityNames()
-          const rootPolicy = diagnostics.rootPolicy?.()?.map((probe) => ({
+          const agentToolPolicy = diagnostics.rootPolicy?.()?.map((probe) => ({
             agent_id: probe.agentId ?? null,
             root: probe.root,
             preset_id: probe.presetId,
             outcome: probe.outcome,
+            allowed: probe.allowed ?? [],
             denied: probe.denied,
             failed: probe.failed,
           }))
@@ -288,7 +256,15 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
             call: snapshot.call,
             api_key: apiKey,
             registered_capabilities: capabilities,
-            ...(rootPolicy === undefined ? {} : { root_tool_policy: rootPolicy }),
+            ...(agentToolPolicy === undefined ? {} : { agent_tool_policy: agentToolPolicy }),
+            // Authorization decision trail: preset identity vs fallback to session topology; without
+            // it, "identity unavailable" and "identity confirmed" look identical to the model.
+            session_identity: sessionIdentityDecisions().map((record) => ({
+              tool: record.tool,
+              via: record.via,
+              preset_id: record.presetId,
+              allowed: record.allowed,
+            })),
           }
         }),
     ] : []),
@@ -296,7 +272,7 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
   for (const definition of registrations) ctx.effect(() => tools.register(definition), `capital-generation.tool(${definition.name})`)
 }
 
-/** 供测试与宿主侧断言复用：模型可见的 DatasetRef 字段白名单。 */
+/** Model-visible DatasetRef field whitelist (tests and host assertions). */
 export const DATASET_REF_FIELDS = [
   'dataset_id', 'task_id', 'session_id', 'artifact_ref', 'format',
   'capability', 'source_label', 'schema', 'row_count', 'captured_at',

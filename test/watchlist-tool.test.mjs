@@ -1,13 +1,9 @@
-/**
- * `get_watchlist` 的回包闸门（模型读用户自选股的那一路）。
- *
- * 钉的是三类实测教训，不是实现方便：
- *  - **"读不到"与"用户没有自选"必须是两种形状**（把失败渲染成空清单，模型就会回答"你还没加自选"）；
- *  - **持仓三态不许糊成一态**（未标记 / 标了没填比例 / 真填 0）；
- *  - **回包必须过自己声明的 output.schema 与体积预算**（宿主逐次校验，`tool-result-pruner`
- *    超阈值静默截尾——被截掉的正好是清单尾部那几只。§9.5 / §9.6 见 `AGENTS.md`，
- *    体积余量见 `docs/dev/data-roles.md` §1.5）。
- */
+// `get_watchlist` receipt gate — the path where the model reads the user's watchlist.
+// "Cannot read" != "user has none": a failure rendered as an empty list makes the model tell the
+// user they have no watchlist. Holding stays three-state (unmarked / marked without weight / real 0).
+// The receipt must satisfy its own declared output.schema (docs/dev/tool-schema.md §9.5/§9.6),
+// and the size budget: over threshold the host pruner silently truncates the tail, cutting
+// exactly the last rows' holdings.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { watchlistReceipt, watchlistToolDefinition } from '../lib/watchlist/tools.js'
@@ -15,12 +11,10 @@ import { dayDistance } from '../lib/time/tools.js'
 import { assertToolOutput, collectUndeclaredRequired } from './output-contract.mjs'
 
 const DAY_MS = 86_400_000
-const NOW = 1_791_500_000_000 // 2026-10-09 前后；具体时刻不重要，断言只看两个日期的一致性
+const NOW = 1_791_500_000_000 // fixed instant; assertions only compare the two dates against each other
 
-/**
- * 无损 JSON 探针（与 `test/describe-dataset.test.mjs` 的 `assertLosslessJson` 同型：
- * 宿主 `snapshotJsonValue` 见到自有 `undefined` / NaN / 空洞就整次失败）。
- */
+// Lossless-JSON probe (same shape as assertLosslessJson in test/describe-dataset.test.mjs): the host's
+// snapshotJsonValue fails the whole result on own `undefined` / NaN / holes.
 function assertLosslessJson(value, path = '$') {
   if (value === undefined) assert.fail(`${path} 是 undefined——自有 undefined 不许带出工具层`)
   if (typeof value === 'number' && !Number.isFinite(value)) assert.fail(`${path} 是 ${value}，不是合法 JSON`)
@@ -174,8 +168,8 @@ test('⛔ 30 条满载回包必须留在体积预算内：超阈值是静默截�
 })
 
 test('description 是模型侧唯一事实来源：四句必须说得出口的纪律都在里面', () => {
-  // 面板与宿主的口径改了而这里没改，表现是"模型按一句已经不成立的话回答用户"，
-  // 而且不会有任何测试红——所以钉的是**句子**，不是实现。
+  // Pin the sentences, not the implementation: if panel/host wording changes and this drifts, the
+  // model answers the user from a claim that no longer holds and no other test turns red.
   const { description } = watchlistToolDefinition(() => undefined)
   assert.match(description, /\*\*只读\*\*/, '写入口只在面板里，这句得写出来')
   assert.match(description, /weight_pct:null/, '标了没填比例 ≠ 0%，这一档模型必须知道怎么读')

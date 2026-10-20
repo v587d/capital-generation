@@ -5,42 +5,26 @@ import { getDataTimeContract } from '../time/tools.js'
 import { createWindClient, WIND_SERVER_ENDPOINTS, type WindCallResult, type WindClient, type WindServerType } from '../web-retriever/wind-client.js'
 
 /**
- * Wind（万得）MCP 数据源——`docs/design/wind-market-source.md` §6.7 改口后的 P1 三条能力。
- *
- * 只接 fuyao 明确没有的：宏观/行业/汇率 EDB 序列（唯一来源）、按日期区间取的历史 K 线、
- * 每根带成交额/换手/均价的 K 线。与腾讯重叠的港美股快照与日周月线不接，NL 工具一概不接
- * （列名是 question 的函数，`output_schema` 无处锚定，§6.3）。
- *
- * ⛔ 下面每条解析约束都来自真报文（§6.2–§6.6 与 2026-10-06 第二轮），不是从上游文档抄的：
- * 1. 表格工具回 `{columns:[{name}], rows:[[标量]]}`，行**不是对象**，必须按列名转置；
- * 2. `columns[].type` 一律写 `string`，而 K 线/分钟的数值确实是字符串、EDB 的是 number——
- *    类型元数据不可信，数值由本文件解析，解析不了就响亮失败（§9.5）；
- * 3. 时间写法一张表三种：K 线带**该行自己的**交易所偏移，EDB 是 `20260731` 紧凑串。
- *    epoch 逐行按自带偏移换算，整段按 +08:00 处理会把美股错位 12 小时（§6.4）；
- * 4. 行键全部 ASCII snake_case：`updateDate` → `update_date`、`CHANGEHANDRATE` →
- *    `turnover_rate_pct`（§10.6，映射不到的列丢弃而不是透传）。
+ * Wind MCP: only capabilities Fuyao lacks — EDB macro/industry/FX series, range K-lines with
+ * amount/turnover/avg. No NL tools (columns depend on the question; nothing to anchor in schema).
+ * Payload quirks: tables are `{columns, rows:[scalars]}`; `columns[].type` is always `string`;
+ * timestamps carry each row's exchange offset; unmapped columns are dropped.
  */
 
-/**
- * 数据域的上游预算。健康响应实测 0.59–2.3 秒（EDB 取数 590ms、A 股分钟 653ms、日 K 2296ms），
- * 而"该日没有数据"与"上游故障"在线上都表现为**挂到超时**（§6.6；2026-10-06 连昨天还正常的
- * 港股日线也挂了三次）。Hub 的执行超时是 30 秒，而 `callTool` 每次要走 initialize + tools/call
- * 两跳，所以单次取 12 秒：健康请求有 5 倍余量，病态请求在 Hub 给出无信息的
- * `request timed out` 之前先由本文件给出**带原因**的失败。
- */
+/** 12s: healthy calls take 0.6–2.3s; hangs and no-data look identical, so fail before Hub's 30s. */
 const WIND_SOURCE_TIMEOUT_MS = 12_000
 
-/** 只放**每档都打过真报文**的 period（§6.5）；`60 分钟`两次都挂，所以不放。 */
+/** Only periods with verified payloads; 60-minute hangs both times and is excluded. */
 const KLINE_PERIOD_CODES: Record<string, string> = {
   m1: '1', m5: '3', m15: '5', m30: '6', day: '10', week: '11', month: '12',
 }
 const KLINE_PERIOD_LIST = Object.keys(KLINE_PERIOD_CODES).join('/')
 const MINUTE_PERIODS = new Set(['m1', 'm5', 'm15', 'm30'])
-/** 分钟档区间上限：单日约 240 条（§1.3），而本能力不暴露 count，跨日体积没有别的闸门。 */
+/** Minute ranges cap at 10 days: ~240 rows/day and no count parameter gates volume. */
 const MINUTE_MAX_SPAN_DAYS = 10
 const DAILY_MAX_SPAN_DAYS = 3660
 
-/** 上游 K 线的列名（§6.3：`MATCH` 就是收盘价，Wind 的 K 线没有 CLOSE 列）。 */
+/** Upstream K-line columns: MATCH is close (Wind has no CLOSE column). */
 const KLINE_TIME = 'TIME'
 const KLINE_OPEN = 'OPEN'
 const KLINE_MATCH = 'MATCH'
@@ -50,7 +34,6 @@ const KLINE_TURNOVER = 'TURNOVER'
 const KLINE_VOLUME = 'VOLUME'
 const KLINE_RATE = 'CHANGEHANDRATE'
 const KLINE_AVG = 'AVPRICE'
-/** 缺任何一列就构不成一根 K 线：回别的列形态即"薄表"（§6.6 的不存在代码只回两列）。 */
 const KLINE_REQUIRED = [KLINE_TIME, KLINE_OPEN, KLINE_MATCH, KLINE_HIGH, KLINE_LOW]
 
 type Params = Record<string, unknown>
@@ -87,7 +70,6 @@ function dayDistance(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000)
 }
 
-/** 上游紧凑日期 `20260731` → `2026-07-31`；写不出合法日历日就失败，不放行畸形标签。 */
 function compactDate(value: unknown, context: string): string | null {
   if (value === null || value === undefined || value === '') return null
   const match = /^(\d{4})(\d{2})(\d{2})$/.exec(String(value).trim())
@@ -100,15 +82,14 @@ function compactDate(value: unknown, context: string): string | null {
   return date
 }
 
-/** EDB 的报告期标签没有时区；按本仓宏观表（东财那九张）同一口径落 Asia/Shanghai 零点。 */
+/** EDB period labels have no timezone; use Asia/Shanghai midnight like the Eastmoney macro tables. */
 function reportDateMs(date: string): number {
   return Date.parse(`${date}T00:00:00+08:00`)
 }
 
 /**
- * 单元格 → 数值。`columns[].type` 一律写 `string`，所以必须自己解析（§6.2）：K 线/分钟全是
- * 字符串（`"1318.00"`），EDB 与快照是真 number，两种都得吃。`INVALID` 是后端的"缺失/不适用"，
- * 一律 null，**不许当 0 参与计算**（§1.4）。认不出的字符串是形状变了，不是缺数——响亮失败。
+ * `columns[].type` is always `string`; parse here. `INVALID` = missing → null, never 0.
+ * An unparseable string means the shape changed: fail loudly.
  */
 function windNumber(cell: unknown, context: string, field: string): number | null {
   if (cell === null || cell === undefined) return null
@@ -121,7 +102,6 @@ function windNumber(cell: unknown, context: string, field: string): number | nul
   return value
 }
 
-/** 文本单元格：空串与 INVALID 都是"没有值"；其余保留上游原文（含中文列值）。 */
 function windText(cell: unknown): string | null {
   if (cell === null || cell === undefined) return null
   const text = String(cell).trim()
@@ -129,10 +109,7 @@ function windText(cell: unknown): string | null {
   return text
 }
 
-/**
- * `unit` 的键是 `"HIGH 单位："`——**空格 + 全角冒号**（§6.3）。逐列把上游原文摘进行里，
- * 不翻译也不猜币种：同一列在港美股可能是"港元"/"美元"，抄下上游那三个字是唯一不骗人的做法。
- */
+/** `unit` keys look like `"HIGH 单位："` (space + fullwidth colon); copy the upstream unit text, never translate. */
 function windUnit(unit: unknown, column: string): string | null {
   if (!isRecord(unit)) return null
   for (const [key, value] of Object.entries(unit)) {
@@ -141,7 +118,7 @@ function windUnit(unit: unknown, column: string): string | null {
   return null
 }
 
-/** 上游的业务错误有两种形态：能解析成 JSON 的走 `error` 字段，不能的整段就是文本。 */
+/** Business errors come as JSON (`error` field) or plain text; text must fail with the original text, not become 0 rows. */
 function requirePayload(result: WindCallResult, context: string): JsonRecord {
   if (!result.ok) {
     const message = result.error ?? 'unknown Wind error'
@@ -161,9 +138,6 @@ function requirePayload(result: WindCallResult, context: string): JsonRecord {
     }
     return result.data
   }
-  // 正文不是 JSON 时 wind-client 原样透传 `content`。上游的参数性抱怨（实测
-  // "observation或者[beginDate、endDate]必须填一个"）就是这一类文本：必须带着原文失败，
-  // 不许退化成 0 行——那是把"你说错了"报成"没有数据"。
   const text = typeof result.content === 'string' ? result.content.trim() : ''
   throw windError(`Wind ${context} returned a non-table response: ${text.slice(0, 400) || '(empty)'}`, 'wind_unexpected_response')
 }
@@ -174,7 +148,6 @@ interface WindTable {
   unit: unknown
 }
 
-/** 表格解包：`{data:{columns,rows,unit}}`（K 线/分钟）与顶层直接是表身的形态都接住。 */
 function requireTable(payload: JsonRecord, context: string): WindTable {
   const node = isRecord(payload.data) ? payload.data : payload
   const { columns, rows } = node
@@ -196,9 +169,8 @@ function optionalColumnIndex(table: WindTable, name: string): number {
 }
 
 /**
- * 指标元信息 → 行键。键集**不固定**：2026-10-06 实测汇率类没有 `unit`/`magnitude`/`currency`，
- * GDP 类三者齐全；缺的键落 null，不猜单位（§10.6 第 2 条的显式映射表就在这五行里）。
- * `series_begin_date`/`series_end_date` 是**该指标序列**的起止，不是本次请求的窗口。
+ * Metric metadata → row keys. Key sets vary (FX lacks unit/magnitude/currency); missing keys become
+ * null, never guessed. `series_*` bound the series, not the request window.
  */
 function metricMeta(meta: JsonRecord, context: string): JsonRecord {
   const code = windText(meta.code)
@@ -237,11 +209,7 @@ async function executeEdbSearch(client: WindClient, params: Params, signal: Abor
   return { data: rows, schema: edbSearchOutput }
 }
 
-/**
- * EDB 取数：`{metrics:[{meta, date[], value[]}]}` 的**并行数组**转置成一行一期（§3.3）。
- * 日期与数值长度不一致时不猜——多出来的日期没有值、多出来的值没有期间，两种都是把数值挂错
- * 期间，与 §1.4 里"excelTotalCount 不可信"同一族。
- */
+/** Transpose `{metrics:[{meta, date[], value[]}]}` parallel arrays into one row per period; length mismatch fails. */
 async function executeEdbQuery(client: WindClient, params: Params, signal: AbortSignal): Promise<{ data: JsonRecord[]; schema: object }> {
   const payload = requirePayload(await client.callTool('query_economic_indicator_data', {
     question: params.indicator,
@@ -268,10 +236,7 @@ async function executeEdbQuery(client: WindClient, params: Params, signal: Abort
   return { data: rows, schema: edbQueryOutput }
 }
 
-/**
- * K 线时间戳**必须自带偏移**（§6.4：A股/港股 +08:00、美股 -04:00，是交易所当地时间）。
- * 没写偏移就没法确定这是哪一刻，`Date.parse` 会按宿主本地时区猜——所以先失败。
- */
+/** K-line timestamps must carry an explicit offset (exchange local time); `Date.parse` would guess host TZ. */
 function klineInstant(value: unknown, context: string): { datetime: string; time_ms: number } {
   const text = String(value ?? '').trim()
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:?\d{2})$/.test(text)) {
@@ -293,14 +258,10 @@ async function executeKline(client: WindClient, params: Params, signal: AbortSig
     period: KLINE_PERIOD_CODES[period],
     aftype: adjust === 'qfq' ? '0' : '2',
   }
-  // 前复权必须给 afdate，且不得早于区间——两者任一缺失都是挂满 60 秒而不是报错（§6.5）。
-  // 锁"当日"而不是暴露成参数：后复权以 afdate 为锚向未来放大，把锚默认成今天会得到
-  // 一个逐位等于不复权却叫 hfq 的序列，所以 hfq 根本不放（参数层已拒）。
+  // qfq needs afdate within the range or it hangs 60s. Lock to today; hfq is not exposed.
   if (adjust === 'qfq') args.afdate = isoDateFromEpoch(Date.now(), 'Asia/Shanghai')
   const payload = requirePayload(await client.callTool('get_stock_kline', args, signal), 'get_stock_kline')
   const table = requireTable(payload, 'get_stock_kline')
-  // 空表是合法成功：非交易日实测快回 rows=[] 且 unit=null（§6.2）——"这一区间没有行情"
-  // 与"取不到"是两种结论，前者落 0 行 Dataset，后者由上面的错误分类负责。
   if (table.rows.length === 0) return { data: [], schema: klineOutput }
   const at = KLINE_REQUIRED.reduce<Record<string, number>>((acc, name) => ({ ...acc, [name]: columnIndex(table, name, 'get_stock_kline') }), {})
   const turnoverAt = optionalColumnIndex(table, KLINE_TURNOVER)
@@ -424,8 +385,7 @@ function normalizeEdbSearch(params: Params): Params {
 }
 
 function normalizeEdbQuery(params: Params): Params {
-  // `observation` 走这道显式拒绝，而不是靠 assertKnown：默默忽略时间参数是最坏的一种失败，
-  // 而实测上游对 observation "给 3 只回 2 期"（§6.7），期数不可信。
+  // observation is rejected explicitly: it returns 2 periods for 3 requested, so counts are untrustworthy.
   if (params.observation !== undefined) throw new Error('parameter observation is not supported: 实测该口径给 3 期只回 2 期，期数不可信；请给 start_date 与 end_date')
   const raw = typeof params.indicator === 'string' ? params.indicator.trim() : ''
   if (raw.length === 0) throw new Error('parameter indicator is required')
@@ -437,10 +397,7 @@ function normalizeEdbQuery(params: Params): Params {
   return { indicator: raw.replace(/\s+/g, ' '), start_date, end_date }
 }
 
-/**
- * 代码照 Wind 的写法收下，**不补也不猜交易所后缀**（§3.3）：实测美股 `AAPL.O` 与 `AAPL.N`
- * 回完全相同的行（后缀不参与解析），所以猜一个后缀不会报错、只会静默认错标的。
- */
+/** Codes are taken as Wind spells them, never with a guessed exchange suffix: AAPL.O and AAPL.N return identical rows. */
 function normalizeWindCode(value: unknown): string {
   const raw = typeof value === 'string' ? value.trim().toUpperCase() : ''
   if (!/^[A-Z0-9][A-Z0-9.]*\.[A-Z]{1,3}$/.test(raw) || raw.includes('..')) {
@@ -450,8 +407,7 @@ function normalizeWindCode(value: unknown): string {
 }
 
 function normalizeKline(params: Params): Params {
-  // `count` 进 allowed 只为了给出**可用**的拒绝理由（默默忽略"我要 N 根"是最坏的一种失败，
-  // 同 tencent 港美股那两条对 start/end 的处理）：负值/0 的语义只有上游蓝本的说法、没打过真报文（§6.8 第 2 条）。
+  // count is in `allowed` only to reject it with a reason: its negative/zero semantics are untested.
   if (params.count !== undefined) throw new Error('parameter count is not supported: 本能力按 start_date..end_date 取全区间，count 的正负/零语义（往后 N 条 / 往前 N 条 / 全区间）未实测，不暴露')
   const code = normalizeWindCode(params.code)
   const period = params.period === undefined ? 'day' : String(params.period).trim().toLowerCase()
@@ -478,11 +434,7 @@ function normalizeKline(params: Params): Params {
 }
 
 
-/**
- * 单能力的 DataSource：客户端在**定义期**构造是安全的（它不持有 Key——每次 callTool 现解析，
- * 也不持有会话），所以这里没有任何"装配期读到凭据才注册"的门槛（§9.7⑤，桌面端那 61 颗
- * 静默缺席的事故就在这一条上）。
- */
+/** Build at definition time is safe: no key (resolved per call), no session; registration is not gated on credentials. */
 function createWindSource(options: {
   capability: string
   tool: string
@@ -517,7 +469,7 @@ function createWindSource(options: {
     timeoutMs: WIND_SOURCE_TIMEOUT_MS,
     resolveApiKey: options.resolveApiKey,
   })
-  // 归一化会被跑两遍（Hub 入队前一次、execute 一次，§10.7），所以只换值不改键名、且必须幂等。
+  // normalize runs twice (Hub enqueue and execute), so keep key names and make it idempotent.
   const normalize = (params: unknown): Params => {
     if (!isRecord(params)) throw new Error('params must be an object')
     assertKnown(params, options.allowed)
@@ -526,7 +478,6 @@ function createWindSource(options: {
   return {
     schema,
     normalizeParams: normalize,
-    // 空结果是合法成功（非交易日分钟线实测快回 rows=[]），所以这道护栏只认形状、不认条数（§3.3）。
     validateOutput: (data) => Array.isArray(data),
     execute: (request: DataRequest, signal: AbortSignal) => options.execute(client, normalize(request.params), signal),
   }
@@ -538,18 +489,13 @@ const EDB_QUERY_DESCRIPTION = 'Wind EDB 时间序列**取数**：上游回 {meta
 
 const KLINE_DESCRIPTION = 'Wind K 线：单只标的按**日期区间**取 日/周/月 与 1/5/15/30 分钟。相对腾讯的增量（§6.6.1）：按日期区间取 640 根之前的历史、每根带成交额/成交量/换手/均价的美股 K 线、以及分钟档；⚠️ **分钟档只有 A 股取到过行**，港股与美股的分钟到 2026-10-06 为止四次全挂、仍未证实，要港美股分时先小范围试一次。港美股日线与快照请走 tencent_*。⛔ code 必须自带交易所后缀（600519.SH / 00700.HK / AAPL.O），本能力不猜后缀——实测 AAPL.O 与 AAPL.N 回完全相同的行（后缀不参与解析），所以 BRK.B 一类双市场代码有认错标的的风险；每行的 code 只是请求写法回显，上游 K 线表里没有代码列。⛔ period 只放逐档打过真报文的七档，60 分钟实测两次都挂满超时、不提供。adjust 只有 none 与 qfq：后复权以 afdate 为锚向未来放大，锚默认成今天会得到一个逐位等于不复权却叫 hfq 的序列，所以宁可不给；qfq 的 afdate 由本能力锁成当日，因此 end_date 不得晚于当日；分钟档只允许 none。close 来自上游 MATCH 列（Wind 没有 CLOSE 列）；上游多给的列不收录，行里以 output_fields 为准。数值列上游全是字符串（columns[].type 却一律写 string），解析不了即失败。time_ms 按**该行自带偏移**换算（A股/港股 +08:00、美股 -04:00 是交易所当地时间），整段按北京时间处理会让美股错位 12 小时。⚠️ volume 实测 A 股是**股**（腾讯 A 股 K 线是手，跨源先换）；turnover_rate_pct 是百分数原值（0.2892 = 0.2892%），上游不给它的单位与分母口径。非交易日快回 0 行、是合法成功（实测 A 股国庆休市日 653ms 回空表）；而"该日该市场分钟尚未落地"与上游故障都表现为挂到 12 秒超时（wind_upstream_timeout）——不要盲目重试同一区间，改更早日期或改走日线。积分计费：AUTH/RATE_LIMIT/后端错误一律不自动重试。'
 
-/**
- * §6.7 改口后的 P1 三条。`wind_edb_*` 是 P0（EDB 是唯一来源），`wind_stock_kline` 是 P1。
- * 不接的一概有理由：price_indicators 与全部 NL 工具（中文键 / 列名是 question 的函数）、
- * bond 与 fund/index（重叠或未测）、analytics_data（实测连 initialize 都挂）。
- */
+
 export function createWindSources(resolveApiKey: WindApiKeyResolver): DataSource[] {
   return [
     createWindSource({
       capability: 'wind_edb_search',
       tool: 'search_economic_indicator',
       server: 'economic_data',
-      // 指标目录与序列发布都是日/季粒度；缓存拉长是为了少烧积分，而不是省 RTT。
       cacheMaxAgeMs: 6 * 3_600_000,
       summary: 'Wind EDB 宏观/行业/汇率指标检索（只找码不取数）',
       description: EDB_SEARCH_DESCRIPTION,

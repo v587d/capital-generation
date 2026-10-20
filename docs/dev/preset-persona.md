@@ -4,13 +4,19 @@
 > （§8.3）与新增角色流程（§8.5）留在 `AGENTS.md`，因为它们是每次动手都要过的闸门。
 > §编号沿用 `AGENTS.md` 的全局命名空间。
 
-## 8.1 现状（实测于 dsh 0.1.7-rc.2）
+## 8.1 现状（实测于 dsh 0.2.1-rc.2）
 
-- 装配整体住 **`preset/capital-generation/agent.patch.yml`**：一颗 `@deepseek-ai/dsh-agent-preset`
-  insert 行，`config = { id, name, description, order, plugins: [...] }`，`plugins` 就是旧的
-  `agent.cordis.yml` 行数组。由 `package.json` 的 `dsh.bundle.patch`（**数组**：主 patch + 这颗）
-  随包挂载，`trust=system`。**不要**手抄进 `~/.dsh/.agent-presets`，也不要编辑 DSH 自带安装目录
+- 装配整体住 **`preset/capital-generation/agent.patch.yml`**：**六颗**
+  `@deepseek-ai/dsh-agent-preset` insert 行——根 `capital-generation` 加五颗角色 preset，每颗
+  `config = { id, name?, description?, plugins: [...] }`，`plugins` 就是旧的 `agent.cordis.yml`
+  行数组。由 `package.json` 的 `dsh.bundle.patch`（**数组**：主 patch + 这一份 yml）随包挂载，
+  `trust=system`。**不要**手抄进 `~/.dsh/.agent-presets`，也不要编辑 DSH 自带安装目录
   （`standard` / `ptc` / `minimal` / `cordis`）——要改就复制成本地 preset。
+- ⛔ 注册表**没有"隐藏"概念**（0.2.1 实测 `agentPresets.list()` 只认声明行）：每颗 preset 都是
+  用户在「Agent 预设 → 自定义」里能手工开成会话的模式。所以角色工具面收敛的判据**只有 preset
+  id、不分根会话还是 child**——手开一条 web_retriever 会话那条路径也必须收敛，否则人设说的是网页
+  材料，工具表里躺着 `request_data` 与 `render_chart`。D0 之后这件事主要由**行组合**保证（那一颗
+  preset 压根没注册取数工具），运行期只剩逐名减掉的同行兄弟。
 - ⛔ **`config.id`（`capital-generation`）是写进会话日志的身份**：0.1.7 的
   `dsh-agent-preset-registry` **既不扫目录也不接受 preset 路径**，只认声明行。旧写法
   （registry 行 `config.roots` 指目录）整体失效，漂移的表现是**历史会话恢复时
@@ -19,9 +25,16 @@
   所在目录：所以 `skill-filesystem` 的 `customSkillDirs` 只能
   `createRequire(baseUrl).resolve('<包名>/package.json')` 解析回随包发布的
   `preset/capital-generation/skills`（回归 `test/persona.test.mjs`，路径与本仓目录实况同源比对）。
-- 主 persona 由 `@deepseek-ai/dsh-persona` 行 `config.prefix` 承载（**没有** `config.text`）；
-  不设 `suffix` 时部署级后缀被遮蔽为空（有意）。子 persona 由委派行 `config.persona` 承载：
-  同一节名注册进子 scope，**最近 scope 胜出 ⇒ 覆盖（不是追加）**主 persona。
+- 主 persona 与每颗角色 persona 都由**各自 preset 里**的 `@deepseek-ai/dsh-persona` 行
+  `config.prefix` 承载（**没有** `config.text`）；不设 `suffix` 时部署级后缀被遮蔽为空（有意）。
+  0.2.1 起委派行**不再带 persona**（报错原文：`persona and tool plugins … configure them in an
+  Agent Preset and select it with agentPreset`），子 persona 因此住在角色 preset 自己的声明行里，
+  那是**另一颗 generation**，不是往主 persona 上追加一节。
+- **工具面落点（D0，2026-10-19）**：六颗 preset 全部只挂 `@v587d/capital-generation/tools/<family>`
+  的**族行**——组合表住 `test/persona.test.mjs`、行契约住 `test/family-rows.mjs`（十行清单抄两份就是
+  §9.7 的开端）。运行期那份名字级 allow 清单已删，只剩 control 焊进来的 `interrupt_agent` 逐名减掉。
+- **host 平面**：`capital-runtime` 只 provide 一份 chart token/artifact；`capital-policy` 在 host
+  装一次 root/role/shell/fs 监听；root 可见性已由组合期负责（deny:false），旧单体调用点已删。
 - 长协议由 `skill-filesystem` + `tool-skill` 两行发现；组合设计理由住同目录 `README.md`（不注入
   会话）；**本文与 `docs/dev/` 是给研发 Agent 的，使用者 Agent 只读 persona + skill + 工具
   description**，两侧受众不共用文本，也不得为腾地方把本文内容搬进 persona。
@@ -88,39 +101,50 @@
   不新建、`description` = 角色标签、durable id、委派清单与 `waiting_data`、路由表、禁主 Agent
   直连数据工具与检索、子 Agent 互通经主 Agent 中继、全部 continuable、安全合规底线、叶子边界与
   「第一步先加载协议」。长协议 / 示例 JSON / 重试表 / 清单格式一律进 `skills/`。
-- **插件代码默认不注册 skill provider**：preset 自带 skills 继续由 `skill-filesystem` / `tool-skill` 组合行承载。唯一例外是用户显式选择的 community `selected-skills`：只在 `agent/created` 中同时确认 Capital preset 与 root Agent 后，注册到该 Agent 自己的 scope（`agent/created` 等注入完成再放行，开关每轮 `agent/pre-step` 重读并按需失效目录缓存，切换不需要新建会话）；配置默认全关，provider 只扫描 `selected-skills/catalog.js` 批准的快照目录并按 catalog 过滤，catalog 条目可带 `experimental` / `watchlist` 状态和能力标签，随 Agent scope 注销并停止 watcher。冷启动阶段维护频率和评分是用户可见的风险信号，不是自动拒绝条件；未来可随 catalog 规模和评测成熟逐步收紧。不得注册到 preset standing scope 或 Host scope；子 Agent 的既有 `toolFilter.allow` 不变。同一个 provider 还给三颗任务型内置 skill 提供**同名遮蔽候选**（正文 + 外部精选索引，读取期拼装、不改磁盘），条件与失败姿态见 §8.7。回归 `test/selected-skills-provider.test.mjs`、`test/selected-skill-tags.test.mjs` 与 `test/persona.test.mjs`。
-- **子 Agent 读 skill 的唯一开关是 allow 里的 `skill`**：restriction 过滤继承层、只豁免本 scope
-  自注册工具；这条链上任一环改动（toolFilter / skill 名 / 文件名）都要同步测试。
-- `dataCollectorHub` / `datasetStore` 必须留在 `capital-generation-scope` 的 isolate realm 内
-  （出 realm 会进程级冲突）；`compaction` / `toolResultPruner` 同在 `compaction` 组 realm 内
-  （pruner 是该组 id 为 `tool-result-pruner` 的**子行**）。
-- `toolFilter.allow` / `deny` 只写**真实注册**的全局工具名（写错的表现是"创建子 Agent 失败"）。
-  宿主自己挂的 `web_search` / `web_fetch` 因此**永远不许进 `toolFilter`**；它们现在也**不在
-  `ROOT_AGENT_DENIED_TOOLS` 里**——2026-09-30 双端实测这两个名字在根作用域里并不存在，deny 只会
-  抛错被跳过，对它们目前只剩 persona 文案这一层。**宿主若把它们挂出来，加回
-  `ROOT_AGENT_DENIED_TOOLS`（逐名 restrict 能容忍"没这个名字"），不要加进 `toolFilter`。**
+- **插件代码默认不注册 skill provider**：preset 自带 skills 继续由 `skill-filesystem` / `tool-skill` 组合行承载。唯一例外是用户显式选择的 community `selected-skills`：只在 `agent/created` 中同时确认 Capital preset 与 root Agent 后，注册到该 Agent 自己的 scope（`agent/created` 等注入完成再放行，开关每轮 `agent/pre-step` 重读并按需失效目录缓存，切换不需要新建会话）；配置默认全关，provider 只扫描 `selected-skills/catalog.js` 批准的快照目录并按 catalog 过滤，catalog 条目可带 `experimental` / `watchlist` 状态和能力标签，随 Agent scope 注销并停止 watcher。冷启动阶段维护频率和评分是用户可见的风险信号，不是自动拒绝条件；未来可随 catalog 规模和评测成熟逐步收紧。不得注册到 preset standing scope 或 Host scope；子 Agent 侧不受影响（provider 注册在 agent scope，restriction 只过滤继承层）。同一个 provider 还给三颗任务型内置 skill 提供**同名遮蔽候选**（正文 + 外部精选索引，读取期拼装、不改磁盘），条件与失败姿态见 §8.7。回归 `test/selected-skills-provider.test.mjs`、`test/selected-skill-tags.test.mjs` 与 `test/persona.test.mjs`。
+- **子 Agent 读 skill 的开关**：由该角色 preset 自己挂的 `tool-skill` 行提供（D0 之后每颗角色
+  都挂那一行，没有"仍挂单体"的例外了）。restriction 过滤继承层、只豁免本 scope 自注册工具；
+  这条链上任一环改动（角色挂的行 / skill 名 / 文件名）都要同步测试。
+- `dataCollectorHub` / `datasetStore` 只留在 `capital-data-collector` 那颗 `capital-generation-scope`
+  isolate realm 里（realm 里只有 `tools/collect` 一行）；其余角色只建本地 store（retriever 另有检索
+  客户端），不建 hub；`compaction` / `toolResultPruner` 同 realm（pruner 是组内子行）。
+- **名字清单只写真注册的工具名**：`tools.restrict()` 对"本作用域看不见的名字"抛错。根侧逐名
+  `restrict({deny})` 的 try/catch 把它变成无害跳过；角色那份从前是**一次整批 allow**，一个看不见的
+  名字就整批失败、**该角色完全没被收敛**（静默 fail-open）。D0 换成**逐名 tolerant deny**（只减
+  `interrupt_agent` 那颗焊死的兄弟），失败方向跟着翻：错一个只少减一个，且记进 `failed` 可见。
+  宿主自己挂的 `web_search` / `web_fetch` 因此**不在 `ROOT_AGENT_DENIED_TOOLS` 里**（2026-09-30 双端实测
+  本 preset 作用域没有这两个名字，deny 只会抛错被跳过，目前只剩 persona 文案在管）；**宿主若把它们挂出来，
+  加回根侧名单**（逐名 restrict 能容忍"没这个名字"），别拿那份兄弟 deny 当工具面清单。
 - **四组结构件，删任一处该闸门就退回"persona 软建议"**：① 可视化 gate（§6.1 三件套 + §6.3 两处
   联动 → `chart-presentation.md` / `chart-delivery-events.md`）；② shell 闸门与 fs 写口
   （shell 槽位 + 升级 guard + `write`/`edit` 的根侧名单与全局 guard，2026-10-15「开 read、
   同时保留 bash」→ `bash-gate.md` §1.6）；③ 出网只有一个入口：`RETRIEVAL_DENIED_TOOLS`
   （`src/agents/root-tool-policy.ts`，13 个检索 / 来源工具名的**唯一事实来源**，spread 进
-  `ROOT_AGENT_DENIED_TOOLS`，**新增来源只改这一处**）+ 通用 subagent deny + 主 persona 禁直连
-  文案；④ 本地回退开关支配九个具名来源（§4.2 → `web-retriever.md`）。②③ 由
+  `ROOT_AGENT_DENIED_TOOLS`，**新增来源只改这一处**）+ 主 persona 禁直连
+  文案；这批名字同时**只由 `capital-web-retriever` 挂的 `tools/retrieve-search` +
+  `tools/retrieve-sources` 两行带出来**（§8.1 → `agent.patch.yml` 的组合与
+  `test/family-rows.mjs` 的行契约），别的角色没挂那两行、也就拿不到。④ 本地回退开关支配九个具名来源
+  （§4.2 → `web-retriever.md`）。②③ 由
   `test/persona.test.mjs`（无通配 + deepEqual 对齐同一名单）与 `test/root-tool-policy.test.mjs`
   （名单长度 13）钉死。**教训**：`工具前缀_*` 通配在工具改名后一个都不匹配——禁直连文案必须
   **只点名宿主的 `web_search` / `web_fetch`**。
 - **③ 的唯一例外是 `ocr`，且例外开在"形态"而不是"工具名"上**（§4.3）：主 Agent 拿本地文档
-  （`file` / `doc_id`）是正当入口，外部链接（`url`）仍必须委派。名字级 deny 表达不了这个粒度，
-  所以走 `installRootOcrGuard` 的调用级 monotonic guard 只拒 `url` 形态。加 `ocr` 时**不要**把它
-  塞进 `RETRIEVAL_DENIED_TOOLS`（那会连带关掉本地形态），也**不要**省掉通用 subagent 的 deny 行
-  （否则通用 child 继承它能自己出文档）。
-- **`data_analyst` 保持 `disabled`**。启用前需同时满足：宿主 Python runner + coding 工具；插件注册
-  `read_profile`；更新本文 §1；更新测试预留断言；shell 槽位进 allow 并重定沙箱写边界（写
-  `capital-analysis/runs/` 需 `workspace-write`，不要 read-only 钉会话，§1.6）。
+  （`file` / `doc_id`）是正当入口，外部链接（`url`）仍必须委派。名字级 deny 表达不了这个粒度，所以走
+  `registerRootOcrGuard` 的调用级 guard 只拒 `url` 形态，且**全局装、调用期现读人设**（挂 created
+  会漏手开模式，账本 L32）。加 `ocr` 时**不要**把它塞进 `RETRIEVAL_DENIED_TOOLS`（那会连带关掉本地
+  形态）。通用 child 已随 2026-10-18 决策删除，`ocr` 那一行因此只由 `capital-web-retriever` 与**主
+  preset** 挂（挂别的角色 = 重新开出一个"能自己抓外部文档"的第二个出口，别拿运行期那份兄弟 deny 当补救）。
+- **`data_analyst` 的 preset 与委派行都 disabled**（2026-10-18 用户要求先停用）。declaration
+  不激活、不进 picker（它挂 dataset-read / time 两行，手开也不越权）。恢复时去掉 `disabled`，先实现
+  Python runner + coding tools + `read_profile`（新工具必须先有自己的族行），shell 槽位加行并重定
+  沙箱写边界（`capital-analysis/runs/` 需 `workspace-write`，不要 read-only 钉会话，§1.6）。
 
 ## 8.5 新增或修改一个角色
 
-1. 按 §8.2 定落点。2. 专用角色**六处齐改**：委派行（allow 必须含 `skill`）、子 persona（骨架 +
-   第一条 duty `skill <name>`）、`skills/<name>/SKILL.md`、主 persona 路由与复用、本文 §1.1
-   （`data-roles.md`）、测试断言。3. 挂载验证（§8.3 第 1 项）+ `npm test` + 开一个 Capital 会话
-   确认工具表与首轮预检。
+1. 按 §8.2 定落点。2. 专用角色**七处齐改**：角色 preset 声明行（`dsh-persona` 正文：骨架 +
+   第一条 duty `skill <name>`，以及它自己需要的工具行）、主 preset 的委派行（`provider` /
+   `toolName` / `agentPreset`）、工具面的落点（在 `agent.patch.yml` 里决定它挂哪几族行，并按
+   `test/family-rows.mjs` 的行契约核对组合结果；只有"同行焊进来减不掉的兄弟"才写
+   `src/agents/role-tool-policy.ts` 那份逐名 deny，它不是工具面清单）、`skills/<name>/SKILL.md`、
+   主 persona 路由与复用、本文 §1.1（`data-roles.md`）、测试断言。3. 挂载验证（§8.3 第 1 项）+
+   `npm test` + 开一个 Capital 会话确认工具表与首轮预检。

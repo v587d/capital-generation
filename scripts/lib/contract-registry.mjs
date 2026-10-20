@@ -1,45 +1,28 @@
 /**
- * 数据源契约巡检注册表（`docs/dev/tool-schema.md` §10.8 那道闸门的正文）。
- *
- * 一条能力一行，**四态取一**：
- *   · `tier: 'daily'`   每天 04:00（北京）打，失败算结论
- *   · `tier: 'weekly'`  周六 04:00（北京）全量打（静态面：基金档案 / 经理 / 回测这一类）
- *   · `shadow: {…}`     照打，但本视角不判——视角差异不是上游故障；每天在报告里露一次脸
- *   · `excluded: {…}`   刻意不打（按次计费等），理由必须写下来
- *
- * ⛔ 本文件**不写 URL、不写字段清单**。字段判据来自 `lib/` 里 `DataSource` 的 `output_schema`
- * 与 `validateOutput`，URL 与参数校验来自生产的 `execute()`——写第二份就是第二份真相（§10.8 第 3 条）。
- * 这里只回答三个问题：**打谁、用什么最小参数、允许多慢**。
- *
- * 参数一律**可复现**：能省略的日期一律省略（让上游自己取最近可用交易日），显式传非交易日会拿到
- * `1002`（`dragon_tiger` 的 description 明写「不自动回退」），那是巡检自己造出来的失败。
- * 非要给日期窗时**只写相对量**（`dayShift(-30)`），由 runner 在每次运行时按北京日历换成具体日期：
- * 写死 `end_date: '2026-09-30'` 那种窗会一天天变旧，到点就永久 EMPTY——同一类失败的第二个版本。
+ * Contract-probe registry (gate body for `docs/dev/tool-schema.md` §10.8): daily / weekly / shadow
+ * (probed, not judged) / excluded (with a reason). ⛔ No URLs or field lists — those come from
+ * production `execute()` / `output_schema`. Params stay reproducible: omit dates or use `dayShift`.
  */
 
-/**
- * 只有这三类判据开 Issue；其余进 summary。这套东西能不能活过第三周就看这一行。
- * 住在注册表（纯数据模块）而不是 runner：发单脚本不需要为此 import 整条 `lib/` 链。
- */
+// Only these verdicts open an issue; pure data so the publish script needn't import the whole lib.
 export const ISSUE_VERDICTS = Object.freeze(['GUARD', 'ENVELOPE', 'HTTP_STATUS'])
 
-/** 延迟预算初值：一律保守，等第一次 hosted 全量的实测 P95 回填（设计 §2.4）。 */
+/** Conservative initial latency budget, to be backfilled from hosted P95. */
 export const DEFAULT_BUDGET_MS = 20_000
 
-/** 家族 = 限速分组。同组串行、组间留 gap；跨组**绝不并发**（两份独立节流 = 没节流）。 */
+/** Family = throttle group: serial within, gap between; never concurrent across (two throttles = none). */
 export const PROBE_FAMILIES = ['fuyao', 'eastmoney', 'tencent', 'retriever', 'anysearch', 'wind', 'paddle', 'ftshare']
 
-/** 组间间隔：让上一个上游的连接与风控计数先冷下来。 */
+/** Gap between families so connection and rate counters cool down. */
 export const PROVIDER_GAP_MS = 2_000
 
 /**
- * Fuyao 巡检专用地板：生产侧 `fuyao-core.ts` 是裸 `fetch`、**没有任何最小间隔**，
- * 只靠 Hub 的串行。400 ms 是 `smoke-fuyao.mjs` 跑 61 端点未触发 4001 的实测节奏。
- * ⚠️ 这是巡检侧新增的常量，不代表生产侧也该有——别顺手搬进 `fuyao-core.ts`。
+ * Probe-only floor: production fuyao is bare fetch with no spacing (the Hub serializes); 400 ms kept
+ * 61 endpoints under 4001. ⚠️ Do not copy this into production.
  */
 export const FUYAO_PROBE_GAP_MS = 400
 
-/** 家族级默认凭据；开工前闸门只检查本次真用到的那几个（设计 §6.4）。 */
+/** Default secret per family; the gate checks only those used. */
 export const FAMILY_SECRET = {
   fuyao: 'FUYAO_API_KEY',
   anysearch: 'ANYSEARCH_API_KEY',
@@ -48,45 +31,39 @@ export const FAMILY_SECRET = {
   ftshare: 'FTSHARE_API_KEY',
 }
 
-/** 已知数据缺口的上游码：命中它不算失败，但每天在正文列一次（§10.4）。 */
+/** Known upstream gap codes: not a failure, but listed in the report every day. */
 export const KNOWN_GAP_CODES = Object.freeze(['1002', '2004', '5003'])
 
 const ETFS = '510300.SH'
 const A_SHARE = '600519.SH'
 
-/**
- * 相对"巡检跑的那天"的北京日历日偏移：`dayShift(-1)` = 前一个自然日，`dayShift(-30)` = 往前 30 天。
- * 只是个标记，真正换成日期在 `resolveDayShifts()`（runner 每次运行做一遍）。
- * ⛔ 不许在这里写死绝对日期：窗口会一天天变旧，到点永久 EMPTY，那是巡检自己造的失败。
- */
+// `dayShift(-1)` = previous calendar day; a marker resolved once per run. ⛔ No absolute dates:
+// the window ages until it is permanently EMPTY.
 const dayShift = (days) => {
   if (!Number.isInteger(days)) throw new RangeError(`dayShift 要整数天，拿到 ${JSON.stringify(days)}`)
   return { dayShift: days }
 }
 
-/** DataSource 面：走生产的 `source.execute()` + `source.validateOutput()`。 */
+/** DataSource face (production execute + validateOutput) and probe face (runner's probeTable). */
 const ds = (family, capability, tier, params, extra = {}) => ({
   face: 'datasource', family, capability, tier, params, budgetMs: DEFAULT_BUDGET_MS, ...extra,
 })
-/** 非 DataSource 面（具名来源函数 / 协议级探针）：由 runner 里的 probeTable 分派。 */
 const pr = (family, capability, tier, extra = {}) => ({
   face: 'probe', family, capability, tier, budgetMs: DEFAULT_BUDGET_MS, ...extra,
 })
-/** 刻意不打：没有 tier，runner 看见 `excluded` 就跳过，但覆盖测试仍要求这一行存在。 */
+/** Not probed: no tier, skipped by the runner but still required by the coverage test. */
 const out = (family, capability, reason, since) => ({
   face: 'probe', family, capability, excluded: { since, reason },
 })
-/** 同上，但这一颗是**真注册出来的 DataSource 能力**——覆盖测试按 face 数分母，别混。 */
+/** Same, for a registered DataSource; the coverage test counts faces separately. */
 const dsOut = (family, capability, reason, since) => ({
   face: 'datasource', family, capability, params: {}, excluded: { since, reason },
 })
 
-// ── Fuyao（同花顺 REST，61 颗能力）────────────────────────────────────────────
-// 参数表自 scripts/smoke-fuyao.mjs 原样搬入，不重写。
 const HISTORY_START = Date.UTC(2025, 0, 2)
 const HISTORY_END = Date.UTC(2025, 1, 28)
 
-/** 依赖真实 id 的四颗：编造 id 会拿到 5003，那是脚本问题不是上游故障（§10.3）。 */
+/** Four entries need a real id; an invented id returns 5003, a script bug rather than upstream fault. */
 const MANAGER_RESOLVE = {
   requires: 'manager_id',
   resolveFrom: { capability: 'fund_profile', params: { thscode: ETFS }, path: 'item.0.manager_info.0.manager_id' },
@@ -120,7 +97,6 @@ const FUYAO = [
   ds('fuyao', 'index_quote', 'daily', { thscodes: '000001.SH,399001.SZ' }, { expect: { minRows: 1 } }),
   ds('fuyao', 'index_history', 'daily', { thscode: '000001.SH', interval: '1d', start: HISTORY_START, end: HISTORY_END }, { expect: { minRows: 1 } }),
 
-  // 基金 / 经理 / 回测：结构稳定、变化慢，周六全量覆盖即可。
   ds('fuyao', 'hot_stock_history', 'weekly', { date: '2026-06-21' }),
   ds('fuyao', 'hot_stock_rank_trend', 'weekly', { thscode: '300034.SZ', start_date: '2026-06-21', end_date: '2026-07-01' }),
   ds('fuyao', 'fund_profile', 'weekly', { thscode: ETFS }, { expect: { minRows: 1 }, note: 'manager_id / company_id 从这里解析' }),
@@ -169,16 +145,10 @@ const FUYAO = [
   ds('fuyao', 'fund_backtest_indicators', 'weekly', {}),
 ]
 
-// ── Eastmoney 数据面（21 颗，全部每天）────────────────────────────────────────
-// 全量而非"每族一个代表"：上游改版通常打中一个端点，不打中一族。
-// 龙虎榜两颗：日期窗只写**相对量**，上界取前一个自然日；单票那颗不写死代码——从当天真榜单的
-// 首行取 `thscode`（`requires` + `resolveFrom`，跟 manager_id 同一套机制）。于是它每天打的是一只
-// "确定在榜"的股票，EMPTY 就只剩"上游真出问题"这一种解释了。
-// ⚠️ `requires` 的键名同时就是注入的参数名（runner 里 `{...params, [requires]: id}`），
-//    所以一条能力只能有一个运行时解析的参数；`ticker` 这个键名全表只此一处，别复用。
+// Every eastmoney endpoint, not one per family: upstream changes hit a single endpoint.
+// Billboard rows use relative bounds and resolve `thscode` from today's real list, so EMPTY can only
+// mean upstream trouble. ⚠️ A `requires` key doubles as the injected param name, one per entry.
 const BILLBOARD = { start_date: dayShift(-30), end_date: dayShift(-1), page: 1, size: 3 }
-// 宏观指标：下界写死没问题（2025 年 1 月起都有数），上界必须是"昨天"——写死 2026-09-30 意味着
-// 这个窗只会越来越旧，直到某天没人注意到它已经一年没往前走过。
 const EM_RANGE = { start_date: '2025-01-01', end_date: dayShift(-1), page: 1, size: 3 }
 const EM = [
   ds('eastmoney', 'eastmoney_top_buy_sell_market', 'daily', { ...BILLBOARD }, { expect: { minRows: 1 } }),
@@ -205,11 +175,10 @@ const EM = [
   ds('eastmoney', 'eastmoney_convertible_bond_list', 'daily', { start_date: dayShift(-180), end_date: dayShift(-1), page: 1, size: 3 }),
 ]
 
-// ── Tencent 公开端点（9 颗，全部每天；免密，120 ms 一条链）─────────────────────
 const TX = [
   ds('tencent', 'tencent_quote', 'daily', { codes: [A_SHARE] }, { expect: { minRows: 1, identity: { field: 'tencent_symbol', value: 'sh600519' } } }),
   ds('tencent', 'tencent_kline', 'daily', { code: A_SHARE, period: 'day', count: 10 }, { expect: { minRows: 1 } }),
-  // 分笔会翻页（MAX_TICK_PAGES=300），实测单次可达 4.5 s，预算单列。
+  // Ticks paginate (MAX_TICK_PAGES=300) and can take 4.5 s, so it gets its own budget.
   ds('tencent', 'tencent_ticks', 'daily', { code: '000001.SZ' }, { budgetMs: 30_000 }),
   ds('tencent', 'tencent_hk_quote', 'daily', { codes: ['00700'] }, { expect: { minRows: 1 } }),
   ds('tencent', 'tencent_us_quote', 'daily', { codes: ['AAPL'] }, { expect: { minRows: 1 } }),
@@ -219,14 +188,12 @@ const TX = [
   ds('tencent', 'tencent_us_kline', 'daily', { code: 'AAPL', period: 'day', count: 5 }, { expect: { minRows: 1 } }),
 ]
 
-// ── Wind 数据面：按次消耗积分，刻意不进巡检（设计 §10 第 1 条）──────────────────
 const WIND_DATA = [
   dsOut('wind', 'wind_edb_search', '按次消耗上游积分，不进日常巡检；协议级 initialize/tools/list 已覆盖域名与 Key。取数级由人工按需跑 npm run smoke:wind', '2026-10-08'),
   dsOut('wind', 'wind_edb_query', '按次消耗上游积分；同上。这条还实测过「该日缺数」与「上游故障」在线上不可区分（都挂到超时），自动重试只会白烧积分', '2026-10-08'),
   dsOut('wind', 'wind_stock_kline', '按次消耗上游积分；同上', '2026-10-08'),
 ]
 
-// ── web_retriever 具名来源（provider + operation，不是 DataSource）─────────────
 const RETRIEVER = [
   pr('retriever', 'cls_telegraph', 'daily', { params: { limit: 3 }, expect: { minRows: 1 } }),
   pr('retriever', 'wscn_lives', 'daily', { params: { channel: 'global-channel', limit: 3 }, expect: { minRows: 1 }, budgetMs: 30_000, note: '实测 2.8 s，离群但不算失败' }),
@@ -236,8 +203,8 @@ const RETRIEVER = [
   pr('retriever', 'eastmoney_reports', 'daily', { params: { code: '600519', pageSize: 3, pageNo: 1 }, expect: { minRows: 1 }, note: '只认裸 6 位代码，带 SH 前缀会 hits=0' }),
   pr('retriever', 'sina_reports', 'daily', { params: { code: '688017', page: 1 }, expect: { minRows: 1 }, note: '必须带交易所前缀；重定向会换主机并降级到 http' }),
   pr('retriever', 'ths_eps_forecast', 'daily', { params: { code: '600519' }, expect: { minRows: 1 }, note: '正文是 GBK 而响应头不带 charset，按 UTF-8 解会得到 11800 个替换字符' }),
-  // 上交所互动：hosted 视角被 WAF 稳定 403（实测 3/3），国内出口 3/3 正常 200。
-  // 走影子：照打、留痕、不报警——"我们其实没在测它"每天早上在报告里露一次脸。
+  // SSE Q&A: WAF 403s the hosted egress (3/3) but not a domestic one (3/3). Shadow: probed,
+  // recorded, never alarmed — "we aren't really testing this" shows up in every daily report.
   pr('retriever', 'sseinfo_qa', 'daily', {
     params: { kind: 'questions', page: 1, pageSize: 3 },
     shadow: {
@@ -257,10 +224,8 @@ const RETRIEVER = [
   }),
 ]
 
-// ── 协议级探针：不计费，专抓域名下线 / TLS / Key 失效 / MCP 工具改名 ────────────
-// analytics_data 刻意不在这里：本仓未接，实测连 initialize 都挂满 60 秒。
-// abortMs 给到 60 s 与生产 `WIND_REQUEST_TIMEOUT_MS` 同值：实测 index_data / financial_docs /
-// economic_data 三台的 initialize 就要 30–60 s，卡在 30 s 会把"慢"误判成"坏了"（2026-10-08 实测）。
+// Protocol probes: free, catch domain loss / TLS / bad key / renamed tools. abortMs 60 s matches
+// production: three servers take 30–60 s to initialize and 30 s would read "slow" as "broken".
 const WIND_PROTOCOL = [
   'vserver_stock_data', 'vserver_fund_data', 'vserver_index_data',
   'vserver_bond_data', 'vserver_financial_docs', 'vserver_economic_data',
@@ -281,39 +246,32 @@ const PADDLE = [
   out('paddle', 'paddle_ocr_job', '端到端要一份长期可公开访问的样本 PDF，样本未选定；选定后升级为 weekly 真跑', '2026-10-08'),
 ]
 
-// ── FTShare（非凸科技）资金流 / 报价快照 / 披露 / 宏观 / 期货那一整族（每天）───────────
-// 日期一律相对量：日度那族上游只保留最近约 45 个交易日（实测 T-45 有数、T-46 起 total=0），
-// 窗口每天都在往前滚，写死绝对日期等于让巡检自己变成永久 EMPTY。
-// `page` 实测生效（六页 × 1000 去重 = total_items 5574），但响应里的 `pageNum` 恒 1，
-// 所以巡检只用 page=1 打最小切片，翻页正确性交给离线测试的桩信封。
+// FTShare: dates are always relative (daily endpoints keep ~45 trading days). `page` works but the
+// response always says pageNum 1, so probes take page=1; paging is covered by offline stub tests.
 const FT_RANGE = { start_date: dayShift(-10), end_date: dayShift(-1), size: 3 }
 const FT = [
-  // 带 code 打：这一条同时在验"过滤真的生效"（producer 会逐行核返回身份，被吞掉时回 invalid_response）。
+  // With a code: also verifies that filtering really works.
   ds('ftshare', 'ftshare_stock_daily_flow', 'daily', { ...FT_RANGE, code: A_SHARE }, { expect: { minRows: 1 }, note: '同花顺个股日度资金流；金额单位亿元（与全市场快照成交额交叉核对过）' }),
   ds('ftshare', 'ftshare_industry_daily_flow', 'daily', FT_RANGE, { expect: { minRows: 1 }, note: '同花顺一级行业 90 个板块的资金滚动，是 eastmoney_cashflow_rotation 的第二家上游' }),
   ds('ftshare', 'ftshare_concept_daily_flow', 'daily', FT_RANGE, { expect: { minRows: 1 }, note: '概念板块天然重叠，禁止跨板块相加' }),
-  // 不给 date/time 就打"最新切片"，所以这一条永远落在有数的那一档上。
-  ds('ftshare', 'ftshare_main_capital_flow', 'daily', { size: 3 }, { expect: { minRows: 1 }, note: '15 分钟切片主力资金，单位元；免费档限流 10 QPS / burst 20' }),
-  ds('ftshare', 'ftshare_ashare_quote', 'daily', { board: 'bjse', size: 3 }, { expect: { minRows: 1 }, note: '北证口径单独一条：本仓只有这一族与日 K 截面含北交所（腾讯那一路明确拒 BJ）' }),
+  ds('ftshare', 'ftshare_main_capital_flow', 'daily', { size: 3 }, { expect: { minRows: 1 }, note: '15 分钟切片主力资金，单位元；免费档限流 10 QPS / burst 20' }),  ds('ftshare', 'ftshare_ashare_quote', 'daily', { board: 'bjse', size: 3 }, { expect: { minRows: 1 }, note: '北证口径单独一条：本仓只有这一族与日 K 截面含北交所（腾讯那一路明确拒 BJ）' }),
   ds('ftshare', 'ftshare_market_breadth', 'daily', {}, { expect: { minRows: 1 }, note: '单行；九档家数之和实测 = 报价面 total_items（跨能力对账点）' }),
   ds('ftshare', 'ftshare_daily_kline_snapshot', 'daily', { size: 3 }, {
     requires: 'trade_date',
-    // 编一个周末日期进去会得到上游 400「不是交易日」，那是巡检自己造的失败——日期由日历供。
+    // A fabricated weekend date gets an upstream 400 "not a trading day": take it from the calendar.
     resolveFrom: { capability: 'ftshare_trading_calendar', params: { start_date: dayShift(-20), end_date: dayShift(-1) }, path: 'item.0.trade_date' },
     expect: { minRows: 1 },
   }),
   ds('ftshare', 'ftshare_prev_close', 'daily', { code: A_SHARE, start_date: dayShift(-20), end_date: dayShift(-1) }, { expect: { minRows: 1 }, note: '响应没有身份列，本层核日期是否落在请求区间内' }),
   ds('ftshare', 'ftshare_trading_calendar', 'daily', { market: 'cn', start_date: dayShift(-20), end_date: dayShift(20) }, { expect: { minRows: 1 } }),
-  // 批次 C 的五颗。⛔ 依旧一律相对日期 / 真实 id：写死绝对日期等于让巡检自己变成永久 EMPTY。
-  // 不给 date 就落在"上游最新有数的一天"，当日入库时刻实测不固定（19:32 还没有、20:03 已有），不给它反而稳。
+  // Batch C. ⛔ Still only relative dates / real ids; without a date it lands on the latest day with data.
   ds('ftshare', 'ftshare_block_trades', 'daily', { size: 3 }, { expect: { minRows: 1 }, note: '一笔一行；premium_ratio 是比例值（-0.0885 = 折价 8.85%）' }),
-  // 预告 / 快报按期披露、**没有滚动窗口**（实测预告回到 2000 年、快报回到 2005 年），所以写过去的报告期不会腐烂。
-  // 两颗各测一种查法：这颗走 modeB，顺带让 producer 的 year / report_type 逐行核对每天跑一遍。
+  // Forecasts / express reports have no rolling window, so past periods stay valid; modeB also
+  // exercises the producer's year / report_type checks.
   ds('ftshare', 'ftshare_performance_forecast', 'daily', { year: 2024, report_type: 'annual', size: 3 }, { expect: { minRows: 1 }, note: 'modeB 全市场实测 3150 行；别名 q4/h1 在参数层就拒' }),
   ds('ftshare', 'ftshare_performance_express', 'daily', { code: A_SHARE }, { expect: { minRows: 1 }, note: 'modeA 单票不分页；上期为负时 net_profit_yoy_pct 的符号是反的，别拿它判方向' }),
   ds('ftshare', 'ftshare_sw_industry_overview', 'daily', { size: 3 }, {
     requires: 'date',
-    // 窗口只到最近约 94 个交易日，且必须真的是交易日——日期同样从日历里取，不自己编。
     resolveFrom: { capability: 'ftshare_trading_calendar', params: { start_date: dayShift(-20), end_date: dayShift(-1) }, path: 'item.0.trade_date' },
     expect: { minRows: 1 },
     note: '全部层级实测 497~498 行 = 一级 31 + 二级 131 + 三级 335/336',
@@ -322,9 +280,8 @@ const FT = [
     expect: { minRows: 1 },
     note: '42 列宽表；聚合列（amount / total_mv 等）实测自 2026-08-26 起为 null，所以这条只核行数不核数值',
   }),
-  // 批次 D 的五颗（2026-10-16）。日期继续从日历里解析、id 继续从真响应里解析——
-  // ⛔ `requires` 是**按名字共享**的：同名条目共用注册表里第一条的 resolveFrom，
-  // 所以下面这三条 'date' 都必须指向同一份交易日历；谁改了第一条，另外两条会跟着静默换供。
+  // Batch D. Dates resolve from the calendar; ⛔ `requires` is shared by name, so the three 'date'
+  // rows below must keep pointing at the same calendar.
   ds('ftshare', 'ftshare_limit_price', 'daily', { size: 3 }, {
     requires: 'date',
     resolveFrom: { capability: 'ftshare_trading_calendar', params: { start_date: dayShift(-20), end_date: dayShift(-1) }, path: 'item.0.trade_date' },
@@ -333,7 +290,7 @@ const FT = [
   }),
   ds('ftshare', 'ftshare_dragon_tiger_seats', 'daily', { size: 500 }, {
     requires: 'date',
-    // 必须是真交易日：非交易日的信封是 data:null（合法空），编个周末进去就是巡检自己造的 EMPTY。
+    // A non-trading day returns data:null, which is a legal empty result.
     resolveFrom: { capability: 'ftshare_trading_calendar', params: { start_date: dayShift(-20), end_date: dayShift(-1) }, path: 'item.0.trade_date' },
     expect: { minRows: 1 },
     note: '前五买入/卖出席位；响应行内没有日期列，trade_date 由本层按请求补写；一天实测 44–72 行，一页取全',
@@ -348,15 +305,12 @@ const FT = [
   }),
   ds('ftshare', 'ftshare_convertible_bond_kline', 'daily', { start_date: dayShift(-60), end_date: dayShift(-1), period: 'day' }, {
     requires: 'code',
-    // ⛔ 不写死单只券：转债会提前赎回与摘牌，写死就把巡检做成永久 EMPTY。代码从本仓涨跌停那颗
-    // 当日在册的 cb 清单里取（实测同日 315 只），拿到的必然是一只今天还在交易的债。
+    // ⛔ Never hardcode one bond: convertibles redeem and delist. Take a code from today's cb list.
     resolveFrom: { capability: 'ftshare_limit_price', params: { instrument_type: 'cb', size: 1 }, path: 'item.0.thscode' },
     expect: { minRows: 1 },
     note: '单只可转债日 K；跨度上限 12 个自然月由上游 400 说话，本层不换算成天数闸门',
   }),
-  // 批次 E 的五颗（2026-10-16，利率与日历这一整块空白）。同样一律相对日期：
-  // 日历那颗的覆盖是**滚动窗**（实测约"过去 2.5 个月到未来 2 周"，2026-11-02 起就 0 行），
-  // 写死绝对日期等于过两周自己变成永久 EMPTY。
+  // Batch E: the calendar coverage is a rolling window, so absolute dates would rot within weeks.
   ds('ftshare', 'ftshare_lpr', 'daily', {}, {
     expect: { minRows: 1 },
     note: '无参数无分页，一次给完全历史（实测 2661 行）；本层多发参数会在参数层拒，所以这条必须空参打',
@@ -377,15 +331,13 @@ const FT = [
     expect: { minRows: 1 },
     note: '⛔ 窗上限 3 天差由参数层拦（实测 4 天 400），巡检只打 3 天窗内；event_time 上游给秒，本层转毫秒',
   }),
-  // 批次 F 的十颗（2026-10-16，期货与贵金属——本仓此前是整块空白）。⛔ 合约代码一律**从清单那颗现取**：
-  // 期货合约会到期，写死一只 2610 就把巡检做成几个月后的永久 EMPTY（同那条转债代码的教训）。
+  // Batch F: ⛔ contract codes come from the listing row — contracts expire, a hardcoded one rots.
   ds('ftshare', 'ftshare_futures_contracts', 'daily', {}, {
     expect: { minRows: 1 },
     note: '一日全量快照实测 1812 行 = 906 只合约 × 两份 future_type 副本（null 与 2），按行计数会翻倍；无分页',
   }),
   ds('ftshare', 'ftshare_futures_contract_detail', 'daily', {}, {
     requires: 'symbol',
-    // 代码从同族清单的第一行现取（实测首行 IC2610.CFE，短后缀），本层按交易所换成 K 线要的长后缀。
     resolveFrom: { capability: 'ftshare_futures_contracts', params: {}, path: 'item.0.symbol' },
     expect: { minRows: 1 },
     note: '带 symbol 打时这条同时在验过滤真的生效（上游大小写不敏感，本层比的是大写后的值）',
@@ -429,16 +381,13 @@ const FT = [
   }),
 ]
 
-/** 全量注册表。覆盖测试拿它对着 `lib/` 的真实注册数逐条核。 */
 export const CONTRACT_PROBES = [...FUYAO, ...EM, ...TX, ...WIND_DATA, ...RETRIEVER, ...WIND_PROTOCOL, ...ANYSEARCH, ...PADDLE, ...FT]
 
-/** 该条真打时需要的凭据（`excluded` 返回空——它永远不发请求）。 */
 export function secretRefOf(entry) {
   if (entry.excluded) return undefined
   return entry.secret ?? FAMILY_SECRET[entry.family]
 }
 
-/** 状态：excluded / shadow / active。四态里 daily|weekly 是 active 的两个子档。 */
 export function stateOf(entry) {
   if (entry.excluded) return 'excluded'
   if (entry.shadow) return 'shadow'
@@ -446,9 +395,8 @@ export function stateOf(entry) {
 }
 
 /**
- * 本次该打哪一档。**时区换算只有这一处**，且必须显式 `Asia/Shanghai`：
- * GitHub cron 的星期字段是 UTC，直接读 runner 本地时间会拿到 UTC，于是"周六全量"错位一天、
- * 全量档静默永不触发（设计 §5.1）。给 `date` 参数是为了能被测试钉住。
+ * Which tier to run. Timezone conversion happens only here and must name Asia/Shanghai: GitHub cron
+ * weekdays are UTC, so reading local time shifts "Saturday full" by a day and it never fires.
  */
 export function resolveTier(date = new Date()) {
   const weekday = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai', weekday: 'short' }).format(date)
@@ -456,21 +404,16 @@ export function resolveTier(date = new Date()) {
 }
 
 /**
- * 排程真值表，**用 UTC 写**，与 workflow 里那条 cron 一一对应：
- * 北京周一~周六 04:00 = UTC 周日~周五 20:00；北京周日不排。
- * 工作日与周六同一个 UTC 小时，所以只有一条——档位差异（daily / full）在 `resolveTier()` 按北京星期判。
- * 代码里再写一份的理由：cron 只住在 YAML，看门狗却要算"最近一个本该跑的时刻"，总得有能读的那一份。
- * 两边漂移由 `test/contract-registry.test.mjs` 逐个 (星期, 小时) 比对拦住——改时间必须同时改两处。
+ * Schedule truth table in UTC, mirroring the single cron line: Beijing Mon–Sat 04:00 = UTC Sun–Fri
+ * 20:00. test/contract-registry.test.mjs pins both sides together.
  */
 export const SCHEDULE_UTC = [
   { hour: 20, dow: [0, 1, 2, 3, 4, 5] },
 ]
 
 /**
- * 最近一个**本该跑**的时刻（UTC）。北京周日那一档不存在，往回跳；小时跟着 `SCHEDULE_UTC` 走。
- * 与 workflow 里那条 cron 严格同构，所以由 `test/contract-registry.test.mjs` 钉住两边一致。
- * GitHub 的 `schedule` 只保证"会跑"，实测迟到 3~4 小时，所以这里算的是"最近该跑的那一档"，
- * 不是某个准点窗口——迟到但最终跑过的记录照样算心跳。
+ * Latest due slot (UTC), skipping the nonexistent Beijing Sunday. GitHub can run `schedule` 3–4 h
+ * late, so a late run still counts as a heartbeat; this is a slot, not a punctuality window.
  */
 export function lastScheduledDue(now = new Date()) {
   for (let back = 0; back <= 7; back += 1) {
@@ -484,24 +427,16 @@ export function lastScheduledDue(now = new Date()) {
 }
 
 /**
- * **上一档**（= 把时刻往前推一天再取 `lastScheduledDue`），看门狗用它而不是上面那个。
- *
- * 理由是一次实测出来的顺序倒挂：旧的北京 07:00 那一档实际 10:13 / 10:48 才落地，而看门狗的名义
- * 时刻是同一天的 09:30——**判据那一刻，正常迟到的探针还没出现**。当时没误报，纯粹因为看门狗自己
- * 迟到了 6 小时（比探针还晚），于是把正确性押在"两条互不保证先后的 best-effort 调度器恰好按想要的
- * 顺序迟到"上。把排程提前到 04:00 只把名义余量从 2.5 小时涨到 5.5 小时，还是在赌；改成判上一档之后，
- * 被检查的那一档至少已经过去一整天，一个排程日内迟到多久都不影响结论。代价是发现调度器死了要晚约
- * 24~30 小时——对一个本来就会迟到 6 小时的信道，这个代价买的是"永不误报"，值得。
- * 手动 dispatch 依然不算心跳（那是人替它跑，不是调度器活着）。
+ * **Previous** slot (one day back, then `lastScheduledDue`); the watchdog uses this one.
+ * A real ordering inversion: probes scheduled 07:00 landed 10:13 while the watchdog's nominal 09:30
+ * had already run, so a punctual probe looked missing. A full day of slack costs ~24 h of detection
+ * latency but never false-alarms; manual dispatch is not a heartbeat.
  */
 export function previousScheduledDue(now = new Date()) {
   return lastScheduledDue(new Date(now.getTime() - 24 * 3_600_000))
 }
 
-/**
- * 报告与 Issue 标题上"哪一天"必须用**北京日期**：北京 04:00 = UTC 前一天 20:00，直接切 `at` 的
- * UTC 日会让每天的单都盖着前一天的日期——同天去重与「连续第 N 天」都读这个字符串。
- */
+/** Report dates must be Beijing dates: 04:00 Beijing is the previous UTC day, and dedupe/streaks read this. */
 export function beijingDateOf(value) {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -511,10 +446,9 @@ export function beijingDateOf(value) {
 }
 
 /**
- * 把参数里的 `dayShift` 标记换成**具体日期**（北京日历）——runner 每次运行只做一次，之后所有
- * 请求、报告、测试看到的都是普通字符串，标记不会漏进生产校验。
- * 只认"单独一个 `dayShift` 键"的对象：多写一个键就不算标记，宁可让它原样漏到 normalizeParams
- * 里炸响，也不要在巡检侧猜意图。数组递归、其余值（含 undefined）原样返回、不改动入参。
+ * Replaces `dayShift` markers with concrete Beijing dates; the runner calls it once per run.
+ * Only a lone `{ dayShift: n }` object counts as a marker — anything else is left to fail loudly in
+ * normalizeParams. Arrays recurse; other values (and undefined) pass through untouched.
  */
 export function resolveDayShifts(value, runAt = new Date()) {
   if (Array.isArray(value)) return value.map((item) => resolveDayShifts(item, runAt))
@@ -523,7 +457,7 @@ export function resolveDayShifts(value, runAt = new Date()) {
     if (keys.length === 1 && keys[0] === 'dayShift') {
       const days = value.dayShift
       if (!Number.isInteger(days)) throw new TypeError(`dayShift 要整数天，拿到 ${JSON.stringify(days)}`)
-      // 先按天推时刻、再取北京日历：中国无夏令时，±24h 的整数步长不会跨过一天。
+      // Shift by whole days first: China has no DST, so ±24 h never crosses a date boundary.
       return beijingDateOf(new Date(runAt.getTime() + days * 86_400_000))
     }
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, resolveDayShifts(item, runAt)]))
@@ -531,8 +465,7 @@ export function resolveDayShifts(value, runAt = new Date()) {
   return value
 }
 
-/** 本次要真打的条目（含影子——影子照打，只是不计入结论）。
- * `tier: 'daily'` 只打日档；`tier: 'full'`（北京周六）打日档 + 周档。 */
+/** Entries to probe for a tier: shadows included; `full` adds weekly to daily. */
 export function probesForTier(tier) {
   const wanted = tier === 'full' ? new Set(['daily', 'weekly']) : new Set(['daily'])
   return CONTRACT_PROBES.filter((entry) => !entry.excluded && wanted.has(entry.tier))

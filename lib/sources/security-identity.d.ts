@@ -5,10 +5,7 @@ export interface EastmoneySecurityIdentity {
     eastmoney_code: string;
     eastmoney_market: EastmoneyMarket;
 }
-/**
- * Resolve Eastmoney's provider identifiers without guessing a market from digits.
- * `market` is mandatory for a bare SECURITY_CODE; `secid` carries its own market.
- */
+/** Never guess a market from digits: `market` is mandatory for bare SECURITY_CODE; secid carries its own. */
 export declare function normalizeEastmoneySecurityIdentity(input: {
     secucode?: unknown;
     security_code?: unknown;

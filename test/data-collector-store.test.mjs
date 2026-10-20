@@ -4,7 +4,7 @@ import { WorkspaceDatasetStore, DEFAULT_RETENTION_MS } from '../lib/data-collect
 
 const SESSION = { id: 'session-1', header: { cwd: '/workspace/proj' } }
 
-/** 极简 in-memory fake ctx.fs：只实现 store 用到的最小子集，行为对齐官方契约。 */
+/** Minimal in-memory fake ctx.fs: only the subset the store uses, matching the official contract. */
 function fakeFs() {
   const files = new Map() // displayPath -> content
   const dirs = new Set()
@@ -51,7 +51,7 @@ function fakeFs() {
         error.code = 'FS_NOT_OBSERVED'
         throw error
       }
-      // 模拟 fs-local 写入时自动创建父目录
+      // fs-local creates parent directories on write.
       const segments = target.displayPath.split('/').filter(Boolean)
       for (let i = 1; i < segments.length; i += 1) this.dirs.add('/' + segments.slice(0, i).join('/'))
       this.files.set(target.displayPath, content)
@@ -148,7 +148,7 @@ test('save：raw.json 与 manifest.json 原子 createIfAbsent 写入 workspace�
   assert.equal(manifest.captured_at, 1_700_000_000_000)
   assert.equal(manifest.retention_until, 1_700_000_000_000 + DEFAULT_RETENTION_MS, '默认保留 7 天')
   assert.equal(manifest.params_digest, 'history:{}')
-  // 返回值是公开 DatasetRef；manifest 额外包含宿主内部 scope 字段。
+  // The returned value is the public DatasetRef; the manifest also holds host-internal scope fields.
   const { session_scope_id: _scope, ...publicManifest } = manifest
   assert.deepEqual(ref, publicManifest)
   assert.equal(manifest.session_scope_id, 'session-1')
@@ -165,7 +165,7 @@ test('重启读取：新 store 实例（新进程内状态）可从同一 worksp
   const fs = fakeFs()
   const first = new WorkspaceDatasetStore({ fs, sandboxPolicy: policyLike(), now: () => 1_700_000_000_000, newId: deterministicId() })
   const saved = await first.save(saveInput())
-  // 模拟重启：全新 store 实例，只共享同一 filesystem backend
+  // Simulate a restart: a fresh store instance sharing only the filesystem backend.
   const second = new WorkspaceDatasetStore({ fs, sandboxPolicy: policyLike(), now: () => 1_700_000_000_100 })
   assert.deepEqual(await second.readRef(saved.dataset_id, SESSION), saved)
   assert.deepEqual(await second.listRefs(SESSION), [saved])
@@ -256,7 +256,7 @@ test('listRefs：损坏 manifest 跳过；datasets 目录不存在返回空；�
   const fs = fakeFs()
   const store = new WorkspaceDatasetStore({ fs, sandboxPolicy: policyLike(), now: () => 1_700_000_000_000, newId: deterministicId() })
   const saved = await store.save(saveInput())
-  // 再在 datasets 下写一个损坏 manifest 的目录
+  // A directory under datasets/ with an unparseable manifest.
   const brokenManifest = await fs.resolve(`capital-data/datasets/ds_broken/manifest.json`, { cwd: '/workspace/proj' })
   await fs.writeText(brokenManifest, 'not json')
   const refs = await store.listRefs(SESSION)

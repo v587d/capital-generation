@@ -1,85 +1,33 @@
 /**
- * 根 Agent 的工具收敛：把"只有子 Agent 该用"的工具从**主 Agent**的工具表里拿掉。
- *
- * 为什么需要它：preset 行注册在 standing composition 层，而主 Agent 与子 Agent 的
- * scope 都是 standing 的**子节点（兄弟）**。因此：
- *  - 在 preset 层用 `tools.restrict({deny})` 会把子 Agent 一起 deny
- *    （`dsh-tools` 的 `view()` 里 allow/deny 只是交集过滤，永远不能把祖先 deny 掉的名字加回来），
- *    连 `visualization_specialist` 的 `toolFilter.allow: [render_chart]` 都会失效；
- *  - 只在**根 Agent 自己的 scope** 上 deny，才既拿掉主 Agent 的入口、又不影响子 Agent。
- *
- * ⚠️ 监听必须注册在**未打 scope 标签的 context**（`ctx.root`）上。
- * 实测（2026-09-17，dsh 0.1.5-rc.1）：`agent/created` 的路由键是 **agent 对象本身**
- * （`dsh-agent` 的 `agentCarrier(agent) = scopeTarget(agent, agent)`），不是 agent 的 scope key。
- * `dsh-scope` 的准入规则只放行"未打标签的监听器"或"键在 carrier key 祖先链上"的监听器，
- * 所以注册在 standing scope 上的监听器**收不到**这个事件——表现是主 Agent 的工具表照旧有
- * `render_chart`，而且没有任何报错（静默失效）。宿主平面行之所以能用 `ctx.on('agent/created')`，
- * 正是因为它们未打标签。因此这里取 `ctx.root`，再用 `agentPresets.composedPreset(agent.ctx)`
- * 筛出本 preset 的 agent。
+ * Root Agent tool convergence on the root's own scope: preset-level deny would also hit
+ * children. Listeners must live on `ctx.root`; tagged standing-scope listeners miss agent/created.
  */
-/**
- * 出网工具名（唯一一份事实来源）：检索面 2 + wind 2 + 具名来源查询面 9。
- *
- * ⚠️ **不含 `ocr`**：主 Agent 保留它的本地形态（`file` / `doc_id`），只由
- * {@link rootOcrGuardReason} 关掉 `url` 形态——名字级 deny 做不到这个区分。
- *
- * 主 Agent 侧「外部检索只经 web_retriever 回传」必须是**结构件**，不能只写在 persona 里：
- * 2026-09-24 review 复现——persona 禁直连清单当时写的是 `web_retriever_*` 通配，工具改名后
- * 通配一个都不匹配，禁令名存实亡，而工具表里那 13 个入口始终摆着。逐名 deny 由本清单决定，
- * preset 与测试都从这里取名字（`test/persona.test.mjs` 交叉核验），新增来源只改这一处。
- */
+/** Outbound tools (search 2 + wind 2 + named sources 9); `ocr` is excluded because only its url form is restricted. */
 export declare const RETRIEVAL_DENIED_TOOLS: readonly ["anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "sina_reports", "ths_eps_forecast"];
-/** 文档解析工具名（`web_retriever` 的第三个工作面）。 */
 export declare const OCR_TOOL_NAME = "ocr";
-/**
- * 根 Agent 的 `ocr` 只放行**本地形态**（`file` / `doc_id`），`url` 形态拒绝。
- *
- * 为什么不整名 deny：用户把 PDF 放在工作目录用 `@xxx.pdf` 推给主 Agent 是正当入口，
- * 解析它不需要经过委派；但 `url` 形态等于"主 Agent 自己决定去戳一个外部链接"，
- * 那是「外部检索只经 web_retriever」这条结构约束唯一被留的口子。名字级 deny 做不到
- * 这个区分（`render_chart` 的教训一样：可见性不是权限），所以用调用级 guard。
- */
+/** Name-level deny cannot express the form distinction; this is a call-level guard. */
 export declare const OCR_ROOT_URL_DENIED: string;
-/** 单次调用的判定：根 Agent 用 `ocr` 提交外部 `url` 才拒绝，其余一律放行。 */
-export declare function rootOcrGuardReason(exec: GuardedExecution | undefined): string | undefined;
-/**
- * shell 工具名：preset 里这两行是**平台成对**挂载的（`agent.patch.yml` 的 `tool-bash` /
- * `tool-pwsh`，靠 `process.platform === 'win32'` 互斥 `disabled`），所以名字由平台决定。
- *
- * ⛔ 但**闸门必须认全集**：只认本平台那一个，另一端就是静默放行——同一个能力两个入口，
- * 本地测试只覆盖了接好的那个（AGENTS.md §9.7 的第三种形状）。`bash-guard.ts` 的升级闸门
- * 从这里取名字，不再各写一份。
- *
- * 2026-10-15 用户决策「开 read、同时保留 bash」：shell **不再**进 {@link ROOT_AGENT_DENIED_TOOLS}
- * ——主 Agent 保留 bash / pwsh（读 skill 分册、纯计算）；子会话侧仍由委派行的 `toolFilter`
- * 与 `bash-guard.ts` 的升级闸门收敛。
- */
+export declare function ocrUrlFormRequested(exec: GuardedExecution | undefined): boolean;
+/** Read per call because a created-time gate misses manually opened modes; fail open unless a confirmed Capital root. */
+export declare function ocrFormGuardReasonFor(ctx: PolicyContext): (exec: GuardedExecution | undefined) => string | undefined;
+/** Mounted as a platform pair; recognize both everywhere or the other platform's gate is dead. */
 export declare const SHELL_TOOL_NAMES: readonly ["bash", "pwsh"];
-export declare const ROOT_AGENT_DENIED_TOOLS: readonly ["render_chart", "subagent_visualization_specialist", "prepare_chart_source", "anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "sina_reports", "ths_eps_forecast", "write", "edit"];
-/** 本 preset 的 id（`composedPreset` 的返回值）。 */
+export declare const ROOT_AGENT_DENIED_TOOLS: readonly ["render_chart", "prepare_chart_source", "anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "sina_reports", "ths_eps_forecast", "write", "edit"];
 export declare const CAPITAL_PRESET_ID = "capital-generation";
 interface ToolRestriction {
     allow?: readonly string[];
     deny?: readonly string[];
 }
-/**
- * `ctx.tools` 里本仓真正用到的两个方法。
- *
- * `guard` 是单调执行闸门（`dsh-tools` 的 `ToolGuard`）：同步检查一次调用，返回字符串即拒绝，
- * **没有 allow 结果**，所以任何监听顺序都翻不回 allow。bash 闸门（`bash-guard.ts`）用它，
- * 因为「只按调用内容 deny」这件事只有这里有正确的语义。
- */
+/** `guard` only returns a deny string, so listener order can never turn a deny into an allow. */
 interface RestrictedToolRuntime {
     restrict?(filter: ToolRestriction): unknown;
     guard?(guard: (execution: GuardedExecution) => string | undefined): unknown;
 }
-/** 闸门看到的调用形状（`name` + 解析后的 `arguments` + 调用方 agent）。 */
 export interface GuardedExecution {
     readonly name?: string;
     readonly arguments?: unknown;
     readonly agent?: AgentLike;
 }
-/** 事件载荷里我们真正用到的 Agent 形状。 */
 export interface AgentLike {
     readonly session?: {
         readonly id?: string;
@@ -92,7 +40,6 @@ export interface AgentLike {
         readonly [key: string]: unknown;
     };
 }
-/** 监听用的 context 形状（结构类型，便于单测注入假实现）。 */
 export interface PolicyContext {
     on?(event: string, listener: (payload: {
         agent?: AgentLike;
@@ -106,85 +53,42 @@ export interface PolicyContext {
     readonly [key: string]: unknown;
 }
 export type RootToolPolicyOutcome = 'restricted' | 'skipped' | 'unavailable';
-/** 根 Agent 判据：没有 parentSession。子 Agent 一律有（spawn provider 写入）。 */
 export declare function isRootAgent(agent: AgentLike | undefined): boolean;
-/** 会话 id（guard 归档用）；缺失或空串返回 undefined。 */
 export declare function agentSessionId(agent: AgentLike | undefined): string | undefined;
-/** 只有本 preset 的 agent 才收敛：别的 preset 的 agent 不该被我们碰。 */
 export declare function isCapitalAgent(ctx: PolicyContext, agent: AgentLike | undefined): boolean;
-/**
- * 根收敛的**现场记录**（取证用，不改任何行为）。
- *
- * 为什么必须有：`registerRootToolPolicy` 有三条互不相同的静默出口——读不到 registry、
- * `composedPreset` 判 false、逐名 `restrict()` 抛错被 catch 跳过（此时 outcome 仍记
- * `restricted`）。三条都**不留痕迹**，而桌面端不落盘 `ctx.logger`，于是"收敛没生效"这件事
- * 在桌面端等于不可观测。2026-09-30 桌面端实测：Capital 根会话的 `request.header.tools`
- * 里 `pwsh` / `request_data` / `dc_status` / `render_chart` 全在，就是这条不可观测让它
- * 一路只表现为"模型不太守纪律"。
- *
- * 读法：`dc_status` 的 `root_tool_policy` 字段（模型可见、可回传，不依赖宿主日志）。
- */
+/** Allows any Capital preset; guards for role children must use this, not the root id. */
+export declare function isCapitalPresetAgent(ctx: PolicyContext, agent: AgentLike | undefined): boolean;
+/** Diagnostic record surfaced via `dc_status`: silent convergence exits leave no other trace. */
 export interface RootPolicyProbe {
-    /** 根 Agent 会话 id（子 Agent 也有 id，用来区分两条路径）。 */
     agentId: string | undefined;
     root: boolean;
-    /** `composedPreset` 的原样返回值；`'no-registry'` = registry 或方法不在，`'error'` = 它抛错。 */
     presetId: string;
-    outcome: 'pending' | 'restricted' | 'unavailable' | 'skipped' | 'not-capital';
-    /** 真正被 `restrict({deny})` 接住的工具名。 */
+    outcome: 'pending' | 'restricted' | 'unavailable' | 'skipped' | 'not-capital' | 'guard-denied';
     denied: string[];
-    /** `restrict()` 抛错因而被静默跳过的名字——非空就说明收敛只成功了一部分。 */
+    /** Non-empty means `restrict()` threw for those names and convergence was partial. */
     failed: string[];
 }
-/** 最近 {@link MAX_PROBES} 条收敛现场（进程内；不落盘，随宿主进程生灭）。 */
+/** Shares the convergence channel so opened-mode and call-level failures line up. */
+export declare function recordGuardDecision(ctx: PolicyContext, exec: GuardedExecution | undefined, toolName: string): void;
 export declare function rootPolicyProbes(): RootPolicyProbe[];
-/** 只给测试用：清空现场记录，避免用例之间互相污染。 */
 export declare function resetRootPolicyProbes(): void;
-/**
- * 只对根 Agent 生效地 deny {@link ROOT_AGENT_DENIED_TOOLS}。
- *
- * 逐名 restrict：`tools.restrict()` 对"本 scope 看不到的名字"会抛错（别的 preset、或行还没挂载），
- * 逐名调用把这种"本来就不该有"的情况变成无害跳过，而不是整批失败。
- * 任何异常都不抛出：调用方是 agent 创建路径，宁可少收敛也不能挡住建 agent。
- */
+/** Per-name deny on the root only; name-not-visible throws become harmless skips. Never throws: called on agent creation. */
 export declare function restrictRootAgentTools(agent: AgentLike | undefined, record?: {
     denied: string[];
     failed: string[];
 }): RootToolPolicyOutcome;
-/**
- * 在**根 Agent 自己的 scope** 上装 `ocr` 的调用级闸门（子 Agent 不装：`url` 形态归它们）。
- *
- * 与 `restrictRootAgentTools` 同一个监听、同一份判据；guard 不可用或安装异常都不影响
- * 已经完成的 deny 收敛（宁可少一层闸门，不能挡住建 agent）。
- */
-export declare function installRootOcrGuard(agent: AgentLike | undefined): (() => void) | undefined;
-/** `tool-fs` 的写口工具名（唯一一份）：`read` / `read_image` 是只读口，不在名单。 */
+/** Install globally once; created-time identity misses manually opened modes. */
+export declare function registerRootOcrGuard(ctx: PolicyContext): void;
 export declare const FS_WRITE_TOOL_NAMES: readonly ["write", "edit"];
-/** fs 写口拒绝文案：指回正确路径（读用 read，落盘走工具回传），并留可恢复的余地。 */
+/** Points at the allowed paths (read, tool returns) instead of leaving the caller stuck. */
 export declare const FS_WRITE_READ_ONLY: string;
-/**
- * `tool-fs` 写口的调用级闸门（**全局**装在插件 ctx 上，一次安装管住本 preset 所有 agent）。
- *
- * 为什么装全局而不是像 `ocr` 那样按 agent 装：`agent/created` 的落层时机随宿主形状漂移
- * （桌面端 restrict 不写进链路层，见 `docs/dev/bash-gate.md` 的实测记录），而 guard 按
- * `exec.agent` 取链路、与实例绑哪层无关——这正是那份文档里声明的备选方向，先在写口上落地。
- *
- * ⛔ 全局 guard 会吃到本进程**所有**调用，所以判据必须 fail-**open**：registry 读不到、
- * `composedPreset` 抛错、拿不到 agent 的形状一律放行——宁可少拦一层（`ROOT_AGENT_DENIED_TOOLS`
- * 还在视图层兜着），也绝不能把别的 preset（开发会话的 read / write / edit）吃掉。
- * 拒绝只发生在"能确证调用方属于本 preset"时。
- */
+/** Global call-level fs guard: the host global layer registers write/edit, so per-name restrict
+ * only shrinks children. Fail open unless a Capital preset is confirmed. */
 export declare function fsWriteGuardReasonFor(ctx: PolicyContext): (execution: GuardedExecution) => string | undefined;
-/**
- * 装 {@link fsWriteGuardReasonFor}。guard 不可用或安装异常都不外抛（调用方是装配路径）；
- * disposer 由 `ctx.effect` 持有，随本 fiber 释放。
- */
 export declare function registerFsWriteGuard(ctx: PolicyContext): void;
-/**
- * 注册 `agent/created` 监听。监听器只做一件事：对本 preset 的根 Agent 收敛一次。
- *
- * 注册位置是 Root context（未打标签），因此能收到全部 agent；`agentPresets` 负责筛出本 preset。
- * Root 监听器不随本 fiber 卸载，所以显式用 `ctx.effect` 持有它的 disposer。
- */
-export declare function registerRootToolPolicy(ctx: PolicyContext): void;
+export interface RootToolPolicyOptions {
+    /** Host policy passes false: family rows already close the surface, so record only. */
+    deny?: boolean;
+}
+export declare function registerRootToolPolicy(ctx: PolicyContext, options?: RootToolPolicyOptions): void;
 export {};

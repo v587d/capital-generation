@@ -1,10 +1,7 @@
 /**
- * SSRF-gated local HTTP fetcher used after AnySearch extraction fails.
- *
- * Known limitation: DNS is resolved before each request, but the resolved IP is
- * not pinned into the subsequent HTTP connection. A DNS rebinding window remains
- * between validation and connect. Closing that window would require a custom
- * dispatcher; this module keeps the same explicit trade-off as dsh-search-first.
+ * SSRF-gated local HTTP fetcher, used after AnySearch extraction fails.
+ * Known limit: DNS resolves per request but the IP is not pinned to the connection,
+ * so a rebinding window remains (same trade-off as dsh-search-first).
  */
 
 import { htmlToMarkdown, stripInvisibleText } from './html-markdown.js'
@@ -114,8 +111,7 @@ function parseIpv6(address: string): number[] | null {
 
 function isPrivateIpv4(address: [number, number, number, number]): boolean {
   const [first, second, third] = address
-  // 100.64/10 覆盖 100.64.0.0 ~ 100.127.255.255，因此阿里云元数据端点
-  // 100.100.100.200 已被 `first===100 && second>=64 && second<=127` 这条挡住。
+  // 100.64/10 also covers 100.100.100.200 (cloud metadata endpoint).
   return first === 0
     || first === 10
     || first === 127
@@ -131,7 +127,7 @@ function isPrivateIpv4(address: [number, number, number, number]): boolean {
     || first >= 224
 }
 
-/** 两个 16 位组 → 点分 IPv4（用于 6to4 / Teredo 内嵌地址解出）。 */
+/** Two 16-bit groups -> dotted IPv4 (for 6to4 / Teredo embedded addresses). */
 function groupsToIpv4(high: number, low: number): [number, number, number, number] {
   return [high >> 8, high & 0xff, low >> 8, low & 0xff]
 }
@@ -149,10 +145,10 @@ export function isPublicIp(address: string): boolean {
   const isMappedIpv4 = groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff
   if (isMappedIpv4) return !isPrivateIpv4(groupsToIpv4(groups[6], groups[7]))
 
-  // 6to4（2002::/16）把 IPv4 明文嵌在第 2、3 组：`2002:7f00:0001::` 即 127.0.0.1。
+  // 6to4 (2002::/16) embeds IPv4 in groups 2-3; Teredo (2001:0::/32) in groups
+  // 7-8 bitwise-negated, plus server IPv4 in 3-4 — decode, or the prefix bypasses
+  // the private v4 table.
   if (groups[0] === 0x2002) return !isPrivateIpv4(groupsToIpv4(groups[1], groups[2]))
-  // Teredo（2001:0000::/32）的客户端 IPv4 在第 7、8 组按位取反存储（服务端 IPv4 在第 3、4 组，
-  // 一并校验）：解出内嵌 v4 后递归判定，否则 `2001::` 前缀会绕过整张私网 v4 表。
   if (groups[0] === 0x2001 && groups[1] === 0x0000) {
     const client = groupsToIpv4(~groups[6] & 0xffff, ~groups[7] & 0xffff)
     const server = groupsToIpv4(groups[2], groups[3])
@@ -195,20 +191,14 @@ function validateUrl(input: string): URL {
   return url
 }
 
-/** 可展示链接的形态：字面 http(s) 开头，且整串不含空白与控制符。 */
+/** Display form of a link: literal http(s), no whitespace or control chars. */
 const HYPERLINK_PATTERN = /^https?:\/\/[^\s\u0000-\u001F\u007F-\u009F]+$/u
 
 /**
- * 上游返回的 URL 字段（搜索结果的 `url`、各来源条目的 `url`）会**变成用户可点击的
- * markdown 链接**（docs/dev/web-retriever.md §4.2 回传引用格式），所以这里按"要展示"的口径再收一道；
- * `validateUrl` 是"要请求"的口径，抛错语义不适合逐条字段。
- * 返回 `''` 表示这个值不配成为链接，调用方据此**丢字段**（不是丢条目）：
- * - 非 http(s) 协议：`javascript:` / `data:` 点下去就是执行；
- * - 含空白或控制符：换行能把后半截甩出链接语法，变成正文里的新内容；
- * - 带凭据：`https://sseinfo.com.cn@evil.example/` 显示的是官方域名、跳的是别的站；
- * - 超长串：不是链接该占的体积（条目的输出预算见 `tools.ts` 的 `SOURCE_OUTPUT_BUDGET_CHARS`）。
- * 返回**剥完不可见字符的原串**而不是 `url.toString()`：后者会把非 ASCII 路径按
- * percent-encoding 展开（中文 URL 一字 9 字符），模型引用时白白吃掉预算。
+ * Upstream URLs become clickable markdown, so: http(s) only (javascript:/data: execute),
+ * no whitespace/control chars (newlines escape the link), no credentials (displayed host
+ * != target), length cap. Raw string, not `href`, to avoid percent-encoding non-ASCII;
+ * `''` means drop the field, never the item.
  */
 export function safeUrl(value: unknown, maxChars = LOCAL_FETCH_MAX_URL_LENGTH): string {
   if (typeof value !== 'string') return ''
@@ -303,15 +293,9 @@ async function assertAllowedHost(
 }
 
 /**
- * 「把这条 URL 交给**别人**去取」的闸门：只判形态与主机，不发任何请求。
- *
- * `ocr` 的 `url` 形态本机不抓这个文件——上游解析服务替我们取。但本插件不能成为
- * "把内网 URL 交给第三方去戳"的通道，所以这里复用与本机直连**同一份**主机校验
- * （形态走 `safeUrl` + `validateUrl`，公网性走 `assertAllowedHost`），只是跳过后面的
- * 重定向与体积那几步。SSRF 面因此不新长第二份实现，也不会随两处漂移。
- *
- * 返回**原串**（不是 `url.href`）：`href` 会把非 ASCII 路径 percent-encode 展开，
- * 白吃输出预算；`allowPrivate` 在这里恒为 false，不提供开关——关掉的不是我们的风险面。
+ * Gate for a URL fetched by someone else (ocr url form): same shape + public-host
+ * check, no request. `allowPrivate` is always false — that risk is not ours to waive.
+ * Returns the raw string (href would percent-encode non-ASCII and eat budget).
  */
 export async function assertPublicUrlTarget(
   value: unknown,
@@ -341,13 +325,8 @@ function isSupportedContentType(mime: string): boolean {
 }
 
 /**
- * 兼容性放行：把 JSON 当成 `text/javascript` 风格的 MIME 也算 JSON。
- *
- * 为什么需要它：2026-09-24 实测 `sns.sseinfo.com/allcompany.do`（上证e互动公司列表）返回
- * `json/javascript;charset=UTF-8`，正文是标准 JSON。严格按 `application/json` 判定会把
- * 一个**正常的 JSON 接口**判成 `UNSUPPORTED_CONTENT_TYPE`——本仓此前只见过
- * `application/json` / `+json`，所以这条是接入该来源时才暴露的。安全性不受影响：
- * 正文仍要 `JSON.parse` 通过，解析失败照旧报错，只是不再因为 MIME 拼法而误拒。
+ * Accept javascript-style MIME spellings: sseinfo returns `json/javascript`.
+ * Safe because the body must still pass JSON.parse.
  */
 function isJsonMime(mime: string): boolean {
   return mime === 'application/json'
@@ -358,14 +337,8 @@ function isJsonMime(mime: string): boolean {
 }
 
 /**
- * 响应头**完全缺失** Content-Type 时的保守嗅探。
- *
- * 为什么需要它：实测 `https://www.cls.cn/detail/2188659` 的 GET 响应**不带任何
- * Content-Type**（同一 URL 的 HEAD 却带 `text/html`），而正文是完好的 SSR HTML。
- * 原实现"缺头即拒"会把这类站点误判成 `UNSUPPORTED_CONTENT_TYPE`。
- *
- * 边界（有意保守）：只在**缺头**时启用；头存在但不支持的类型（如 `application/pdf`）
- * 仍然照旧拒绝，不放宽既有内容类型闸门。判定只认正文开头的明确标记，认不出就维持失败。
+ * Conservative sniff used only when Content-Type is entirely missing (some hosts
+ * serve HTML without it); a present-but-unsupported type is still rejected.
  */
 function sniffMissingContentType(text: string): 'html' | 'json' | undefined {
   const head = text.slice(0, 512).replace(/^\uFEFF/u, '').trimStart().toLowerCase()
@@ -388,16 +361,12 @@ interface ReadBodyResult {
   charTruncated: boolean
 }
 
-/** 错误响应体的摘录上限：够指认原因就停，不拿它当第二条正文通道。 */
+/** Error-body excerpt cap: enough to name the cause, not a second content channel. */
 const ERROR_DETAIL_MAX_CHARS = 180
 
 /**
- * 把 4xx/5xx 的**响应体**读成一小段可展示的缘由。
- *
- * 为什么必须带：2026-09-25 实测 PaddleOCR 对某个 PDF 直链回 `HTTP 400` +
- * `{"code":10004,"msg":"文件格式不支持"}`——只报状态码，模型面对 `local fetch returned HTTP 400`
- * 什么也决定不了（换链接？换形态？放弃？）。原因在上游写的正文里，不在我们造的码里。
- * 读失败一律吞掉返回空串：这是给失败**加**信息，不能反过来把原始失败弄丢或改成另一种失败。
+ * Surface the upstream reason (e.g. HTTP 400 + `{"code":10004,...}`) in the error;
+ * read failures are swallowed so the original failure is never lost.
  */
 async function errorDetail(response: Response, signal: AbortSignal): Promise<string> {
   try {
@@ -469,42 +438,23 @@ async function readBody(
 }
 
 /**
- * 请求描述符：`createLocalFetcher`（GET+markdown 化，回退链用）与来源工具
- * （`src/web-retriever/sources.ts`，硬编码主机的 JSON/HTML 接口）共用同一个出口校验。
- *
- * 为什么共用而不是各写一份：出口校验（URL 合法性 + DNS 公网 IP 闸门 + 手动重定向重校验 +
- * 大小/超时上限）一旦有第二份实现，两份就会各自漂移，而**安全闸门漂移不会报错**——
- * 本仓在"同一个便利能力接在多个入口、只覆盖接好的那个"上已经踩过两次（AGENTS.md §9.7）。
+ * Request descriptor shared by `createLocalFetcher` (GET + markdown for fallback)
+ * and the named-source tools, so there is exactly one egress gate.
  */
 export interface HttpRequest {
   url: string
   method?: 'GET' | 'POST'
-  /** 额外请求头（如上证e互动要求 `Referer`）。仅由来源配方内部提供，不接受模型入参。 */
+  /** Extra headers (e.g. Referer); source recipes only, never model input. */
   headers?: Record<string, string>
-  /**
-   * 请求体。字符串按 `application/x-www-form-urlencoded` 发（互动易第二步要求 POST 但 body 为空）；
-   * `FormData` 则**故意不写 content-type**——boundary 必须由实现自己带，写死就是把请求写坏。
-   */
+  /** String body -> x-www-form-urlencoded; FormData sets no content-type (impl supplies the boundary). */
   body?: string | FormData
-  /** 覆盖本次请求的 accept 头；省略用默认。 */
+  /** Override the accept header for this request. */
   accept?: string
-  /**
-   * 正文编码。省略时用响应头声明的 charset，缺省 UTF-8。
-   *
-   * 为什么需要**工具内部**的显式声明：2026-09-24 实测 `basic.10jqka.com.cn` 声明
-   * `content-type: text/html`（**不带 charset**）而正文是 **GBK**——按 UTF-8 解会产出 11,800 个
-   * U+FFFD 替换字符，中文全部不可读、正则全部失配（`gbk` 解码后 0 个替换字符）。
-   * ⚠️ 这个字段**绝不能暴露成模型入参**：配错编码只会静默产出乱码，属"看起来成功"的坏形态。
-   * 与 `headers` 一样，只由来源实现按硬编码知识填写。
-   */
+  /** Body encoding, overrides the response charset. Source-internal: a wrong value silently mojibakes. */
   encoding?: string
   /**
-   * 逐请求覆盖响应体/正文上限（省略用 `LocalFetchOptions` 的全局值）。
-   *
-   * 为什么要覆盖而不是把全局值调大：全局 `maxBytes` 是给"抓一个网页正文"定的（512 KB），
-   * 网页抓取的响应体积就是风险体积；OCR 结果 JSONL 是**我们自己提交出去再取回来**的解析产物
-   * （实测 15 页研报 258 KB），把它挤进网页的额度会让大文档静默 `truncated`——
-   * 而截断的 JSONL 是解析失败，不是"少读了几条"。调大全局值等于放宽所有网页出口。
+   * Per-request caps: global ones fit a web page, but parsed OCR JSONL can hit 258 KB
+   * and a truncated result is a parse failure, not "a few fewer rows".
    */
   maxBytes?: number
   maxContentChars?: number
@@ -513,7 +463,7 @@ export interface HttpRequest {
 export interface HttpOutcome {
   url: string
   status: number
-  /** 正文原文，**不做任何转换**（JSON 原文直通、HTML 原样返回，由工具自己决定如何呈现）。 */
+  /** Raw body, no conversion (JSON passes through, HTML stays raw; the tool decides). */
   text: string
   truncated: boolean
 }
@@ -583,16 +533,15 @@ export function createHttpRequester(options: LocalFetchOptions): {
           throw new LocalFetchError('HTTP', `local fetch returned HTTP ${response.status}${await errorDetail(response, controller.signal)}`)
         }
         const type = contentType(response)
-        // 缺头（mime 为空）不当场拒绝：正文读进来嗅探后再判。头存在但不支持的类型
-        // 仍然在读正文前直接拒绝（保持既有闸门与快速失败）。
+        // Missing Content-Type is deferred to body sniffing; a present unsupported
+        // type still fails before reading the body.
         const missingContentType = type.mime === ''
         if (!missingContentType && !isSupportedContentType(type.mime)) {
           throw new LocalFetchError('UNSUPPORTED_CONTENT_TYPE', `unsupported content type: ${type.mime}`)
         }
         const body = await readBody(
           response,
-          // 工具内部的显式声明优先于响应头：实测存在"头不带 charset 但正文是 GBK"的站点
-          // （`basic.10jqka.com.cn`），按 UTF-8 解会整页变成替换字符（见 `HttpRequest.encoding`）。
+          // Source-declared encoding wins: some hosts omit charset but serve GBK.
           input.encoding ?? type.charset,
           input.maxBytes ?? options.maxBytes,
           input.maxContentChars ?? options.maxContentChars,
@@ -625,10 +574,8 @@ export function createHttpRequester(options: LocalFetchOptions): {
 }
 
 /**
- * 回退链用的抓取器：GET 取回后按内容类型决定**呈现**（JSON 原文直通、HTML 转 markdown）。
- *
- * 出口校验 / 重定向 / 上限 / 取消语义全部委托给 {@link createHttpRequester}——
- * 这里只保留"如何呈现正文"这一层，避免同一套闸门出现第二份实现（见 `HttpRequest` 注释）。
+ * Fallback fetcher: GET, then choose presentation (JSON raw, HTML -> markdown).
+ * Egress, redirects, limits and cancellation all delegate to `createHttpRequester`.
  */
 export function createLocalFetcher(options: LocalFetchOptions): {
   fetch(url: string, signal?: AbortSignal): Promise<LocalFetchOutcome>
@@ -636,23 +583,13 @@ export function createLocalFetcher(options: LocalFetchOptions): {
   const requester = createHttpRequester(options)
 
   async function fetchLocal(input: string, callerSignal?: AbortSignal): Promise<LocalFetchOutcome> {
-    // accept 头由 requester 统一设置（与既有断言一致：HTML/文本优先、JSON 兜底）。
+    // The accept header is set centrally by the requester (HTML/text first, JSON last).
     const outcome = await requester.request({ url: input }, callerSignal)
     const head = outcome.text.slice(0, 512).replace(/^\uFEFF/u, '').trimStart().toLowerCase()
     const looksHtml = /^(?:<!doctype|<html|<\?xml|<!--|<[a-z][a-z0-9-]*(?:\s|\/|>))/u.test(head)
-    // JSON 必须**原文直通**，不得走 markdown 化。
-    //
-    // 2026-09 实测缺陷：此前所有正文一律交给 htmlToMarkdown，而转义器会把 JSON 改坏——
-    // 数组括号变 `\[ ... \]`（`JSON.parse` 不再成立）、字段名 `content_text` 变
-    // `content\_text`（按字段名读取不可靠）、`<script>` 内容被当标签删掉（数据丢失）。
-    // 内容类型闸门与 skill 都向模型承诺支持 JSON，此前的行为是"承诺收下、交付却改坏"。
-    //
-    // ⚠️ 呈现判据**只看正文**，不看响应头：requester 已按内容类型闸门决定"收不收"，
-    // 而实测存在响应头与正文不一致的站点（`sniffMissingContentType` 的注释记着
-    // cls.cn 详情页的实测案例），与其再信一次头，不如直接认正文。
-    // JSON 原样返回：用**正文**判据而不是响应头——实测 `json/javascript` 这类 MIME
-    // 在严格 `application/json` 判定下不算 JSON（见 `isJsonMime` 的记录），
-    // 且 JSON 正文必然以 `{` / `[` 开头，判定是确定的。
+    // JSON must pass through raw: the turndown converter escapes brackets, field
+    // names and drops script-like content, corrupting it. Judge by the body, not
+    // the header (some hosts send mismatched or javascript-ish MIME types).
     const looksJson = head.startsWith('{') || head.startsWith('[')
     if (looksJson || !looksHtml) {
       return {

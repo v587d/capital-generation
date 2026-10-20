@@ -1,18 +1,10 @@
 #!/usr/bin/env node
 /**
- * 巡检看门狗：**独立 workflow** 调它，检查 `data-source-contract.yml` 的调度到底还在不在跑。
- *
- * 为什么必须独立：调度被 GitHub 静默停用（仓库 60 天无活动）时，写在同一个文件里的自查步骤
- * 也跟着不跑——两个独立调度器，其中一个才发现另一个死了。这也是 AGENTS.md §9.7 那一族的运维版：
- * 「探针没跑」和「探针全绿」在 Actions 列表里长得一模一样。
- *
- * 判据是**运行记录**，不是"有没有发 Issue"：巡检全绿本来就不发单，拿 Issue 当心跳会把正常判成故障。
- * 口径（只认 schedule / 不看运行结论 / 判上一档）抽在 `lib/contract-report.mjs` 的 `heartbeatVerdict`
- * 里——脚本只在 CI 跑，lib 才钉得住离线测试。
- *
- * ⛔ 健康时也要把仍开着的**自家**告警关掉：`publish-contract-issue.mjs` 明确拒绝关这种单
- * （它一个能力名都不提，见 `closeDecision`），两边都以为对方收拾 = 一张假告警永远挂着，
- * 而"永远挂着的第一张告警"会把之后所有真告警都稀释成噪声。
+ * Watchdog run from a separate workflow: it verifies `data-source-contract.yml` is still scheduled.
+ * A silently disabled schedule also skips in-file self-checks, so only an independent scheduler
+ * can notice; the criterion is run records, not issues (green runs open none).
+ * ⛔ Close still-open alarms of our own when healthy: publish refuses to close them, and a
+ * permanent first alarm dilutes every later real one.
  */
 import { parseArgs } from 'node:util'
 import { appendFile } from 'node:fs/promises'
@@ -35,7 +27,7 @@ const verdict = heartbeatVerdict(runs.workflow_runs)
 const newestAge = verdict.newest
   ? ((Date.now() - new Date(verdict.newest.created_at).getTime()) / 3_600_000).toFixed(1) : null
 
-// 无论有没有故障都留一行——看门狗自己静默停摆时，这是唯一能事后对账的痕迹。
+// Always append one line: if the watchdog itself stops, this is the only trail left.
 const line = `看门狗自检（${new Date().toISOString()}）：上一档排程 ${verdict.due.toISOString()}`
   + `（北京 ${beijing(verdict.due)}）之后 \`schedule\` 记录 ${verdict.heartbeat.length} 条；`
   + `最近一次 schedule 记录 ${verdict.newest ? `${verdict.newest.created_at}（${newestAge} 小时前）` : '无'}。\n`
@@ -48,7 +40,7 @@ const alarms = (opens ?? []).filter(isWatchdogAlarm)
 if (verdict.ok) {
   const last = verdict.heartbeat.map((run) => run.created_at).sort().at(-1)
   console.log(`${WORKFLOW} 在上一档（北京 ${beijing(verdict.due)}）之后有 ${verdict.heartbeat.length} 条 schedule 记录，调度器活着。`)
-  // 只关自己开的单：巡检日报单由 publish 脚本按能力逐条复核后再关，这里无权插手。
+  // Only our own alarms: daily report issues are closed by the publish script per capability.
   for (const issue of alarms) {
     await api.post(`/repos/${api.repo}/issues/${issue.number}/comments`, {
       body: `调度器已确认在跑：\`${WORKFLOW}\` 最近一次 \`schedule\` 记录是 ${last}。本单关闭。`,

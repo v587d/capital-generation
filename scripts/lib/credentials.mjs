@@ -1,10 +1,7 @@
 /**
- * 读取宿主 credentials 引用（脚本侧专用；运行时走宿主 credentials 服务，见 src/index.ts）。
- *
- * 为什么要有它：`smoke-fuyao.mjs` 与 Wind 探针都要拿 Key，而两处各写一遍正则就是
- * AGENTS.md §9.7 那一族——Key 解析改了只改一处，另一处静默失效。
- * 顺序与运行时一致：环境变量优先，其次 `~/.dsh/.credentials.yaml`。
- * ⛔ 只返回字符串，任何调用方都不许把它打印或落盘。
+ * Script-side credential lookup by ref name (runtime uses the host credentials service).
+ * Env var wins over ~/.dsh/.credentials.yaml, matching runtime order. ⛔ Returned strings must
+ * never be printed or written by any caller.
  */
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -18,7 +15,7 @@ export function resolveCredential(ref) {
     const matched = new RegExp(`^\\s*${ref}:\\s*(.+?)\\s*$`, 'm').exec(text)
     if (matched) return matched[1].replace(/^["']|["']$/g, '')
   } catch {
-    // 凭据文件不可读时由调用方决定怎么报缺 Key
+    // Unreadable credential file: the caller decides how to report the missing key.
   }
   return undefined
 }

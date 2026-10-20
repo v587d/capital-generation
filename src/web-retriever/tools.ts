@@ -40,9 +40,8 @@ import {
 
 interface ToolRuntimeLike { register(definition: unknown): () => void }
 /**
- * exec 形状**只认框架那一份**（`src/tool-exec.ts`）：`ocr` 要拿调用方 session 去落盘，
- * 如果这里自造一个只有 `id` 的形状，本地测试就会绕过 `header.cwd` 这条真实路径
- * （AGENTS.md §9.7 的第 2 条事故正是 session 读取漏接框架形状）。
+ * Use the framework's exec shape (`src/tool-exec.ts`): `ocr` needs the caller
+ * session; a self-made shape would bypass the real `header.cwd` path.
  */
 type ToolExecLike = AgentExecutionLike
 
@@ -91,19 +90,15 @@ function integer(value: unknown, name: string, min: number, max: number): number
 }
 
 /**
- * 检索回声：按调用方 session 维护两类只读信息——
- * 1. recent_retrievals：最近几次检索流水（跨 anysearch 与 wind_docs，上限 RECENT_TRACE_LIMIT），
- *    供模型在换 provider 前盘点已搜过什么、避免重复搜索；
- * 2. provider_tally：各 provider 的累计调用次数（不封顶），让"每个 provider 一般 5 次收敛"
- *    的经验法则变成看得见的计数器。
- * 两者都是纯提醒不拦截；内存态、不落盘，随会话消亡。WebRetriever / WindClient 保持无状态。
+ * Per-caller-session, in-memory: capped recent retrievals plus per-provider tally.
+ * Advisory only (never blocks); retriever/client stay stateless.
  */
 interface RetrievalEcho {
   recent: RetrievalTrace[]
   tally: Record<string, number>
-  /** 刚写入的流水条目（存储态引用），供调用方回填 fetch 的 `via`。 */
+  /** The stored trace just written, so callers can backfill `via`. */
   entry: RetrievalTrace
-  /** 重新快照当前流水；回填 `entry.via` 后用它取最新的 recent_retrievals。 */
+  /** Fresh snapshot after backfilling `entry.via`. */
   snapshot: () => RetrievalTrace[]
 }
 
@@ -158,24 +153,9 @@ function fetchOutput(result: Awaited<ReturnType<WebRetriever['fetch']>>, recent:
 }
 
 /**
- * 把失败回执变成**工具错误**。
- *
- * 为什么必须抛而不是正常返回：DSH 用 `isError` 表达工具失败，而 `dsh-tools` 的
- * `createSuccessResult` 硬编码 `isError: false`——**返回值没有任何办法标记失败**，
- * 唯一通道是从 `execute` 抛出（`dispatchToolBody` 的 catch → `toolErrorResult`，
- * 产出 `{ text: "Error: …", isError: true, error: { message } }`）。官方
- * `web_fetch` / `web_search` 就是抛 `WebError`。
- *
- * 2026-09 实测缺陷：本工具此前把失败做成 `ok:false` 信封**正常返回**，于是子 Agent
- * 会话日志里 7 次实际失败的抓取全部记成 `isError: false`，UI 与模型都当成成功，
- * 任何基于 `isError` 的重试/统计/压缩逻辑也一并失效。
- *
- * 抛出的消息带**完整结构化回执**，所以 `via` / `fallback` / `local_error` /
- * `recent_retrievals` / `provider_tally` 与来源标注协议字段一个都不丢。
- *
- * 范围：只覆盖 `web_retriever_fetch`（本地回退所在工具）。`anysearch_search`
- * 与两个 `wind_docs_*` 工具的错误信号是同一类问题，但按 2026-09 决定**不在本次改动**
- * 内，审计与后续安排见 `docs/design/tool-result-error-signal.md`。
+ * Tool failures must be thrown: DSH hardcodes `isError: false` on success results,
+ * so a returned `ok:false` envelope is logged as success. The thrown message carries
+ * the full structured receipt so via/fallback/local_error survive.
  */
 function throwToolFailure(payload: Record<string, unknown>): never {
   throw new Error(JSON.stringify(payload))
@@ -202,24 +182,18 @@ const WIND_ANNOUNCEMENTS_UPSTREAM = 'get_company_announcements'
 const WIND_NEWS_UPSTREAM = 'get_financial_news'
 
 /**
- * 注册 web_retriever 的检索工具：anysearch（广度）两工具 + wind_docs（public_document
- * 精准）两工具 + `ocr`（文档解析）一工具。wind 与 ocr 都**无条件注册**——Key 缺失/服务
- * 不可用只影响调用结果（错误信封），不影响工具注册与子 Agent 创建。
- *
- * `ocr` 与 `datasetStore` 共用 workspace 落盘，而检索回声（`recent_retrievals` /
- * `provider_tally`）**必须**与另外四个工具共享同一份闭包，所以它在这同一个 `definitions`
- * 数组里注册，不另起一个注册函数。
+ * Search family: anysearch search/fetch plus the two wind_docs tools. `echo` is
+ * per registration (one family row), so its receipts cover only this family.
  */
-export function registerWebRetrieverTools(
+export function registerSearchTools(
   ctx: Context,
   retriever: WebRetriever,
   windClient: WindClient,
-  ocr: OcrToolDependencies,
+  echo = createRetrievalEcho(),
 ): void {
   const tools = ctx.get('tools') as ToolRuntimeLike | undefined
   if (!tools) return
 
-  const echo = createRetrievalEcho()
   const trace = (exec: ToolExecLike, provider: string, tool: string, query: string) =>
     echo(exec, { provider, tool, query, at: Date.now() })
 
@@ -252,7 +226,7 @@ export function registerWebRetrieverTools(
         const result = await retriever.fetch(url, exec.signal)
         entry.via = result.via
         const payload = fetchOutput(result, snapshot(), tally)
-        // 失败必须变成工具错误（isError: true），不能做成"正常返回的失败信封"。
+        // A failure must throw (isError: true); a successful-looking error envelope is not.
         if (result.ok === false) throwToolFailure(payload)
         return payload
       },
@@ -297,26 +271,6 @@ export function registerWebRetrieverTools(
         return windOutput(WIND_NEWS_TOOL, query, result, recent, tally)
       },
     },
-    {
-      name: 'ocr',
-      timeoutMs: OCR_TOOL_TIMEOUT_MS,
-      description: '把一份 PDF 或图片解析成模型可读的 markdown（PaddleOCR 文档解析，需要 Token）。一次调用只走一种形态：url=公网 .pdf 直链（本机不抓文件，由上游取）；file=session workspace 内的相对路径（pdf/png/jpg/jpeg/webp/bmp/tiff，@mention 带来的开头 @ 可省）；job_id + doc_id=继续等上一次 status:pending 回执里的作业（**不重复提交、不再花钱**）；doc_id=读已落盘的结果，可配 pages（"1-3" / "5" / "2-4,9"，一次最多 8 页）或 query（关键词定位，回命中片段与页号）。⚠️ 作业**整篇一次算完**：pages 只影响读、不影响算价，也不会更便宜；同一份文档重复调用会命中 doc_id 缓存、不再出网。结果一律落 capital-data/ocr/<doc_id>/，回执在预算内给全文、超预算只给页索引与第 1 页。没有 Token、解析失败或文档超页时须如实说明边界：不得把标题当正文引用，不得把 PDF 链接当正文来源标注（正文来自解析结果，引用写 doc_id 与页号）。',
-      parameters: jsonObject({
-        url: { type: 'string', description: '公网可达的 .pdf 直链（http/https，不含凭据，不接受内网地址与 IP 字面量）' },
-        file: { type: 'string', description: 'session workspace 内的相对路径，例如 refs/贵州茅台研报.pdf' },
-        job_id: { type: 'string', description: '上一次回执 status:pending 里的 job_id；必须与同一回执的 doc_id 一起传' },
-        doc_id: { type: 'string', description: '解析结果标识（形如 ocr_1a2b3c4d5e6f），来自回执' },
-        pages: { type: 'string', description: '配合 doc_id 读取的页区间，1 起始闭区间，例如 "2-4,9"；一次最多 8 页' },
-        query: { type: 'string', description: `配合 doc_id 的关键词定位，最多 ${OCR_MAX_QUERY_CHARS} 字符` },
-        limit: { type: 'integer', description: `query 命中数上限 1~${OCR_MAX_QUERY_LIMIT}，默认 ${OCR_DEFAULT_QUERY_LIMIT}` },
-        charts: { type: 'boolean', description: '可选，是否启用图表识别（默认 true）；只影响 url/file 形态的这一次提交' },
-        refresh: { type: 'boolean', description: '可选，忽略缓存重新解析（默认 false）；只接受与 url/file 同时传，重跑会再花一次 job' },
-      }, []),
-      output: { schema: { type: 'object', additionalProperties: true }, render },
-      async execute(args: Record<string, unknown>, exec: ToolExecLike) {
-        return runOcr(ocr, trace, args, exec)
-      },
-    },
   ]
 
   for (const definition of definitions) {
@@ -324,16 +278,61 @@ export function registerWebRetrieverTools(
   }
 }
 
-// ── 文档解析面：ocr（PDF / 图片 → markdown，产物一律落盘）───────────────────
+/**
+ * Legacy single-bundle entry: search, wind and ocr tools share one echo, matching
+ * the old monolith behavior.
+ */
+export function registerWebRetrieverTools(
+  ctx: Context,
+  retriever: WebRetriever,
+  windClient: WindClient,
+  ocr: OcrToolDependencies,
+): void {
+  const echo = createRetrievalEcho()
+  registerSearchTools(ctx, retriever, windClient, echo)
+  registerOcrTool(ctx, ocr, echo)
+}
+
+/** `ocr` tool definition shared by the retrieve entry and the root local-only entry. */
+function ocrToolDefinition(ocr: OcrToolDependencies, trace: OcrTrace) {
+  return {
+    name: 'ocr',
+    timeoutMs: OCR_TOOL_TIMEOUT_MS,
+    description: '把一份 PDF 或图片解析成模型可读的 markdown（PaddleOCR 文档解析，需要 Token）。一次调用只走一种形态：url=公网 .pdf 直链（本机不抓文件，由上游取）；file=session workspace 内的相对路径（pdf/png/jpg/jpeg/webp/bmp/tiff，@mention 带来的开头 @ 可省）；job_id + doc_id=继续等上一次 status:pending 回执里的作业（**不重复提交、不再花钱**）；doc_id=读已落盘的结果，可配 pages（"1-3" / "5" / "2-4,9"，一次最多 8 页）或 query（关键词定位，回命中片段与页号）。⚠️ 作业**整篇一次算完**：pages 只影响读、不影响算价，也不会更便宜；同一份文档重复调用会命中 doc_id 缓存、不再出网。结果一律落 capital-data/ocr/<doc_id>/，回执在预算内给全文、超预算只给页索引与第 1 页。没有 Token、解析失败或文档超页时须如实说明边界：不得把标题当正文引用，不得把 PDF 链接当正文来源标注（正文来自解析结果，引用写 doc_id 与页号）。',
+    parameters: jsonObject({
+      url: { type: 'string', description: '公网可达的 .pdf 直链（http/https，不含凭据，不接受内网地址与 IP 字面量）' },
+      file: { type: 'string', description: 'session workspace 内的相对路径，例如 refs/贵州茅台研报.pdf' },
+      job_id: { type: 'string', description: '上一次回执 status:pending 里的 job_id；必须与同一回执的 doc_id 一起传' },
+      doc_id: { type: 'string', description: '解析结果标识（形如 ocr_1a2b3c4d5e6f），来自回执' },
+      pages: { type: 'string', description: '配合 doc_id 读取的页区间，1 起始闭区间，例如 "2-4,9"；一次最多 8 页' },
+      query: { type: 'string', description: `配合 doc_id 的关键词定位，最多 ${OCR_MAX_QUERY_CHARS} 字符` },
+      limit: { type: 'integer', description: `query 命中数上限 1~${OCR_MAX_QUERY_LIMIT}，默认 ${OCR_DEFAULT_QUERY_LIMIT}` },
+      charts: { type: 'boolean', description: '可选，是否启用图表识别（默认 true）；只影响 url/file 形态的这一次提交' },
+      refresh: { type: 'boolean', description: '可选，忽略缓存重新解析（默认 false）；只接受与 url/file 同时传，重跑会再花一次 job' },
+    }, []),
+    output: { schema: { type: 'object', additionalProperties: true }, render },
+    async execute(args: Record<string, unknown>, exec: ToolExecLike) {
+      return runOcr(ocr, trace, args, exec)
+    },
+  }
+}
+
+/** Register only `ocr` (root keeps local document parsing, no search/source tools). */
+export function registerOcrTool(ctx: Context, ocr: OcrToolDependencies, echo = createRetrievalEcho()): void {
+  const tools = ctx.get('tools') as ToolRuntimeLike | undefined
+  if (!tools) return
+  const trace: OcrTrace = (exec, provider, tool, query) => echo(exec, { provider, tool, query, at: Date.now() })
+  const definition = ocrToolDefinition(ocr, trace)
+  ctx.effect(() => tools.register(definition), 'capital-generation.tool(ocr)')
+}
+
+// Document parsing: ocr (PDF / image -> markdown, always persisted)
 //
-// 与前两组的分工：search / fetch 是**检索**工作面，具名来源是**查询**工作面，`ocr` 是
-// **解析**工作面——把一个已经确定的文档变成模型可读的正文。它因此不绑任何具体来源
-// （谁的 `.pdf` 直链都能喂进来），也**不受 `localFetch.enabled` 支配**：那道开关的字面
-// 语义是"允许本机直连提取网页内容"，而这里的文件由上游解析服务取，用户同意的是另一件事
-// （Token 卡片）。判据写在 `docs/dev/web-retriever.md` §4.3。
+// This is the parse workface: not bound to a source, and not gated by
+// `localFetch.enabled` (upstream fetches the file; user consent is the token card).
 
 const OCR_TOOL_TIMEOUT_MS = 240_000
-/** 一次 `pages` 读取的页数上限：与"整篇一次算完"配对，限制的是**回集体积**，不是算力。 */
+/** Read-back cap per `pages` call; limits receipt size, not compute (whole doc was parsed). */
 const OCR_MAX_PAGES_PER_READ = 8
 const OCR_QUERY_WINDOW_CHARS = 320
 const OCR_MAX_QUERY_CHARS = 64
@@ -342,22 +341,19 @@ const OCR_MAX_QUERY_LIMIT = 20
 const OCR_LOCAL_SUFFIXES = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff']
 const PDF_URL_SUFFIX = /\.pdf$/iu
 
-/** `ocr` 的两项依赖：上游客户端 + workspace 落盘（与 Dataset 共用同一份实现）。 */
+/** `ocr` deps: upstream client + workspace store (shared with Dataset). */
 export interface OcrToolDependencies {
   store: WorkspaceDatasetStore
   client: PaddleOcrClient
-  /** 注入以便测试钉住 `created_at`。 */
+  /** Injectable for tests pinning `created_at`. */
   now?: () => number
-  /**
-   * 注入以便测试：`url` 形态的公网性闸门默认走**真实 DNS**（与本机直连同一份实现，§9.7），
-   * 生产路径不传。生产代码里没有任何调用方给它赋值——它只是把 DNS 这一步挪出断言范围。
-   */
+  /** Test-only DNS override; production never sets it. */
   resolveAddresses?: LocalFetchOptions['resolveAddresses']
 }
 
 type OcrTrace = (exec: ToolExecLike, provider: string, tool: string, query: string) => RetrievalEcho
 
-/** 回执统一的错误码（`OcrError` 的码 + 工具侧才可能出现的码）。 */
+/** Receipt error codes: `OcrError` codes plus tool-side ones. */
 type OcrFailureCode =
   | 'NO_CREDENTIAL'
   | 'UPSTREAM'
@@ -370,7 +366,7 @@ type OcrFailureCode =
   | 'DOC_NOT_FOUND'
   | 'STORE_UNAVAILABLE'
 
-/** 工具侧自己判定出来的失败（参数形态、缓存缺失），带一条能照做的 hint。 */
+/** Tool-side failure (argument shape, missing cache) with an actionable hint. */
 class OcrToolError extends Error {
   constructor(readonly code: OcrFailureCode, message: string, readonly hint?: string) {
     super(message)
@@ -388,10 +384,8 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * 半件产物（meta 在、正文不在）怎么修：把**能照抄的那一次调用**写进 hint。
- *
- * 指认来自 meta，不来自调用方——`doc_id` 是内容寻址的，用同一个 source 重跑必然落回同一个
- * `doc_id`，所以这条 hint 是无脑可执行的。认不出 source 形态时只说"重新解析一次"，不编参数。
+ * Build the repair hint from meta: doc_id is content-addressed, so replaying the
+ * stored source lands on the same artifact. Unknown source => generic advice.
  */
 function artifactRepair(sourceKind: 'url' | 'file' | 'job' | undefined, source: string | undefined): string {
   const prefix = sourceKind === 'url' ? 'url:' : sourceKind === 'file' ? 'file:' : undefined
@@ -402,19 +396,14 @@ function artifactRepair(sourceKind: 'url' | 'file' | 'job' | undefined, source: 
   return `再调一次 { ${prefix.slice(0, -1)}: ${argument}, refresh: true } 重新解析（doc_id 由内容寻址，重跑落回同一个产物）`
 }
 
-/**
- * 三条实现各自的异常（`OcrToolError` / `OcrError` / 出口闸门 / `DatasetStoreError`）
- * 翻成**一套**回执码。认不出的仍退回 `INVALID_INPUT` 并照抄消息——绝不假装知道上游
- * 或宿主失败的原因。
- */
+/** Map all implementation errors to one receipt code set; unknown => INVALID_INPUT. */
 function ocrFailure(error: unknown): { code: OcrFailureCode; error: string; hint?: string } {
   if (error instanceof OcrToolError) {
     return { code: error.code, error: error.message, ...(error.hint ? { hint: error.hint } : {}) }
   }
   if (error instanceof OcrError) return { code: error.code, error: error.message }
   if (error instanceof OcrArtifactError) {
-    // 产物坏了不是调用方传错了：说成 INVALID_INPUT 会把模型推到"换个参数再猜"，
-    // 而正确的下一步只有一条——拿 meta 里的 source 重跑那一次解析。
+    // A corrupt artifact is not caller error; the only fix is replaying meta.source.
     return { code: 'RESULT_INVALID', error: error.message, hint: artifactRepair(error.sourceKind, error.source) }
   }
   const code = (error as { code?: unknown } | undefined)?.code
@@ -450,7 +439,7 @@ function ocrFailure(error: unknown): { code: OcrFailureCode; error: string; hint
 
 interface OcrRequest {
   mode: 'url' | 'file' | 'resume' | 'read'
-  /** 检索回声里显示的一行指认（url / 相对路径 / job_id / doc_id）。 */
+  /** One-line label for the retrieval echo (url / path / job_id / doc_id). */
   label: string
   url?: string
   file?: string
@@ -483,10 +472,8 @@ function requireDocId(value: unknown): string {
 }
 
 /**
- * 四形态的**边界归一化**（`docs/dev/tool-schema.md` §9.2：多形态靠可选属性 + 归一化，一个工具名）。
- *
- * 歧义一律响亮拒绝而不是"挑一个"：`url` + `file` 同时给、`pages` 配 `query`、`refresh`
- * 配 `doc_id`——静默选边会让模型以为自己要的东西还在。
+ * Normalize the four input forms here. Ambiguous combinations fail loudly instead
+ * of silently picking one.
  */
 function ocrRequest(args: Record<string, unknown>): OcrRequest {
   const present = (key: string): boolean => args[key] !== undefined && args[key] !== null && args[key] !== ''
@@ -534,7 +521,7 @@ function ocrRequest(args: Record<string, unknown>): OcrRequest {
   return { mode: 'file', label: file, file, charts, refresh }
 }
 
-/** 本地文档路径：剥掉 `@mention` 带进来的开头 `@`，再按后缀放行（真正的归属校验在 store）。 */
+/** Strip a leading `@` from @mention; suffix allowlist only (ownership is checked in store). */
 function normalizeLocalPath(value: string): string {
   const raw = value.startsWith('@') ? value.slice(1).trim() : value.trim()
   const suffix = (raw.includes('.') ? raw.slice(raw.lastIndexOf('.') + 1) : '').toLowerCase()
@@ -581,7 +568,7 @@ function metaFields(meta: OcrArtifactMeta, cached: boolean): Record<string, unkn
   }
 }
 
-/** 排版噪音的量化说明：证明"变小"是剥样式，不是被截断。 */
+/** Quantify cleanup: proves the shrink is style removal, not truncation. */
 function cleanupNote(meta: OcrArtifactMeta): string | undefined {
   if (meta.style_chars_removed === 0 && meta.tables === 0) return undefined
   const parts: string[] = []
@@ -590,10 +577,7 @@ function cleanupNote(meta: OcrArtifactMeta): string | undefined {
   return parts.join('；')
 }
 
-/**
- * `done` 回执的装载：整篇放得下就给全文，否则给页索引 + 第 1 页；连索引都放不下就只给
- * 边界说明。**永不半路截断**——截断的正文会被当成完整正文引用，比少给一页危险。
- */
+/** Whole text if it fits, else page index + page 1; never truncate mid-page. */
 function doneReceipt(artifact: OcrArtifact, input: { cached: boolean; elapsed_ms?: number; echo: RetrievalEcho }): Record<string, unknown> {
   const { meta, document } = artifact
   const cleanup = cleanupNote(meta)
@@ -610,7 +594,7 @@ function doneReceipt(artifact: OcrArtifact, input: { cached: boolean; elapsed_ms
     ? undefined
     : { page: first.page, chars: first.chars, ...(first.heading === undefined ? {} : { heading: first.heading }), text: document.document.slice(first.start, first.end) }
   const withIndex = { ...base, index, note: budgetNote(meta, cleanup, false) }
-  // 判断装载用的是**那一条**note：换措辞后再测会让"放不下"变成"其实放不下"（多 3 个字符也算越界）。
+  // Measure with the exact note being shipped; a rewording could push it over.
   const withPageOne = pageOne === undefined ? undefined : { ...withIndex, page_one: pageOne, note: budgetNote(meta, cleanup, true) }
   if (withPageOne && fitsBudget(withPageOne)) return withPageOne
   if (fitsBudget(withIndex)) return withIndex
@@ -622,8 +606,8 @@ function doneReceipt(artifact: OcrArtifact, input: { cached: boolean; elapsed_ms
 }
 
 /**
- * 超预算时的那句说明必须**算得过来**：早先写的是"整篇 N 字符超出预算 6144"，而 5717 < 6144
- * 也是这句话——被装的从来不只是正文，还有信封与页索引。说成"正文 + 回执装不进"才是事实。
+ * Budget note must be accurate: the budget covers text plus envelope and index,
+ * so say "text + receipt does not fit", not "text exceeds N".
  */
 function budgetNote(meta: OcrArtifactMeta, cleanup: string | undefined, withPageOne: boolean): string {
   const line = `整篇正文 ${meta.chars} 字符连同回执装不进 ${SOURCE_OUTPUT_BUDGET_CHARS} 字符预算：这里给${withPageOne ? '页索引与首页' : '页索引'}，正文用 pages 或 query 取（不再出网、不再花钱）`
@@ -650,7 +634,7 @@ function pendingReceipt(input: {
   }
 }
 
-/** `pages` 形态：整页给，放不下就**整页**从尾部让路（不切半页）。 */
+/** `pages` form: whole pages; overflow drops whole pages from the tail. */
 function pagesReceipt(input: {
   artifact: OcrArtifact
   requested: number[]
@@ -674,7 +658,7 @@ function pagesReceipt(input: {
       ...(entry.heading === undefined ? {} : { heading: entry.heading }),
       text: entry.text,
     }
-    // 第一条永不因预算丢弃以外的理由跳过：单页就超预算时宁可空手报错，也不给半页。
+    // First page is never skipped for budget: a single oversized page errors instead of half-shipping.
     if (!fitsBudget(envelope([...excerpts, item], []))) {
       omitted = input.requested.slice(excerpts.length)
       break
@@ -690,7 +674,7 @@ function pagesReceipt(input: {
   }
 }
 
-/** `query` 形态：命中窗口从尾部裁，永不给出半截列表还假装完整。 */
+/** `query` form: hit windows are trimmed from the tail, never a half list. */
 function queryReceipt(input: { artifact: OcrArtifact; query: string; limit: number; echo: RetrievalEcho }): Record<string, unknown> {
   const { meta, document } = input.artifact
   const found = locateQuery(document, input.query, input.limit, OCR_QUERY_WINDOW_CHARS)
@@ -717,7 +701,7 @@ function queryReceipt(input: { artifact: OcrArtifact; query: string; limit: numb
   }
 }
 
-/** 解析完成后的统一出口：落盘（内容寻址、默认不覆盖）→ 回执。 */
+/** Persist (content-addressed, no overwrite by default), then build the receipt. */
 async function persistAndReceipt(
   deps: OcrToolDependencies,
   input: {
@@ -747,8 +731,8 @@ async function persistAndReceipt(
   try {
     await writeOcrArtifact(deps.store, { session: input.session, meta, document: input.document, signal: input.signal, overwrite: input.refresh })
   } catch (error) {
-    // 两个会话同时在解析同一份文档：后写的撞 createIfAbsent。读回先写的那份即可——
-    // 内容寻址保证两者同文，把它报成失败只是把一次成功说成错误。
+    // Concurrent writers race on createIfAbsent: read back the winner (same content
+    // address) instead of reporting a success as failure.
     if (input.refresh) throw error
     const existing = await readOcrArtifact(deps.store, { session: input.session, doc_id: input.doc_id, signal: input.signal })
     if (!existing) throw error
@@ -758,16 +742,9 @@ async function persistAndReceipt(
 }
 
 /**
- * 失败回执：`{provider, status:'error', ok:false, code, error, hint?}` + 已知的 `doc_id` /
- * `job_id` / 检索回声。
- *
- * 形态归一化（`ocrRequest`）的失败**同样**要走这里：那一层的 `hint` 是"下一步该传什么"，
- * 抛裸 `Error` 就只剩一句中文，模型照旧会再猜一次。回声此时还没有（连请求都无法指认），
- * 所以缺省不带，而不是硬编一个空标签冒充。
- *
- * `spent` 是**本次调用已经产生花费**的指认：`url`/`file` 形态的 `doc_id` 是算出来的、
- * `job_id` 是提交回来的，都不在入参里。失败时把它们交回去，模型才能走"只传 job_id + doc_id
- * 续查"那条不花钱的路；不给就等于把一次已经付费的作业丢在半路。
+ * Error receipt. Normalization failures also land here so their hint survives.
+ * `spent` returns the computed doc_id / submitted job_id for already-paid work,
+ * so the model can resume instead of paying again.
  */
 function ocrErrorReceipt(
   error: unknown,
@@ -840,7 +817,7 @@ async function runOcr(
         echo,
       })
     }
-    // 解析形态：先算 doc_id，命中缓存就**一次都不出网**。
+    // Compute doc_id first; a cache hit makes zero upstream calls.
     const target = requested.mode === 'url'
       ? await pdfUrlTarget(requested.url as string, signal, deps.resolveAddresses)
       : await localFileTarget(deps, requested.file as string, session, signal)
@@ -870,13 +847,13 @@ async function runOcr(
       echo,
     })
   } catch (error) {
-    // 取消原样抛出：那是调用方的意志，不能被降级成一条"看起来像上游坏了"的错误信封。
+    // Cancellation is the caller's intent: rethrow, do not wrap as upstream failure.
     if (isAbortError(error)) throw error
     throwToolFailure(ocrErrorReceipt(error, { requested, echo, spent }))
   }
 }
 
-/** 一种解析入参的三件东西：算 `doc_id` 的种子、进 meta 的指认、给上游的提交体。 */
+/** What a parse input yields: doc_id seed, meta provenance, upstream submit body. */
 interface OcrParseTarget {
   seed: string | Uint8Array
   source: string
@@ -885,8 +862,8 @@ interface OcrParseTarget {
 }
 
 /**
- * `url` 形态：出口闸门复用本机直连那一份实现（形态 + 主机公网性），再收 `.pdf` 后缀。
- * 本机**不抓**这个文件——上游替我们取，所以这里没有体积上限，只有 SSRF 面。
+ * `url` form: reuse the local-fetch public-host gate, then require `.pdf`. We do
+ * not download the file (upstream does), so there is no size cap here, only SSRF.
  */
 async function pdfUrlTarget(
   value: string,
@@ -901,7 +878,7 @@ async function pdfUrlTarget(
   return { seed: `url:${url}`, source: `url:${url}`, sourceKind: 'url', submit: { fileUrl: url } }
 }
 
-/** `file` 形态：读出字节 + 指认（`source` 只记 workspace 相对路径，绝不记绝对路径）。 */
+/** `file` form: read bytes; provenance records the workspace-relative path only. */
 async function localFileTarget(
   deps: OcrToolDependencies,
   value: string,
@@ -913,29 +890,24 @@ async function localFileTarget(
   return { seed: bytes, source: `file:${path}`, sourceKind: 'file', submit: { file: { bytes, filename } } }
 }
 
-// ── 具名来源的结构化查询工具 ────────────────────────────────────────────────
+// Named-source query tools
 //
-// 与上面四个工具的关系：search / fetch 是**检索**工作面（候选发现、按 URL 取正文），
-// 这里是**查询**工作面（具名来源 + 业务参数 → 确定、有序、可翻页、同参可复现的结果集）。
-// 九个来源各自是一次具体实现，没有配方注册表 / 通用适配层——见 `sources.ts` 文件头。
+// Query workface vs. search/fetch: source + params -> deterministic, ordered,
+// pageable result set. Each source is concrete; see `sources.ts` header.
 
 const SOURCE_RESULT_CAP = MAX_ITEMS
 const SOURCE_PAGE_SIZE_MAX = 50
 
-/** 六个带 code 的工具共用这一句"能写什么"，描述的写法与校验的实现因此不会各说各话。 */
+/** Shared by six code-taking tools so description and validation cannot drift. */
 const CODE_FORMS = '（也可写 SH600519 / 600519.SH，会归一化成 6 位）'
 
 /**
- * 一次具名来源输出的字符预算：取宿主 tool-result 剪枝阈值的 75%。
- * 阈值配在 `preset/capital-generation/agent.cordis.yml` 的 `thresholdChars: 8192`
- * （由 `test/persona.test.mjs` 钉住与本常量同源）。超过阈值的工具结果在会话历史里会被
- * `dsh-compaction-tool-result-pruner` 换成 head 4096 + `[... middle pruned ...]` + tail 1024，
- * 也就是**中间条目被无声吃掉**，而留在头部的 `count` 还写着原来的条数。
- * 留 25% 余量的做法与数据面能力目录的预算同一口径（`test/data-collector-hub.test.mjs`）。
+ * Source output budget = 75% of the host's 8192 tool-result pruning threshold.
+ * Over that, the middle is silently pruned while `count` still claims the full total.
  */
 export const SOURCE_OUTPUT_BUDGET_CHARS = 6144
 
-/** 预算里为"承认省略了几条"那句话预留的体积：不预留的话，加上这句话反而会再次越界。 */
+/** Headroom for the "N items omitted" note, which itself counts against the budget. */
 const TRUNCATION_NOTE_RESERVE = 200
 
 function sourceOutput(outcome: SourceOutcome, recent: RetrievalTrace[], tally: Record<string, number>): Record<string, unknown> {
@@ -958,7 +930,8 @@ function sourceOutput(outcome: SourceOutcome, recent: RetrievalTrace[], tally: R
       provider_tally: tally,
     }
   }
-  // 按上游顺序**从尾部裁**，不跳着放：跳着放会让"同参数同结果"失效，count 也不再是前缀长度。
+  // Trim from the tail in upstream order: skipping items breaks "same params, same
+  // result" and `count` would no longer be a prefix length.
   let taken = 0
   let used = JSON.stringify(envelope([], 0)).length + TRUNCATION_NOTE_RESERVE
   for (const item of candidates) {
@@ -969,8 +942,8 @@ function sourceOutput(outcome: SourceOutcome, recent: RetrievalTrace[], tally: R
   }
   let items = candidates.slice(0, taken)
   let payload = envelope(items, candidates.length - items.length)
-  // 兜底自检：算术里已经预留了截断说明的体积，真超了（note 本身很长）就再退一条，
-  // 宁可少一条也不把整份结果交给剪枝器切成头尾两截。
+  // Safety net: if the reserved headroom was not enough (long note), drop one more
+  // item rather than let the pruner split the result.
   while (items.length > 1 && JSON.stringify(payload).length > SOURCE_OUTPUT_BUDGET_CHARS) {
     items = items.slice(0, -1)
     payload = envelope(items, candidates.length - items.length)
@@ -978,11 +951,7 @@ function sourceOutput(outcome: SourceOutcome, recent: RetrievalTrace[], tally: R
   return payload
 }
 
-/**
- * 失败也做成**工具错误**（`isError`），与 `web_retriever_fetch` 同一口径：
- * 宿主用 `isError` 表达失败，正常返回无法标记失败（见 `throwToolFailure` 注释）。
- * 抛出的消息带完整结构化回执，`recent_retrievals` / `provider_tally` 一个不丢。
- */
+/** Same isError convention as `web_retriever_fetch`; receipt stays structured. */
 function throwSourceFailure(source: SourceId, operation: string, error: unknown, recent: RetrievalTrace[], tally: Record<string, number>): never {
   const code = error instanceof SourceError ? error.code : 'NETWORK'
   throwToolFailure({
@@ -1001,14 +970,9 @@ function sourceItemsText(items: SourceItem[]): string {
 }
 
 /**
- * 注册九个具名来源工具（provider + operation 命名）。
- *
- * 为什么单独一个注册函数：这九个工具只依赖 HTTP 传输（`local-fetch` 的出口校验），
- * 不依赖 AnySearch / Wind；任何一路的配置缺失都不应连带影响另外几路的注册。
- *
- * `enabled`（设置卡片「允许启动本地提取网页内容」）**同时支配这九个工具的执行**：
- * 关闭时工具仍在注册面（不静默消失），但每次调用响亮失败并说明开关位置——
- * 卡片文案的字面语义对模型与用户都成立，用户同意不被旁路。
+ * Nine source tools depend only on HTTP egress, so they register independently of
+ * AnySearch/Wind config. `enabled=false` still registers but each call fails loudly
+ * naming the settings switch, so the switch semantics hold for user and model.
  */
 export function registerSourceTools(ctx: Context, localFetchOptions: LocalFetchOptions & { enabled?: boolean }): void {
   const tools = ctx.get('tools') as ToolRuntimeLike | undefined
@@ -1016,11 +980,9 @@ export function registerSourceTools(ctx: Context, localFetchOptions: LocalFetchO
 
   const echo = createRetrievalEcho()
   const transport = createSourceTransport(localFetchOptions)
-  // 东财系三个工具（7×24 快讯 / 个股新闻 / 研报）**共用同一个节流器**：它们打到同一个上游、
-  // 共用主机的出口 IP，各自限流等于没限（详见 `src/net/eastmoney-client.ts`）。
-  // 与数据面共享**同一份进程级节流**（`sharedEastmoneyThrottle()`），但 transport 注入
-  // 闸门实现（`createHttpRequester`）：出口校验、逐跳重定向重校验、大小/超时上限与其余
-  // 六个来源同一份（此前走裸 fetch，是"声称一份、实际两份"的事故形态，AGENTS.md §9.7）。
+  // The three eastmoney tools hit one upstream from one egress IP, so they share one
+  // process-wide throttle and the same gated transport; a second bare fetch path is
+  // the "two implementations" regression (AGENTS.md §9.7).
   const eastmoneyClient = createEastmoneyClient({
     userAgent: localFetchOptions.userAgent,
     throttle: sharedEastmoneyThrottle(),
@@ -1065,9 +1027,8 @@ export function registerSourceTools(ctx: Context, localFetchOptions: LocalFetchO
     try {
       outcome = await produce()
     } catch (error) {
-      // 调用方取消**原样抛出**，绝不降级成失败信封：取消不是"这个来源查不到"，
-      // 而把它写成 ok:false 会让上层以为来源失败（与 web_retriever_fetch 同口径）。
-      // 传输层抛的是 `LocalFetchError('ABORTED')`，来源层抛的是 `SourceError('ABORTED')`。
+      // Caller cancel rethrows untouched (`LocalFetchError('ABORTED')` or
+      // `SourceError('ABORTED')`); only real failures become receipts.
       const code = error instanceof SourceError ? error.code : (error as { code?: string })?.code
       if (code === 'ABORTED' || (error instanceof Error && error.name === 'AbortError')) throw error
       throwSourceFailure(provider, operation, error, recent, tally)

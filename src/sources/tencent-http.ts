@@ -2,8 +2,8 @@ import type { DataRequest, DataSource, SchemaDescriptor } from '../data-collecto
 import { buildDataKey } from '../data-collector/hub.js'
 import { getDataTimeContract } from '../time/tools.js'
 import { isLikelyIndex, normalizeSecurityCodes, parseSecurityCode, requireTencentSecurity, type SecurityCode } from './security-code.js'
-// 港美股快照、smartbox 与那条**唯一的**出口节流链都在内核里；本文件只留能力定义与 K 线 / 分笔编排。
-// 为什么必须共用：两条独立节流等于没有限流，两份字段位序表迟早只会修好一份（AGENTS.md §9.7）。
+// Shared core holds HK/US snapshots, smartbox and the one throttle chain; this file only defines
+// capabilities and K-line/tick orchestration. Two throttles = no throttle.
 import {
   QUOTE_URL,
   fetchOffshoreIndexQuotes,
@@ -250,20 +250,16 @@ async function executeQuote(params: Params, signal: AbortSignal): Promise<{ data
   return { data: rows, schema: quoteOutput }
 }
 
-/**
- * K 线的**唯一**主机轮换：A 股与港美股共用同一份冷却表、同一条节流链、同一条"取消原样抛出"。
- * 两条入口的差异用两个回调表达，而不是再抄一份循环——§9.7 的教训是"两份互不知情"等于没有限流，
- * 这里同理：两份轮换逻辑迟早只会修好一份。
- */
+/** Single K-line host rotation for A-shares and HK/US; entries differ only by callbacks. */
 interface KlineTransport {
   path: string
   param: string
   label: string
-  /** 什么算"这台主机这次没给东西"：A 股看整个 data 对象，港美股看指定 symbol 的序列数组。 */
+  /** "Host gave nothing": whole data object for A-shares, symbol series for HK/US. */
   isEmpty: (data: JsonRecord) => boolean
   /**
-   * 上游把请求判成参数错误时**一次即停**：换机不会让它变好，把其余主机拉黑 120 秒更是把一次
-   * 写错的调用扩散成全进程故障。实测港美股端点对不合法 param 回 `{"code":1,"msg":"bad params"}`。
+   * Stop on first param rejection: another host will not fix it, and blacklisting all hosts for
+   * 120s spreads one bad call process-wide. HK/US returns `{"code":1,"msg":"bad params"}`.
    */
   isParamRejection?: (payload: JsonRecord) => boolean
 }
@@ -287,7 +283,8 @@ async function callKlineHosts(transport: KlineTransport, signal: AbortSignal): P
       errors.push(`${host}: empty data`)
       hostDownUntil.set(host, Date.now() + HOST_COOLDOWN_MS)
     } catch (error) {
-      // 取消与参数性失败都原样抛出，**先于**一切拉黑/换机逻辑（docs/dev/web-retriever.md §4.2「取消原样抛出」）。
+      // Cancellation and param failures rethrow before blacklist/rotation; see
+      // `docs/dev/web-retriever.md` §4.2.
       if (error instanceof Error && error.name === 'AbortError') throw error
       if ((error as Error & { code?: string }).code === 'tencent_invalid_param') throw error
       errors.push(`${host}: ${error instanceof Error ? error.message : String(error)}`)
@@ -468,14 +465,6 @@ async function executeTicks(params: Params, signal: AbortSignal): Promise<{ data
   }
 }
 
-/**
- * 港美股快照与 A 股快照**不能共用一份字段表**：实测腾讯在同一个 `~` 分隔串里换了列位——
- * 币种 A 股根本没有、港股在第 75 位、美股在第 35 位；换手率港股在第 59 位（分母是**总股本**）、
- * 美股在第 38 位（分母是**流通股本**）；成交额在港股**指数行**是万元级而个股行是元级。
- * 所以两张表各自映射（都在 `tencent-public-core.ts`，host 半边与这里共用），
- * 并且只收能用算术或量级证明的列（§10.2：口径猜错就是话说错）。
- */
-
 function normalizeOffshoreCodes(params: unknown, name: string, perCode: (value: unknown, name: string) => string): Params {
   if (!isRecord(params)) throw new Error('params must be an object')
   const rawValues = Array.isArray(params.codes) ? params.codes : typeof params.codes === 'string' ? params.codes.split(',').map((item) => item.trim()).filter(Boolean) : undefined
@@ -490,13 +479,11 @@ function normalizeOffshoreCodes(params: unknown, name: string, perCode: (value: 
 }
 
 async function executeOffshoreQuote(params: Params, signal: AbortSignal, market: 'hk' | 'us'): Promise<{ data: JsonRecord[]; schema: object }> {
-  // 取数编排（含美股"没回行就剥一段后缀重问"）在内核里，与自选股面板共用一份。
   const rows = await fetchOffshoreQuotes(market, params.codes as string[], signal)
   return { data: rows, schema: market === 'hk' ? hkQuoteOutput : usQuoteOutput }
 }
 
 async function executeOffshoreIndexQuote(params: Params, signal: AbortSignal, market: 'hk' | 'us'): Promise<{ data: JsonRecord[]; schema: object }> {
-  // 指数只收点位那一族可证明的列；写法来自检索，身份形状由内核核对（猜写法会静默拿到别的标的）。
   const rows = await fetchOffshoreIndexQuotes(market, params.codes as string[], signal)
   return { data: rows, schema: market === 'hk' ? hkIndexQuoteOutput : usIndexQuoteOutput }
 }
@@ -507,7 +494,6 @@ const offshoreKlinePaths: Record<'hk' | 'us', Record<string, string>> = {
   us: { qfq: '/appstock/app/usfqkline/get', none: '/appstock/app/kline/kline' },
 }
 
-/** 港美股 K 线入口：主机轮换全部走 `callKlineHosts`（一份实现），这里只补"序列在哪个 symbol 的哪个键下"。 */
 async function callOffshoreKline(path: string, param: string, symbol: string, signal: AbortSignal): Promise<unknown[]> {
   const data = await callKlineHosts({
     path,
@@ -526,13 +512,13 @@ async function callOffshoreKline(path: string, param: string, symbol: string, si
   return node[key] as unknown[]
 }
 
-/** K 线行：`[日期, 开, 收, 高, 低, 量, …]`——与 A 股同一套位序，第 6 位是上游附带的回购/分红文本。 */
+/** Row: `[date, open, close, high, low, volume, …]`; field 6 is buyback/dividend text. */
 function parseOffshoreKlineRows(items: unknown[], canonical: string, tencentSymbol: string, period: string, adjust: string, market: 'hk' | 'us'): JsonRecord[] {
   const rows: JsonRecord[] = []
   for (const item of items) {
     if (!Array.isArray(item) || item.length < 6) throw sourceError(`Tencent ${market} K-line ${tencentSymbol} row shape changed`, 'tencent_invalid_response')
     const date = String(item[0])
-    // 只匹配 `\d{4}-\d{2}-\d{2}` 会把 2026-13-99 这样的假日期放过去，所以要按真历法回读一次。
+    // Shape alone accepts 2026-13-99, so re-read through the real calendar.
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || (() => { const parsed = new Date(`${date}T00:00:00Z`); return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date })()) {
       throw sourceError(`Tencent ${market} K-line ${tencentSymbol} has unreadable date ${JSON.stringify(date)}`, 'tencent_invalid_response')
     }
@@ -555,7 +541,7 @@ function parseOffshoreKlineRows(items: unknown[], canonical: string, tencentSymb
       volume,
     }
     if (market === 'hk') {
-      // 港股复权序列多回两列（第 7/8 位）；实测不复权序列只有七列，这两处就是 null。
+      // Adjusted series has two extra columns; unadjusted has seven, so both are null.
       row.turnover_pct = item.length > 7 ? numberOrNull(item[7]) : null
       row.amount_wan_hkd = item.length > 8 ? numberOrNull(item[8]) : null
     }
@@ -567,7 +553,7 @@ function parseOffshoreKlineRows(items: unknown[], canonical: string, tencentSymb
 
 function normalizeOffshoreKline(params: unknown, market: 'hk' | 'us'): Params {
   if (!isRecord(params)) throw new Error('params must be an object')
-  // start/end 进 allowed 只为了给出**可用**的拒绝理由：默默忽略日期是最坏的一种失败（调用方以为过滤过了）。
+  // start/end are accepted only to reject them.
   assertKnown(params, ['code', 'period', 'adjust', 'count', 'start', 'end'])
   if (params.start !== undefined || params.end !== undefined) throw new Error('start/end are not supported: 实测 hkfqkline 忽略日期区间（带 2024-01-01..2024-03-01 与 count=640 仍回 640 条、最早到 2021-07-30），只有 count 生效')
   const code = market === 'hk' ? normalizeHkCode(params.code, 'code') : normalizeUsCode(params.code, 'code')
@@ -588,7 +574,7 @@ async function executeOffshoreKline(params: Params, signal: AbortSignal, market:
   const period = String(params.period)
   const adjust = String(params.adjust)
   const count = Number(params.count)
-  // K 线的 symbol 身份：港股就是 hk+5 位；美股必须带交易所后缀，且后缀由快照回答。
+  // HK is hk + 5 digits; US suffix must be resolved by the snapshot.
   const tencentSymbol = market === 'hk' ? `hk${code}` : await resolveUsKlineSymbol(code, signal)
   const canonical = market === 'hk' ? code : tencentSymbol.slice(2)
   const path = offshoreKlinePaths[market][adjust]
@@ -659,12 +645,8 @@ const usQuoteOutput = {
 }
 
 /**
- * 港美股**指数**快照的输出表：只有点位那一族，且**刻意不收**任何量纲列与币种列。
- *
- * 为什么不收（2026-10-07 真报文）：港股指数行的第 6 / 36 / 37 位两列相等且量级像万元，
- * 美股指数行的第 37 位给了 2.1e14、第 38 / 44 / 45 / 62 / 63 位为空——口径推不出来，
- * 声明一列我们没有把握的东西比少给一列更糟（docs/dev/tool-schema.md §10.2）。
- * 为什么不收币种：上游确实在第 75 / 35 位塞了 `HKD` / `USD`，但指数是无量纲的数。
+ * Index output: point values only. Magnitude columns are unreadable (hkHSI 6/36/37 duplicate at
+ * 10k; usIXIC 37 is 2.1e14, 38/44/45/62/63 empty). No currency.
  */
 const offshoreIndexQuoteProperties = (symbolLabel: string) => ({
   code: { type: 'string' },
@@ -692,7 +674,7 @@ const usIndexQuoteOutput = {
   items: { type: 'object', properties: offshoreIndexQuoteProperties('美东'), additionalProperties: true },
 }
 
-/** 港美股 K 线的公共列：`[日期, 开, 收, 高, 低, 量]`，量纲是**股**。 */
+/** Columns `[date, open, close, high, low, volume]`, volume in shares. */
 const offshoreKlineProperties = () => ({
   code: { type: 'string' }, tencent_symbol: { type: 'string' }, adjust: { type: 'string' },
   period: { type: 'string' }, date: { type: 'string' },
@@ -700,9 +682,8 @@ const offshoreKlineProperties = () => ({
   volume: { type: 'number', description: '成交量（股）；不是 A 股 K 线那套"手"' },
 })
 
-// 只有**港股复权序列**多回两列，而其中成交额是**万港元**（实测腾讯 2026-10-05 给 366,702.882，
-// 当日快照给 3,667,028,820.9 港元，差整整 1e4）。美股的两个可用入口（qfq / none）实测都只回六列，
-// 所以美股这张表**没有** amount 字段——不声明一列恒为 null 的东西，那只会让人以为是缺数。
+// HK adjusted series has two extra columns; its amount is in 10k HKD. US qfq/none return six
+// columns, so the US table declares no amount field.
 const hkKlineOutput = {
   type: 'array',
   items: {

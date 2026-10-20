@@ -1,15 +1,14 @@
 # Capital Generation 研发约定
 
-> **读者是研发 Agent**（改本仓代码的你）。使用者 Agent 的运行时指令住 persona + skill + 工具
-> `description`，与本文**不共用文本**；不得为腾地方把本文内容搬进 persona（落点判据 §8.2）。
->
-> - 本文只放**索引**与**每次动手都要过的闸门**（§3 §7 §8.3 §9 §10），详情按 §编号住 `docs/dev/`，
->   靠指针按需 `Read`（DSH 只从 session cwd 往上找指令文件，子目录不会被注入）。
-> - 本文件由 preset 的 `agent-instructions` 行注入会话，`maxBytes: 16384` 是硬闸门（超出即截断，
->   尾部规则静默消失）。行数、体积与 **§指针一致性**由 `test/dev-docs.test.mjs` 钉住：整数节只住
->   本文，`docs/dev/*.md` 只有小数节且同一父节从 `.1` 连续。不手工维护"谁引用了哪节"的清单。
-> - **⛔ = 曾造成真实事故的硬约束**；改动须有明确设计决策并同步回归测试。只读事实（字段、schema、
->   能力清单）以代码与工具 `description` 为准，本文不抄。**README 是写给人看的**：对外文档不写研发黑话（本文这种 §编号、`docs/dev/`、`ctx.*` / `*_ref` / `toolFilter` 一类实现层标识），改首页前先过 `test/readme-prose.test.mjs`；说不清的用户影响就别写，只写读者看得见和要做的动作。
+> **读者是研发 Agent**。使用者指令住 persona + skill + 工具 `description`，与本文不共用文本；
+> 不得把本文内容搬进 persona（§8.2）。
+> - 本文只放**索引**与**动手前的闸门**（§3 §7 §8.3 §9 §10），详情按 §编号住 `docs/dev/`，按需 `Read`。
+> - 本文件经 preset 的 `agent-instructions` 注入，`maxBytes: 16384` 是硬闸门（超出即截断尾部规则）。
+>   行数、体积与 §指针一致性由 `test/dev-docs.test.mjs` 钉住：整数节只住本文，`docs/dev/*.md`
+>   只有小数节且同一父节从 `.1` 连续。
+> - **⛔ = 曾造成事故的硬约束**；改动须同步回归测试。只读事实以代码与工具 `description` 为准。
+>   **README 是写给人看的**：不写 §编号、`docs/dev/`、`ctx.*` 一类实现层标识，改首页前过
+>   `test/readme-prose.test.mjs`；说不清的用户影响就别写，只写读者看得见和要做的动作。
 
 ## 0. 阅读路径
 
@@ -22,7 +21,7 @@
 | settings 卡片（host 平面嵌套包，座位在「插件」页） | `docs/dev/settings-config.md`（§5.1–§5.4）|
 | `render_chart` 准入与呈现 | `docs/dev/chart-presentation.md`（§6.1 §6.2）|
 | 交付登记与会话事件类型 | `docs/dev/chart-delivery-events.md`（§6.3）|
-| preset 现状、人设落点、「不许改」全表、新增角色六处齐改 | `docs/dev/preset-persona.md`（§8.1 §8.2 §8.4 §8.5）|
+| preset 现状、人设落点、「不许改」全表、新增角色七处齐改 | `docs/dev/preset-persona.md`（§8.1 §8.2 §8.4 §8.5）|
 | 外部 Skills 接入 | `docs/dev/selected-skills.md`（§8.6）|
 | 精选 Skill 索引与标签注册表（含勾选上限） | `docs/dev/selected-skill-index.md`（§8.7）|
 | 工具 schema 全表、数据源验收全表 | `docs/dev/tool-schema.md`（§9.1–§9.6 §10.1–§10.9）|
@@ -30,11 +29,11 @@
 ### ⛔ 硬约束一览
 
 - **§1.1** 省往返靠 `isConcurrencySafe` + 框架并发池；体积闸门只有一道（`SAFE_RESULT_CHARS=7000` 小回执 + hint）——不合并多份 dataset，也不引入 digest / 裁剪阶梯。
-- **§1.3** 日期串落到数值时间列必须 `query_type_conflict` 响亮失败，不许静默跳过 filter；日期归一（`query-time.ts`）与 session 读取（`src/tool-exec.ts` 的 `exec.agent.session`）各只有一份实现，新增入口必须复用、不提供兜底。
+- **§1.3** 日期串落到数值时间列必须 `query_type_conflict` 响亮失败；日期归一、session 读取与**工具授权判据**各只有一份实现、不提供兜底（`src/tool-exec.ts`；授权按 preset 身份判、不看 `parentSession`，§1.1）。
 - **§1.6** bash 闸门不是安全边界（沙箱只拦写），别把它写成边界；guard 刻意不解析命令内容。
 - **§5.1** 可编辑配置只坐 `plugins.bundle.config`（key = 组合包名）一处，不开行级座位：每深一跳就多一次"设置里没这个插件"。
-- **§6.1** 根收敛监听只能挂 `ctx.root`（挂 standing scope 收不到且不报错）；通用 `subagent` 行必须
-  带 `toolFilter.deny`，否则通用 child 继承全部工具能自己出图。
+- **§6.1** 根收敛监听挂 `ctx.root`（standing 层收不到）；身份闸门全局装、调用期现读
+  （created 时人设未定）。委派出口只有专用角色，工具面 = preset 挂的族行（allow 清单禁恢复）。
 - **§6.1** `/capital-charts` 序列旁路必须接 `connection.requestRejection`，否则是无认证端点。
 - **§6.3** 会话事件词汇表是闭集，交付必须走 first-party `deliverables/presented`；cordis ctx 不能用
   `{ ...ctx }` 展开（`get`/`on`/`effect` 挂在原型上）；寄存队列按 owner（根会话）归档。
@@ -48,7 +47,7 @@
 main Agent
   +-- data_collector   外部取数，立即持久化，只回传 DatasetRef
   +-- data_junior      质量 / 统计 / 可视化 gate，只回传 profile_ref / 聚合结果 / chart_ref
-  |     └── visualization_specialist  one-shot 出图，只回传 chart_ref / 小回执
+  |     └── visualization_specialist  异步出图，只回传 chart_ref / 小回执
   +-- data_analyst     Python 分析（仅预留，未启用）
   +-- web_retriever    网页材料获取（一次一个）
 ```
@@ -103,29 +102,25 @@ capital-analysis/runs/<analysis_id>/          # 预留（data_analyst）
 
 ## 6. 图表呈现纪律（`render_chart`，只有 visualization_specialist 持有）
 
-准入与 gate（`ctx.root` 收敛、通用 subagent 的 deny、序列旁路认证）在 `docs/dev/chart-presentation.md`；
+准入与 gate（`ctx.root` 收敛、只有专用角色持有出图链、序列旁路认证）在 `docs/dev/chart-presentation.md`；
 交付登记与回合归属（事件闭集、ctx 展开、寄存归档）在 `docs/dev/chart-delivery-events.md`。
 
 ## 7. 已删除、禁止恢复
 
-- **`final_report` 全链路**（registry / `/capital-reports` / 报告卡 / skill）2026-09-17 移除：根因
-  "协议鼓励 `verified`、宿主一律拒绝"，且报告正文本来就是主 Agent 最终答复。**不要**以任何形式恢复；
-  结论、证据、来源与局限一律写在最终答复里。
-- **turn-tail 图表卡片通道与自定义会话事件类型**：2026-09-18 移除，禁止加回（判据见 §6.3；
-  `client.src.cjs` 只留 `tool.call.toolview['render_chart']` 卡片、`exports.inject` 只有 `slots`，
-  回归 `test/chart-client.test.mjs`）。
+- **`final_report` 全链路**（registry / `/capital-reports` / 报告卡 / skill）：根因"协议鼓励
+  `verified`、宿主一律拒绝"；报告正文本来就是最终答复。**禁止恢复**；结论、证据、来源与局限写在最终答复里。
+- **turn-tail 图表卡片通道与自定义会话事件类型**：禁止加回（判据 §6.3；`client.src.cjs` 只留
+  `tool.call.toolview['render_chart']` 卡片、`exports.inject` 只有 `slots`；回归 `test/chart-client.test.mjs`）。
 
 ## 8. Preset 维护纪律
 
-现状、人设落点判据、「不许改」全表、新增角色的六处齐改（§8.5）见 `docs/dev/preset-persona.md`。
+现状、人设落点判据、「不许改」全表、新增角色的七处齐改（§8.5）见 `docs/dev/preset-persona.md`。
 
 ### 8.3 改完后必须验证（缺一不可）
 
-1. **挂载验证**（0.1.7 起用 `agentPresets.resolve(id)`：结果无 `broken`，且 `compositionInventory()`
-   新增行 active（`FiberState.ACTIVE = 2`），失败信息点名问题行；旧 `standingKeyFor` 已消失）
+1. **挂载验证**（`agentPresets.resolve(id)` 无 `broken`，`compositionInventory()` 新增行 active；失败信息点名问题行）
 2. **`npm test` 全绿**（会先 build）。测试断言实测教训，不准删断言变绿；规则迁移须同步断言。persona / `agent.patch.yml` 体积与文档行数闸门见相应测试。改过运行时路径、换行或子进程形状，勿放宽 `test/cross-platform.test.mjs`。
-3. **测试跟随本机 dsh 版本**：`dsh-persona` 字段是 `prefix` 不是 `text`（`test/persona.test.mjs`
-   有核对用例）。字段名变化必须只在**一条**用例里失败并点名文件。
+3. **测试跟随本机 dsh 版本**：`dsh-persona` 字段是 `prefix` 不是 `text`（`test/persona.test.mjs` 有核对用例）；字段变化须只在**一条**用例里失败并点名文件。
 4. 动过 preset 行 / host 平面 / 交付事件，再跑 `npm run check:dsh`（扩展面账本逐条探测）。
 
 ## 9. 工具 schema 纪律（改任何模型工具定义之后）
@@ -137,12 +132,19 @@ capital-analysis/runs/<analysis_id>/          # 预留（data_analyst）
 
 ### 9.7 同一能力接多个入口：共用一份实现、逐入口验证
 
-两次事故同一族（§1.3 日期归一漏接、session 读取漏接框架形状），共同特征：**本地测试只覆盖了
-"接好的那个入口"**。自检清单：① 实现是否只有一份（`query-time.ts` / `tool-exec.ts`）？② 所有
-会执行它的入口都接上了吗（`grep` 调用点，不凭记忆）？③ 每个入口有对等断言吗？④ 测试用的是
-**框架真实 exec 形状**（`exec.agent.session`）而非自造简化形状吗？⑤ 注册面有没有押在"装配期读一次的对外部状态"上——2026-09-30 桌面端装配期取凭据失败即静默不注册 61 颗同花顺能力、整场进程不重试，同一进程里走调用期解析的自选股却照样取到数；**外部时刻一律留到调用期，注册只看结构**。⑤ 还有另一半：**失败也要留可重试的余地**——把 rejection memoize 住等于把一次装配期抢跑钉到进程结束（自选股的 `domain()` 曾把 `storageDomain` 未就绪缓存成永久 `store_unavailable`）。
+两次事故同一族（§1.3 日期归一漏接、session 读取漏接框架形状）：**本地测试只覆盖了接好的入口**。
+自检：① 实现是否只有一份（`query-time.ts` / `tool-exec.ts`）？② 所有入口都接上了吗（`grep` 调用点）？
+③ 每个入口有对等断言吗？④ 测试用**框架真实 exec 形状**（`exec.agent.session`）吗？⑤ 注册是否押在装配期读一次的外部状态上？
+外部时刻留到调用期，注册只看结构；失败也不要 memoize，否则一次装配期抢跑会钉到进程结束（自选股 `domain()` 的永久 `store_unavailable`）。
 
 ## 10. 数据源验收纪律（改 `src/sources/*.ts` 之后）
 
 全表在 `docs/dev/tool-schema.md` §10.1–§10.9。底线：**注册新能力要同时补巡检条目**（§10.8 四态之一，改法 §10.9）；
 改端点同步 `npm run docs:capabilities`；新护栏先拿官方示例 / 真报文验过；`2004` 不注册、`5003` 是数据缺口。
+
+## 11. 代码注释纪律（改任何源文件之后）
+
+默认不写。只保留代码说不出的**约束与坑**：安全/身份边界、失败方向、顺序与生命周期、上游怪癖、魔数依据。
+删历史复盘（日期、会话 id、事故经过）、代码复述、分段横幅、注释掉的代码，以及只重复类型的
+`@param` / `@returns`。文件头 ≤5 行，单点一行；优先英文（中文只用于原文报错、用户文案或中文术语更准处）。
+细节住 `docs/dev/`，只留指针；生成物（`lib/`、生成的 `client.js`）不手改；指令注释不删。

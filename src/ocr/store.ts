@@ -1,23 +1,8 @@
 /**
- * `ocr` 的**产物层**：解析结果一律落 `capital-data/ocr/<doc_id>/`，模型侧只拿 `doc_id` 与索引。
- *
- * 为什么必须落盘而不是留在内存：一份 15 页研报归一化后约 2.7 万字符，而工具输出预算
- * 只有 6,144（`SOURCE_OUTPUT_BUDGET_CHARS`）。落盘之后"按页取回 / 关键词定位"才是**纯本地
- * 零花费**的第二、第三次读取；否则每次翻页都要重跑上游、再花一次 job。
- *
- * ```text
- * capital-data/ocr/<doc_id>/
- * ├── meta.json      # 页偏移索引与花费口径（model / charts / job_id / created_at）
- * └── document.md    # 全篇归一化 markdown，页分隔 `<!-- page:N -->`
- * ```
- *
- * `doc_id` 是**内容寻址**的：`sha1(归一化输入 + model + flags)` 前 12 位。因此"同一份文档
- * 重复解析"自动命中缓存不再出网；`refresh` 才强制重跑（上游对同一份 PDF 两次给出过
- * 18% 与 19% 的不同数字，重跑**不是**独立验证，引用必须带 `doc_id` 与 `created_at`）。
- *
- * 写入顺序是 `document.md` → `meta.json`：**meta 的在场即代表产物完整**。中途被中断
- * （超时、取消）留下半件产物时，下一次读取按"未缓存"处理并重写（`overwrite`），
- * 不会把模型永久锁死在一个坏 `doc_id` 上。
+ * OCR artifacts live under `capital-data/ocr/<doc_id>/`; the model only gets `doc_id`.
+ * Content-addressed ids make a repeat parse a cache hit. `document.md` is written before
+ * `meta.json`, so meta's presence means a complete artifact; half-written ones are redone.
+ * Page reads reuse the persisted text instead of re-running a paid upstream job.
  */
 
 import type { SessionLike, WorkspaceDatasetStore } from '../data-collector/store.js'
@@ -31,22 +16,18 @@ export const OCR_DOC_ID_PATTERN = /^ocr_[0-9a-f]{12}$/u
 const META_FILE = 'meta.json'
 const DOCUMENT_FILE = 'document.md'
 
-/** 本地文档字节的读取上限：上游 100 页口径下的研报/公告量级，超限宁可报错也不要缓冲整份。 */
+/** Read cap for local documents: 100-page reports fit; fail rather than buffer a whole file. */
 export const OCR_MAX_SOURCE_BYTES = 32 * 1024 * 1024
 
-/** 产物元数据（落盘形态）。字段名与回执一致，模型看到的和盘上的不是两份真相。 */
+/** On-disk metadata; field names match the receipt so disk and model see one truth. */
 export interface OcrArtifactMeta {
   doc_id: string
-  /**
-   * 输入指认：`url:<http(s) URL>` 或 `file:<workspace 相对路径>`。**绝不落绝对路径**。
-   * 续查（只传 `job_id` + `doc_id`）时本机没有重算种子的输入，此时**留空而不是编一个**——
-   * 把作业号写成来源会被当成"这条 URL 就是文档出处"。
-   */
+  /** Input identity, `url:` or `file:` (never absolute); empty on resume — never pass job_id off as provenance. */
   source?: string
   source_kind: 'url' | 'file' | 'job'
   job_id: string
   model: string
-  /** 提交时的图表识别开关；续查时无从得知，留空。 */
+  /** Chart-recognition flag at submit; unknown on resume, so omitted. */
   charts?: boolean
   pages: number
   chars: number
@@ -68,9 +49,8 @@ interface HashLike {
 }
 
 /**
- * 与 `hub.ts` / `sources.ts` 同一个 `process.getBuiltinModule` 惯用法（本仓刻意不装
- * `@types/node`）。拿不到就**响亮失败**：`doc_id` 是缓存键，退回一个更弱的哈希会让两份不同
- * 文档撞在同一个 `doc_id` 上、把 A 的正文当 B 交出去。
+ * No `@types/node` (same `process.getBuiltinModule` idiom as hub/sources). Fail loudly:
+ * `doc_id` is a cache key, so a weaker fallback could collide two documents onto one id.
  */
 function createHash(algorithm: string): HashLike {
   const processLike = (globalThis as {
@@ -81,7 +61,6 @@ function createHash(algorithm: string): HashLike {
   return hash
 }
 
-/** `seed` 由各形态自己拼（URL 文本 / 文件字节），统一在此收敛成 `ocr_<12 hex>`。 */
 export function deriveOcrDocId(seed: string | Uint8Array, model: string, charts: boolean): string {
   const hash = createHash('sha1')
   hash.update(seed)
@@ -89,7 +68,6 @@ export function deriveOcrDocId(seed: string | Uint8Array, model: string, charts:
   return `ocr_${hash.digest('hex').slice(0, 12)}`
 }
 
-/** 回执里给模型的 opaque 引用（与 Dataset/profile 引用同一套 `workspace://` 口径）。 */
 export function ocrArtifactRef(docId: string): string {
   return `workspace://${OCR_ARTIFACT_SUBDIR}/${docId}`
 }
@@ -115,13 +93,7 @@ function isTooLarge(error: unknown): boolean {
   return error instanceof DatasetStoreError && error.code === 'dataset_too_large'
 }
 
-/**
- * 落盘产物**自己**坏了（调用方没做错任何事）。
- *
- * 为什么要单独一个类型：翻成回执的那一层要把"下一步该传什么"写清楚，而那一步需要的指认
- * （当初解析用过的 url / file）只有这份 meta 里有。让调用方重新去猜链接，等于把一次
- * 可机械执行的修复推回给人或模型。
- */
+/** Corrupt artifact, not caller error; the repair hint needs the source only this meta holds. */
 export class OcrArtifactError extends Error {
   constructor(
     readonly reason: 'meta_unreadable' | 'meta_invalid' | 'document_missing',
@@ -136,10 +108,8 @@ export class OcrArtifactError extends Error {
 }
 
 /**
- * 读回一份产物。三种"读不到"必须能区分：
- *  - `undefined`：从未解析过（meta 与 document 都不在）——调用方据此决定提交新 job。
- *  - 抛错：meta 在但正文丢失/损坏，或半件产物——**不能**当成"没有内容"，也不能静默重跑
- *    （重跑要花一次 job，用户看不到钱去哪了），交给调用方翻成带 `doc_id` 的失败回执。
+ * `undefined` = never parsed (safe to submit a job). A throw = meta present but body
+ * missing/corrupt: do not treat as empty and do not silently re-run (a re-run costs a job).
  */
 export async function readOcrArtifact(
   store: WorkspaceDatasetStore,
@@ -172,7 +142,7 @@ export async function readOcrArtifact(
   return { meta, document: { document: text, pages: meta.page_entries, chars: meta.chars, images: meta.images, tables: meta.tables, styleCharsRemoved: meta.style_chars_removed } }
 }
 
-/** 落盘。`overwrite` 只在调用方**已经决定**重新生成时传（见文件头的写入顺序）。 */
+/** `overwrite` only when the caller has already decided to regenerate. */
 export async function writeOcrArtifact(
   store: WorkspaceDatasetStore,
   input: { session: SessionLike; meta: OcrArtifactMeta; document: OcrDocument; signal?: AbortSignal; overwrite?: boolean },
@@ -191,7 +161,7 @@ export async function writeOcrArtifact(
   return { artifact_ref: ocrArtifactRef(docId), paths: written.map((file) => file.path) }
 }
 
-/** meta 是**我们**写出去的记录，读回来时仍逐字段核一遍——手改过的盘也要能响亮失败。 */
+/** Re-validate our own record field by field so a hand-edited file fails loudly. */
 function normalizeMeta(value: unknown, docId: string): OcrArtifactMeta {
   const record = (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>
   const pages = Array.isArray(record.page_entries) ? record.page_entries : []
@@ -231,13 +201,12 @@ function normalizeMeta(value: unknown, docId: string): OcrArtifactMeta {
   }
 }
 
-/** 来源类别缺省或写歪时**响亮失败**：把不认识的 provenance 默认成 `url` 会伪造出处。 */
+/** Fail on an unknown provenance: defaulting it to `url` would fabricate attribution. */
 function sourceKind(value: unknown): OcrArtifactMeta['source_kind'] {
   if (value === 'url' || value === 'file' || value === 'job') return value
   throw new Error(`meta.source_kind 不认识：${String(value)}`)
 }
 
-/** 拼一条与盘上记录同形状的 meta（`document` 只提供算好的排版统计）。 */
 export function buildArtifactMeta(input: {
   doc_id: string
   source?: string
@@ -266,11 +235,8 @@ export function buildArtifactMeta(input: {
 }
 
 /**
- * 读取**待解析**的本地文档字节（`file` 形态的入口）。
- *
- * 只接受 session workspace 内的相对路径：绝对路径（含 Windows 盘符）与 `..` 段在
- * `normalizeWorkspaceRelativePath` 就被拒，之后仍要过沙箱归属校验。模型从 `@xxx.pdf`
- *  mention 里看到的是路径末段，因此回执话术要求它传 workspace 相对路径。
+ * `file` entry: workspace-relative only (absolute paths, drive letters and `..` are
+ * rejected downstream, then ownership is checked); @mentions show just the path tail.
  */
 export async function readOcrSourceBytes(
   store: WorkspaceDatasetStore,

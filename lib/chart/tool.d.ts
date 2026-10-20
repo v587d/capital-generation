@@ -1,16 +1,6 @@
-/**
- * `render_chart`：把已经取到的数据渲染成图，**只回一条小回执**。
- *
- * 上下文经济学（这是本工具存在的理由）：
- *  - 常驻成本 = 一条工具 schema；协议细节在 skill `capital-chart-protocol` 里按需加载；
- *  - 每次调用成本 = spec（几十到一百多 token）+ 回执（几十 token）；
- *  - 序列数据 **0 token**：由宿主写进 workspace 产物，浏览器走旁路取。
- * 对照：让模型把 250 点日线写进参数 ≈ 5–8k token，还会被工具结果剪枝器截断。
- *
- * 权限边界（docs/dev/data-roles.md §1.1「数据调度纪律」的显式豁免）：本工具是**呈现**工具，不是数据工具。
- * 它读 Dataset 只在宿主进程内进行，回执不含任何 rows —— 因此不越过"数据内容不进主 Agent
- * 上下文"这条真正的边界。需要数值结论仍走 data_junior 的 profile / query。
- */
+/** render_chart: render data into workspace artifacts and return only a small receipt.
+ * Series costs zero model tokens and rows stay host-side; numeric conclusions still go through
+ * data_junior. */
 import type { Context } from '@deepseek-ai/cordis';
 import { WorkspaceDatasetStore } from '../data-collector/store.js';
 import { type ChartSourceTokenStore } from './source-token.js';
@@ -30,7 +20,7 @@ type ToolExecLike = {
     signal: AbortSignal;
 };
 export declare const CHART_ARTIFACT_DIR = "capital-analysis/charts";
-/** 回执字段全部是可以进上下文的小元数据；序列本体永远不在这里。 */
+/** Receipt is small metadata only; series never appears here. */
 export interface ChartReceipt {
     chart_ref: string;
     chart_id: string;
@@ -62,22 +52,9 @@ export interface RenderChartInput {
     store: WorkspaceDatasetStore;
     sourceTokens?: ChartSourceTokenStore;
     artifacts?: ChartArtifactRegistry;
-    /**
-     * 惰性解析 host 平面图表服务（`@v587d/capital-charts` 提供）。
-     *
-     * 每次画图时解析，而不是在 `apply` 时解析一次：host 平面行与本 preset 行的挂载先后
-     * 不由我们决定，一次性解析会把"服务稍后才可用"永久固化成 `chart_url=null`。
-     * 服务始终缺席（未安装/无 Web 载体/坏掉）时返回 undefined，整条链路照常降级：产物照样
-     * 落盘、`html_path` 照样可 present，只是 `chart_url` 为 null。
-     */
+    /** Resolve per render, not at apply: host rows may mount later; absence degrades to chart_url=null. */
     charts?: () => ChartPublisher | undefined;
-    /**
-     * 惰性解析"图表 → 本轮交付"发布器（官方 `deliverables/presented`）。
-     *
-     * 与 `charts` 同理每次出图解析一次：宿主平面的 `sessions` / `sessionProjections`
-     * 不可用时返回 undefined，整条链路照常降级——图仍在 workspace 里，回执照样给 html_path，
-     * 只是本轮交付行不会登记这张图。
-     */
+    /** Same lazy rule: an absent publisher skips only the deliverable row. */
     chartEvents?: () => ChartEventPublisher | undefined;
     now?: () => number;
 }

@@ -1,10 +1,7 @@
 /**
- * `@v587d/capital-charts` 的 host half。
- *
- * It owns only opaque chart registrations and their browser route. It never
- * reads Dataset files itself; render_chart supplies the resolved chart series
- * path, and the turn event published by the plugin carries the small metadata
- * the client renders.
+ * Host half of `@v587d/capital-charts`: opaque chart registrations plus their
+ * series route. render_chart supplies the resolved file path; this half never
+ * reads Dataset files itself.
  */
 
 export const name = 'capital-charts'
@@ -77,18 +74,9 @@ function pathnameOf(req, res) {
 }
 
 /**
- * Build the series route handler.
- *
- * @param store - the opaque chart registry.
- * @param options.authorize - optional `(req) => 401 | 403 | undefined`. When it
- *   returns a status the handler answers with that status and never touches the
- *   registry, so an unauthenticated caller learns nothing about `chart_id`.
- *   `apply()` passes `connection.requestRejection` here: that is the same
- *   trusted-Host fence + signed browser cookie every other session-scoped Web
- *   route runs behind (`/api`, the static index), and a route that skips it is
- *   readable by any local process or page that learns a `chart_id`
- *   (2026-09-17 review). A composition with no `connection` service (no browser
- *   auth plane at all) passes nothing and keeps the old behaviour.
+ * `options.authorize` receives `connection.requestRejection` (trusted-Host 403 +
+ * signed cookie 401); a returned status answers before the registry is touched,
+ * so an unauthenticated caller learns nothing about `chart_id`.
  */
 export function createRouteHandler(store, options = {}) {
   const authorize = options.authorize
@@ -98,8 +86,7 @@ export function createRouteHandler(store, options = {}) {
       try {
         rejection = authorize(req)
       } catch {
-        // An authorizer that cannot answer must not fall through to the data:
-        // fail closed on the same status the platform uses for a missing cookie.
+        // Fail closed: an authorizer that cannot answer must not mean "no auth".
         rejection = 401
       }
       if (rejection !== undefined && rejection !== null) {
@@ -162,13 +149,8 @@ export function apply(ctx) {
   })
 
   /**
-   * 认证围栏：优先解析 host 平面的 `connection`（web profile 由
-   * `@deepseek-ai/dsh-client-connection` 提供），把它的 `requestRejection`
-   * 原样接到本路由上——trusted-Host（403）+ 签名 cookie（401）。
-   *
-   * 惰性解析而不是 apply 时解析一次：`connection` 与本行的挂载先后不由我们决定。
-   * 服务整体缺席（Electron/file:// 这类没有浏览器认证面的载体）时返回 undefined，
-   * 退化成"没有认证面"的旧行为；但**解析抛错**（上下文已销毁）一律 401，宁可拒绝。
+   * Resolve `connection` lazily: its mount order is not ours. Absent service
+   * (Electron / file://) = no auth plane; a throwing resolve fails closed 401.
    */
   const authorize = (req) => {
     let connection
@@ -195,11 +177,8 @@ export function apply(ctx) {
       'capital-charts: series route',
     )
   }
-  // 只走 inject，不许"先 get 探测、再直接拿属性"。`ctx.get('webServer')` 能解析出值
-  // **不代表** `ctx.webServer` 这个属性访问合法：cordis 的属性代理只认"本层声明过 inject"
-  // （ReflectService 找不到就抛 cannot get property "webServer" without inject）。探测式写法
-  // 把正确性押在装配顺序上——桌面端 webServer 在本行之前已就绪，于是走了"直接调用"那条并
-  // 当场炸（2026-09-30 实机：capital-charts 与 capital-watchlist 两行 异常）；web profile 里
-  // 它还没就绪，反而躲过。inject 两种顺序都对：已就绪立刻起，没出现就一直等（本行仍激活）。
+  // Only through inject: `ctx.get('webServer')` resolving does not make
+  // `ctx.webServer` legal (cordis requires a declared inject); probing bets
+  // correctness on mount order and crashed on desktop.
   ctx.inject(['webServer'], registerRoute)
 }

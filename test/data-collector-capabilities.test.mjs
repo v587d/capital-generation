@@ -10,16 +10,13 @@ import { createFtshareSources } from '../lib/sources/ftshare-rest.js'
 import { DataCollectorHub } from '../lib/data-collector/hub.js'
 
 /**
- * 能力总表与实现同步。
- *
- * 表是给人看的能力清单（README 链接它），手工维护必然漂移；这里把"文档 == 实现"
- * 变成一条测试：新增端点却忘了更新 docs/data-collector-capabilities.md 时，
- * 失败信息会直接点名缺了哪个 capability。
+ * Keeps the hand-maintained capability document in sync with the implementation; a new endpoint
+ * without a doc update fails and names the missing capability.
  */
 const DOC = fileURLToPath(new URL('../docs/data-collector-capabilities.md', import.meta.url))
 const table = readFileSync(DOC, 'utf8')
 
-/** 只抓分组能力表的首列（覆盖范围表的首列不是单独的 capability 名，天然不匹配）。 */
+/** Only the first column of capability tables (the coverage table's first column is not a bare name). */
 const documented = [...table.matchAll(/^\|\s`([a-z0-9_]+)`\s\|/gm)].map((match) => match[1])
 
 function registered() {
@@ -49,7 +46,7 @@ test('能力总表：每个 capability 都带端点路径、参数列与非空�
     assert.ok(cells[3].length > 0, `${capability} 的参数列不应为空（无参数写「无参数」）`)
     assert.equal(cells[4], hub.describeCapability(capability).paginated ? '是' : '否', `${capability} 的分页列与实现不一致`)
     assert.ok(cells[5].length > 0, `${capability} 的用途列不应为空`)
-    // 必填参数必须在表里带 * 标记，避免读者误以为全部可选
+    // Required params must carry a * marker so readers do not assume all are optional.
     const required = hub.describeCapability(capability).input_schema.required ?? []
     for (const name of required) {
       assert.ok(cells[3].includes(`\`${name}\`\\*`), `${capability} 的必填参数 ${name} 在表里缺少 * 标记`)
@@ -60,8 +57,8 @@ test('能力总表：每个 capability 都带端点路径、参数列与非空�
 test('能力总表：README 必须链接到它，写了能力总数就得与实现一致', () => {
   const readme = readFileSync(fileURLToPath(new URL('../README.md', import.meta.url)), 'utf8')
   assert.ok(readme.includes('docs/data-collector-capabilities.md'), 'README 必须链接 docs/data-collector-capabilities.md')
-  // 首页那句「共计 N 个数据收集能力」是随扩容漂移的形状：数字与实现不同步时用户照着首页那个数去问
-  // 一个已经不存在（或还没上）的能力。没写数量就不核，写了才核——不逼首页必须放一个数字。
+  // A count on the landing page drifts as capabilities grow, sending users to ask for one that does
+  // not exist; check only when a count is stated -- the page need not state one.
   const stated = readme.match(/(\d+)[\s*]*个\s*数据收集能力/)
   if (stated === null) return
   assert.equal(Number(stated[1]), registered().capabilityNames().length,

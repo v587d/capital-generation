@@ -2,10 +2,8 @@ import { DatasetQueryError, executeJsonRowsQuery, type QueryResult, type QuerySp
 import { defaultAxisWindows, isoDateFromEpoch, probeTimeAxis, readAxisDates } from './time-axis.js'
 
 /**
- * Phase 1/2 workspace-local Dataset store（设计约定见 AGENTS.md「数据布局」）。
- *
- * 原始 Dataset 只由宿主写入，Dataset/Profile 都通过 createIfAbsent 发布。
- * Agent 只能使用 dataset_id 和 opaque artifact_ref，不能传入真实路径。
+ * Workspace-local Dataset/profile store: immutable artifacts, host-written only. Agents receive
+ * dataset_id / opaque artifact_ref, never real paths; raw rows never enter agent messages.
  */
 
 export const WORKSPACE_DATA_DIR = 'capital-data'
@@ -17,41 +15,28 @@ export const PROFILE_FILE = 'profile.json'
 export const DEFAULT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
 export const MAX_RAW_READ_BYTES = 16 * 1024 * 1024
 export const MAX_PROFILE_BYTES = 64 * 1024
-/** 类别事实：最多跟踪多少个不同取值；超过则 distinct_count 记 null 并标记 truncated。 */
+/** Max distinct category values tracked; beyond this distinct_count is null and truncated is set. */
 export const MAX_CATEGORY_DISTINCT = 2_000
-/** `top_values` 只展示前 N 个高频取值，其余由 truncated 显式披露。 */
 export const MAX_CATEGORY_TOP_VALUES = 5
 const MAX_CATEGORY_VALUE_LENGTH = 64
-/** 结构摘要：路径条目上限与递归深度上限，保证 profile 体积有界。 */
+/** Structure-digest caps that keep profile.json bounded. */
 export const MAX_STRUCTURE_ENTRIES = 24
-/**
- * 递归深度上限。行集合里 depth 0 就是列本身，文档里 depth 0 是 `$` 根，
- * 因此文档需要多一层才够到 `abilities[].indicators[]` 这种叶子。
- * 条目上限（24）才是真正的体积闸门，深度只是防止病态深嵌套。
- */
+/** Depth 0 is the column itself for rows but `$` for documents; the entry cap is the real size gate. */
 const MAX_STRUCTURE_DEPTH = 4
 const MAX_STRUCTURE_FIELDS = 8
 const MAX_STRUCTURE_SAMPLED_ELEMENTS = 50
-/**
- * `time_facts.windows` 的条数上限。默认只给 4 个常用窗口（近 1 月/3 月/1 年/年初至今），
- * 上限是防回涨的闸门：窗口是"现成坐标"，不是让宿主把任意期间都算一遍。
- */
+/** Window cap: windows are ready-made coordinates, not an invitation to precompute arbitrary ranges. */
 const MAX_TIME_WINDOWS = 8
-/** 推断时间轴时最多检查多少行：命中的列通常在前若干行就出现，不必为一次探针读全量。 */
+/** Probe only leading rows: the time column appears early and daily data is ordered. */
 const MAX_AXIS_PROBE_ROWS = 500
 
 /**
- * 文档型 Dataset（顶层对象、没有行数组，如财务指标 / 回测结果）交给 data_junior 的
- * 内容预算（Unicode 码点数）。取值必须留在 preset 的工具结果剪枝阈值（8192）以内：
- * 超过就会被剪掉中间段，而不是被完整读到。长数组按下面的档位逐级截断，截断了什么
- * 一律写进 `omitted`，不做静默省略。
+ * Document content budget in code points; must stay under the preset's 8192 prune threshold.
+ * Truncated arrays are reported in `omitted`, never silently dropped.
  */
 export const MAX_DOCUMENT_CHARS = 6_000
 
-/**
- * 呈现层（图表）一次性读取行集的上限。超过就拒绝，而不是把几百 MB 拉进宿主内存：
- * 图表是**有界呈现**，不是通用分析通道。
- */
+/** Presentation rows are capped: charts are bounded rendering, not a general analysis channel. */
 export const MAX_PRESENTATION_ROWS = 200_000
 const DOCUMENT_ARRAY_KEEP_STEPS = [8, 3, 1, 0]
 const DOCUMENT_MAX_DEPTH = 6
@@ -75,7 +60,7 @@ export interface DatasetRef {
 }
 
 type StoredDatasetManifest = DatasetRef & {
-  /** Host-only authorization scope; never returned as part of DatasetRef. */
+  /** Host-only auth scope; never returned in DatasetRef. */
   session_scope_id: string
   /** Host-only row array key; old manifests default to `item`. */
   row_key?: string
@@ -85,7 +70,7 @@ export type DatasetShape = 'array' | 'envelope_item' | 'document' | 'none'
 
 export interface DatasetInspection extends DatasetRef {
   query_access: {
-    /** true = 宿主可读取并产出事实（rows 可 query，document 只能 profile）。 */
+    /** true = host can read it and produce facts (rows queryable; documents profile-only). */
     readable: boolean
     shape: DatasetShape
     reason?: string
@@ -135,16 +120,9 @@ export interface ProfileValidation {
 }
 
 /**
- * Profile 的职责：把「原始行」翻译成模型可以安全引用的事实。
- *
- * 除了逐列的类型与缺失统计（Phase 1），Phase 2 起补齐四类事实，它们对应
- * Fuyao 数据里最常见的四类问题：
- * - `statistics` 加 `count` / `sum`：回答「合计多少、覆盖多少条」；
- * - `categories`：字符串列的 distinct 与高频取值，回答「有哪些类别、分布如何」；
- * - `time_facts`：时间列的覆盖范围 + 首行/末行的数值，回答「最新值、区间涨跌」——
- *   只报 min/max 会被模型讲成「先涨到最高再回落」，这是实测过的失真来源；
- * - `structure`：单元格里的数组/对象展开成有界路径摘要，回答「里面有几层、
- *   多少个叶子」，避免只报一句「这一格是 object」。
+ * Profile turns raw rows into facts the model can safely cite: per-column type/missing counts,
+ * statistics, category values, time facts and bounded structure digests. Time facts carry
+ * first/last row values because min/max alone get narrated as a trend.
  */
 export interface ProfileStatistic {
   count?: number
@@ -163,61 +141,44 @@ export interface ProfileCategoryValue {
 }
 
 export interface ProfileCategory {
-  /** 精确去重数；超过枚举上限时为 null（此时 truncated=true）。 */
   distinct_count: number | null
   top_values: ProfileCategoryValue[]
-  /** true = 还有未展示的取值，`top_values` 不是全部。 */
   truncated: boolean
 }
 
 /**
- * 时间轴的**语义**（形态 + 该列自身观测到的时区偏移）。
- *
- * 存在的理由：`date_ms` 这类列的取值是 epoch 毫秒，模型既无法直接读出"这是哪一天"，
- * 也无法把"近 1 个月"翻译回毫秒；没有这一块事实，它只能自己推算——实测单步
- * 41,961 字符的思考里绝大部分是时间戳算术（真机会话 1e44050e）。
- * 块内只放**观测到的**事实，不做猜测：推断不出就报 `unknown`。
+ * Time-axis semantics: value format plus the offset observed in the column itself. Never guessed;
+ * an undecidable axis is reported as `unknown`.
  */
 export interface ProfileTimeAxis {
   column: string
   value_format: 'epoch_ms' | 'date_string' | 'unknown'
-  /** 该列的取值按哪个时区解释（epoch_ms 且能推断时才有）。 */
   time_zone?: string
-  /** 上面的时区的 `+08:00` 形态；`time_zone` 已是 `UTC+08:00` 时不重复（避免同一事实写两遍）。 */
   utc_offset?: string
-  /** 取值对齐到当地午夜、日历日，还是无法判断。 */
   aligned_to?: 'local_midnight' | 'calendar_day' | 'unknown'
 }
 
-/** 一个可直接使用的分析窗口：日历区间 + 该列里真正的查询边界。 */
+/** A ready-to-use window: calendar range plus the real query bounds for this column. */
 export interface ProfileTimeWindow {
   name: string
   start_date: string
   end_date: string
-  /** `>= value_ge` 即"从这个窗口的第一天开始"（epoch 轴为当地午夜）。 */
   value_ge: number | string
-  /** `<= value_le` 即"到这个窗口的最后一天结束"。 */
   value_le: number | string
-  /** 该窗口在 Dataset 里**真实存在**的首末日期；起点落在非交易日时这里是下一个交易日。 */
+  /** Real first/last date present in the Dataset; a non-trading start moves to the next session. */
   data_from: string | null
   data_to: string | null
 }
 
 export interface ProfileTimeFacts {
   time_column: string
-  /** 文件顺序是否随时间递增；null = 时间列有缺失，无法判断。 */
   ordered_ascending: boolean | null
-  /** 时间列的最小/最大值（覆盖范围），原值不改写。 */
   covered_from: unknown
   covered_to: unknown
-  /** 覆盖范围的人类可读日期；只对 epoch_ms 轴出现（date_string 轴本身可读）。 */
   covered_from_iso?: string
   covered_to_iso?: string
-  /** 时间轴语义：形态与时区偏移。 */
   axis: ProfileTimeAxis
-  /** 常用窗口（近 1 月 / 近 3 月 / 近 1 年 / 年初至今）的现成边界。 */
   windows?: ProfileTimeWindow[]
-  /** 首行与末行的「时间列 + 数值列」取值（文件顺序），用于首末值与区间变化。 */
   first: Record<string, unknown>
   last: Record<string, unknown>
 }
@@ -229,17 +190,13 @@ export interface ProfileStructureField {
 
 export interface ProfileStructure {
   type: 'array' | 'object'
-  /** 该路径在数据中出现的次数（行内多次出现会累加）。 */
   occurrences: number
-  /** 未抽样时，所有出现位置的元素总数；对象路径不返回该字段。 */
   total_elements?: number
-  /** 该路径受上限影响时，实际检查到的元素/对象数量；存在时不代表完整数量。 */
+  /** Present only when sampling capped the scan; it is not the complete count. */
   sampled_elements?: number
-  /** 数组：空数组的出现次数与长度极值。 */
   empty_count: number
   min_length: number
   max_length: number
-  /** 对象：直接字段名与观察到的类型（有界）。 */
   fields: ProfileStructureField[]
 }
 
@@ -323,8 +280,8 @@ export interface FsLike {
   ): Promise<unknown>
   readText(target: FsTargetLike, signal?: AbortSignal): Promise<string>
   /**
-   * 原样读字节（本地 PDF / 图片交给外部解析服务时用）。宿主把上限放在这道缝上：
-   * 超过 `maxBytes` 抛 `FS_TOO_LARGE`，**不会**返回截断结果。
+   * Raw bytes for external parsers (local PDF/images). The host enforces maxBytes on this seam:
+   * overflow throws FS_TOO_LARGE and never returns truncated content.
    */
   readBytes?(target: FsTargetLike, signal: AbortSignal | undefined, maxBytes: number): Promise<Uint8Array>
   listDir(target: FsTargetLike, signal?: AbortSignal): Promise<Array<{ name: string; type: 'file' | 'directory' | 'other'; target: FsTargetLike }>>
@@ -346,18 +303,12 @@ export interface QueryDatasetInput {
   signal?: AbortSignal
 }
 
-/**
- * 时间轴探针结果：形态 + 已出现的日期 + 列清单。
- *
- * 三条消费路径共用同一份事实，避免"谁猜时间列"出现第二套判据：
- * ① `query_dataset` 的日期筛选归一；② `resolve_data_time_range` 的数据集模式；
- * ③ 报错信息里列出可选列。
- */
+/** Time-axis probe shared by date normalization, dataset time windows and error hints. */
 export interface TimeAxisSnapshot {
   dataset_id: string
   columns: string[]
   axis: ProfileTimeAxis
-  /** 探针看到的日期（升序、去重）；用于把窗口夹到真实存在的交易日。 */
+  /** Probe dates (ascending, deduplicated); used to clamp windows to real trading days. */
   dates: string[]
 }
 
@@ -372,15 +323,14 @@ export interface ProfileDatasetResult extends ProfileRef {
   schema?: ProfilePayload['schema']
   validation?: ProfilePayload['validation']
   warnings: string[]
-  /** 仅文档型 Dataset：有界内容，不随 profile 持久化。 */
+  /** Document Datasets only: bounded content, never persisted with the profile. */
   document?: ProfileDocument
 }
 
 export interface ProfileDocument {
-  /** 有界后的文档内容；连最小档位都放不下时为 null。 */
   content: unknown
   truncated: boolean
-  /** 被截断的数组路径与省略条数，逐个披露，不做静默省略。 */
+  /** Every truncation is disclosed here; no silent omission. */
   omitted: Array<{ path: string; kept: number; omitted: number }>
 }
 
@@ -405,7 +355,7 @@ export interface SaveDatasetInput {
   schema: object | null
   row_count: number | null
   data: unknown
-  /** Host-only row array key for envelope-shaped json_rows data. */
+  /** Host-only row key for envelope-shaped json_rows data. */
   row_key?: string
   signal?: AbortSignal
 }
@@ -440,11 +390,8 @@ function isAbsolutePath(value: string): boolean {
 }
 
 /**
- * 规范化并校验 workspace **相对**路径。
- *
- * 拒绝：空串、绝对路径（含 Windows 盘符）、任何 `..` 段、反斜杠（本仓统一 `/`）。
- * 这里只做形态校验；真正的沙箱归属由 `resolveContained` 证明。两道关卡都要过——
- * 形态校验是为了给出可读错误，归属校验才是安全边界。
+ * Validate a workspace-relative path shape. Containment is proven separately by resolveContained;
+ * both checks are required, and this one only makes errors readable.
  */
 export function normalizeWorkspaceRelativePath(value: string): string {
   if (typeof value !== 'string') throw new DatasetStoreError('workspace_path_invalid', 'path must be a string')
@@ -622,7 +569,7 @@ export class WorkspaceDatasetStore {
         profile,
         signal: input.signal,
       })
-      // 结构摘要随 profile 持久化；有界内容只随本次工具结果返回，不进入 profile 产物。
+      // Structure digest is persisted with the profile; bounded content is returned only.
       return { ...profileRef, ...profile, document: boundDocument(raw.value) }
     }
     const profile = buildProfile(raw.rows, input.time_column, input.primary_key, extractRowContracts(ref.schema))
@@ -648,11 +595,8 @@ export class WorkspaceDatasetStore {
   }
 
   /**
-   * 时间轴只读探针（`query_dataset` 的日期归一边界与 `resolve_data_time_range` 的数据集模式共用）。
-   *
-   * 只读前 {@link MAX_AXIS_PROBE_ROWS} 行推断形态与偏移：时间列一定在每行都出现，日线数据
-   * 的有序性也让前若干行足以定出粒度；这样这个探针**可以随查询逐次调用**，
-   * 代价与"读一份 16MB raw.json 只为一个问题"不同量级。
+   * Read-only time-axis probe shared by the date normalizer and dataset time-window mode.
+   * Samples at most MAX_AXIS_PROBE_ROWS rows, so it is cheap enough to call per query.
    */
   async describeTimeAxis(input: {
     session: SessionLike
@@ -710,15 +654,9 @@ export class WorkspaceDatasetStore {
   }
 
   /**
-   * 宿主内部**呈现层**读取有界行集（图表用）。
-   *
-   * 契约（不可违反）：
-   *  - 返回值**不得**进入任何 Agent 消息、工具结果或模型上下文；调用方只能在宿主进程内
-   *    把它变成有界可视化载荷（见 src/chart/series.ts）。
-   *  - 这是唯一一处把原始 rows 交给 store 之外代码的入口，因此命名、文档与调用点都必须是
-   *    "呈现"语义。需要数值结论一律走 profile_dataset / query_dataset。
-   *  - session 作用域与 profile/query 同源（`sessionScopeFor` 取父会话），所以主 Agent
-   *    用自己会话即可读到自己子 Agent 采到的 Dataset。
+   * Host-internal presentation read (charts). The returned rows must never enter any agent message,
+   * tool result or model context; this is the only path that hands raw rows outside the store.
+   * Session scope follows the parent session, so the main agent can present a child's Datasets.
    */
   async readPresentationRows(input: {
     session: SessionLike
@@ -740,11 +678,8 @@ export class WorkspaceDatasetStore {
   }
 
   /**
-   * 宿主内部读取 workspace 内的**文本**文件（图表 spec、OCR 产物、用户本地数据）。
-   *
-   * 这是 workspace 读取的**唯一**实现：`readWorkspaceJson` / `readWorkspaceBytes` 都从
-   * `workspaceFileTarget` 取归属与体积闸门，不各自再写一遍路径校验（§9.7——同一个事实
-   * 有两份实现就一定会漂移）。
+   * Host-internal workspace text read; with readWorkspaceBytes it shares containment and size
+   * gates via workspaceFileTarget.
    */
   async readWorkspaceText(input: {
     session: SessionLike
@@ -768,11 +703,8 @@ export class WorkspaceDatasetStore {
   }
 
   /**
-   * 宿主内部读取 workspace 内的**原始字节**（本地 PDF / 图片上传给外部解析服务的入口）。
-   *
-   * 上限必须显式给出：这道缝后面的调用方要把字节整个装进内存，没有默认值可兜。
-   * `fs.readBytes` 缺席（载体未挂载该能力）时**响亮失败**，不回退成 `readText`——
-   * 二进制走文本读取会得到被解码污染的字节。
+   * Host-internal raw-byte read (local PDF/images). maxBytes is mandatory and fails loudly; never
+   * fall back to readText, which would corrupt binary data.
    */
   async readWorkspaceBytes(input: {
     session: SessionLike
@@ -812,7 +744,6 @@ export class WorkspaceDatasetStore {
     return { relative, target }
   }
 
-  /** 宿主内部呈现层读取 workspace 内的 JSON 文件（用户本地数据直接可视化的入口）。 */
   async readWorkspaceJson(input: { session: SessionLike; path: string; signal?: AbortSignal }): Promise<unknown> {
     const text = await this.readWorkspaceText(input)
     try {
@@ -823,18 +754,9 @@ export class WorkspaceDatasetStore {
   }
 
   /**
-   * 宿主内部**产物层**把一组文本文件写进 workspace 的一个子目录（图表与 OCR 产物用）。
-   *
-   * 走与 Dataset 落盘完全相同的沙箱策略与归属校验；默认 `createIfAbsent`，保证不会静默
-   * 覆盖已有产物（图表 id 唯一，重复即 bug，应当响亮失败）。
-   *
-   * `overwrite: true` 是给**内容寻址产物**重跑用的（OCR：上次在两个文件之间被中断，
-   * 半件产物必须能被下一次解析自愈）。它不是"跳过幂等"的口子：幂等判断在调用方，
-   * 只有已经决定重新生成时才传。
-   *
-   * 返回值同时给出**相对路径**（可以进 Agent 消息、可以 present 给用户）与**绝对路径**
-   * （只供宿主内部使用，例如登记给 host 平面的取数路由）。这个区分是本仓的数据纪律：
-   * 绝对路径不出宿主进程。
+   * Host-internal artifact write (charts, OCR): same sandbox and containment checks as Datasets,
+   * createIfAbsent by default. `overwrite` exists only for content-addressed reruns.
+   * Returns a relative path (agent-visible) and an absolute one (host-only).
    */
   async writeWorkspaceFiles(input: {
     session: SessionLike
@@ -897,14 +819,8 @@ export class WorkspaceDatasetStore {
     return stored
   }
 
-  /**
-   * 读取原始 Dataset。返回两种形状之一：
-   * - `rows`：顶层数组或 manifest 声明的行数组键，可 profile、可 query；
-   * - `document`：顶层对象且没有行数组（财务指标、回测结果这类），可 profile
-   *   （宿主算结构摘要 + 有界内容），不可 query。
-   * 判定放在读取时而不是复用 manifest 的 `format`：`format` 只记录写入时的粗略
-   * 形状，真正的形状以文件内容为准。
-   */
+  /** Read raw Dataset: rows (array/envelope) are queryable, documents are profile-only. Shape is
+   * decided from file content, not the manifest's coarse `format`. */
   private async readRaw(ref: DatasetRef, session: SessionLike, signal?: AbortSignal, rowKey?: string): Promise<RawDataset> {
     const root = this.readRoot(session)
     if (!root || !this.fs) throw new DatasetStoreError('filesystem_unavailable', 'workspace filesystem is unavailable')
@@ -1189,11 +1105,7 @@ function buildProfile(
   }
 }
 
-/**
- * 挑时间列：显式指定优先；否则按列名候选，并要求该列的非空值全是数字或日期样式
- * 字符串。只按列名取第一个匹配列会把 `report_type`（季度枚举）误当时间轴，
- * 于是首末值与覆盖范围全是错的口径。
- */
+/** Prefer an explicit column; otherwise require a name match plus numeric/date-only values (report_type must not win). */
 function pickTimeColumn(rows: unknown[], columns: string[], requested?: string): string | undefined {
   if (requested !== undefined) return columns.includes(requested) ? requested : requested
   for (const column of columns) {
@@ -1211,17 +1123,7 @@ function pickTimeColumn(rows: unknown[], columns: string[], requested?: string):
 
 const DATE_LIKE_PATTERN = /^\d{4}(-\d{1,2}(-\d{1,2})?)?$/
 
-/**
- * 时间事实：覆盖范围 + 首行/末行的「时间列与数值列」取值（文件顺序）。
- *
- * 只报 min/max 时，模型会把区间极值讲成走势（实测样本里出现过「从 74 涨到 105
- * 以上随后可能回落」这种没有依据的叙述）。首末行给出的是真实首末取值，
- * 区间变化因此可追溯；`ordered_ascending` 说明文件顺序，避免把末行当成最新。
- */
-/**
- * 时间事实的**唯一实现**（profile 与时间轴探针共用）：
- * 覆盖范围（原值 + ISO）、时间轴语义、常用窗口、首末行取值。
- */
+/** Sole implementation of time facts (profile and probe): coverage, axis, windows, first/last rows. */
 function timeFactsFor(
   rows: unknown[],
   timeColumn: string,
@@ -1291,14 +1193,7 @@ function structureAccumulator(entries: Map<string, StructureAccumulator>, path: 
   return created
 }
 
-/**
- * 把单元格里的数组/对象展开成有界路径摘要（深度 ≤3、条目 ≤24）。
- *
- * 路径约定：对象字段用 `.name`，数组元素用 `[]`，例如 QDII 额度的三层嵌套会得到
- * `sub_tab`（数组，共 3 项）→ `sub_tab[].fund_list`（数组，共 40 项）。
- * 未抽样时用 `total_elements` 表示完整数量；超过 50 项时改用 `sampled_elements`，明确只统计了实际检查到的部分，
- * 而不是让模型面对一句「sub_tab 的类型是 object」。
- */
+/** Bounded path digest: `.name` for object fields, `[]` for array elements, depth and count capped. */
 function collectStructure(value: unknown, path: string, depth: number, entries: Map<string, StructureAccumulator>, sampled = false): void {
   if (depth > MAX_STRUCTURE_DEPTH) return
   if (Array.isArray(value)) {
@@ -1373,12 +1268,7 @@ function tallyCategoryValue(tally: Map<string, CategoryTally>, column: string, v
   columnTally.counts.set(key, 1)
 }
 
-/**
- * 文档型 Dataset 的 profile：没有行，所以不给行列统计，只给结构摘要。
- *
- * `$` 表示文档根，其余路径沿用 structure 的约定（对象字段用 `.name`、数组元素用 `[]`），
- * 例如财务指标会得到 `abilities`（共 5 项）与 `abilities[].indicators`（共 40 项）。
- */
+/** Document profile: structure digest only, rooted at `$` (no row statistics). */
 function buildDocumentProfile(value: Record<string, unknown>): ProfilePayload {
   const entries = new Map<string, StructureAccumulator>()
   collectStructure(value, '$', 0, entries)
@@ -1396,11 +1286,7 @@ function buildDocumentProfile(value: Record<string, unknown>): ProfilePayload {
   }
 }
 
-/**
- * 把文档内容裁到预算内：长数组按档位逐级截断（保留前 N 项），每次尝试都重新
- * 量体积，直到放得下。返回实际采用的档位与被省略的路径，供模型如实披露
- * 「完整共 N 项，本次只给了前 K 项」。
- */
+/** Shrink long arrays in steps until the document fits; report every omitted path. */
 function boundDocument(value: unknown): ProfileDocument {
   const measure = (candidate: unknown): number | undefined => {
     try {
@@ -1442,7 +1328,7 @@ function shrinkArrays(value: unknown, keep: number, path: string, omitted: Profi
   return result
 }
 
-/** 行内取列值：`present=false` 表示该列在这行不存在（缺失），与显式 null 区分开。 */
+/** present=false distinguishes a missing column from an explicit null. */
 export interface ProfileCell {
   present: boolean
   value: unknown

@@ -1,23 +1,13 @@
 /**
- * Wind 金融文档检索客户端（JSON-RPC over HTTP，零依赖）。
- *
- * 线格式为 JSON-RPC 2.0（即 MCP 线协议）：initialize → tools/call，无会话态、
- * 无 SDK、无框架依赖——与 fuyao-rest / anysearch engines 同构的普通 HTTP 客户端。
- * 协议蓝本（Wind 官方 CLI）：github.com/Wind-Alice/AliceMarket 的
- * skills/wind-mcp-skill/scripts/cli.mjs（本地参考副本在 docs/reference/，不入库）。
+ * Wind financial-document client: JSON-RPC 2.0 (MCP wire protocol) over plain
+ * HTTP. initialize -> tools/call, no session state, no SDK.
  */
 export declare const DEFAULT_WIND_ENDPOINT = "https://mcp.wind.com.cn/vserver_financial_docs/mcp/";
 export declare const WIND_REQUEST_TIMEOUT_MS = 60000;
 export declare const WIND_MAX_CONTENT_CHARS = 20000;
 /**
- * 七台托管 MCP server 的端点（`server_type` → URL）。
- *
- * 这里是**事实**（端点常量），不是代码搬运：上游仓库未声明 LICENSE，蓝本
- * （官方 CLI 的 `SERVERS` 表）按惯例只作本地参考副本、不入库，见
- * `docs/design/wind-market-source.md` §1.1。
- *
- * `analytics_data` 一并列出是为了记下"它存在但不可用"：2026-10-05 实测连 `initialize`
- * 都挂满 60 秒（同文档 §6.1），所以数据源侧不接它。
+ * Hosted MCP servers (`server_type` -> URL). `analytics_data` is listed to record
+ * that it exists but is unusable (initialize hangs), so no data source uses it.
  */
 export declare const WIND_SERVER_ENDPOINTS: {
     readonly stock_data: "https://mcp.wind.com.cn/vserver_stock_data/mcp/";
@@ -30,40 +20,33 @@ export declare const WIND_SERVER_ENDPOINTS: {
 };
 export type WindServerType = keyof typeof WIND_SERVER_ENDPOINTS;
 /**
- * 错误分类（persona/主 Agent 依据它决定 fallback）：
- * AUTH=Key 缺失或无效；RATE_LIMIT=429；NETWORK=网络错误/5xx/超时；
- * BACKEND=接口层与业务错误；INVALID=响应不可解析。
+ * Error classes drive fallback: AUTH=missing/invalid key; RATE_LIMIT=429;
+ * NETWORK=network/5xx/timeout; BACKEND=API/business; INVALID=unparseable.
  */
 export type WindErrorCode = 'AUTH' | 'RATE_LIMIT' | 'NETWORK' | 'BACKEND' | 'INVALID';
 export interface WindCallResult {
     ok: boolean;
-    /** 成功且正文可解析为 JSON 时：Wind 返回结果（字符串字段裁剪到 WIND_MAX_CONTENT_CHARS）。 */
+    /** Parsed JSON result; string fields clipped to WIND_MAX_CONTENT_CHARS. */
     data?: unknown;
-    /** 成功但正文非 JSON 时：原文透传（≤WIND_MAX_CONTENT_CHARS）。 */
+    /** Non-JSON body passed through (<= WIND_MAX_CONTENT_CHARS). */
     content?: string;
     content_chars?: number;
     error?: string;
     code?: WindErrorCode;
 }
-/**
- * 报给 Wind 的客户端版本（`initialize.clientInfo.version` 与 `tools/call._meta.clientVersion`）。
- *
- * ⚠️ 必须与 `package.json` 的 `version` 一致：嵌套包 `chart-ui/package.json` 的版本由
- * `test/chart-composition.test.mjs` 守着（会因漂移而失败），这里原本是写死的第二处，
- * 一次发版就得记得改两遍。所以本常量由测试一并核对（见 `test/wind-client.test.mjs`）。
- */
+/** Must match `package.json` version; a test pins the two together. */
 export declare const WIND_CLIENT_VERSION = "2.8.3";
 export interface WindClient {
     callTool(toolName: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<WindCallResult>;
 }
 export interface WindClientOptions {
     endpoint?: string;
-    /** 每次调用重新解析 Key，不缓存（与 anysearch engines 同策略）。 */
+    /** Re-resolve the key on every call, never cache it. */
     resolveApiKey: () => Promise<string | undefined>;
-    /** 单次请求超时毫秒（initialize 与 tools/call 各自适用）；默认 60000。 */
+    /** Per-request timeout (initialize and tools/call separately); default 60000. */
     timeoutMs?: number;
-    /** 网络错误重试间隔毫秒；默认 [300, 1000]，仅供测试注入缩短。 */
+    /** Network-error retry delays; default [300, 1000], shortened only in tests. */
     retryDelaysMs?: number[];
 }
-/** 创建 Wind 文档检索客户端；端点在构造时校验（配置错误立即暴露，与 anysearch 同策略）。 */
+/** Endpoint is validated at construction so config errors surface immediately. */
 export declare function createWindClient(options: WindClientOptions): WindClient;

@@ -21,7 +21,7 @@ test('Eastmoney identity：明确市场才归一证券，板块保持独立类�
   })
   assert.deepEqual(normalizeEastmoneySecurityIdentity({ secucode: '000430', market: 'SZ' }).thscode, '000430.SZ')
   assert.deepEqual(normalizeEastmoneySecurityIdentity({ secid: '1.600519' }).thscode, '600519.SH')
-  // secid 市场码实测（2026-09-24 push2）：北交所与深市共用 `0.`，`2.*` 上游直接 rc=100。
+  // BJ shares prefix `0.` with Shenzhen; `2.*` fails upstream.
   assert.deepEqual(normalizeEastmoneySecurityIdentity({ secid: '0.920982' }).thscode, '920982.BJ')
   assert.deepEqual(normalizeEastmoneySecurityIdentity({ secid: '0.430047' }).thscode, '430047.BJ')
   assert.deepEqual(normalizeEastmoneySecurityIdentity({ secid: '0.000993' }).thscode, '000993.SZ')
@@ -66,7 +66,7 @@ test('Eastmoney 宏观表：行键名一律 ASCII snake_case（§10.6 不许透�
     for (const key of declared) {
       assert.match(key, /^[a-z][a-z0-9_]*$/, `${capability} 的行键 ${key} 不是 ASCII snake_case：全半角或中文键名会让 query_dataset 匹配零行`)
     }
-    // 上游键名（大写缩写）一个都不许出现在行字段里——映射表必须逐字段改名而不是原样透传。
+    // Map every upstream key; raw capitalized field names must not leak into rows.
     for (const key of declared) assert.ok(!/^[A-Z]/.test(key), `${capability} 透传了上游键名 ${key}`)
     assert.equal(source.schema.paginated, capability === 'eastmoney_mutual_quota' ? false : true, '额度表是当日四条快照，不分页')
     assert.deepEqual(source.schema.rowShape, { rowKey: 'item' })
@@ -259,7 +259,7 @@ test('eastmoney_main_capital_snapshot：全市场快照，只有查询日、不�
     assert.equal(first.trade_date, '2026-09-30')
     assert.equal(suspended.change_pct, null, '停牌行原样保留 null')
     assert.ok(!('SECURITY_INNER_CODE' in first) && !('TRADE_MARKET_CODE' in first), '内部编码不进取')
-    // 排序列与方向的枚举在发请求前把关
+    // Validate sort field and direction enums before sending the request.
     await assert.rejects(
       () => source.execute({ capability: 'eastmoney_main_capital_snapshot', params: { sort_field: 'trade_date' }, session }, signal),
       /sort_field must be one of/,
@@ -425,7 +425,7 @@ test('eastmoney_margin_trading：真实行按加减法映射，行身份与上�
     assert.equal(row.margin_balance_pct, 0.86173284)
     assert.equal(row.market_segment, '融资融券_沪证', '市场原文保留')
     assert.ok(!('KCB' in row) && !('TRADE_MARKET' in row) && !('TRADE_MARKET_CODE' in row) && !('SCODE' in row), '内部编码与裸代码不进取')
-    // 上游把明细串行到别的票上，不能挂到请求的那只下面
+    // Do not attach serialized upstream detail to the requested symbol.
     globalThis.fetch = async () => response({ success: true, code: 0, result: { pages: 1, count: 1, data: [{ ...raw, SECUCODE: '600519.SZ' }] } })
     await assert.rejects(
       () => source.execute({ capability: 'eastmoney_margin_trading', params: { ticker: '600519.SH', start_date: '2026-09-01', end_date: '2026-09-30' }, session }, signal),
@@ -445,17 +445,13 @@ test('eastmoney_margin_trading：42 列宽表靠字段字典仍在详情预算�
   assert.equal(described.output_fields.split('\n').filter((line) => line.startsWith('item[].')).length, declared.length,
     '映射表每一列都要出现在字典里，投影不能漏列')
   const dictionary = JSON.stringify(described)
-  // 同一份详情把字典换成逐列 JSON Schema 就越过 4096（实测 4900+）：这条断言钉住"为什么需要投影"，
-  // 也意味着再往这张表加列时先看这里，而不是等运行时静默截断。
+  // Full per-column schema exceeds the tool envelope, so the projected schema is required.
   const withSchema = JSON.stringify({ ...described, output_schema: source.schema.output_schema, output_fields: undefined })
   assert.ok(dictionary.length < 4096, `字典形态详情 ${dictionary.length} 字符，已打穿单能力 4096 预算`)
   assert.ok(withSchema.length > 4096, `schema 直发形态只有 ${withSchema.length} 字符，这条回归失去意义`)
 })
 
-/**
- * 可转债行的上游形状（2026-10-05 live 复核过）。`BOND_EXPIRE` 上游就是**字符串**，
- * `*_DATE` 一律带 ` 00:00:00`，行情列整表恒 null——这三点是这张表最容易踩的地方。
- */
+/** Convertible rows preserve three live quirks: string expiry, padded dates, and null quote columns. */
 const bondRaw = (overrides = {}) => ({
   SECURITY_CODE: '118077', SECUCODE: '118077.SH', TRADE_MARKET: 'CNSESH', SECURITY_NAME_ABBR: '莱特转债',
   CONVERT_STOCK_CODE: '688150', SECURITY_SHORT_NAME: '莱特光电',
@@ -467,7 +463,7 @@ const bondRaw = (overrides = {}) => ({
   IB_START_DATE: '2026-09-29 00:00:00', IB_END_DATE: '2027-09-28 00:00:00', CASHFLOW_DATE: '2027-09-29 00:00:00',
   PAY_INTEREST_DAY: '09-29', INTEREST_RATE_EXPLAIN: '第一年0.10%、第二年0.30%、第三年0.60%、第四年1.00%、第五年1.50%、第六年2.00%。',
   FIRST_PER_PREPLACING: 1.313, ONLINE_GENERAL_AAU: 1000, ONLINE_GENERAL_LWR: 0.00118203, IS_CONVERT_STOCK: '否',
-  // 恒 null / 恒占位的行情列与内部编码：live 实测整表如此，必须留在 fixture 里验证"被丢弃"。
+  // Keep null placeholder columns in the fixture to prove they are discarded.
   CONVERT_STOCK_PRICE: null, CURRENT_BOND_PRICE: null, TRANSFER_PRICE: null, TRANSFER_PREMIUM_RATIO: 100,
   RESALE_TRIG_PRICE: null, REDEEM_TRIG_PRICE: null, PBV_RATIO: null, MARKET: null,
   ISSUE_TYPE: '1,4', REDEEM_TYPE: '2', PARAM_NAME: '交易所系统网上向社会公众投资者发行', BOND_COMBINE_CODE: '26092900001LTZ',
@@ -486,8 +482,7 @@ test('eastmoney_convertible_bond_list：日期轴是起息日，正股市场只�
     const source = sourceMap().eastmoney_convertible_bond_list
     const result = await source.execute({ capability: 'eastmoney_convertible_bond_list', params: { start_date: '2026-09-01', end_date: '2026-09-30' }, session }, signal)
     assert.equal(requested.searchParams.get('sortColumns'), 'PUBLIC_START_DATE')
-    // 过滤列与排序列同为 PUBLIC_START_DATE（实测与 VALUE_DATE 1059/1059 相同且从不为空）：
-    // 换成 LISTING_DATE 就会静默吞掉"已发行未上市"的债。
+    // PUBLIC_START_DATE also covers issued-but-unlisted bonds; LISTING_DATE would drop them.
     assert.equal(requested.searchParams.get('filter'), `(PUBLIC_START_DATE>='2026-09-01')(PUBLIC_START_DATE<='2026-09-30')`)
     const [row] = result.data.item
     assert.deepEqual([row.thscode, row.ticker, row.name, row.market], ['118077.SH', '118077', '莱特转债', 'CNSESH'], '行主体是债券本身')
@@ -514,10 +509,9 @@ test('eastmoney_convertible_bond_list：老三板与 126 段老债都不按代�
     result: {
       pages: 1, count: 2,
       data: [
-        // live 实测：404005.NQ 普利退债，TRADE_MARKET=STAS00，正股 400266 是老三板标的。
-        // 按数字首位（4/8/92 → 北交所）会把它写成 400266.BJ——那就是给一只证券编造了市场。
+        // The three-digit exchange code identifies BJ; inferring from the code prefix can invent a market.
         bondRaw({ SECUCODE: '404005.NQ', SECURITY_CODE: '404005', TRADE_MARKET: 'STAS00', SECURITY_NAME_ABBR: '普利退债', CONVERT_STOCK_CODE: '400266', SECURITY_SHORT_NAME: 'R普利1' }),
-        // live 实测：126 段沪市老债（分离交易可转债）没有转股期，四列同批为 null。
+        // Legacy Shanghai 126 bonds may genuinely lack a conversion period; nulls are valid.
         bondRaw({ SECUCODE: '126018.SH', SECURITY_CODE: '126018', TRADE_MARKET: 'CNSESH', SECURITY_NAME_ABBR: '08江铜债', CONVERT_STOCK_CODE: '600362', SECURITY_SHORT_NAME: '江西铜业', TRANSFER_START_DATE: null, TRANSFER_END_DATE: null, INITIAL_TRANSFER_PRICE: null, IS_CONVERT_STOCK: null, COUPON_IR: null, IB_START_DATE: null, IB_END_DATE: null, CASHFLOW_DATE: null }),
       ],
     },
@@ -549,7 +543,7 @@ test('eastmoney_convertible_bond_list：SECUCODE 丢后缀或起息/到期日畸
     globalThis.fetch = async () => response({ success: true, code: 0, result: { pages: 1, count: 1, data: [broken] } })
     await assert.rejects(call, (error) => error?.code === 'eastmoney_invalid_response', '半截行不能出库：' + JSON.stringify(broken.SECUCODE ?? broken.CONVERT_STOCK_CODE))
   }
-  // 区间内没有发行是**数据缺口**（上游 code 9201），给空结果而不是错误，免得模型反复重试。
+  // Code 9201 means no issuance in range; return a data gap, not a retryable error.
   globalThis.fetch = async () => response({ success: false, code: 9201, message: '返回数据为空' })
   const empty = await call()
   assert.deepEqual([empty.data.item, empty.data.pagination.total], [[], 0])
@@ -564,12 +558,12 @@ test('eastmoney_convertible_bond_list：代码参数剥市场后缀，畸形代�
   }
   try {
     const source = sourceMap().eastmoney_convertible_bond_list
-    // 后缀只用来收窄：过滤走不带市场的 SECURITY_CODE / CONVERT_STOCK_CODE（债市代码 11/12/13/40 都有）。
+    // Suffixes only narrow queries; filtering uses market-independent codes because bond prefixes vary.
     await source.execute({ capability: 'eastmoney_convertible_bond_list', params: { start_date: '2019-01-01', end_date: '2019-12-31', bond_code: '110059.SH' }, session }, signal)
     assert.equal(requested.searchParams.get('filter'), `(PUBLIC_START_DATE>='2019-01-01')(PUBLIC_START_DATE<='2019-12-31')(SECURITY_CODE="110059")`)
     await source.execute({ capability: 'eastmoney_convertible_bond_list', params: { start_date: '2019-01-01', end_date: '2019-12-31', stock_code: '600000' }, session }, signal)
     assert.equal(requested.searchParams.get('filter'), `(PUBLIC_START_DATE>='2019-01-01')(PUBLIC_START_DATE<='2019-12-31')(CONVERT_STOCK_CODE="600000")`)
-    // 老三板退市债（404005.NQ）也是本表的真实成员，后缀必须认。
+    // Delisted-board `.NQ` rows are valid members of this table.
     await source.execute({ capability: 'eastmoney_convertible_bond_list', params: { start_date: '2021-01-01', end_date: '2021-12-31', bond_code: '404005.nq' }, session }, signal)
     assert.equal(requested.searchParams.get('filter'), `(PUBLIC_START_DATE>='2021-01-01')(PUBLIC_START_DATE<='2021-12-31')(SECURITY_CODE="404005")`)
     for (const bad of ['11005', 'abc123', '600000.XX', '', '600000.SHX']) {
@@ -599,7 +593,7 @@ test('eastmoney_convertible_bond_list：72 列表取 29 列，字典形态才装
   const withSchema = JSON.stringify({ ...described, output_schema: source.schema.output_schema, output_fields: undefined })
   assert.ok(dictionary.length < 4096, `字典形态详情 ${dictionary.length} 字符，已打穿单能力 4096 预算`)
   assert.ok(withSchema.length > 4096, `schema 直发形态只有 ${withSchema.length} 字符，这条回归失去意义`)
-  // 契约层面必须能读出这三件事，否则丢弃列会被当成取数失败、量纲会被猜错。
+  // Contract text must explain discarded columns, amount units, and null semantics.
   for (const promise of [/不含行情/, /1059\/1059/, /亿元/, /百分数原值/, /实际存续年数/, /当前计息年度/, /按代码首位/]) {
     assert.match(described.description, promise, `转债表描述缺少契约承诺 ${promise}`)
   }
@@ -643,8 +637,7 @@ test('eastmoney_top_buy_sell_market：解析分页龙虎榜并保留 canonical t
 })
 
 test('eastmoney_top_buy_sell_market：MARKET 为自由文本/空时护栏不误杀（SECUCODE 已带市场）', async () => {
-  // 真实龙虎榜的 `MARKET` 不是 SH/SZ 白名单口径（如 `深交所主板`、空值）。把它喂进硬校验
-  // 会让整页判错（§10.2 护栏误杀族）；SECUCODE 自带市场后缀时以它为准，`market` 列仍存原文。
+  // Dragon-tiger MARKET text is not a hard SH/SZ enum; SECUCODE carries the authoritative suffix.
   const originalFetch = globalThis.fetch
   globalThis.fetch = async () => response({ success: true, code: 0, result: { pages: 1, count: 2, data: [
     { TRADE_DATE: '2026-09-23 00:00:00', SECURITY_CODE: '000993', SECUCODE: '000993.SZ', MARKET: '深交所主板', SECURITY_NAME_ABBR: '闽东电力' },

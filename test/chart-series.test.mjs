@@ -4,9 +4,9 @@ import { buildChartPayload, extractRows, parseTimeValue, MAX_CHART_POINTS } from
 import { normalizeChartSpec } from '../lib/chart/spec.js'
 
 /**
- * 序列构建的契约测试。这里钉住的是**即使出错也不会误导用户**的几条性质：
- * 时间解析口径确定、时间轴严格升序唯一、下采样后所有子序列共用同一组时间、
- * 标记点不会因为下采样而消失、数值口径（含数字字符串）与 Dataset 一致。
+ * Series building, pinned on properties that would mislead users if broken: deterministic time
+ * parsing, strictly ascending unique axis, shared time set after downsampling, markers that
+ * survive downsampling, and numeric handling consistent with Dataset.
  */
 
 const meta = { source_kind: 'dataset', dataset_id: 'ds_1', source_label: '同花顺 日线', captured_at: 1_700_000_000_000 }
@@ -21,7 +21,7 @@ test('parseTimeValue：口径确定（业务日字符串 / epoch 秒 / epoch 毫
   assert.equal(parseTimeValue(1735776000000).seconds, 1735776000)
   assert.equal(parseTimeValue('1735776000000').seconds, 1735776000)
   assert.equal(parseTimeValue('2025-01-02T08:00:00Z').seconds, 1735804800)
-  // 无时区的 datetime 按 UTC 解释：同一份数据在任何机器上得到同一条时间轴。
+  // A timezone-less datetime is read as UTC so the same data yields the same axis on every machine.
   assert.equal(parseTimeValue('2025-01-02 08:00:00').seconds, 1735804800)
   assert.equal(parseTimeValue('2025-02-30'), undefined, '不存在的日历日必须被拒绝')
   assert.equal(parseTimeValue('not a date'), undefined)
@@ -31,11 +31,11 @@ test('parseTimeValue：口径确定（业务日字符串 / epoch 秒 / epoch 毫
 test('extractRows：顶层数组直接用；envelope 找到行数组；多候选时点名让人选', () => {
   assert.deepEqual(extractRows([{ a: 1 }]).rows, [{ a: 1 }])
   assert.deepEqual(extractRows({ code: 0, item: [{ a: 1 }] }).rows, [{ a: 1 }])
-  // 已知 envelope 键优先：同花顺常见的 item / data 同时出现时按候选顺序取，不随机猜。
+  // Known envelope keys win in candidate order when both item and data appear, never guessed.
   assert.deepEqual(extractRows({ item: [{ a: 1 }], data: [{ b: 2 }] }).rows, [{ a: 1 }])
-  // 只有一个非候选数组键时接受它（用户自己的 JSON 常常就叫 stock_items 之类）。
+  // A single non-candidate array key is accepted (user JSON is often named stock_items).
   assert.deepEqual(extractRows({ other: 1, stock_items: [{ a: 1 }] }).rows, [{ a: 1 }])
-  // 真正歧义时宁可报错，也不静默画错数据。
+  // Ambiguity is an error rather than silently charting the wrong rows.
   assert.throws(
     () => extractRows({ alpha: [{ a: 1 }], beta: [{ b: 2 }] }),
     (error) => error.code === 'chart_source_invalid' && /several candidate row arrays/.test(error.message),
@@ -187,7 +187,7 @@ test('buildChartPayload：OHLC 不自洽时照画但必须披露（不静默把�
 })
 
 test('buildChartPayload：OHLC 图形不接受分类数据，并把模型引向 column', () => {
-  // bar 与 candlestick 共用 OhlcData，都需要真实有序时间轴：宁可报错，也不画一张错位的图。
+  // bar and candlestick share OhlcData and need a real ordered time axis: error rather than a misaligned chart.
   assert.throws(
     () => build([
       { when: '第一期', open: 1, high: 2, low: 0.5, close: 1.5 },
@@ -195,7 +195,7 @@ test('buildChartPayload：OHLC 图形不接受分类数据，并把模型引向 
     ], { kind: 'bar', x: 'when', ohlc: { open: 'open', high: 'high', low: 'low', close: 'close' } }),
     (error) => error.code === 'chart_no_rows' && /kind=column/.test(error.message),
   )
-  // 同样的数据用单值柱就是合法的（自动走分类轴）。
+  // Same data as a single-value column is valid and falls back to a category axis.
   const payload = build([
     { when: '第一期', value: 1 },
     { when: '第二期', value: 2 },

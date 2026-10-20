@@ -7,12 +7,9 @@ import { WorkspaceDatasetStore } from '../lib/data-collector/store.js'
 import { renderChart, registerChartTool } from '../lib/chart/tool.js'
 
 /**
- * render_chart 的端到端契约（假 fs + 真 store，因此沙箱归属校验是真的在跑）。
- *
- * 这里钉住三条**不可回退**的性质：
- *  1. 回执里没有原始数据 —— 图表工具不污染上下文，这条一旦破了整个方案就失去意义；
- *  2. 产物是自包含的 —— 离线可开，不依赖 DSH 运行时，是上游破坏性更新时的降级底线；
- *  3. 主 Agent 能读到自己子 Agent 采到的 Dataset（session 作用域同源）。
+ * render_chart end-to-end (fake fs + real store, so sandbox ownership checks really run). Pins:
+ * receipts carry no raw data, artifacts are self-contained, and a main Agent can read a Dataset
+ * captured by its own child.
  */
 
 const WORKSPACE = '/workspace/proj'
@@ -21,7 +18,7 @@ const COLLECTOR = { id: 'child-1', header: { cwd: WORKSPACE, parentSession: 'mai
 const exec = () => ({ agent: { session: MAIN }, signal: new AbortController().signal })
 const execAs = (session) => ({ agent: { session }, signal: new AbortController().signal })
 
-/** 与 test/data-collector-store.test.mjs 同源的极简 in-memory fake fs。 */
+/** Same minimal in-memory fake fs as test/data-collector-store.test.mjs. */
 function fakeFs() {
   const files = new Map()
   const dirs = new Set()
@@ -75,7 +72,7 @@ function makeStore() {
   return { fs, store: new WorkspaceDatasetStore({ fs, sandboxPolicy }) }
 }
 
-/** 一个"像行情"的 Dataset：涨跌与成交量都取有辨识度的哨兵值，便于断言回执没泄漏。 */
+/** Quote-like Dataset whose values are sentinels, so a leaked data point is unmistakable. */
 const SENTINEL = 987654.321
 function historyRows(count = 90) {
   return Array.from({ length: count }, (_value, index) => ({
@@ -124,9 +121,9 @@ test('render_chart：dataset 来源产出三件产物，回执不含任何原始
   }
   assert.equal(receipt.html_path, `capital-analysis/charts/${receipt.chart_id}/chart.html`)
 
-  // 最硬的一条不变量：回执里不能出现任何数据值，也不能出现计划外的字段。
-  // 用"键集合恰好等于合同"来钉住，而不是靠关键词黑名单（`has_volume` 这种合法字段
-  // 会误伤黑名单）。任何未来新增的字段都必须先改这条断言——也就是先想清楚它会不会带数据。
+  // Hardest invariant: the receipt contains no data values and no undeclared fields. Pin it by
+  // exact key set rather than a keyword blocklist (legit fields like `has_volume` trip those);
+  // adding a field requires editing this assertion first, i.e. deciding whether it can carry data.
   const serialized = JSON.stringify(receipt)
   assert.equal(serialized.includes(String(SENTINEL)), false, '回执泄漏了数据点')
   assert.deepEqual(Object.keys(receipt).sort(), [
@@ -150,9 +147,9 @@ test('render_chart：chart.html 自包含（内联库与数据，无外部请求
   assert.match(html, /__capitalChart/)
   assert.equal(/<script[^>]+src=/.test(html), false, '不允许外部脚本')
   assert.equal(/(src|href)\s*=\s*["']https?:/i.test(html), false, '不允许外部资源引用')
-  // 深色模式与主题变量随 HTML 自带，脱开 DSH 也能正常显示。
+  // Dark mode and theme vars ship inside the HTML, so it renders without DSH.
   assert.match(html, /prefers-color-scheme: dark/)
-  // 数据确实内联了，而且是 JSON 转义过的（不会提前闭合脚本标签）。
+  // Data is inlined and JSON-escaped so it cannot close the script tag early.
   assert.match(html, /"chart_id":"ch_/)
 })
 
@@ -195,7 +192,7 @@ test('render_chart：来源与路径边界都被显式拒绝', async () => {
     () => renderChart({ store }, { spec: { kind: 'line', series: ['close'] } }, exec()),
     (error) => error.code === 'chart_source_invalid',
   )
-  // 目录穿越：形态校验直接拒绝，绝不落到沙箱那一层再说。
+  // Traversal is rejected by shape validation before it ever reaches the sandbox.
   await assert.rejects(
     () => renderChart({ store }, { path: '../outside.json', spec: { kind: 'line', series: ['close'] } }, exec()),
     (error) => error.code === 'workspace_path_invalid',
@@ -208,7 +205,7 @@ test('render_chart：来源与路径边界都被显式拒绝', async () => {
     () => renderChart({ store }, { path: 'missing.json', spec: { kind: 'line', series: ['close'] } }, exec()),
     (error) => error.code === 'dataset_not_found',
   )
-  // Dataset 不可跨 session 作用域读取：另一个主会话读不到。
+  // Datasets do not cross session scopes: another main session cannot read it.
   await assert.rejects(
     () => renderChart({ store }, { dataset_id: ref.dataset_id, spec: { kind: 'line', series: ['close'] } }, execAs({ id: 'other-main', header: { cwd: WORKSPACE } })),
     (error) => error.code === 'dataset_session_mismatch',
@@ -261,11 +258,11 @@ test('图表协议 skill 必须真实存在（工具 description 让模型去加
   const description = /description:\s*(.+)/.exec(frontmatter[1])
   assert.ok(description && description[1].length > 40, 'skill 需要一句可路由的 description')
   assert.ok(text.length > 500, 'skill 正文过短，协议细节不应留在工具 description 里')
-  // 协议里点名的错误码必须与实现一致，避免"文档写了但代码没有"。
+  // Protocol error codes must match the implementation, so docs cannot drift ahead of code.
   for (const code of ['chart_source_invalid', 'chart_field_not_found', 'chart_spec_invalid', 'chart_no_rows', 'chart_too_large']) {
     assert.match(text, new RegExp(code), `skill 应说明 ${code}`)
   }
-  // kind 与数据形状的对应关系是模型最容易写错的地方，必须在协议里成表出现。
+  // kind-to-data-shape mapping is where the model errs most, so the protocol must table it.
   for (const needle of ['column', 'candlestick', 'bar', 'OHLC']) {
     assert.match(text, new RegExp(needle), `skill 应说明 kind 与数据形状的对应（缺 ${needle}）`)
   }

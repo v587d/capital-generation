@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createFuyaoRestSources, resolveFuyaoApiKey, MAX_HISTORY_WINDOW_MS, MAX_BATCH_CODES } from '../lib/sources/fuyao-rest.js'
 
-/** 全部已注册的 capability（顺序即注册顺序：Phase 1 四个在前）。 */
+/** All registered capabilities, in registration order. */
 const ALL_CAPABILITIES = [
   // Phase 1
   'ticker_search', 'quote', 'history', 'trading_calendar',
@@ -50,7 +50,7 @@ const ALL_SOURCE_NAMES = [
   'get_fund_offerings_list', 'get_fund_quota_list', 'get_fund_quota_summary',
   'get_fund_diagnostics_detail', 'get_fund_backtest_result', 'get_fund_backtest_indicators',
 ]
-/** 真正带分页语义的 capability（其余为一次性全量或窗口型）。 */
+/** Capabilities that truly expose pagination semantics. */
 const PAGINATED = ['quote', 'history', 'ticker_list', 'limit_up_pool', 'limit_down_pool', 'limit_break_pool', 'fund_indicator_table']
 
 function fakeCtx(credentials) {
@@ -98,21 +98,21 @@ test('input_schema 契约：interval/adjust 枚举与参数说明按 ths_api.md 
   try {
     const sources = createFuyaoRestSources(async () => 'key-1')
     const byName = Object.fromEntries(sources.map((s) => [s.schema.name, s.schema.input_schema]))
-    // historical：interval 固定 1d；adjust 三取值；start/end 毫秒说明
+    // historical: fixed daily interval, three adjust values, millisecond dates.
     const historical = byName['get_a_share_prices_historical']
     assert.deepEqual(historical.properties.interval.enum, ['1d'], 'interval 当前固定支持 1d')
     assert.match(historical.properties.start.description, /毫秒/, 'start 需注明毫秒时间戳')
     assert.match(historical.properties.end.description, /毫秒/, 'end 需注明毫秒时间戳')
     assert.deepEqual(historical.properties.adjust.enum, ['none', 'forward', 'backward'])
     assert.match(historical.properties.adjust.description, /前复权/)
-    // search：limit 默认值说明；asset_type 枚举说明
+    // search: default limit and documented asset_type enum.
     const search = byName['get_meta_tickers_search']
     assert.match(search.properties.limit.description, /最大 50/)
     assert.match(search.properties.asset_type.description, /a-share|fund-etf/)
-    // snapshot：thscodes 逗号分隔说明
+    // snapshot: comma-separated thscodes.
     const snapshot = byName['get_a_share_prices_snapshot']
     assert.match(snapshot.properties.thscodes.description, /逗号分隔/)
-    // calendar：无参
+    // calendar: no parameters.
     assert.deepEqual(byName['get_a_share_calendar_trading_days'].properties, {})
   } finally {
     globalThis.fetch = originalFetch
@@ -221,10 +221,7 @@ test('resolveFuyaoApiKey：优先 credentials，再回退环境变量', async ()
   }
 })
 
-// ── Phase 1：参数规范化、语义校验与输出护栏 ──────────────────────────────────
-// 这一组用例保护的是"本地契约"：非法参数在解析密钥与发请求之前就被拒绝，
-// 语义相同、书写不同的请求规范化到同一份参数（Hub 据此复用 Dataset），
-// 结构不可用的响应在落盘前被输出护栏拦下。
+// Phase 1 protects local normalization, validation and output guards before any request.
 
 const sources = () => createFuyaoRestSources(async () => 'key')
 const byCapability = (capability) => {
@@ -406,11 +403,9 @@ test('输出护栏：契约字段缺失、行非对象、类型不符都判为�
   assert.equal(calendar.validateOutput({ item: [{ date_ms: 1, date: '19700101' }] }), true)
   assert.equal(calendar.validateOutput({ item: [{ date_ms: 'abc', date: '19700101' }] }), false)
 })
-// ── Phase 2：首批 14 个新端点的契约 ─────────────────────────────────────────
-// 保护口径：端点参数语义（互斥、成对、上限、枚举、代码形态）与输出结构护栏
-// （主标识严格、指标宽容、null 放行），以及真正发出去的 query 形态。
+// Phase 2 pins endpoint parameter shapes, output guards and actual query forms.
 
-/** 用 mock fetch 执行一次 source，返回请求 URL 与上游 data。 */
+/** Execute one source with mocked fetch and return its URL and upstream data. */
 async function executeWithFetch(source, params, envelope = { code: 0, data: { item: [] } }) {
   const originalFetch = globalThis.fetch
   const calls = []
@@ -441,7 +436,7 @@ test('ticker_list：asset_type 枚举与分页范围', () => {
   assert.throws(() => source.normalizeParams({ limit: 10001 }), /must be <= 10000/)
   assert.throws(() => source.normalizeParams({ offset: -1 }), /must be >= 0/)
   assert.throws(() => source.normalizeParams({ asset_type: 'a-share,bond' }), /invalid value: bond/)
-  // 代码表与检索都按官方契约支持 futures/options（元数据域全量放开）。
+  // Identity and search accept futures/options because the metadata domain follows the full contract.
   assert.doesNotThrow(() => source.normalizeParams({ asset_type: 'futures,options' }))
   assert.doesNotThrow(() => byCapability('ticker_search').normalizeParams({ q: '豆粕', asset_type: 'futures' }))
 })
@@ -510,7 +505,7 @@ test('financial_indicators：report 格式与嵌套 abilities 结构', () => {
     assert.throws(() => source.normalizeParams({ thscode: '300033.SZ', report: invalid }), /report period/, `report=${invalid} 应被拒绝`)
   }
   assert.throws(() => source.normalizeParams({ thscode: '300033.SZ' }), /missing required parameter: report/)
-  // 嵌套结构：value 是原始数值字符串（保留精度）或 null，不转 number
+  // Nested values remain upstream numeric strings or null; converting them loses precision.
   assert.equal(source.validateOutput({ thscode: '300033.SZ', report: '2025-1', abilities: [{ ability: 'profitability', indicators: [{ index_id: 'sale_gross_margin', value: '89.12000000' }, { index_id: 'earned_interest_multiple', value: null }] }] }), true)
   assert.equal(source.validateOutput({ thscode: '300033.SZ', report: '2025-1', abilities: [] }), true, '空 abilities 是合法结果')
   assert.equal(source.validateOutput({ thscode: '300033.SZ', report: '2025-1' }), false, '缺 abilities')
@@ -527,7 +522,7 @@ test('valuation / auction：批量代码上限按去重前的 token 数校验', 
   assert.throws(() => valuation.normalizeParams({ thscodes: '   ' }), /must not be empty/)
   const overLimit = Array.from({ length: MAX_BATCH_CODES + 1 }, (_, index) => `60${String(index).padStart(4, '0')}.SH`).join(',')
   assert.throws(() => valuation.normalizeParams({ thscodes: overLimit }), /at most 100 codes/)
-  // 去重前校验：101 个重复 token 同样超限。
+  // The token cap is checked before deduplication, so repeated entries still count.
   assert.throws(() => valuation.normalizeParams({ thscodes: Array.from({ length: MAX_BATCH_CODES + 1 }, () => '600519.SH').join(',') }), /at most 100 codes/)
   assert.equal(valuation.normalizeParams({ thscodes: Array.from({ length: MAX_BATCH_CODES }, () => '600519.SH').join(',') }).thscodes, '600519.SH')
   assert.deepEqual(auction.normalizeParams({ thscodes: '600519.SH', stage: 'LIVE' }), { thscodes: '600519.SH', stage: 'live' })
@@ -655,9 +650,7 @@ test('Phase 2 输出护栏：主标识严格、指标宽容、null 放行', () =
   assert.equal(catalog.validateOutput({ item: [{ name: '白酒概念' }] }), false, '缺 thscode 判不符')
 })
 
-// ── Phase 3：盘面特色数据与竞价基准 ─────────────────────────────────────────
-// 这一批端点全部经真实探针确认可用；每个端点的 sort_field 白名单不同，
-// 共用分页参数但不能共用枚举，故逐端点断言。
+// Phase 3 shares pagination fields but each endpoint has a distinct sort whitelist.
 
 test('Phase 3：跌停池与炸板池的排序白名单各自独立', () => {
   const down = byCapability('limit_down_pool')
@@ -667,7 +660,7 @@ test('Phase 3：跌停池与炸板池的排序白名单各自独立', () => {
     { page: 2, size: 200, sort_field: 'first_limit_time', sort_dir: 'asc' },
   )
   assert.deepEqual(brk.normalizeParams({ sort_field: 'open_times' }), { sort_field: 'open_times' })
-  // 两个端点的 sort_field 白名单不同：跌停池没有 open_times，炸板池没有 last_limit_time。
+  // Each limit endpoint has a different sort whitelist; do not share enums.
   assert.throws(() => down.normalizeParams({ sort_field: 'open_times' }), /invalid value/)
   assert.throws(() => brk.normalizeParams({ sort_field: 'last_limit_time' }), /invalid value/)
   for (const source of [down, brk]) {
@@ -684,7 +677,7 @@ test('Phase 3：飙升榜/热股榜的 period 与热度字符串口径', () => {
   assert.deepEqual(sky.normalizeParams({ period: 'HOUR' }), { period: 'hour' })
   assert.deepEqual(hot.normalizeParams({}), {})
   assert.throws(() => sky.normalizeParams({ period: 'week' }), /invalid value/)
-  // heat 是上游原始字符串（保留精度），转成 number 判契约不符。
+  // Heat is an upstream string; coercing it to number violates the response contract.
   const row = { thscode: '603822.SH', ticker: '603822', name: '嘉澳环保', rank: 1, heat: '1941909', rank_change: 7, rank_trend: 'up' }
   assert.equal(sky.validateOutput({ item: [row] }), true)
   assert.equal(sky.validateOutput({ item: [{ ...row, heat: 1941909 }] }), false, 'heat 必须是字符串')
@@ -723,7 +716,7 @@ test('Phase 3：异动标签大小写不敏感、拒绝空 token，批量代码�
   assert.throws(() => stock.normalizeParams({}), /missing required parameter: thscodes/)
   const overLimit = Array.from({ length: 51 }, (_, index) => `60${String(index).padStart(4, '0')}.SH`).join(',')
   assert.throws(() => stock.normalizeParams({ thscodes: overLimit }), /at most 50 codes/)
-  // 关键词数组：空数组合法，非数组判不符
+  // An empty keywords array is valid; a non-array is malformed.
   const row = { thscode: '600519.SH', stock_name: '贵州茅台', analysis_content: '异动解读', keyword_list: ['白酒'], tag_name: '大涨' }
   assert.equal(stock.validateOutput({ item: [row] }), true)
   assert.equal(stock.validateOutput({ item: [{ ...row, keyword_list: [] }] }), true)
@@ -745,7 +738,7 @@ test('Phase 3：龙虎榜 board_type/date 校验，行数组是 stock_items 而�
   assert.equal(tiger.validateOutput({ ...container, stock_items: undefined }), false, '缺 stock_items 判不符')
   assert.equal(tiger.validateOutput({ ...container, trade_date: undefined }), false, '缺 trade_date 判不符')
   assert.equal(tiger.validateOutput({ ...container, stock_items: [{ ticker: '002407' }] }), false, '行缺 thscode 判不符')
-  // 游资榜：stock_items 为空、hot_money_items 填充
+  // The hot-money table fills hot_money_items while leaving stock_items empty.
   assert.equal(tiger.validateOutput({ ...container, board_type: 'hot_money', stock_items: [], hot_money_items: [{ name: '某游资', buying: 1234.5, rows: [stock] }] }), true)
 })
 
@@ -788,7 +781,7 @@ test('Phase 3：query 形态（跌停池排序、异动标签、龙虎榜）', a
   assert.match(tiger, /\/api\/a-share\/special-data\/dragon-tiger-list\?board_type=org&date=2026-07-01$/)
 })
 
-// ── Phase 3B：公募基金 ──────────────────────────────────────────────────────
+// Phase 3B: public mutual funds.
 
 test('Phase 3B：基金代码校验只接受 .OF/.SH/.SZ，且一律单数 thscode', () => {
   const profile = byCapability('fund_profile')
@@ -797,8 +790,7 @@ test('Phase 3B：基金代码校验只接受 .OF/.SH/.SZ，且一律单数 thsco
   assert.throws(() => profile.normalizeParams({ thscode: '025480' }), /full fund thscode/)
   assert.throws(() => profile.normalizeParams({ thscode: '510300.SH,159919.SZ' }), /full fund thscode/, '基金端点不接受逗号多值')
   assert.throws(() => profile.normalizeParams({}), /missing required parameter: thscode/)
-  // 标的类型不在本地判定范围：`.SH` 既是个股也是场内 ETF 的后缀，格式上无法区分，
-  // 因此 600519.SH 会通过本地校验，由上游按真实标的类型返回 3004/3001。
+  // `.SH` cannot distinguish stock from ETF locally; upstream codes report the actual type.
   assert.deepEqual(profile.normalizeParams({ thscode: '600519.SH' }), { thscode: '600519.SH' })
 })
 
@@ -832,7 +824,7 @@ test('Phase 3B：fund_nav 的 range 与 nav_type 枚举（含逗号取值 unit,a
   assert.deepEqual(source.normalizeParams({ thscode: '510300.SH' }), { thscode: '510300.SH' }, '省略 range 即最多返回最新一个净值日期')
   assert.throws(() => source.normalizeParams({ thscode: '510300.SH', range: 'day' }), /invalid value/)
   assert.throws(() => source.normalizeParams({ thscode: '510300.SH', nav_type: 'cumulative' }), /invalid value/)
-  // nav_date 是毫秒时间戳而非日期字符串；未请求的 nav_type 字段不输出
+  // nav_date is an epoch; only requested nav_type fields are emitted.
   assert.equal(source.validateOutput({ item: [{ nav_date: 1782748800000, unit_nav: 3.9 }] }), true, 'nav_type=unit 时缺 adj_nav 合法')
   assert.equal(source.validateOutput({ item: [{ unit_nav: 3.9 }] }), false, '缺 nav_date 判不符')
 })
@@ -846,9 +838,9 @@ test('Phase 3B：fund_stock_history 三个参数必填，report_type 不做枚�
   assert.throws(() => source.normalizeParams({ thscode: '510300.SH', end_date: '2026-06-30' }), /missing required parameter: report_type/)
   assert.throws(() => source.normalizeParams({ thscode: '510300.SH', report_type: 'quarter' }), /missing required parameter: end_date/)
   assert.throws(() => source.normalizeParams({ thscode: '510300.SH', report_type: 'quarter', end_date: '2026/06/30' }), /YYYY-MM-DD/)
-  // 上游 report_type 枚举未公开：annual/half 返回 5003（无该类型数据）而非参数错误，故本地不设白名单。
+  // Upstream report_type is open-ended; 5003 means no data, so do not invent a local whitelist.
   assert.doesNotThrow(() => source.normalizeParams({ thscode: '510300.SH', report_type: 'half', end_date: '2026-06-30' }))
-  // rank 仅前十大有值，其余为 null
+  // Only the first ten ranks carry values; the rest are null.
   const row = { thscode: '600519.SH', ticker: '600519', name: '贵州茅台', asset_type: 'stock', hold_ratio: 4.67, market_value: 123456789.12, period_increase_pct: 0.12, rank: null, report_type: 'quarter', end_date_ms: 1782748800000 }
   assert.equal(source.validateOutput({ item: [row] }), true)
   assert.equal(source.validateOutput({ item: [{ ...row, rank: undefined }] }), true, 'rank 允许缺失')
@@ -865,7 +857,7 @@ test('Phase 3B：fund_holders 口径枚举与 fund_top_holders 的 limit 边界'
   assert.deepEqual(top.normalizeParams({ thscode: '510300.SH', limit: 10 }), { thscode: '510300.SH', limit: 10 })
   assert.throws(() => top.normalizeParams({ thscode: '510300.SH', limit: 0 }), /must be >= 1/)
   assert.throws(() => top.normalizeParams({ thscode: '510300.SH', limit: 11 }), /must be <= 10/)
-  // limit 限定报告期数而非行数：data.limit 可缺席，行数不受 limit 约束
+  // limit bounds reporting periods, not row count; data.limit may be absent.
   const row = { holder_id: 'T000280241', holder_code: '015016', holder_name: '某机构', holder_type: '一般法人', rank: 1, hold_share: 1000, hold_rate_pct: 20.5, report_date_ms: 1782748800000, publish_date_ms: 1782748800000 }
   assert.equal(top.validateOutput({ timestamp: 1, limit: 10, item: [row] }), true)
   assert.equal(top.validateOutput({ timestamp: 1, item: [row] }), true, 'data.limit 允许缺席')
@@ -905,13 +897,13 @@ test('Phase 3B：query 形态（基金端点用单数 thscode、nav 区间、id 
   assert.match(company, /\/api\/fund\/companies\/detail\?company_id=C1$/)
 })
 
-// ── Phase 3C：基金进阶子模块 ────────────────────────────────────────────────
+// Phase 3C: advanced fund submodules.
 
 test('Phase 3C：JSON 查询参数解析、形状校验与键序规范化', () => {
   const line = byCapability('fund_indicator_line')
   const indexes = '[{"index_info":[{"index_id":"rsi_pct"}],"thscodes":["510300.SH"]}]'
   const normalized = line.normalizeParams({ indexes, time_range: '{"time_type":"DAY_1"}' })
-  // 键序被规范化（canonicalJson 递归排序），语义相同的 JSON 命中同一个 digest
+  // Canonical key ordering makes semantically equal JSON produce the same digest.
   assert.equal(normalized.indexes, '[{"index_info":[{"index_id":"rsi_pct"}],"thscodes":["510300.SH"]}]')
   assert.equal(line.normalizeParams({ indexes: '[{"thscodes":["510300.SH"],"index_info":[{"index_id":"rsi_pct"}]}]', time_range: '{"time_type":"DAY_1"}' }).indexes, normalized.indexes,
     '键序不同的等价 JSON 必须归一到同一字符串')
@@ -945,7 +937,7 @@ test('Phase 3C：顶层数组响应（quota/summary、backtest/indicators）不�
   assert.equal(summary.validateOutput([]), true, '空数组合法')
   assert.equal(summary.validateOutput({ item: [] }), false, '顶层必须是数组，不是 {item:[]}')
   assert.equal(summary.validateOutput([{ unlimited: '3' }]), false, '缺 name 判不符')
-  // 五个字段全部是字符串，数字会判契约不符
+  // All five fields are strings; numeric values violate the contract.
   assert.equal(summary.validateOutput([{ name: 'x', total: 13 }]), false)
 
   const indicators = byCapability('fund_backtest_indicators')
@@ -963,7 +955,7 @@ test('Phase 3C：quota/list 三层嵌套护栏', () => {
   assert.equal(quota.validateOutput([{ name: '热门', sub_tab: [{ name: '全部' }] }]), false, '缺 fund_list')
   assert.equal(quota.validateOutput([{ name: '热门', sub_tab: [{ name: '全部', fund_list: [{ fund_name: 'x' }] }] }]), false, '基金项缺 thscode')
   assert.equal(quota.validateOutput([{ name: '热门', sub_tab: [{ name: '全部', fund_list: [{ thscode: 'x', quota: 5 }] }] }]), false, 'quota 必须是字符串或 null')
-  // tab 必须是 JSON 数组；buy 是布尔且省略时不下发
+  // tab must be a JSON array; an omitted boolean buy is not sent.
   assert.deepEqual(quota.normalizeParams({ tab: '["remen"]' }), { tab: '["remen"]' })
   assert.deepEqual(quota.normalizeParams({ tab: '["remen"]', buy: true }), { tab: '["remen"]', buy: true })
   assert.throws(() => quota.normalizeParams({ tab: 'remen' }), /JSON array/)
@@ -983,7 +975,7 @@ test('Phase 3C：indicators/line 的三层自定义护栏', () => {
 test('Phase 3C：json 字段类型容忍"文档写 object、实际是 array/null"', () => {
   const diagnostics = byCapability('fund_diagnostics')
   const base = { thscode: '510300.SH', ticker: '510300', fund_type: 'exchange', peer_code: 'ETF-INDEX' }
-  // 实测 dimensions/resilience 是数组、probabilities/ranges 是 null
+  // Upstream emits dimensions/resilience arrays but null probabilities/ranges for this shape.
   assert.equal(diagnostics.validateOutput({ item: [{ ...base, dimensions: [{ year: '2026' }], resilience: [], probabilities: null, ranges: null }] }), true)
   assert.equal(diagnostics.validateOutput({ item: [{ ...base, dimensions: {}, probabilities: null }] }), true, '对象同样放行（上游结构保留）')
   assert.equal(diagnostics.validateOutput({ item: [{ ...base }] }), true, '缺失也放行：这些字段是"保留上游结构"，不做存在性约束')
@@ -1000,7 +992,7 @@ test('Phase 3C：经理区间枚举只有 5 个值（与 nav 的 8 值不同）'
     assert.throws(() => performance.normalizeParams({ manager_id: 'M1', range: invalid }), /invalid value/, `${invalid} 不属于经理区间枚举`)
   }
   assert.throws(() => performance.normalizeParams({ manager_id: 'M1' }), /missing required parameter: range/)
-  // 而 nav 的 8 值枚举仍然接受这些值，两者不能共用
+  // The eight-value nav enum remains valid and must not be merged with this range set.
   assert.doesNotThrow(() => byCapability('fund_nav').normalizeParams({ thscode: '510300.SH', range: 'hyear' }))
 })
 
@@ -1015,7 +1007,7 @@ test('Phase 3C：回测参数校验与响应口径护栏', () => {
   assert.throws(() => backtest.normalizeParams({ ...params, per_buy_amount: -1 }), /must be >= 0/)
   assert.throws(() => backtest.normalizeParams({ ...params, per_buy_amount: '100' }), /must be a number/)
   assert.throws(() => backtest.normalizeParams({ thscode: '000001.OF' }), /missing required parameter: buy_conditions/)
-  // 响应日期是 yyyy-MM-dd 字符串而非毫秒；trades 必为数组
+  // Response dates are yyyy-MM-dd strings; trades must always be arrays.
   const data = { start_date: '2023-09-08', end_date: '2026-09-08', metrics: { strategy_return: 0.42, win_rate: 0 }, trade_count: 726, trades: [{ trade_date: '2023-09-11', type: 'BUY', profit: null }], curve_points: { '2023-09-08': 0 } }
   assert.equal(backtest.validateOutput(data), true)
   assert.equal(backtest.validateOutput({ ...data, start_date: 123 }), false, '日期必须是字符串')
@@ -1043,18 +1035,18 @@ test('Phase 3C：基金端点一律不吃复数 thscodes（除既有约定外）
   assert.throws(() => byCapability('fund_income').normalizeParams({ thscodes: '510300.SH,159919.SZ' }), /unsupported parameter: thscodes/)
 })
 
-// ── 复核修正（2026-09 独立测试报告）──────────────────────────────────────────
+// Review fixes from the independent test report.
 
 test('修正①：fund_returns 必须接受官方文档示例（其中没有 return_week）', () => {
   const source = byCapability('fund_returns')
-  // 官方示例字段（llm_full.md:4385-4394）：只有 8 个 return_*，缺 return_week / return_twoyear
+  // The official example declares only these eight return_* fields.
   const documented = { return_month: -3.33, return_tmonth: 0.03, return_hyear: 0.19, return_year: 19.66, return_tyear: 28.69, return_fyear: 1.77, return_nowyear: 2.49, return_now: 121.58 }
   assert.equal(source.validateOutput({ timestamp: 1782748800000, item: [documented] }), true,
     '官方示例是合法响应，护栏不得误杀')
-  // 只返回一个排名字段的极端情况同样合法
+  // A response containing one rank field is still valid.
   assert.equal(source.validateOutput({ item: [{ rank_week: 12 }] }), true)
   assert.equal(source.validateOutput({ item: [{ peer_average_year: 8.1 }] }), true)
-  // 但完全不含收益/排名族字段的行仍判契约不符（防垃圾结构）
+  // Rows with neither return nor rank fields are rejected as unusable structure.
   assert.equal(source.validateOutput({ item: [{ thscode: '510300.SH' }] }), false)
   assert.equal(source.validateOutput({ item: [{}] }), false)
   assert.equal(source.validateOutput({ item: 'x' }), false)
@@ -1066,7 +1058,7 @@ test('修正④：fund_indicator_table 声明为分页能力（有 page_info/pag
   assert.equal(table.schema.paginated, true)
   const schema = table.schema.input_schema.properties.page_info.description
   assert.match(schema, /page_begin|page_size/)
-  // 其余端点不应被顺手标成可分页
+  // Do not mark one-shot endpoints pageable merely because they share page parameters.
   assert.equal(byCapability('fund_income').schema.paginated, false)
 })
 
@@ -1100,6 +1092,6 @@ test('修正⑦：envelope 的 timestamp/total 在模型可见 schema 中允许 
     assert.equal(properties[field].oneOf.length, 2, `${field} 必须声明 integer | null`)
     assert.deepEqual(properties[field].oneOf.map((entry) => entry.type), ['integer', 'null'])
   }
-  // 运行时护栏本来就放行 null，两者现在一致
+  // Runtime guards already accept null; schema and runtime now agree.
   assert.equal(quote.validateOutput({ timestamp: null, item: [] }), true)
 })

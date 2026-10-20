@@ -1,9 +1,6 @@
 /**
- * Largest-Triangle-Three-Buckets 下采样：返回**保留下来的行下标**。
- *
- * 为什么返回下标而不是点：一张图上可能同时有主序列、K 线、成交量副图与标记点，
- * 它们必须**共用同一组时间轴**。若各自下采样，同一时刻会在不同子图上错位。
- * 于是只对"主序列"跑一次 LTTB 求下标，再把这组下标套用到所有子序列上。
+ * LTTB downsampling returning kept row indices. All subplots share one time axis, so indices
+ * are computed once from the primary series and applied everywhere.
  */
 export function largestTriangleThreeBuckets(values: readonly number[], threshold: number): number[] {
   const count = values.length
@@ -15,7 +12,6 @@ export function largestTriangleThreeBuckets(values: readonly number[], threshold
   sampled.push(anchor)
 
   for (let bucket = 0; bucket < threshold - 2; bucket += 1) {
-    // 下一个桶的均值，作为三角形的一个顶点。
     const averageStart = Math.floor((bucket + 1) * every) + 1
     const averageEnd = Math.min(Math.floor((bucket + 2) * every) + 1, count)
     const averageLength = Math.max(averageEnd - averageStart, 1)
@@ -28,7 +24,6 @@ export function largestTriangleThreeBuckets(values: readonly number[], threshold
     averageX /= averageLength
     averageY /= averageLength
 
-    // 当前桶里与 anchor、均值构成最大三角形面积的点。
     const rangeStart = Math.floor(bucket * every) + 1
     const rangeEnd = Math.min(Math.floor((bucket + 1) * every) + 1, count)
     const anchorX = anchor
@@ -47,7 +42,7 @@ export function largestTriangleThreeBuckets(values: readonly number[], threshold
   }
 
   sampled.push(count - 1)
-  // 去重并保持升序：LTTB 的桶边界在极端阈值下可能产生重复下标。
+  // Bucket edges can yield duplicate indices at extreme thresholds; keep ascending order.
   const unique: number[] = []
   for (const index of sampled) if (unique.length === 0 || index > unique[unique.length - 1]!) unique.push(index)
   return unique

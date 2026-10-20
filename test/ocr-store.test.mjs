@@ -1,9 +1,8 @@
-// `src/ocr/store.ts` 的落盘回归：产物层是"第二次读取不再花钱"的唯一凭据。
-//
-// 为什么单独钉一份：`ocr` 的全部省钱逻辑（内容寻址 `doc_id`、按页取回、关键词定位）都建立在
-// "正文确实在盘上、且能被原样读回来"之上。半件产物（写完 document 还没写 meta 就被中断）
-// 必须**可自愈**而不是把 `doc_id` 永久锁死；三种"读不到"（没解析过 / 记录坏了 / 正文丢了）
-// 必须在回执里是三种话。fs 与 sandbox 走假实现，路径由 `WorkspaceDatasetStore` 真实校验。
+// Persistence regression for `src/ocr/store.ts`: the on-disk artifact is the only reason a second
+// read costs nothing — content-addressed `doc_id`, per-page fetch and keyword locate all assume the
+// body is really there and reads back unchanged. Half-written artifacts must self-heal, never lock
+// `doc_id` forever; "never parsed" / "record corrupt" / "body missing" are three distinct replies.
+// Fake fs and sandbox; paths go through the real `WorkspaceDatasetStore` validation.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { WorkspaceDatasetStore } from '../lib/data-collector/store.js'
@@ -24,7 +23,7 @@ import { buildOcrDocument } from '../lib/ocr/markdown.js'
 const SESSION = { id: 'session-1', header: { cwd: '/workspace/proj' } }
 const ROOT = '/workspace/proj'
 const DOC_ID = 'ocr_1a2b3c4d5e6f'
-/** 内存 fs：只实现 OCR 产物层用到的最小子集（含 `readBytes` 与 `stat`）。 */
+/** In-memory fs: only the minimal subset the OCR artifact layer uses (incl. `readBytes` and `stat`). */
 function fakeFs() {
   const files = new Map()
   const bytes = new Map()
@@ -156,7 +155,7 @@ test('三种"读不到"是三种形状：没解析过=undefined；正文丢失/�
     return true
   }, 'meta 在、正文不在：不能说"没有内容"，也不能静默重跑（那要再花一次钱）')
 
-  // 反过来（只写了正文没写 meta）就是"未缓存"：下一次解析用 overwrite 自愈，不锁死 doc_id。
+  // Body without meta reads as "not cached"; the next parse self-heals via overwrite, no locked doc_id.
   const orphan = makeStore()
   await orphan.store.writeWorkspaceFiles({ session: SESSION, dir: `${OCR_ARTIFACT_SUBDIR}/${DOC_ID}`, files: [{ name: 'document.md', content: '半件产物' }] })
   assert.equal(await readOcrArtifact(orphan.store, { session: SESSION, doc_id: DOC_ID }), undefined)
@@ -220,7 +219,7 @@ test('file 形态读取：只收 workspace 相对路径，字节上限显式，�
   assert.deepEqual([...read.bytes], [37, 80, 68, 70])
   assert.equal(read.filename, '茅台研报.pdf', '上传给上游的文件名取路径末段（不带目录）')
 
-  // 后缀闸门属于工具层（`normalizeLocalPath`），这一层只管"是不是 workspace 内的相对路径"。
+  // Suffix gating lives in the tool layer (`normalizeLocalPath`); this layer only checks workspace-relative paths.
   for (const path of ['/etc/passwd.pdf', '../outside.pdf', 'refs/../../x.pdf', 'refs/../escape.pdf']) {
     await assert.rejects(() => readOcrSourceBytes(store, { session: SESSION, path }), (error) => {
       assert.match(`${error.code} ${error.message}`, /workspace_path_invalid|relative to the session workspace|not contain/u, `${path} 应该被拒`)

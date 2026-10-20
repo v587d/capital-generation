@@ -1,17 +1,9 @@
 #!/usr/bin/env node
 /**
- * 把 `chart-ui/client.src.cjs` 打成客户端模块表 bundle：`chart-ui/client.js`。
- *
- * 为什么需要一个构建步骤（而不是手写 client.js）：
- *  - 设计（内部设计文档 docs/design/chart-visualization.md §9）要求客户端**不产生页面全局**，
- *    所以 lightweight-charts 不能走 UMD 全局，必须是打包进来的 ESM 模块（tree-shake 后）。
- *  - 运行时（src/chart/runtime.ts）以**字符串**形式与自包含 HTML 同源；这里把它落成一个
- *    真实的临时模块（而不是在浏览器里 `eval`），既避免 CSP 风险，也保持两边同源。
- *
- * 产物形状与 shipped 客户端一致：`window.__ModuleLoader__.load({ id, factory })`，
- * 工厂是 CommonJS，`react` 保持 external 由 `require` 提供。
- *
- * 用法：node scripts/build-client.mjs（`npm run build` / `npm run build:client` 会调用）
+ * Bundles `chart-ui/client.src.cjs` into the client module table `chart-ui/client.js`.
+ * The chart runtime must not publish a page global (docs/design/chart-visualization.md §9), so the
+ * runtime string is emitted as a real temp module rather than eval'd in the browser (CSP), keeping
+ * the same source as the standalone HTML. `react` stays external, supplied by the module table.
  */
 import { build } from 'esbuild'
 import { readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -25,7 +17,7 @@ const CHART_UI = join(ROOT, 'chart-ui')
 const GENERATED_RUNTIME = join(CHART_UI, 'client.runtime.gen.cjs')
 const manifest = JSON.parse(readFileSync(join(CHART_UI, 'package.json'), 'utf8'))
 
-// 运行时 IIFE 返回 API 对象、不挂全局，所以这里直接把它赋给模块导出即可。
+// The runtime IIFE returns its API object instead of publishing a global, so export it directly.
 writeFileSync(GENERATED_RUNTIME, `'use strict'\nexports.__capitalChart = ${CHART_RUNTIME_SOURCE}\n`)
 
 try {
@@ -35,10 +27,9 @@ try {
     format: 'cjs',
     platform: 'browser',
     target: ['es2020'],
-    // lightweight-charts 只有 ESM 入口（exports 里没有 require 条件），
-    // 这里补上 import 条件让它按 ESM 解析，再由 esbuild 打包成 CJS。
+    // lightweight-charts ships only an ESM entry, so add the import condition for esbuild.
     conditions: ['import'],
-    // shell 静态种子：保持 external，由客户端模块表的 require 提供，避免打进第二份 react。
+    // Keep react external: the module table's require supplies the shell's single copy.
     external: ['react', 'react/jsx-runtime'],
     minify: true,
     legalComments: 'inline',

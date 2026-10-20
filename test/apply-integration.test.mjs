@@ -1,18 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { apply, readCapitalSettings, LOCAL_FETCH_DEFAULTS } from '../lib/index.js'
-import { ROOT_AGENT_DENIED_TOOLS } from '../lib/agents/root-tool-policy.js'
+import { apply as applyPolicy } from '../lib/policy-entry.js'
+import { apply as applyRootExtras } from '../lib/root-extras-entry.js'
+import { resetRootPolicyProbes } from '../lib/agents/root-tool-policy.js'
+import { SIBLING_DENIED_TOOLS, resetRolePolicyProbes } from '../lib/agents/role-tool-policy.js'
 import { collectUndeclaredRequired } from './output-contract.mjs'
 
-/**
- * 装配入口的集成测试。
- *
- * 此前所有测试都是**手工构造 Hub** 或手工注入 diagnostics，没有任何一条真正调用
- * `apply()`；于是"生产装配路径是否真的注册了全部数据源 / 工具 / 诊断状态"只靠声明，
- * 没有证据。这里用最小假 ctx 走一遍真实装配。
- */
-
-/** 最小 ctx：只实现 apply() 真正触达的服务与生命周期方法。 */
+// apply() integration coverage: fake ctx with production wiring; hand-built hubs would leave registration unproven.
 function fakeCtx({ credentials, settings } = {}) {
   const tools = []
   const pluginGuards = []
@@ -25,12 +20,11 @@ function fakeCtx({ credentials, settings } = {}) {
     get: (name) => {
       if (name === 'tools') return {
         register: (definition) => { tools.push(definition); return () => {} },
-        // 插件 ctx 上的 guard 注册（fs 写口闸门是**全局**装的，不走 agent/created）
+        // Plugin-level guard registration; fs write gate is global, not per agent/created.
         guard: (guard) => { pluginGuards.push(guard); return () => {} },
       }
       if (name === 'credentials') return credentials
-      // settings 允许晚到（services.set 之后才可见）：宿主 boot 里 fibers 并行 apply，
-      // 服务注册顺序不保证，读取面必须经得起"装配期没有、调用期才有"。
+      // settings may arrive late: boot applies fibers in parallel.
       if (name === 'settings') return settings ?? services.get('settings')
       return services.get(name)
     },
@@ -92,22 +86,18 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
     for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status', 'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'prepare_chart_source', 'get_local_datetime', 'resolve_data_time_range', 'get_watchlist', 'anysearch_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'ocr', 'render_chart']) {
       assert.ok(toolNamed(tools, name), `装配后应注册工具 ${name}`)
     }
-    // 2026-09-17 设计修订：final_report 整条链路删除（报告投影不再是主 Agent 的职责）。
+    // final_report was removed and must not come back.
     assert.equal(toolNamed(tools, 'final_report'), undefined, 'final_report 不应再注册')
     assertToolSchemas(tools)
 
-    // dc_status 应报告 Key 存在
     const status = await toolNamed(tools, 'dc_status').execute({}, exec(delegated))
     assert.equal(status.api_key.present, true)
     assert.equal(status.api_key.source, 'env(FUYAO_API_KEY)')
     assert.equal(status.registered_capabilities.length, 128)
-    // ⛔ 生产装配也必须把根收敛的现场记录接进 dc_status：单元测试里手工注入 diagnostics
-    // 会全绿，而 `src/index.ts` 忘传 `rootPolicy` 的表现是"桌面端又查不出来"——正是这次
-    // 事故缺的那双眼睛（§9.7：每个入口都要有对等断言）。
-    assert.ok(Array.isArray(status.root_tool_policy), 'apply() 必须把 rootPolicy 注入 dc_status')
-    assert.deepEqual(status.root_tool_policy, [], '假装配里没有 agent 被创建，记录应为空数组而不是缺字段')
+    // dc_status policy diagnostics come from production wiring and cover child roles too.
+    assert.ok(Array.isArray(status.agent_tool_policy), 'apply() 必须把收敛现场注入 dc_status')
+    assert.deepEqual(status.agent_tool_policy, [], '假装配里没有 agent 被创建，记录应为空数组而不是缺字段')
 
-    // 能力目录应可用（两级发现的第一级）：紧凑行编码，一行一条能力。
     const directory = await toolNamed(tools, 'list_capabilities').execute({}, exec(delegated))
     assert.equal(typeof directory, 'string')
     assert.equal(directory.split('\n').length, 128, '目录必须一行一条能力，行数等于注册数')
@@ -121,14 +111,7 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
   }
 })
 
-/**
- * 2026-09-30 桌面端事故回归。宿主凭据 provider 在 `[Service.init]` 里**先 yield 把服务发布出去、
- * 之后才 await loadInitial() 装载快照**（实测 dsh-credentials-local/lib/index.js:441-446），
- * 所以装配期那一次 `resolve()` 返回 `undefined` 且**不抛错**。旧实现把"装配期读到 key"当成
- * 同花顺源的注册门槛，于是整个进程生命周期内 61 个能力静默缺席，目录只剩 8 项；同一进程里
- * 走调用期解析的自选股照样取到了 fuyao 行情——这个反差就是它没被立刻发现的原因。
- * 现在的契约三句：注册不看 key；缺 key 时**调用期**点名 FUYAO_API_KEY 失败；快照装载完同一进程自愈。
- */
+// apply-time credential resolve() can be undefined without throwing: registration must not depend on it.
 test('apply()：装配期凭据尚未装载时同花顺源照常注册，失败留到调用期点名', async () => {
   delete process.env.FUYAO_API_KEY
   try {
@@ -152,7 +135,7 @@ test('apply()：装配期凭据尚未装载时同花顺源照常注册，失败�
     assert.equal('registration_error' in unloaded, false,
       '注册结果与凭据时刻解耦后，同一份 dc_status 不可能再同时报「key 有」和「源未注册」')
 
-    // 工具表与凭据状态解耦：Key 缺失不能让子 Agent 创建失败（toolFilter 里的名字必须真实存在）
+    // Tool table is decoupled from key state: toolFilter names must exist without a key.
     for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status']) {
       assert.ok(toolNamed(tools, name), `无 Key 时仍应注册 ${name}`)
     }
@@ -164,7 +147,6 @@ test('apply()：装配期凭据尚未装载时同花顺源照常注册，失败�
       '缺 key 必须响亮失败并点名引用名，不是含糊的 capability_unknown，也不是内存假成功',
     )
 
-    // 快照随后装载完（宿主本来就会做完）：同一进程、同一份注册，不需要重启。
     snapshotLoaded = true
     const loaded = await toolNamed(tools, 'dc_status').execute({}, exec(delegated))
     assert.equal(loaded.api_key.present, true, '调用期解析必须看见晚到的凭据（README「卡片保存即生效」的前提）')
@@ -192,13 +174,7 @@ test('apply()：credentials 优先于环境变量', async () => {
   }
 })
 
-/**
- * 事故族回归（issue #3 / 2026-09-26 迁 0.1.7）：卡片的可编辑面是 `capital-config` **条目**
- * Config 的 `.volatile()` 投影，主插件经 `settings.describe()` 按条目 id 读回解析值。
- * 这条用例钉的是"读回"这一步：条目里改了引用名与人设，装配必须跟着变；不接这一步的表现
- * 是用户在设置页保存了却毫无效果（零报错）。同时钉住"条目缺席 / describe 抛错"时沿用
- * preset 配置，不把整个插件装配掀掉。
- */
+// Editable config comes from the capital-config entry via settings.describe(); a missing entry or throwing describe falls back to preset.
 test('apply()：配置读自 capital-config 条目，条目缺席或报错时回落 preset 配置', async () => {
   process.env.FUYAO_API_KEY = 'env-key-should-lose'
   try {
@@ -210,7 +186,6 @@ test('apply()：配置读自 capital-config 条目，条目缺席或报错时回
           return ref === 'CUSTOM_FUYAO' ? { value: 'entry-key', source: 'credentials(CUSTOM_FUYAO)' } : undefined
         },
       },
-      // Host 的 describe() 把所有活动条目都列出来：值已按条目 Config 摊平解析（无取值单元）。
       settings: {
         describe: () => [
           { ns: 'dsh-brand', value: {} },
@@ -229,7 +204,6 @@ test('apply()：配置读自 capital-config 条目，条目缺席或报错时回
     assert.equal(sections.length, 1, '条目里的 customPersona 必须注册成人设节')
     assert.match(sections[0].text, /从卡片保存的人设/, '人设正文来自条目配置（首尾空白按实现 trim）')
 
-    // describe 抛错（条目未装配 / schema 漂移）：回落 preset 配置，装配照常完成。
     const falling = fakeCtx({
       credentials: { resolve: async () => undefined },
       settings: { describe: () => { throw new Error('entry not mounted') } },
@@ -245,22 +219,14 @@ test('apply()：配置读自 capital-config 条目，条目缺席或报错时回
   }
 })
 
-/**
- * 2026-10-13 复盘回归（session-bb8635a1）：用户 07:51 在设置卡保存 10 个精选 Skills 开关、
- * 07:54 新建 Capital 会话，首轮 skill catalog 里一个精选 Skill 都没有；08:30 重组后同一条
- * 读取路径立刻读对。根因一族：**读取面押在装配期捕获的外部状态上**——boot 里各 fiber 并行
- * apply，settings / configEditor 晚于本插件注册时，装配期 `ctx.get('settings')` 捕获到
- * undefined，整场进程静默降级成 preset 默认（全关），"读不到"被伪装成"用户全关"。
- */
+// Read services at call time, never at apply time: boot can register settings late, and the silent all-off default looks like the user disabling everything.
 test('readCapitalSettings：服务引用调用期现取，保存层兜底，preset 回落可辨认', () => {
   const boot = { customPersona: 'preset 人设' }
   let services
   const ctx = { get: (name) => services?.get(name) }
 
-  // 装配期 settings 尚未注册：回落 preset，但 source 必须认得出"读不到"。
   assert.equal(readCapitalSettings(ctx, boot).source, 'preset')
 
-  // 服务晚到（同一进程、同一条读取路径）：立刻读到条目值，不需要重启。
   services = new Map([
     ['settings', { describe: () => [{ ns: 'capital-config', value: { customPersona: '  条目人设  ' } }] }],
   ])
@@ -268,7 +234,6 @@ test('readCapitalSettings：服务引用调用期现取，保存层兜底，pres
   assert.equal(applied.source, 'settings-describe')
   assert.equal(applied.config.customPersona.trim(), '条目人设')
 
-  // describe() 整个跳过条目（条目 fiber 未挂好的窗口）：用户已保存的值仍要读得到。
   services = new Map([
     ['settings', { describe: () => [{ ns: 'other-entry', value: {} }] }],
     ['configEditor', { entries: () => [{ options: { id: 'capital-config', config: { customPersona: '保存层人设' } } }] }],
@@ -277,7 +242,6 @@ test('readCapitalSettings：服务引用调用期现取，保存层兜底，pres
   assert.equal(saved.source, 'config-editor')
   assert.equal(saved.config.customPersona, '保存层人设')
 
-  // 两级都读不到（describe 抛错、保存层也没有本条目）：回落 preset 且可辨认。
   services = new Map([
     ['settings', { describe: () => { throw new Error('entry not mounted') } }],
     ['configEditor', { entries: () => [{ options: { id: 'other', config: {} } }] }],
@@ -285,19 +249,17 @@ test('readCapitalSettings：服务引用调用期现取，保存层兜底，pres
   assert.equal(readCapitalSettings(ctx, boot).source, 'preset')
 })
 
-test('apply()：settings 晚到也必须挂住精选 Skills 读取链路（保存后立刻建会话就得看得到）', async () => {
+test('tools/root-extras：settings 晚到也必须挂住精选 Skills 读取链路（保存后立刻建会话就得看得到）', async () => {
   const { ctx, listeners, services, effectResults } = fakeCtx()
   services.set('agentPresets', { composedPreset: () => 'capital-generation' })
-  // 装配期没有 settings 服务（boot 竞态的真实形态），selectedSkills 全默认关。
-  apply(ctx, { customPersona: '', retriever: { baseURL: '', credentialRef: '', windDocs: { endpoint: '', credentialRef: '', timeoutMs: 0 } } })
+  // No settings service at apply time, the real boot race.
+  applyRootExtras(ctx)
   await Promise.all(effectResults)
 
-  // 服务缺席也必须挂监听并注册 provider：旧实现在这里走"静态全关"快路径——监听都不挂，
-  // 整场进程的精选 Skills 就此锁死，正是 2026-10-13 那 36 分钟。
+  // A static all-off shortcut would skip the listener and lock selected skills for the process.
   let provider
   const cleanups = []
   const injectedCtx = {
-    // 真实 filesystem provider 会探测可选的 fs 服务：没有就走 node 原生发现（本仓快照目录）。
     get: () => undefined,
     skills: {
       registerProvider(create) {
@@ -319,7 +281,6 @@ test('apply()：settings 晚到也必须挂住精选 Skills 读取链路（保�
     assert.ok(provider, 'settings 服务缺席时也必须注册 selected skills provider（默认全关只是空目录）')
     assert.deepEqual((await provider.list({})).map(({ name }) => name), [], '默认全关：空目录')
 
-    // settings 晚到（保存完成）：同一条读取路径立刻生效——不重启、不新建会话。
     services.set('settings', {
       describe: () => [{ ns: 'capital-config', value: { selectedSkills: { buffettFramework: true } } }],
     })
@@ -328,21 +289,29 @@ test('apply()：settings 晚到也必须挂住精选 Skills 读取链路（保�
       `晚到的 settings 必须立刻生效（首轮 catalog 就该看到），实际目录：${names.join(', ') || '(空)'}`)
     assert.ok(!names.includes('financial-health'), '没开的仍然不进目录（默认全关不许破）')
   } finally {
-    // 失败路径也必须收摊：真实 filesystem provider 带 watcher，漏了就拖住整个测试进程。
+    // Dispose always: the real provider owns process-pinning watchers.
     for (const dispose of cleanups) dispose?.()
   }
 })
 
-/**
- * 事故回归（2026-09-14）：`query_dataset` 的 parameters 根曾写成 `{ oneOf: [...] }`
- * 而没有 `type: 'object'`。模型供应商在请求进入时整体校验
- * `tools[].function.parameters`，直接返回 400
- * （`Invalid schema for function 'query_dataset': schema must be a JSON Schema of
- * 'type: "object"', got 'type: null'`）。校验早于模型生成第一个 token，而这份工具表
- * 在会话组作用域里主 Agent 也带着 —— 于是**每个** Capital 会话在第 1 轮第 1 步整体
- * 失败，与用户问什么无关。这里把「根 schema 只能是 object + properties」钉成装配期
- * 不变量，任何新增工具踩到同一坑都会在这里失败，而不是上线后在真实会话里 400。
- */
+test('tools/root-extras：customPersona 在下一轮 assembly 重读，保存后无需重启', () => {
+  const { ctx, sections, services } = fakeCtx()
+  applyRootExtras(ctx)
+  assert.equal(sections.length, 1, 'root-extras 必须注册 customPersona 节')
+  assert.equal(sections[0].name, 'capital:user-customization')
+  assert.equal(sections[0].text(), '', '未保存人设时不注入正文')
+  services.set('settings', {
+    describe: () => [{ ns: 'capital-config', value: { customPersona: '  保存后的人设  ' } }],
+  })
+  assert.match(sections[0].text(), /保存后的人设/, '装配期只读一次会把保存前的人设钉到进程结束')
+  assert.match(sections[0].text(), /NON-OVERRIDABLE SAFETY REMINDER/, '动态正文仍必须带安全脚注')
+  services.set('settings', {
+    describe: () => [{ ns: 'capital-config', value: { customPersona: 'x'.repeat(8_001) } }],
+  })
+  assert.equal(sections[0].text(), '', '超长人设不能把 prompt 组装打崩')
+})
+
+// A root `oneOf` without type: object makes the provider 400 the whole tool table before the first token.
 function assertObjectSchemas(node, path, toolName) {
   if (Array.isArray(node)) {
     node.forEach((child, index) => assertObjectSchemas(child, `${path}[${index}]`, toolName))
@@ -355,11 +324,7 @@ function assertObjectSchemas(node, path, toolName) {
   for (const [key, value] of Object.entries(node)) assertObjectSchemas(value, `${path}.${key}`, toolName)
 }
 
-/**
- * `get_watchlist` 走的是**另一条数据面**：清单归 host 平面的 `capital-watchlist` 行
- * （`ctx.provide('capitalWatchlist', …)`），本插件只读、不另建存储。两条都要钉：
- * 注册不以服务在不在为条件（§9.7 ⑤ 桌面端事故的形状），以及服务后到必须立刻读得到。
- */
+// get_watchlist reads a late-arriving host service; register unconditionally and fail loudly.
 test('apply()：get_watchlist 无条件注册，capitalWatchlist 晚到也照样读得到', async () => {
   process.env.FUYAO_API_KEY = 'smoke-key'
   try {
@@ -389,7 +354,7 @@ test('apply()：get_watchlist 无条件注册，capitalWatchlist 晚到也照样
     assert.equal(after.items[0].held, false, '没标过持仓就是未持仓，不是 0%')
     assert.equal(after.limit, 30, '上限从宿主回包来，不在插件侧抄常量')
 
-    // 只读：这条路上没有任何写入口（添加 / 移除 / 标记持仓都只在面板里）。
+    // Read-only: add/remove/mark live only in the panel UI.
     assert.equal(Object.keys(definition.parameters.properties).length, 0, 'get_watchlist 不该有任何入参')
   } finally {
     if (SAVED_KEY === undefined) delete process.env.FUYAO_API_KEY
@@ -410,14 +375,12 @@ test('apply()：所有注册工具的 parameters 根必须是 object 型 schema'
       assert.ok(parameters && typeof parameters === 'object', `${definition.name} 必须有 parameters`)
       assert.equal(parameters.type, 'object', `${definition.name}: parameters 根必须声明 type: 'object'`)
       assert.ok(parameters.properties && typeof parameters.properties === 'object', `${definition.name}: parameters 必须给出 properties`)
-      // 根级组合子会让供应商只看到空参数表；API 侧的 object 校验也可能直接拒绝。
       for (const combinator of ['oneOf', 'anyOf', 'allOf']) {
         assert.equal(combinator in parameters, false, `${definition.name}: parameters 根不允许出现 ${combinator}`)
       }
       assertObjectSchemas(parameters, `${definition.name}.parameters`, definition.name)
     }
 
-    // 本次事故的具体工具必须显式覆盖，避免上面的通用断言被整体绕过
     const query = toolNamed(tools, 'query_dataset')
     assert.equal(query.parameters.type, 'object')
     assert.ok(query.parameters.properties.query, 'envelope 形态的 query 字段必须出现在根 properties 里')
@@ -434,9 +397,7 @@ test('apply()：所有注册工具的 output.schema 结构自洽（required 必�
     apply(ctx, { customPersona: '', retriever: { baseURL: '', credentialRef: '', windDocs: { endpoint: '', credentialRef: '', timeoutMs: 0 } } })
     await Promise.all(effectResults)
 
-    // 结构不变量：`required` 里写了一个没在 properties 里声明的键，宿主一定判"缺字段"，
-    // 而本地 test 直接调 execute 看不见（2026-09-23 事故，见 test/output-contract.mjs）。
-    // 真实返回值是否合规由各工具自己的用例断言（多形态工具必须逐形态来）。
+    // required must name declared properties; per-tool cases cover actual return values.
     for (const definition of tools) {
       const schema = definition.output?.schema
       if (schema === undefined) continue
@@ -448,19 +409,18 @@ test('apply()：所有注册工具的 output.schema 结构自洽（required 必�
   }
 })
 
-test('apply()：注册根 Agent 工具收敛监听（只拿掉主 Agent 的专属入口）', async () => {
+test('capital-policy + tools/root-extras：注册根 Agent 工具收敛监听（只拿掉主 Agent 的专属入口）', async () => {
   process.env.FUYAO_API_KEY = 'smoke-key'
   try {
     const { ctx, listeners, effectResults } = fakeCtx()
     apply(ctx, { customPersona: '', retriever: { baseURL: '', credentialRef: '', windDocs: { endpoint: '', credentialRef: '', timeoutMs: 0 } } })
+    applyPolicy(ctx)
+    applyRootExtras(ctx)
     await Promise.all(effectResults)
 
     const created = listeners.filter((entry) => entry.event === 'agent/created')
-    // 三个监听是三件事，不能合并：① 根 Agent 工具收敛（出图三件套 / 出网 / 写口）；
-    // ② shell 闸门（只拦被委派会话必然失败的沙箱升级）；③ selected skills 的 provider
-    // 注册（2026-10-13 起不再按"有没有 settings 服务"走快路径跳过——那正是静默锁死的根子）。
-    // 顺序即 apply() 里的注册顺序，但这里不去依赖它——逐个调用、按行为断言。
-    assert.equal(created.length, 3, 'apply 必须注册三个 agent/created 监听：根收敛 + shell 闸门 + selected skills')
+    // Four distinct duties; assert behavior, not registration order.
+    assert.equal(created.length, 4, 'apply 必须注册四个 agent/created 监听：根收敛 + 角色收敛 + shell 闸门 + selected skills')
     const notifyCreated = (agent) => { for (const entry of created) entry.listener({ agent }) }
 
     const restricted = []
@@ -471,32 +431,23 @@ test('apply()：注册根 Agent 工具收敛监听（只拿掉主 Agent 的专�
         guard: (guard) => { guarded.push(guard); return () => {} },
       },
     }
-    // 根 Agent（无 parentSession）→ 收敛；子 Agent（有 parentSession）→ 原样放行。
+    // Root visibility is closed at composition time; no per-name deny for absent tools.
     notifyCreated({ session: { header: { cwd: '/w' } }, ctx: agentCtx })
     notifyCreated({ session: { header: { cwd: '/w', parentSession: 'main-1' } }, ctx: agentCtx })
-    assert.equal(restricted.length, ROOT_AGENT_DENIED_TOOLS.length, '根 Agent 逐名收敛；子 Agent 一次都不碰')
-    assert.deepEqual(restricted.map((filter) => filter.deny[0]).sort(), [...ROOT_AGENT_DENIED_TOOLS].sort())
-    // 3 = shell 闸门每 agent 一次（根 + 子）+ `ocr` 的 `url` 形态闸门**只装根**一次
-    //（fs 写口闸门不在此列：它装在插件 ctx 上、全局一次，见下面的专属用例）。
-    // 按行为分流而不是按顺序取下标：注册顺序不该被测试钉死（§8.5），但"谁装了什么闸门"必须可指认。
+    assert.equal(restricted.length, 0, '根可见性在组合期决定；host 不再对不存在的名字提交 deny')
+    // Only the shell gate is per agent: identity gates are global because the Agent exists before preset selection.
     const rootBashCall = () => ({ name: 'bash', agent: { session: { header: { cwd: '/w' } } }, arguments: { command: 'date' } })
-    const rootOcrCall = (arguments_) => ({ name: 'ocr', agent: { session: { header: { cwd: '/w' } } }, arguments: arguments_ })
     const childBashEscalation = () => ({ name: 'bash', agent: { session: { header: { cwd: '/w', parentSession: 'main-1' } } }, arguments: { command: 'date', sandbox_permissions: 'x' } })
     const bashGuards = guarded.filter((guard) => /沙箱升级/.test(String(guard(childBashEscalation()))))
-    const ocrGuards = guarded.filter((guard) => guard(rootOcrCall({ url: 'https://pdf.dfcfw.com/H3_x_1.pdf' })) !== undefined)
     assert.equal(bashGuards.length, 2, '每个 agent 各装一次 shell 闸门（同一实现，按调用身份判定）')
     assert.equal(bashGuards[0], bashGuards[1], '闸门必须是同一个函数：判定只有一份实现')
-    assert.equal(ocrGuards.length, 1, '⛔ `ocr` 的 url 闸门只装根 Agent：主 Agent 不自己抓外链，但本地文档解析留给它')
-    assert.equal(ocrGuards[0](rootOcrCall({ file: 'refs/茅台研报.pdf' })), undefined, 'file 形态放行：那是主 Agent 的正当入口')
-    assert.equal(ocrGuards[0](rootOcrCall({ doc_id: 'ocr_000000000000', pages: '1' })), undefined, '读盘形态放行')
-    assert.equal(ocrGuards.every((guard) => !bashGuards.includes(guard)), true, '两份闸门互不冒充')
-    // 闸门按调用身份判定（2026-10-15 决策「开 read、同时保留 bash」）：主 Agent 的 shell 放行，
-    // 被委派会话的沙箱升级被拒（迁移旧断言"根会话的 bash 调用被拒"）。
+    assert.equal(guarded.length, 2, '⛔ 除 shell 闸门外不许再按 agent 装任何闸门：身份判据一律全局装（见下面的专属用例）')
+    assert.equal(guarded.every((guard) => bashGuards.includes(guard)), true, '识别出的 shell 闸门就是全部按 agent 安装的闸门')
     assert.equal(bashGuards[0](rootBashCall()), undefined, '主 Agent 的 shell 调用放行')
     assert.match(String(bashGuards[0](childBashEscalation())), /不会去问用户/)
     assert.equal(bashGuards[0]({ name: 'bash', agent: { session: { header: { cwd: '/w', parentSession: 'main-1' } } }, arguments: { command: 'node -e 1' } }), undefined)
 
-    // 收敛失败（工具名未知 / ctx 缺工具）不得抛出：调用方是 agent 创建路径。
+    // Policy failures (unknown tool, missing ctx) must not throw: runs on agent creation.
     assert.doesNotThrow(() => notifyCreated({ agent: { session: { header: {} }, ctx: { tools: { restrict: () => { throw new Error('unknown tool') } } } } }))
     assert.doesNotThrow(() => notifyCreated({ agent: { session: { header: {} }, ctx: {} } }))
   } finally {
@@ -505,27 +456,101 @@ test('apply()：注册根 Agent 工具收敛监听（只拿掉主 Agent 的专�
   }
 })
 
-test('apply()：fs 写口闸门装在插件 ctx（全局一次），只拦本 preset 的 write / edit', async () => {
-  // 这是 docs/dev/bash-gate.md §1.6 里声明的备选方向在写口上的落地：guard 按调用身份判定，
-  // 与实例绑哪层无关，所以全局装一次就够。⛔ 反面钉子：fail-open 必须真的放行别的 preset——
-  // 全局 guard 判错一次，会把同一进程里开发会话的正当写口一起吃掉。
+test('apply()：角色会话只减掉焊死的兄弟名字，并原样回到 dc_status', async () => {
+  process.env.FUYAO_API_KEY = 'smoke-key'
+  try {
+    // Probes are module-level and earlier cases wrote root records; reset for a clean deepEqual.
+    resetRootPolicyProbes()
+    resetRolePolicyProbes()
+    const { ctx, tools, listeners, effectResults } = fakeCtx()
+    ctx.provide('agentPresets', { composedPreset: (agentCtx) => agentCtx?.preset })
+    apply(ctx, { customPersona: '', retriever: { baseURL: '', credentialRef: '', windDocs: { endpoint: '', credentialRef: '', timeoutMs: 0 } } })
+    applyPolicy(ctx)
+    await Promise.all(effectResults)
+    const created = listeners.filter((entry) => entry.event === 'agent/created')
+
+    const restricted = []
+    const agentCtx = { tools: { restrict: (filter) => { restricted.push(filter); return () => {} }, guard: () => () => {} } }
+    const notify = (agent) => { for (const entry of created) entry.listener({ agent }) }
+
+    notify({ session: { id: 'junior-1', header: { cwd: '/w', parentSession: 'main-1' } }, ctx: { ...agentCtx, preset: 'capital-data-junior' } })
+    assert.deepEqual(restricted, SIBLING_DENIED_TOOLS.map((deny) => ({ deny: [deny] })),
+      '角色侧只提交逐名 deny：整份 allow 名单已由 D0 删除，工具面在组合期就封闭了')
+    assert.equal(restricted.filter((filter) => filter.allow !== undefined).length, 0,
+      '⛔ 不许出现 allow：那是"继承全部再划掉"的形状，§6.1 禁止恢复')
+
+    const before = restricted.length
+    notify({ session: { id: 'other-1', header: { cwd: '/w', parentSession: 'main-1' } }, ctx: { ...agentCtx, preset: 'some-other-preset' } })
+    assert.equal(restricted.length, before, '别的 preset 的 child 不许被我们碰')
+
+    const status = await toolNamed(tools, 'dc_status').execute({}, exec(delegated))
+    assert.deepEqual(status.agent_tool_policy, [
+      {
+        agent_id: 'junior-1', root: false, preset_id: 'capital-data-junior', outcome: 'restricted',
+        allowed: [], denied: [...SIBLING_DENIED_TOOLS], failed: [],
+      },
+    ], '角色收敛现场必须由生产装配原样带回会话侧')
+  } finally {
+    if (SAVED_KEY === undefined) delete process.env.FUYAO_API_KEY
+    else process.env.FUYAO_API_KEY = SAVED_KEY
+  }
+})
+
+test('capital-policy 行必须把 tools 声明成注入：否则三颗闸门静默不装', async () => {
+  // Without inject, ctx.get('tools') is undefined and all three identity gates no-op silently.
+  const policy = await import('../lib/policy-entry.js')
+  assert.ok(Array.isArray(policy.inject) && policy.inject.includes('tools'),
+    'capital-policy 必须 export const inject = ["tools"]（host 平面行读服务只有这一条不静默的路）')
+})
+
+test('apply()：三颗身份闸门都装在插件 ctx（各一次），按人设判定且 fail-open', async () => {
+  // Identity gates install once, globally, keyed by preset; other presets fail open.
   process.env.FUYAO_API_KEY = 'smoke-key'
   try {
     const { ctx, pluginGuards, effectResults } = fakeCtx()
     ctx.provide('agentPresets', { composedPreset: (agentCtx) => agentCtx?.preset })
     apply(ctx, { customPersona: '', retriever: { baseURL: '', credentialRef: '', windDocs: { endpoint: '', credentialRef: '', timeoutMs: 0 } } })
+    applyPolicy(ctx)
     await Promise.all(effectResults)
 
-    assert.equal(pluginGuards.length, 1, '全局 fs 写口 guard 只装一次，不走 agent/created')
-    const guard = pluginGuards[0]
     const capital = { ctx: { preset: 'capital-generation' } }
-    assert.notEqual(guard({ name: 'write', agent: capital, arguments: { file_path: '/w/a.md' } }), undefined, '本 preset 的 write 被拦')
+    const junior = { ctx: { preset: 'capital-data-junior' } }
+    const writeCall = (agent) => ({ name: 'write', agent, arguments: { file_path: '/w/a.md' } })
+    const ocrUrlCall = (agent, arguments_) => ({ name: 'ocr', agent, arguments: arguments_ })
+    const siblingCall = (agent) => ({ name: 'interrupt_agent', agent, arguments: { agent_id: 'x' } })
+    const byName = (call) => pluginGuards.filter((guard) => guard(call) !== undefined)
+
+    const fsGuards = byName(writeCall(capital))
+    const ocrGuards = byName(ocrUrlCall(capital, { url: 'https://pdf.dfcfw.com/H3_x_1.pdf' }))
+    const siblingGuards = byName(siblingCall(junior))
+    assert.equal(fsGuards.length, 1, '全局 fs 写口 guard 只装一次，不走 agent/created')
+    assert.equal(ocrGuards.length, 1, '⛔ `ocr` 的 url 形态 guard 只装一次且必须全局：主 Agent 不自己抓外链，本地解析留给它')
+    assert.equal(siblingGuards.length, 1, '兄弟名字 guard 只装一次：可见性减不掉的（与 send_message 焊在同一行）只能在调用期拦')
+    assert.equal(pluginGuards.length, 3, `插件 ctx 上的全局闸门就是这三颗，第四颗意味着新增了一份按实例安装的身份判据（收到 ${pluginGuards.length}）`)
+    assert.equal(new Set([fsGuards[0], ocrGuards[0], siblingGuards[0]]).size, 3, '三颗闸门互不冒充：各认自己的工具名')
+
+    const guard = fsGuards[0]
     assert.notEqual(guard({ name: 'edit', agent: capital }), undefined, '本 preset 的 edit 被拦')
+    assert.notEqual(guard(writeCall(junior)), undefined, '角色会话的 write 同样被拦：行 config 删不掉继承来的写口（账本 L33）')
     assert.equal(guard({ name: 'read', agent: capital }), undefined, 'read 放行（2026-10-15 决策新开的口）')
-    assert.equal(guard({ name: 'write', agent: { ctx: { preset: 'standard' } } }), undefined, '别的 preset 照常写（fail-open）')
-    assert.equal(guard({ name: 'write', agent: { ctx: {} } }), undefined, '认领不出 preset 就放行')
-    // 没有 agentPresets 服务时也是 fail-open（registry 不可读不得殃及全进程）
+    assert.equal(guard(writeCall({ ctx: { preset: 'standard' } })), undefined, '别的 preset 照常写（fail-open）')
+    assert.equal(guard(writeCall({ ctx: {} })), undefined, '认领不出 preset 就放行')
+
+    const ocr = ocrGuards[0]
+    assert.equal(ocr(ocrUrlCall(capital, { file: 'refs/茅台研报.pdf' })), undefined, 'file 形态放行：那是主 Agent 的正当入口')
+    assert.equal(ocr(ocrUrlCall(capital, { doc_id: 'ocr_000000000000', pages: '1' })), undefined, '读盘形态放行')
+    assert.equal(ocr(ocrUrlCall({ ctx: { preset: 'capital-web-retriever' } }, { url: 'https://pdf.dfcfw.com/H3_x_1.pdf' })), undefined,
+      '⛔ 检索人设的 url 形态放行：判据是人设，不是会话拓扑（委派子与手开角色都走这一支）')
+    assert.equal(ocr(ocrUrlCall({ ctx: { preset: 'standard' } }, { url: 'https://x/y.pdf' })), undefined, '别的 preset 的 url 形态放行（fail-open）')
+
+    const sibling = siblingGuards[0]
+    assert.equal(sibling(siblingCall(capital)), undefined, '主 Agent 保留打断权：它才是决定要不要让别的会话停下来的人')
+    assert.equal(sibling(siblingCall({ ctx: { preset: 'standard' } })), undefined, '别的 preset 的 interrupt_agent 放行（fail-open）')
+    assert.equal(sibling({ name: 'send_message', agent: junior, arguments: {} }), undefined, 'send_message 是叶子角色的正当出口，不在这颗闸门里')
     assert.doesNotThrow(() => fakeCtx().pluginGuards)
+    // Clear denial records so later deepEqual probe assertions start clean.
+    resetRootPolicyProbes()
+    resetRolePolicyProbes()
   } finally {
     if (SAVED_KEY === undefined) delete process.env.FUYAO_API_KEY
     else process.env.FUYAO_API_KEY = SAVED_KEY
@@ -541,15 +566,12 @@ test('apply()：render_chart 注册在 standing 层（由根 Agent 收敛决定�
 
     const renderChart = toolNamed(tools, 'render_chart')
     assert.ok(renderChart, 'render_chart 必须仍被注册：visualization_specialist 的 toolFilter.allow 依赖它')
-    // 委派调用者（有 parentSession）不带 chart_source_ref 时必须被拒 —— 这正是主 Agent 失去
-    // 这个工具后也不会被"顺手出图"的运行时兜底。
     const delegatedSession = { id: 'child-1', header: { cwd: '/workspace/proj', parentSession: 'main-1' } }
     await assert.rejects(
       () => renderChart.execute({ dataset_id: 'ds_1', spec: { kind: 'line', series: ['close'] } }, exec(delegatedSession)),
       (error) => error.code === 'chart_source_scope_mismatch',
       '委派调用者必须用 chart_source_ref，不能用 dataset_id / path',
     )
-    // 描述里必须写清"只回小回执"与"不要把图表文件写进正文"。
     assert.match(renderChart.description, /只回一条小回执/)
     assert.match(renderChart.description, /不要.*罗列图表文件/)
   } finally {
@@ -569,7 +591,7 @@ test('apply()：customPersona 注册为独立 system-prompt 节', () => {
   assert.ok(effectResults.length > 0)
 })
 
-/** AnySearch 401/403 → AUTH（可回退失败）；本机直连用 IP 字面量，不触发 DNS。 */
+// AnySearch 401/403 maps to AUTH; IP literals avoid DNS in local fallback.
 const authFailureResponse = () => ({
   status: 403,
   ok: false,
@@ -588,7 +610,6 @@ test('apply()：本地回退默认启用并把 UA 落到本机直连请求；ena
   process.env.FUYAO_API_KEY = 'smoke-key'
   const originalFetch = globalThis.fetch
   try {
-    // 1) 缺省配置（retriever 未给 localFetch）：AnySearch 403 → 自动本机直连，UA 非空。
     {
       const { ctx, tools, effectResults } = fakeCtx()
       const requests = []
@@ -610,7 +631,6 @@ test('apply()：本地回退默认启用并把 UA 落到本机直连请求；ena
       assert.equal(LOCAL_FETCH_DEFAULTS.userAgent, '@v587d/capital-generation')
     }
 
-    // 2) enabled:false：AnySearch 403 → 工具错误（抛错，isError:true），只有一次请求。
     {
       const { ctx, tools, effectResults } = fakeCtx()
       let calls = 0

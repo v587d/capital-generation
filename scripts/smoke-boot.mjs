@@ -1,51 +1,22 @@
 #!/usr/bin/env node
 /**
- * 启动冒烟：在 workspace 内搭一个 scratch profile 并**真的把 dsh 跑起来**，确认
- * profile 能完成 boot（loader 行全部导入并激活）。
- *
- * 为什么必须有这一步（事故教训，2026-09-15）：
- * `dsh --dump-config` 只打印组合后的配置，**不会触发 `!!js` 求值、也不会导入任何行**。
- * 当时把"行出现在 dump 里"当成了验证通过，结果 `name` 上误用 `!!js` 的写法在真实启动时
- * 变成 `failed to import loader entry capital-charts ([object Object]): name.startsWith is
- * not a function` —— 用户重启后**整个 dsh web 起不来**。dump 能证明的只有"patch 应用了"，
- * 证明不了"能起来"。
- *
- * 做法：与真实 profile 同构的目录 + 真实 `dsh` 进程 + `--port 0`（让 OS 选端口，不碰
- * 用户正在跑的 3080）+ `--no-open`（不弹浏览器）；所有写入都在 workspace 内。
- *
- * 2026-09-26（issue #3）补了两件当时缺的事，因为那次升级的**两个根因都没被这个冒烟抓到**：
- *  1. **boot 内探针**（`probe.mjs`，随 scratch profile 一起写）：在真实 boot graph 里读
- *     `agentPresets.resolve('capital-generation')`、`settings.describe()` 与
- *     `pluginManager.listBundles()` 的行清单。0.1.7 起预设由一颗声明行注册，registry 激活失败
- *     只打一行 warn（`agent preset <id>: <原因>`），启动期什么都正常，症状延后到用户打开历史
- *     会话（`Unknown agent preset`）；settings 卡片那条链同理（条目没 `.volatile()` 叶子 →
- *     根本不进 describe 镜像；卡片坐 bundle 自己的页面，那一行只是取数通道，见
- *     docs/dev/settings-config.md §5.1 §5.4）。
- *     探针把这三件事提前到 boot。
- *  2. **反向对照**（`badpreset` profile）：故意重复声明同一个预设 id，确认失败特征**真的会触发**。
- *     闸门抓不到的东西看起来就像通过了 —— 上一条事故正是"只复核 bundle 投递"的闸门一路绿。
- *
- * 用法：npm run smoke:boot
+ * Boot smoke: builds a scratch profile in the workspace and really starts dsh. `--dump-config`
+ * evaluates no `!!js` and imports no row, so a bad row passes the dump and still keeps the whole web
+ * profile down. Runs with `--port 0 --no-open`, an in-boot probe, and a negative control.
  */
 import { spawn } from 'node:child_process'
 import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { locateDshCli } from './lib/run-tool.mjs'
+// Assembly rows come from test/preset-rows.mjs (ledger L17), never a second list.
+import { allPresets, capitalRowsOf } from '../test/preset-rows.mjs'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const SANDBOX = join(ROOT, '.tmp-boot')
 const TIMEOUT_MS = 90_000
 
-/**
- * dsh 的入口脚本，用**当前进程的 node** 跑它，不经过 shell。
- *
- * `spawn('dsh')` 在 Windows 上命中的是 `.cmd` 垫片：ENOENT（而且 stderr 为空，看不到原因），
- * 换成 `'dsh.cmd'` 则是 EINVAL（Node 对批处理强制要求 shell）。dsh 是 Node CLI，
- * 所以 `package.json` 的 `bin`（`lib/bin.js`）就是可以直接交给 node 的那个文件。
- * 前置条件缺失就**立刻**点名并退出 2（与 `check-dsh-compat.mjs` 同一个约定），
- * 不要等 scratch profile 都建好了才失败。
- */
+/** dsh entry script, no shell: the `dsh` .cmd shim gives ENOENT, `dsh.cmd` gives EINVAL. Exit 2 if missing. */
 const DSH_CLI = locateDshCli()
 if (DSH_CLI === undefined) {
   console.error('smoke-boot: 定位不到 dsh 入口（<包根>/lib/bin.js）。')
@@ -54,29 +25,31 @@ if (DSH_CLI === undefined) {
   process.exit(2)
 }
 
-/** 预设身份与 settings 条目 id —— 与 `preset/capital-generation/agent.patch.yml`、
- *  `config/index.js` 必须同字，测试另有断言（`test/capital-config.test.mjs`）。 */
+/** Preset identity and settings entry id must match agent.patch.yml and config/index.js verbatim. */
 const PRESET_ID = 'capital-generation'
 const SETTINGS_ENTRY_ID = 'capital-config'
-/** bundle 名以 package.json 为准（插件面板按它列出这颗包的行）。 */
+/** Bundle name from package.json: the plugin panel lists bundles by this name. */
 const PACKAGE_NAME = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).name
 /**
- * 三颗 host 平面嵌套包的客户端 bundle。`__DSH_BOOT__` 里带的是**包名**（`dsh-client-modules`
- * 的 locatePkgJson 按"最近的 package.json"归属 bundle 身份），不是 profile 行 id——所以这里
- * 按包名问，并且**从各包的 package.json 现读**。2026-10-14 目录改名之后，原先硬写的
- * `capital-*` 在 index.html 里永不命中：真机照样报 ⚠️ 并以非零退出，闸门没瞎，但它量的
- * 已经不是"bundle 有没有送达"。派生而不抄字符串，下次改名就不必再来修这里。
+ * Family rows come from agent.patch.yml via test/preset-rows.mjs; only fiberState is checked. A
+ * drifted row logs one warn and silently drops a whole tool family for that role.
  */
+const FAMILY_ROWS_BY_PRESET = Object.fromEntries(
+  allPresets()
+    .filter((preset) => preset.disabled !== true)
+    .map((preset) => [preset.config.id, capitalRowsOf(preset.config.id).map((row) => row.id)]),
+)
+/** `__DSH_BOOT__` keys by package name: derive it from package.json, never hardcode the directory name. */
 const CLIENT_BUNDLES = [
   { dir: 'chart-ui', label: '图表客户端 bundle' },
   { dir: 'config', label: 'settings 卡片 bundle' },
   { dir: 'watchlist', label: '自选股客户端 bundle' },
 ].map((entry) => ({ ...entry, id: JSON.parse(readFileSync(join(ROOT, entry.dir, 'package.json'), 'utf8')).name }))
 
-/** 探针在 boot 内打印这一行（JSON），父进程按它判定。 */
+/** Probe marker line; the parent process keys off it. */
 const PROBE_MARKER = 'capital-boot-probe: '
 
-/** 失败特征：loader 行导入/激活失败、**预设声明行激活失败**、监听失败、启动期未捕获异常。 */
+/** Failure signatures: loader rows, preset rows, listening, and boot-time crashes. */
 const FAILURE_PATTERNS = [
   /failed to import loader entry/i,
   /did not activate/i,
@@ -87,7 +60,7 @@ const FAILURE_PATTERNS = [
   ...PRESET_FAILURE_PATTERNS(),
 ]
 
-/** registry 的预设失效特征：`agent preset <id>: <原因>` 只在 warn 里出现一次，启动照旧成功。 */
+/** Registry preset failure: `agent preset <id>: <reason>` logs once in a warn and boot still succeeds. */
 function PRESET_FAILURE_PATTERNS() {
   return [
     /agent preset \S+:/,
@@ -95,18 +68,12 @@ function PRESET_FAILURE_PATTERNS() {
     /Duplicate agent preset/i,
   ]
 }
-/** 成功特征：web-runtime 行打印的访问 URL（带 token）。 */
 const SUCCESS_PATTERN = /https?:\/\/[^\s]+/
 
 /**
- * boot 成功后顺手确认客户端半边真的进了 boot graph。
- *
- * 这是 F3（"preset 行的客户端 bundle 到不了浏览器"）的**运行期反证**：index.html 的
- * `window.__DSH_BOOT__` 里出现 chart-ui 的 bundle，说明"挂在 host 平面"这个选择是对的。
- *
- * 认证流程（dsh-client-connection 的 browserAuth）：带 `?token=` 的根请求会 302 到干净的
- * `/` 并 Set-Cookie；后续请求必须带上那个 cookie，否则一律 401。Node 的 fetch 不做
- * cookie jar，所以这里手工接一次。
+ * Confirms each client bundle really reached the boot graph. browserAuth 302s a `?token=` request to
+ * a clean `/` and sets a cookie; later requests need that cookie or get 401. Node's fetch has no
+ * cookie jar, so do the one handshake by hand.
  */
 async function fetchIndex(url) {
   const signal = AbortSignal.timeout(15_000)
@@ -119,16 +86,14 @@ async function fetchIndex(url) {
     : [first.headers.get('set-cookie')].filter(Boolean)
   const cookie = cookies.map((value) => String(value).split(';')[0]).join('; ')
   const followed = await fetch(new URL(location, url).href, { headers: cookie.length > 0 ? { cookie } : {}, signal })
-  // Node 的 fetch 不做 cookie jar；把接到的 cookie 挂在响应上，后续探针复用同一次握手。
+  // No cookie jar in Node's fetch: attach the cookie to the response for reuse in later probes.
   followed.cookie = cookie
   return followed
 }
 
 /**
- * 自选股路由的**认证围栏**实弹核对（同一 host 平面行注册的路径，跑在真 dsh 里）：
- * 匿名必须 401，带浏览器 cookie 必须 200。
- * 这是 AGENTS.md 里那条"prefix 路由自己接 requestRejection"的唯一运行期证据——
- * 单元测试用的是 fake authorize，证明不了真围栏。
+ * Live fence check for the watchlist prefix route (anonymous 401, cookie 200) — the only runtime
+ * proof that the route wires requestRejection; unit tests use a fake authorize.
  */
 async function watchlistFenceProbe(url, cookie) {
   const signal = AbortSignal.timeout(15_000)
@@ -150,12 +115,8 @@ async function watchlistFenceProbe(url, cookie) {
 }
 
 /**
- * SKILL.md 原文旁路（`/capital-skills/<名>.md`）的围栏与**闭集**实弹核对。
- *
- * 这条路由读的是盘上的文件，所以"匿名必须 401"之外还要问两件事：① 表里没这个名字（含 `%2F..%2F`
- * 这种编码斜杠）必须 404 而不是 500/读到别人的文件；② 命中时必须真的拿到那份快照的开头
- * （frontmatter 的 `---`），拿到空串就是"把没读到写成一份空原文"。与上一条同理，单元测试用的是
- * fake authorize，证明不了真围栏。
+ * Live fence and closed-set check for /capital-skills: anonymous 401, an uncatalogued or encoded
+ * `../` name 404, and a hit returns real frontmatter.
  */
 async function skillDocFenceProbe(url, cookie, skillName) {
   const signal = AbortSignal.timeout(15_000)
@@ -185,7 +146,6 @@ async function skillDocFenceProbe(url, cookie, skillName) {
   }
 }
 
-/** 围栏判据：匿名拒绝、带 cookie 可读、闭集外一律 404、且拿到的确实是那份快照。 */
 function skillFenceOk(fence) {
   return fence !== undefined && fence.anonymousStatus === 401 && fence.status === 200
     && fence.cacheControl === 'no-store' && fence.startsWithFrontMatter && fence.bytes > 200
@@ -204,10 +164,7 @@ async function bootGraphHasCapitalBundles(url) {
   }
 }
 
-/**
- * 探针行源码：一颗普通 host 平面行，等两个服务都到位后读**运行期事实**。
- * 写在 profile 目录里（不在发布物内），随 scratch profile 一起生灭。
- */
+/** One plain host-plane probe row, written into the scratch profile so it dies with it. */
 function probeSource() {
   return [
     `// smoke-boot 的一次性探针（由 scripts/smoke-boot.mjs 生成，不属于发布物）。`,
@@ -221,7 +178,7 @@ function probeSource() {
     `}`,
     ``,
     `async function attempt(ctx) {`,
-    `  const result = { preset: null, broken: null, entry: null, localFetchEnabled: null, rows: null, presetRows: null, problems: [] }`,
+    `  const result = { preset: null, broken: null, entry: null, localFetchEnabled: null, rows: null, presetRows: null, rolePresets: null, familyRows: null, hostRuntime: null, identityGuards: null, problems: [] }`,
     `  try {`,
     `    const agentPresets = ctx.get('agentPresets')`,
     `    if (!agentPresets) result.problems.push('agentPresets 服务未提供')`,
@@ -233,9 +190,47 @@ function probeSource() {
     `      else if (record.broken) result.problems.push('预设激活失败：' + record.broken)`,
     `      const composition = (await agentPresets.compositionInventory()).find((item) => item.id === PRESET_ID)`,
     `      // tool-fs 是 2026-10-15 新增行（主 Agent 的 read 通道）：挂载检查必须点名新增行 active`,
-    `      const required = ['persona', 'tool-subagent-data-collector', 'tool-subagent-data-junior', 'tool-fs', 'capital-generation']`,
+    `      const required = ['persona', 'tool-subagent-data-collector', 'tool-subagent-data-junior', 'tool-fs']`,
     `      result.presetRows = required.map((id) => ({ id, state: composition?.rows?.find((row) => row.entryId === id)?.fiberState ?? null }))`,
     `      for (const row of result.presetRows) if (row.state !== 2) result.problems.push('预设子行未激活：' + row.id + '（fiberState=' + row.state + '）')`,
+    `      if (composition?.rows?.some((row) => row.entryId === 'capital-generation')) result.problems.push('根 preset 仍然挂着单体 capital-generation 行')`,
+    `      // phase-1 spike：所有 Capital preset 都要能激活。`,
+    `      const roster = await agentPresets.list()`,
+    `      result.rolePresets = []`,
+    `      for (const item of roster) {`,
+    `        if (typeof item.id !== 'string' || !item.id.startsWith('capital-') || item.id === PRESET_ID) continue`,
+    `        const role = await agentPresets.resolve(item.id)`,
+    `        result.rolePresets.push({ id: item.id, broken: role?.broken ?? null })`,
+    `        if (role?.broken) result.problems.push('角色预设激活失败：' + item.id + '：' + role.broken)`,
+    `      }`,
+    `      // D0：工具面 = preset 挂的族行。每一颗 preset 的每一行都必须 fiberState=2，`,
+    `      // 否则那一族工具在该角色的会话里整族缺席（装载失败只打一行 warn，没有别的信号）。`,
+    `      const inventory = await agentPresets.compositionInventory()`,
+    `      const FAMILY_ROWS_BY_PRESET = ${JSON.stringify(FAMILY_ROWS_BY_PRESET)}`,
+    `      result.familyRows = []`,
+    `      for (const presetId of Object.keys(FAMILY_ROWS_BY_PRESET)) {`,
+    `        const compositionOf = inventory.find((item) => item.id === presetId)`,
+    `        if (!compositionOf) { result.problems.push('compositionInventory 里没有 ' + presetId); continue }`,
+    `        for (const rowId of FAMILY_ROWS_BY_PRESET[presetId]) {`,
+    `          const state = compositionOf.rows?.find((row) => row.entryId === rowId)?.fiberState ?? null`,
+    `          result.familyRows.push({ preset: presetId, rowId, state })`,
+    `          if (state !== 2) result.problems.push(presetId + ' 的族行 ' + rowId + ' 未激活（fiberState=' + state + '）：那颗角色的这一族工具整族不存在')`,
+    `        }`,
+    `        if (compositionOf.rows?.some((row) => row.entryId === 'capital-generation')) result.problems.push(presetId + ' 仍然挂着单体 capital-generation 行')`,
+    `      }`,
+    `    }`,
+    `    result.hostRuntime = Boolean(ctx.get('capitalChartRuntime'))`,
+    `    if (!result.hostRuntime) result.problems.push('capital-runtime 未提供 capitalChartRuntime（chart source token 无法跨 preset 共享）')`,
+    `    // 身份闸门必须真的落在宿主的 global guard 层：capital-policy 行不声明 inject 时`,
+    `    // ctx.get('tools') 在 boot 期解析成 undefined（不抛错），三颗闸门就静默不装`,
+    `    //（2026-10-15 起的 fs 写口 guard 一直是这个形状，被 tool-fs 的行级开关掩护住）。`,
+    `    try {`,
+    `      const tools = ctx.get('tools')`,
+    `      const guards = tools?.layers?.global ? [...tools.layers.global.guards.values()] : []`,
+    `      result.identityGuards = guards.filter((guard) => /recordGuardDecision/.test(String(guard))).length`,
+    `      if (result.identityGuards < 3) result.problems.push('宿主 global guard 层里只有 ' + result.identityGuards + '/3 颗本仓身份闸门（fs 写口 / ocr 形态 / 兄弟名字）：guard 面没拿到，闸门静默不装')`,
+    `    } catch (error) {`,
+    `      result.problems.push('读不到 tools.layers.global.guards：' + String(error && error.message || error))`,
     `    }`,
     `  } catch (error) {`,
     `    result.problems.push('预设解析抛错：' + String(error && error.message || error))`,
@@ -287,7 +282,6 @@ function probeSource() {
   ].join('\n')
 }
 
-/** scratch profile 的骨架：与真实 profile 同构，但完全落在 workspace 内。 */
 function prepareSkeleton(name) {
   const profile = join(SANDBOX, 'profiles', name)
   const link = join(profile, 'node_modules', PACKAGE_NAME)
@@ -302,7 +296,7 @@ function prepareSkeleton(name) {
   return profile
 }
 
-/** 正常 scratch profile：挂上探针行（profile 级 patch 的 `insert` **必须是列表**）。 */
+/** Normal scratch profile. A profile-level patch `insert` must be a list. */
 function prepareProfile() {
   rmSync(SANDBOX, { recursive: true, force: true })
   const profile = prepareSkeleton('scratch')
@@ -311,12 +305,7 @@ function prepareProfile() {
     `- insert:\n    - id: capital-boot-probe\n      name: './probe.mjs'\n`)
 }
 
-/**
- * 反向对照 profile：**重复声明**同一个预设 id。上游 registry 对此是
- * `Duplicate agent preset: <id>`（`dsh-agent-preset-registry/lib/index.js`），
- * 表现是 "1 entry did not activate" 的 warn + 一行原因，**web 照样起来** ——
- * 所以这一步证明的正是"闸门看得见这种失效"。
- */
+/** Negative control: duplicate preset id, which upstream only reports as one warn while web still starts. */
 function prepareBadPresetProfile() {
   const profile = prepareSkeleton('badpreset')
   writeFileSync(join(profile, 'cordis.patch.yml'), [
@@ -331,12 +320,7 @@ function prepareBadPresetProfile() {
   ].join('\n'))
 }
 
-/**
- * 真跑一颗 scratch profile。
- *
- * @param name profile 名（`profiles/<name>`）
- * @param waitMs 看到监听 URL 之后额外等待的时间（留给探针打印；0 = 不等）
- */
+/** Runs one scratch profile; `waitMs` caps how long to wait for the probe after the URL appears. */
 function run(name, waitMs = 0) {
   const profile = join(SANDBOX, 'profiles', name)
   return new Promise((resolve) => {
@@ -351,7 +335,7 @@ function run(name, waitMs = 0) {
     let killed = false
     let grace
 
-    // 由调用方在**用完这个进程之后**收尾（拉 index.html 复核 boot graph 必须趁它还活着）。
+    // The caller stops this process after use: fetching index.html must happen while it is alive.
     const stop = () => {
       if (killed) return
       killed = true
@@ -384,7 +368,7 @@ function run(name, waitMs = 0) {
         finish({ ok: true, reason: '已监听并打印访问 URL' })
         return
       }
-      // 探针一打印就收尾；waitMs 是"它压根没打印"的上限，别白等。
+      // Stop as soon as the probe prints; waitMs only caps how long to wait for a probe that never does.
       console.log(`smoke-boot: 已监听 ${urlMatch[0].replace(/\?.*$/, '')}，等待 boot 内探针…`)
       if (output.includes(PROBE_MARKER)) finish({ ok: true, reason: '已监听并打印访问 URL' })
       else grace = setTimeout(() => finish({ ok: true, reason: '已监听并打印访问 URL（探针未打印）' }), waitMs)
@@ -408,7 +392,7 @@ function parseProbe(output) {
 }
 
 prepareProfile()
-// scratch 目录是一次性产物：哪怕中途抛异常也不许留在树里（`.tmp-*` 不进版本库不代表可以留）。
+// One-shot scratch dir: never leave it behind, even when an exception is thrown midway.
 process.on('exit', () => { rmSync(SANDBOX, { recursive: true, force: true }) })
 console.log(`smoke-boot: scratch profile = ${join(SANDBOX, 'profiles', 'scratch')}`)
 console.log('smoke-boot: 启动 dsh（--port 0 --no-open），等待 boot + 探针…')
@@ -424,7 +408,7 @@ try {
   if (result.ok) {
     console.log(`smoke-boot: ✅ ${result.reason}`)
     console.log(tail)
-    // 带 token 的那条才是浏览器认证要用的 URL（browserAuth 拿它换 cookie）；进程还活着时去拉。
+    // The token URL is the one browserAuth exchanges for a cookie; fetch while the process lives.
     const urls = [...result.output.matchAll(new RegExp(SUCCESS_PATTERN.source, 'g'))].map((match) => match[0])
     const url = urls.find((entry) => entry.includes('token=')) ?? urls[urls.length - 1]
     bundles = await bootGraphHasCapitalBundles(url)
@@ -434,7 +418,7 @@ try {
         const found = bundles.hasBundles[bundle.id] === true
         console.log(`smoke-boot: ${found ? '✅' : '⚠️ '} boot graph 中的${bundle.label}：${bundle.id} ${found ? '存在' : '未找到'}`)
       }
-      // 自选股的 host 半边（storage-domain + prefix 路由）只有在这里才被证明"真的挂载并工作"。
+      // The watchlist host half (storage-domain + prefix route) is only proven mounted here.
       try {
         fence = await watchlistFenceProbe(url, bundles.cookie ?? '')
         const fenceOk = (bundles.cookie ?? '').length === 0
@@ -446,9 +430,7 @@ try {
         fence = { ok: false, error: String(error?.message ?? error) }
         console.log(`smoke-boot: ❌ 自选股路由探针失败：${fence.error}`)
       }
-      // 读原文那条旁路是**这一版新加的文件读面**：闭集与围栏都只在真宿主里才量得出真效果。
-      // 测 catalog 的**头尾各一颗**：两端分属不同快照与不同目录布局，只测 `[0]` 的话，
-      // 后面每接一颗快照，它的路径与闭集都没有实弹核对过（AGENTS.md §9.7 同一族）。
+      // The skill-doc route is only real in a host; test both catalog ends (own path layout each).
       try {
         const { SELECTED_SKILL_CATALOG } = await import(new URL('../selected-skills/catalog.js', import.meta.url).href)
         const skillNames = [...new Set([
@@ -477,10 +459,17 @@ try {
       : ['boot 内探针没有打印结果（探针行未激活，或 resolve/describe 卡住）']
     if (probe.printed) {
       console.log(`smoke-boot: ${probe.preset === PRESET_ID && !probe.broken ? '✅' : '❌'} 预设 ${probe.preset}（broken=${probe.broken ?? 'null'}）`)
+      console.log(`smoke-boot: ${Array.isArray(probe.rolePresets) && probe.rolePresets.every((item) => !item.broken) ? '✅' : '❌'} 角色 preset：${JSON.stringify(probe.rolePresets ?? [])}`)
+      // Tool surface = family rows; local tests see only the row contract, not the host's load result.
+      const familyRows = probe.familyRows ?? []
+      const familyBad = familyRows.filter((row) => row.state !== 2)
+      const expectedFamilyRows = Object.values(FAMILY_ROWS_BY_PRESET).reduce((sum, ids) => sum + ids.length, 0)
+      console.log(`smoke-boot: ${familyRows.length === expectedFamilyRows && familyBad.length === 0 ? '✅' : '❌'} 族行装配（共 ${familyRows.length}/${expectedFamilyRows} 行）${familyBad.length === 0 ? '' : '，未激活：' + familyBad.map((row) => row.preset + '/' + row.rowId + '=' + row.state).join(', ')}`)
+      console.log(`smoke-boot: ${probe.hostRuntime === true ? '✅' : '❌'} host runtime capitalChartRuntime（${probe.hostRuntime === true ? 'present' : 'absent'}）`)
+      console.log(`smoke-boot: ${probe.identityGuards === 3 ? '✅' : '❌'} 身份闸门在宿主 global guard 层：${probe.identityGuards ?? '读不到'} / 3 颗（fs 写口 + ocr 形态 + 兄弟名字）`)
       console.log(`smoke-boot: ${probe.presetRows?.every((row) => row.state === 2) ? '✅' : '❌'} 关键预设行：${JSON.stringify(probe.presetRows ?? [])}`)
       console.log(`smoke-boot: ${probe.entry === 'present' && typeof probe.localFetchEnabled === 'boolean' ? '✅' : '❌'} settings 条目 ${SETTINGS_ENTRY_ID}：${probe.entry}，retriever.localFetch.enabled=${probe.localFetchEnabled}`)
-      // 卡片坐 **bundle 自己的页面**（0.1.7 起设置页不再托管第三方卡片）：这里按 bundle 的行清单核取数通道。
-      // 顺手把**行数**也打出来：设置卡片第三格那个数字同源同值，肉眼能对着浏览器核。
+      // The card sits on its bundle's own page; the row count equals the card's "contained components".
       console.log(probe.rows
         ? `smoke-boot: ${probe.rows.includes(SETTINGS_ENTRY_ID) ? '✅' : '❌'} 插件页里 ${PACKAGE_NAME} 的行（共 ${probe.rows.length} 行 = 卡片「包含的组件」那个数字）：${probe.rows.join(', ')}`
         : `smoke-boot: ⚠️  读不到插件页的行清单（${probe.rowReadError ?? '未知原因'}），卡片座位需人工确认`)
@@ -503,7 +492,7 @@ try {
   result.stop()
 }
 
-// ── 反向对照：闸门必须**能**失败 ──────────────────────────────────────────────
+// Negative control: the gate must be able to fail.
 console.log('smoke-boot: 反向对照 —— 故意重复声明预设，确认失败特征真的会触发…')
 prepareBadPresetProfile()
 const negative = await run('badpreset', 0)
@@ -524,10 +513,11 @@ if (gateFired) {
 const positiveOk = result.ok
   && (result.probeProblems?.length ?? 1) === 0
   && (bundles?.fetched !== true || CLIENT_BUNDLES.every((bundle) => bundles.hasBundles[bundle.id] === true))
-  // ⛔ 自选股路由必须"匿名拒绝 + 带 cookie 可读"：prefix 路由自己不接 requestRejection
-  // 就是任何本机进程凭路径即可读写用户自选股（docs/dev/chart-presentation.md §6.1 那条硬约束的同一族）。
+  // ⛔ The watchlist route must reject anonymous and serve with cookie: a prefix route without
+  // requestRejection lets any local process read/write the user's watchlist
+  // (docs/dev/chart-presentation.md §6.1).
   && (bundles?.fetched !== true || fence?.ok === true)
-  // ⛔ 读原文的旁路同一条要求：匿名拒绝、闭集外一律 404、命中才读盘（§6.1 那一族的第三条路径）。
+  // ⛔ The skill-doc route: anonymous rejected, closed set 404, disk read only on a hit.
   && (bundles?.fetched !== true || skillFence?.ok === true)
-// 反向对照**期望**是失败：`negative.ok` 为 false 才算它对，所以这里只问"特征有没有触发"。
+// The negative control is expected to fail: only ask whether the signature fired.
 process.exit(positiveOk && gateFired !== undefined ? 0 : 1)

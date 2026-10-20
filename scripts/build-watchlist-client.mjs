@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// 生成 watchlist/client.js（浏览器半边的 esbuild 产物，随包发布，勿手改）。
-// 与 build-config-client.mjs 同一封装协议：ModuleLoader.load({id, factory})。
+// Generates watchlist/client.js (esbuild output, shipped as-is) with the same
+// ModuleLoader.load({id, factory}) envelope as build-config-client.mjs.
 import { build } from 'esbuild'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'

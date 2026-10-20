@@ -4,11 +4,7 @@ import { stripInvisibleText } from '../web-retriever/html-markdown.js'
 
 type ToolRuntimeLike = { register(definition: unknown): () => void }
 
-/**
- * `capital-watchlist`（host 平面行）provide 的 `capitalWatchlist` 服务里，本工具用到的那一小片。
- * 声明成**可选方法 + 只读**：跨平面的形状归那一边所有，这里只描述"读清单"这条路径需要什么，
- * 任何多余字段都不进回包。清单的增删与持仓标记一律只在面板里做，Agent 侧没有写入口。
- */
+/** Slice of the host-plane `capitalWatchlist` service this tool reads; writes happen only in the panel. */
 interface WatchlistRow {
   readonly thscode?: string
   readonly name?: string
@@ -31,24 +27,13 @@ interface WatchlistServiceLike {
 const jsonObject = (properties: Record<string, unknown> = {}, required: string[] = []): object =>
   ({ type: 'object', properties, required, additionalProperties: false })
 
-/** ToolOutputDefinition.render(args, value)：第一参是入参、第二参才是返回值。 */
 function render(_args: unknown, value: unknown): Array<{ type: 'text'; text: string }> {
   return [{ type: 'text', text: JSON.stringify(value) }]
 }
 
 const WATCHLIST_DENIED = '这不是"用户没有自选股"：清单读不到，一条都不许猜。'
 
-/**
- * 一条记录 → 模型看见的那几格。**每个键都声明过**（§9.6：多一个未声明字段同样致命）。
- *
- * 两形态由 `held` 点名：未持仓的那一行**不出现** `weight_pct` / `holding_marked_*`——
- * "根本不是仓位"的时候谈"比例是 null 还是 0"没有意义，而把这三格摊给 30 行会让满载回包
- * 撞破体积预算（下面那条 6144 的闸门实测过）。三态仍然彼此可分：
- * `held:false` / `held:true` 且 `weight_pct:null`（标了没填） / `held:true` 且 `weight_pct:0`（真填 0）。
- *
- * 字段是照着"用户点名的四格 + 判断这句话还能信多久"选的，`added_age_days` 与 `pinned` 都不在这个
- * 问题里：添加日期就是事实本身，而清单**顺序**已经反映了置顶（服务端 `rowsOf` 给的读法）。
- */
+/** Held rows may carry weight/marked fields; `held:true` with `weight_pct:null` stays distinct from 0. */
 function rowOf(row: WatchlistRow, today: string) {
   const stripped = stripInvisibleText(String(row?.name ?? ''))
   const thscode = String(row?.thscode ?? '')
@@ -56,25 +41,21 @@ function rowOf(row: WatchlistRow, today: string) {
   const holding = row?.holding
   const held = holding !== undefined
   const markedAt = held && typeof holding?.marked_at === 'number' ? String(readClock(holding.marked_at as number).date) : null
-  // 天数下界取 0：机器时钟回拨过会让"N 天前"变成负数，那是没有意义的一句话；
-  // 日期那一格仍给原值，所以异常照样看得见（不靠 clamp 把它藏起来）。
+  // Clamp the age at 0 so a clock rollback cannot produce a negative "days ago"; the date itself stays raw.
   const age = (date: string) => Math.max(0, dayDistance(date, today))
   return {
     thscode,
-    // 上游名字里的零宽 / 方向覆盖符肉眼看不见，却能让"用户核对的那句话"与 Agent 收到的不一样
-    // （设计文档 §3.2）；剥完为空就退回代码，不放一个空字符串上去。
+    // Strip invisible characters so the name the user sees matches what the agent reads; fall back to the code.
     name: stripped.length > 0 ? stripped : thscode,
     asset_type: String(row?.asset_type ?? ''),
     added_date: addedAt,
     held,
-    // ⛔ 持仓那一档里"没有这个数"就是 null，不是 0：用户在面板上勾了持仓、比例留空，
-    // 把它写成 0% 等于替用户说了一句他没说的话（域 schema 同一口径，见 change_pct 那段）。
+    // Empty weight stays null, not 0: writing 0 would put a claim in the user's mouth.
     ...(held ? { weight_pct: holding?.weight_pct ?? null } : {}),
     ...(markedAt !== null ? { holding_marked_date: markedAt, holding_marked_age_days: age(markedAt) } : {}),
   }
 }
 
-/** 成功回包。`limit` 只在宿主给了才带（那个数字归 `capital-watchlist` 所有，这里不抄一份）。 */
 export function watchlistReceipt(rows: WatchlistRow[], limit: number | undefined, now: number): Record<string, unknown> {
   const today = String(readClock(now).date)
   const items = rows.map((row) => rowOf(row, today))
@@ -120,7 +101,7 @@ export function watchlistToolDefinition(source: () => WatchlistServiceLike | und
         as_of_date: { type: 'string' },
         items: {
           type: 'array',
-          // `required` 只列两种形态共有的五格；持仓那三格由 `held` 点名（§9.6 的多形态唯一姿势）。
+          // `required` lists only the five shared fields; held-only fields are keyed by `held`.
           items: jsonObject({
             thscode: { type: 'string' },
             name: { type: 'string' },
@@ -138,7 +119,7 @@ export function watchlistToolDefinition(source: () => WatchlistServiceLike | und
     async execute(): Promise<Record<string, unknown>> {
       const service = source()
       if (service === undefined || typeof service.list !== 'function') {
-        // ⛔ 绝不回空清单：装配里少了 host 平面那一行与"用户一条自选都没加"在回包上必须长得不一样。
+        // Never return an empty list: a missing host row must look different from "user has no watchlist".
         return unavailable('watchlist_unavailable', `自选股服务没有挂载（capital-watchlist 那行没起来）。${WATCHLIST_DENIED}`)
       }
       let result: WatchlistListResult | undefined
@@ -157,20 +138,15 @@ export function watchlistToolDefinition(source: () => WatchlistServiceLike | und
 }
 
 /**
- * 注册 `get_watchlist`（主 Agent 的工具；`capital-generation-scope` 组里注册 = 主 Agent 与
- * 全部 child 都看得见，所以通用 `subagent` 行必须把它 deny 掉，见 preset 的 agent.patch.yml）。
- *
- * 会话级数据（Dataset / profile / chart）走 workspace，而自选股是**宿主级用户资产**：
- * 本工具不读 `{{cwd}}`、不碰 `~/.dsh/storages/` 那个文件，只调那一路唯一的宿主服务
- * （设计文档 §2.4：不允许另建一份存储）。
+ * Register get_watchlist (main agent + all children; the subagent row must deny it). Host-level user
+ * data: read it only through the host service, never a second store.
  */
 export function registerWatchlistTool(ctx: Context): void {
   const tools = ctx.get('tools') as ToolRuntimeLike | undefined
   if (tools === undefined) return
   ctx.effect(() => tools.register(watchlistToolDefinition(() => {
-    // ⛔ 服务只在**每次调用**时现取（AGENTS.md §9.7 ⑤）：`capital-watchlist` 是 host 平面行，
-    // 它的 provide 与本 preset 行的装配先后不由我们决定。装配期取一次，就等于把一次抢跑
-    // 钉成"用户的自选股整个进程读不到"（桌面端 2026-09-30 那 61 条能力缺席是同一族形状）。
+    // Resolve the service at call time: host-plane row order is not ours, and caching a startup miss
+    // would hide the user's watchlist for the whole process.
     try {
       return ctx.get('capitalWatchlist') as WatchlistServiceLike | undefined
     } catch {

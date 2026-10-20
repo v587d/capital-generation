@@ -12,23 +12,48 @@
 - **接线**：shell 行 preset 自持、**平台成对**挂载（Linux `tool-bash` / Windows `tool-pwsh`；Web
   平面把 host 层两行都 disabled，Windows 没有 bash-sandbox，只挂 bash 会实际执行 PowerShell），
   主 Agent 与 data_junior 共用（2026-10-15 起不再只给 data_junior）。`enableRunInBackground: false`。
-  文件口一颗 `tool-fs`：`read` / `write` / `edit` 全量注册（`read_image` 是包内条件注册，另看宿主
-  attachments 服务；`tool-fs-search` 本轮不挂）。allow/deny 名字用 `!!js` 按平台选——`restrict()`
-  对未注册名字报错，表现是"创建子 Agent 失败"而非挂载失败。
+  文件口一颗 `tool-fs`（本层只注册 `read`，`write` / `edit` 留在这里不注册——但**这不等于看不见**，见下）。
+- **⛔ 行组合管得住的只有"我们自己的工具"与"同名变体的替换"**（2026-10-19 真机实测）：宿主
+  `dsh-base` 在 **global 层**挂了 `dsh-tool-bash` / `dsh-tool-pwsh` / `dsh-tool-fs` /
+  `dsh-tool-fs-search` / `dsh-tool-subagent-control`(+`/list-agents`) / `dsh-tool-todo` /
+  `dsh-tool-web`，而 `ScopedLayers.merge()` 是"global 打底 + 作用域链覆盖**同名变体**"——**本层不注册
+  一个名字，不等于把它从视图里删掉**。实测三条：根 preset 的 `tool-fs` 行写着 `write: false /
+  edit: false`，手开 Capital 仍看得见 `write` 且真的落盘；手开 资讯 里 `interrupt_agent` 直接执行
+  并回了"Agent 不存在"；每一颗模式都有 shell。（同一批表里 资讯 / 行情 没有 `write` / `edit`——
+  那两档的可见性成因未实测清楚，但能确定的结论只有一条：指望行 config 收窄宿主面是靠不住的。）
+  要减**可见面**只有 `tools.restrict({deny})`（且只对被委派的那一支有效，账本 L32）；要真**拦下**
+  只能靠调用级 guard。写口与兄弟名字都属于后者。
+- **shell 名的判据仍要认全集**：两行都声明、靠 `disabled: !!js process.platform …` 互斥，所以
+  `bash-guard.ts` 的闸门必须认**两个名字的全集**——只认本平台那颗，另一端就是静默放行（§9.7）。
 - **结构件**（都不看命令内容）：① `ROOT_AGENT_DENIED_TOOLS` = 出图三件套 + 十三个出网工具 +
   `write` / `edit`（shell 名 2026-10-15 起**移出**名单，旧钉子随决策迁移，见
   `test/root-tool-policy.test.mjs`）；② `src/agents/bash-guard.ts` 在每个本 preset agent 自己的
   scope 装单调 guard，只拦**必然失败的沙箱升级**（`sandbox_permissions` / `justification`：委派会话
   审批策略固定为 `never`，`decide()` 直接 rejected、answerer 不被调用，模型却收到「user rejected」
   式文案）——被委派或身份不可考的调用方 fail closed，主 Agent 的升级走正常 ask 审批；
-  ③ 通用 `subagent` 行 deny 含 shell 槽位 + `read` / `write` / `edit`，否则通用 child 继承 standing
-  全部工具、绕过 ①②（`read_image` 刻意不点名：条件注册的名字写进 deny = 创建子 Agent 失败）。
-- **fs 写口闸门（2026-10-15，本文声明过的备选方向在写口上落地）**：`registerFsWriteGuard` 在
-  插件 ctx 上**全局装一次** `tools.guard()`（guard 按 `exec.agent` 取链路，与实例绑哪层无关），
-  调用期拦本 preset 的 `write` / `edit`，文案 `FS_WRITE_READ_ONLY` 指回正路（读用 `read`，数据与
+  ③ 角色工具面由 preset 挂的**族行**表达（D0，2026-10-19：`src/agents/role-tool-policy.ts` 那份
+  整批 allow 已删，只剩逐名减掉 `tool-subagent-control` 焊进来的 `interrupt_agent`；2026-10-18
+  通用 child 连同它的 deny 名单一起删除）：**本仓那 28 颗工具**谁能使，只看哪颗 preset 挂了哪几行
+  ——挂漏 = 该角色整族用不上（fail-closed），多挂一行才是越权。宿主自带的名字不在这套判据里
+  （上面那条⛔），`read_image` / `find` / `glob` / `grep` / `ls` / `todo_write` 这些条件注册或
+  global 注册的名字因此**不进任何清单**，别处也没有第二份名字表要维护。
+- **fs 写口闸门（2026-10-15 提出，2026-10-19 才真的在场）**：`registerFsWriteGuard` 在插件 ctx 上
+  **全局装一次** `tools.guard()`（guard 按 `exec.agent` 取链路，与实例绑哪层无关），
+  调用期拦**本插件任一 preset**（根 + 五颗角色）的 `write` / `edit`，文案 `FS_WRITE_READ_ONLY` 指回正路（读用 `read`，数据与
   产物走工具回传，落盘由工具实现完成）。判据 **fail-open**：`composedPreset` 读不到 / 抛错 /
   拿不到 agent 一律放行——全局 guard 判错一次，会把同一进程里开发会话的正当写口一起吃掉。
-  `read` 不在名单里，只读口全开（含 `read_image`）。
+  `read` 不在名单里，只读口全开（含 `read_image`）。⛔ 这颗 guard 依赖 `capital-policy` 行的
+  `export const inject = ['tools']`（账本 L33）：没声明时 `ctx.get('tools')` 在 boot 期是
+  `undefined`、属性访问抛错被 try/catch 吞掉，**闸门整批静默不装**——2026-10-15 到 2026-10-19
+  的真实状态就是这样，掩护它的是视图层那条 `tool-fs` 行级 `write: false`（而那条本身也拦不住
+  宿主 global 层那一份）。运行期反证住 `npm run smoke:boot`（数宿主 global guard 层里的颗数）。
+- **⛔ 按人设的调用级闸门一律全局装、在调用期现读身份**（2026-10-19）：与 fs 写口同形的共三颗——
+  `registerFsWriteGuard`（`write` / `edit`）、`registerRootOcrGuard`（`ocr` 的 `url` 形态）、
+  `registerRoleSiblingGuard`（`interrupt_agent`）。**判据不许挂 `agent/created`**：宿主先建 Agent、
+  后选人设（账本 L32），created 那一刻读到的还是创建默认值，手开模式一次都不会被拦。三颗都按 root
+  去重、都 fail-open、拒绝都记进 `dc_status` 的 `agent_tool_policy`（`outcome=guard-denied`，`root`
+  照实记会话形状）。回归 `test/policy-dedup.test.mjs`（各装一次）+ `test/apply-integration.test.mjs`
+  （走生产装配逐颗放行 / 拒绝，含"检索人设的 `ocr` url 形态放行"这条——判据是人设，不是会话拓扑）。
 - **读侧没有结构边界，只有人设边界（2026-10-15）**：写口两层（视图层 deny + 全局调用闸门），读口
   只有一条主 persona 规则（不读 `capital-data/` 落盘、不读 `~/.dsh/`，分册整册读完才算读过）。
   按 `read` 的参数做路径闸门是**假边界**：shell 还在，`cat` 同一个文件不需要任何权限，而沙箱实测

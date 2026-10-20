@@ -87,8 +87,8 @@ async function fixture() {
 }
 
 test('ChartSourceTokenStore：同 task_id + dataset_id 幂等复用，不再为同一 dataset 重签', async () => {
-  // 2026-10-10 真机回归（task_fh_300803_20261010）：data_junior 改视图方案后为同一 dataset
-  // 重签 token，紧跟着 7.9K 字符思考。skill 警告拦不住 → 幂等沉到工具层。
+  // Re-signing for the same dataset cost a round-trip plus 7.9K chars of deliberation on a real
+  // run; persona guidance didn't stop it, so idempotency sits in the tool layer.
   let counter = 0
   const { store, ref } = await fixture()
   const tokens = new ChartSourceTokenStore({ now: () => 1_700_000_000_000, newToken: () => `cs_seq_${++counter}` })
@@ -100,7 +100,7 @@ test('ChartSourceTokenStore：同 task_id + dataset_id 幂等复用，不再为�
   assert.equal(counter, 1, '幂等路径不应生成第二个 token')
   assert.equal(tokens.size(), 1)
 
-  // 不同 task / 不同 session / 不同 dataset 仍是独立 token
+  // key is (task, session, dataset) — change any of them and you get an independent token
   const otherTask = await tokens.issue({ store, session: JUNIOR, dataset_id: ref.dataset_id, task_id: 'task-2' })
   assert.notEqual(otherTask.chart_source_ref, first.chart_source_ref)
   const otherSession = await tokens.issue({ store, session: { ...JUNIOR, id: 'junior-2' }, dataset_id: ref.dataset_id, task_id: 'task-1' })

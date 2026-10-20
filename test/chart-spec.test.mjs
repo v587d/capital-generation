@@ -3,11 +3,8 @@ import assert from 'node:assert/strict'
 import { normalizeChartSpec, MAX_CHART_SERIES } from '../lib/chart/spec.js'
 
 /**
- * spec 归一化的契约测试。
- *
- * 重点不是"happy path 能用"，而是**模型最可能犯的几种表达**都能被正确理解或被
- * 可自愈地拒绝：JSON 字符串参数、别名键、枚举拼错、缺必填。错误信息必须点名
- * 可用取值，模型才能一次改对。
+ * Spec normalization: accepts the shapes the model actually emits (JSON-string args, alias keys)
+ * and rejects the rest with errors that name the valid values so one retry can fix it.
  */
 
 test('normalizeChartSpec：最小 spec 即可用，缺 x 时是分类轴', () => {
@@ -65,7 +62,7 @@ test('normalizeChartSpec：kind 别名（histogram→column、candles→candlest
 })
 
 test('normalizeChartSpec：bar 是 OHLC 柱，单值柱必须报错并指向 column', () => {
-  // 实测出来的坑：单值数据塞进 BarSeries（OhlcData）不会报错，只会画出一张空图。
+  // Observed trap: single-value data in BarSeries (OhlcData) does not error, it draws an empty chart.
   assert.throws(
     () => normalizeChartSpec({ kind: 'bar', x: 'd', series: ['revenue'] }),
     (error) => error.code === 'chart_spec_invalid' && /spec\.ohlc/.test(error.message),

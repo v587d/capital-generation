@@ -1,18 +1,8 @@
 /**
- * 自选股测试的共用夹具（不是 *.test.mjs，`node --test` 不会把它当用例）。
- *
- * 三件事必须仿真到位，否则断言只会证明"代码和自己造的假件一致"：
- *  1. **KvTable 的真实面**：只有 `get/entries/keys/size/put/delete/update`，**没有 `values()`**；
- *     `update` 对缺失键抛 `missing-key`；写入要过域 schema（真域在持久边界逐条校验）。
- *  2. **Fuyao 的真报文形态**：下面的 fixture 抄自 2026-09-28 实测响应（含 ETF 批量被
- *     `code=1002 (only one code per request)` 拒绝那条），不是按想象造的字段。
- *  3. **腾讯公开端点的真回包形态**（2026-10-07 实测）：smartbox 逐字照抄（含 `N` 哨兵与
- *     `\uXXXX` 转义），快照按实测列位填数（名称用 ASCII——GBK 解码由 `tencent-source.test.mjs`
- *     与真机冒烟覆盖，位序错了这里也一样会红）。
- *
- * `stubFuyao` 现在挡的是**两路上游**（A 股 Fuyao + 港美股腾讯）：自选股一次搜索要打三笔，
- * 只 stub 一家等于让单测碰真网络。默认回"上游正常但这一路没有这个票"（smartbox 的 `N` 哨兵、
- * 快照的 `v_pv_none_match`），要港美股候选或报价的用例自己传 fixture。
+ * Shared watchlist fixtures (not a *.test.mjs file, so `node --test` skips it). Fakes must match real
+ * shapes: KvTable has no `values()`, `update` throws `missing-key`, writes pass the domain item schema.
+ * `stubFuyao` serves both upstreams (Fuyao A-share + Tencent HK/US) and defaults to "healthy route,
+ * instrument absent" (`N` sentinel / `v_pv_none_match`); bodies copy measured response shapes.
  */
 import { domainSpec } from '../watchlist/index.js'
 import { SMARTBOX_ROWS, tencentSnapshotText } from './tencent-fixtures.mjs'
@@ -38,7 +28,7 @@ export function createFakeDomain() {
       return records.size
     },
     async put(key, value) {
-      // 真域在写入边界校验：坏记录在这里就该响亮失败，而不是静默写进盘。
+      // The real domain validates at the write boundary: bad records must fail loudly here.
       itemSchema.parse(value)
       records.set(key, value)
     },
@@ -74,7 +64,7 @@ export function createFakeDomain() {
   }
 }
 
-/** 真报文样本（2026-09-28）：搜索命中、指数快照、A 股快照、ETF 单只快照。 */
+/** Real response samples: search hits, index snapshot, A-share snapshot, single-ETF snapshot. */
 export const FIXTURES = {
   searchCatl: {
     code: 0,
@@ -124,23 +114,21 @@ export const FIXTURES = {
     code: 0,
     data: { timestamp: 1790586418000, item: [{ thscode: '510300.SH', ticker: '510300', last_price: 4.417, price_change_ratio_pct: -2.170543, prev_price: 4.515 }] },
   },
-  /** 实测：ETF 端点传逗号多值直接被拒（逐只扇出因此是硬约束，不是保守选择）。 */
+  /** The ETF endpoint rejects comma-separated codes: per-item fan-out is forced, not conservative. */
   fundBatchRejected: { code: 1002, message: 'Invalid parameter format: thscode (only one code per request)', data: null },
   rateLimited: { code: 4001, message: '请求频率超限', data: null },
   noData: { code: 0, data: { timestamp: null, item: [] } },
 }
 
-/** 一次输入三路并发：Fuyao 一笔 + smartbox `t=hk` / `t=us` 各一笔（见 `search` 的注释）。 */
+/** One input fans out to three routes: Fuyao plus smartbox `t=hk` and `t=us`. */
 export function upstreamCalls(calls, needle) {
   return calls.filter((call) => call.url.includes(needle))
 }
 
 /**
- * 按 URL 分派 fixture，并把每次出网都记下来（断言"参数里必须带白名单与 limit"
- * 与"刷新只发生了一次"都靠这份记录）。
- *
- * @param overrides - `{ 'api/a-share/prices/snapshot': payload | (() => payload) }` 形式的定制；
- *   键撞不中就走默认路由。腾讯那两家的值是**文本**（不是 JSON 信封），函数形态收 `(url) => text`。
+ * Routes fixtures by URL and records every outbound call (request-parameter and call-count assertions
+ * rely on this log). `overrides` matches a URL substring, values may be `(url) => payload`; Tencent
+ * overrides are text bodies, Fuyao ones are JSON envelopes.
  */
 export function stubFuyao(overrides = {}) {
   const calls = []
@@ -157,8 +145,7 @@ export function stubFuyao(overrides = {}) {
       const query = decodeURIComponent(/[?&]q=([^&]*)/.exec(url)?.[1] ?? '')
       return SMARTBOX_ROWS[`${market}|${query}`] ?? 'v_hint="N";'
     }
-    // 快照的查询串是 `…/q=hk00700,hkHSI` 这种**路径形态**（`QUOTE_URL` 自己就带着 `q=`），
-    // 用 `[?&]` 找它会一条都找不到。
+    // The snapshot query string is path-shaped (`QUOTE_URL` carries `q=`), so `[?&]` would find nothing.
     const symbols = (/q=([^&]*)/u.exec(url)?.[1] ?? '').split(',').filter(Boolean)
     return tencentSnapshotText(symbols)
   }
@@ -166,10 +153,9 @@ export function stubFuyao(overrides = {}) {
     if (url.includes('/api/meta/tickers/search')) {
       const requested = /[?&]q=([^&]+)/.exec(url)?.[1] ?? ''
       const decoded = decodeURIComponent(requested)
-      // 按代码精确回查（`add({thscode})` 的实现就是这条路）：只回显"上游真有"的代码，
-      // 否则 not_found 分支永远测不到。
+      // Exact-code lookup (what `add({thscode})` does): echo only codes the upstream really has, or not_found never runs.
       if (/^\d{6}\.(SH|SZ)$/.test(decoded)) {
-        // 有真报文的代码优先用真报文（否则"带后缀查"和"按名字查"会拿到两条不同的假数据）
+        // Codes with a real fixture win, so "query with suffix" and "query by name" return the same row.
         if (decoded === '300750.SZ') return FIXTURES.searchCatl
         const known = /^[1569]/.test(decoded) || /^30/.test(decoded)
         if (!known) return FIXTURES.noData
@@ -184,7 +170,7 @@ export function stubFuyao(overrides = {}) {
     if (url.includes('/api/a-share/prices/snapshot')) return FIXTURES.stockSnapshot
     if (url.includes('/api/fund/market/snapshot')) {
       if (url.includes('thscodes=')) return FIXTURES.fundBatchRejected
-      // 单只端点：按请求代码回显同一只（真报文形态，价格用 510300 的实测值）
+      // Single-code endpoint: echo the requested code back (prices use the measured 510300 values).
       const requested = /[?&]thscode=([^&]+)/.exec(url)?.[1] ?? '510300.SH'
       return { code: 0, data: { timestamp: 1790586418000, item: [{ thscode: requested, ticker: requested.slice(0, 6), last_price: 4.417, price_change: -0.098, price_change_ratio_pct: -2.170543, prev_price: 4.515 }] } }
     }
@@ -200,8 +186,7 @@ export function stubFuyao(overrides = {}) {
       if (status !== 200) return { ok: false, status, json: async () => payload.body ?? {} }
       return { ok: true, status, json: async () => payload }
     }
-    // 腾讯这两条都是**文本**响应：快照要 GBK 解，smartbox 全 ASCII（名称是 `\uXXXX` 字面转义）。
-    // 夹具的正文是 ASCII，UTF-8 字节与 GBK 字节逐位相同，所以这里不必真造一份 GBK 编码。
+    // Both Tencent routes answer text: the fixture bodies are ASCII, so UTF-8 bytes equal GBK bytes here.
     const bytes = Buffer.from(String(payload), 'utf-8')
     return {
       ok: true,
@@ -218,7 +203,7 @@ export function stubFuyao(overrides = {}) {
   }
 }
 
-/** 最小 fake cordis 上下文：够 `readCredentialRef` 的解析路径用（不跑 effect 工厂）。 */
+/** Minimal fake cordis context: enough for `readCredentialRef` resolution (no effect factories). */
 export function fakeCtx(entries = {}) {
   const services = new Map(Object.entries(entries))
   const ctx = {
@@ -232,7 +217,7 @@ export function fakeCtx(entries = {}) {
   return ctx
 }
 
-/** 一次 HTTP 往返的 fake req/res。 */
+/** Fake req/res for one HTTP round trip. */
 export function httpFixture({ method = 'GET', url = '/', body, headers = {} }) {
   const chunks = body === undefined ? [] : [Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))]
   const req = {
@@ -254,10 +239,7 @@ export function httpFixture({ method = 'GET', url = '/', body, headers = {} }) {
   return { req, res }
 }
 
-/**
- * 可交易的几条标的。持仓这一族的用例不能拿种子的四条指数来标：`markHolding` 的类型闸门
- * 只放行个股与场内基金（指数是市场读数，不是可持有、可配比率的券）。
- */
+/** Holdable rows: `markHolding` admits stocks and exchange-traded funds only, not the seeded index rows. */
 export const HOLDABLE_ROWS = [
   { thscode: '300750.SZ', ticker: '300750', name: '宁德时代', exchange: 'SZ', asset_type: 'a-share' },
   { thscode: '600519.SH', ticker: '600519', name: '贵州茅台', exchange: 'SH', asset_type: 'a-share' },
@@ -266,10 +248,7 @@ export const HOLDABLE_ROWS = [
   { thscode: 'AAPL.OQ', ticker: 'AAPL', name: '苹果', exchange: 'US', asset_type: 'us-stock' },
 ]
 
-/**
- * 先读一次清单让种子落地，再把上面几条经**域的写入边界**摆进来（走同一道 `itemSchema.parse`，
- * 形状与真域一致，也不依赖上游搜索恰好命中哪几条）。返回摆进来的代码，供用例数行数。
- */
+// Reads the list once so seeding lands, then inserts the holdable rows through the domain write boundary.
 export async function withHoldable(instance, fake, addedAt = 1_790_586_000_000) {
   await instance.list()
   for (const row of HOLDABLE_ROWS) {

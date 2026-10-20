@@ -1,10 +1,6 @@
 /**
- * Wind 金融文档检索客户端（JSON-RPC over HTTP，零依赖）。
- *
- * 线格式为 JSON-RPC 2.0（即 MCP 线协议）：initialize → tools/call，无会话态、
- * 无 SDK、无框架依赖——与 fuyao-rest / anysearch engines 同构的普通 HTTP 客户端。
- * 协议蓝本（Wind 官方 CLI）：github.com/Wind-Alice/AliceMarket 的
- * skills/wind-mcp-skill/scripts/cli.mjs（本地参考副本在 docs/reference/，不入库）。
+ * Wind financial-document client: JSON-RPC 2.0 (MCP wire protocol) over plain
+ * HTTP. initialize -> tools/call, no session state, no SDK.
  */
 
 export const DEFAULT_WIND_ENDPOINT = 'https://mcp.wind.com.cn/vserver_financial_docs/mcp/'
@@ -12,14 +8,8 @@ export const WIND_REQUEST_TIMEOUT_MS = 60_000
 export const WIND_MAX_CONTENT_CHARS = 20_000
 
 /**
- * 七台托管 MCP server 的端点（`server_type` → URL）。
- *
- * 这里是**事实**（端点常量），不是代码搬运：上游仓库未声明 LICENSE，蓝本
- * （官方 CLI 的 `SERVERS` 表）按惯例只作本地参考副本、不入库，见
- * `docs/design/wind-market-source.md` §1.1。
- *
- * `analytics_data` 一并列出是为了记下"它存在但不可用"：2026-10-05 实测连 `initialize`
- * 都挂满 60 秒（同文档 §6.1），所以数据源侧不接它。
+ * Hosted MCP servers (`server_type` -> URL). `analytics_data` is listed to record
+ * that it exists but is unusable (initialize hangs), so no data source uses it.
  */
 export const WIND_SERVER_ENDPOINTS = {
   stock_data: 'https://mcp.wind.com.cn/vserver_stock_data/mcp/',
@@ -34,30 +24,23 @@ export const WIND_SERVER_ENDPOINTS = {
 export type WindServerType = keyof typeof WIND_SERVER_ENDPOINTS
 
 /**
- * 错误分类（persona/主 Agent 依据它决定 fallback）：
- * AUTH=Key 缺失或无效；RATE_LIMIT=429；NETWORK=网络错误/5xx/超时；
- * BACKEND=接口层与业务错误；INVALID=响应不可解析。
+ * Error classes drive fallback: AUTH=missing/invalid key; RATE_LIMIT=429;
+ * NETWORK=network/5xx/timeout; BACKEND=API/business; INVALID=unparseable.
  */
 export type WindErrorCode = 'AUTH' | 'RATE_LIMIT' | 'NETWORK' | 'BACKEND' | 'INVALID'
 
 export interface WindCallResult {
   ok: boolean
-  /** 成功且正文可解析为 JSON 时：Wind 返回结果（字符串字段裁剪到 WIND_MAX_CONTENT_CHARS）。 */
+  /** Parsed JSON result; string fields clipped to WIND_MAX_CONTENT_CHARS. */
   data?: unknown
-  /** 成功但正文非 JSON 时：原文透传（≤WIND_MAX_CONTENT_CHARS）。 */
+  /** Non-JSON body passed through (<= WIND_MAX_CONTENT_CHARS). */
   content?: string
   content_chars?: number
   error?: string
   code?: WindErrorCode
 }
 
-/**
- * 报给 Wind 的客户端版本（`initialize.clientInfo.version` 与 `tools/call._meta.clientVersion`）。
- *
- * ⚠️ 必须与 `package.json` 的 `version` 一致：嵌套包 `chart-ui/package.json` 的版本由
- * `test/chart-composition.test.mjs` 守着（会因漂移而失败），这里原本是写死的第二处，
- * 一次发版就得记得改两遍。所以本常量由测试一并核对（见 `test/wind-client.test.mjs`）。
- */
+/** Must match `package.json` version; a test pins the two together. */
 export const WIND_CLIENT_VERSION = '2.8.3'
 
 export interface WindClient {
@@ -66,11 +49,11 @@ export interface WindClient {
 
 export interface WindClientOptions {
   endpoint?: string
-  /** 每次调用重新解析 Key，不缓存（与 anysearch engines 同策略）。 */
+  /** Re-resolve the key on every call, never cache it. */
   resolveApiKey: () => Promise<string | undefined>
-  /** 单次请求超时毫秒（initialize 与 tools/call 各自适用）；默认 60000。 */
+  /** Per-request timeout (initialize and tools/call separately); default 60000. */
   timeoutMs?: number
-  /** 网络错误重试间隔毫秒；默认 [300, 1000]，仅供测试注入缩短。 */
+  /** Network-error retry delays; default [300, 1000], shortened only in tests. */
   retryDelaysMs?: number[]
 }
 
@@ -84,7 +67,7 @@ class WindTransportError extends Error {
   }
 }
 
-/** HTTP 状态 → 错误分类（蓝本 HTTP_ERROR_MAP；其余状态一律 NETWORK）。 */
+/** HTTP status -> error class; anything else is NETWORK. */
 const HTTP_ERROR_CODES: Record<number, WindErrorCode> = {
   401: 'AUTH',
   429: 'RATE_LIMIT',
@@ -110,14 +93,14 @@ function normalizeEndpoint(endpoint?: string): string {
   return raw
 }
 
-/** 响应可能是纯 JSON 或 SSE（取最后一个 data: 行）；蓝本 parseSSE 的等价实现。 */
+/** Body may be pure JSON or SSE (last `data:` line). */
 function parseResponsePayload(text: string): unknown {
   const trimmed = text.trim()
   if (trimmed.startsWith('{')) {
     try {
       return JSON.parse(trimmed)
     } catch {
-      // 非 JSON 对象落到下面的 SSE 解析。
+      // Not a JSON object: fall through to the SSE parse below.
     }
   }
   let last: string | undefined
@@ -134,7 +117,7 @@ function parseResponsePayload(text: string): unknown {
   throw new Error(`响应格式无法识别（既非 JSON 也非 SSE）；原文前 200 字符：${text.slice(0, 200)}`)
 }
 
-/** 深度裁剪：对象/数组内的字符串字段超过上限时截断（保持结构；超长响应另有 harness 剪枝兜底）。 */
+/** Deep-clip long string fields, preserving structure. */
 function trimDeep(value: unknown, maxChars: number): unknown {
   if (typeof value === 'string') return value.length > maxChars ? value.slice(0, maxChars) : value
   if (Array.isArray(value)) return value.map((item) => trimDeep(item, maxChars))
@@ -159,7 +142,7 @@ function firstContentText(result: Record<string, unknown>): string | undefined {
   return undefined
 }
 
-/** JSON-RPC error 字段 → 可读文本。 */
+/** Render a JSON-RPC error field as text. */
 function rpcErrorText(payload: unknown): string | undefined {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined
   const record = payload as Record<string, unknown>
@@ -174,8 +157,8 @@ function rpcErrorText(payload: unknown): string | undefined {
 }
 
 /**
- * 三层业务错误解包（蓝本 mcpRequest 后半段）：Wind 把业务错误包在 content[0].text
- * 的 JSON 字符串里，必须二次解析——mcp_tool_error_code / error{} / data.code 三种形态。
+ * Wind wraps business errors inside content[0].text JSON, so unpack a second time:
+ * mcp_tool_error_code / error{} / data.code.
  */
 function innerBusinessError(data: unknown): string | undefined {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined
@@ -207,7 +190,7 @@ function innerBusinessError(data: unknown): string | undefined {
   return undefined
 }
 
-/** JSON-RPC result → WindCallResult：含 isError 与内层业务错误解包。 */
+/** JSON-RPC result -> WindCallResult, including isError and inner business errors. */
 function interpretResult(payload: unknown): WindCallResult {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return { ok: false, code: 'INVALID', error: 'Wind 返回不可解析（非 JSON-RPC 对象）' }
@@ -242,7 +225,7 @@ function interpretResult(payload: unknown): WindCallResult {
   return { ok: true, data: trimDeep(parsed, WIND_MAX_CONTENT_CHARS) }
 }
 
-/** 创建 Wind 文档检索客户端；端点在构造时校验（配置错误立即暴露，与 anysearch 同策略）。 */
+/** Endpoint is validated at construction so config errors surface immediately. */
 export function createWindClient(options: WindClientOptions): WindClient {
   const endpoint = normalizeEndpoint(options.endpoint)
   const timeoutMs = options.timeoutMs && options.timeoutMs > 0 ? options.timeoutMs : WIND_REQUEST_TIMEOUT_MS
@@ -285,7 +268,7 @@ export function createWindClient(options: WindClientOptions): WindClient {
     }
   }
 
-  /** 网络级错误按退避重试；HTTP 状态错误与调用方取消不重试（蓝本同款行为）。 */
+  /** Retry network errors with backoff; HTTP status errors and caller cancels do not retry. */
   async function postRpc(method: string, params: unknown, apiKey: string, signal?: AbortSignal): Promise<unknown> {
     let lastError: unknown
     for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt += 1) {

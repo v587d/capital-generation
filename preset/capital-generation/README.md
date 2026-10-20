@@ -1,14 +1,14 @@
 # Capital 模式 preset：组合设计说明
 
-本文件是 `agent.patch.yml`（那颗 `@deepseek-ai/dsh-agent-preset` 声明行）的**维护者文档**（人类可读），
+本文件是 `agent.patch.yml`（那六颗 `@deepseek-ai/dsh-agent-preset` 声明行）的**维护者文档**（人类可读），
 不是模型可见内容：`skill-filesystem` 只扫 `skills/`，本文件既不会进 skill 目录，也不会被注入上下文。
 组合文件里只留"就地必需"的一行注（realm、`!!js`、disabled 行），其余设计理由都在这里。
 
 - 本目录由 `@v587d/capital-generation` 随包分发，`agent.patch.yml` 走 `package.json` 的
-  `dsh.bundle.patch`（**数组**：主 patch + 这颗）以 `trust=system` 挂载；**不要**手抄进
-  `~/.dsh/.agent-presets`。
+  `dsh.bundle.patch`（**数组**：主 patch + 这一份 yml，六颗声明行都在里面）以 `trust=system`
+  挂载；**不要**手抄进 `~/.dsh/.agent-presets`。
 - 长协议在 `skills/`（同目录），由本 preset 自己的 `skill-filesystem` 行发现；`capital-visualization-protocol` 同时供 data_junior 的 gate 和 visualization_specialist 按需加载。
-- visualization_specialist 是 data_junior 创建的 one-shot 前台子 Agent，不进入主 Agent 的 direct-child 复用清单；它只消费 chart_source_ref 并使用受控 render_chart。
+- visualization_specialist 是 data_junior 委派出图的子 Agent（0.2.1 起所有子会话都是异步 continuable，没有 one-shot / 前台模式），不进入主 Agent 的 direct-child 复用清单；它只消费 chart_source_ref 并使用受控 render_chart。
 - 验证方式与"改 preset 前后的必做检查"见仓库根 `AGENTS.md` §8.3；设计理由与「不许改」全表见
 `docs/dev/preset-persona.md`。
 
@@ -22,23 +22,27 @@
 
 ## 2. 人设（persona）承载与官方语义
 
-实测 `dsh 0.1.5-rc.1`，`0.1.7-rc.2` 复核字段未变（`test/persona.test.mjs` 对着本机 dsh 核对），
-三层载体注册的是**同一个 system-prompt 节名**：
+实测 `dsh 0.2.1-rc.2`（`test/persona.test.mjs` 对着本机 dsh 核对字段名），两层载体注册的是
+**同一个 system-prompt 节名**：
 
 | 载体 | 位置 | 字段 | 生效范围 |
 |---|---|---|---|
 | `dsh-system-prompt` 行 | 部署（web profile） | `personaPrefix` / `personaSuffix` | 全局 |
-| `dsh-persona` 行 | 本 preset | `prefix`（必填）/ `suffix` / `complete` / `includeRuntimeContext` | preset 内全部 agent（主 + 子） |
-| `dsh-tool-subagent` 行 | 本 preset 委派行 | `config.persona` | 该子 Agent 自己 |
+| `dsh-persona` 行 | **每颗 preset 自己**（根 + 五颗角色，各一行） | `prefix`（必填）/ `suffix` / `complete` / `includeRuntimeContext` | 该 preset 组出来的 agent |
 
 - 节名是 `deployment:persona-prefix`（order 0）与 `deployment:persona-suffix`（order
-  10200）。**最近 scope 胜出 ⇒ 是覆盖不是追加**；`dsh-subagent` 把 `config.persona` 注册进
-  子 Agent 自己的 scope，所以子人设**替换**（不是扩展）主 persona。
-- `prefix`/`suffix` 是模板，渲染时对 `{{…}}` **严格插值**：未注册或 undefined 的变量会抛错。
-  `provider` / `model` / `cwd` 由 `dsh-agent-loop` 全局注册，可以直接用。
+  10200）。**最近 scope 胜出 ⇒ 是覆盖不是追加**：0.2.1 起委派行**不再带 `config.persona`**
+  （`tool-subagent: persona is no longer supported; configure persona … in an Agent Preset and
+  select it with agentPreset`），子人设因此住在角色 preset 自己的 `dsh-persona` 行里，子 Agent
+  组出来的那一颗 generation 覆盖同名节——效果与旧写法一致：**替换**（不是扩展）主 persona。
+- `prefix`/`suffix` 是模板，渲染时对 `{{…}}` **严格插值**：未注册或 undefined 的变量会抛错，
+  而且抛的是**整个会话的系统提示组装**，不是"这一段不显示"。可注册的变量以本机为准——
+  0.2.1 的 `dsh-agent-loop` 只注册 `provider` / `model`（0.2.0 还有的 `cwd` **已被上游删掉**，
+  真机踩过一次：`unknown prompt variable "{{cwd}}" in section "deployment:persona-prefix"`）。
+  `test/persona.test.mjs` 现读本机注册表钉这条闸门，正文里写了少掉的变量会在 `npm test` 就红。
 - 本 preset **不设 `suffix`**：按官方语义，空模板**仍然遮蔽**部署级后缀，所以部署那句
-  `Your working directory is {{cwd}}.` 在 Capital 会话里不出现（主 persona 自己写了
-  `{{cwd}}`）。这是有意为之，不是漏配。
+  "Your working directory is …" 在 Capital 会话里不出现；工作目录改由主 persona 自己用
+  **文字**说明（本会话选定的 workspace 根目录），不再引用已经不存在的变量。这是有意为之，不是漏配。
 - `complete: true` 会把其余所有段落（身份、工具引导、后缀）一并抑制；`includeRuntimeContext:
   false` 全有全无地关掉沙箱/审批/委派等 runtime context。本 preset 都不用。
 - 成本：persona 正文每个请求都重复；`prefix` 变化会让 KV cache 从第一个变化 token 起失效。
@@ -51,7 +55,8 @@
   而 skill 只在模型决定加载时才生效。
 - **按需进 `skills/`**：载荷 JSON 样例、字段级规则、`error/code → 处置`表、四态事实怎么读、
   QuerySpec 细则、检索收敛法则、官方域名核验清单、回传格式范例。
-- **子 Agent 也能按需加载**：子行的 `toolFilter.allow` 里写了 `skill`，子 Agent 就同时拿到
+- **子 Agent 也能按需加载**：每颗角色 preset 自己挂 `@deepseek-ai/dsh-tool-skill` 行（四颗在用角色都有；预留的
+  `capital-data-analyst` declaration 已 disabled，恢复时要去掉 `disabled`），子 Agent 就同时拿到
   目录与加载器。判据在 `dsh-tools` 的 `view()`：restriction 过滤**继承层（全局 + 全部祖先
   scope，含 preset 层）**，只豁免"本 scope 自己注册的"工具；而 `dsh-tool-skill` 发布目录的
   条件正是 `ctx.tools.get('skill', agent) === 该注册对象`。源码注释里记着这段历史坑
@@ -93,32 +98,54 @@
   **能力目录与工具结果超过阈值时中间段被剪掉**；`test/data-collector-hub.test.mjs` 因此用
   "目录 6144 + 单能力详情 4096"两道测试预算，让测试先失败而不是运行时静默截断。该阈值
   **不能按 Agent 区分**（全仓只有这一个 pruner 实例），主/子 Agent 共用。
-- `toolFilter.allow` 只能写**真实注册**的全局工具名：`tools.restrict()` 对未知名字直接报错，
-  且它在**子 Agent 创建窗口**执行——写错的表现是"创建子 Agent 失败"，不是挂载失败。
-- **通用 `subagent` 行必须写 `toolFilter.deny`（2026-09 review）**：`dsh-subagent` 只在
-  `composition.toolFilter !== void 0` 时才 `restrict`，而 child 用 `composeFrom(childCtx,
-  parent.ctx)` 加入父 Agent **同一份 standing composition**，因此没有 filter 的通用 child
-  会继承 standing 的全部工具——只带 `parentSession` 的 child 就能自己 `prepare_chart_source`
-  再 `render_chart`，把"出图只有一个入口"降级成 persona 建议。这里的 `deny` 与子角色的
-  `allow` 不冲突：`allow`/`deny` 都只是继承层交集过滤，专用行各自的白名单照常生效。
-  通用行只能有一个 filter，所以用 `deny` 列全敏感工具（数据管线 + Dataset 系列 + 出图 +
-  专用角色创建工具）；`deny` 里的名字同样必须真实注册。回归断言见
-  `test/persona.test.mjs` 的「通用 subagent 行」用例。
-- **同一份 `deny` 也覆盖出网（2026-09-24）**：本插件 14 个检索 / 来源 / 文档解析工具全部列进来，否则只带
-  `parentSession` 的通用 child 能自己抓网页，「外部检索只经 web_retriever」又是一条 persona 文案。
-  名字的唯一事实来源是 `src/agents/root-tool-policy.ts` 的 `RETRIEVAL_DENIED_TOOLS`（根 Agent 逐名
-  deny 用的就是它），测试把两处对齐成同一份名单。**`ocr` 是根侧收敛的唯一例外（2026-09-26）**：它
-  不进 `RETRIEVAL_DENIED_TOOLS`（主 Agent 要能解析用户 `@` 进来的本地文档），改由调用级 guard 只拒
-  `url` 形态；但通用 child 的这份 `deny` 里它**必须在**——连本地形态一起拿掉，否则通用 child
-  继承它能自己解析文档（见 §4.3 → `docs/dev/web-retriever.md`）。**宿主自己挂的 `web_search` / `web_fetch` 绝不能
-  写进这里的 `deny`**：它们不由本插件注册，未注册名字在 `deny` 里的表现是"创建子 Agent 失败"；
-  它们只出现在根侧 `ROOT_AGENT_DENIED_TOOLS`（逐名 `restrict` 的 try/catch 容忍"这个 scope 里没有"）。
+- **工具面 = preset 挂的行**（D0，2026-10-19）：`toolFilter` 已从委派行删除，上游报错原文指明的
+  替代是「persona 与工具插件改住 Agent Preset，委派行只用 `agentPreset` 选它」——这一条我们做到底：
+  本仓 28 颗模型工具按族拆成 `@v587d/capital-generation/tools/<family>` 的 subpath 入口行
+  （`package.json` 的 `exports`），每颗 preset 只挂自己那几族，**不再有运行期名字级 allow 名单**。
+  行契约（那一行注册哪些名字）只有一份，住 `test/family-rows.mjs`：`test/family-entries.test.mjs`
+  拿它实测每个入口注册了什么，`test/persona.test.mjs` 拿它核对 YAML 的组合结果。
+  - collector：`tools/collect` + `tools/time`；junior：`tools/dataset-read` + `tools/chart-source` +
+    `tools/time`；specialist：`tools/chart-render` + `tools/time`；retriever：`tools/retrieve-search` +
+    `tools/retrieve-sources` + `tools/ocr` + `tools/time`；根：`tools/time` +
+    `tools/ocr` + `tools/watchlist` + `tools/root-extras`（最后一行一颗工具都不带，只挂精选
+    skills 的 provider 与用户自定义人设分节）。**`tools/time` 每颗 preset 都挂、且不带任何行配置**：
+    通用能力不按角色裁（2026-10-19 决策，retriever 那颗继承自 0.2.0 `toolFilter` 的
+    `localDatetime: false` 已删——行契约里没有开关，写了就是"以为裁了、其实没人读"）。
+  - 运行期只剩**一格**：`tool-subagent-control` 把 `send_message` 与 `interrupt_agent` 焊在同一行，
+    而宿主没给那颗行开成员开关，叶子角色逐名 tolerant deny 减掉那个兄弟
+    （`src/agents/role-tool-policy.ts` 的 `SIBLING_DENIED_TOOLS`）。它不是工具面清单。⛔ 那一格只减
+    **被委派子会话**的可见面：手开的角色会话上 restrict 减不掉它（时机见账本 L32），所以执行期另有
+    一颗全局 `tools.guard()`（`registerRoleSiblingGuard`）兜住同一颗名字。
+- **⛔ 行名与 deny 名的两种失效形状都是静默的**：族行名写错 / 包导出漏了 ⇒ 那一行装载失败
+  （只打一行 warn），该角色**少一整族**工具；`deny` 里的名字本作用域看不见 ⇒ 逐名跳过，只少减
+  那一个并记进 `failed`（这是它相对旧"整批 allow"的差别：错一个名字不再等于完全不收敛）。
+  两道补偿：`test/family-entries.test.mjs` 把 `package.json` 的 `exports` 与行契约对表，
+  `dc_status` 的 `agent_tool_policy` + `session_identity` 把现场带回会话侧。
+- **⛔ 没有通用 `subagent` 行**（2026-10-18 用户决策：没有明确场景就不该有「其他」，它的 34 名
+  `deny` 名单一起删）。"谁能碰什么"因此始终是**正面清单**：deny 是 fail-open（漏写就等于有权限，
+  2026-09 的出图绕过就是这么走的），行组合是 fail-closed（多挂一行才越权）。**禁止**以任何形式
+  恢复通用委派行，也禁止把那一格兄弟 deny 长成工具面清单；回归 `test/persona.test.mjs`
+  「委派出口只有专用角色」「组合表：每颗 preset 挂的族行必须恰好是这几行」与
+  `test/role-tool-policy.test.mjs`。
+- **出网那十三颗只由 retriever 挂的两行带出来**，其余角色没挂就拿不到；根 preset 不挂
+  `tools/retrieve-search` / `tools/retrieve-sources`，可见性在组合期封闭。
+  `src/agents/root-tool-policy.ts` 的 `RETRIEVAL_DENIED_TOOLS` / `ROOT_AGENT_DENIED_TOOLS` 作为
+  单体载体与回归兜底保留（host policy 对 root 传 `deny:false`），**新增来源只改族行与行契约**。
+  **`ocr` 那一行由根与 retriever 各挂一次**：主 Agent 要能解析用户 `@` 进来的本地文档；host 的
+  `installRootOcrGuard` 只拒它的 `url` 形态，retriever 侧拿到完整形态
+  （见 §4.3 → `docs/dev/web-retriever.md`）。
+  **宿主自己挂的 `web_search` / `web_fetch`
+  绝不能写进任何名单**：它们不由本插件注册，双端实测本 preset 的作用域里没有这两个名字（2026-09-30
+  起它们也已从 `ROOT_AGENT_DENIED_TOOLS` 清掉）。根侧逐名 `restrict` 的 try/catch 能把"这个 scope
+  里没有"变成无害跳过，但那只会留下一条看不见用的 `failed`。**宿主若把它们挂进本 preset 的作用域，
+  加回根侧名单，并想清楚哪颗 preset 该挂带它们的那一行。**
 - 不用 `dsh-time-context` 行：它每个 step 自动注入时钟读数，与自研 `get_local_datetime`
   重复；时间读数只来自后者（会话组作用域内注册，主 Agent 与全部子 Agent 共享，支持
   `timezone` 换算）。
-- `data_analyst` 行保持 `disabled`。启用前置条件（缺一不可）：宿主先实现 Python runner 与
-  coding 工具；插件注册 `read_profile`（allow 里的名字必须先真实存在）；更新 `AGENTS.md` 与 `docs/dev/data-roles.md`
-  的角色边界与 `test/persona.test.mjs` 的预留期断言。
+- `data_analyst` 的 preset 与委派行都保持 `disabled`（2026-10-18 用户要求先停用，等价于注释）。
+  恢复前置条件（缺一不可）：宿主先实现 Python runner 与 coding 工具；插件注册 `read_profile`
+  （新工具必须先有族行带它、行契约同步）；更新 `AGENTS.md`、`docs/dev/data-roles.md` 与
+  `test/persona.test.mjs` 的预留期断言。
 
 ## 5.1 shell 与文件口：开 read、保留 bash、不给写（2026-10-15 用户决策）
 
@@ -129,19 +156,23 @@
   2026-09-30 的"主 Agent 不给 shell"）：主 Agent 需要 `read` 读 skill 分册与工作区文件
   （此前只能 `bash cat`，能力等价但绕远），shell 保留纯计算兜底。`ROOT_AGENT_DENIED_TOOLS`
   里的 `bash` / `pwsh` 随之移出，名单改为出图三件套 + 十三个出网工具 + `write` / `edit`。
-- **文件写口不开**：`write` / `edit` 被两层拦住——根侧逐名收敛（主 Agent 视图层）+ 全局
-  `tools.guard()`（`registerFsWriteGuard`，调用期按 `composedPreset` 认领，fail-open，细节见
-  `docs/dev/bash-gate.md` §1.6）。理由：主 Agent 唯一对用户说话、又会读到子 Agent 回传（含网页
-  材料），写文件等于给"注入 → 落盘 → 被别的环节读回"开口；业务落盘本来就有正路
-  （`store.writeContext` 等工具实现），模型手里的写口没有正当用途。通用 `subagent` 行的
-  `toolFilter.deny` 同步含 `read` / `write` / `edit`（通用 child 不得读 raw.json，原始 rows
-  永不出工具层）。
+- **文件写口不开，但"不开"靠的是调用级闸门，不是行配置**：根 preset 那行 `read: true /
+  write: false / edit: false` 只决定**本层变体**——2026-10-19 实测手开 Capital 里 `write` 仍在工具表
+  中且真的落盘，缺席不等于移除（`ScopedLayers.merge` 用 global 打底，账本 L33）。所以拦下写口的只有一颗：全局 `tools.guard()`
+  （`registerFsWriteGuard`，判据 = 调用期 `composedPreset` ∈ 本插件任一 preset，fail-open，细节见
+  `docs/dev/bash-gate.md` §1.6）。`ROOT_AGENT_DENIED_TOOLS` 里的 `write` / `edit` 只在**被委派**
+  那一支减得到可见面，且生产装配以 `deny: false` 注册、不提交名单。理由：主 Agent 唯一对用户说话、
+  又会读到子 Agent 回传（含网页材料），写文件等于给"注入 → 落盘 → 被别的环节读回"开口；业务落盘
+  本来就有正路（`store.writeContext` 等工具实现）。角色一侧同一条判据：本插件的六颗 preset 一律
+  不许直接写文件，原始 rows 也永不出工具层。
 - **平台成对挂载**：Windows 上 host 层挂的是 `pwsh-sandbox`，没有 `bash-sandbox`；只挂
-  `tool-bash` 会让名为 bash 的工具实际执行 PowerShell。所以两行互补 `disabled`，allow / deny
-  里的名字用 `!!js` 三元表达式按平台选。`tools.restrict()` 对未注册名字报错，所以表达式与行必须
-  同进同退（回归：`test/persona.test.mjs`「shell 行：平台成对挂载……」）。
+  `tool-bash` 会让名为 bash 的工具实际执行 PowerShell。所以两行互补 `disabled: !!js`。0.2.1 起
+  这份 YAML 里不再出现工具名，shell 名改为在 `src/agents/role-tool-policy.ts` 按平台取一颗
+  （`SHELL_TOOL`）进 data_junior 的清单——取错那颗会整批 restrict 报错、该角色完全不收敛，
+  所以 `test/bash-guard.test.mjs` 另钉一条"preset 挂的每一行 shell，闸门与角色工具面都必须认"，
+  成对挂载与后台执行那一格仍由 `test/persona.test.mjs`「shell 行：平台成对挂载……」看着。
 - **不给后台执行**：`enableRunInBackground: false`。本 preset 不挂 `tool-jobs`，开着后台只会让
-  模型拿到一个永远读不回来的 jobId（`job_output` / `job_kill` 不在任何 allow 里）。
+  模型拿到一个永远读不回来的 jobId（本 preset 压根没挂 `tool-jobs` 那一行）。
 - **shell 闸门只剩一层，且不是安全边界**（`src/agents/bash-guard.ts`）：拦掉
   `sandbox_permissions` / `justification`——被委派会话的审批策略由框架固定为 `never`，升级必然
   失败，而且模型会收到「the user rejected…」这种把系统拒绝说成用户拒绝的文案；被委派或身份
@@ -160,9 +191,11 @@
 ## 6. 改动流程
 
 1. 先判断内容属于"每轮硬规则"（→ persona）还是"按需协议"（→ `skills/`）。
-2. 专用角色六处齐改（判据与顺序见 `docs/dev/preset-persona.md` §8.5）：委派行（provider /
-   toolName / backgroundMode / persona / toolFilter，allow 必须含 `skill`）、子 persona（骨架 +
-   第一条 duty `skill <name>`）、`skills/<name>/SKILL.md`、主 persona 的路由与复用规则、
+2. 专用角色**七处齐改**（判据与顺序见 `docs/dev/preset-persona.md` §8.5）：角色 preset 声明行
+   （`dsh-persona` 正文：骨架 + 第一条 duty `skill <name>`；以及它自己需要的工具行）、主 preset
+   里的委派行（`provider` / `toolName` / `agentPreset`）、该角色 preset 挂哪几族行
+   （`test/family-rows.mjs` 的行契约 + `test/persona.test.mjs` 的组合表；只有同行焊死的兄弟才写
+   `src/agents/role-tool-policy.ts` 那份逐名 deny）、`skills/<name>/SKILL.md`、主 persona 的路由与复用规则、
    `docs/dev/data-roles.md` §1.1 的角色边界、测试断言。
 3. `npm test` 全绿 + `agentPresets.resolve('capital-generation')` 结果里没有 `broken`（挂载成功），
    再开一个 Capital 会话确认工具表、首轮预检，以及子 Agent 是否真的按第一条 duty 先加载 skill。

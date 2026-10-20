@@ -1,15 +1,16 @@
 import { type SessionLike } from './data-collector/store.js';
 /**
- * 「调用方 session 在哪里」的**唯一实现**。
+ * The single source of truth for caller identity and tool authorization.
  *
- * ⛔ 2026-09-23 事故（会话 `66fa9666`）：`resolve_data_time_range` 的 Dataset 形态自己写成了
- * `exec.session`，而框架一直把它放在 `exec.agent.session`（`dataset-tools.ts` 的 `callerSession`
- * 从一开始就是这么读的）。结果是该形态对**任何**调用方都抛
- * `Dataset time-range mode requires an authorized session`，模型只好绕道日期串。
- * 同一个事实有两份实现，就一定会漂移——所以这里收敛成一份，两边都从这里取。
+ * Only the framework shape `exec.agent.session` is accepted; no `exec.session` fallback,
+ * so tests cannot bypass the real shape again.
  *
- * 注意：这里**只认框架形状** `exec.agent.session`。不要加 `exec.session` 之类的兜底——
- * 那会让本地直调测试继续绕过真实形状，正是上次漏掉该 bug 的原因。
+ * Authorization is by preset, not by session topology: a root session manually opened with
+ * a role preset must be allowed, while the main Agent (`capital-generation`) stays denied.
+ * Raw rows are protected by tool return shapes, not by this gate.
+ *
+ * When identity cannot be confirmed (registry unavailable or no preset), fall back to the
+ * legacy parentSession check. That fallback must never be wider than the old behavior.
  */
 export interface AgentExecutionLike {
     agent?: {
@@ -20,10 +21,43 @@ export interface AgentExecutionLike {
                 parentSession?: string;
             };
         };
+        ctx?: unknown;
     };
     signal: AbortSignal;
 }
-/** 取调用方 session；缺失即响亮失败（`session_unavailable`）。 */
+/** Return the caller session; fail loudly when the framework shape is missing. */
 export declare function callerSession(exec: AgentExecutionLike): SessionLike;
-/** 取调用方 session，并要求它是**被委派的**子 Agent（有 parentSession）。 */
-export declare function delegatedSession(exec: AgentExecutionLike, toolName: string): SessionLike;
+/** Result of {@link authorizeToolSession}; never throws so each domain keeps its own error. */
+export interface ToolSessionDecision {
+    readonly session: SessionLike;
+    readonly allowed: boolean;
+    /** `preset` = resolved identity; `topology` = legacy fallback when the registry is unavailable. */
+    readonly via: 'preset' | 'topology';
+    /** Matched preset id; undefined when `via === 'topology'`. */
+    readonly presetId?: string;
+}
+/**
+ * Decide whether this session may use a preset-restricted tool.
+ *
+ * Does not throw: callers own their error codes and messages. The only side effect is
+ * recording the decision in a bounded ring buffer for diagnostics.
+ */
+export declare function authorizeToolSession(pluginCtx: unknown, exec: AgentExecutionLike, toolName: string, allowedPresetIds: readonly string[]): ToolSessionDecision;
+/**
+ * Data-side gate: decide and throw `dataset_session_mismatch` when denied.
+ *
+ * Messages are model guidance: name the current preset on preset mismatch, or tell a role
+ * agent to ask its caller instead of switching tools.
+ */
+export declare function authorizedSession(pluginCtx: unknown, exec: AgentExecutionLike, toolName: string, allowedPresetIds: readonly string[]): SessionLike;
+/** Bounded recent authorization decisions, exposed through `dc_status.session_identity`. */
+export interface SessionAuthRecord {
+    readonly tool: string;
+    readonly via: 'preset' | 'topology';
+    readonly presetId: string | null;
+    readonly allowed: boolean;
+}
+/** Recent decisions as a shallow copy (JSON-safe for model output). */
+export declare function sessionIdentityDecisions(): SessionAuthRecord[];
+/** Test-only: clear records between cases. */
+export declare function resetSessionIdentityDecisions(): void;

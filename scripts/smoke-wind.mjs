@@ -1,16 +1,7 @@
 /**
- * Wind 数据源真实复核（§3.6 第 5 条：冒烟要逐条报告上游回执与 **guard 判定**）。
- *
- * 与 `scripts/spike-wind.mjs` 的分工：spike 打**裸协议**、打印形状与键名，用来形成结论；
- * 本脚本走**已注册的 DataSource**（转置、单位、epoch、护栏都在里面），用来复核护栏没杀真报文
- * （`docs/dev/tool-schema.md` §10.2）。
- *
- *   npm run smoke:wind                                   # 三条各打一次（最省的默认组合）
- *   npm run smoke:wind -- --kline 000001.SZ              # 只复核指定代码的日 K
- *   npm run smoke:wind -- --minute 00700.HK --date 2026-09-30   # 探某市场某日的分钟落地情况
- *
- * ⛔ 真实调用**按次消耗上游积分**：默认串行、一次一条，不做并发探针以外的批量调用。
- * 日志只打印形状、行数与错误分类，不打印 Key、不落盘正文。
+ * Real Wind data-source check: runs the registered DataSource (transpose, units, epoch, guards)
+ * so guards are verified against real payloads. spike-wind.mjs is the bare-protocol counterpart.
+ * ⛔ Each call burns upstream credits: serial, one at a time; logs shapes and row counts only.
  */
 import { parseArgs } from 'node:util'
 import { createWindSources } from '../lib/sources/wind-mcp.js'
@@ -35,10 +26,7 @@ if (!apiKey) {
 const byCapability = new Map(createWindSources(async () => apiKey).map((source) => [source.schema.capability, source]))
 const today = flags.date ?? new Date().toISOString().slice(0, 10)
 
-/**
- * 冒烟计划：**一次一条**，默认组合是三条各打一次（§3.6 第 5 条禁止并发探针以外的批量调用）。
- * 给了 `--kline/--minute/--indicator/--question` 就只打那一条——探针对象越具体，烧掉的越少。
- */
+/** Smoke plan: one call at a time; a specific flag narrows it down to one row. */
 const probes = [
   flags.minute && {
     capability: 'wind_stock_kline',
@@ -81,7 +69,7 @@ for (const item of plan) {
     const { data } = await source.execute({ capability: item.capability, params: item.params, session: { id: 'smoke-wind', header: { cwd: process.cwd() } } }, AbortSignal.timeout(30_000))
     const rows = data
     if (!Array.isArray(rows)) throw new Error('数据源没有返回行数组')
-    // 0 行是合法成功（非交易日实测快回空表），但要把这个事实单独说清楚，别读成"取到了"。
+    // 0 rows is a legal success (non-trading days return empty); say so instead of "got data".
     console.log(`  ✅ ${Date.now() - started}ms  ${rows.length === 0 ? '0 行（合法空结果：该区间没有行情/没有匹配）' : `${rows.length} 行`}`)
     if (rows.length > 0) console.log(`  首行 ${preview(rows[0])}\n  末行 ${preview(rows[rows.length - 1])}`)
   } catch (error) {

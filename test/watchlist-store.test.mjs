@@ -1,9 +1,6 @@
 /**
- * 自选股 store 层闸门（域 schema / 播种 / 上限 / 报价快照语义）。
- *
- * 这些断言钉的是"实测教训"而不是实现方便：删空后不许重播（否则用户删不掉）、
- * 失败不许写成快照（否则面板显示一个来历不明的 0）、上限必须真的挡住写（否则
- * `single` 布局整写一份 JSON 就是无界放大）。
+ * Watchlist store gates: schema, seeding, cap and quote snapshot semantics — an emptied list must not
+ * re-seed, a failed fetch must not become a snapshot, and the cap must hold under concurrency.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -28,8 +25,7 @@ test('首次打开播种四条指数（三个市场各一），全部是 seed �
   try {
     const result = await instance.list()
     assert.equal(result.items.length, SEED_ITEMS.length, '种子数量就是 4')
-    // 2026-10-07 由用户定为跨三个市场各留一根"今天有没有开盘"的标尺（设计文档 §3.9 第 7 点）：
-    // 替换掉深证成指 / 创业板指 / 沪深300，`SEED_ITEMS` 是一整张常量表，删除与新增一次做完。
+    // One seed benchmark per market, deliberately fixed in SEED_ITEMS.
     assert.deepEqual(result.items.map((item) => item.thscode), ['000001.SH', 'HSI.HK', 'IXIC.US', 'INX.US'])
     for (const item of result.items) {
       assert.equal(item.source, 'seed')
@@ -127,8 +123,7 @@ test('裸代码与非支持标的被拒；场外基金即便被搜到也进不�
   }
 })
 
-// 六位代码生成器：上限从 10 抬到 30 之后，`60000${index}` 这种拼法会在 index≥10 时变成七位
-// 而被 normalizeThscode 判 invalid_query——那不是被测行为，是夹具的错。
+// Six-digit fixture codes: `${60000 + index}` overflows to 7 digits past index 10.
 const codeAt = (index) => `60${String(index).padStart(4, '0')}.SH`
 
 test(`清单上限 ${MAX_ITEMS} 条：再加一条返回 list_full，不写库、不静默替换，回包带 limit`, async () => {
@@ -144,8 +139,7 @@ test(`清单上限 ${MAX_ITEMS} 条：再加一条返回 list_full，不写库�
     const overflow = await instance.add({ thscode: codeAt(900) })
     assert.equal(overflow.ok, false)
     assert.equal(overflow.code, 'list_full')
-    // 「最多 N 条，先删一条再加」那句话的数字必须由服务端给：2.5.2 是服务端常量 + 中文字典
-    // 写死"10"各写一遍，抬上限只会改红一边。
+    // The limit must come from the server so client copy has a single source.
     assert.equal(overflow.limit, MAX_ITEMS, 'list_full 回包要带 limit，客户端才有单源可读')
     assert.equal(fake.records.size, MAX_ITEMS, '超限不覆盖已有条目')
   } finally {
@@ -174,10 +168,7 @@ test('⛔ 上限不许被并发添加突破：只差一格时两个 /add 只许�
 })
 
 test('⛔ 刷新在途时的删除与置顶，不许被写回撤销', async () => {
-  // 面板一打开就自动刷新，这扇窗几乎每次都开着；ETF 逐只扇出时最宽。
-  // 旧实现拿批次开始时的整表快照做写回基底、整条覆写，于是刷新落地那一刻：刚删的标的被原样
-  // 写回来（还重新占掉一格），刚置顶的被旧记录里的空 pinned_at 盖掉、静默掉回原位——两个动作
-  // 系统都当场回执了"成功"。
+  // A start-of-refresh snapshot write-back silently reverted acked remove/pin calls.
   const stub = stubFuyao()
   const { instance, fake } = service()
   const outer = globalThis.fetch
@@ -186,7 +177,7 @@ test('⛔ 刷新在途时的删除与置顶，不许被写回撤销', async () =
   const gate = new Promise((resolve) => { release = resolve })
   globalThis.fetch = async (url, init) => {
     const pending = outer(url, init)
-    // 闸门只在 refresh 起来之后落下：setup 的 list/add 自己也走 fetch，全程挂着就是死锁。
+    // Gate opens only once refresh is running; setup list/add also use fetch.
     if (gateOn) await gate
     return pending
   }
@@ -195,7 +186,7 @@ test('⛔ 刷新在途时的删除与置顶，不许被写回撤销', async () =
     assert.equal((await instance.add({ thscode: codeAt(800) })).ok, true)
     gateOn = true
 
-    const running = instance.refresh() // 两组（指数批量 + A 股批量）都卡在 gate 上
+    const running = instance.refresh() // both groups block on the gate
     const removed = await instance.remove({ thscode: '000001.SH' })
     const pinned = await instance.pin({ thscode: 'IXIC.US' })
     assert.equal(removed.ok, true, '删除当场回执成功')
@@ -243,7 +234,7 @@ test('刷新把报价整体写回，并带 captured_at 与上游 source_ts', asy
 })
 
 test('失败不落"错误快照"：报价仍是 null，当次回包里逐条给 code', async () => {
-  // 三家全挂（A 股指数被限流 + 港美股两个市场都不回行）：这才是"整块失败"，也才允许 `scope: 'all'`。
+  // All three upstream groups fail: the only case allowed to report `scope: 'all'`.
   const stub = stubFuyao({ '/api/a-share-index/prices/snapshot': FIXTURE_RATE_LIMITED, 'qt.gtimg.cn': 'v_pv_none_match="1";' })
   const { instance, fake } = service()
   try {
@@ -258,11 +249,6 @@ test('失败不落"错误快照"：报价仍是 null，当次回包里逐条给 
   }
 })
 
-/**
- * 上一条的另一半：**已经有过成功快照**的行遇上取数失败。域里那条记录不该被碰，
- * 面板于是照画上一次的值（用户点名"为什么不是取最近一次刷新的报价值"）。
- * 全批一条都没落地时 `refreshed_at` 回 null——页脚那个时间讲的是"最后一次真取到数"。
- */
 test('取数失败保住上一次成功的快照：只覆写成功的那几条，全批没落地时 refreshed_at 为 null', async () => {
   const { instance, fake } = service()
   let stub = stubFuyao()
@@ -275,7 +261,7 @@ test('取数失败保住上一次成功的快照：只覆写成功的那几条�
     const before = new Map(first.items.map((item) => [item.thscode, item.quote]))
     assert.ok(before.get('000001.SH'), '第一次刷新确实把快照写进了域')
 
-    // 只有 A 股指数那一路被限流：其余照常更新，那一行保留上一次成功的快照（不是 null、不是 0）。
+    // Only the A-share index group is rate-limited; other rows update normally.
     swap({ '/api/a-share-index/prices/snapshot': FIXTURE_RATE_LIMITED })
     const second = await instance.refresh()
     assert.equal(second.error.code, 'rate_limited', '批级失败照旧上抛，面板才有红字可画')
@@ -292,7 +278,7 @@ test('取数失败保住上一次成功的快照：只覆写成功的那几条�
     }
     assert.ok(second.refreshed_at > 0, 'A 股个股与港美股都落地了 → 批次时刻照报')
 
-    // 三路都不回数据：一行都不许动，且页脚那格不许往前推。
+    // No group returns data: no row may change and refreshed_at must not advance.
     swap({ '/api/a-share-index/prices/snapshot': FIXTURE_RATE_LIMITED, '/api/a-share/prices/snapshot': FIXTURE_RATE_LIMITED, 'qt.gtimg.cn': 'v_pv_none_match="1";' })
     const third = await instance.refresh()
     assert.equal(third.refreshed_at, null, '⛔ 一条都没落地就不报"刷新于此刻"')
@@ -353,7 +339,7 @@ test('刷新写回报价不动置顶：pinned_at 随整条记录 spread 保住�
 })
 
 test('pinned_at 是可选字段：磁盘上已有的 v1 记录（没有这一格）必须照样过 schema', () => {
-  // 域在加载边界逐条校验，写成必填会让老清单直接 invalid-record（整条路由变 store_unavailable）。
+  // The domain validates on load; a required field would reject legacy lists wholesale.
   const legacy = {
     thscode: '000001.SH', ticker: '000001', name: '上证指数', exchange: 'SH', asset_type: 'a-share-index',
     added_at: 1, source: 'seed', quote: null,
@@ -383,9 +369,7 @@ test('写进域里的每条记录都必须过 schema（真域在持久边界逐�
 })
 
 test('域名必须过 storage 的 unit name 规则（连字符会被上游拒成 malformed-medium）', async () => {
-  // 实测教训：域叫 `capital-watchlist` 时，真 boot 里所有路由都是
-  // `store_unavailable：malformed-medium：invalid unit name 'capital-watchlist'`。
-  // `UNIT_NAME_RE = /^[a-z][a-z0-9_]*$/`（@deepseek-ai/dsh-storage），路由名与域名因此不同字。
+  // The storage unit-name rule rejects hyphens; the route and domain names differ.
   assert.match(domainSpec.name, /^[a-z][a-z0-9_]*$/u, '域名只许小写字母、数字与下划线')
   assert.equal(domainSpec.name, 'capital_watchlist')
   for (const table of Object.keys(domainSpec.tables)) {
@@ -400,10 +384,7 @@ test('域名必须过 storage 的 unit name 规则（连字符会被上游拒成
 const FIXTURE_RATE_LIMITED = { code: 4001, message: '请求频率超限', data: null }
 
 test('存储装配期抢跑不许锁死功能：第一次打不开、后来能开就必须读得到清单', async () => {
-  // 2026-09-30 review 实测的闩锁：`domainPromise` 连 rejection 一起 memoize，于是"一次装配期
-  // 抢跑"就永久 503——`openDomain` 只被调过一次，之后每一次动作都复用那份失败的 promise。
-  // 这不是假想：`storageDomain` 是 dsh-storage-domain 在自己 `inject(backendServices,…)` 的回调里
-  // 才 provide 的，host 平面的预热完全可能跑在它前面（AGENTS.md §9.7 ⑤ 的同族形状）。
+  // Memoizing the rejected openDomain promise latches an early mount race permanently.
   const stub = stubFuyao()
   const fake = createFakeDomain()
   let attempts = 0
@@ -429,12 +410,7 @@ test('存储装配期抢跑不许锁死功能：第一次打不开、后来能�
   }
 })
 
-/**
- * 域 schema 的这一版只**拓宽**（键形状、`asset_type` 七档、`exchange` 四档、报价两格可选），
- * 所以磁盘上已有的 v1 记录逐条仍然通过——不抬 domain `version`、不写迁移（§3.4 / §4.1）。
- * ⛔ 反过来做（收窄或改语义）会让一次读就把整份清单判成 `invalid-record` → `store_unavailable`：
- * 这几条就是那一步的哨兵，改 schema 之前先看它们答什么。
- */
+// The schema only widens: v1 rows must still parse at the same domain version.
 test('五种 canonical 键形状都过 schema，老记录没有的两格照读', () => {
   const valueSchema = domainSpec.tables.items.valueSchema
   const base = { ticker: '300750', name: '宁德时代', exchange: 'SZ', asset_type: 'a-share', added_at: 1, source: 'user', quote: null }
@@ -444,8 +420,7 @@ test('五种 canonical 键形状都过 schema，老记录没有的两格照读',
   for (const thscode of ['300750', '00700', 'AAPL', '.IXIC', 'abc123.SZ', '600000.BJ', '012414.OF', 'HSI.SZ']) {
     assert.equal(valueSchema.safeParse({ ...base, thscode }).success, false, `${thscode} 不是这版的键`)
   }
-  // 2.5.3 的 `pinned_at` 与本版新增的 `currency` / `source_time` 都是**可选**：
-  // 写成必填会把用户已有的每一条记录判成坏记录（读一次就整块不可用）。
+  // pinned_at, currency and source_time stay optional so v1 rows remain readable.
   const v1 = { thscode: '000001.SH', ticker: '000001', name: '上证指数', exchange: 'SH', asset_type: 'a-share-index', added_at: 1, source: 'seed', quote: { price: 1, change_pct: null, captured_at: 2, source_ts: null } }
   assert.equal(valueSchema.safeParse(v1).success, true, 'v1 老行（没有这三格）必须照读')
   assert.equal(valueSchema.parse({ ...v1, quote: { ...v1.quote, currency: 'HKD', source_time: '2026-10-06 16:00:01' } }).quote.currency, 'HKD')
@@ -474,8 +449,7 @@ test('exchange 取最后一个点号之后：`BRK.B.N` 的市场是 US，不是 
 })
 
 test('⛔ 三路分派之后，上限这一闸仍然只许进一条：只差一格时港与美各问一次也只成一个', async () => {
-  // 上一条测的锁是 A 股那一路；这一条测的是"搜索走 smartbox 的那两路"共用同一把锁——
-  // 分派改了出网的去向，不该改读-改-写的互斥。
+  // The smartbox routes share the same cap lock; dispatch changes must not bypass it.
   const stub = stubFuyao()
   const { instance, fake } = service()
   try {
@@ -490,12 +464,6 @@ test('⛔ 三路分派之后，上限这一闸仍然只许进一条：只差一�
     stub.restore()
   }
 })
-
-/**
- * ── 持仓标记（2026-10-09 加，主 Agent 经 `get_watchlist` 读的就是这一格）─────────────
- * 这一格是**用户自报**的权重，所以闸门全在"别说谎"上：没填 ≠ 0、取消 ≠ 换位置、
- * 刷新写回 ≠ 撤销用户的标记、指数 ≠ 可持有的标的。每条都配反向对照（把修复撤掉即红）。
- */
 
 test('标记持仓：填比例 / 只标记不填 / 真填 0 是三态；取消标记不许把行甩到清单末尾', async () => {
   const stub = stubFuyao()
@@ -518,7 +486,7 @@ test('标记持仓：填比例 / 只标记不填 / 真填 0 是三态；取消�
     const absent = await instance.markHolding({ thscode: '00700.HK' })
     assert.equal(absent.item.holding.weight_pct, null, '缺字段与空串同一档')
 
-    // 三个市场各标一条：闸门认的是**类型**而不是市场（A 股个股 / 场内 ETF / 港股 / 美股都可持有）。
+    // The gate keys on asset type, not market: A-share, ETF, HK and US are all holdable.
     assert.equal((await instance.markHolding({ thscode: 'AAPL.OQ', weight_pct: 5 })).ok, true)
 
     const cleared = await instance.clearHolding({ thscode: '600519.SH' })
@@ -597,8 +565,7 @@ test('刷新写回不许抹掉刚标的持仓', async () => {
 })
 
 test('⛔ 刷新在途时标记与移除持仓，不许被写回撤销；在途被删的行不许带着持仓复活', async () => {
-  // 与"刷新在途时的删除与置顶"同一扇窗、同一个形状，只是这一格原先不存在：
-  // 面板一打开就自动刷新，而用户就在刷新那几秒里点「标记持仓」。
+  // Same in-flight refresh window as remove/pin: the user marks a holding during auto-refresh.
   const stub = stubFuyao()
   const { instance, fake } = service()
   const outer = globalThis.fetch
@@ -644,8 +611,7 @@ test('⛔ 类型闸门：指数不是一个可持有的标的，标不上、也�
       assert.equal(result.code, 'invalid_query', '不新增错误码：这一档就是"这个入参不成立"')
       assert.equal(fake.records.get(code).holding, undefined, '⛔ 被拒的请求连那一格都不许写进去（写了模型就真会读到一句用户没说过的话）')
     }
-    // 未知类型同样不可标（闸门是白名单而不是"排除 *-index"）：这条靠上面四条已经证明，
-    // 这里钉的是**同一份判定**认个股与场内基金——两个方向都要有证据，反选写法会静默放行未来新增的档。
+    // Positive control for the whitelist: a denylist would silently admit future types.
     for (const code of ['300750.SZ', '510300.SH', '00700.HK', 'AAPL.OQ']) {
       assert.equal((await instance.markHolding({ thscode: code, weight_pct: 10 })).ok, true, `${code} 该能标`)
     }
@@ -655,9 +621,7 @@ test('⛔ 类型闸门：指数不是一个可持有的标的，标不上、也�
 })
 
 test('⛔ 闸门只拦"标"、不拦"取消"：一条遗留的指数持仓必须退得掉', async () => {
-  // 类型改判之前（2026-10-09 早先那一版）指数是能标的，磁盘上可能就有这样的记录；手改 JSON 也造得出。
-  // 若两边都拦：面板按类型不画取消出口、宿主又拒绝写 → 那一格被锁死在域里，而 get_watchlist 会一直
-  // 把一句用户早已不认的话当他的仓位读。
+  // Legacy index holdings exist; blocking clear would lock the false statement in.
   const stub = stubFuyao()
   const { instance, fake } = service()
   try {
@@ -678,8 +642,7 @@ test('⛔ 闸门只拦"标"、不拦"取消"：一条遗留的指数持仓必须
 })
 
 test('⛔ 合计闸门：只做多的组合，占比加起来不许超过 120%', async () => {
-  // 用户点名"我居然可以针对多只标的都填超过 50%"。单只 0–100 已经管住了，管不住的是**加起来**；
-  // 额度按"其余持仓"算，所以这一格自己改小永远走得通（见下面第二条）。
+  // Per-item 0-100 is not enough: the sum is capped at 120% against other holdings.
   const stub = stubFuyao()
   const { instance, fake } = service()
   try {
@@ -702,8 +665,7 @@ test('⛔ 合计闸门：只做多的组合，占比加起来不许超过 120%',
 })
 
 test('⛔ 合计闸门只拦"变大"：已超额的数据必须还能改小、勾上没填永远放行', async () => {
-  // 手改 JSON 或旧版本都能造出"每一只都不越单只上限、加起来却 200%"的一份域（正是用户点名的形态）。
-  // 若闸门连"改小"与"先勾上"一起拦，用户就再也出不去了——与类型闸门不拦 clearHolding 同一族理由。
+  // Over-120% data can already exist; blocking shrink or mark-empty would trap the user.
   const stub = stubFuyao()
   const { instance, fake } = service()
   try {
@@ -716,7 +678,7 @@ test('⛔ 合计闸门只拦"变大"：已超额的数据必须还能改小、�
     assert.equal((await instance.markHolding({ thscode: '300750.SZ', weight_pct: 0 })).ok, true, '0 是一个真数（这一只出清了），也是一次改小')
 
     await stamp('510300.SH', 100)
-    await stamp('00700.HK', 100) // 此刻 0 + 10 + 100 + 100 = 210%，额度对 AAPL 已经是 0
+    await stamp('00700.HK', 100) // 0 + 10 + 100 + 100 = 210%, leaving no AAPL quota
     const markedEmpty = await instance.markHolding({ thscode: 'AAPL.OQ', weight_pct: null })
     assert.equal(markedEmpty.ok, true, '勾上、比例留空：不加重，闸门不参与（否则超额旧数据会堵死"先勾上再慢慢填"）')
     assert.equal(markedEmpty.item.holding.weight_pct, null)
@@ -728,8 +690,7 @@ test('⛔ 合计闸门只拦"变大"：已超额的数据必须还能改小、�
 })
 
 test('holding 是可选字段：没有这一格的 v1 老记录照样过 schema，非法形态在持久边界就被拒', () => {
-  // 与 pinned_at 同一条理由：域在加载边界逐条校验，写成必填（或 nullable + 默认值）会让
-  // 现有清单一次读就 invalid-record → 整条路由 store_unavailable。
+  // Same as pinned_at: optional, or legacy rows invalidate the whole route on load.
   const legacy = {
     thscode: '000001.SH', ticker: '000001', name: '上证指数', exchange: 'SH', asset_type: 'a-share-index',
     added_at: 1, source: 'seed', quote: null,

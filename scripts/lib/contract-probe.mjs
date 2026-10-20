@@ -1,14 +1,8 @@
 /**
- * 数据源契约巡检 runner（设计见 `docs/design/data-source-contract-probe.md`）。
- *
- * 三条不可让的规矩，都是本仓付过学费的：
- * 1. **只走生产的 `execute()` / `validateOutput()`**，本文件不出现第二个 URL、第二份字段清单。
- * 2. **限速复用进程级单例**（`sharedEastmoneyThrottle` / `tencentThrottle`）——同一个出口 IP 上
- *    两份独立节流等于没节流（`src/net/eastmoney-client.ts:6-8`）。
- * 3. **不重试**。生产侧对 429 的一致态度是「分类，不是控制回路的输入」；重试会把一次抖动
- *    变成两个都看起来很权威的数据点。
- *
- * ⛔ 输出里不许出现密钥、完整 query string 或响应正文——Issue 是公开的（设计 §6.2）。
+ * Contract-probe runner. Only production execute()/validateOutput() (no second URL, no second field
+ * list), only the shared process-wide throttles (two chains on one egress IP is no throttle), and
+ * no retries (a retry turns one blip into two authoritative points).
+ * ⛔ Output carries no secrets, query strings or response bodies: issues are public.
  */
 import { createRequestThrottle } from '../../lib/net/throttle.js'
 import { sharedEastmoneyThrottle, createEastmoneyClient } from '../../lib/net/eastmoney-client.js'
@@ -29,17 +23,17 @@ import {
   resolveDayShifts,
 } from './contract-registry.mjs'
 
-/** 只有这三类判据开 Issue；定义在注册表里，这里转出是为了让 runner 与报告共用一个名字。 */
+/** Only these verdicts open an issue; the list lives in the registry (pure data module). */
 export { ISSUE_VERDICTS }
 
-/** 与 `src/index.ts` 的 `LOCAL_FETCH_DEFAULTS.userAgent` 同值——巡检走用户走的那条路。 */
+/** Same value as `LOCAL_FETCH_DEFAULTS.userAgent` in src/index.ts: probes take the user's path. */
 const USER_AGENT = '@v587d/capital-generation'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-/** 看起来像网络/路由问题的错误——它不是上游契约失败，绝不进 Issue。 */
+/** Network / routing trouble — never an upstream contract failure, never an issue. */
 const TRANSPORTISH = /fetch failed|UND_ERR|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket|timed out|TimeoutError|aborted|预算被中止/i
-/** 各家把 HTTP 状态写在消息里，形态不统一，所以几种写法都认。 */
+/** Providers format HTTP status into messages inconsistently, so accept several shapes. */
 const HTTP_IN_MESSAGE = /HTTP\s*(\d{3})|http_(\d{3})|returned HTTP (\d{3})/
 
 function httpStatusOf(error) {
@@ -48,7 +42,7 @@ function httpStatusOf(error) {
   return matched ? Number(matched[1] ?? matched[2] ?? matched[3]) : undefined
 }
 
-/** Fuyao 的业务码骑在 HTTP 200 上，只出现在消息文本里（`fuyao-core.ts` 抛的形态）。 */
+/** Fuyao business codes ride on HTTP 200 and only appear in the message text. */
 function upstreamCodeOf(error) {
   const message = error?.message ?? ''
   return /Fuyao API error (\d+)/.exec(message)?.[1]
@@ -56,24 +50,17 @@ function upstreamCodeOf(error) {
     ?? (typeof error?.code === 'string' && /^\d{4}$/.test(error.code) ? error.code : undefined)
 }
 
-/**
- * 上游明确说"这个标的 / 这个区间就是没有记录"——合法空结果，不是链路故障。
- * 混进 TRANSPORT 会让真故障被噪声淹没；混进 GUARD 会让人去改没坏的映射表。
- */
+// Upstream says "no records for this ticker / range": a legal empty result, not a link fault.
+// Mixing it into TRANSPORT drowns real faults; mixing it into GUARD sends people to fix a good map.
 const EMPTY_RESULT_CODES = new Set(['eastmoney_no_billboard_data', 'NOT_FOUND'])
-/** 参数被上游拒了 = 注册表里的样本不对，是我方缺陷；归进 ENVELOPE 让它开单，别藏在噪声里。 */
+// Upstream rejected our params = the registry sample is wrong, i.e. our defect: let ENVELOPE file it.
 const PARAM_REJECT_CODES = new Set(['eastmoney_invalid_ticker', 'tencent_invalid_param'])
-/**
- * AnySearch **替目标站**报的错：取不到正文、目标封了、内容类型不支持、超长。
- * 这些说明 `/v1/extract` 端点本身契约完好——它正确地把一个下游问题报了回来。
- * 巡检测的是 AnySearch，不是 www.gov.cn 那天开不开门；把它算成失败就是每天看一条无法修的警报。
- */
+// AnySearch reporting a target-side error (blocked, unsupported, too large): `/v1/extract` is intact.
+// The probe measures AnySearch, not whether www.gov.cn is up that day.
 const TARGET_SIDE_MARKERS = /extract_failed|target_blocked|unsupported_content|content_too_large|Unable to extract content/i
 
-/**
- * 把一次调用的结果归进闭集判据。顺序即优先级：先认结构失败，再谈空与慢。
- * `TRANSPORT` 是最后的兜底——凡是认不出别的，都当成"我们这条链路的问题"，不开单。
- */
+// Order is priority: structural failures first, then empty and slow. TRANSPORT is the fallback
+// bucket — anything unrecognised is treated as our link's problem and opens no issue.
 export function classify({ error, guardOk, rowCount, minRows, ms, budgetMs, identityMismatch, knownCodes = [] }) {
   if (error) {
     const message = String(error.message ?? '')
@@ -93,7 +80,7 @@ export function classify({ error, guardOk, rowCount, minRows, ms, budgetMs, iden
   return 'PASS'
 }
 
-/** 行数组在哪：照 `schema.rowShape` 这道权威提示找，不猜。 */
+/** Locate the row array via `schema.rowShape`, the authoritative hint — don't guess. */
 export function rowsOf(data, rowShape) {
   if (Array.isArray(data)) return data
   if (!data || typeof data !== 'object') return []
@@ -103,7 +90,7 @@ export function rowsOf(data, rowShape) {
   return []
 }
 
-/** 从 `output_schema` 取期望行键——字段判据的"期望"那一侧，不另写一份。 */
+/** Expected row keys come from `output_schema` — never a second field list. */
 export function expectedRowKeys(outputSchema) {
   const item = outputSchema?.properties?.item ?? (outputSchema?.type === 'array' ? outputSchema : undefined)
   const props = item?.items?.properties ?? item?.properties
@@ -114,7 +101,6 @@ function diffKeys(expected, actual) {
   return { missing: expected.filter((k) => !actual.includes(k)), added: actual.filter((k) => !expected.includes(k)) }
 }
 
-/** 按点路径取嵌套值（`item.0.manager_info.0.manager_id`），取不到返回 undefined。 */
 function pickPath(root, path) {
   return path.split('.').reduce((node, token) => (node == null ? node : node[token]), root)
 }
@@ -133,7 +119,7 @@ const abortSignal = () => new AbortController().signal
 
 function buildProbeTable() {
   const transport = createSourceTransport({ enabled: true, timeoutMs: 30_000, userAgent: USER_AGENT })
-  // 与生产同一份进程级节流 + 同一个闸门 transport：巡检测的是用户走的那条路，不是第二条路。
+  // Same process-wide throttle and gated transport as production: the probe takes the user's path.
   const eastmoneyClient = createEastmoneyClient({
     userAgent: USER_AGENT,
     throttle: sharedEastmoneyThrottle(),
@@ -156,7 +142,7 @@ function buildProbeTable() {
   }
 }
 
-/** Wind 协议级探针：initialize + tools/list，**不计费**（取数级刻意不接，设计 §10 第 1 条）。 */
+/** Wind protocol probe: initialize + tools/list only, never billable data calls. */
 async function runWindProtocol(entry) {
   const rpc = createWindRpc({
     endpoint: `${WIND_BASE}/${entry.server}/mcp/`,
@@ -168,31 +154,27 @@ async function runWindProtocol(entry) {
   return Array.isArray(listed?.tools) ? listed.tools : []
 }
 
-/** 家族顺序 = 出网顺序：一家打完再换下一家，绝不让两家的请求交错。 */
-// ⛔ 这份清单与注册表的 `PROBE_FAMILIES` 是**两份名单**，漏一家不会报错、只会**静默少打一族**
-// （`--family ftshare` 打印"7 条真打"却收 0 条结果，2026-10-15 就这么漏过整批 A 的实机验证）。
-// 覆盖由 `test/contract-registry.test.mjs` 钉住：每个有真打条目的家族都必须在这里出现。
+// Families run in egress order: finish one provider before starting the next.
+// ⛔ This list and the registry's `PROBE_FAMILIES` are two lists; a missing family silently probes
+// nothing. test/contract-registry.test.mjs pins the coverage.
 export const FAMILY_ORDER = ['fuyao', 'eastmoney', 'tencent', 'retriever', 'anysearch', 'wind', 'ftshare']
 
 /**
- * ⚠️ 东财 / 腾讯 / 具名来源**绝不能再包一层节流**：它们的 `execute()` 内部已经过
- * `sharedEastmoneyThrottle()` / `tencentThrottle` 那条链了。把同一个单例套在自己外面 =
- * 外层任务占着链等内层完成、内层排在同一条约链的后头等外层让位——**自锁**，
- * 表现是第一条探针就永久挂住（实测踩过）。这些家的节奏由生产代码负责，巡检只负责别添乱。
+ * ⚠️ Never wrap eastmoney / tencent / named sources in another throttle: their execute() already runs
+ * through sharedEastmoneyThrottle() / tencentThrottle. Wrapping the singleton again self-locks
+ * (outer task holds the chain waiting for the inner one queued behind it) and the first probe hangs.
  */
 const NO_PACE = (task) => task()
 
 function pacerFor(family) {
-  // Fuyao 生产侧是裸 fetch、没有任何最小间隔（只靠 Hub 串行），巡检进程里没有 Hub，所以自己加地板。
+  // Production fuyao is bare fetch with no min spacing (Hub serializes); no Hub here, so add a floor.
   if (family === 'fuyao') return createRequestThrottle(FUYAO_PROBE_GAP_MS)
   if (family === 'eastmoney' || family === 'tencent' || family === 'retriever' || family === 'ftshare') return NO_PACE
   return createRequestThrottle(1_000)
 }
 
-/**
- * 开工前凭据闸门：缺 key 就红，**一个请求都不发**。
- * 理由不是"少发几个请求"——是 AnySearch 缺 key 照样返回 200 + 真结果，让它跑起来就是假绿。
- */
+// Missing key must fail before any request: AnySearch answers 200 with real results without a key,
+// so letting it run would be a false green.
 export function assertCredentials(entries) {
   const needed = [...new Set(entries.map(secretRefOf).filter(Boolean))].sort()
   const missing = needed.filter((ref) => !resolveCredential(ref))
@@ -203,7 +185,7 @@ export function assertCredentials(entries) {
   return needed
 }
 
-/** Fuyao 的 manager_id / company_id 不许编造：从真实响应解析，解析不出就把依赖它的条目记 SKIPPED。 */
+/** Never invent manager_id / company_id: resolve from a real response, else mark dependents SKIPPED. */
 async function resolveIdentifiers(entries, sources, log) {
   const found = {}
   for (const ref of new Set(entries.map((e) => e.requires).filter(Boolean))) {
@@ -265,7 +247,7 @@ async function runOne({ entry, sources, probes, identifiers }) {
         budgetMs: entry.budgetMs, knownCodes: entry.knownCodes,
         identityMismatch: identity ? rows[0]?.[identity.field] !== identity.value : false,
       }),
-      // 这是 Issue 里最能缩短修复时间的一栏：期望键 vs 实得键，只有键名，没有值。
+      // The most useful column in an issue: expected vs actual keys, names only, no values.
       keyDiff: expected.length > 0 && actual.length > 0 ? diffKeys(expected, actual) : undefined,
       actualKeys: expected.length === 0 && actual.length > 0 ? actual.slice(0, 12) : undefined,
     }
@@ -284,12 +266,8 @@ async function runOne({ entry, sources, probes, identifiers }) {
   }
 }
 
-/**
- * 把条目里的 `dayShift` 标记换成具体日期——**一次运行只做一遍**，之后 runner、运行时 id 解析、
- * 报告看到的都是普通字符串（换算做两遍就会出现两个"今天"，跨 UTC 午夜那档尤其）。
- * 单独导出是为了能被离线测试钉住：这一步漏掉的症状是"参数是个对象"，只有真发请求才会炸，
- * 而本仓已经踩过一次"本地全绿、只有 CI 发现"（§11.5 第 4 条）。
- */
+// `dayShift` markers become dates exactly once per run: runner, id resolution and report must all
+// see plain strings (resolving twice can yield two different "todays" around UTC midnight).
 export function withResolvedDates(entries, runAt = new Date()) {
   return entries.map((entry) => ({
     ...entry,
@@ -304,7 +282,7 @@ export async function runContractProbes({ tier = 'daily', only, family, log = (t
   let entries = probesForTier(tier)
   if (family) entries = entries.filter((entry) => entry.family === family)
   if (only) entries = entries.filter((entry) => entry.capability.includes(only))
-  // trading_calendar 排最前：它决定后面所有 EMPTY 该怎么解释。
+  // trading_calendar first: it decides how every later EMPTY should be read.
   entries = [...entries].sort((a, b) => Number(b.capability === 'trading_calendar') - Number(a.capability === 'trading_calendar'))
   entries = withResolvedDates(entries)
 
@@ -344,7 +322,7 @@ export async function runContractProbes({ tier = 'daily', only, family, log = (t
       shadow: results.filter((r) => r.state === 'shadow').length,
       failing: failing.length,
     },
-    // ⛔ 只有这一份进 Issue；TRANSPORT / SLOW / EMPTY 一律留在 summary，不开单。
+    // ⛔ Only this list opens issues; TRANSPORT / SLOW / EMPTY stay in the summary.
     failing,
   }
 }

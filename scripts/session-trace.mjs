@@ -1,16 +1,8 @@
 #!/usr/bin/env node
 /**
- * 观察 Capital 会话里主 Agent 与子 Agent 的行为。
- *
- * 只读：解压 `$DSH_HOME/sessions/<workspace-slug>/<session-id>/session.v3.jsonl.zstd`
- * （DSH 的追加式记录，每个 frame 是一段独立 zstd，所以要逐帧解），按
- * `header.parentSession` 还原委派树，再打印每个 Agent 的工具序列与 Agent 间消息。
- *
- * 用法：
- *   node scripts/session-trace.mjs                    # 当前工作目录最近的会话树
- *   node scripts/session-trace.mjs --session <id>     # 指定会话（前缀匹配即可）
- *   node scripts/session-trace.mjs --list             # 只列会话，不展开
- *   node scripts/session-trace.mjs --cwd /path/to/ws  # 指定工作目录
+ * Prints main/sub-agent behaviour from a Capital session: tool sequences and inter-agent messages,
+ * read-only. Session files are appended frame by frame (one zstd frame per write), so each must be
+ * decompressed frame by frame; the tree comes from `header.parentSession`.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -24,7 +16,7 @@ function argValue(name, fallback) {
   return index >= 0 && process.argv[index + 1] ? process.argv[index + 1] : fallback
 }
 
-/** 逐帧解压：Node 的 zstd 解码只吃第一帧，会话文件是追加式多帧。 */
+/** Node's zstd decoder stops after the first frame; session files append one frame per write. */
 function decodeSession(file) {
   const buffer = readFileSync(file)
   const offsets = []
@@ -39,7 +31,7 @@ function decodeSession(file) {
     try {
       text += zstdDecompressSync(buffer.subarray(offsets[index], offsets[index + 1])).toString('utf8')
     } catch {
-      // 压缩数据里出现巧合的 magic 会切错帧，跳过即可
+      // A coincidental magic inside compressed data splits the frame wrong; skip it.
     }
   }
   const events = []
@@ -48,16 +40,15 @@ function decodeSession(file) {
     try {
       events.push(JSON.parse(line))
     } catch {
-      // 记录被截断时忽略残行
+      // Ignore the truncated tail line of a half-written record.
     }
   }
   return events
 }
 
 /**
- * DSH 把工作目录编码成会话目录名：去掉开头的 `/`，把 `/` 换成 `-`，两侧各加 `-`。
- * 例：`/home/shawn/projects/capital-generation` → `--home-shawn-projects-capital-generation--`
- * （目录名里的 `-` 与路径分隔符不可逆，所以只能正向编码后比对，不做反向还原。）
+ * DSH encodes cwd into the session dir name: strip the leading `/`, replace `/` with `-`, wrap in `-`.
+ * Paths are not reversible (dashes collide with separators), so compare only forward encodings.
  */
 function slugFor(cwd) {
   return `--${cwd.replace(/^\//, '').replace(/\//g, '-')}--`
@@ -84,13 +75,13 @@ function loadSessions(cwd) {
       if (!header) continue
       sessions.push({ id, file, header, events, mtime: statSync(file).mtimeMs })
     } catch {
-      // 正在写入或损坏的会话跳过
+      // Skip sessions that are still being written or are corrupt.
     }
   }
   return { root, sessions }
 }
 
-/** 主会话 id 带 `session-` 前缀、子会话目录是裸 uuid，显示时统一去掉前缀。 */
+/** Main session ids carry a `session-` prefix, child dirs are bare uuids; display both bare. */
 const shortId = (id) => String(id ?? '').replace(/^session-/, '').slice(0, 8)
 
 const compact = (value, limit = 110) => {
@@ -158,7 +149,7 @@ function renderSession(session, sessions, options, depth) {
   for (const child of children) renderSession(child, sessions, options, depth + 1)
 }
 
-/** 父子关联：子会话 header.parentSession 指的是父会话 header.id（可能带/不带 session- 前缀）。 */
+/** parentSession points at the parent header.id, with or without the `session-` prefix. */
 function sameSession(session, id) {
   if (!id) return false
   const bare = (value) => String(value).replace(/^session-/, '')
@@ -201,7 +192,7 @@ function main() {
       console.log(`找不到会话 ${wanted}；用 --list 看可用 id`)
       return
     }
-    // 指定子会话时，回溯到它的根，方便看整棵树
+    // A named child still shows the whole tree: walk up to its root.
     let cursor = match
     while (cursor.header.parentSession) {
       const parent = sessions.find((session) => sameSession(session, cursor.header.parentSession))

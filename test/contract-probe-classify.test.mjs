@@ -1,10 +1,7 @@
 /**
- * 判据分类器的回归。
- *
- * 为什么单独钉：`classify()` 决定了「今天开不开 Issue」这一件事，而它整个是纯函数——
- * 却全靠上游错误文本与 code 的形状。这类映射一旦哪天有人"顺手改个正则"，
- * 坏法是把真故障静音或把噪声开成警报，两种都要等到出事那天才看得见。
- * 这里把每一条实测过的形状钉成断言（含 2026-10-08 真跑时踩到的三个误判）。
+ * Verdict classifier regression. `classify()` alone decides whether a daily Issue opens, yet it
+ * depends entirely on upstream error text and codes; a casual regex edit would either mute real
+ * failures or alarm on noise. Every shape here was observed in real runs.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -55,7 +52,7 @@ test('HTTP 状态与限流算 HTTP_STATUS，会开单', () => {
 })
 
 test('合法空结果与参数被拒各有归属，不许混进 TRANSPORT', () => {
-  // 2026-10-08 真跑踩到的误判：这条一度被判成 TRANSPORT。
+  // "no records" is a data gap, not a transport failure — a live run once misclassified it.
   const noBillboard = Object.assign(new Error('Eastmoney ticker 600519.SH has no billboard records'), { code: 'eastmoney_no_billboard_data' })
   assert.equal(classify({ error: noBillboard, ...ok }), 'EMPTY')
   const notFound = Object.assign(new Error('互动易查不到 600519'), { code: 'NOT_FOUND' })
@@ -67,7 +64,7 @@ test('合法空结果与参数被拒各有归属，不许混进 TRANSPORT', () =
 test('AnySearch 替目标站报的错不算 AnySearch 坏——巡检测的不是 gov.cn 开不开门', () => {
   const extractFailed = Object.assign(new Error('AnySearch /v1/extract error: Unable to extract content from the URL. (extract_failed)'), { code: 'UPSTREAM' })
   assert.equal(classify({ error: extractFailed, ...ok }), 'PASS')
-  // 但鉴权与限流是真故障，必须开单。
+  // Auth and rate limits reported by AnySearch itself are real failures.
   assert.equal(classify({ error: Object.assign(new Error('AnySearch 401'), { code: 'AUTH', status: 401 }), ...ok }), 'HTTP_STATUS')
 })
 

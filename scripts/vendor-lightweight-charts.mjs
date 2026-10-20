@@ -1,15 +1,8 @@
 #!/usr/bin/env node
 /**
- * 把 lightweight-charts 的浏览器 standalone 构建 vendor 进本仓库。
- *
- * 设计约束（见内部设计文档 docs/design/chart-visualization.md §5.5）：
- *  - **不用 CDN**：本仓是离线本地部署，图表库必须随包发布；
- *  - **固定版本**：版本号写进 VERSION.json 并记录 SHA-256，升级是一次显式动作，
- *    不是 `npm install` 的副作用；
- *  - **输出确定性**：不写时间戳，重复执行结果逐字节一致，便于 review diff。
- *
- * 用法：node scripts/vendor-lightweight-charts.mjs
- * 前置：node_modules 里已安装 devDependency `lightweight-charts`。
+ * Vendors the lightweight-charts browser standalone build. No CDN (offline deployment), a pinned
+ * version recorded with its SHA-256 as an explicit upgrade action, and byte-identical reruns
+ * (no timestamps) so diffs stay reviewable.
  */
 import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
@@ -39,7 +32,7 @@ const sha256 = createHash('sha256').update(source).digest('hex')
 mkdirSync(OUT_DIR, { recursive: true })
 writeFileSync(join(OUT_DIR, DIST_FILE), source)
 
-// 许可证必须随包发布：Apache-2.0 的 NOTICE 义务 + 归属说明。
+// The license must ship too: Apache-2.0 NOTICE obligation plus attribution.
 const licenseCandidates = ['LICENSE', 'LICENSE.txt', 'LICENSE.md']
 const licenseFile = licenseCandidates.find((candidate) => existsSync(join(PKG_DIR, candidate)))
 if (!licenseFile) {
@@ -55,8 +48,7 @@ const version = {
   license: manifest.license,
   dist: DIST_FILE,
   sha256,
-  // 归属：Apache-2.0 要求保留归属说明；库自带 attributionLogo（默认开启），
-  // 我们保持开启，因此无需在 UI 里另加一行 —— 见 typings.d.ts 的 attributionLogo 注释。
+  // Attribution: the library's own attributionLogo stays enabled, so no extra UI line is needed.
   attribution: 'TradingView Lightweight Charts™ — attribution logo 保持开启',
 }
 writeFileSync(join(OUT_DIR, 'VERSION.json'), `${JSON.stringify(version, null, 2)}\n`)

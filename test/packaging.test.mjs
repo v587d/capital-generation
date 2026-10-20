@@ -7,23 +7,15 @@ import { fileURLToPath } from 'node:url'
 import { locateNpmCli } from '../scripts/lib/run-tool.mjs'
 
 /**
- * 打包闸门。
- *
- * 为什么必须有这条测试：浏览器侧的静态资源（vendored 图表库）**不会**被 tsc 搬运，
- * 漏掉的表现不是"图表难看"，而是运行时 `loadVendoredChartLibrary()` 抛错、
- * 图表 HTML 里少一段脚本。而将来 Step 3 的客户端 bundle 一旦漏发，
- * 上游会以 `ClientPackageCompositionError` 让**整个 web profile 起不来**。
- *
- * 所以这里断言的不是"文件存在"，而是"**发布出去的那个包里**文件存在"——用
- * `npm pack --dry-run --json` 的实际文件清单，而不是源码目录里看一眼。
+ * Packaging gate: the assertion is "present in the published tarball" (`npm pack --dry-run --json`),
+ * not "present in the source tree". Vendored browser assets are not moved by tsc, and a missing
+ * client bundle keeps the whole web profile from starting.
  */
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
 function packedFilePaths() {
-  // 不经 shell 启动 npm：Windows 上 `npm` 是 `.cmd` 垫片，`spawnSync('npm')` → ENOENT 且
-  // `stderr` 是空的（原断言只插值 stderr，于是失败被报成一句没有原因的话）；
-  // `spawnSync('npm.cmd')` → EINVAL；`shell: true` 配 args 是 DEP0190 弃用形态。
-  // npm 本身就是 Node CLI，所以直接交给当前进程的 node 跑它的 cli.js。
+  // Launch npm through this process's node: the Windows `npm` shim is a `.cmd` (ENOENT, empty stderr),
+  // `npm.cmd` hits EINVAL and `shell: true` with args is a deprecated form.
   const { cli, searched } = locateNpmCli()
   assert.ok(cli !== undefined,
     `定位不到 npm-cli.js，无法问真实打包器"发出去的文件有哪些"。搜过这些路径：\n${searched.join('\n')}`)
@@ -58,15 +50,14 @@ test('打包闸门：vendored 图表库与构建产物都在发布清单里', (t
     'config/client.js',
     'watchlist/package.json',
     'watchlist/index.js',
-    // 类型表被 host 半边 import、被浏览器半边内联：漏进包 = 装出去的插件整条 /capital-watchlist 起不来。
+    // Shared type table: imported by the host half, inlined by the browser half — missing kills /capital-watchlist.
     'watchlist/holding-rules.js',
     'watchlist/client.js',
-    // 第三方清单要点得到文件：写了 `xxx/LICENSE` 却没随包发，等于把署名义务发丢了。
+    // A listed LICENSE that is not shipped loses the attribution duty.
     'THIRD_PARTY_NOTICES.md',
     'preset/capital-generation/agent.patch.yml',
     'preset/capital-generation/skills/capital-chart-protocol/SKILL.md',
-    // 协议五册逐颗点名：persona 的 duty 行按名字加载，漏发一册的症状是"子 Agent 拿不到契约"，
-    // 而 catalog 反查只会说找不到文件，说不出少的是哪一册。
+    // Persona duty lines load skills by name, so every protocol book is named individually here.
     'preset/capital-generation/skills/capital-data-protocol/SKILL.md',
     'preset/capital-generation/skills/capital-data-profile/SKILL.md',
     'preset/capital-generation/skills/capital-data-query/SKILL.md',
@@ -77,12 +68,11 @@ test('打包闸门：vendored 图表库与构建产物都在发布清单里', (t
     assert.ok(paths.has(required), `发布清单里缺少 ${required}（npm run build 是否跑过？files 列表是否漏了？）`)
   }
 
-  // 许可证必须随包发布：Apache-2.0 的 NOTICE 义务。
+  // Apache-2.0 NOTICE duty: the vendored license must ship.
   const license = [...paths].find((path) => path.endsWith('chart/vendor/LICENSE'))
   assert.ok(license, 'vendored 图表库的 LICENSE 必须随包发布')
 
-  // `dsh.bundle.patch` 现在是**数组**（主 patch + 预设声明行）：漏发其中任何一个的表现不是
-  // 报错，而是"预设根本没注册"——历史会话恢复时 Unknown agent preset。
+  // `dsh.bundle.patch` is an array (host patch + preset declaration line); a missing entry leaves the preset unregistered.
   const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
   const declared = manifest.dsh?.bundle?.patch
   const patches = Array.isArray(declared) ? declared : declared ? [declared] : []
@@ -92,7 +82,7 @@ test('打包闸门：vendored 图表库与构建产物都在发布清单里', (t
     assert.ok(paths.has(packed), `dsh.bundle.patch 指向的 ${packed} 不在发布清单里（装配整行会静默不生效）`)
   }
 
-  // 反向断言：本地研发文档不进包（.gitignore 之外的第二道闸门）。
+  // Reverse gate: local dev docs must not ship (second gate after .gitignore).
   for (const path of paths) {
     assert.equal(path.startsWith('docs/'), false, `研发文档不应随包发布：${path}`)
   }
@@ -100,10 +90,8 @@ test('打包闸门：vendored 图表库与构建产物都在发布清单里', (t
 })
 
 test('打包闸门：selected-skills 的运行时半边逐条落在发布清单里', async () => {
-  // provider 运行时按**包内相对路径** import catalog，skills 根按 catalog 的仓库→相对路径映射现算
-  // （src/agents/selected-skills-provider.ts）：漏发任何一条的表现不是报错，而是"用户在卡片上勾了，
-  // 那个 skill 就是不出现"。仓库里跑测试永远发现不了，因为目录就在 cwd 下面——AGENTS.md §9.7 那一族，
-  // 只有打包器能回答"发出去有哪些文件"。
+  // The provider imports the catalog by in-package relative path and derives each skills root from it
+  // (src/agents/selected-skills-provider.ts): a missing entry only shows as "checked, never appears".
   const paths = packedFilePaths()
   const { SELECTED_SKILL_CATALOG, SELECTED_SKILL_SKILL_DIRS } = await import('../selected-skills/catalog.js')
   assert.ok(SELECTED_SKILL_CATALOG.length >= 1, 'catalog 一条都没有，这条闸门就变成空断言了')
@@ -112,8 +100,7 @@ test('打包闸门：selected-skills 的运行时半边逐条落在发布清单�
     assert.ok(paths.has(required), `发布清单里缺少 ${required}（settings 卡片与 provider 都 import catalog）`)
   }
 
-  // 每条 catalog 的 repository 都得在「仓库 → skills 相对路径」里有登记，否则 provider 现算不出根、
-  // 下面这条按真实路径反查也无从查起（InvestSkill 的 skill 在 plugins/us-stock-analysis/skills 底下）。
+  // Every catalog repository needs a registered skills root, or the provider cannot resolve its path.
   for (const entry of SELECTED_SKILL_CATALOG) {
     assert.ok(SELECTED_SKILL_SKILL_DIRS[entry.repository],
       `catalog 条目 ${entry.key} 的仓库 ${entry.repository} 没有 skills 根登记（SELECTED_SKILL_SKILL_DIRS）`)
@@ -125,7 +112,7 @@ test('打包闸门：selected-skills 的运行时半边逐条落在发布清单�
       `catalog 登记了 ${entry.key}（${entry.name}），但包里找不到 ${skillPath} —— 用户勾上这一格也不会生效`)
   }
 
-  // MIT 快照随包发布，许可证与溯源记录必须跟着走（上游全文快照是刻意保留的，见 selected-skills/README.md）。
+  // MIT snapshots ship with their license and provenance record (see selected-skills/README.md).
   const repositories = [...new Set(SELECTED_SKILL_CATALOG.map((entry) => entry.repository))]
   for (const repository of repositories) {
     for (const provenance of ['LICENSE', 'UPSTREAM.md']) {
@@ -134,12 +121,8 @@ test('打包闸门：selected-skills 的运行时半边逐条落在发布清单�
     }
   }
 
-  // 反向断言：随包发的是运行时正文与溯源，不是上游仓库全部。每颗快照的排除口径就写在它自己的
-  // `.npmignore` 里（上一颗挡 images/ 与 viz/ 的成图和 viz 站点；InvestSkill 挡它自己的静态站、
-  // 与 skill 正文同源的 prompts/ 副本、脚本与 CI 材料），所以这里以那份文件为唯一声明处：
-  // 有人放宽口径、或 .npmignore 写了却没被打包器执行，这条会点名哪个目录或哪份文件又进包了。
-  // **目录规则与文件规则都要问**：第五颗之后补的排除大多是 `README*.md` 这类文件规则，
-  // 只查目录等于放任它们不生效（AGENTS.md §9.7 同一族：闸门必须覆盖真会失效的那一类）。
+  // Ship runtime bodies and provenance, not whole upstream repos. Each snapshot declares exclusions in its own
+  // `.npmignore` (the single source here), and both directory and file rules must be checked.
   const globToRegExp = (rule) => new RegExp(`^${rule
     .replace(/[.+^${}()|[\]\\]/g, '\\$&')
     .replace(/\*/g, '.*')
@@ -169,7 +152,7 @@ test('打包闸门：selected-skills 的运行时半边逐条落在发布清单�
 })
 
 test('打包闸门：声明 dsh.client 的包，其客户端 bundle 必须真的在包里', () => {
-  // 主包与随包携带的嵌套包都要查：漏发 chart-ui/client.js 会让整个 web profile 起不来。
+  // Check the main package and every nested package: a missing client bundle stops the web profile.
   const manifests = ['package.json', 'chart-ui/package.json', 'config/package.json', 'watchlist/package.json']
   const paths = packedFilePaths()
   let checked = 0
@@ -187,8 +170,7 @@ test('打包闸门：声明 dsh.client 的包，其客户端 bundle 必须真的
     const onDisk = join(ROOT, owner, resolved)
     assert.ok(existsSync(onDisk), `exports["./client"] 指向的文件不存在：${owner}/${resolved}`)
 
-    // 发布清单这一侧只用 posix 比：`npm pack --json` 返回的是 `chart-ui/client.js`，而
-    // join() 给本机分隔符——Windows 上 has() 永远落空（2026-09-30 双端 CI 实测的唯一红）。
+    // Compare in posix form: `npm pack --json` always returns `/` paths, join() uses the host separator.
     const packedPath = join(owner, resolved).replace(/^\.\//, '').split(sep).join('/')
     assert.ok(paths.has(packedPath), `${packedPath} 不在发布清单里；bundle 缺失会让整个 web profile 起不来`)
   }
@@ -196,18 +178,9 @@ test('打包闸门：声明 dsh.client 的包，其客户端 bundle 必须真的
   assert.ok(checked >= 1, '至少 chart-ui 应声明 dsh.client；一个都没检查到说明测试失效了')
 })
 
-/**
- * 插件显示名的闸门（账本 L25）。
- *
- * 卡片与详情页主标题的唯一来源是宿主按 `<包名>/locale/<语言>.json` 读到的 `meta.title`，
- * 而这条链**三个断点全都静默**（症状一律是"又变回 @v587d/capital-generation 了"）：
- *  1. `en.json` 是宿主扫目录的**入口**——解析不到它就根本不读这个目录（`readPluginMeta` 里
- *     `englishPath === undefined ? new Map() : dictionariesOf(englishPath, …)`），只加 `zh.json` 等于没加。
- *  2. 目录里**每一个** `*.json` 都要按语言 id 命名且能解析；多一个无关文件就让整份 meta
- *     变成 `{ error }`，显示名整体回落且不报错。
- *  3. 读的是**导出资源**不是磁盘路径：漏 `exports["./locale/*.json"]` 或 `files` 里的 `locale`，
- *     本地跑得好、装出去就没有。
- */
+// Plugin display name = meta.title from <package>/locale/<language>.json; all three links fail silently.
+// en.json is the entry the host scans for, every other *.json must be a valid language id (one stray file
+// voids the whole meta), and reads target exported resources — `exports` / `files` omissions bite only after install.
 test('插件显示名：根包 locale meta 必须能被宿主读到，且 README 指路的名字跟着它', () => {
   const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
   assert.equal(manifest.exports?.['./locale/*.json'], './locale/*.json',
@@ -230,7 +203,7 @@ test('插件显示名：根包 locale meta 必须能被宿主读到，且 README
     assert.ok(paths.has(`locale/${name}`), `locale/${name} 不在发布清单里（files 是否漏了 locale？）`)
   }
 
-  // 卡片只画 meta.title，npm 包名从此不再出现在「已安装」列表里 —— README 让用户找包名就是错的路标。
+  // Cards draw only meta.title, so the README must not send users looking for the npm package name.
   const readme = readFileSync(join(ROOT, 'README.md'), 'utf8')
   assert.ok(!/已安装的\s*`@v587d\/capital-generation`/u.test(readme),
     'README 还在让用户到「已安装」列表里找 npm 包名，但卡片显示的是 locale meta.title')
@@ -239,10 +212,9 @@ test('插件显示名：根包 locale meta 必须能被宿主读到，且 README
 })
 
 test('打包闸门：第三方清单点名的文件必须真的随包发布', () => {
-  // 清单是"这是谁的东西、什么许可"对外的唯一答案。写了路径却没发出去 = 署名义务发丢了，
-  // 而且什么报错都不会有——所以把清单里点名的每个仓内路径都拿去问一次真实打包器。
+  // The notices file is the only external answer for "whose work, what license": ask the packer about every path it names.
   const notices = readFileSync(join(ROOT, 'THIRD_PARTY_NOTICES.md'), 'utf8')
-  // 反引号里还写着 `@deepseek-ai/cordis` 这类 npm 包名，它们带斜杠但不是仓内路径。
+  // Backticks also hold npm package names like `@deepseek-ai/cordis`: slashed, but not repo paths.
   const named = [...new Set(
     [...notices.matchAll(/`([^`]+)`/g)]
       .map((match) => match[1])

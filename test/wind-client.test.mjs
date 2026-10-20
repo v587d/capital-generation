@@ -13,12 +13,8 @@ import {
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
-/**
- * 报给 Wind 的客户端版本必须跟 `package.json` 同步。
- *
- * 发版时版本号有**两处**要改（主包 + 嵌套包 `chart-ui/`），这里原本是写死的第三处；
- * 改成常量 + 本断言后，漂移会**具名失败**而不是悄悄发出一个错版本号。
- */
+// The client version reported to Wind is a third copy after package.json and the chart-ui nested
+// package; pinning it makes a missed bump fail by name instead of silently sending a wrong version.
 test('WIND_CLIENT_VERSION 必须与 package.json 的 version 一致', () => {
   const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
   assert.equal(WIND_CLIENT_VERSION, pkg.version, '发版时忘了同步 WIND_CLIENT_VERSION（src/web-retriever/wind-client.ts）')
@@ -26,7 +22,7 @@ test('WIND_CLIENT_VERSION 必须与 package.json 的 version 一致', () => {
 
 const okKey = async () => 'secret'
 
-/** 替换 globalThis.fetch 并记录每次调用；用完必须 restore。 */
+// Swaps globalThis.fetch and records every call; restore() is mandatory.
 function stubFetch(impl) {
   const calls = []
   const original = globalThis.fetch
@@ -177,7 +173,7 @@ test('网络错误按退避重试，最终成功；Key 缺失直接 AUTH 不触�
     const result = await client.callTool('get_financial_news', { query: 'x' })
     assert.equal(result.ok, true)
     assert.deepEqual(result.data, { items: [1] })
-    // initialize 网络错误重试 2 次后成功（3 次请求），tools/call 首次即成功（第 4 次请求）。
+    // 3 requests: initialize retried twice then succeeded; 4th = tools/call succeeding first try.
     assert.equal(retryStub.calls.length, 4)
   } finally {
     retryStub.restore()
@@ -225,10 +221,8 @@ test('超时归 NETWORK；调用方取消时不重试', async () => {
   }
 })
 
-/**
- * 七台 server 的端点表是数据源侧唯一的路由真值（`src/sources/wind-mcp.ts` 按 server_type 取）。
- * 这里钉的是**事实**：拼错的端点不会报错，只会让上游回一个看不懂的 404/BACKEND。
- */
+// The seven-server endpoint table is the only routing truth on the source side (src/sources/wind-mcp.ts
+// picks by server_type). A typo'd endpoint never errors locally — upstream just answers 404/BACKEND.
 test('WIND_SERVER_ENDPOINTS：七台齐全、逐台对号，financial_docs 仍是同一个默认端点', async () => {
   assert.deepEqual(Object.keys(WIND_SERVER_ENDPOINTS), [
     'stock_data', 'fund_data', 'index_data', 'bond_data', 'financial_docs', 'economic_data', 'analytics_data',

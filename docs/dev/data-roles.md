@@ -24,7 +24,7 @@
     profile_ref, columns, bytes, facts_bytes, queries_bytes, hint}` 小回执，回执自带体积归因
     （哪边大砍哪边：queries 大 → 去 queries 单走 query_dataset；facts 大 → `columns_of_interest`
     收窄）。**不要**再引入 digest / 裁剪阶梯，也不要因一次重发砍事实块（超预算的成因总是塞多了）。
-  - **出图只有一个入口**：`prepare_chart_source` 创建 one-shot `visualization_specialist` 并汇总
+  - **出图只有一个入口**：`prepare_chart_source` 委派 `visualization_specialist` 出图并汇总
     `chart_ref`（§6 → `chart-presentation.md`）。主 Agent 不出图、不在正文罗列图表文件。
   - **gate 的"必须出图"以委派范围为前提**（2026-09-26 实机冒烟）：主 Agent 说"停在 profile"，
     data_junior 仍按"可视化 gate 是硬步骤"一路出图——工具行为符合协议，但用户的范围指令没被遵守。
@@ -34,9 +34,23 @@
     `bash` 是**纯计算兜底**，**不是取数通道**（§1.6 → `bash-gate.md`）。data_analyst 启用前逐行 /
     序列级分析没有合规路径，须如实告知用户并降级到统计能力。
 - **主 Agent 读数据一律委派 data_junior**，绝不直接调用 Dataset 系列工具（工具层拒绝主 Agent，
-  `dataset_session_mismatch`）。collector 每送达一份 DatasetRef 就把该份交同一个 junior 先到 profile / query，
+  `dataset_session_mismatch`）。**这道闸门的判据是人设，不是会话拓扑**（2026-10-19，设计
+  `docs/design/agent-preset-four-modes.md` §4.1）：`src/tool-exec.ts` 的 `authorizedSession` 读
+  `agentPresets.composedPreset(exec.agent.ctx)`，命中 `src/preset-ids.ts` 的授权集合才放行；
+  身份确证不了才回落到旧的"必须有 `parentSession`"，回落路径不比旧判据更宽。所以人类手工开出来的
+  角色模式能用自己那套工具，而主 Agent 仍然不能——旧的拓扑写法把两者混为一谈，症状是角色模式的
+  每一颗业务工具都报 `restricted to delegated data agents`。判据现场可在 `dc_status` 的
+  `session_identity` 里读（`via=preset|topology`）。collector 每送达一份 DatasetRef 就把该份交同一个 junior 先到 profile / query，
   收到 collector 终结消息后才要求综合与可视化 gate；同一 task_id + dataset_id 不重复派发。
-- **`visualization_specialist`**：one-shot 前台子 Agent，工具表只有 `skill` + `render_chart`；
+- **⛔ 身份判据一律在调用期现读，不许挂在 `agent/created` 上**（2026-10-19 真机实测）：宿主**先建
+  Agent、后选人设**（`agentPresets.select()` = `recompose(agent.ctx)` 再 `session.append("agent-preset/selected")`，
+  账本 L32），created 那一刻读到的还是创建默认值——装在 created 上的身份闸门对**手开模式一次都不触发**
+  （症状：手开 Capital 的 `ocr` `url` 形态真的打到了上游，`dc_status` 里连一条拒绝记录都没有）。
+  `tools.guard()` 按 `exec.agent` 判定、与实例绑哪层无关，所以三颗身份闸门（fs 写口 / `ocr` 形态 /
+  兄弟名字 `interrupt_agent`）都**全局装在插件 ctx 上、各一次**；`agent/created` 只剩两处 restrict
+  （根收敛 + 角色兄弟可见性），它们管的是**被委派子会话**那一支（可见性真能减掉，手开那一支减不掉）。
+- **`visualization_specialist`**：data_junior 的异步子 Agent（0.2.1 起子会话一律异步，one-shot /
+  前台模式已随 `backgroundMode` 一起删除），工具表只有 `skill` + `render_chart`；
   spec 由它组装，data_junior 只交"要什么视图"。
 - **`data_analyst`**：保持 `disabled`，启用前置条件见 §8.4（`preset-persona.md`）。启用后由主 Agent **按需激活**（不进每轮强制预检），补数走 §1.4 的 `analysis_data_request`，不直接持有取数工具。
   **`web_retriever`**：纪律见 §4.1（`web-retriever.md`）。

@@ -1,8 +1,7 @@
 /**
- * 本地类型声明垫片：turndown 与 @joplin/turndown-plugin-gfm。
- *
- * 本仓刻意不引入 @types/turndown（也不引入 @types/node，见 src/chart/html.ts 的明文约定），
- * 只声明我们真正用到的形状。tsconfig 的 include 覆盖 src 目录，会自动收录本文件。
+ * Type shim for turndown + @joplin/turndown-plugin-gfm: no `@types/*` in this repo
+ * (same rule as `src/chart/html.ts`), only the shapes we use are declared.
+ * tsconfig `include` covers src, so this file is picked up automatically.
  */
 
 declare module 'turndown' {

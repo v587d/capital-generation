@@ -21,7 +21,7 @@ function fakeCtx(toolRuntime) {
   const effects = []
   return {
     get: (name) => (name === 'tools' ? toolRuntime : undefined),
-    effect: (fn) => { effects.push(fn); return fn() }, // 真实 Cordis effect 会立即执行同步副作用
+    effect: (fn) => { effects.push(fn); return fn() }, // Real Cordis effects run their sync side effect immediately.
   }
 }
 
@@ -98,16 +98,16 @@ test('工具注册：request_data + list_capabilities + describe_capability；ge
 })
 
 test('⛔ 并发声明只在纯读的发现面：list / describe 可并发，request_data 不声明', () => {
-  // 省往返的机制是 `isConcurrencySafe` + 框架并发池（`docs/dev/data-roles.md` §1.1），不是把多份结果合并成一个载荷。
-  // 发现面读的是内存注册表，没有副作用，所以多域 / 多能力的探索付一次往返。
+  // Saving round-trips come from `isConcurrencySafe` + the framework pool (docs/dev/data-roles.md §1.1),
+  // never from merging results. The discovery surface reads an in-memory registry with no side effects.
   const { toolRuntime } = makeHubAndTools()
   const definition = (name) => toolRuntime.definitions.find((d) => d.name === name)
   for (const name of ['list_capabilities', 'describe_capability']) {
     assert.equal(typeof definition(name).isConcurrencySafe, 'function', `${name} 必须声明并发安全，否则模型只能一份一份串行等`)
     assert.equal(definition(name).isConcurrencySafe({}), true)
   }
-  // request_data 刻意不声明：Hub 的执行器是 FIFO 串行（`hub.ts` 的 Phase 1 注释），上游节流与
-  // in-flight 合并都建立在"一次执行一条"上；把它放进并发池等于替节流链承诺一个没验过的并发形状。
+  // request_data is deliberately not concurrency-safe: the Hub executor is FIFO serial, and upstream
+  // throttling plus in-flight merging rely on one execution at a time.
   assert.equal(definition('request_data').isConcurrencySafe, undefined,
     'request_data 不许顺手标并发安全——要标就得先重验 Hub 串行与各家节流链')
 })
@@ -261,7 +261,7 @@ test('list_capabilities：一行一条 capability|summary|paginated，不含内�
   assert.equal(directory, 'quote|行情快照|1')
   assert.deepEqual(definition.output.schema, { type: 'string' })
   assertToolOutput(definition, directory)
-  // 目录只负责"选哪个"：带 schema 的话全量约 23KB，会被剪枝器截断中间部分。
+  // The directory only helps pick a capability; with schema it would be ~23KB and get truncated mid-way.
   for (const forbidden of ['data_key', 'source_label', 'api:fuyao', 'get_a_share_prices_snapshot', 'input_schema']) {
     assert.ok(!directory.includes(forbidden), `目录不应出现 ${forbidden}`)
   }
@@ -329,7 +329,7 @@ test('describe_capability：返回单个能力的完整契约，一次一个', a
   assert.deepEqual(Object.keys(detail).sort(), ['capability', 'description', 'input_schema', 'output_fields', 'paginated', 'summary'])
   assert.equal(detail.capability, 'quote')
   assert.ok(detail.input_schema, '详情必须带 input_schema（params 填写依据）')
-  // 输出契约交字典不交 JSON Schema：逐列 schema 让详情体积随列数增长，宽表第一次注册就打穿预算。
+  // Output contract is a dictionary, not JSON Schema: per-column schema grows with column count and a wide table blows the budget.
   assert.equal(detail.output_fields, 'timestamp:integer\nitem:array\nitem[].thscode:string\nitem[].last_price:number?')
   assertToolOutput(toolRuntime.definitions.find((d) => d.name === 'describe_capability'), detail)
 })
@@ -345,7 +345,7 @@ test('describe_capability：四类错误都有稳定 code 与恢复指引', asyn
   await assert.rejects(() => run({ capability: 'a'.repeat(300) }), /capability_invalid/)
   await assert.rejects(() => run({ capability: 'quote,history' }), /capability_invalid/)
 
-  // 未知名字：错误里必须列出全部可用能力名，让模型能自我纠正而不是猜。
+  // Unknown name: must list all candidate names so the model can self-correct.
   await assert.rejects(() => run({ capability: 'kline' }), (error) => {
     assert.match(error.message, /capability_unknown/)
     assert.match(error.message, /quote/, '未知名字的错误必须列出可用能力')
@@ -353,7 +353,7 @@ test('describe_capability：四类错误都有稳定 code 与恢复指引', asyn
     return true
   })
 
-  // 目录为空（数据源未注册）：必须明确"别重试"，而不是含糊的 not found。
+  // Empty catalog (no sources registered) must say "do not retry", not a vague not-found.
   const empty = makeHubAndTools()
   await assert.rejects(
     () => runTool(empty.toolRuntime, 'describe_capability', { capability: 'quote' }, exec(delegatedSession())),
@@ -400,30 +400,34 @@ test('dc_status：上报 registered_capabilities 而非内部 source 名，不�
   assert.equal(status.api_key.source, 'file')
   assert.deepEqual(status.registered_capabilities, ['quote'])
   assert.equal('registration_error' in status, false, '注册不再以凭据为门槛，回执里不留这条自相矛盾的字段')
-  assert.equal('root_tool_policy' in status, false, '没注入 rootPolicy 时不许凭空造出这个字段（output.schema 要如实）')
+  assert.equal('agent_tool_policy' in status, false, '没注入收敛现场时不许凭空造出这个字段（output.schema 要如实）')
 })
 
 /**
- * 根收敛的现场记录必须能从**会话侧**读到：桌面端不落盘宿主日志，`ctx.logger.warn`
- * 在那边等于没有（2026-09-30 同一族第二次踩）。这条断言顺带钉住无损 JSON——
- * `agentId` 是 undefined，带出去就必须是 null，不许让空洞出工具边界（§9.5）。
+ * Tool-surface convergence must be readable from the session side: desktop builds do not persist
+ * host logs, so `ctx.logger.warn` is invisible there. Also pins lossless JSON -- undefined agentId
+ * must leave as null. The field now carries both root deny (`root: true`) and child allow/deny
+ * (`root: false`); `allowed` is always an empty array for root, and a missing field is a schema
+ * violation (§9.6).
  */
-test('dc_status：root_tool_policy 原样带出收敛现场，undefined 归一成 null', async () => {
+test('dc_status：agent_tool_policy 原样带出收敛现场，undefined 归一成 null', async () => {
   const { toolRuntime } = makeHubAndTools({
     diagnostics: {
       probeApiKey: async () => ({ present: false, source: null }),
       rootPolicy: () => [
         { agentId: undefined, root: true, presetId: 'standard', outcome: 'not-capital', denied: [], failed: [] },
         { agentId: 'root-2', root: true, presetId: 'capital-generation', outcome: 'restricted', denied: ['pwsh'], failed: ['bash'] },
+        { agentId: 'child-1', root: false, presetId: 'capital-data-junior', outcome: 'restricted', allowed: ['send_message', 'skill'], denied: [], failed: [] },
       ],
     },
   })
   const status = await runTool(toolRuntime, 'dc_status', {}, exec(delegatedSession()))
-  assert.deepEqual(status.root_tool_policy, [
-    { agent_id: null, root: true, preset_id: 'standard', outcome: 'not-capital', denied: [], failed: [] },
-    { agent_id: 'root-2', root: true, preset_id: 'capital-generation', outcome: 'restricted', denied: ['pwsh'], failed: ['bash'] },
+  assert.deepEqual(status.agent_tool_policy, [
+    { agent_id: null, root: true, preset_id: 'standard', outcome: 'not-capital', allowed: [], denied: [], failed: [] },
+    { agent_id: 'root-2', root: true, preset_id: 'capital-generation', outcome: 'restricted', allowed: [], denied: ['pwsh'], failed: ['bash'] },
+    { agent_id: 'child-1', root: false, preset_id: 'capital-data-junior', outcome: 'restricted', allowed: ['send_message', 'skill'], denied: [], failed: [] },
   ])
-  assert.equal(JSON.parse(JSON.stringify(status.root_tool_policy)).length, 2, '回执必须能无损序列化（undefined 不许带出工具边界）')
+  assert.equal(JSON.parse(JSON.stringify(status.agent_tool_policy)).length, 3, '回执必须能无损序列化（undefined 不许带出工具边界）')
 })
 
 test('tools 缺失：ctx.get(tools) 为空时不注册也不抛', () => {

@@ -1,16 +1,11 @@
 /**
- * PaddleOCR 输出 → 模型可读 markdown 的归一化（`ocr` 的呈现层，唯一一份实现）。
- *
- * 为什么必须归一化（2026-09-25 拿真报文实测，贵州茅台 15 页研报）：上游把**表格输出成内联
- * HTML**，每个单元格都带 `style='text-align: center; word-wrap: break-word;'`——
- * 105,639 个字符里 63,232 个（60%）是 `style='...'` 样板，去掉再转成 GFM 管道表只剩 27,156。
- * 本仓的场景恰恰是"大量表格、图形"，不处理就等于**预算的六成买的是 HTML 属性**，
- * 而 `prettifyMarkdown` 这类 flag 在上游被静默忽略（未知键也返回 Success），帮不上。
- *
- * 归一化只做**无损排版**：不删正文、不改数字、不做摘要。数字一律照抄上游。
+ * PaddleOCR output -> model-readable markdown (the only implementation). Upstream emits
+ * tables as inline HTML with per-cell `style=`, so on a measured 15-page report ~60% of
+ * characters were style boilerplate; `prettifyMarkdown`-style flags are silently ignored.
+ * Normalization is lossless layout only: no text, numbers or tables are dropped.
  */
 
-/** 上游一页的解析产物（我们只取 markdown 文本与图片计数）。 */
+/** One page as returned upstream (we use markdown text and image count). */
 export interface OcrSourcePage {
   page: number
   markdown: string
@@ -19,24 +14,24 @@ export interface OcrSourcePage {
 
 export interface OcrPageEntry {
   page: number
-  /** 该页正文在 `document` 里的起始码点下标（含）。 */
+  /** Code-point offset into `document` (inclusive). */
   start: number
-  /** 结束下标（不含）。 */
+  /** End offset (exclusive). */
   end: number
   chars: number
-  /** 该页第一个标题行（索引用，没有则省略）。 */
+  /** First heading line on the page, for the index. */
   heading?: string
 }
 
 export interface OcrDocument {
-  /** 全篇：各页正文以 `<!-- page:N -->` 分隔（渲染不可见，页定位靠它）。 */
+  /** Pages separated by `<!-- page:N -->`; invisible when rendered, used for page lookup. */
   document: string
   pages: OcrPageEntry[]
   chars: number
   images: number
-  /** 转成 GFM 的 HTML 表数量。 */
+  /** Number of HTML tables converted to GFM. */
   tables: number
-  /** 剥掉的 style 样板字符数（回执里用来证明"不是截断，是排版噪音"）。 */
+  /** Stripped style characters, so the receipt can prove layout noise, not truncation. */
   styleCharsRemoved: number
 }
 
@@ -48,7 +43,7 @@ export interface OcrHit {
 
 const PAGE_MARKER_PREFIX = '<!-- page:'
 
-/** HTML 实体：财报文档里 `&amp;` 出现在公司名与科目名里，不解开就是脏数据。 */
+/** `&amp;` appears in company and account names; leaving it encoded is dirty data. */
 const NAMED_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }
 
 function decodeEntities(value: string): string {
@@ -73,18 +68,15 @@ function stripTags(value: string): string {
 }
 
 function escapeCell(value: string): string {
-  // GFM 单元格里的竖线必须转义，否则一行被切成更多列——表格串列比报错危险（声明与正文不一致）。
+  // GFM cells need escaped pipes; a split row misaligns columns silently.
   return value.replace(/\|/gu, '\\|')
 }
 
-/** 取一行 `<tr>` 里的单元格文本。 */
+/** Cell text from one `<tr>`; split on open tags, then cut at the matching close tag. */
 function rowCells(row: string): string[] {
   const cells: string[] = []
-  // 先按**开**标签切：畸形行（少写 `</td>`，实测存在）也能一格一切；再按闭标签截断本段，
-  // 防止 `1</td><td>2` 这类残留把下一格的内容并进来。第一格之前的 `<thead>` 碎片一律丢弃。
-  // ⚠️ 单元格标签是 `<td>` **或** `<th>`（上游表头行用 `<th>`，实测）：写成 `<t(?:d|th)`
-  //    只匹配得到 `<td`，`<th>` 行切不出格、整行被 `kept` 丢掉——表头静默消失。
-  //    `\b` 在这里是必要的：它让 `<thead>` / `<table>` 不被误当成单元格开标签。
+  // Upstream header rows use `<th>`; matching only `<td` silently drops whole header rows.
+  // `\b` keeps `<thead>` / `<table>` from being read as cell openers.
   for (const segment of row.split(/<t(?:d|h)\b[^>]*>/giu).slice(1)) {
     cells.push(stripTags(segment.split(/<\/t(?:d|h)\s*>/iu)[0] ?? ''))
   }
@@ -92,10 +84,8 @@ function rowCells(row: string): string[] {
 }
 
 /**
- * 一张 HTML 表 → GFM 管道表。
- *
- * 表头按上游第一行处理（上游会把 `<thead><th>` 放第一行）；列数以各行最大值为准并补齐，
- * 因为 GFM 要求分隔行列数与表头一致，少一格整张表退化成裸文本。
+ * HTML table -> GFM pipe table. Header is upstream's first row; pad every row to the
+ * widest so GFM's separator count matches the header (a short row degrades the table).
  */
 function tableToMarkdown(tableHtml: string): string {
   const rows = [...tableHtml.matchAll(/<tr\b[^>]*>([\s\S]*?)(?:<\/tr>|$)/giu)].map((match) => rowCells(match[1]))
@@ -113,7 +103,7 @@ export interface NormalizedMarkdown {
   styleCharsRemoved: number
 }
 
-/** 剥样式 + HTML 表转 GFM + 收空行。对不含 HTML 的正文近似恒等。 */
+/** Strip styles, convert HTML tables to GFM, collapse blank lines; near-identity otherwise. */
 export function normalizeOcrMarkdown(source: string): NormalizedMarkdown {
   const styleMatches = source.match(/\s(?:style|class)\s*=\s*(?:"[^"]*"|'[^']*')/giu) ?? []
   const styleCharsRemoved = styleMatches.reduce((total, match) => total + match.length, 0)
@@ -126,8 +116,8 @@ export function normalizeOcrMarkdown(source: string): NormalizedMarkdown {
     .replace(/<br\s*\/?\s*>/giu, ' ')
     .replace(/<\/?(?:td|th|tr|thead|tbody|tfoot|table|div|span|p|font|img|a|sup|sub|b|i|u|s|em|strong)\b[^>]*>/giu, '')
     .replace(/\s(?:style|class)\s*=\s*(?:"[^"]*"|'[^']*')/giu, '')
-    // 上游会把标题粘在正文尾巴上（实测 `2024-11-12## 盈利预测`），标题不在行首就没法进索引；
-    // 要求 `#` 后必须有空格，避免把 "评级#买入" 这类没有空格的井号误拆。
+    // Upstream glues headings to preceding text (`2024-11-12## 盈利预测`); require a
+    // space after `#` so "评级#买入" is not split.
     .replace(/(?<=\S)(#{1,6}\s+\S)/gu, '\n\n$1')
     .replace(/[ \t]+\n/gu, '\n')
     .replace(/\n{3,}/gu, '\n\n')
@@ -142,7 +132,7 @@ function firstHeading(markdown: string): string | undefined {
   return undefined
 }
 
-/** 把逐页 markdown 拼成一份文档，并算出**页偏移索引**（按页取回与关键词定位都靠它）。 */
+/** Join per-page markdown and record page offsets, used by page reads and keyword lookup. */
 export function buildOcrDocument(sourcePages: OcrSourcePage[]): OcrDocument {
   const chunks: string[] = []
   const pages: OcrPageEntry[] = []
@@ -178,8 +168,8 @@ function pageOf(pages: OcrPageEntry[], at: number): OcrPageEntry | undefined {
 }
 
 /**
- * 页区间解析：`"1-3"` / `"5"` / `"2-4,9"`（1 起始，闭区间）。
- * 越界页码**响亮失败**而不是静默少给——"这页没有"和"我没给"在回执里必须能区分。
+ * `"1-3"` / `"5"` / `"2-4,9"` (1-based, inclusive). Out-of-range pages fail loudly:
+ * "page absent" and "not requested" must stay distinguishable in the receipt.
  */
 export function parsePageRange(spec: string, totalPages: number): number[] {
   const taken: number[] = []
@@ -213,7 +203,7 @@ export interface PageExcerpt {
   text: string
 }
 
-/** 按页切出正文（纯字符串切片，不重跑上游）。 */
+/** Slice pages out of the stored text; never re-runs upstream. */
 export function selectPages(document: OcrDocument, pages: number[]): PageExcerpt[] {
   return pages.map((page) => {
     const entry = document.pages.find((item) => item.page === page)
@@ -225,11 +215,10 @@ export function selectPages(document: OcrDocument, pages: number[]): PageExcerpt
 }
 
 /**
- * 关键词定位：在**已落盘的文档**里找命中，回带页号的上下文片段。
- *
- * 为什么不靠 `pages` 硬读：一份 15 页研报归一化后约 2.7 万字符，而工具输出预算 6,144——
- * 想拿财务预测表就得能"跳着看"。上游页区间不影响算力（整篇都算过），所以定位必须在这份
- * 归一化文本上做，不再出网。
+ * Keyword lookup over the persisted normalized text (no egress): the output budget is
+ * smaller than a whole report, so callers must be able to jump. Adjacent hits merge into
+ * one window, and windows never cross a page boundary — a miscited page is worse than
+ * fewer hits — which also keeps `<!-- page:N -->` markers out of excerpts.
  */
 export function locateQuery(document: OcrDocument, query: string, limit: number, windowChars: number): OcrHit[] {
   const haystack = document.document
@@ -244,11 +233,9 @@ export function locateQuery(document: OcrDocument, query: string, limit: number,
     const at = lowered.indexOf(loweredNeedle, cursor)
     if (at < 0) break
     cursor = at + needle.length
-    // 相邻命中合并成一段窗口：否则同一句话的三次命中会占满 limit，看着像三条证据其实是一条。
+    // Merge adjacent hits: three occurrences of one sentence must not fill `limit`.
     if (at < lastEnd) continue
     const entry = pageOf(document.pages, at)
-    // 窗口**不越页**：片段被标成"第 N 页"就是要能被引用回第 N 页，跨了页就是错引（错引比少引危险）。
-    // 顺带把 `<!-- page:N -->` 存储标记挡在外面——那是落盘布局，不是给模型回传正文的东西。
     const from = Math.max(entry?.start ?? 0, at - windowChars)
     const to = Math.min(entry?.end ?? haystack.length, at + needle.length + windowChars)
     hits.push({ page: entry?.page ?? 1, at, excerpt: haystack.slice(from, to).replace(/\n+/gu, ' ⏎ ') })

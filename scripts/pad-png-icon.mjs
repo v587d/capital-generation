@@ -55,7 +55,7 @@ for (let y = 0; y < height; y++) {
   cur.copy(prev)
 }
 
-// 画布边长让 logo 长边缩放到 targetSide 时刚好填满（渲染侧固定 36px 方框，等比 contain）
+// Canvas side = logo long edge scaled to targetSide inside the fixed 36px render frame (uniform contain).
 const side = Math.max(Math.ceil((Math.max(width, height) * 36) / targetSide), Math.max(width, height))
 const offX = Math.floor((side - width) / 2)
 const offY = Math.floor((side - height) / 2)

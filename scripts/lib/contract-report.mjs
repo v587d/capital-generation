@@ -1,14 +1,8 @@
 /**
- * 巡检的两份用户可见产物：每日报告正文（Issue 正文的唯一形状来源）+ 看门狗的心跳判据与告警单标识。
- *
- * 单独成模块的理由：这些是**用户每天读的那份东西**，格式坏了等于整套巡检失效，
- * 但它原先长在 CLI 里没法被测。拆出来就能拿一份假报告直接断言形状。
- * 看门狗的判据同理住这里：脚本只在 CI 跑，lib 才能被离线测试钉住——而"该不该报警/该关哪张单"
- * 恰恰是最不能等到 CI 才发现写错的那一类。
- *
- * ⛔ 只渲染 `report.failing`（结构/状态级）。`TRANSPORT` / `SLOW` / `EMPTY` 一律进
- * 「不进结论」一节——把它们和真故障混在一张表里，是这套东西被忽略的第一原因。
- * ⛔ 不输出响应正文、不输出 query string、不输出密钥；只有键名与 code。
+ * The two user-visible outputs: the daily report body (sole source of issue body shape) and the
+ * watchdog's heartbeat rule / alarm marker. Lives in lib so offline tests can assert the shapes.
+ * ⛔ Render only `report.failing`; TRANSPORT / SLOW / EMPTY go into a separate "not a verdict"
+ * section. ⛔ No response bodies, query strings or secrets — key names and codes only.
  */
 
 import { ISSUE_VERDICTS, beijingDateOf, previousScheduledDue } from './contract-registry.mjs'
@@ -63,15 +57,10 @@ export function renderReport(report) {
 }
 
 /**
- * 要不要关一张旧的巡检单：**只有这一单提到的、当前真在巡检的能力，本次全部真打过且都没判不合格，才关**。
- *
- * 不能只看"本次没有不合格"：`report.results` 只装**本档位真打过**的那些条目。日档那天，周六才打的
- * weekly 能力根本不在里面——按"没出现在失败里"就关单，等于给没复核过的东西发通过证明，还顺手把
- * 「连续第 N 天」的历史清零。看门狗那张告警单同理：它提的是 workflow 文件名、一个能力都不提，
- * 照旧逻辑会在任何一个全绿早晨被偷偷收掉——那正是把"调度没跑"的警报关掉。
- * `SKIPPED`（id 没解析出来所以没真打）也不算复核过。
- *
- * 关单的判据住在 lib 而不是脚本里：脚本只在 CI 跑，lib 才能被离线测试钉住。
+ * Close an old probe issue only if every capability it mentions is active and was really probed
+ * this run, all passing. "Not in today's failures" is not enough: weekly entries are absent on
+ * daily runs, and SKIPPED means it never ran — closing those would certify unverified coverage
+ * and reset the streak counter. The watchdog alarm names a workflow, no capability, so it is kept.
  */
 export function closeDecision(issueBody, results, activeCapabilities) {
   const mentioned = [...new Set((issueBody.match(/`([a-z0-9_]+)`/gu) ?? []).map((token) => token.slice(1, -1)))]
@@ -91,28 +80,22 @@ export function closeDecision(issueBody, results, activeCapabilities) {
   return { action: 'close', mentioned, reason: `${mentioned.join(' / ')} 本次全部通过` }
 }
 
-/** 看门狗告警单的标识：开单、找旧单、关单三处共用同一个字符串，不许各自再写一遍。 */
+/** One marker string shared by open / find / close for watchdog alarms. */
 export const WATCHDOG_MARKER = '巡检未运行'
 
-/** 这张是不是看门狗自己开的单（不是巡检日报单、不是 PR）。 */
+/** True for watchdog alarms only (not daily report issues, not PRs). */
 export function isWatchdogAlarm(issue) {
   return !issue.pull_request && String(issue.title ?? '').includes(WATCHDOG_MARKER)
 }
 
 /**
- * 心跳判据：**`schedule` 触发过 == 调度器还活着**。三条都是被实测逼出来的：
- *
- * 1. 只认 `event === 'schedule'`。一次手动 dispatch 就能把整周的调度停摆遮过去，而手动跑
- *    恰恰不是调度器活着的证据（2026-10-09 第一次遇到整档没按时出现）。
- * 2. **不看 `status` / `conclusion`**：跑挂了也算心跳。红 = 我方 harness 坏，Issue = 上游坏，
- *    未运行 = 调度死——三个信道各说各的事；把 failed 从心跳里剔掉，等于让一个天天红的巡检
- *    在看门狗这里判成"没跑"，两个信道当场混掉。
- * 3. 判**上一档**（`previousScheduledDue`）而不是"最近本该跑那一档"：实测 `schedule` 迟到 3~4 小时，
- *    探针的实际落地时刻晚于看门狗的名义时刻——按名义顺序看门狗每一天都会误报，它过去没误报
- *    纯粹因为自己也迟到得更多。把正确性押在"两条互不保证先后的 best-effort 调度器恰好按想要的
- *    顺序迟到"上，就是这套东西第一次真跑起来时踩到的那个坑。
- *
- * `newest` 取 schedule 里最晚的一条，不信 API 的顺序。
+ * Heartbeat: any `schedule`-triggered run means the scheduler is alive.
+ * 1. Only `event === 'schedule'`: a manual dispatch would mask a dead week.
+ * 2. Ignore status/conclusion: a failed run is still a heartbeat (red = harness, issue = upstream,
+ *    no run = scheduler dead — three separate channels).
+ * 3. Check the previous slot (`previousScheduledDue`), not the latest due one: `schedule` runs 3–4 h
+ *    late, so the nominal slot races the watchdog and always false-alarms.
+ * `newest` is the max created_at, not the API's first row.
  */
 export function heartbeatVerdict(runs, now = new Date()) {
   const due = previousScheduledDue(now)

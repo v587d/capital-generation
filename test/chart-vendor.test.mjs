@@ -6,20 +6,11 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * vendored 图表库的三方一致性闸门（2026-09，GitHub 分发前补）。
- *
- * 同一个库以**两种形态**随包发布：
- *  1. `lib/chart/vendor/lightweight-charts.standalone.production.js` —— 自包含 `chart.html`
- *     内联的那份，来自 `npm run vendor:charts`（源：`vendor/lightweight-charts/`）；
- *  2. `chart-ui/client.js` —— esbuild 从 `node_modules` 的 ESM 入口打包的那份。
- *
- * devDependency 曾经写成 `^5.2.1`：上游一发新版，别人 `npm install && npm run build` 就会把
- * **新版本**打进 `client.js`，而 `vendor/` 仍停在旧版本——同一个产品里两条渲染路径跑不同版本的库，
- * 且没有任何断言会失败。本用例把三条锁死：
- *  ① `node_modules` 版本 == `vendor/VERSION.json` 版本（漂移的源头）；
- *  ② 两份 dist 逐字节一致（sha256，来自 VERSION.json 的登记值）；
- *  ③ 已提交的 `client.js` 许可横幅版本 == vendor 版本（证明构建产物来自同一版本）。
- * 另外核对 `lib/chart/vendor/` 是 `vendor/` 的副本（`scripts/copy-assets.mjs` 跑过）。
+ * Third-party consistency gate for the vendored chart library, which ships in two forms (the
+ * standalone dist inlined into chart.html, and client.js bundled from node_modules). A caret
+ * devDependency once let a fresh install bundle a newer version than vendor/, so the two render
+ * paths diverged silently. Pins: installed version == vendor/VERSION.json, dists byte-identical,
+ * and client.js's license banner carries the vendor version.
  */
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -61,7 +52,7 @@ test('vendored 图表库：已提交的 client.js 必须来自同一版本（许
     `chart-ui/client.js 里找不到 "${marker}"：浏览器 bundle 与 vendor 的版本已经分叉，`
       + '或 esbuild 不再保留库的许可横幅（那同时意味着 Apache-2.0 归属信息丢了）——跑 npm run build 后核对',
   )
-  // 归属信息是 Apache-2.0 许可要求的一部分，跟着版本戳一起钉住。
+  // Attribution is part of the Apache-2.0 requirement, so pin it alongside the version marker.
   assert.ok(client.includes('TradingView'), 'client.js 必须保留 TradingView 归属信息')
 })
 

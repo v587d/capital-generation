@@ -1,18 +1,7 @@
 #!/usr/bin/env node
 /**
- * DSH 接口契约探针。
- *
- * 背景：dsh 处于快速迭代期，本插件对上游的依赖面必须**可探测**，而不是等运行时
- * 静默失效。本脚本对**本机已安装的 dsh**逐条断言 docs/reference/dsh-surface-ledger.md
- * 里的接口账本；上游漂移在这里变成一条点名"哪个接口 / 期望什么 / 现在是什么"的失败，
- * 而不是"图表某天不显示了"。
- *
- * 同型先例：test/persona.test.mjs 的「字段契约跟随本机版本」用例（历史教训：
- * dsh-persona 的字段改名叠加正文重写，让 8 个用例长期失败而无人察觉）。
- *
- * 用法：
- *   npm run check:dsh
- *   DSH_PACKAGE_DIR=/path/to/@deepseek-ai/dsh npm run check:dsh
+ * Probes the installed dsh against docs/reference/dsh-surface-ledger.md, turning upstream drift into
+ * a named failure instead of a silent runtime break. DSH_PACKAGE_DIR overrides the install location.
  */
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -23,11 +12,10 @@ const PASS = 'pass'
 const FAIL = 'fail'
 const NA = 'n/a'
 
-/** 本仓根目录：L25 要拿宿主的读元函数核对**我们自己**的显示元数据。 */
+/** Repo root: L25 reads our own plugin metadata through the host's meta reader. */
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
-// 定位 dsh 包根的实现只在 scripts/lib/run-tool.mjs 有一份（smoke-boot 要用同一个包根的
-// lib/bin.js 起进程；两份 finder 迟早分叉，症状是"一端探到了、另一端说找不到"）。
+// One dsh locator only (scripts/lib/run-tool.mjs); two finders drift.
 
 const DSH_DIR = locateDshPackage()
 if (!DSH_DIR) {
@@ -37,7 +25,7 @@ if (!DSH_DIR) {
 }
 
 const PKG = (name) => join(DSH_DIR, 'node_modules', '@deepseek-ai', name)
-/** 读文本；文件不存在返回 undefined（探针据此报 fail 并说明缺了什么）。 */
+/** Reads text, undefined when absent, so probes can name the missing path. */
 function readIfPresent(path) {
   try {
     if (!statSync(path).isFile()) return undefined
@@ -47,7 +35,26 @@ function readIfPresent(path) {
   }
 }
 
-/** 探头：一个接口一条，返回 { id, title, status, detail }。 */
+/**
+ * Since 0.2.1 the ui-primitives / ui-slots packages are bundled into dsh-web-frontend/dist, so probes
+ * measuring their .d.ts / CSS would stay red; mark them n/a only when the frontend confirms it.
+ */
+const BUNDLED_UI_REASON = (() => {
+  try {
+    const frontendManifest = JSON.parse(readFileSync(join(PKG('dsh-web-frontend'), 'package.json'), 'utf8'))
+    const devDependencies = frontendManifest.devDependencies ?? {}
+    const packages = ['@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-client-ui-slots']
+    if (!packages.every((name) => typeof devDependencies[name] === 'string')) return undefined
+    if (!packages.every((name) => !existsSync(join(DSH_DIR, 'node_modules', name)))) return undefined
+    if (!existsSync(join(PKG('dsh-web-frontend'), 'dist', 'assets'))) return undefined
+    return `0.2.1 起 ${packages.join(' / ')} 编进 dsh-web-frontend/dist（devDependencies ${packages.map((name) => devDependencies[name]).join(' / ')}），不再有各自可读的 .d.ts / CSS / index.js；本探针在 0.2.1 标 n/a，升级到重新拆包的版本会恢复实测`
+  } catch {
+    return undefined
+  }
+})()
+const BUNDLED_UI_PROBES = new Set(['L15', 'L19', 'L22', 'L23', 'L24', 'L26', 'L27', 'L28'])
+
+/** One probe per surface, returning { id, title, status, detail }. */
 const probes = [
   {
     id: 'L1',
@@ -84,7 +91,7 @@ const probes = [
         if (!existsSync(join(process.cwd(), owner, resolved))) {
           return { status: FAIL, detail: `${relativeManifest}: exports["./client"] 指向的文件不存在：${resolved}` }
         }
-        // 嵌套包由主包的 files 决定是否随包发布，所以两种归属都要认。
+        // Nested packages ship via the root package's files list, so accept either owner.
         const rootManifest = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8'))
         const packedPath = join(owner, resolved).replace(/^\.\//, '')
         const shipped = (manifest.files ?? []).some((entry) => resolved === entry || resolved.startsWith(`${entry}/`))
@@ -131,10 +138,8 @@ const probes = [
     title: 'Slot conversation.chat.turnTail + TurnTailOwnerProps',
     why: '该槽本是为「最终图表落在收尾正文之后」而接的官方 turn-tail 扩展面。',
     run() {
-      // 2026-09-18 起本包不再使用 turn-tail 通道（AGENTS.md §7：连同自定义会话事件类型一起
-      // 移除，禁止恢复），0.1.7 又把它的 kind 从 chain 改成 list——一个我们不消费的面的
-      // 形状漂移不该再让 check:dsh 变红。守卫在 test/chart-client.test.mjs：客户端包只留
-      // tool.call.toolview 卡片与 slots inject。上游若再次改名，无需动本仓。
+      // Retired with the turn-tail channel (AGENTS.md §7): we consume no part of it, so its shape
+      // drift must not turn check:dsh red. test/chart-client.test.mjs keeps the client scope honest.
       return { status: NA, detail: '本包已摘除 turn-tail 通道（AGENTS.md §7），该面不再消费；探针退休' }
     },
   },
@@ -156,8 +161,8 @@ const probes = [
         ['sessions.get(id)', /get\(id\)/, session, sessionFile],
         ['非 surface 事件不进消息历史（deriveEventMessage default: return null）', /default: return null/, session, sessionFile],
         ['sessionProjections.stateOf(session, key)', /stateOf\(/, projection, projectionFile],
-        // 关键不变量（2026-09-18 事故）：交付事件必须仍在**闭集**词汇表里。掉出去 =
-        // 写出的日志在冷加载时被 fail-closed 拒绝，整份会话打不开。
+        // Key invariant: the delivery event must stay in the closed vocabulary, or written logs are
+        // rejected at cold load and the whole session becomes unopenable.
         ['deliverables/presented 属于 KNOWN_SESSION_EVENT_TYPES', /"deliverables\/presented"/, session, sessionFile],
       ]
       const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
@@ -168,8 +173,14 @@ const probes = [
   },
   {
     id: 'L12',
-    title: 'agent/created（Scoped<Agent>）+ agent.ctx + tools.restrict 的 scoped 语义',
-    why: '根 Agent 的 render_chart / 孙 Agent 创建工具只能靠"在它自己的 agent scope 上 deny"拿掉；事件消失、agent.ctx 不可用或 restrict 变成 context-global，都会让主 Agent 重新拿到这些入口（或在 standing 层误伤 specialist）。',
+    title: 'agent/created（Scoped<Agent>）+ agent.ctx + tools.restrict 的 scoped 语义（根侧 deny / 角色侧逐名兄弟 deny）',
+    why: '根 Agent 的出图入口、以及 0.2.1 起每颗角色残留的那一格（D0 之后工具面由 preset 挂的行组合表达，'
+      + '运行期只剩 `tool-subagent-control` 焊进来的 `interrupt_agent` 要靠 restrict 减掉），都只能靠"在它自己的'
+      + ' agent scope 上 restrict"来实现；事件消失、agent.ctx 不可用、restrict 变成 context-global，'
+      + '或"restriction 只过滤继承层"这条语义反转，都会让主 Agent 重新拿到出图工具、或让那一次 deny 静默不生效'
+      + '（角色看得见本该减掉的名字）。'
+      + '同一颗探针还断言委派行**不再**接受 `persona` / `toolFilter`——0.2.1 起"按名字划工具面"在装配层没有格子，'
+      + '这正是 D0 把工具面搬到行组合、只保留这一格残留的理由。',
     run() {
       const agentTypes = join(PKG('dsh-agent'), 'lib/types/runtime-types.d.ts')
       const types = readIfPresent(agentTypes)
@@ -186,16 +197,18 @@ const probes = [
         ['payload 带 agent（监听器据此拿 agent.ctx）', /'agent\/created'\(this: Scoped<Agent>, payload: \{[\s\S]{0,120}agent: Agent/, types, agentTypes],
         ['tools.restrict() 要求 scoped context（agent.ctx）', /tools\.restrict\(\) requires a scoped context/, tools, toolsFile],
         ['restrict 走 layer.restrictions.append（作用域层过滤）', /layer\.restrictions\.append\(compiled\)/, tools, toolsFile],
-        // 0.1.7：原先借 dsh-agent-presets 的实现做旁证，该包已被 agent-preset-registry 取代且
-        // 不再监听 agent/created；dsh-tool-subagent 是同一条不变量的现役使用者（拿到 created
-        // agent 后用**它自己的 ctx** 装 scoped 运行时——不是 ctx.root）。
+        ['restriction 只过滤继承层，不碰本层自注册（逐名 deny 不误伤本行注册工具的前提）', /A restriction filters what a scope inherits[\s\S]{0,160}never what its OWN layer registers/, tools, toolsFile],
+        ['preset 的工具对 agent scope 是"祖先贡献"（角色侧那份 deny 筛得掉它们的依据）', /presets moved them onto the agent plane they became an ANCESTOR[\s\S]{0,80}contribution/, tools, toolsFile],
+        // 0.1.7: dsh-agent-presets was replaced by agent-preset-registry; dsh-tool-subagent is the
+        // current user of the same invariant (it scopes the created agent's own ctx, not ctx.root).
         ['上游自己在 agent/created 里拿 created agent', /"agent\/created",\s*(?:async\s*)?\(\{ agent/, subagent, subagentFile],
         ['并经由该 agent 自己的 ctx 注入 scoped 运行时', /\w\.ctx\.inject\(\[/, subagent, subagentFile],
+        ['0.2.1 起委派行拒绝 persona / toolFilter（名字级收敛只剩 agent scope 这一格）', /const field of \["persona", "toolFilter"\][\s\S]{0,200}is no longer supported/, subagent, subagentFile],
       ]
       const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
       return missing.length === 0
-        ? { status: PASS, detail: 'agent/created + agent.ctx + scoped restrict 仍可用（root 收敛机制成立）' }
-        : { status: FAIL, detail: `根 Agent 收敛机制的接口变了：${missing.join(' / ')}（见账本 L12）` }
+        ? { status: PASS, detail: 'agent/created + agent.ctx + scoped restrict 仍可用（根收敛与角色那格兄弟 deny 共用这一格，委派行已不接受 toolFilter）' }
+        : { status: FAIL, detail: `工具面收敛机制的接口变了：${missing.join(' / ')}（见账本 L12）` }
     },
   },
   {
@@ -295,7 +308,7 @@ const probes = [
         ['payload 带 turn（交付行归属轮号）', /'agent\/turn-stopping'\(this: Scoped<Agent>, payload: \{[\s\S]{0,160}turn: number/, types, typesFile],
         ['@mode serial（轮仍打开时同步派发）', /@mode serial[\s\S]{0,600}'agent\/turn-stopping'\(/, types, typesFile],
         ['agent loop 真的派发它', /dispatch\.serial\("agent\/turn-stopping"/, loop, loopFile],
-        // 顺序是关键：必须在 append("turn/end") 之前，否则轮已关闭（实测间距约 560 字符）。
+        // Order matters: must precede append("turn/end"), after which the turn is closed.
         ['派发在 turn/end 之前', /dispatch\.serial\("agent\/turn-stopping"[\s\S]{0,1200}session\.append\("turn\/end"/, loop, loopFile],
       ]
       const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
@@ -354,7 +367,8 @@ const probes = [
       const fieldsFile = join(PKG('dsh-client-ui-primitives'), 'lib/types/settings-form/fields.d.ts')
       const fields = readIfPresent(fieldsFile)
       if (fields === undefined) return { status: FAIL, detail: `读不到 ${fieldsFile}` }
-      // 文档链接 portal 进官方 head 行、并用元素选择器摆位，所以 head 行的 DOM / CSS 形状是**我们的**依赖。
+      // The docs link portals into the official head row and positions via element selectors, so
+      // that row's DOM/CSS shape is our dependency.
       const widgetsFile = join(PKG('dsh-client-ui-primitives'), 'lib/index.js')
       const widgets = readIfPresent(widgetsFile)
       if (widgets === undefined) return { status: FAIL, detail: `读不到 ${widgetsFile}` }
@@ -372,21 +386,21 @@ const probes = [
       if (remote === undefined) return { status: FAIL, detail: `读不到 ${remoteFile}` }
 
       const checks = [
-        // ── host 半边：可编辑性是 schema 事实，不是注册出来的命名空间 ──
+        // Host half: editability is a schema fact, not a registered namespace.
         ['ctx.settings 服务（SettingsForms）', /settings:\s*SettingsForms/, hostTypes, hostTypesFile],
         ['settings.describe() 返回条目投影', /describe\(options\?: SettingsDescribeOptions\): SettingsDescriptor\[\]/, hostTypes, hostTypesFile],
         ['volatileForm(schema) 仍在', /function volatileForm\(schema\)/, hostImpl, hostImplFile],
         ['没有任何 volatile 字段 ⇒ 条目不进镜像', /Object\.keys\(dict\)\.length === 0 \? void 0 : z\.object\(dict\)/, hostImpl, hostImplFile],
         ['命名空间恒等于 profile 条目 id', /ns: entry\.options\.id/, hostImpl, hostImplFile],
         ['写非 volatile 路径被响亮拒绝', /is not volatile/, hostImpl, hostImplFile],
-        // ── 浏览器半边：按条目 id 寻表单，按 served 门控注册 ──
+        // Browser half: find forms by entry id, register behind the served gate.
         ['ctx.configForms.get(entryId)', /get<T>\(entryId: string\): ConfigForm<T>/, form, formFile],
         ['ctx.configForms.whileServed(namespaces, register)', /whileServed\(namespaces: readonly string\[\], register:/, form, formFile],
         ["slot plugins.bundle.config 是 keyed", /'plugins\.bundle\.config':\s*\{\s*kind:\s*'keyed'/s, slot, slotFile],
         ['组合包页面按**包名**渲染配置段，且只给 view: page（不给 form）', /renderSlot\("plugins\.bundle\.config", \{ view: "page" \}, \{ entryKey: pkg\.name \}\)/, pmPage, pmPageFile],
         ['没人按包名注册 ⇒ 整块配置段不出现（座位是注册出来的）', /configured: ledger\.bundles\.has\(openPkg\.name\)/, pmPage, pmPageFile],
         ['包级座位的 key 进 ledger 投影', /bundles: keysOf\("plugins\.bundle\.config"\)/, pmPage, pmPageFile],
-        // ── 卡片第三格：我们没有能替换「包含的组件」的座位，只按它的 DOM 形状切可见性 ──
+        // Card third tab: no slot can replace "contained components", so we gate visibility by DOM shape.
         ['「包含的组件」那一格仍叫 section[data-plugin-rows]（收起/放行就认这一个）', /"data-plugin-rows": true/, pmPage, pmPageFile],
         ['包页仍把配置段与组件段画成同一容器的兄弟两格（我们的选择器靠这条相邻关系）', /"data-plugin-config": true,[\s\S]{0,300}?\(RowsSection,/, pmPage, pmPageFile],
         ['包页根节点仍带 data-plugin-detail="<包名>"（样式表用它把规则限定在自己那一页）', /"data-plugin-detail": pkg\.name/, pmPage, pmPageFile],
@@ -467,7 +481,8 @@ const probes = [
         ['registry 仍按声明注册（register(definition)）', /register\(definition: PresetDefinition\)/, registryTypes, registryTypesFile],
       ]
       const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
-      // 反向断言：旧的"registry 指目录"写法不许回来（它现在会静默不注册，issue #3）。
+      // Reverse assertion: the old "registry points at a directory" form must not return (it now
+      // registers nothing, silently).
       if (/roots\b/.test(definition) || /roots\b/.test(registryTypes)) {
         missing.push(`registry 又出现 roots 字段（${registryTypesFile}；0.1.7 的声明式挂载与之互斥）`)
       }
@@ -524,8 +539,8 @@ const probes = [
       const overlay = /'conversation\.input\.overlay': \{\s*kind: 'list';\s*scope: 'session';/.test(slots)
       const props = ['open', 'onClose', 'title', 'closeLabel', 'footer', 'contentClassName', 'shortcutModal', 'headless']
       const missingProps = props.filter((name) => !new RegExp(`\\b${name}\\??:`).test(modal))
-      // headless 卡片只拿到 .dialog 这一块底板：底色 / 圆角 / 阴影 / overflow 归官方，几何归我们。
-      // 这四条里任何一条漂了，面板就会变成"没有底的浮层"或"圆角外沿漏内容"。
+      // A headless card only gets the .dialog base: backdrop / radius / shadow / overflow are the
+      // host's, geometry is ours. Any drift leaves an edgeless overlay or content outside the radius.
       const card = [
         ['background 仍来自 layer-2 token', /background: var\(--dsw-alias-bg-layer-2\)/],
         ['圆角仍来自 panel token', /border-radius: var\(--dsw-radius-panel\)/],
@@ -533,7 +548,7 @@ const probes = [
         ['卡片仍是 flex column（我们把 padding 收到 0）', /display: flex;\s*flex-direction: column/],
       ]
       const missingCard = card.filter(([label, pattern]) => !pattern.test(modalCss)).map(([label]) => label)
-      // 「详情」那一格靠这五条活着：只挑字符串字面量，不押 css$NN 那种每次构建都会改的散列名。
+      // The "details" panel depends on these five: match string literals, never css$NN hashes.
       const chrome = [
         ['关着时返回 null（35 行「详情」不许各挂一个浮层）', /if \(!open\) return null/, impl, implFile],
         ['对话框语义仍由 aria-modal 给出（标题走 aria-label，我们只出 title）', /"aria-modal": "true"/, impl, implFile],
@@ -579,7 +594,7 @@ const probes = [
         ['handle 由调用方关（Domain.close()）', /close\(\): Promise<void>/, domain, domainFile],
         ['single 布局仍是默认（整份 JSON 原子写）', /layout\?: 'single' \| 'per-record'/, spec, specFile],
         ['声明入口 defineDomain / domainTable 仍在', /export declare function defineDomain/, spec, specFile],
-        // 域名规则是实测坑：连字符 → `malformed-medium：invalid unit name`
+        // Domain name rule learned the hard way: a hyphen fails as `malformed-medium: invalid unit name`.
         ['unit name 规则仍是小写字母 / 数字 / 下划线', "UNIT_NAME_RE = /^[a-z][a-z0-9_]*$/", storage, storageFile],
       ]
       const missing = checks.filter(([, pattern, text]) => (typeof pattern === 'string' ? !text.includes(pattern) : !pattern.test(text))).map(([label, , , file]) => `${label}（${file}）`)
@@ -658,7 +673,7 @@ const probes = [
         ['Escape 仍由菜单在 capture 阶段处理（Modal 的层栈检查 event.defaultPrevented）', /document\.addEventListener\("keydown", onEscape, true\)/, text],
         ['外点收起仍是 pointerdown（点别的行/弹窗内容即关，不用我们补监听）', /document\.addEventListener\("pointerdown", onPointerDown\)/, text],
         ['条目里的 disabled 仍会禁用整行（第一行的「置顶」与步进到界的 −/+ 靠它置灰）', /disabled: entry\.disabled/, text],
-        // ── 2026-10-09：持仓改到菜单里之后新依赖的四条 ──────────────────────────────
+        // Four more dependencies introduced when holding moved into the menu.
         ['组件行仍排在数据行**之后**（步进行贴着「标记持仓」、发丝线在「移除」上，靠的就是这一条）', /\[\s*items\.map\(renderEntry\),\s*children\s*\]/, text],
         ['selectedIds 仍能点亮多行，选中行仍带尾部那道勾（selection 默认 check）', /const selected = entry\.id === selectedId \|\| selectedIds\?\.includes\(entry\.id\) === true/, text],
         ['勾选态仍是渲染 IconCheckOutlineRegular（改名或换成 fill 就是"标没标"看不出来）', /selected && selection === "check" && jsx\(IconCheckOutlineRegular/, text],
@@ -737,8 +752,8 @@ const probes = [
         return { status: FAIL, detail: `显示名的上游约定变了：${missing.join(' / ')}（见账本 L25；改本仓的 locale/exports，不要改探针）` }
       }
 
-      // 上游形状对了还不够：本仓这一侧要真的能被读出来（exports / files / 文件名任何一处漏了，
-      // 症状都只是"名字又变回包名"，没有报错）。
+      // Upstream shape is not enough: our own package must actually be readable (a missing exports /
+      // files / locale entry only shows up as "the name is the package name again").
       const bootModule = await import(pathToFileURL(bootFile).href)
       if (typeof bootModule.readPluginMeta !== 'function') {
         return { status: FAIL, detail: `dsh-app-boot 不再导出 readPluginMeta（${bootFile}）` }
@@ -870,8 +885,8 @@ const probes = [
     why: '2026-10-15 决策「开 read、同时保留 bash」把这一行测进依赖面：preset 挂 `tool-fs` 一行，'
       + '主 Agent 用 `read` 读精选 Skill 的方法论分册与工作区文件（`write` / `edit` 由视图层 deny + '
       + '全局写口闸门两层拦）。三种漂移都静默：① 工具改名或 `read_image` 从条件注册变成无条件注册 ⇒ '
-      + '`ROOT_AGENT_DENIED_TOOLS` 与通用 subagent 的 `toolFilter.deny` 里那几个名字对不上，'
-      + '`restrict()` 对未注册名字的表现是"创建子 Agent 失败"；② 回执不再带行号或换一套包装 ⇒ '
+      + '`ROOT_AGENT_DENIED_TOOLS` 与 `src/agents/role-tool-policy.ts` 的角色 allow 清单里那几个名字'
+      + '对不上（根侧逐名 `restrict` 只是跳过，角色侧整批失败 = 该角色完全不收敛）；② 回执不再带行号或换一套包装 ⇒ '
       + '`test/selected-skills-content.test.mjs` 的 `readEnvelopeChars` 与整册预算（240 字符路径 + '
       + '每行 `N: `）全部算错方向，分册会在使用者看不见的地方被剪中段；③ 三条上限改小 '
       + '（`READ_LIMIT` / `READ_MAX_BYTES` / `READ_MAX_LINE_LENGTH`）⇒ 一册读不全而工具不报错，'
@@ -879,7 +894,7 @@ const probes = [
     run() {
       const file = join(PKG('dsh-tool-fs'), 'lib/index.js')
       const text = readIfPresent(file)
-      if (text === undefined) return { status: FAIL, detail: `读不到 ${file}（宿主换了这颗文件口包？账本 L29 与两处 deny 名单要一起改）` }
+      if (text === undefined) return { status: FAIL, detail: `读不到 ${file}（宿主换了这颗文件口包？账本 L29 与根侧名单、角色 allow 清单要一起改）` }
       const checks = [
         ['read 回执仍带 `<path>` 包装（readEnvelopeChars 按它算预算）', /<path>/, text, file],
         ['read 回执仍带 `<content>` 包装（同上）', /<content>/, text, file],
@@ -935,20 +950,101 @@ const probes = [
         : { status: FAIL, detail: `框架并发池契约变了：${missing.join(' / ')}（见账本 L30；改本仓的并发声明与 skill 纪律，不要改探针）` }
     },
   },
+  {
+    id: 'L31',
+    title: '委派行 Config 的**闭集**（`dsh-tool-subagent`）：provider / toolName / modelSelectionSettings / agentOptions / agentPreset / allowedAgentPresets / maxDepth，且 agentPreset 押在 agent-presets 服务与 provider 能力上',
+    why: '0.2.1 迁移的直接教训：persona 与 toolFilter 从这颗 Config 移出后，**旧键不会报错、只会被 zod 静默剥掉**'
+      + '（L12 当时是绿的，装配却已经在按 0.2.0 的形状写）。preset 里每颗委派行都靠 `agentPreset` 指向角色 preset，'
+      + '角色 preset 的名字与 `ROLE_PRESET_IDS` 同字——这三处（Config 键闭集、agent-presets 服务、provider 的'
+      + ' agentPreset 能力）任一漂移，症状都是"委派行还在、选不到角色"或"孩子拿到父级整张工具表"。',
+    run() {
+      const file = join(PKG('dsh-tool-subagent'), 'lib/index.js')
+      const text = readIfPresent(file)
+      if (text === undefined) return { status: FAIL, detail: `读不到 ${file}（宿主换了这颗委派工具包？账本 L31 要跟着改）` }
+      const checks = [
+        ['Config 仍收 provider / toolName / modelSelectionSettings / agentOptions 四件', /const Config = z\.object\(\{\s*provider: z\.string\(\)\.required\(\),\s*toolName: z\.string\(\)\.default\("subagent"\),\s*modelSelectionSettings: z\.boolean\(\)\.default\(false\),\s*agentOptions: z\.object\(/, text, file],
+        ['agentPreset / allowedAgentPresets 仍是字符串型（角色 preset 的选法）', /agentPreset: z\.string\(\)\.min\(1\),\s*allowedAgentPresets: z\.array\(z\.string\(\)\.min\(1\)\)\.min\(1\)/, text, file],
+        ['maxDepth 仍接受自然数或 "provider-managed"', /maxDepth: z\.union\(\[z\.natural\(\)\.max\(Number\.MAX_SAFE_INTEGER\), z\.const\("provider-managed"\)\]/, text, file],
+        ['allowedAgentPresets 必须包含 agentPreset（两份名单的一致性由它自己拦）', /agentPreset must be included in allowedAgentPresets/, text, file],
+        ['选角色押在 agent-presets 服务上（服务缺席即抛错，不静默降级）', /agent preset selection requires the agent-presets service/, text, file],
+        ['provider 不支持独立选角色时抛错（fork 后端继承父上下文）', /does not support independent agent preset selection/, text, file],
+      ]
+      const missing = checks.filter(([, pattern, source]) => !pattern.test(source))
+        .map(([label, , , source]) => `${label}（${source}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: '委派行 Config 闭集与 agentPreset 的三道前置校验都仍在（persona / toolFilter 的拒绝面见 L12）' }
+        : { status: FAIL, detail: `委派行的 Config 契约变了：${missing.join(' / ')}（见账本 L31；改 preset 与 role-tool-policy，不要改探针）` }
+    },
+  },
+  {
+    id: 'L32',
+    title: '人设绑定的两个时机：委派 child 在创建时 composeFrom，手开会话在 agent/created **之后** select → recompose → append',
+    why: '本仓一切按人设的判据都在**调用期**现读 composedPreset(exec.agent.ctx)，三颗身份闸门全局装在插件 ctx 上，'
+      + '不挂在 agent/created 上——依据就是这个时机差：手选 preset 的会话是先建 Agent、后换人设，created 那一刻读到的还是创建默认值。'
+      + '2026-10-19 真机实测：装在 created 上的 `ocr` url 形态闸门对手开 Capital 一次都没触发（同一进程里被委派的 web_retriever 正常）。'
+      + '上游若把 select 挪到 created 之前，"按 agent 装闸门"重新变得可行；若改成重建 Agent（先 dispose 再 created），'
+      + 'L12 那两处 restrict 会拿到已死的 ctx——两种漂移都要求重判安装位置，所以钉顺序而不是只钉名字。',
+    run() {
+      const file = join(PKG('dsh-agent-preset-registry'), 'lib/index.js')
+      const text = readIfPresent(file)
+      if (text === undefined) return { status: FAIL, detail: `读不到 ${file}` }
+      const checks = [
+        ['委派子 Agent 在创建时并入父的 revision（这一支的 created 时机是"身份已定"）', /composeFrom\(ctx, parent\) \{[\s\S]{0,520}this\.join\(ctx, key, generation\)/, text, file],
+        ['手开走 select(agent, agentPreset)：入参是一个已建好的 Agent（有 .ctx / .session / .id）', /async select\(agent, agentPreset\) \{[\s\S]{0,900}agent\.session\.append\("agent-preset\/selected"/, text, file],
+        ['⛔ 顺序：recompose(agent.ctx) 在 append("agent-preset/selected") 之前（即 created 之后身份才落定）', /await this\.recompose\(agent\.ctx, agentPreset\);[\s\S]{0,120}agent\.session\.append\("agent-preset\/selected"/, text, file],
+        ['recompose 的实体 = mount + 广播 tools/change（工具面真的换掉了）', /async recompose\(ctx, id\) \{[\s\S]{0,200}this\.owner\.emit\("tools\/change"\)/, text, file],
+        ['读当前身份的唯一口径 composedPreset(ctx)（本仓 preset-claim 依赖它）', /composedPreset\(ctx\) \{[\s\S]{0,120}return this\.generationFor\(ctx\)\?\.mount\.presetId/, text, file],
+        ['会话 header 只是**起始** preset，当前值靠该事件推进（投影 init / apply 两份口径不同）', /key: "agentPreset",[\s\S]{0,240}init: \(header\) => header\.agentPreset \?\? null,[\s\S]{0,120}event\.type === "agent-preset\/selected"/, text, file],
+      ]
+      const missing = checks.filter(([, pattern, source]) => !pattern.test(source))
+        .map(([label, , , source]) => `${label}（${source}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: '人设绑定时机未变：委派=创建期、手开=created 之后 ⇒ 身份判据只能现读、闸门只能全局装' }
+        : { status: FAIL, detail: `人设绑定的时机变了：${missing.join(' / ')}（见账本 L32；先重判三颗 guard 的安装位置，再动探针）` }
+    },
+  },
+  {
+    id: 'L33',
+    title: 'Cordis 服务解析的不对称：`ctx.<name>` 抛错，`ctx.get(name)` 静默返回 undefined（host 平面行必须声明 inject）',
+    why: 'capital-policy 是 host 平面行，它要 `tools.guard()` 面来装三颗身份闸门。这条不对称意味着'
+      + '**不声明 inject 时装配不会失败**：属性访问抛错被我们的 try/catch 吞掉、`get` 直接给 undefined，'
+      + '于是闸门"装了但不在场"，零报错。2026-10-15 的 fs 写口 guard 就是这么静默空转了 4 天'
+      + '（被 tool-fs 的行级 write:false 掩护住），2026-10-19 才由三条真机测试暴露。'
+      + '上游若把 `get` 也改成抛错，或让属性访问静默返回 undefined，我们这条依赖（"声明 inject + 读不到就 warn"）都要重判。',
+    run() {
+      const file = join(PKG('cordis'), 'lib/index.js')
+      const text = readIfPresent(file)
+      if (text === undefined) return { status: FAIL, detail: `读不到 ${file}` }
+      const checks = [
+        ['属性访问未 inject ⇒ 抛错', /cannot get property "\$\{prop\}" without inject/, text, file],
+        ['非 runtime fiber 走 `reflect.get(prop, false)` ⇒ 返回 undefined，不抛错', /return ctx\.reflect\.get\(prop, false\)/, text, file],
+        ['required 服务在 inactive context 里才是响亮错误（另一种方向，别混为一说）', /cannot get required service/, text, file],
+      ]
+      const missing = checks.filter(([, pattern, source]) => !pattern.test(source))
+        .map(([label, , , source]) => `${label}（${source}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: '两种失败方向都在（属性抛错 / get 静默 undefined）⇒ host 平面行必须声明 inject，读不到服务要 warn' }
+        : { status: FAIL, detail: `Cordis 服务解析的失败方向变了：${missing.join(' / ')}（见账本 L33；先检查 capital-policy 的 inject 与三颗 guard 的 warn，再动探针）` }
+    },
+  },
 ]
 
 const results = []
 for (const probe of probes) {
   let outcome
   try {
-    // `await` 一个同步探针拿到的就是它本身；有异步探针（L25 要 import 宿主的读元函数）之后，
-    // 这里不能只 catch 同步抛错——promise 的拒绝会以 `outcome === undefined` 的形态静默通过。
-    outcome = await probe.run()
+    if (BUNDLED_UI_REASON !== undefined && BUNDLED_UI_PROBES.has(probe.id)) {
+      outcome = { status: NA, detail: BUNDLED_UI_REASON }
+    } else {
+      // Awaiting a sync probe yields itself; with async probes (L25 imports the host meta reader) a
+      // rejected promise would otherwise surface as `outcome === undefined` and pass silently.
+      outcome = await probe.run()
+    }
   } catch (error) {
     outcome = { status: FAIL, detail: `探针自身抛错：${error instanceof Error ? error.message : String(error)}` }
   }
-  // 没有 status 的探针**不算通过**：异步探针忘了 return、或 return 了错形状，都会让
-  // 下面的 FAIL 过滤器一条都不抓到 —— 那正是"账本看起来很全、实际没人探"。
+  // A probe without a status is not a pass: a forgotten return or wrong shape would otherwise slip
+  // past the FAIL filter and leave the ledger looking complete while probing nothing.
   if (outcome === undefined || ![PASS, FAIL, NA].includes(outcome.status)) {
     outcome = { status: FAIL, detail: `探针没有返回 {status, detail}，实际拿到：${JSON.stringify(outcome) ?? String(outcome)}` }
   }

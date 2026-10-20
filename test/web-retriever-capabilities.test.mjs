@@ -4,21 +4,13 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { OCR_TOOL_NAME, RETRIEVAL_DENIED_TOOLS } from '../lib/agents/root-tool-policy.js'
 
-/**
- * web_retriever 能力表与实现同步。
- *
- * 与 `test/data-collector-capabilities.test.mjs` 同族：README 首页只留三行概括，明细住在
- * `docs/web-retriever-capabilities.md`，靠人记得改必然漂移。2.2.0 那次 `web_retriever_search`
- * 改名成 `anysearch_search` 就同时动了工具、persona 与文档——文档漏改的症状是"用户照着表里
- * 一个不存在的名字去问"，所以这里把名字集合钉成测试。
- *
- * 名字的事实来源是 `src/agents/root-tool-policy.ts`（注释自称"出网工具名唯一一份事实来源"，
- * 13 个检索/查询 + `ocr` = 14），preset 与测试都从它取。
- */
+// The capability doc drifts unless pinned: a stale row means the user asks for a tool name that no
+// longer exists. Name truth is src/agents/root-tool-policy.ts (RETRIEVAL_DENIED_TOOLS + OCR_TOOL_NAME
+// = 14); preset, doc and this test all read from that one table.
 const DOC = fileURLToPath(new URL('../docs/web-retriever-capabilities.md', import.meta.url))
 const doc = readFileSync(DOC, 'utf8')
 
-/** 只抓三张能力表的首列；「怎么用」那张的首列是粗体工作面名，天然不匹配。 */
+// Matches only the three capability tables' first column; the 「怎么用」 table holds a bolded surface name there.
 const documented = [...doc.matchAll(/^\|\s`([a-z0-9_]+)`\s\|/gm)].map((match) => match[1])
 const registered = [...RETRIEVAL_DENIED_TOOLS, OCR_TOOL_NAME]
 
@@ -38,7 +30,7 @@ test('web_retriever 能力表：每个工具都带上游、密钥口径与非空
     const cells = row.split('|').map((cell) => cell.trim())
     assert.equal(cells.length, 7, `${name} 的表格行应是「工具 | 上游 | 密钥 | 参数 | 用途」五列：${row}`)
     assert.ok(cells[2].length > 0, `${name} 的上游列不应为空`)
-    // 密钥列只许两档：本仓四把密钥之外的来源查询面全部零密钥，写"可选"这类模糊口径等于没写。
+    // Two allowed values only: besides this repo's four keys every other source is keyless; "optional" is not an answer.
     assert.ok(['需要', '无'].includes(cells[3]), `${name} 的密钥列应写「需要」或「无」，实际是「${cells[3]}」`)
     assert.ok(cells[4].length > 0, `${name} 的参数列不应为空（无参数写「无参数」）`)
     assert.ok(cells[5].length > 0, `${name} 的用途列不应为空`)
@@ -48,7 +40,7 @@ test('web_retriever 能力表：每个工具都带上游、密钥口径与非空
 test('web_retriever 能力表：README 必须链接到它，写了工具总数就得与实现一致', () => {
   const readme = readFileSync(fileURLToPath(new URL('../README.md', import.meta.url)), 'utf8')
   assert.ok(readme.includes('docs/web-retriever-capabilities.md'), 'README 必须链接 docs/web-retriever-capabilities.md')
-  // 与数据面同一族：首页那句「共计 14 个网页检索能力」随工具增减漂移。没写就不核，写了才核。
+  // README's 「共计 14 个网页检索能力」 count drifts with tool changes; checked only when present.
   const stated = readme.match(/(\d+)[\s*]*个\s*网页检索能力/)
   if (stated === null) return
   assert.equal(Number(stated[1]), registered.length,

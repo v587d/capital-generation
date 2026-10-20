@@ -3,52 +3,28 @@ import { DatasetQueryError } from './query.js'
 import { dateParts, periodInputOf, resolveZonedPeriod, zoneOffsetMsByDiff } from '../time/tools.js'
 
 /**
- * Dataset 时间轴：把「日历」与「列里的时间值」双向对齐。
- *
- * 为什么必须由宿主做（2026-09-23 真机会话实测，问题单 session 1e44050e）：
- * data_junior 拿到 `time_facts.covered_from = 1695571200000` 之后，要判断覆盖到哪一天、
- * 能不能做 52 周窗口、月末锚点是多少，只能自己把 epoch 换算成日历；而 `query_dataset` 的
- * filter 值又只接受毫秒，于是"2026-08-23 是多少毫秒"这类问题被反复心算。
- * 结果是单步思考 41,961 字符里绝大部分是时间戳算术，且口径随时可能算错（它自己在思考里
- * 写了 "Risky"）。时间换算是**确定性计算**，属于宿主：
- *
- * 1. 正向（值 → 日历）：{@link isoFromAxisValue} 供 profile 的 time_facts 输出 ISO；
- * 2. 反向（日历 → 值）：{@link resolveAxisWindow} 把 ISO 日期/相对期解析成该列自己的边界值；
- * 3. 语义：{@link probeTimeAxis} 从**列自身观测到的偏移**推断时区，绝不猜。
- *
- * 日线数据里 `date_ms` = 当地午夜 00:00 的 epoch（实测 1695571200000 = 2023-09-25 00:00 +08:00
- * = UTC 前一天 16:00），所以"当天"的边界必须按该列的偏移算：值同时满足
- * `>= dayStart` 与 `<= dayEnd` 才算落在这一天。
+ * Dataset time axis: aligns calendar dates with the values stored in a column. `date_ms` is
+ * local-midnight epoch, so a day means `>= dayStart && <= dayEnd` under the column's observed
+ * offset. These conversions are deterministic host work, never left to the model.
  */
 
-/** 一天的毫秒数。 */
 const DAY_MS = 86_400_000
 
-/**
- * 从"当地午夜的 epoch"反解时区偏移。
- *
- * 列里的值就是某地 00:00 的瞬间，所以它对一天的余数恰好是"UTC 当天几点"，
- * 时区偏移 = 该余数的**相反数**：A 股数据余数 57_600_000（UTC 16:00）⇒ +08:00。
- * 余数先归一到 `(-12h, +12h]`（超半天即换到前一天），否则 +08:00 会被读成 -16:00。
- */
+/** Recover the zone offset from local-midnight epochs: offset = -(value mod day), normalized to (-12h, +12h]. */
 function zoneOffsetFromMidnightValue(value: number): number {
   const remainder = value % DAY_MS
   const utcHourOfDay = remainder > DAY_MS / 2 ? remainder - DAY_MS : remainder
   return -utcHourOfDay
 }
 
-/** 推断出的偏移必须落在真实时区范围内（UTC-12:00 ~ UTC+14:00）。 */
+/** Inferred offset must lie in UTC-12:00 .. UTC+14:00. */
 const MIN_OFFSET_MS = -12 * 3_600_000
 const MAX_OFFSET_MS = 14 * 3_600_000
 
-/**
- * 把数值列当 epoch 毫秒的必要量级。秒级 epoch（10 位，约 1.7e9）与毫秒级（13 位，约 1.8e12）
- * 差三个数量级：不加这道闸门时，秒级时间戳会被误判成"日粒度 epoch"（1.7e9 恰好是 86400 的
- * 整数倍），于是所有窗口边界整体错到 1970 年附近。1e11 ms ≈ 1973 年，足以把两者分开。
- */
+/** Epoch must be >= 1e11: second-level epochs can also look day-aligned and would land near 1970. */
 const MIN_EPOCH_MS = 100_000_000_000
 
-/** 能一键还原成 IANA 名的常见股票/基金数据时区（只有偏移等于它时才用名字，避免误标）。 */
+/** Offsets matching these get an IANA name; anything else is rendered as UTC±HH:MM. */
 const CANONICAL_ZONES: Array<{ zone: string; offsetMs: number }> = [
   { zone: 'Asia/Shanghai', offsetMs: 8 * 3_600_000 },
   { zone: 'UTC', offsetMs: 0 },
@@ -60,7 +36,6 @@ function isRecordLike(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-/** 行内取列值：与 store 的 profileCell 同义，只为不把 store 的私有实现引到这里。 */
 function cellOf(row: unknown, column: string): ProfileCell {
   if (!isRecordLike(row)) return { present: false, value: undefined }
   return Object.prototype.hasOwnProperty.call(row, column)
@@ -68,7 +43,6 @@ function cellOf(row: unknown, column: string): ProfileCell {
     : { present: false, value: undefined }
 }
 
-/** 某时刻在某时区下的日历年月日；时区非法或 Intl 不可用时返回 undefined。 */
 function readDateParts(epochMs: number, zone: string): { year: number; month: number; day: number } | undefined {
   try {
     const parts = new Intl.DateTimeFormat('en-US', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' })
@@ -80,7 +54,6 @@ function readDateParts(epochMs: number, zone: string): { year: number; month: nu
   }
 }
 
-/** `YYYY-MM-DD` 的严格解析：非法日期在这里就响亮失败，不带进任何换算。 */
 function readCalendarDate(value: string): { year: number; month: number; day: number } {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim())
   if (!match) throw new Error(`date must use YYYY-MM-DD: ${JSON.stringify(value)}`)
@@ -92,7 +65,6 @@ function readCalendarDate(value: string): { year: number; month: number; day: nu
   return parts
 }
 
-/** 日历天数推进：只按日/周/月/季度算，调用方只用到这三种。 */
 function shiftCalendarDate(value: string, unit: 'day' | 'month' | 'quarter', amount: number): string {
   const parts = dateParts(value)
   if (unit === 'day') {
@@ -111,19 +83,14 @@ function finiteNumbers(values: unknown[]): number[] {
   return values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
 }
 
-/** epoch 毫秒 → 该时区下的 `YYYY-MM-DD`；时区非法时退化为 UTC，绝不抛错。 */
+/** Epoch to zone-local YYYY-MM-DD; an invalid zone falls back to UTC and never throws. */
 export function isoDateFromEpoch(epochMs: number, zone: string): string {
   const parts = readDateParts(epochMs, zone) ?? readDateParts(epochMs, 'UTC')
   if (parts === undefined) return new Date(epochMs).toISOString().slice(0, 10)
   return `${String(parts.year).padStart(4, '0')}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`
 }
 
-/**
- * 某时区下"该日 00:00 的 epoch"。
- *
- * 两遍收敛：先用目标日 UTC 午夜的偏移作估计，再按估计时刻的偏移校正一次——
- * 对固定偏移时区（A 股数据里全部如此）一遍即准，对 DST 边界也只在跨日时刻才有差别。
- */
+/** Zone-local midnight, two-pass convergence; fixed-offset zones are exact on the first pass. */
 export function zoneDayStartMs(date: string, zone: string): number {
   const parts = readCalendarDate(date)
   const utcMidnight = Date.UTC(parts.year, parts.month - 1, parts.day)
@@ -131,12 +98,10 @@ export function zoneDayStartMs(date: string, zone: string): number {
   return utcMidnight - zoneOffsetMsByDiff(estimated, zone)
 }
 
-/** 某时区下"该日 23:59:59.999 的 epoch"，与 {@link zoneDayStartMs} 同一天。 */
 export function zoneDayEndMs(date: string, zone: string): number {
   return zoneDayStartMs(shiftCalendarDate(date, 'day', 1), zone) - 1
 }
 
-/** 把毫秒偏移写成 `+08:00` / `-03:30` / `+00:00`。 */
 export function formatOffset(offsetMs: number): string {
   const sign = offsetMs < 0 ? '-' : '+'
   const abs = Math.abs(offsetMs)
@@ -145,29 +110,20 @@ export function formatOffset(offsetMs: number): string {
   return `${sign}${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
 }
 
-/** 偏移落到常见数据时区时返回 IANA 名，否则返回 `UTC+08:00` 形态的说明串。 */
 function zoneForOffset(offsetMs: number): string {
   const canonical = CANONICAL_ZONES.find((entry) => entry.offsetMs === offsetMs)
   return canonical ? canonical.zone : `UTC${formatOffset(offsetMs)}`
 }
 
-/**
- * 从列值推断时间轴的形态、偏移与对齐方式。
- *
- * - 全部是数字且都是 86_400_000 的整数倍 → 日粒度 epoch；偏移 = 值 mod 一天；
- * - 全部是 `YYYY-MM-DD` 样式字符串 → date_string（ISO 写法，模型可读，无需换算）；
- * - 其余（秒级 epoch、混合类型、带时间的字符串）→ unknown，**不做猜测**：
- *   宿主宁可让模型看到 `unknown` 并用工具确认，也不要给一个看似合理的错误边界。
- */
+/** Infer format, offset and alignment from observed values only; anything else is `unknown`, never guessed. */
 export function probeTimeAxis(column: string, values: unknown[]): ProfileTimeAxis {
   const present = values.filter((value) => value !== null && value !== undefined)
   if (present.length === 0) return { column, value_format: 'unknown' }
 
   const numbers = finiteNumbers(present)
   if (numbers.length === present.length) {
-    // 日粒度 = 每个值都等于"某天 + 同一个日内偏移"，且这个偏移落在合法时区范围内。
-    // 只检查 `value % DAY_MS === 0` 是不够的：A 股数据的当地午夜等于 UTC 前一天 16:00，
-    // 余数是 57_600_000 而不是 0——按那个判据会把整列判成 unknown（实测踩过）。
+    // Daily granularity means every value shares one intra-day remainder, not remainder 0: local
+    // midnight is 16:00 UTC for A-share data, so `value % DAY_MS === 0` would reject the whole column.
     const offsetMs = zoneOffsetFromMidnightValue(numbers[0])
     const dayAligned = numbers.every((value) => Number.isSafeInteger(value)
       && value >= MIN_EPOCH_MS
@@ -188,30 +144,21 @@ export function probeTimeAxis(column: string, values: unknown[]): ProfileTimeAxi
   return { column, value_format: 'unknown' }
 }
 
-/** 时间轴上的一次边界换算：日历 → 该列里真正可用的值 / 查询下界。 */
+/** One calendar-to-column conversion: usable bounds plus the real first/last data dates. */
 export interface AxisBounds {
-  /** 日历起点（含）：`>= value_ge` 即"从这一天开始"。 */
   value_ge: number | string
-  /** 日历终点（含）的日末：`<= value_le` 即"到这一天结束"。 */
   value_le: number | string
-  /** 该窗口内 Dataset 首行/末行的日期（无数据时为 null）。 */
   data_from: string | null
   data_to: string | null
 }
 
 /**
- * 把一条 filter 的日期写法翻译成该时间轴上可比较的值。
- *
- * 三种结果：
- * - `filters`：翻译后的条件（`=` 展开成 `>= value_ge` + `<= value_le` 两条），交给引擎；
- * - `undefined`：这条不需要翻译（值不是日期 / 列不是时间列）；
- * - 抛错：**写法在此列上无意义**（日期字符串落到数值时间列等）。绝不静默放行——
- *   旧行为是 `skip_with_warning` 把该行整条跳过，等于"筛选条件消失、返回全量"，
- *   而模型只会看到一份看起来成功的全量结果（比报错危险得多）。
+ * Translate a date-like filter value into comparable bounds. Dates mean whole days: `=` expands
+ * to >=/<=, while `>`, `<`, `in` and `!=` fail loudly instead of silently shifting a day.
  */
 export function translateFilterDateValue(input: {
   axis: ProfileTimeAxis
-  /** 探针看到的日期（升序），period 窗口要用它夹到真实存在的交易日。 */
+  /** Probe dates in ascending order; period windows clamp to real trading days. */
   dates: string[]
   column: string
   operator: string
@@ -221,7 +168,7 @@ export function translateFilterDateValue(input: {
   if (column !== axis.column || axis.value_format === 'unknown') return undefined
   const asDate = typeof value === 'string' ? dateFromText(value) : undefined
   const asPeriod = isRecordLike(value) ? periodInputOf(value.period) : undefined
-  // `in` 的数组形态：逐个识别，一个日期都不认识才算"不是日期写法"。
+  // `in`: recognize dates element-wise; the value counts as a date form if any element is a date.
   const inDates = operator === 'in' && Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string' && dateFromText(item) !== undefined)
     : []
@@ -229,16 +176,13 @@ export function translateFilterDateValue(input: {
   const label = asDate ?? (asPeriod === undefined ? inDates.join(',') : `${asPeriod}(period)`)
   const range = /^(>=|<=|=|>|<)$/.exec(operator)
   if (range === null) {
-    // `in` / `!=` 在"整天"语义下表达的都是"排除"或"多天集合"：前者要求把每个日期
-    // 展开成两条边界（会被 filter 上限打回），后者根本不是范围查询。
-    // 与其给一个差一天的答案，不如让模型改用 >= / <= 明确写出要哪些天。
+    // `in`/`!=` cannot express whole-day exclusion or multi-day sets without changing semantics.
     throw new DatasetQueryError(
       'query_type_conflict',
       `filter ${column} cannot take a date-like value with operator ${operator}; dates always mean whole days, so write the range you want with >= and <= (got ${label})`,
     )
   }
-  // 日期只有"整天"的语义：> 与 < 会把边界挪到前一天/后一天的 23:59:59.999，
-  // 等于悄悄换一个窗口——宁可响亮失败，也不给一个差一天的答案。
+  // Strict comparisons would shift the window by a day; fail loudly instead.
   if (operator === '>' || operator === '<') {
     throw new DatasetQueryError(
       'query_type_conflict',
@@ -271,7 +215,6 @@ export function translateFilterDateValue(input: {
   }
 }
 
-/** `YYYY-MM-DD` / `YYYY-MM` / `YYYY` → 该区间的首日；其余文本返回 undefined。 */
 function dateFromText(value: string): string | undefined {
   const text = value.trim()
   const full = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text)
@@ -293,20 +236,14 @@ function dateFromText(value: string): string | undefined {
 }
 
 export interface AxisWindow extends AxisBounds {
-  /** 窗口名，例如 `last_3_months`、`ytd`、`2026-10`。 */
   name: string
-  /** 解析出的日历区间（半开：start ≤ 日期 ≤ end）。 */
   start_date: string
   end_date: string
 }
 
 /**
- * Dataset 模式的时间窗解析结果：把"近 3 个月"这类说法直接翻译成**可直接使用的查询边界**，
- * 并同时给出人类可读的日期与 Dataset 里真实存在的首末日期。
- *
- * 这是 data_junior 侧 `resolve_data_time_range` 的第二形态（第一形态仍是"给 request_data
- * 生成上游时间参数"）。两形态共用同一套 period 解析（`time/tools.ts` 的 resolveZonedPeriod），
- * 避免同一个词在两侧得到不同答案。
+ * Dataset-mode time window: period -> usable query bounds plus the real first/last dates present.
+ * Shares period parsing with capability mode so one phrase cannot mean two things.
  */
 export interface DatasetTimeResolution {
   mode: 'dataset'
@@ -314,23 +251,18 @@ export interface DatasetTimeResolution {
   timezone: string
   time_column: string
   period: string
-  /** 解析出的日历区间（名义区间）。 */
   range: { start_date: string; end_date: string }
-  /** 该区间内**真实存在**的首末日期（非交易日自动夹到相邻交易日）。 */
   data: { from: string | null; to: string | null; days: number | null }
-  /** 可直接使用的边界：`{column: time_column, operator: '>=', value: bound_ge}`。 */
+  /** Real dates present in the range; non-trading days clamp to the nearest session. */
   bounds: { bound_ge: number | string; bound_le: number | string; inclusive: boolean }
   bounds_are_intraday: boolean
-  /** Dataset 的完整覆盖范围（ISO 形态）。 */
   dataset: { covered_from: string; covered_to: string }
-  /** 名义区间与真实数据不一致等必须让模型知道的事实（协议要求"warnings 必须遵守"）。 */
+  /** Facts the model must respect (e.g. nominal range differs from actual data). */
   warnings: string[]
 }
 
-/** period 的两种写法：字面窗口（`last_3_months`）或 `{unit,count}`。 */
 export type PeriodInput = string | { unit: string; count: number }
 
-/** period 的可读名字：对象形态写成 `2_year`，省略或空串写成 `all`。 */
 export function periodName(period: PeriodInput | undefined): string {
   if (period === undefined) return 'all'
   if (typeof period === 'string') return period.trim() === '' ? 'all' : period.trim()
@@ -389,21 +321,8 @@ function boundsFor(axis: ProfileTimeAxis, startDate: string, endDate: string): A
 }
 
 /**
- * 把「日历窗口」解析成该时间轴上可用的边界值。
- *
- * `data_from` / `data_to` 用**该列自己的粒度**把窗口夹到真实存在的日期上：
- * 窗口起点落在周末/节假日时前移到下一个有数据的日期，终点回退到最后一个有数据的日期。
- * 这样"近 1 个月"这类窗口不会因为非交易日而给出空结果。
- */
-/**
- * 把「日历窗口」解析成该时间轴上可用的边界值。
- *
- * `data_from` / `data_to` 用**该列自己的粒度**把窗口夹到真实存在的日期上：窗口首日落在
- * 周末/节假日时前移到下一个有数据的日期，末日回退到最后一个有数据的日期。
- *
- * 锚点本身是非交易日时（例如"以周日为锚的近 1 周"）末日**再往后认一天**：
- * 名义窗口 [9/14, 9/20] 里最后一个交易日是 9/18，而锚点想表达的"最近一周"其实该到 9/21。
- * 这不是猜测：只有当紧邻末日的下一个日期确实存在、且它晚于锚点时才会这样延伸。
+ * Resolve a calendar window into bounds on this axis. First/last data dates clamp to dates that
+ * actually exist; when the anchor is beyond the last data date, the end extends by one session.
  */
 export function resolveAxisWindow(input: {
   axis: ProfileTimeAxis
@@ -417,11 +336,9 @@ export function resolveAxisWindow(input: {
   const sorted = [...new Set(dates)].sort()
   if (sorted.length === 0) throw new Error('dataset has no usable time values on the time axis')
   const anchor = input.anchorDate ?? sorted[sorted.length - 1]
-  // 锚点就是 Dataset 最后一天时，"到锚点为止"不该再往后认一天（那是把窗口拖到未来）；
-  // 只有当锚点明确超出现有数据、且窗口末端被截断时，末日的下一个交易日才属于该窗口。
+  // An anchor at the dataset end must not extend into the future; only an anchor beyond the data may.
   const anchorIsDatasetEnd = anchor === sorted[sorted.length - 1]
-  // 名字只用于展示：对象形态的 period（`{unit,count}`）必须**原样**交给解析器，
-  // 不能先转成展示名再解析（`2_year` 不是合法 period，会掉进 unsupported period）。
+  // Name is display-only: object periods must reach the resolver as-is (`2_year` is not a valid period).
   const period = periodName(input.period)
   const resolved = resolveZonedPeriod(input.period ?? 'all', anchor)
   const clipped = clampToDates(sorted, resolved.start, resolved.end, { anchor, extend: !anchorIsDatasetEnd })
@@ -438,36 +355,24 @@ export function resolveAxisWindow(input: {
   }
 }
 
-/** 把窗口夹到真实存在的日期：起点取"第一个 ≥ start"，终点取"最后一个 ≤ end"。 */
+/** Clamp to existing dates: first >= start, last <= end (optionally one session past). */
 function clampToDates(sorted: string[], start: string, end: string, boundary: { anchor: string; extend: boolean }): { from: string; to: string } | undefined {
   const inside = sorted.filter((date) => date >= start && date <= end)
   if (inside.length === 0) return undefined
   const from = inside[0]
   const to = inside[inside.length - 1]
-  // 窗口末端被前截（末日在锚点之前）、且该日之后确实还有下一个交易日时，才把它认进来。
-  // 锚点就是数据最后一天时不延伸：那时窗口本来就该"到锚点为止"，多认一天是拖到未来。
   const next = sorted[sorted.indexOf(to) + 1]
   const extended = boundary.extend && next !== undefined && end <= boundary.anchor ? next : to
   return { from, to: extended }
 }
 
-/**
- * 单值 → 该列里代表"这一天"的取值。
- *
- * `epoch_ms` 轴取当地午夜（value_ge 与 value_le 相等时的那个值），`date_string` 轴原样返回。
- * 用于 filter 的 `=` / `in`：先把日期压成单值，再交给引擎做相等比较。
- */
+/** Single value representing a whole day: local midnight on epoch axes, the date itself otherwise. */
 export function axisValueForDate(axis: ProfileTimeAxis, date: string): number | string {
   if (axis.value_format === 'date_string') return date
   return zoneDayStartMs(date, axis.time_zone ?? 'UTC')
 }
 
-/**
- * 读一份 Dataset 的时间轴（形态 + 已出现的日期清单）。
- *
- * 日期清单只用于把窗口夹到真实存在的交易日，所以按升序逐行收集、遇到更早的值才插入，
- * 到上限即停：`date_ms` 数据是有序的，正常情况下一次遍历就装满。
- */
+/** Collect distinct axis dates in ascending order, capped at MAX_AXIS_DATES; used to clamp windows. */
 export const MAX_AXIS_DATES = 20_000
 
 export function readAxisDates(input: {
@@ -495,10 +400,7 @@ export function readAxisDates(input: {
   return dates.sort()
 }
 
-/** profile 的 `time_facts.windows`：最常见的几个窗口，让模型不必自己算锚点。
- *
- * 只给"数据里确实存在"的窗口；空窗口不出现，避免模型拿一个空区间去查询再困惑。
- */
+/** Default windows for time_facts; windows with no data are omitted rather than returned empty. */
 export const DEFAULT_WINDOW_PERIODS = ['last_1_month', 'last_3_months', 'last_1_year', 'ytd'] as const
 
 export function defaultAxisWindows(input: { axis: ProfileTimeAxis; dates: string[] }): AxisWindow[] {
@@ -509,7 +411,6 @@ export function defaultAxisWindows(input: { axis: ProfileTimeAxis; dates: string
       if (window.data_from === null) continue
       windows.push(window)
     } catch {
-      // 数据覆盖不到这个窗口（例如上市不足一年）时不输出该窗口，不是错误。
     }
   }
   return windows

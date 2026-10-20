@@ -1,20 +1,11 @@
 /**
- * PaddleOCR AIStudio **异步 job** 客户端（`ocr` 的上游实现，唯一一份出网实现）。
+ * Async PaddleOCR jobs client — the plugin's only OCR egress implementation.
  *
- * 生命周期（2026-09-25 真报文实测，15 页贵州茅台研报，31 秒完成）：
- * `POST /api/v2/ocr/jobs` → `{code:0,msg:'Success',data:{jobId}}`
- * → `GET /api/v2/ocr/jobs/{jobId}` 轮询 `data.state`：`pending` → `running`
- * （带 `extractProgress.{totalPages,extractedPages}`）→ `done`（带 `resultUrl.jsonUrl`）
- * → `GET jsonUrl` 拿 **JSONL**（每行一个批次，`result.layoutParsingResults[]` 一项一页）。
+ * Flow: POST job → poll state → fetch result JSONL (one layout result per page).
  *
- * ⛔ 两条只能从真报文里拿到的事实，决定了本文件的形状：
- * 1. **上游把错误装在 HTTP 200 里**：模型名写错返回 `{code:10007,msg:'模型传参错误'}`
- *    且没有 `data.jobId`。只判 `status === 200` 会把失败当成功、`jobId` 变 `undefined`，
- *    然后拿 `undefined` 去轮询——所以每个响应都先看 `code`。
- * 2. **`optionalPayload` 的未知键被静默忽略**（塞 `zzzBogusKey` 照样返回 Success）。
- *    公开文档那页讲的其实是同步 `/layout-parsing`，`mergeTables` / `prettifyMarkdown`
- *    在 jobs 上是否生效无法证明，因此**只传官方示例里出现过的三个键**，
- *    不拿没验证过的开关换"看起来能配"的假象。表格噪音靠 `markdown.ts` 自己处理。
+ * ⛔ Two response-shape facts determine the code below:
+ * 1. Business failures arrive as HTTP 200 with `{ code: nonzero, jobId absent }`, so always check `code`.
+ * 2. Unknown `optionalPayload` keys are silently ignored; send only documented example keys.
  */
 
 import type { HttpOutcome, HttpRequest } from '../web-retriever/local-fetch.js'
@@ -23,13 +14,13 @@ import { buildOcrDocument, type OcrDocument } from './markdown.js'
 export const PADDLE_OCR_DEFAULT_ENDPOINT = 'https://paddleocr.aistudio-app.com/api/v2/ocr/jobs'
 export const PADDLE_OCR_DEFAULT_MODEL = 'PaddleOCR-VL-1.6'
 
-/** 上游文档口径：PDF 默认最多 100 页。超页是**上游会失败**，提前拦比事后猜便宜。 */
+/** Upstream PDF page limit; reject earlier than letting the remote job fail. */
 export const PADDLE_OCR_MAX_PAGES = 100
 
 const DEFAULT_POLL_INTERVAL_MS = 5_000
-/** 自有等待预算必须**小于**工具声明的 `timeoutMs`：留出不确定返回与写盘的余量。 */
+/** Wait budget stays below the tool timeout, leaving time for the response and disk write. */
 const DEFAULT_WAIT_BUDGET_MS = 200_000
-/** 结果 JSONL 的体积上限（实测 15 页 258 KB；上限给到 8 MB 并在超限时响亮失败）。 */
+/** JSONL response cap; exceeding it fails loudly rather than parsing a partial document. */
 const DEFAULT_RESULT_MAX_BYTES = 8 * 1024 * 1024
 
 export type OcrErrorCode =
@@ -52,7 +43,7 @@ export interface OcrProgress {
   total_pages: number
 }
 
-/** 一次轮询看到的作业状态（只保留我们用得上的字段）。 */
+/** Poll status, narrowed to fields used here. */
 export interface OcrJobState {
   state: string
   progress?: OcrProgress
@@ -61,9 +52,9 @@ export interface OcrJobState {
 }
 
 export interface OcrSubmitInput {
-  /** 公网可达的 `.pdf` 直链：由**上游**去取文件，本机不落任何字节。 */
+  /** Public PDF URL fetched by the provider; no local bytes are involved. */
   fileUrl?: string
-  /** 本地文档字节（`file` 形态）：走 multipart 上传。 */
+  /** Local document bytes uploaded as multipart. */
   file?: { bytes: Uint8Array; filename: string }
   charts: boolean
   signal: AbortSignal
@@ -73,7 +64,7 @@ export interface OcrWaitOutcome {
   status: 'done' | 'pending'
   job_id: string
   progress?: OcrProgress
-  /** `status === 'done'` 时一定有。 */
+  /** Present whenever status is done. */
   document?: OcrDocument
   json_url?: string
   elapsed_ms: number
@@ -87,7 +78,7 @@ export interface PaddleOcrClientOptions {
   pollIntervalMs?: number
   waitBudgetMs?: number
   resultMaxBytes?: number
-  /** 注入以便测试：睡眠必须可取消。 */
+  /** Injectable sleep keeps polling cancellable. */
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>
   now?: () => number
 }
@@ -97,7 +88,7 @@ export interface PaddleOcrClient {
   submit(input: OcrSubmitInput): Promise<string>
   poll(jobId: string, signal: AbortSignal): Promise<OcrJobState>
   wait(jobId: string, signal: AbortSignal, progress?: OcrProgress): Promise<OcrWaitOutcome>
-  /** 提交并等到有结果（或自有预算耗尽回 pending）。 */
+  /** Submit and poll until terminal, or return pending when the wait budget is exhausted. */
   parse(input: OcrSubmitInput): Promise<OcrWaitOutcome>
   load(jsonUrl: string, signal: AbortSignal): Promise<OcrDocument>
 }
@@ -125,11 +116,9 @@ function sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /**
- * 把传输层异常翻成 OCR 错误码。
- *
- * ⚠️ `createHttpRequester` 对 4xx/5xx 抛的是 `LocalFetchError('HTTP', '… returned HTTP 401')`，
- * 状态码只在消息文本里。这里按文本识别鉴权类失败（401/403）**只为了把"该去卡片填 token"
- * 这条最有用的话送到模型面前**；识别不到就退回 `UPSTREAM`，绝不假装知道上游说了什么。
+ * Map transport exceptions to OCR codes. `LocalFetchError` carries the HTTP status
+ * only in its message, so recognize 401/403 to point at the token card; otherwise
+ * fall back to UPSTREAM rather than infer upstream details.
  */
 function mapTransportFailure(error: unknown): OcrError {
   const message = error instanceof Error ? error.message : String(error)
@@ -156,7 +145,7 @@ export function createPaddleOcrClient(options: PaddleOcrClientOptions): PaddleOc
     return { authorization: `bearer ${token}` }
   }
 
-  /** 发一次请求并**校验 body.code**：上游用 HTTP 200 装业务错误（见文件头 ⛔ 1）。 */
+  /** Send and validate `body.code`; HTTP 200 can still be a business error. */
   async function call(request: HttpRequest, signal: AbortSignal): Promise<Record<string, unknown>> {
     let outcome: HttpOutcome
     try {
@@ -186,7 +175,7 @@ export function createPaddleOcrClient(options: PaddleOcrClientOptions): PaddleOc
   }
 
   function optionalPayload(charts: boolean): Record<string, boolean> {
-    // 只带官方示例出现过的三个键（文件头 ⛔ 2）。
+    // Send only the three documented example keys.
     return { useDocOrientationClassify: false, useDocUnwarping: false, useChartRecognition: charts }
   }
 
@@ -203,15 +192,12 @@ export function createPaddleOcrClient(options: PaddleOcrClientOptions): PaddleOc
       const form = new FormData()
       form.append('model', model)
       form.append('optionalPayload', JSON.stringify(payload))
-      // `fs.readBytes` 的返回类型是 `Uint8Array<ArrayBufferLike>`，而 `Blob` 只接受
-      // ArrayBuffer 背书的视图；字节确实是新分配的 ArrayBuffer，在边界上收敛一次类型。
+      // Narrow the buffer-backed view at this runtime boundary; the bytes are freshly allocated.
       form.append('file', new Blob([file.bytes as unknown as BlobPart], { type: 'application/octet-stream' }), file.filename)
       extraHeaders = {}
       body = form
     }
-    // ⛔ `headers`（bearer）与 `extraHeaders`（content-type）**都要**带上：只传后者就等于
-    //    把作业提交发成一个无鉴权请求（实测 401），而轮询那条路是带着 token 的——
-    //    两条出网路径形状不一致，恰是"只测接好的那个入口"能长期潜伏的形态。
+    // ⛔ Send both bearer and content-type headers; omitting either makes the two egress paths diverge.
     const parsed = await call({ url: endpoint, method: 'POST', headers: { ...headers, ...extraHeaders }, body }, input.signal)
     const jobId = asRecord(parsed.data)?.jobId
     if (typeof jobId !== 'string' || jobId.length === 0) {
@@ -238,10 +224,8 @@ export function createPaddleOcrClient(options: PaddleOcrClientOptions): PaddleOc
   }
 
   async function load(jsonUrl: string, signal: AbortSignal): Promise<OcrDocument> {
-    // ⛔ 结果地址是**预签名**的对象存储 URL（实测主机 `paddleocr-store-8.bj.bcebos.com`，与作业
-    //    API 不同域）。带上我们的 bearer，BOS 会把它当作待验签请求并索要 `date` 头，直接
-    //    HTTP 400 `MissingDateHeader`；不带才拿得下来（实测 200 / 308 KB）。而且把 token 发给
-    //    第三方存储域本身就是密钥外流——这条路**只**靠签名过的 URL 鉴权。
+    // ⛔ Fetch the presigned result URL without our bearer: object storage rejects mixed auth
+    // and the token must not leak to a third-party host.
     let outcome: HttpOutcome
     try {
       outcome = await options.request(
@@ -253,7 +237,7 @@ export function createPaddleOcrClient(options: PaddleOcrClientOptions): PaddleOc
       if (code === 'ABORTED' || (error instanceof Error && error.name === 'AbortError')) throw error
       throw mapTransportFailure(error)
     }
-    // 结果 JSONL 单独定上限（15 页实测 258 KB），超限就是真超限，不能继续当完整文档解析。
+    // Cap the result JSONL separately; an oversize response is not a usable document.
     if (outcome.truncated) {
       throw new OcrError('RESULT_INVALID', `解析结果超出 ${resultMaxBytes} 字节上限并被截断：整份文档作废，不给半份 markdown`)
     }
@@ -268,8 +252,7 @@ export function createPaddleOcrClient(options: PaddleOcrClientOptions): PaddleOc
         throw new OcrError('RESULT_INVALID', `结果 JSONL 有一行不是 JSON（长度 ${trimmed.length}）：整份文档作废`)
       }
       if (!record) throw new OcrError('RESULT_INVALID', '结果 JSONL 的某一行不是对象')
-      // ⛔ 成功行**也带** `errorMsg`：2026-09-25 实测每行都是 `{errorCode: 0, errorMsg: "Success", …}`。
-      //    判据只能是 `errorCode !== 0`——把"有 errorMsg"当失败会把每一份成功解析的文档报成失败。
+      // ⛔ Successful rows also carry errorMsg; use errorCode !== 0, not field presence.
       const errorCode = record.errorCode
       const failed = typeof errorCode === 'number' ? errorCode !== 0 : typeof errorCode === 'string' ? errorCode !== '0' && errorCode.length > 0 : false
       const result = asRecord(record.result)
@@ -329,7 +312,7 @@ export function createPaddleOcrClient(options: PaddleOcrClientOptions): PaddleOc
       } catch (error) {
         const code = (error as { code?: string })?.code
         if (code === 'ABORTED' || (error instanceof Error && error.name === 'AbortError')) throw error
-        // 睡眠本身不会失败成别的错误；真出了就算作业状态未知，别硬编成上游错误。
+        // A sleep failure means job state is unknown; do not relabel it as an upstream error.
         throw new OcrError('RESULT_INVALID', `轮询等待异常（已轮询 ${attempts} 次）：${error instanceof Error ? error.message : String(error)}`)
       }
     }

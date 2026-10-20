@@ -1,12 +1,7 @@
 /**
- * 自包含 HTML 图表的生成器。
- *
- * 这是整个方案的**降级底线**（内部设计文档 docs/design/chart-visualization.md §5.4 的 L2）：
- * 它只依赖"用户有一个浏览器"，不依赖 DSH 的客户端插件系统、不依赖网络、
- * 不依赖任何上游扩展点。即使 Slot / bundle / 路由全部被上游改动打坏，
- * 用户依然能拿到一张可交互的图。
- *
- * 因此它必须：内联 vendored 库 + 内联数据 + 内联运行时，**零外部请求**。
+ * Standalone HTML: the L2 fallback that needs only a browser. Vendored library, data and
+ * runtime are inlined (zero external requests) so a broken client plugin, route or network
+ * cannot take charts down.
  */
 import { ChartError } from './errors.js'
 import { CHART_RUNTIME_SOURCE } from './runtime.js'
@@ -18,13 +13,7 @@ export interface VendoredChartLibrary {
   license: string
 }
 
-/**
- * 取 Node 内建 fs。
- *
- * 本仓刻意不引入 `@types/node`（src 里其他地方也不 import node: 模块），改用与
- * cordis.patch.yml 同一个惯用法 `process.getBuiltinModule`，因此只依赖**运行时**能力，
- * 不新增构建期类型依赖。
- */
+// No `@types/node` by design; process.getBuiltinModule is runtime-only, same idiom as cordis.patch.yml.
 interface NodeFsLike {
   readFileSync(path: URL, encoding: 'utf8'): string
 }
@@ -41,10 +30,8 @@ function nodeFs(): NodeFsLike {
 let cachedLibrary: VendoredChartLibrary | undefined
 
 /**
- * 读取随包发布的 lightweight-charts standalone 构建。
- *
- * 路径相对 `import.meta.url`：编译后是 `lib/chart/vendor/...`（由 scripts/copy-assets.mjs
- * 从 `vendor/` 复制过去）。缺失时给出可操作错误，而不是让 HTML 里静默少一段脚本。
+ * Path is relative to import.meta.url (assets copied into lib by scripts/copy-assets.mjs);
+ * a missing library is a hard, actionable error rather than silently missing script bytes.
  */
 export function loadVendoredChartLibrary(): VendoredChartLibrary {
   if (cachedLibrary) return cachedLibrary
@@ -60,17 +47,17 @@ export function loadVendoredChartLibrary(): VendoredChartLibrary {
   }
 }
 
-/** 内联脚本的安全转义：`</script` 会提前结束 script 元素。 */
+/** `</script` would close the inline script element early. */
 function escapeScript(source: string): string {
   return source.replace(/<\/script/gi, '<\\/script')
 }
 
-/** 内联 JSON 的安全转义：`<` 一律写成 `\u003c`（JSON 里合法，且彻底杜绝标签闭合）。 */
+/** `<` becomes `\u003c` (valid JSON) so data can never close a tag. */
 function escapeJson(value: unknown): string {
   return JSON.stringify(value).replace(/</g, '\\u003c')
 }
 
-/** 数据截至时间：按本仓数据口径用 Asia/Shanghai 显示，同时保留 UTC。 */
+/** Data timestamps display in Asia/Shanghai per data convention; UTC is the fallback. */
 function formatCapturedAt(epochMs: number): string {
   try {
     const parts = new Intl.DateTimeFormat('en-CA', {
@@ -87,7 +74,6 @@ function formatCapturedAt(epochMs: number): string {
 export interface BuildStandaloneHtmlInput {
   payload: ChartPayload
   library: VendoredChartLibrary
-  /** 生成时刻（epoch ms），仅用于页脚署名，不参与渲染。 */
   generatedAt: number
 }
 

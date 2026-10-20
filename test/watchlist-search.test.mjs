@@ -1,9 +1,7 @@
 /**
- * 搜索与消歧（自选股唯一的上游入口）。
- *
- * 断言的是**出网参数**与**规范化结果**两件事：范围收窄必须发生在入参上
- * （`asset_type` 白名单 + `limit` 那一档），否则场外基金 / 外汇 / 期货会混进候选，
- * 并把"不支持的标的"和"没有匹配"揉成同一个错——那正是 R4 会失效的地方。
+ * Search and disambiguation. Assertions cover outbound parameters and normalised results: scope must
+ * narrow on the way in (`asset_type` whitelist + per-branch `limit`), otherwise OTC funds, FX and futures
+ * leak into candidates and "unsupported" collapses into "no match".
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -11,7 +9,7 @@ import { SEARCH_ASSET_TYPES, SEARCH_BRANCH_LIMITS, createWatchlistService, keyFo
 import { fetchSmartbox, parseSmartbox } from '../lib/sources/tencent-public-core.js'
 import { FIXTURES, SMARTBOX_ROWS, createFakeDomain, stubFuyao } from './watchlist-harness.mjs'
 
-/** 出网按家数分开数：三路并发之后"总共几次"不是判据，"哪一家几次"才是。 */
+/** Per-provider outbound counts: after three concurrent routes the judge is "which provider, how often", not the total. */
 const callsTo = (calls, needle) => calls.filter((call) => call.url.includes(needle))
 
 function run(searchStub, options = {}) {
@@ -74,9 +72,7 @@ test('白名单之外的 asset_type 在路由层就被丢掉（场外基金没�
 })
 
 test('候选池全量返回（⛔ 不再切 20）；两种"还有更多"各自都要报 truncated', async () => {
-  // A 股那一路一次给满它自己那一档（Fuyao `limit` 官方上限 50）：**一行不落地全回给面板**。
-  // 上游没有第二页（smartbox 硬顶 10、Fuyao 没有 offset），切一刀不是"倒逼缩小输入"，
-  // 是把本来能给的行藏起来——2026-10-08 用户点名"既然翻不了页就直接放出来"。
+  // The A-share branch fills its own limit and hands every row back: no second page upstream, so cutting only hides rows.
   const many = {
     code: 0,
     data: {
@@ -100,8 +96,7 @@ test('候选池全量返回（⛔ 不再切 20）；两种"还有更多"各自�
     stub.restore()
   }
 
-  // 另一种更隐蔽：合并后**远不到**池子上界，但港那一路回满了它自己那一档（smartbox 实测硬顶 10 条，
-  // 多要也不会多给）。这一路的"还有更多"只看它自己的预算——按合并后的总条数判就会静默说"就这些"。
+  // The subtler case: the merged total is far below the pool ceiling, but the HK branch filled its own budget.
   const tenHk = `v_hint="${Array.from({ length: 10 }, (unused, index) => `hk~${String(1000 + index)}~\u6e2f\u80a1${index}~gg${index}~GP`).join('^')}";`
   const narrow = stubFuyao({ 'smartbox.gtimg.cn': (url) => (url.includes('t=hk') ? tenHk : 'v_hint="N";') })
   const second = run(narrow)
@@ -130,7 +125,7 @@ test('空输入与超长输入是本地错误，绝不发一次出网请求', as
 })
 
 test('同花顺指数（.TI）这类非沪深后缀不进候选：不挡掉就是"添加"那一下 500', async () => {
-  // 实测：`q=宁德时代` 会带回 `885789.TI 宁德时代概念`（exchange 为 null）。
+  // Upstream answers a name query with `885789.TI` (exchange null), so non SH/SZ suffixes must be filtered here.
   const stub = stubFuyao({
     '/api/meta/tickers/search': {
       code: 0,
@@ -157,23 +152,21 @@ test('同花顺指数（.TI）这类非沪深后缀不进候选：不挡掉就�
 test('normalizeThscode：trim + 大写；五种形状都收，裸码 / 北交所 / 场外都拿不到 thscode', async () => {
   assert.equal(normalizeThscode(' 300750.sz '), '300750.SZ')
   assert.equal(normalizeThscode('600519.SH'), '600519.SH')
-  // 2026-10-07 起清单接受五种 canonical 键（设计文档 §3.4）。
+  // The list accepts five canonical key shapes (design doc §3.4).
   for (const input of ['00700.HK', 'HSI.HK', 'AAPL.OQ', 'BRK.B.N', 'IXIC.US']) {
     assert.equal(normalizeThscode(` ${input.toLowerCase()} `), input, `${input} 是合法键`)
   }
   for (const input of ['300750', '920002.BJ', '012414.OF', '', undefined, 42, 'ABCDEF.SH', 'HSI.SZ', 'AAPL', 'HK00700', '.IXIC']) {
     assert.equal(normalizeThscode(input), undefined, `${String(input)} 不该被接受`)
   }
-  // ⛔ `.SH` / `.SZ` / `.HK` / `.US` 这四个尾段是我们自己占的市场标记：字母代码带着它们
-  // 不能同时又被当成"美股身份"，否则一个不存在的键能进清单、还能去敲腾讯的门。
+  // `.SH` / `.SZ` / `.HK` / `.US` are our own market markers: an alphabetic code may not also read as US identity.
   assert.equal(keyFormOf('BRK.B.N').form, 'us-stock')
   assert.equal(keyFormOf('HSI.HK').form, 'hk-index', '⛔ `HSI.HK` 落不进美股分支（判序反向对照）')
   assert.equal(keyFormOf('SSPX.AM').form, 'us-stock', '⛔ `SSPX.AM` 落不进指数分支（P19 那只 ETF）')
 })
 
 test('一路失败只降那一路：A 股搜索挂了，候选里仍给港美股，失败进 partial', async () => {
-  // R12：`credential_missing` / `fuyao_unavailable` 的射程从"整块面板"缩到"A 股那一路"。
-  // 只有三路全挂才许占用居中位（下面那条用例测的就是这一半）。
+  // R12: `credential_missing` / `fuyao_unavailable` shrink from the whole panel to the A-share route.
   const stub = stubFuyao({ '/api/meta/tickers/search': { status: 503, body: {} }, 'smartbox.gtimg.cn': (url) => (url.includes('t=us') ? SMARTBOX_ROWS['us|腾讯'] : 'v_hint="N";') })
   const { service } = run(stub)
   try {
@@ -215,11 +208,8 @@ test('没配密钥时：A 股那一路点名 credential_missing，港美股那�
   }
 })
 
-/**
- * 三路并发合并（设计文档 §3.2）。Fuyao 那一路这里**借用**真报文 `searchCatl`（`300750.SZ 宁德时代`）：
- * 本用例测的是"三条上游的结果怎么并成一屏"，不是"腾讯这只票在 Fuyao 叫什么"——
- * 后者今天没有实测回执，就不许写成 fixture。
- */
+// Three-route merge: borrows the real `searchCatl` payload for Fuyao, because "what this Tencent instrument is
+// called in Fuyao" has no measured receipt and therefore must not become a fixture.
 test('一次输入三路并发：A 股 + 港 + 美并成一屏，窝轮被白名单挡在门外', async () => {
   const stub = stubFuyao({
     '/api/meta/tickers/search': FIXTURES.searchCatl,
@@ -230,8 +220,7 @@ test('一次输入三路并发：A 股 + 港 + 美并成一屏，窝轮被白名
     const result = await service.search('腾讯')
     assert.equal(result.ok, true)
     assert.deepEqual(result.items.map((item) => item.thscode), ['300750.SZ', '00700.HK', '80700.HK', '01698.HK', 'TCEHY.PS', 'TCTZF.PS', 'TME.N', 'NPSNY.PS'])
-    // ⛔ P17 的那一条：`t=hk&q=腾讯` 十条里七条是窝轮 `QZ`，过滤后必须**只剩 3 条**——
-    // 剩 10 条是白名单没生效，剩 0 条是把 `QZ` 与 `GP` 一起拒了（两种都是真的取数事故）。
+    // The HK name query is mostly warrant rows (`QZ`): filtering must leave exactly 3 — 10 is a missed whitelist, 0 rejects `GP` too.
     assert.equal(result.items.filter((item) => item.exchange === 'HK').length, 3)
     assert.deepEqual(result.items.filter((item) => item.exchange === 'US').map((item) => item.asset_type), ['us-stock', 'us-stock', 'us-stock', 'us-stock'])
     assert.equal(result.truncated, false, '合并后 8 条 < 10，不算截断')
@@ -256,8 +245,7 @@ test('精确代码优先：输入就是那只票的代码时它排第一（跨�
 })
 
 test('⛔ smartbox 的 `N` 哨兵与非法 `t`：都解析成"零条"，但 `t` 只许是那两个常量', async () => {
-  // 实测 P16：`t=hk,us` / `t=hf` 这类上游不认的值回的是**同一个** `N`。所以上游那一侧无法区分
-  // "没有这个票"与"参数写错了"——区分只能做在我们这一侧：`t` 取自常量表，且内核直接拒掉别的值。
+  // An unknown `t` answers with the same `N` sentinel, so "no match" vs "bad parameter" is only separable here.
   assert.deepEqual(parseSmartbox('v_hint="N";'), [], '无命中不是畸形回包，不许烧一次红字给用户')
   assert.deepEqual(parseSmartbox('v_hint="";'), [], '空正文同样是零条')
   await assert.rejects(() => fetchSmartbox('腾讯', 'hk,us', AbortSignal.timeout(1000)), /smartbox market must be one of/u,
@@ -295,7 +283,7 @@ test('`00700` 同时命中港与 A 两只票：键不撞、两条都在（P5 的
 })
 
 test('类型段决定行类，不由代码段猜：ZS 进指数、GP 进个股（含 ETF）', async () => {
-  // 两条真回包都进了默认路由：`t=hk&q=HSTECH` 同时回指数与一只 ETF，`t=us&q=QQQ` 回的全是 ETF。
+  // Both bodies go through the default route: `t=hk&q=HSTECH` returns an index and an ETF, `t=us&q=QQQ` only ETFs.
   const stub = stubFuyao()
   const { service } = run(stub)
   try {
@@ -312,8 +300,7 @@ test('类型段决定行类，不由代码段猜：ZS 进指数、GP 进个股�
 })
 
 test('⛔ 直加 canonical 键必须先剥成 stem：smartbox 认不下 `00700.HK` / `TCEHY.PS` 这种写法', async () => {
-  // 实测（2026-10-07）：把这四种键原样丢给检索，回的全是 `N` 哨兵——和"查无此票"同一个回文。
-  // 拿它当"没有这只票"就是把一只真票判成不存在，所以 `/add` 用 stem 去问、再按键比回来。
+  // Canonical keys sent verbatim return the `N` sentinel, the same body as "no such instrument": `/add` asks with the stem.
   const stub = stubFuyao()
   const { service } = run(stub)
   try {
@@ -330,15 +317,11 @@ test('⛔ 直加 canonical 键必须先剥成 stem：smartbox 认不下 `00700.H
   }
 })
 
-/**
- * 大小写（2026-10-08 真上游实测）：Fuyao 的 `q` 是**区分大小写**的子串匹配——
- * `q=tcl` 0 条而 `q=TCL` 3 条、`q=etf` 0 条而 `q=ETF` 50 条、`q=600519.sh` 0 条而 `q=600519.SH` 1 条；
- * 而港美股那两路（smartbox）实测**不区分大小写**（`aapl` / `AAPL` / `apple` 回包逐字节相同）。
- * 所以"多问一笔"只许做在 A 股那一路，且只在 `q` 真的含 ASCII 小写字母时发生。
- */
+// Fuyao `q` is case-sensitive substring matching while smartbox is not, so the extra query happens only on the
+// A-share route and only when `q` really contains ASCII lowercase.
 const envelope = (items) => ({ code: 0, data: { timestamp: 1, item: items } })
 const aRow = (code) => ({ thscode: `${code}.SZ`, ticker: code, name: `标的${code}`, exchange: 'SZ', asset_type: 'a-share' })
-/** 按 `q` 分岔的 Fuyao 夹具：小写那一支照真上游回 0 条，大写那一支回给定行。 */
+/** Fuyao fixture branching on `q`: the lowercase arm returns 0 rows like the real upstream, the uppercase arm returns the given rows. */
 const fuyaoByCase = (upperRows, lowerRows = []) => ({
   '/api/meta/tickers/search': (url) => {
     const asked = new URL(url).searchParams.get('q')
@@ -398,7 +381,7 @@ test('两笔按 canonical 键去重，原样那一份排前面（同一只票不
 })
 
 test('半边失败：拿到候选就算这一路答上了；一支候选都没拿到才进 partial', async () => {
-  // 原样那一笔 503、大写那一笔正常 → 候选照给、不许同时说"A股搜索不可用"（同屏自相矛盾）。
+  // Original-case call 503, uppercase call fine: candidates are still handed out and the route is not also called unavailable.
   const half = stubFuyao({
     '/api/meta/tickers/search': (url) => {
       const asked = new URL(url).searchParams.get('q')
@@ -415,7 +398,7 @@ test('半边失败：拿到候选就算这一路答上了；一支候选都没�
     half.restore()
   }
 
-  // 两笔都挂 → 仍然是"A股这一路没参与"，而不是"这个票不存在"。
+  // Both calls down: still "the A-share route did not participate", not "this instrument does not exist".
   const down = stubFuyao({ '/api/meta/tickers/search': { status: 503, body: {} } })
   const second = run(down)
   try {
@@ -429,8 +412,7 @@ test('半边失败：拿到候选就算这一路答上了；一支候选都没�
 })
 
 test('"回满自己那一档"按**笔**算：两笔各 15 条、并起来 20 条不许说还有更多', async () => {
-  // 上游两笔都没被砍（各 15 < limit 50），只是去重后并起来 20 条——按合并后的条数判就会凭空
-  // 给用户一句 tip，而那句话说的是"上游还有货、我们藏了"，假的比没有更糟。
+  // Neither call was cut (15 < limit 50); judging on the merged count would invent a "there is more" tip.
   const lower = Array.from({ length: 15 }, (unused, index) => aRow(String(100001 + index)))
   const upper = Array.from({ length: 15 }, (unused, index) => aRow(String(100006 + index)))
   const stub = stubFuyao(fuyaoByCase(upper, lower))
@@ -443,7 +425,7 @@ test('"回满自己那一档"按**笔**算：两笔各 15 条、并起来 20 条
     stub.restore()
   }
 
-  // 反向对照一：其中一笔真被砍在 limit 上（回满 50），也要说还有更多。
+  // Counter-case: one call really did fill its limit (50), so "there is more" must be said.
   const cut = stubFuyao(fuyaoByCase(Array.from({ length: SEARCH_BRANCH_LIMITS['a-share'] }, (unused, index) => aRow(String(200001 + index)))))
   const second = run(cut)
   try {
@@ -455,8 +437,7 @@ test('"回满自己那一档"按**笔**算：两笔各 15 条、并起来 20 条
 })
 
 test('⛔ 两笔并起来超过这一档时自己砍的那一刀也算"被砍"：items 正好 50、truncated 为真', async () => {
-  // 40 + 40 不重叠 = 80 > limit 50：单看每一笔都没回满（40 < 50），但我们只留 50 行，
-  // 剩下 30 行是**被我们藏起来的**——这时候不说"还有更多"就是把"我们砍的"说成"上游就这些"。
+  // 40 + 40 without overlap: no single call filled, but we keep 50 and hide 30 ourselves — that counts as cut too.
   const lower = Array.from({ length: 40 }, (unused, index) => aRow(String(500001 + index)))
   const upper = Array.from({ length: 40 }, (unused, index) => aRow(String(500041 + index)))
   const stub = stubFuyao(fuyaoByCase(upper, lower))
@@ -471,8 +452,8 @@ test('⛔ 两笔并起来超过这一档时自己砍的那一刀也算"被砍"�
 })
 
 test('⛔ 候选池上界 = 三路上游硬顶之和（50 + 10 + 10 = 70），顺序仍是 A 股 → 港 → 美', async () => {
-  // 2026-10-08 用户拍板：不翻页就直接放出来，上限交给上游硬顶；排序**维持 A → 港 → 美不变**
-  // （"让用户自己筛"走下拉顶部那颗筛选头，不在合并顺序上做文章）。
+  // No pagination: the ceiling is the upstream hard caps, and merge order stays A-share → HK → US
+  // (filtering lives in the dropdown header, not in the merge order).
   const aRows = Array.from({ length: SEARCH_BRANCH_LIMITS['a-share'] }, (unused, index) => aRow(String(600001 + index)))
   const hkRows = Array.from({ length: SEARCH_BRANCH_LIMITS.hk }, (unused, index) => `hk~${String(10000 + index)}~港股${index}~gg${index}~GP`)
   const usRows = Array.from({ length: SEARCH_BRANCH_LIMITS.us }, (unused, index) => `us~TK${String.fromCharCode(65 + index)}.OQ~美股${index}~usg${index}~GP`)

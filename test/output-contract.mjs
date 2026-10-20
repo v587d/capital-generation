@@ -1,22 +1,9 @@
 /**
- * 工具**输出契约**断言：返回值必须满足工具自己声明的 `output.schema`。
+ * Validate tool results against their declared output.schema.
  *
- * 为什么需要它（2026-09-23 真机事故，会话 `cf464cb6`）：宿主 `dsh-tools` 的
- * `createSuccessResult` 会先 `snapshotToolValue` 再
- * `validateJsonSchemaValue(tool.output.schema, detached, "value")`，任何违反都抛
- * `ToolOutputError: tool "<name>" returned invalid output: ...`，**整次调用作废**。
- * 而 test 里直接调 `definition.execute(...)` **完全绕过这一层**——于是
- * `resolve_data_time_range` 的 capability 形态（返回里没有 `mode`）在本地全绿、
- * 真机上每次调用都失败，模型只看到一句 invalid output，重试了 3 次同一条调用。
- *
- * 这份实现是宿主规则的**镜像**（与 `assertLosslessJson` 同型：宿主规则进测试，不靠人记）：
- * 逐条对应 `dsh-tools/lib/types/json-schema.js` 的 `validateJsonSchemaValue`——
- * `required` 必须存在且非 undefined、`additionalProperties: false` 拒绝未声明字段、
- * `oneOf` 必须**恰好**匹配一支。它比宿主宽松的地方（`format` / `minimum` / `pattern`
- * 未实现）不会造成漏报本类事故：本类事故的形状是"字段缺失 / 多余"。
- *
- * 与之配套的**上游探针**在 `npm run check:dsh`（账本 L16）：一旦上游不再按
- * `output.schema` 校验返回值，这条镜像就该跟着退休，探针会点名。
+ * The host rejects any mismatch before the model sees a result, while direct execute()
+ * calls bypass it. This helper mirrors the host's required/additionalProperties/oneOf rules.
+ * `npm run check:dsh` detects whether the host rule still exists.
  */
 
 const SCHEMA_TYPES = new Set(['object', 'array', 'string', 'number', 'integer', 'boolean', 'null'])
@@ -89,12 +76,12 @@ function violationsOf(schema, value, path) {
   return out
 }
 
-/** 返回违反声明的条目（空数组 = 合规）。 */
+/** Violations against the declared schema; an empty list means valid. */
 export function outputSchemaViolations(schema, value, path = 'value') {
   return violationsOf(schema, value, path)
 }
 
-/** 断言一次工具调用的返回值满足它自己声明的 output.schema。 */
+/** Assert that one execute result conforms to its own output schema. */
 export function assertToolOutput(definition, value) {
   if (definition?.output?.schema === undefined) return
   const violations = outputSchemaViolations(definition.output.schema, value)
@@ -103,7 +90,7 @@ export function assertToolOutput(definition, value) {
   }
 }
 
-/** 结构不变量：`required` 里的每个键都必须在 `properties` 里声明过（递归检查）。 */
+/** Required properties must be declared recursively. */
 export function collectUndeclaredRequired(schema, path = 'value') {
   const out = []
   const walk = (node, where) => {

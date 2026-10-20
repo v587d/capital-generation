@@ -5,15 +5,7 @@ import { WorkspaceDatasetStore } from '../lib/data-collector/store.js'
 import { MAX_DESCRIBE_QUERIES, SAFE_RESULT_CHARS } from '../lib/data-collector/describe.js'
 import { assertToolOutput } from './output-contract.mjs'
 
-/**
- * `describe_dataset` 的契约测试。
- *
- * 设计要点（docs/design/describe-dataset-design.md）：
- *  - **一次一份**：多个 dataset 由模型在同一条消息里发多个调用，靠 `isConcurrencySafe`
- *    进框架并发池——所以这里既断言"没有 dataset_ids 数组参数"，也断言并发声明存在。
- *  - **形状分支在宿主**：document 型不执行 queries。
- *  - **唯一体积闸门**：超过 SAFE_RESULT_CHARS 返回 too_large 小回执，绝不返回超长载荷。
- */
+// One dataset per call (siblings ride the concurrency pool); document shape skips queries; SAFE_RESULT_CHARS is the only size gate.
 
 const CHILD = { id: 'junior-1', header: { cwd: '/workspace/proj', parentSession: 'main-1' } }
 const ROOT = { id: 'main-1', header: { cwd: '/workspace/proj' } }
@@ -95,14 +87,7 @@ function definitionsFor(store) {
 const describeTool = (store) => definitionsFor(store).find((definition) => definition.name === 'describe_dataset')
 const exec = (session) => ({ agent: { session }, signal: new AbortController().signal })
 
-/**
- * 复刻宿主 `snapshotJsonValue`（`@deepseek-ai/dsh-util-values`）的"无损 JSON"规则。
- *
- * ⛔ 为什么不能用 `JSON.stringify` 代替：它会**静默丢掉** undefined 属性，于是
- * "返回值带 undefined"这种真实故障在本地完全不可见。2026-09-23 真机事故正是如此：
- * 同一批 5 次 `describe_dataset` 里 3 次被宿主判
- * `ToolOutputError: value is not lossless JSON`，而本地 11 条测试全绿。
- */
+// Host lossless-JSON rule. JSON.stringify cannot stand in: it drops undefined properties silently.
 function assertLosslessJson(value, path = '$') {
   if (value === null) return
   const type = typeof value
@@ -147,7 +132,7 @@ const closeRows = (rows) => Array.from({ length: rows }, (_, index) => ({
   turnover: 2_000 + index,
 }))
 
-/** 21 列宽表：实测 profile ≈ 8.2KB，必然触发体积闸门。 */
+// 21 columns put the profile near 8.2KB, so the size gate must fire.
 const wideRows = (rows) => Array.from({ length: rows }, (_, index) => Object.fromEntries(
   Array.from({ length: 21 }, (_, key) => [`metric_${key}`, key % 3 === 0 ? `文本${index}` : (index + 1) * 1.5]),
 ))
@@ -157,11 +142,11 @@ test('describe_dataset：注册、一次一份、并发声明与 schema 根形�
   const definition = describeTool(store)
   assert.ok(definition, 'describe_dataset 必须注册')
 
-  // 并发声明是"省往返"的机制本身：同一条消息里的多个调用靠它进框架并发池。
+  // Declaring concurrency is the round-trip saving: sibling calls enter the pool.
   assert.equal(typeof definition.isConcurrencySafe, 'function')
   assert.equal(definition.isConcurrencySafe({}), true)
 
-  // 一次一份：不接受 dataset_ids 数组（合并 N 份结果才会引出体积预算/digest）。
+  // One dataset per call: no dataset_ids array, merging N results would need digests and trimming.
   assert.deepEqual(Object.keys(definition.parameters.properties).sort(), [
     'columns_of_interest', 'dataset_id', 'primary_key', 'queries', 'task_id', 'time_column',
   ])
@@ -169,16 +154,12 @@ test('describe_dataset：注册、一次一份、并发声明与 schema 根形�
   assert.equal(definition.parameters.type, 'object')
   assert.equal(definition.parameters.additionalProperties, false)
 
-  // 其余三个底层工具仍然注册（单点复核的逃生通道）。
   const names = definitionsFor(store).map((item) => item.name)
   for (const name of ['inspect_dataset', 'profile_dataset', 'query_dataset']) assert.ok(names.includes(name), `${name} 必须保留`)
 })
 
 test('⛔ 读 Dataset 的五颗里只有 describe_dataset 声明并发', () => {
-  // 宿主是 fail-closed 的：不声明就串行（真机核过，账本 L30）。所以"标不标"是**按工具**定的决定，
-  // 每一颗都要有理由，不许顺手补——`query_dataset` 不标的理由写在注册处注释（单颗中位 17 毫秒，
-  // 成本主体是 JSON.parse + 聚合，Node 单线程下并发也不重叠；多份数据的诉求由 describe_dataset 的
-  // queries 承接）。`write_profile` 更不待言：它写盘。
+  // The host is fail-closed: an undeclared tool runs serially, so each declaration is a per-tool decision.
   const declared = definitionsFor(makeStore().store)
     .filter((definition) => definition.isConcurrencySafe !== undefined)
     .map((definition) => definition.name)
@@ -199,7 +180,6 @@ test('describe_dataset：一次调用完成 inspect + profile + queries', async 
 
   assert.equal(result.status, 'ok')
   assertLosslessJson(result)
-  // 宿主按 output.schema 校验返回值：ok 形态（含新增的 time_facts.axis/windows）必须合规。
   assertToolOutput(definition, result)
   assert.equal(result.dataset_id, ref.dataset_id)
   assert.equal(result.capability, 'history')
@@ -208,7 +188,6 @@ test('describe_dataset：一次调用完成 inspect + profile + queries', async 
   assert.equal(result.row_count, 30)
   assert.ok(result.artifact_ref.startsWith('workspace://capital-data/datasets/'))
   assert.ok(result.profile_ref.startsWith('workspace://capital-data/profiles/'))
-  // profile 四类事实随行返回，且 profile 已落盘
   assert.ok(result.quality)
   assert.ok(result.time_facts)
   assert.ok(result.statistics.close_price)
@@ -216,7 +195,6 @@ test('describe_dataset：一次调用完成 inspect + profile + queries', async 
   assert.ok(result.queries[0].result, 'query 成功时应带 result')
   assert.equal(result.queries[0].result.returned_count, 2)
   assert.ok(fs.files.has(`/workspace/proj/capital-data/profiles/${result.profile_id}/profile.json`))
-  // 载荷不得出现绝对路径
   assert.ok(!JSON.stringify(result).includes('/workspace/proj'))
 })
 
@@ -257,7 +235,7 @@ test('describe_dataset：columns_of_interest 只保留指定列的统计与类�
   assert.deepEqual(Object.keys(result.statistics), ['close_price'])
   assert.deepEqual(Object.keys(result.schema), ['close_price'])
   assert.deepEqual(result.categories, {}, '未指定的类别列不应返回')
-  // 列清单本身保留全量，模型才知道还能要哪些列
+  // The column list stays complete so the model knows what else it can ask for.
   assert.ok(result.columns.includes('volume'))
 })
 
@@ -269,15 +247,14 @@ test('describe_dataset：体积闸门——宽表不返回超长载荷，改返�
   const tooLarge = await definition.execute({ dataset_id: ref.dataset_id }, exec(CHILD))
   assert.equal(tooLarge.status, 'too_large')
   assertLosslessJson(tooLarge)
-  // too_large 是同一工具的第二形态：它的字段集合与 ok 形态不同，必须同样对声明合规。
+  // too_large is a second field set and must satisfy the same output.schema.
   assertToolOutput(definition, tooLarge)
   assert.ok(tooLarge.bytes > SAFE_RESULT_CHARS, `bytes=${tooLarge.bytes} 应超过闸门 ${SAFE_RESULT_CHARS}`)
   assert.equal(tooLarge.columns.length, 21, '回执必须带完整列名，模型才知道怎么收窄')
   assert.ok(tooLarge.profile_ref.startsWith('workspace://capital-data/profiles/'))
   assert.ok(/columns_of_interest/.test(tooLarge.hint))
   assert.ok(JSON.stringify(tooLarge).length < SAFE_RESULT_CHARS, '回执自身必须在预算内')
-  // 体积归因（2026-10-10 真机）：宽表带 queries 打穿闸门时，回执只说"用 columns_of_interest
-  // 收窄"会把模型引去砍列——真正的大头常常是 queries。归因字段必须自洽，hint 指名先砍哪边。
+  // Attribution must be self-consistent and the hint must name the larger side.
   assert.equal(typeof tooLarge.facts_bytes, 'number')
   assert.equal(typeof tooLarge.queries_bytes, 'number')
   assert.equal(tooLarge.facts_bytes + tooLarge.queries_bytes, tooLarge.bytes,
@@ -285,7 +262,6 @@ test('describe_dataset：体积闸门——宽表不返回超长载荷，改返�
   assert.ok(tooLarge.facts_bytes > tooLarge.queries_bytes, '无 queries 时 facts 是大头')
   assert.match(tooLarge.hint, /columns_of_interest/, 'facts 大头时 hint 应指名 columns_of_interest')
 
-  // 按 hint 收窄后应当正常返回
   const narrowed = await definition.execute({ dataset_id: ref.dataset_id, columns_of_interest: ['metric_0', 'metric_1'] }, exec(CHILD))
   assert.equal(narrowed.status, 'ok')
   assertLosslessJson(narrowed)
@@ -293,9 +269,7 @@ test('describe_dataset：体积闸门——宽表不返回超长载荷，改返�
 })
 
 test('describe_dataset：queries 是大头时 hint 指名先砍 queries（2026-10-10 真机回归）', async () => {
-  // 真机形状：列已收窄，但 queries 带 5-6 个聚合、30 行分组结果，照样打穿闸门。
-  // 旧 hint 只说"用 columns_of_interest 收窄"，模型只好 describe（去 queries）+ query_dataset
-  // 各来一轮；归因字段指名 queries 是大头后，一次去掉 queries 即可。
+  // Few columns but 5 aggregates over 240 groups still overflow: naming queries in the hint makes one retry enough.
   const { store } = makeStore()
   const ref = await saveRows(store, closeRows(240))
   const definition = describeTool(store)
@@ -322,7 +296,6 @@ test('describe_dataset：queries 是大头时 hint 指名先砍 queries（2026-1
     `queries_bytes(${tooLarge.queries_bytes}) 应大于 facts_bytes(${tooLarge.facts_bytes})`)
   assert.match(tooLarge.hint, /去掉 queries/, 'queries 大头时 hint 应指名先去掉 queries')
 
-  // 去掉 queries 后同一份 columns_of_interest 应正常返回
   const factsOnly = await definition.execute({
     dataset_id: ref.dataset_id,
     columns_of_interest: ['date_ms', 'close_price', 'volume'],
@@ -343,7 +316,7 @@ test('describe_dataset：窄表不触发闸门（闸门只拦真正超预算的�
 
 test('describe_dataset：文档型超预算时给文档专用 hint（列过滤对文档无效）', async () => {
   const { store } = makeStore()
-  // 文档内容按 MAX_DOCUMENT_CHARS 有界，但 structure 摘要仍可能把它推过闸门。
+  // Document content is bounded, but the structure summary can still push past the gate.
   const doc = { blob: 'x'.repeat(5900) }
   for (let index = 0; index < 40; index += 1) {
     doc[`section_${index}`] = Object.fromEntries(Array.from({ length: 8 }, (_, key) => [`field_${index}_${key}`, key % 2 ? 1 : 'text']))
@@ -400,8 +373,7 @@ test('回归（2026-09-23 真机）：缺事实块时不得把 undefined 带出�
   const { store } = makeStore()
   const definition = describeTool(store)
 
-  // ① 全数值列（真机里的日线）：profile 没有 categories —— 绝不能让 categories: undefined 出工具。
-  //    真机里模型还猜错了列名（open/high/low/close，实际是 open_price/...），三个事实块全部落空。
+  // ① Numeric-only dataset: categories must be absent, not undefined; guessed column names are ignored.
   const numeric = await saveRows(store, Array.from({ length: 10 }, (_, index) => ({
     date_ms: 1_700_000_000_000 + index * 86_400_000,
     open_price: 10 + index,
@@ -425,14 +397,12 @@ test('回归（2026-09-23 真机）：缺事实块时不得把 undefined 带出�
   assert.ok(numericResult.warnings.some((warning) => /ignored unknown columns/.test(warning)),
     '猜错的列名必须如实披露，而不是静默丢掉')
 
-  // ② 全字符串列（真机里的 ticker_search）：profile 没有 statistics
   const strings = await saveRows(store, [{ thscode: '300803.SZ', ticker: '300803', name: '指南针' }])
   const stringResult = await definition.execute({ dataset_id: strings.dataset_id }, exec(CHILD))
   assert.equal(stringResult.status, 'ok')
   assertLosslessJson(stringResult)
   assert.equal('statistics' in stringResult, false, '没有数值列时 statistics 必须缺省，而不是 undefined')
 
-  // ③ 文档型：没有逐列 schema / validation
   const document = await saveRows(store, { report: { revenue: 1, net_profit: 2 } }, { format: 'json', row_count: null })
   const documentResult = await definition.execute({ dataset_id: document.dataset_id }, exec(CHILD))
   assert.equal(documentResult.status, 'ok')
@@ -446,7 +416,6 @@ test('describe_dataset：session 与入参边界一律抛错（isError），不�
   const ref = await saveRows(store, closeRows(5))
   const definition = describeTool(store)
 
-  // 主 Agent 直调：非 delegated session
   await assert.rejects(
     () => definition.execute({ dataset_id: ref.dataset_id }, exec(ROOT)),
     /dataset_session_mismatch/,
@@ -481,7 +450,7 @@ test('describe_dataset：过期 Dataset 抛错（单 dataset 调用没有"部分
   let now = 1_700_000_000_000
   const { store } = makeStore({ now: () => now })
   const ref = await saveRows(store, closeRows(5))
-  now += 8 * 24 * 60 * 60 * 1000 // 超过 7 天保留期
+  now += 8 * 24 * 60 * 60 * 1000 // past the 7-day retention window
   const definition = describeTool(store)
   await assert.rejects(
     () => definition.execute({ dataset_id: ref.dataset_id }, exec(CHILD)),
@@ -489,15 +458,7 @@ test('describe_dataset：过期 Dataset 抛错（单 dataset 调用没有"部分
   )
 })
 
-/**
- * ⛔ 2026-09-23 事故（会话 `66fa9666`）：describe 内嵌 queries 与 `query_dataset` **行为不一致**。
- *
- * 同一个回合里，模型按协议把时间筛选写成日期串：
- *   - `query_dataset`：`">=": "2026-09"` 正常按区间筛；
- *   - `describe_dataset.queries`：`">=": "2026"` 被引擎当**数字 2026** 比较 → 243 行全中
- *     （`days_2026: 243`，静默错数）；`">=": "2026-07"` 被 `skip_with_warning` 整条跳过 → 0 行。
- * 两条都是"看起来成功"的错结果，比报错危险。根因是这一层归一最初只接在 `query_dataset` 上。
- */
+// ⛔ describe.queries must normalize date strings exactly like query_dataset: a bare year once compared as the number 2026.
 test('describe_dataset：内嵌 queries 的时间筛选与 query_dataset 同构（日期串必须按区间解析）', async () => {
   const { store } = makeStore()
   const rows = [
@@ -515,15 +476,14 @@ test('describe_dataset：内嵌 queries 的时间筛选与 query_dataset 同构�
     time_column: 'date_ms',
     columns_of_interest: ['close_price'],
     queries: [
-      // `>= "2026"` 必须是"2026 年内"，而不是被当成数字 2026 匹配全部 5 行。
+      // `>= "2026"` means "within 2026", not numeric 2026.
       { filters: [{ column: 'date_ms', operator: '>=', value: '2026' }], aggregates: [{ function: 'count', as: 'days_2026' }] },
-      // `>= "2026-07"` 与 `<= "2026-07-31"` 必须是七月区间，不能整条被跳过。
+      // `>= "2026-07"` / `<= "2026-07-31"` must be a July range, not a skipped query.
       { filters: [{ column: 'date_ms', operator: '>=', value: '2026-07' }, { column: 'date_ms', operator: '<=', value: '2026-07-31' }], aggregates: [{ function: 'count', as: 'july_days' }] },
-      // `=` 单日必须能命中（展开成当天上下界）。
       { filters: [{ column: 'date_ms', operator: '=', value: '2026-09-04' }], aggregates: [{ function: 'max', column: 'close_price', as: 'close_0904' }] },
-      // 日期串配 `>` 无意义 ⇒ 只让**这一条**报错，不影响 profile 与其余 query。
+      // A date string with `>` is meaningless: only this query fails, profile and siblings survive.
       { filters: [{ column: 'date_ms', operator: '>', value: '2026-09-04' }], aggregates: [{ function: 'count', as: 'n' }] },
-      // 分组返回时间列时，与 query_dataset 一样补可读日期。
+      // Grouped time columns gain a readable date column, same as query_dataset.
       { filters: [{ column: 'date_ms', operator: '>=', value: '2026-09-01' }], group_by: ['date_ms'], aggregates: [{ function: 'max', column: 'close_price', as: 'c' }], order_by: [{ column: 'date_ms', direction: 'asc' }] },
     ],
   }, exec(CHILD))
@@ -537,7 +497,6 @@ test('describe_dataset：内嵌 queries 的时间筛选与 query_dataset 同构�
   assert.equal(rejected.error.code, 'query_type_conflict', '无意义的日期算子必须响亮失败，而不是给错答案')
   assert.deepEqual(grouped.result.rows.map((row) => row.date_ms_iso), ['2026-09-04', '2026-09-23'])
   assert.ok(grouped.result.columns.includes('date_ms_iso'))
-  // 单条失败不影响整份结果的可加载性与输出契约。
   assertLosslessJson(described)
   assertToolOutput(definition, described)
 })
@@ -569,7 +528,7 @@ test('describe_dataset：columns_of_interest 也收窄 time_facts 的首末值�
   const definition = describeTool(store)
 
   const full = await definition.execute({ dataset_id: ref.dataset_id, time_column: 'date_ms' }, exec(CHILD))
-  // first/last 只投影「时间列 + 数值列」（字符串列不进首末投影）。
+  // first/last project only the time column plus numeric columns.
   assert.deepEqual(Object.keys(full.time_facts.first).sort(), ['close_price', 'date_ms', 'turnover', 'volume'])
 
   const narrowed = await definition.execute({
@@ -577,7 +536,7 @@ test('describe_dataset：columns_of_interest 也收窄 time_facts 的首末值�
     time_column: 'date_ms',
     columns_of_interest: ['close_price'],
   }, exec(CHILD))
-  // 时间列永远保留（首末值的时间坐标），其余只留被点名的列。
+  // The time column always stays; only the named columns remain.
   assert.deepEqual(Object.keys(narrowed.time_facts.first), ['date_ms', 'close_price'])
   assert.deepEqual(Object.keys(narrowed.time_facts.last), ['date_ms', 'close_price'])
   assert.ok(JSON.stringify(narrowed).length < JSON.stringify(full).length)

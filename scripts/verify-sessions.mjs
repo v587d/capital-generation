@@ -1,22 +1,11 @@
 #!/usr/bin/env node
 /**
- * 会话日志**可加载性**复核（发布前 / 改交付通道后必跑）。
- *
- * 为什么必须有它：2026-09-18 的事故里，非 first-party 的会话事件类型会被读取侧
- * `validateStoredEvents()` fail-closed 拒绝，**整份会话打不开**——而且写入时完全静默，
- * 单测也覆盖不到（单测只看我们自己的 payload，不看真实日志能否被真实后端冷加载）。
- * 这里用已安装的 dsh 的 jsonl 后端逐份 open+read，核对两件事：
- *   ① 每份会话都能冷加载（原始事故的判据）；
- *   ② 日志里没有 `KNOWN_SESSION_EVENT_TYPES` 闭集之外、且未标 ignorable 的事件类型。
- *
- * **历史遗留 vs 新回归**：修复前写入的会话（含 `capital/chart-rendered`）是已知遗留，
- * 不该让这个闸门永远红。判据用"最后一份成功登记交付的会话"作为修复落地的水位线：
- * 水位线**之后**的会话出问题才算失败（那意味着新代码又写坏了日志）。
- *
- * 用法：
- *   node scripts/verify-sessions.mjs [--since <ISO>] [--dir <sessions 根>] [--strict]
- *   npm run verify:sessions
- * 退出码：0 通过；1 发现新回归；2 找不到 dsh（跳过，不在无 dsh 的环境里造假失败）。
+ * Session-log loadability check (run before release and after changing the delivery path).
+ * A non-first-party event type makes the reader fail closed and the whole session unopenable, with
+ * no warning at write time. Opens every session via the installed jsonl backend and checks it cold
+ * loads and contains no event type outside KNOWN_SESSION_EVENT_TYPES unless marked ignorable.
+ * Sessions written before the last delivered session are known legacy, not new regressions.
+ * Exit: 0 pass, 1 new regression, 2 no dsh found (skip, don't fake a failure).
  */
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
@@ -40,8 +29,8 @@ if (!DSH_DIR) {
 }
 
 const NESTED = join(DSH_DIR, 'node_modules', '@deepseek-ai')
-// homedir() 而不是 process.env.HOME：Windows 上没有 HOME，写 `join('', '.dsh')` 会得到
-// 相对路径 `/.dsh/sessions` → 目录不存在 → 扫到 0 份会话还报"通过"（闸门静默失效）。
+// homedir(), not process.env.HOME: on Windows HOME is unset, `join('', '.dsh')` gives a relative
+// path, the directory is missing and 0 sessions would be reported as a pass.
 const dshHome = process.env.DSH_HOME ?? join(homedir(), '.dsh')
 const sessionsRoot = argValue('--dir', join(dshHome, 'sessions'))
 const since = Date.parse(argValue('--since', (() => {
@@ -59,7 +48,7 @@ const KNOWN = new Set(
 )
 
 const MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
-/** 多帧 zstd：逐帧解（Node 的 zstd 解码只吃第一帧）。 */
+/** Multi-frame zstd: decode frame by frame (Node's decoder reads only the first). */
 function decode(file) {
   const buffer = readFileSync(file)
   const offsets = []
@@ -75,16 +64,16 @@ function decode(file) {
   return events
 }
 
-// 收集候选会话（版本无关：按 session.v<N> 挑最新那份，实现与理由见 scripts/lib/session-files.mjs）
+// Version-agnostic: pick the newest session.v<N> (see scripts/lib/session-files.mjs).
 const records = findSessionRecords(sessionsRoot, since)
 if (records.length === 0) {
-  // 0 份**不是通过**：这份闸门曾经硬编码 v3、在 v4 宿主上扫到 0 份却打印 ✅，绿灯空转了一整代。
+  // Zero sessions is not a pass: a hardcoded v3 once scanned 0 on a v4 host and still printed OK.
   console.log(`verify-sessions: ${sessionsRoot} 下自 ${new Date(since).toISOString()} 没有读到任何会话 ⇒ 闸门**没有核对任何东西**（不是通过）。`)
   console.log('  先确认宿主写的是哪种文件名（session.v<N>.jsonl[.zstd]），或用 --dir 指一个确有会话的 store、--since 放宽时间窗。')
   process.exit(2)
 }
 
-// 先解一遍，找出"修复水位线"：最后一份含 deliverables/presented 的会话写入时间
+// Decode first to find the write watermark: the last session containing deliverables/presented.
 const decoded = records.map((record) => ({ ...record, events: decode(record.file) }))
 const watermark = decoded
   .filter((record) => record.events.some((event) => event.type === 'deliverables/presented'))
@@ -118,7 +107,7 @@ for (const record of decoded) {
   }
   if (unknown.length === 0 && loadError === undefined) continue
 
-  // 水位线之前的算历史遗留；之后（或 --strict）算新回归
+  // Before the watermark = legacy; after it (or with --strict) = new regression.
   const isLegacy = !STRICT && watermark > 0 && mtime < watermark
   const target = isLegacy ? legacy : regressions
   target.push({ id, unknown, loadError })

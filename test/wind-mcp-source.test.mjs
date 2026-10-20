@@ -6,16 +6,12 @@ import { probeTimeAxis } from '../lib/data-collector/time-axis.js'
 import { getDataTimeContract, resolveDataTimeRange } from '../lib/time/tools.js'
 
 /**
- * Wind MCP 数据源的契约回归（§6.7 改口后的 P1 三条）。
- *
- * ⛔ 这里的每份正文都是**真报文**，不是按文档编的形状（`docs/dev/tool-schema.md` §10.2：
- * 护栏拒绝真报文就是真实取数事故）。来源是 `scripts/spike-wind.mjs` 与 2026-09-18 那轮
- * 探针落盘的响应正文（`.review/wind-probe/probe3-results.json`，本地暂存、不入库），
- * 逐行原样抄在这里，只在行数上截断并标注。**截断的是行数，不是形状**。
+ * Wind MCP contract regressions (§10.2) use real payloads from local probe output.
+ * Row counts are truncated; response shapes are copied unchanged, never reconstructed from docs.
  */
 
 const ASHARE_DAILY = {
-  // 600519.SH，begin_date 2026-08-01 / end_date 2026-08-15，period '1d'（2296ms 回执，取前 2 行）
+  // 600519.SH, 2026-08-01..15, daily; first two response rows.
   data: {
     columns: [
       { name: 'TIME', type: 'string' }, { name: 'OPEN', type: 'string' }, { name: 'MATCH', type: 'string' },
@@ -32,7 +28,7 @@ const ASHARE_DAILY = {
 }
 
 const US_MINUTE = {
-  // AAPL.US，get_stock_quote begin/end 2026-08-10（同一套列，美股 unit 是**美元**）；取前 2 行
+  // AAPL.US quote on 2026-08-10; same columns, unit is USD. First two rows.
   data: {
     columns: [
       { name: 'TIME', type: 'string' }, { name: 'OPEN', type: 'string' }, { name: 'MATCH', type: 'string' },
@@ -49,7 +45,7 @@ const US_MINUTE = {
 }
 
 const US_DAILY = {
-  // AAPL.O，begin_date 2026-08-10 / end_date 2026-08-15，period '1d'；取前 2 行
+  // AAPL.O, 2026-08-10..15, daily; first two rows.
   data: {
     ...US_MINUTE.data,
     rows: [
@@ -60,21 +56,21 @@ const US_DAILY = {
   error: null,
 }
 
-/** 非交易日（2026-10-01..03）实测快回：ok=true、rows=[]、unit=null，columns 仍给全（§6.2）。 */
+/** Non-trading dates return quickly as a valid empty result: rows=[] but columns still present (§6.2). */
 const EMPTY_TRADING_TABLE = {
   data: { columns: ASHARE_DAILY.data.columns.map((column) => ({ ...column })), rows: [], unit: null },
   error: null,
 }
 
 const EDB_SEARCH = {
-  // search_economic_indicator question='中国GDP相关指标'：扁平 meta 数组，键是 camelCase
+  // search_economic_indicator returns a flat meta array with camelCase keys.
   metrics: [
     { code: 'M5567876', name: '中国:GDP:现价:当季值', unit: '亿元', source: '国家统计局', magnitude: '亿', currency: '人民币', updateDate: '20260720', beginDate: '19920331', endDate: '20260630', freq: '季' },
     { code: 'M5567879', name: '中国:GDP:现价:第三产业:当季值', unit: '亿元', source: '国家统计局', magnitude: '亿', currency: '人民币', updateDate: '20260720', beginDate: '19920331', endDate: '20260630', freq: '季' },
   ],
 }
 
-/** 2026-10-06 实测：汇率这一族的键集**没有** unit/magnitude/currency（正文未落盘，按键集重录）。 */
+/** FX indicators omit unit/magnitude/currency; this shape was re-recorded from the key set. */
 const EDB_SEARCH_NO_UNIT = {
   metrics: [
     { code: 'G0002329', name: '美元兑人民币', source: '美联储', updateDate: '20261006', beginDate: '19810102', endDate: '20261002', freq: '日' },
@@ -83,7 +79,7 @@ const EDB_SEARCH_NO_UNIT = {
 }
 
 const EDB_QUERY = {
-  // query_economic_indicator_data question='M5567876' beginDate 2025-01-01 endDate 2025-12-31
+  // query_economic_indicator_data with indicator M5567876 across calendar year 2025.
   metrics: [{
     meta: { code: 'M5567876', name: '中国:GDP:现价:当季值', unit: '亿元', source: '国家统计局', magnitude: '亿', currency: '人民币', updateDate: '20260720', beginDate: '19920331', endDate: '20260630', freq: '季' },
     date: ['20250331', '20250630', '20250930', '20251231'],
@@ -91,7 +87,7 @@ const EDB_QUERY = {
   }],
 }
 
-/** 上游把参数性抱怨写成**纯文本**（不是 JSON）：wind-client 会原样透传 content。 */
+/** Wind sends parameter complaints as plain text; wind-client forwards the content unchanged. */
 const EDB_MISSING_WINDOW = 'observation或者[beginDate、endDate]必须填一个'
 
 const signal = new AbortController().signal
@@ -136,7 +132,7 @@ async function failure(capability, params, payload, resolveApiKey = async () => 
   assert.fail(`${capability} 本应响亮失败，却安静地成功了`)
 }
 
-// ── 装配：三条都注册得上，且注册面不看 Key ─────────────────────────────────
+// Assembly registers all three Wind tools without checking the key first.
 
 test('createWindSources：三条能力注册齐全，data_key 与来源标注都是内部字段', () => {
   const sources = createWindSources(async () => undefined)
@@ -149,7 +145,7 @@ test('createWindSources：三条能力注册齐全，data_key 与来源标注都
     assert.deepEqual(source.schema.rowShape, { rootArray: true })
     assert.ok(source.schema.summary.length < 60, '摘要进能力目录，必须短')
   }
-  // 缺 Key 也要注册得上（§9.7⑤）：上面的 resolveApiKey 返回 undefined，三条照样在。
+  // Registration survives an unresolved key; missing-key handling belongs to call time (§9.7).
   assert.equal(sources.length, 3)
 })
 
@@ -157,7 +153,7 @@ test('时间契约：EDB 不设 maxDays（宏观要能翻到几十年前），K 
   assert.deepEqual(getDataTimeContract('wind_edb_query'), { kind: 'date_range', fields: ['start_date', 'end_date'] })
   assert.equal(getDataTimeContract('wind_stock_kline').maxDays, 3660)
   assert.match(getDataTimeContract('wind_stock_kline').warning, /分钟档/)
-  // query_hint 只给检索类：带真实日期参数的 wind_* 不能再吃到那句"X 至 Y"。
+  // Only search-style tools get the date-range hint; date-bearing Wind sources own their parameters.
   const resolved = resolveDataTimeRange({ capability: 'wind_stock_kline', period: 'last_3_months' }, Date.parse('2026-10-06T00:00:00Z'))
   assert.deepEqual(resolved.params, { start_date: '2026-07-06', end_date: '2026-10-06' })
   assert.equal(resolved.query_hint, undefined, '取数能力不该收到检索用的时间提示语')
@@ -165,7 +161,7 @@ test('时间契约：EDB 不设 maxDays（宏观要能翻到几十年前），K 
   assert.equal(docs.query_hint, '2026-07-06 至 2026-10-06')
 })
 
-// ── K 线：真报文转置、单位、逐行偏移 ───────────────────────────────────────
+// K-line transposition, per-row offsets and units.
 
 test('wind_stock_kline：标量数组按 columns[].name 转置，MATCH 就是 close', async () => {
   const { result, calls } = await run('wind_stock_kline', { code: '600519.SH', start_date: '2026-08-01', end_date: '2026-08-15' }, ASHARE_DAILY)
@@ -184,7 +180,7 @@ test('wind_stock_kline：标量数组按 columns[].name 转置，MATCH 就是 cl
   assert.equal(first.code, '600519.SH')
   assert.equal(first.period, 'day')
   assert.equal(first.adjust, 'qfq')
-  // unit 的键是 "HIGH 单位："（空格 + 全角冒号），逐列原文摘进行里，不翻译。
+  // Unit key is `"HIGH 单位："`; copy the upstream wording verbatim rather than translate it.
   assert.equal(first.price_unit, '元')
   assert.equal(first.amount_unit, '元')
   assert.equal(first.volume_unit, '股')
@@ -196,7 +192,7 @@ test('wind_stock_kline：epoch 逐行按该行自带偏移换算，美股不许�
   assert.equal(row.datetime, '2026-08-10T00:00:00.000-04:00')
   assert.equal(row.time_ms, Date.parse('2026-08-10T00:00:00.000-04:00'))
   assert.equal(row.price_unit, '美元')
-  // A 股那根的偏移不同：同一个 Dataset 里绝不共用一个 time_zone（§6.4）。
+  // A-share and offshore bars have different offsets; never share one time_zone in a Dataset (§6.4).
   const ashare = (await run('wind_stock_kline', { code: '600519.SH', start_date: '2026-08-01', end_date: '2026-08-15' }, ASHARE_DAILY)).result.data
   assert.notEqual(ashare[0].time_ms, row.time_ms)
   assert.equal(probeTimeAxis('time_ms', ashare.map((item) => item.time_ms)).time_zone, 'Asia/Shanghai')
@@ -247,7 +243,7 @@ test('wind_stock_kline：INVALID 与空串按 null 处理，绝不落成 0（§1
   assert.equal(result.data[0].turnover_rate_pct, null)
 })
 
-// ── K 线参数面：每一档都要有真报文，未验证的组合一律拒 ─────────────────────
+// K-line parameter surface: only combinations proven by a real response are accepted.
 
 test('wind_stock_kline：period 只放实测七档，60 分钟与未验证写法一律拒', () => {
   const source = sourcesByKey().wind_stock_kline
@@ -255,7 +251,7 @@ test('wind_stock_kline：period 只放实测七档，60 分钟与未验证写法
   assert.deepEqual(enumValues, ['day', 'week', 'month', 'm1', 'm5', 'm15', 'm30'])
   assert.throws(() => source.normalizeParams({ code: '600519.SH', start_date: '2026-08-01', end_date: '2026-08-15', period: '60min' }), /60 分钟/)
   assert.throws(() => source.normalizeParams({ code: '600519.SH', start_date: '2026-08-01', end_date: '2026-08-15', period: '7' }), /period must be one of/)
-  // 上游"未识别的 period 不报错、直接挂满 60 秒"（§6.5）——所以这里是**参数层**闸门，不是兜底。
+  // Unknown periods hang upstream for a minute (§6.5), so reject them in the parameter layer.
   assert.equal(source.normalizeParams({ code: '600519.SH', start_date: '2026-08-01', end_date: '2026-08-15', period: 'DAY' }).period, 'day')
 })
 
@@ -273,7 +269,7 @@ test('wind_stock_kline：hfq 拒绝并写明锚点理由；分钟档只允许 no
   assert.throws(() => source.normalizeParams({ code: '600519', start_date: '2026-08-01', end_date: '2026-08-15' }), /exchange suffix/)
   assert.throws(() => source.normalizeParams({ code: '00700.HK', start_date: '2026-08-15', end_date: '2026-08-01' }), /not be later/)
   assert.throws(() => source.normalizeParams({ ...base, bogus: 1 }), /unsupported parameter/)
-  // 分钟档的区间闸门：不暴露 count，所以体积只能靠区间上限管住。
+  // Minute bars expose no count, so their range limit is the only response-size gate.
   assert.throws(() => source.normalizeParams({ code: '600519.SH', start_date: '2026-08-01', end_date: '2026-09-15', period: 'm5' }), /at most 10 days/)
 })
 
@@ -285,14 +281,13 @@ test('wind_stock_kline：代码原样大写透传，不补也不猜交易所后�
   assert.equal(normalize('AAPL.O'), 'AAPL.O')
   assert.equal(normalize('BRK.B.N'), 'BRK.B.N')
   assert.throws(() => normalize('AAPL'), /exchange suffix/)
-  // 只要求"带一个后缀"，不校验后缀词表：上游的后缀集合我们没逐个字过（实测 .O 与 .N 回同一标的），
-  // 维护一份猜出来的词表只会把真写法挡在门外。
+  // Require a suffix but do not whitelist its value; inventing an exchange list blocks real spellings.
   assert.equal(normalize('600519.S'), '600519.S')
   assert.throws(() => normalize('600519.SHHE'), /exchange suffix/)
   assert.throws(() => normalize('..SH'), /exchange suffix/)
 })
 
-// ── EDB ────────────────────────────────────────────────────────────────────
+// Economic indicator database.
 
 test('wind_edb_search：camelCase 元信息 → snake_case 行键，缺 unit 不猜单位（§10.6）', async () => {
   const { result, calls } = await run('wind_edb_search', { question: '中国GDP相关指标' }, EDB_SEARCH)
@@ -337,7 +332,7 @@ test('wind_edb_query：并行数组转置成一行一期，meta 逐行拼接', a
     magnitude: '亿',
     currency: '人民币',
   })
-  // 时间轴必须落在 report_date 上：meta 那三列日期若被 profile 认成轴就是话说错。
+  // Profile report_date as the time axis; treating the three meta date columns as axes is wrong.
   const columns = Object.keys(result.data[0])
   assert.ok(columns.indexOf('report_date') < columns.indexOf('update_date'), 'report_date 要在 meta 日期列之前，否则 pickTimeColumn 会挑错轴')
 })
@@ -362,7 +357,7 @@ test('wind_edb_query：observation 拒绝并给出实测理由；逗号多码在
   assert.deepEqual(source.normalizeParams(base), base)
 })
 
-// ── 错误分类：积分计费，不伪装成网络故障（§3.3/§6.6）───────────────────────
+// Error classes keep credit/billing failures distinct from network failures (§3.3/§6.6).
 
 test('错误分类：五种上游失败各有稳定 code，计费类一律不自动重试', async () => {
   const cases = [
@@ -393,7 +388,7 @@ test('错误分类：五种上游失败各有稳定 code，计费类一律不自
       )
       assert.equal(call, 1, `${item.label} 之后不得再打第二次——积分按次计费（§1.4）`)
     }
-    // NETWORK 的措辞不许诱导用户重试同一区间：缺数与故障在线上不可区分（§6.6）。
+    // NETWORK wording must not suggest retrying the same range; missing data is indistinguishable (§6.6).
     globalThis.fetch = async (_url, init) => (JSON.parse(init.body).method === 'initialize'
       ? { ok: true, status: 200, text: async () => initResult() }
       : ({ ok: false, status: 504, text: async () => '' }))
@@ -411,7 +406,7 @@ test('缺 Key：每次调用现解析，报 wind_api_key_missing 而不是静默
   assert.match(error.message, /WIND_API_KEY|Key 未配置/)
 })
 
-// ── 走 Hub 的真实入口（§9.7：单测只调 execute 会放过真缺陷）────────────────
+// Exercise the real Hub entry point so unit-only execute checks do not hide wiring defects (§9.7).
 
 test('Hub 路径：三条能力都能落 Dataset，行数组位置与 format 由 rowShape 决定', async () => {
   const saved = []
@@ -453,7 +448,7 @@ test('Hub 路径：三条能力都能落 Dataset，行数组位置与 format 由
     ['wind_edb_query', 'json_rows', 4, 'wind'],
     ['wind_stock_kline', 'json_rows', 2, 'wind'],
   ])
-  // 空结果经 Hub 也是成功：0 行、json_rows，不是一条错误。
+  // A zero-row Hub result remains a successful json_rows Dataset, not an error.
   const emptySaved = []
   const emptyHub = new DataCollectorHub({ store: { async save(input) { emptySaved.push(input); return { dataset_id: 'd0', captured_at: 1, retention_until: 2 } }, async findLatest() { return undefined } } })
   for (const source of createWindSources(async () => 'secret')) emptyHub.registerSource(source)

@@ -1,14 +1,10 @@
 /**
- * `/capital-skills/<skill 名>.md` 闸门：设置卡片「详情」那一份 `SKILL.md` 原文的来路。
- *
- * 三条纪律各对应一类事故，都不是猜测：
- *  - ⛔ **认证围栏**：`webServer.register({kind:'prefix'})` 本身不做任何认证，不接
- *    `connection.requestRejection` 就等于"任何本机进程凭路径即可读插件目录里的文件"
- *    （docs/dev/chart-presentation.md §6.1，与 `/capital-charts`、`/capital-watchlist` 同一条）。
- *    所以第一条用例断言的是**被拒时连一次读盘都没有**。
- *  - **闭集**：请求里的名字只当 `SKILL_DOCS` 这张表的键用，不参与任何路径拼接。
- *  - **宁缺毋滥**：超限整份拒绝而不是切一半——"原文"被截掉一段，比明确说读不到更误导人
- *    （官方 `workspaceFiles` 的 `maxFileBytes` 也是"refused, never truncated"同一条口径）。
+ * `/capital-skills/<name>.md` side channel: serves the exact SKILL.md snapshot shown in settings.
+ *  - Auth fence: `webServer.register` does no auth; without `connection.requestRejection` any local
+ *    process could read plugin files by path (same rule as `/capital-charts`). A rejected request
+ *    must not touch the filesystem at all.
+ *  - Closed set: request names are only table keys, never path fragments.
+ *  - Oversize is refused whole, never truncated (a half "original" misleads more than an error).
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -35,7 +31,7 @@ async function call(handler, input) {
   return res
 }
 
-/** 假读盘：记下被读的是哪一颗，好断言"被拒的请求一次都没碰到文件系统"。 */
+/** Fake filesystem: records reads so a rejected request can be proven to touch nothing. */
 function fakeFs({ contents = new Map(), sizes = new Map() } = {}) {
   const statCalls = []
   const readCalls = []
@@ -63,7 +59,7 @@ test('闭集：catalog 每一条都排得出自己的快照，且排出来的就
       `${entry.name} 的落点不对：${path}`)
     assert.ok(existsSync(target), `${entry.name} 的快照文件不在包里：${path}（files 清单漏了还是目录换了）`)
   }
-  // 表里没有的键，无论怎么写都拼不出路径：这条是"闭集"与"路径拼接"的分水岭。
+  // Unknown keys can never resolve to a path: the closed-set/path-joining boundary.
   assert.equal(SKILL_DOCS.get('../../etc/passwd'), undefined)
 })
 
@@ -174,7 +170,7 @@ test('apply：原文旁路只经 inject 挂到 webServer 上（探测式写法�
   assert.equal(registered[0].path, SKILL_DOC_ROUTE)
   assert.equal(typeof registered[0].handler, 'function')
 
-  // 路由字符串是同字链的两端：客户端 bundle 里那份必须逐字等于这一份。
+  // Route string is a two-ended literal: the client bundle must match host byte for byte.
   const clientSource = readFileSync(join(ROOT, 'config', 'client.src.cjs'), 'utf8')
   const clientRoute = /^const SKILL_DOC_ROUTE = '([^']+)'/m.exec(clientSource)?.[1]
   assert.equal(clientRoute, SKILL_DOC_ROUTE, '客户端拼的地址与 host 注册的前缀漂移 = 「详情」永远读不到，且零报错')

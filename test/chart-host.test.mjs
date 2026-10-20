@@ -4,12 +4,9 @@ import { createChartStore, createRouteHandler, apply, ROUTE_PATH } from '../char
 import { fakeCtx } from './cordis-fake.mjs'
 
 /**
- * host 半边（`@v587d/capital-charts`）的契约测试。
- *
- * 这块代码不经过构建（纯 JS 嵌套包），也没有 TS 类型兜底，所以行为完全靠这里钉住。
- * 重点两条：
- *  - **URL 里没有路径成分**：路由只读登记过的文件，因此不存在目录穿越面；
- *  - **可选降级**：没有 webServer 的 profile 里本行仍要激活并提供服务，而不是变成死行。
+ * Contract for the host half of `@v587d/capital-charts` (plain JS nested package, no types).
+ * The route serves only registered files (no path components in the URL), and a profile without
+ * webServer must still activate and wait rather than become a dead row.
  */
 
 const CHART_ID = 'ch_11111111-2222-3333-4444-555555555555'
@@ -104,9 +101,9 @@ test('路由：登记的文件读不到时按 404 处理，不抛到 webServer',
 })
 
 /**
- * 认证围栏（2026-09 review，P0）：序列旁路以前直接挂在 webServer 上，
- * 绕过了平台自己的 trusted-Host + 浏览器 cookie 围栏（`connection.requestRejection`），
- * 于是知道 chart_id 的任何本机进程/页面都能读 series.json。
+ * Auth fence: the series route used to hang off webServer directly, bypassing the platform's
+ * trusted-Host + cookie check (`connection.requestRejection`); any local process knowing a
+ * chart_id could read series.json.
  */
 test('路由：authorize 拒绝时返回 401/403，且绝不读取登记的文件', async () => {
   let reads = 0
@@ -184,7 +181,7 @@ test('apply()：没有 webServer 的 profile 仍激活并等待（不是死行�
   assert.deepEqual(harness.injected[0].deps, ['webServer'])
   assert.equal(service.publish({ chartId: 'ch_before', filePath: '/tmp/before.json' }), null, '路由未挂载时不得返回不可访问的 URL')
 
-  // webServer 出现后回调要真的把路由挂上。
+  // webServer appearing later must actually mount the route.
   const routes = []
   harness.injected[0].callback({ effect: (callback) => callback(), webServer: { register: (route) => { routes.push(route); return () => {} } } })
   assert.equal(routes.length, 1)
@@ -217,8 +214,7 @@ test('apply()：路由接上 connection 的认证围栏（无 cookie → 401，�
   const authedRes = fakeRes()
   await handler({ url: `${ROUTE_PATH}/${CHART_ID}.json`, method: 'GET', headers: { cookie: 'dsh=ok' } }, authedRes)
   assert.equal(seen.length, 2)
-  // 已认证请求继续走到 store.read（fake store 的默认 readFile 抛错 → 404 是数据侧的事，
-  // 这里只断言它**没有**停在 401）。
+  // The fake store's default readFile throws, so the data side is a 404; the point is it is not a 401.
   assert.notEqual(authedRes.statusCode, 401)
 })
 
@@ -230,7 +226,7 @@ test('apply()：没有 connection 的组合退化成旧行为（无认证面时�
   harness.provided.get('capitalCharts').publish({ chartId: CHART_ID, filePath: '/tmp/x.json' })
 
   const res = await call(routes[0].handler, `${ROUTE_PATH}/${CHART_ID}.json`)
-  // fake store 默认 readFile 抛错，所以数据侧是 404；关键是没被打成 401。
+  // Fake store readFile throws, so the data side is a 404; the point is it is not a 401.
   assert.equal(res.statusCode, 404)
   assert.equal(JSON.parse(res.body).error, 'chart_file_unreadable')
 })

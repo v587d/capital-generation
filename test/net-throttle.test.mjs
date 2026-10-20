@@ -1,10 +1,7 @@
-/**
- * 请求节流器 + 东财共享客户端的回归。
- *
- * 这一层存在的理由（2026-09-24 核实）：本仓东财出口一度有两份互不知情的实现，
- * 而东财按**出口 IP** 风控（社区实测 >5 次/秒、1 分钟 ≥200 次、5 分钟 ≥300 次即临时封禁）。
- * `DataCollectorHub` 的 FIFO 只保证"同一时刻一个请求"，**不含最小间隔**——串行 ≠ 节流。
- */
+// Throttle + shared eastmoney client regression.
+// Eastmoney rate-limits by egress IP (community-measured: >5 req/s, >=200/min, >=300/5min => temp ban),
+// which is why the default minimum interval is 1000ms and both data planes must share ONE client.
+// The hub's FIFO only guarantees one request in flight and carries no minimum gap: serial != throttled.
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -23,7 +20,7 @@ test('节流器：串行 + 最小间隔，且**并发**进入时仍然守间隔'
     startedAt.push(Date.now())
     return index
   })
-  // 同时发起 5 个（模拟模型在一条消息里并发调用多个工具）
+  // 5 submitted at once, mirroring a model calling several tools in a single message
   const results = await Promise.all([0, 1, 2, 3, 4].map(task))
   assert.deepEqual(results, [0, 1, 2, 3, 4], '顺序必须保持')
   assert.equal(startedAt.length, 5)
@@ -80,7 +77,7 @@ test('东财客户端：HTTP 错误状态归类为带 status 的传输错误，4
       assert.equal(error.status, 429)
       return true
     })
-    // 默认 UA 必须带上（上游对空 UA / 无浏览器特征有风控）
+    // Default UA must be sent: upstream rate-limits empty UA / missing browser fingerprint
     assert.match(calls[0].init.headers['user-agent'], /Mozilla/)
   } finally {
     globalThis.fetch = original

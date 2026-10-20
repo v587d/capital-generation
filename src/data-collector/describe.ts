@@ -18,30 +18,14 @@ import {
 } from './args.js'
 
 /**
- * `describe_dataset`：把「inspect_dataset → profile_dataset →（可选）query_dataset」三次调用
- * 合成**一次**（每份 Dataset 一次），供 data_junior 使用。
- *
- * 设计要点（完整理由见 docs/design/describe-dataset-design.md）：
- *
- * 1. **一次调用只处理一个 dataset**。多个 dataset 由模型在**同一条 assistant 消息**里发多个
- *    调用完成——工具声明了 `isConcurrencySafe`，框架会把它们放进并发池，N 份结果在同一个
- *    下一步一起返回。因此**不需要**把 N 份结果合并成一个超长载荷，也就不需要任何
- *    digest / 公平份额 / 裁剪阶梯：单份结果的体积与今天"inspect + profile 两次结果之和"同量级。
- * 2. **形状分支由宿主做**：document 型 Dataset 直接跳过 queries，不再依赖模型先 inspect 再判断。
- * 3. **唯一的体积闸门** {@link SAFE_RESULT_CHARS}：序列化后超过它就不返回超长载荷，改返回
- *    一个小回执（含全部列名与 profile_ref），让模型用 `columns_of_interest` 收窄后重发。
- *    把"剪枝器静默截断"变成"响亮且可操作的重试"，而不是在宿主里做内容改写。
- * 4. **不碰读权限**：一切仍走 store 的受控方法，原始 rows 不进任何 Agent 上下文。
+ * `describe_dataset`: inspect + profile + optional query in one call per Dataset. A single size gate
+ * (SAFE_RESULT_CHARS) returns a small retryable receipt instead of letting the pruner truncate.
  */
 
-/**
- * 单份结果的码点上限。preset 的工具结果剪枝阈值是 8192（head 4096 + tail 1024，按码点），
- * 这里取 7000 留出余量：超过 8192 会被剪掉中间段，而"被剪"与"被本闸门拦下"的区别是
- * **后者会让模型知道发生了什么并给出重试办法**。
- */
+/** Cap below the preset's 8192 prune threshold: overflow is loud and retryable instead of silently clipped. */
 export const SAFE_RESULT_CHARS = 7_000
 
-/** 单次调用的 queries 条数上限：防的是请求体积，不是结果体积（结果另有闸门）。 */
+/** Request-size cap, not a result-size cap. */
 export const MAX_DESCRIBE_QUERIES = 8
 
 export interface DescribeRequest {
@@ -49,9 +33,8 @@ export interface DescribeRequest {
   task_id?: string
   time_column?: string
   primary_key?: string
-  /** 只对这些列返回 statistics / categories / schema；省略即全量。 */
+  /** Restrict statistics/categories/schema to these columns; omitted means all. */
   columns_of_interest?: string[]
-  /** 受控 QuerySpec 列表；`dataset_id` 由管线补成当前 dataset。 */
   queries: QuerySpec[]
 }
 
@@ -97,9 +80,8 @@ export interface DescribeTooLarge {
   shape: DatasetInspection['query_access']['shape']
   columns: string[]
   bytes: number
-  /** 体积归因：facts（元数据 + profile 事实块）部分的码点数。 */
+  /** Size attribution: codepoints of facts vs queries, so the hint can name the bigger side. */
   facts_bytes: number
-  /** 体积归因：queries（含各条 result）部分的码点数。 */
   queries_bytes: number
   hint: string
 }
@@ -114,30 +96,14 @@ function errorEnvelope(error: unknown): { code: string; detail: string } {
   return { code: 'query_failed', detail: error instanceof Error ? error.message : String(error) }
 }
 
-/** 与剪枝器同口径：按 Unicode 码点量体积，不按 UTF-16 码元。 */
+/** Match the pruner: measure Unicode code points, not UTF-16 units. */
 function codePointLength(text: string): number {
   return [...text].length
 }
 
 /**
- * 丢掉值为 `undefined` 的自有属性。
- *
- * ⛔ 这是**必须**的收尾步骤，不是风格问题（2026-09-23 真机事故）：
- * DSH 用 `snapshotJsonValue`（`@deepseek-ai/dsh-util-values`）校验工具的**返回值**，
- * 规则是"无损 JSON"——任何自有属性值为 `undefined`（以及 NaN/Infinity/-0、数组空洞、
- * 非 plain 对象）都会让 `walkJsonValue` 返回 undefined，宿主随即抛
- * `ToolOutputError: tool "describe_dataset" returned invalid output: value is not lossless JSON`，
- * **整次调用作废**。
- *
- * 而 `JSON.stringify` 会**静默丢掉** undefined 属性，所以本地怎么自测都看不出来。
- * 实测（真机会话 42f42c9e）：同一批 5 次调用里 3 次失败——全是数值列的日线缺
- * `categories`、无数值列的 ticker_search 缺 `statistics`；而 quote 与 corporate_actions
- * 恰好两类列都有，所以成功。模型只看到一句"invalid output"，误判成列名不匹配，
- * 重试一次后回退到 inspect/profile 老路。
- *
- * `store.ts` 的 `buildProfile` 一直用"条件展开"（`...(有内容 ? { statistics } : {})`）避开这个坑；
- * 这里改成**单一收尾闸门**：内部怎么组装都行，出工具前一律过 `compact()`。
- * 回归断言见 test/describe-dataset.test.mjs 的 `assertLosslessJson()`。
+ * Strip own properties whose value is `undefined`: DSH validates tool output as lossless JSON and
+ * invalidates the whole call. JSON.stringify hides these, so local self-tests cannot catch them.
  */
 function compact<T extends object>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T
@@ -155,16 +121,12 @@ function normalizeQueryItem(value: unknown, index: number, datasetId: string): Q
     throw new DatasetQueryError('query_spec_invalid', `queries[${index}].dataset_id must match the describe_dataset dataset_id`)
   }
   const shape = coerceQueryShape(source)
-  // envelope 与消息元数据不属于 QuerySpec；dataset_id 由管线按当前 dataset 补。
+  // Envelope and message metadata are not QuerySpec; dataset_id is filled by the pipeline.
   for (const field of ['type', 'task_id', 'dataset_id']) delete shape[field]
   return shape as unknown as QuerySpec
 }
 
-/**
- * 工具边界归一化：宽容解析（字符串化的 JSON 数组/对象、单个对象、envelope 形态），
- * 引擎侧保持严格。与 `query_dataset` 的 `normalizeQueryArgs` 共用同一套解析原语
- * （src/data-collector/args.ts），避免两个工具的宽容度漂移。
- */
+/** Lenient boundary parsing, sharing primitives with query_dataset so both tools accept the same shapes. */
 export function normalizeDescribeArgs(args: Record<string, unknown>): DescribeRequest {
   const dataset_id = readDatasetId(args.dataset_id)
 
@@ -214,13 +176,7 @@ function restrictFacts(
   return { statistics: pick(profile.statistics), categories: pick(profile.categories), schema: pick(profile.schema), keep }
 }
 
-/**
- * `time_facts.first` / `last` 也按 `columns_of_interest` 收窄。
- *
- * 为什么不收窄是错的：该参数承诺"只对这些列返回事实"，而首末行投影**每个数值列都带一份**
- * （7 列日线 = 每个投影 7 个键），是 time_facts 里最占体积的部分。时间列本身永远保留：
- * 它是首末值的时间坐标，删了这两个投影就没有意义（实测整份 describe 里 time_facts 占 1320 字符）。
- */
+/** Narrow first/last projections too; the time column always stays or the projection loses its coordinate. */
 function restrictTimeFacts(
   facts: ProfileDatasetResult['time_facts'],
   keep: Set<string> | undefined,
@@ -239,10 +195,7 @@ export interface DescribeDatasetInput {
   signal?: AbortSignal
 }
 
-/**
- * 单份 Dataset 的完整管线。失败一律抛错（`isError`）：单 dataset 调用里没有"部分成功"，
- * 把失败做成成功信封会让会话日志无法区分（见 docs/design/tool-result-error-signal.md）。
- */
+/** Fail loudly on any error: a single-dataset call has no partial success. */
 export async function describeDataset(input: DescribeDatasetInput): Promise<DescribeOutput> {
   const { store, session, request, signal } = input
 
@@ -268,10 +221,8 @@ export async function describeDataset(input: DescribeDatasetInput): Promise<Desc
   if (shape === 'document') {
     if (request.queries.length > 0) warnings.push('document Dataset has no row array; queries were not executed')
   } else {
-    // 内嵌 queries 与 `query_dataset` 必须**完全同构**（同一份 query-time 归一）：
-    // 曾经这里直连引擎，于是同一个回合里 `query_dataset` 的日期串能用、内嵌的却把
-    // `">=": "2026"` 当数字 2026 比（全中 243 行）、`">=": "2026-07"` 被整条跳过（0 行）。
-    // 时间列优先用请求里显式指定的，其次用 profile 已经认出来的那个。
+    // Embedded queries must be isomorphic to query_dataset (same query-time normalization);
+    // otherwise the same date string behaves differently in the same turn.
     const axisColumn = request.time_column ?? profile.time_facts?.time_column
     for (const [index, query] of request.queries.entries()) {
       try {
@@ -292,7 +243,6 @@ export async function describeDataset(input: DescribeDatasetInput): Promise<Desc
         if (prepared.axis !== undefined) withIsoTimeColumns(result as unknown as Record<string, unknown>, prepared.axis)
         queries.push({ index, result })
       } catch (error) {
-        // 单条 query 失败不炸整份：把错误记在该条上，模型可以在下一次调用里修正。
         queries.push({ index, error: errorEnvelope(error) })
       }
     }
@@ -300,12 +250,10 @@ export async function describeDataset(input: DescribeDatasetInput): Promise<Desc
 
   const facts = restrictFacts(profile, request.columns_of_interest, shape, warnings)
 
-  // 内部按"该有就有、没有就是 undefined"组装，**出工具前统一过 compact()**：
-  // undefined 属性会被 DSH 的输出校验判成 `value is not lossless JSON`（见 compact 注释）。
+  // Assemble with undefined allowed, then compact once before returning (see compact).
   const value = compact({
     status: 'ok',
-    // 来自 inspect_dataset 的元数据。**刻意不带 DatasetRef.schema**：它与 profile 的逐列 schema
-    // 同名不同义，带上既会撞名、又会让宽表体积翻倍；逐列事实已由 profile.schema 覆盖。
+    // Deliberately omit DatasetRef.schema: it collides with profile.schema and doubles wide-table size.
     dataset_id: inspection.dataset_id,
     task_id: inspection.task_id,
     session_id: inspection.session_id,
@@ -318,7 +266,6 @@ export async function describeDataset(input: DescribeDatasetInput): Promise<Desc
     retention_until: inspection.retention_until,
     params_digest: inspection.params_digest,
     query_access: inspection.query_access,
-    // 来自 profile_dataset
     profile_id: profile.profile_id,
     profile_ref: profile.artifact_ref,
     columns: profile.columns,
@@ -337,10 +284,8 @@ export async function describeDataset(input: DescribeDatasetInput): Promise<Desc
   const encoded = JSON.stringify(value)
   const bytes = codePointLength(encoded)
   if (bytes > SAFE_RESULT_CHARS) {
-    // 体积归因：把 queries 部分单量出来，hint 指名先砍哪边。2026-10-10 真机（task_fh_300803_20261010）：
-    // 两份宽表各带 5-6 聚合的 queries 打穿闸门，而回执只说"用 columns_of_interest 收窄"——列本来
-    // 已经很窄，超预算的其实是 queries，模型只好 describe（去 queries）+ query_dataset 各来一轮，
-    // 4 次调用里 2 次本可省。归因字段让 hint 直指大头，不引入第二道闸门（⛔ 体积闸门仍只有一道）。
+    // Attribution lets the hint name the big side without adding a second gate
+    // (there is still exactly one size gate).
     const queriesBytes = codePointLength(JSON.stringify(value.queries))
     const factsBytes = bytes - queriesBytes
     return compact({

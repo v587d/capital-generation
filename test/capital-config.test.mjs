@@ -15,13 +15,7 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const CLIENT = join(ROOT, 'config', 'client.js')
 const CLIENT_SRC = join(ROOT, 'config', 'client.src.cjs')
 
-/**
- * ⛔ 条目 schema 与卡片之间的**清单一致性**：这把闸门是给 2026-10-16 那一次漏接补的。
- * 当时 `ftshareCredentialRef` 已经是 host Config 里的 volatile 字段、主插件也按它现取密钥，
- * 唯独卡片没有那一格——24 项能力在目录里，密钥却没有输入口，而**零报错**（用户只能去改 profile 文件，
- * 且界面上看不见这把密钥）。schema 与卡片是两份清单，"少补一处"正是本项目最忌讳的那一族。
- * 比的是**解析后的引用名集合**，不是行数：多一行同样要失败（界面上会出现一格永远存不了东西的输入框）。
- */
+// Config and card are two lists: compare resolved credential refs, so an omitted or extra ref fails.
 test('capital-config：条目 Config 里每个凭据引用名，卡片都必须有一行密钥', () => {
   const names = []
   const walk = (value) => {
@@ -38,14 +32,7 @@ test('capital-config：条目 Config 里每个凭据引用名，卡片都必须�
   assert.ok(names.length >= 5, `密钥行只剩 ${names.length} 把，闸门多半被架空了`)
 })
 
-/**
- * 0.1.7 的 settings 面里**条目 id 就是命名空间**：host 半边不再有 `settings.register`，
- * 可编辑面是条目 Config 的 `.volatile()` 投影；浏览器半边按 `configForms.get(条目 id)` 读写。
- * 卡片坐的是**组合包自己的页面**：槽 `plugins.bundle.config` 的 key 是组合包的**包名**
- * （页面 `renderSlot(..., { entryKey: pkg.name })`）。于是两条同字链各自钉住——条目 id 四处
- * （patch 行 id ≡ host ≡ 主插件 ≡ 浏览器半边）与包名一处（对根 `package.json`）。
- * 漂移的表现都是**卡片静默消失、零报错**（issue #3 那一族）。
- */
+// Entry id is the settings namespace and must match in four places (patch row, host, main plugin, client); the slot key must equal the bundle name.
 test('条目 id 四处一致 + 槽 key = 组合包包名：settings 命名空间与卡片座位各自同字', () => {
   const patch = yamlLoad(readFileSync(join(ROOT, 'cordis.patch.yml'), 'utf8').replace(/!!js\s+/g, ''))
   const row = patch.flatMap((entry) => entry?.insert ?? []).find((item) => item?.name === './config/index.js')
@@ -63,11 +50,7 @@ test('条目 id 四处一致 + 槽 key = 组合包包名：settings 命名空间
     '配置坐组合包层，不留行级座位：行详情页要 3 跳，且同包其他行点进去是死路')
 })
 
-/**
- * 上游 `plainConfig`（`dsh-settings/lib/index.js:97`）的同一条解引用：`.volatile()` 字段在
- * 解析后是 cosmokit 的取值单元（`{ get, [cosmokit.volatile.write] }`），Host 把它投影成
- * 表单值之前先这样摊平。对照两处 schema 时必须走同一道摊平，否则比的是引用对象不是值。
- */
+// Same dereference as the host: volatile fields are cosmokit cells; flatten before comparing.
 const VOLATILE_WRITE = Symbol.for('cosmokit.volatile.write')
 function plainConfig(value) {
   if (value === null || typeof value !== 'object') return value
@@ -76,12 +59,10 @@ function plainConfig(value) {
   return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, plainConfig(child)]))
 }
 
-/** 注释里点名退休接口是文档说明，负向断言只查代码行。 */
 function codeOnly(source) {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 }
 
-/** 与上游 volatileForm 同一条遍历：`.dict` 逐层走，`meta.volatile` 是承重事实。 */
 function volatilePaths(schema, path = []) {
   if (schema?.meta?.volatile) return [path.join('.')]
   if (schema?.type !== 'object') return []
@@ -89,8 +70,6 @@ function volatilePaths(schema, path = []) {
 }
 
 test('capital-config Host：可编辑面全靠 Config 的 .volatile() 字段，注册通道已退休', () => {
-  // 0.1.7 的 volatileForm 在一个 volatile 字段都没有时返回 undefined ⇒ 条目**不进** describe
-  // 镜像 ⇒ 卡片读不到命名空间；写非 volatile 路径被 `Config field "…" is not volatile` 拒绝。
   const flags = volatilePaths(CapitalConfig)
   for (const path of [
     'customPersona', 'fuyaoCredentialRef', 'ftshareCredentialRef',
@@ -100,8 +79,6 @@ test('capital-config Host：可编辑面全靠 Config 的 .volatile() 字段，�
     assert.ok(flags.includes(path), `${path} 必须 .volatile()，否则卡片改不动它（条目甚至不进 describe 镜像）`)
   }
 
-  // 开关字段按 catalog 现算：两颗手抄清单（卡片与主插件 Config）已经漂过一次，这里再抄第三遍
-  // 只会让"漏了一格不 volatile"继续靠人记得住。
   const selectedSkillPaths = SELECTED_SKILL_CATALOG.map(({ key }) => key)
   assert.ok(selectedSkillPaths.length >= 7, `catalog 只剩 ${selectedSkillPaths.length} 条，这条闸门要退化成空断言了`)
   for (const key of selectedSkillPaths) {
@@ -112,8 +89,7 @@ test('capital-config Host：可编辑面全靠 Config 的 .volatile() 字段，�
   assert.doesNotMatch(hostSource, /settings\.register|settingsScope|SETTINGS_NAMESPACE/,
     '0.1.7 已删除 settings.register / settingsScope；代码里再出现就是把卡片改回了退休的旧面')
 
-  // apply 现在还要挂一条本机路由 ⇒ 走 cordis 形状的 fake（外层直接访问 ctx.webServer 必须抛，
-  // 这条 fake 就是为复刻它而存在的）。
+  // apply registers a local route, so use the cordis fake where bare ctx.webServer throws.
   const registered = []
   const logs = []
   const { ctx: hostCtx, injected } = hostFakeCtx({
@@ -128,12 +104,10 @@ test('capital-config Host：可编辑面全靠 Config 的 .volatile() 字段，�
   assert.equal(registered.length, 1, '原文旁路路由随这颗行注册一次')
 })
 
-/** 假 SettingsFormModel：契约照 form-model.d.ts（bind/shell/field/actions/dispose），不实现暂存写。 */
 function fakeModel(scope) {
   const drafts = new Map()
   let store
-  // 真模型的 edit/resetField/discard 会让**绑定它的那份投影**重算并推给订阅者；假模型也得把
-  // bind() 收到的 project 函数留住，否则草稿改了 dirty 而卡片读到的还是旧快照（脏标记永不上树）。
+  // Keep bind()'s projector or the dirty flag never reaches the store.
   let bound
   const push = () => { if (store && bound) store.set(bound()) }
   return {
@@ -171,7 +145,6 @@ function fakeModel(scope) {
   }
 }
 
-/** 默认给「详情」用的假取数：一次成功、正文固定，用例需要失败时自己换掉。 */
 const defaultFetch = async () => ({
   ok: true,
   status: 200,
@@ -185,15 +158,11 @@ function loadClient({ scope, primitives = {}, fetchImpl = defaultFetch } = {}) {
   const docRequests = []
   const timers = []
   const warnings = []
-  // 假 DOM 只为接住 installStyles 那份**解析后**的样式表：收起宿主组件段的规则里插着包名，
-  // 量源码量不出"最终落在哪个包页面上"，而构建产物还是模板字面量 ⇒ 只能这样跑一次拿成品。
+  // Fake DOM captures the parsed stylesheet; the build keeps mine as a template literal.
   const styles = []
   const sandbox = {
     window: { __ModuleLoader__: { load(value) { entry = value } } },
-    // 「原文读不到」那条降级路会 console.warn；这里既接住它，也靠它读出**失败分类**
-    // （两种 404 该说两句不同的话，分类不落在渲染树上就量不到）。
     console: { warn: (message) => warnings.push(String(message)) },
-    // 取数与定时器都留痕：复制按钮的「已复制」复位是 setTimeout，没句柄就断不出"它会复位"。
     fetch: async (url, init) => { docRequests.push({ url: String(url), init }); return fetchImpl(url, init) },
     setTimeout: (callback, ms) => { timers.push({ callback, ms }); return timers.length },
     clearTimeout: () => {},
@@ -216,19 +185,13 @@ function loadClient({ scope, primitives = {}, fetchImpl = defaultFetch } = {}) {
     styles,
     mod: entry.factory((name) => {
       if (name === 'react') return {
-        // 测试里把函数组件就地展开成它自己返回的节点：渲染顺序与字段 id 要从**渲染树**上读，
-        // 而不是从源码字符串量（ ids 现在是模板字面量，源码匹配不到）。
+        // Expand function components in place; ids are template literals, so read the tree.
         createElement(type, props, ...children) {
           const kids = children.flat(Infinity).filter(Boolean)
           if (typeof type === 'function') return type({ ...props, children: kids })
           return { type, props: { ...props, children: kids }, children: kids }
         },
-        // 假渲染树没有 DOM，portal 目标（官方 head 行）永远找不到 ⇒ useState 恒为 null，
-        // 文档链接走"退回本行末尾"那条降级路，仍然出现在渲染树上。
-        // tab 与筛选条同理冻在初始值：切格子的行为在浏览器侧实测，这里钉的是**三块都在渲染树上、
-        // 不在屏的那块带 hidden=true**（全挂载才是对的：SettingsForm 卸载即丢草稿）。
         useRef: () => ({ current: null }),
-        // 惰性初始化器要真的调用一次（「精选 Skills」的顺序就是靠它"进格子那一刻定一次"）。
         useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
         useEffect: () => {},
       }
@@ -239,15 +202,10 @@ function loadClient({ scope, primitives = {}, fetchImpl = defaultFetch } = {}) {
           return { type: 'SettingsForm', props, children: [...(props.children ?? []), footer] }
         },
         SettingsSecretField(props) { return { type: 'SettingsSecretField', props, children: props.children ?? [] } },
-        // 官方 tab 件：三格 tab 的文案与选中态全从这份 props 上读，桩只负责把它摆进渲染树。
         SegmentedControl(props) { return { type: 'SegmentedControl', props, children: [] } },
-        // 官方对话框：真组件在 `open` 为假时返回 null。桩一律把 children 铺开，否则量不到
-        // 「详情」里那份原文；开合与 Esc / 遮罩的行为在浏览器侧实测。
         Modal(props) { return { type: 'Modal', props, children: props.children ?? [] } },
         Switch(props) { return { type: 'Switch', props, children: props.children ?? [] } },
         IconRightUpOutlineRegular: () => ({ type: 'icon', props: {}, children: [] }),
-        // 上限警示那枚官方三角 + 感叹号图标。桩给它一个可辨认的节点名，
-        // 好让用例钉住"行里真的渲染了这枚图标"而不是只钉文案。
         IconWarningTriangleOutlineRegular: () => ({ type: 'warning-icon', props: {}, children: [] }),
         SettingsFormModel: function SettingsFormModel() { return model },
         writeClipboard: async (value) => { clipboardWrites.push(value); return true },
@@ -258,7 +216,6 @@ function loadClient({ scope, primitives = {}, fetchImpl = defaultFetch } = {}) {
   }
 }
 
-/** `pluginManager.listBundles()` 的返回值形状：我们这个包的行数（其余字段卡片不消费）。 */
 function bundlesWith(rowCount) {
   const rows = Array.from({ length: rowCount }, (unused, index) => ({ rowId: `row-${index}` }))
   return { ok: true, value: [{ name: '@v587d/capital-generation', rows }] }
@@ -280,14 +237,13 @@ function fakeCtx({ scope, served = true, writes = [], listBundles = async () => 
         return scope
       },
       whileServed: (namespaces, register) => {
-        // namespaces 是 sandbox realm 里的数组，直接进 deepStrictEqual 会被原型差异骗过。
+        // Sandbox-realm arrays differ by prototype; normalize with Array.from.
         servedCalls.push(Array.from(namespaces, String))
         return namespaces.some((ns) => ns === SETTINGS_ENTRY_ID) && served ? (register(new Set([SETTINGS_ENTRY_ID])) ?? (() => {})) : () => {}
       },
     },
     remote: {
       credentials: { describe: async () => ({ ok: true, value: {} }), set: async () => {} },
-      // 「包含的组件」的行数唯一真相就是这份清单；用例按需要它拒答、抛错或清单里没我们这个包。
       pluginManager: { listBundles: async () => { listBundlesCalls += 1; return listBundles() } },
       $on(name, handler) { remoteEvents.set(name, handler); return () => { if (remoteEvents.get(name) === handler) remoteEvents.delete(name) } },
     },
@@ -305,12 +261,10 @@ function fakeCtx({ scope, served = true, writes = [], listBundles = async () => 
   return {
     ctx, registrations, servedCalls, injectedSlots, writes, dictionaries,
     remoteEvents, contextEvents, listBundlesCalls: () => listBundlesCalls,
-    /** 触发一颗客户端事件总线上的事件，失效订阅就是这么被叫醒的。 */
     fire(event, listeners) { listeners.get(event)?.() },
   }
 }
 
-/** 一页两格（配置段 + 标题外链）都注册在同一份 registrations 上，按槽名取。 */
 const registrationFor = (registrations, slotName) => registrations.find((item) => item.declaration.name === slotName)
 
 const readyScope = (value = {}) => ({
@@ -352,7 +306,6 @@ test('capital-config Client：只依赖 slots/locale/remote/configForms，注册
   assert.equal(model.drafts.size, 0)
 })
 
-/** 深度收集渲染树里某类节点，顺序即渲染顺序。 */
 function collect(node, type, out = []) {
   if (!node || typeof node !== 'object') return out
   if (node.type === type) out.push(node)
@@ -360,12 +313,10 @@ function collect(node, type, out = []) {
   return out
 }
 
-/** 每行「详情」那颗按钮是对话框唯一的开锁：按无障碍名认它，不按位置猜。 */
 function detailButtons(page) {
   return collect(page, 'button').filter((button) => String(button.props['aria-label']).startsWith('selectedSkillsDetail'))
 }
 
-/** 假渲染树没有 React 运行时：组件 props 由 inject 面手工铺开（`t` 回键名，文案靠字典用例钉）。 */
 function cardProps(injected) {
   return {
     t: (key) => String(key),
@@ -381,7 +332,6 @@ function cardProps(injected) {
   }
 }
 
-/** 挂载好的卡片：返回渲染函数，每次调用都读一次当前 store 快照。 */
 function cardRenderer(registrations) {
   const { declaration, component } = registrationFor(registrations, 'plugins.bundle.config')
   const injected = declaration.inject()
@@ -389,7 +339,7 @@ function cardRenderer(registrations) {
   return { injected, render: () => component(props) }
 }
 
-/** 排空一层宏任务：事件处理器里的 async 取数没有可 await 的句柄，别靠微任务数数。 */
+// Drain one macrotask: async fetches in handlers expose no awaitable handle.
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 test('capital-config Client：五个密钥按序渲染，本机回退与 selected skill 开关依次收尾', () => {
@@ -398,7 +348,6 @@ test('capital-config Client：五个密钥按序渲染，本机回退与 selecte
   const { ctx, registrations } = fakeCtx({ scope })
   mod.apply(ctx)
   const { render } = cardRenderer(registrations)
-  // 组合包页面只给 `<section data-plugin-config>` 容器；三格标题就是 tab 条，面板内部顺序仍归卡片。
   const card = render()
   const titles = collect(card, 'h4')
   assert.deepEqual(titles, [], '标题体系交给 tab 条：卡片不再自绘 h4（h4/h5 两级曾把精选 Skills 压成数据源的子项）')
@@ -407,8 +356,6 @@ test('capital-config Client：五个密钥按序渲染，本机回退与 selecte
   assert.equal(tabs.props.id, 'capital-config-tabs')
   assert.equal(tabs.props.value, 'sources', '默认停在数据源')
   assert.equal(tabs.props.label, 'tabsLabel', 'tablist 的名字走字典')
-  // options 是 sandbox realm 里的数组：直接 .map 出来还是那颗异构数组，deepEqual 会栽在原型上
-  // （:242 的同一条坑）。Array.from 在宿主 realm 现算，比的才是值。
   assert.deepEqual(Array.from(tabs.props.options, (option) => option.value), ['sources', 'skills', 'components'])
   assert.equal(tabs.props.options[0].label, 'title', '第一格文案仍走卡片字典，不硬编码')
   assert.deepEqual(
@@ -454,9 +401,7 @@ test('capital-config Client：五个密钥按序渲染，本机回退与 selecte
 })
 
 test('capital-config Client：catalog 用到的每个能力标签都有中英两套显示名', () => {
-  // 筛选条是从各条目实际用到的 tags 现算的，显示名靠 `TAG_LABELS[locale][tag] ?? tag` 兜底：
-  // 少一套名字不会报错，只会在中文界面上直接画出 `cash-flow` 这种原词——控件对自己的状态说谎。
-  // 词表就是 TAG_LABELS 的键，所以新标签必须同时补 zh 与 en。
+  // Filter tags derive from the catalog; a missing label silently renders the raw tag.
   const used = [...new Set(SELECTED_SKILL_CATALOG.flatMap((entry) => entry.tags))].sort()
   assert.ok(used.length >= 3, `catalog 只用到 ${used.length} 个能力标签，这条闸门多半被架空了`)
   for (const locale of ['zh', 'en']) {
@@ -470,12 +415,6 @@ test('capital-config Client：catalog 用到的每个能力标签都有中英两
   for (const locale of ['zh', 'en']) assert.ok(SELECTED_SKILL_TAG_LABELS[locale].all, `${locale} 的筛选条缺「全部」`)
 })
 
-/**
- * 文案闸门：钉的是"这类话曾经写错成什么"，不是逐字措辞。
- * ① 文档链接曾经落在提示下方、还带服务名前缀（占一整行）；② 密钥曾经标"必填 / 选填"，
- * 而本项目不依赖任何单一数据源，四个 Key 一律选填；③ 生效范围要点名"新 Capital **模式**会话"；
- * ④ 说明文字曾经写到三四句，用户读不完。
- */
 test('capital-config Client：精选 Skills 每行给复制技能名与仓库链接，不再显示 slug', async () => {
   const scope = readyScope({ selectedSkills: { buffettFramework: true } })
   const { mod, clipboardWrites, timers } = loadClient({ scope })
@@ -501,9 +440,6 @@ test('capital-config Client：精选 Skills 每行给复制技能名与仓库链
     assert.equal(link.children[1]?.type, 'icon', '仓库链接带右上角斜上箭头')
     assert.match(String(link.props.rel), /noopener/)
   }
-  // slug 那一行 `<code>buffett-investment-framework</code>` 删掉了：它是给研发看的字，
-  // 而用户要的"这串名字"现在由复制按钮给——所以**无障碍名与悬停提示必须带着真名字**，
-  // 否则删掉可见文本就是把信息藏了而不是省了。
   assert.deepEqual(collect(page, 'code'), [], '卡片不再显示 slug')
   const copyButtons = collect(page, 'button').filter((button) => button.props.className === 'capital-config-skill-action'
     && String(button.props['aria-label']).startsWith('selectedSkillsCopyName'))
@@ -537,8 +473,7 @@ test('capital-config Client：精选 Skills 每行给复制技能名与仓库链
   assert.equal(dict.zh.selectedSkillsTitle, '精选 Skills')
   assert.equal(dict.zh.selectedSkillsHint, undefined, '已移除整段精选 Skills 说明')
   assert.equal(dict.zh.openDocs, '官方文档')
-  // 第三格的标题必须与宿主那一格的显示名**同字**（宿主 `pluginManager.partsLabel`），
-  // 否则 tab 说「组件」、放行下来的段落叫「包含的组件」，用户认不出那是同一件事。
+  // Must match the host's partsLabel, or the tab and section names diverge.
   assert.equal(dict.zh.componentsTitle, '包含的组件')
   assert.equal(dict.en.componentsTitle, 'Components')
   assert.equal(typeof dict.zh.tabsLabel, 'string')
@@ -548,11 +483,6 @@ test('capital-config Client：精选 Skills 每行给复制技能名与仓库链
   assert.equal(typeof dict.zh.selectedSkillsDocFailed, 'string', '原文取不到时要有一句人话')
 })
 
-/**
- * 第二格的左右布局：筛选器在左（DOM 顺序就是左右顺序），清单在右。
- * 每个标签后面那个数字**只有一个含义**：点它会在右边看到几行——不是"已开启几颗"（那是 tab 上
- * 2/35 的口径）。两处口径混用，用户按着数字去找那几行就找不到。
- */
 test('capital-config Client：筛选器在左侧、每个标签带"点它会显示几行"', () => {
   const scope = readyScope()
   const { mod } = loadClient({ scope })
@@ -570,7 +500,6 @@ test('capital-config Client：筛选器在左侧、每个标签带"点它会显�
     for (const tag of entry.tags) tagCount.set(tag, (tagCount.get(tag) ?? 0) + 1)
   }
   tagCount.set('all', SELECTED_SKILL_CATALOG.length)
-  // 期望顺序：「全部」恒第一格，其余按条数从高到低（同数保持 catalog 里的出现顺序）。
   const tags = ['all', ...Array.from(tagCount.keys()).filter((tag) => tag !== 'all')
     .sort((left, right) => tagCount.get(right) - tagCount.get(left))]
   const buttons = collect(filter, 'button')
@@ -591,12 +520,7 @@ test('capital-config Client：筛选器在左侧、每个标签带"点它会显�
   }
 })
 
-/**
- * 「精选 Skills」的顺序：**已开启的排在最前面**，组内保持 catalog 顺序（`Array#sort` 稳定）。
- * ⛔ 这份顺序只在**进入这一格的那一刻**定一次——拨开关的当下不许把用户手底下那一行抽走，
- * 切走再切回来才置顶。假渲染树没有 React 运行时（`useState` 每次 render 重算），所以"当场不动"
- * 这一半只能在浏览器里量（账本 L13 那条"测试用框架真实形状"的同一族），这里钉的是进入那一刻的顺序。
- */
+// Enabled skills sort first, and the order is frozen on tab entry so toggling does not move a row under the cursor.
 test('capital-config Client：已开启的 Skill 置顶，但只在进入那一格时定顺序', () => {
   const enabled = { financialHealth: true, valuationInvestmentStrategy: true }
   const scope = readyScope({ selectedSkills: enabled })
@@ -604,7 +528,7 @@ test('capital-config Client：已开启的 Skill 置顶，但只在进入那一�
   const { ctx, registrations } = fakeCtx({ scope })
   mod.apply(ctx)
   const page = cardRenderer(registrations).render()
-  // 先算一份期望顺序（复制数组再排：catalog 是模块级导入，就地排会把别的用例带歪）。
+  // Copy before sorting: the catalog is shared module state.
   const ordered = [...SELECTED_SKILL_CATALOG]
     .sort((left, right) => (enabled[left.key] === true ? 0 : 1) - (enabled[right.key] === true ? 0 : 1))
   const titles = collect(page, 'span')
@@ -620,15 +544,7 @@ test('capital-config Client：已开启的 Skill 置顶，但只在进入那一�
     '「复制技能名」只给已开启的行 ⇒ 它们跟着聚在最上面')
 })
 
-/**
- * 精选 Skills 的**编辑期上限**。三条判据缺一不可：
- *   ① 到上限后没勾的开关点不动，原因挂在**开关左侧那枚三角警示图标**上（悬停 title 与读屏
- *      aria-label 同一串；控件不许对自己的状态说谎——灰着的开关为什么灰着必须答得出来）；
- *   ② **已勾上的行永远关得掉**——把用户关进一个既不能再选、也不能取消的格子里，比不给上限糟得多；
- *   ③ 老配置（多于上限）照常全部生效，只提示收敛：运行期 provider **不按这个数截断**
- *      （`test/selected-skill-tags.test.mjs` 的「上限不变量」钉着运行期那一半），否则症状就是
- *      "卡片上开着 10 个、会话目录里只剩 6 个"的静默砍功能。
- */
+// Edit-time cap: unchecked switches disable with the reason on the warning icon; over-cap legacy config keeps working.
 test('capital-config Client：精选 Skills 编辑期封顶，老配置照常生效只提示收敛', () => {
   const keys = SELECTED_SKILL_CATALOG.map((entry) => entry.key)
   const labelOf = new Map(SELECTED_SKILL_CATALOG.map((entry) => [entry.label.zh, entry]))
@@ -638,7 +554,6 @@ test('capital-config Client：精选 Skills 编辑期封顶，老配置照常生
     const { ctx, registrations, dictionaries } = fakeCtx({ scope })
     mod.apply(ctx)
     const page = cardRenderer(registrations).render()
-    // 精选 skill 的行 = 包着 Switch 的 switch-row（localFetch 那行同形，按 label 认出并排除）。
     const rows = collect(page, 'div')
       .filter((node) => node.props.className === 'capital-config-switch-row')
       .filter((row) => collect(row, 'Switch').some((node) => node.props.label !== 'localFetchLabel'))
@@ -649,7 +564,6 @@ test('capital-config Client：精选 Skills 编辑期封顶，老配置照常生
       dict: dictionaries.get('settings.capital'),
     }
   }
-  /** 警示图标的位置与身份：在**开关左边**，悬停 title 与读屏 aria-label 同一串（原句由字典用例钉）。 */
   const assertCapIcon = (row, blocked) => {
     const iconIndex = row.children.findIndex((node) => node.props.className === 'capital-config-skill-cap-icon')
     const switchIndex = row.children.findIndex((node) => node.type === 'Switch')
@@ -685,7 +599,6 @@ test('capital-config Client：精选 Skills 编辑期封顶，老配置照常生
     assertCapIcon(row, atCap[entry.key] !== true)
   }
   assert.deepEqual(capPanels, [], '列表顶上那行整行提示已删：原因只活在图标上')
-  // 悬停文案的原句：{count} 是计数占位（"6/6"），由代码拼，字典不存数字。
   assert.equal(
     dict.zh.selectedSkillsCapTooltip.replace('{count}', `${SELECTED_SKILLS_MAX_ENABLED}/${SELECTED_SKILLS_MAX_ENABLED}`),
     'Skill已达上限 (6/6)。', '悬停原句')
@@ -698,7 +611,7 @@ test('capital-config Client：精选 Skills 编辑期封顶，老配置照常生
     assert.equal(dict.zh[key], undefined, `${key} 已随旧话术删掉`)
   }
 
-  // 祖父条款：升级前就勾了 10 个的用户，不该被这一次改动悄悄关掉 4 个功能。
+  // Grandfathering: an existing over-cap selection must not silently lose features.
   const overCap = Object.fromEntries(keys.slice(0, SELECTED_SKILLS_MAX_ENABLED + 2).map((key) => [key, true]))
   const exceeded = renderWith(overCap)
   for (const node of exceeded.switches) {
@@ -717,12 +630,7 @@ test('capital-config Client：精选 Skills 编辑期封顶，老配置照常生
   }
 })
 
-/**
- * 「详情」那份原文：按需取、成功才缓存、失败必须还能再试（AGENTS.md §9.7 ⑤ 同一族）。
- * 取数挂在悬停/点击上而不是页面加载上：35 份快照原文合计约 750 KB。
- * ⛔ 开合必须是**点击**：官方 HoverCard 只认 pointerenter 计时（默认 500ms），且点锚点会把它关掉——
- * 用户实机症状"点详情没反应"就是那个控件的语义，不是我们写错了 handler。
- */
+// Opening must be a click: HoverCard only times pointerenter and closes on anchor click.
 test('capital-config Client：「详情」点击开对话框、悬停预热原文，成功才缓存', async () => {
   const scope = readyScope()
   const { mod, docRequests } = loadClient({ scope })
@@ -781,20 +689,13 @@ test('capital-config Client：原文读不到不写缓存，再点一次还会�
   detail.props.onClick()
   await settle()
   assert.equal(docRequests.length, 3)
-  // 我们那条路由答的 404：分类走的是回包里的 error，文案说"快照读不到"。
   assert.match(warnings.join('\n'), /skill_doc_unreadable/)
 })
 
-/**
- * 两种"读不到"必须分得开：客户端 bundle 每次打开页面就换新的，host 半边却要**重启宿主**才
- * 重新 import。升级后浏览器已经会去要 `/capital-skills/…`，而那条路由还不存在——这时告诉用户
- * "刷新页面再试"是指错方向，只有重启宿主有用。
- */
 test('capital-config Client：宿主还没这条路由时，分类落 route_missing 而不是"快照读不到"', async () => {
   const scope = readyScope()
   const { mod, warnings } = loadClient({
     scope,
-    // 平台自己的 404 页：不是我们的 `{ error }` 形状。
     fetchImpl: async () => ({ ok: false, status: 404, json: async () => { throw new Error('not json') }, text: async () => '<html>Not Found</html>' }),
   })
   const { ctx, registrations } = fakeCtx({ scope })
@@ -825,11 +726,7 @@ test('capital-config Client：Host 不服务该条目时不注册卡片', () => 
     '外链不进 whileServed：它是插件的属性，与配置条目有没有被服务无关')
 })
 
-/**
- * 三格面板与 tab 的对应关系：`SegmentedControl` 无条件发 `aria-controls="<id>-<value>-panel"`
- * （契约写在它的 .d.ts 里），所以**三块面板都必须真的存在**——第三块的内容是宿主那段清单
- * （随 tab 在下方显形），面板本身只留一句读屏侧的话。悬空 id 不报错，只有读屏用户付账。
- */
+// SegmentedControl always emits aria-controls, so all three panels must exist; a dangling id fails silently.
 test('capital-config Client：三块面板各有 tabpanel 身份，第三块也真的存在', () => {
   const scope = readyScope()
   const { mod } = loadClient({ scope })
@@ -860,11 +757,7 @@ test('capital-config Client：三块面板各有 tabpanel 身份，第三块也�
     '但 aria-controls 指的这块面板不许是空的：那句话改挂在读屏侧，零布局贡献')
 })
 
-/**
- * 计数闸门（两条口径都是实测教训）：
- * ① 已开启数是条目快照的即时事实；② 行数唯一来源是宿主的 `listBundles()`——**取不到就什么也不画**，
- * 把"还不知道"写成 `0` 是控件说谎，而 §9.7 ⑤ 的另一半是失败还得能重试。
- */
+// Enabled count is live snapshot state; row count comes only from listBundles(), and an unknown count is never drawn as 0.
 test('capital-config Client：tab 上的两个计数，取不到的数字宁可不画', async () => {
   const scope = readyScope({ selectedSkills: { financialHealth: true, valuationInvestmentStrategy: true } })
   const { mod } = loadClient({ scope })
@@ -881,7 +774,6 @@ test('capital-config Client：tab 上的两个计数，取不到的数字宁可�
   tabs = collect(render(), 'SegmentedControl')[0]
   assert.equal(tabs.props.options[2].label, 'componentsTitle 4')
 
-  // 一次成功之后不再重复要这份逐个 bundle 读 manifest 的清单。
   const calls = listBundlesCalls()
   await injected.ensureBundleRows()
   assert.equal(listBundlesCalls(), calls, '已取到 ⇒ 不再重取')
@@ -951,7 +843,6 @@ test('capital-config Client：密钥草稿还在时 tab 点名未保存（保存
   mod.apply(ctx)
   const { render } = cardRenderer(registrations)
   assert.equal(collect(render(), 'SegmentedControl')[0].props.options[0].label, 'title')
-  // 三块面板全挂载 ⇒ 草稿活着但保存按钮可能正藏在不在屏的那格里；不说出来就是控件装没事。
   model.actions().edit('fuyao', 'sk-demo')
   assert.equal(collect(render(), 'SegmentedControl')[0].props.options[0].label, 'titleUnsaved')
 })
@@ -972,17 +863,12 @@ test('capital-config Client：条目还没就绪时退回一根列，不写 tab 
     '属性缺席是 fail-open 的开关：installStyles 那两条 :has() 认不出卡片 ⇒ 宿主的组件段照常可见')
 })
 
-/**
- * 收起/放行宿主「包含的组件」的规则，钉的是**形状**而不是措辞：方向写反就是"某天用户看不到
- * 自己的行清单"，而 CSS 不会报错。所以这里要的是"任何失配都落在可见那一侧"可被机器检查。
- */
+// Collapse rule for the host components section: a reversed direction hides user rows silently, so mismatches fall on the visible side.
 test('capital-config Client：宿主组件段的收起规则只认自家 tab，失配一律落在"照常可见"', () => {
   const scope = readyScope()
   const { mod, styles } = loadClient({ scope })
   const { ctx } = fakeCtx({ scope })
   mod.apply(ctx)
-  // 量的是**解析后的样式表**（`${BUNDLE_NAME}` 已落定），不是源码字符串；注释先摘掉，
-  // 否则"这条不许写"的反面例子恰好写在注释里，闸门会自己绊自己。
   const css = styles.map((node) => String(node.textContent)).join('\n').replace(/\/\*[\s\S]*?\*\//g, '')
   const bundleName = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).name
   const hideRules = Array.from(css.matchAll(/^[ \t]*\[data-plugin-detail="([^"]+)"\][^\n]*$/gm), (match) => match[0])
@@ -998,18 +884,12 @@ test('capital-config Client：宿主组件段的收起规则只认自家 tab，�
   assert.doesNotMatch(css, /:not\(\[data-capital-config-tab="components"\]\)/, '禁用否定式判据')
   assert.doesNotMatch(css, /^[ \t]*section\[data-plugin-rows\]\s*\{/m, '不存在"默认就藏起来"的裸规则')
   assert.doesNotMatch(css, /\[data-plugin-config\]\s*\+/, '不拿 data-plugin-config 当锚点：行详情页那格是 div，同名不同形')
-  // hidden 的收起方式：作者 display 会盖掉 UA 的 [hidden]{display:none}，写在面板类上等于 hidden 失效
-  // ——35 颗开关与密钥输入框全留在 Tab 序里，看不见却能被键控，是控件对自己说谎。
+  // Author display overrides [hidden]{display:none}, leaving invisible but tabbable controls.
   assert.doesNotMatch(css, /\.capital-config-panel\s*\{[^}]*display:/, '面板类自身不许声明 display')
   assert.match(css, /\.capital-config-panel:not\(\[hidden\]\)\s*\{\s*display: flex/, 'display 只在非 hidden 时声明')
   assert.match(css, /\.capital-config-panel\[hidden\]\s*\{\s*display: none/, 'hidden 一侧单独钉死')
 })
 
-/**
- * 第二格的左右布局与三格的等距，钉的是样式表**形状**：这几条一丢，表现不是报错而是
- * "筛选器跟着清单滚走了"和"每切一格版面跳一次"——都只能在真浏览器里看得见，所以这里
- * 先把形状闸住，浏览器侧再量一次数。
- */
 test('capital-config Client：筛选器吸顶、三格首行等距，且不许冒出第二个滚动容器', () => {
   const scope = readyScope()
   const { mod, styles } = loadClient({ scope })
@@ -1024,27 +904,22 @@ test('capital-config Client：筛选器吸顶、三格首行等距，且不许�
   }
   assert.match(rule('.capital-config-selected-filter'), /position:\s*sticky/, '筛选器要随滚动钉在左边')
   assert.match(rule('.capital-config-selected-filter'), /top:/, 'sticky 没有 top 等于不吸顶')
-  // sticky 的滚动参照是"最近的滚动容器"：左右两列只要有一个 overflow 非 visible，参照就换到自己
-  // 身上，筛选器立刻不再跟着页面滚（且不报错）。
+  // Sticky references the nearest scroll container; overflow on either column breaks it silently.
   for (const selector of ['.capital-config-selected-layout', '.capital-config-selected-list']) {
     assert.doesNotMatch(rule(selector), /overflow:/, `${selector} 不许开第二个滚动容器：那会让 sticky 静默失效`)
   }
-  // 三格「tab 条 → 首行文字」等距：第一格与第二格都靠 card gap 12 + panel gap 12 = 24，
-  // 第三格靠一条负 margin（宿主那段本来就在 44px 外）。
   assert.match(rule('.capital-config-field'), /padding:\s*12px\s+0/, '行的上内边距仍是一档 12px')
   assert.match(rule('.capital-config-selected-layout'), /padding-top:\s*12px/,
     '左列第一颗按钮要顶到 24px：面板只有一个子元素时 flex gap 不发生作用，不补这一档就是 12px')
   assert.match(rule('.capital-config-panel[data-capital-config-panel="components"]'), /margin-bottom:\s*-\d+px/,
     '第三格自己不留内容，靠这条把它的首行文字顶到与另两格等距（负数：宿主那段本来就离得远）')
-  // 「详情」的对话框：官方 `.dialog` 只有 380px，装不下一份 markdown ⇒ 宽度是我们给的。
   assert.match(rule('div.capital-config-skill-modal'), /width:\s*min\(\d{3,}px/, '详情对话框要宽过官方默认的 380px')
   assert.match(rule('div.capital-config-skill-modal'), /max-height:\s*100%/, '高度只封顶：.dialog 自己 overflow hidden')
   assert.ok(/^[ \t]*div\.capital-config-skill-modal\b/m.test(css),
     '宽度那条要挂在 div. 上：光一个类名与官方散列类同权重，靠"我们的样式后注入"赢是押注不是设计')
   assert.match(rule('.capital-config-skill-doc'), /overflow:\s*auto/, '原文在对话框里自己滚（一份有 34 KB）')
   assert.match(rule('.capital-config-skill-doc'), /max-height:/, '封顶的是正文那一块，标题与关闭按钮因此留在原位')
-  // ⛔ 语义色只许引用主题**真实定义**的 token：`--dsw-alias-label-error` 主题里没定义，var() 判败
-  // 回继承色 ⇒ light 黑 / dark 白（这枚图标实机就是这么错的）。warn / error 各钉一个真 token。
+  // Only reference tokens the theme defines; an undefined var() falls back to inherited color.
   assert.doesNotMatch(css, /--dsw-alias-label-error/, '主题里不存在的 token 不许引用')
   assert.match(rule('.capital-config-skill-cap-icon'), /color:\s*var\(--dsw-alias-state-warn-primary\)/,
     '警示图标用 DSH 的 warn 色（StateDot / Tag 的 warning 同款）')
@@ -1056,7 +931,7 @@ test('capital-config Client：筛选器吸顶、三格首行等距，且不许�
 })
 
 test('capital-config Client：回退开关即时写嵌套路径，写被拒不翻转且给出提示；只读存储不发写', async () => {
-  const doc = { value: {} } // 段缺省 ⇒ 开关按 schema 默认呈现为「开」
+  const doc = { value: {} } // Missing section defaults to enabled.
   let writable = true
   let landed = true
   const writes = []
@@ -1077,14 +952,13 @@ test('capital-config Client：回退开关即时写嵌套路径，写被拒不�
   assert.equal(store.getSnapshot().localFetch.on, true)
 
   await injected.toggleLocalFetch(false)
-  // ops 在 VM sandbox realm 里创建，原型不同会骗过 deepStrictEqual ⇒ 先 JSON 归一再比结构。
+  // ops come from the VM realm; normalize through JSON before deep comparing.
   assert.equal(JSON.stringify(writes), JSON.stringify([[{ op: 'set', path: ['retriever', 'localFetch', 'enabled'], value: false }]]),
     '嵌套字段只能走 mutate；set(field) 只支持顶层')
   assert.equal(store.getSnapshot().localFetch.on, false)
   assert.equal(store.getSnapshot().localFetch.failed, false)
   assert.equal(store.getSnapshot().dirty, false, '即时保存的开关不进草稿流（不影响密钥的保存）')
 
-  // 写被拒（revision 冲突 / 路径不被接受）：开关严格由快照渲染 ⇒ 不翻转，并显式说明没落上。
   landed = false
   await injected.toggleLocalFetch(true)
   assert.equal(store.getSnapshot().localFetch.on, false, '写失败时开关不得显示成已切换')
@@ -1101,7 +975,6 @@ test('capital-config Client：回退开关即时写嵌套路径，写被拒不�
   assert.ok(notice, '被拒的即时写必须有一句可见的提示')
   assert.equal(notice.props.children[0], 'saveFailed')
 
-  // 只读存储：不发写请求。
   landed = true
   writable = false
   await injected.toggleLocalFetch(true)
@@ -1139,9 +1012,6 @@ test('capital-config Client：selected skill 开关只写允许的 volatile 路�
 })
 
 test('capital-config Host：schema 默认值必须与主插件 Config 完全一致（两处 schema 不能漂移）', () => {
-  // 主插件用条目配置覆盖自身配置，再用自己的 Config 校验。两处 schema 一旦
-  // 漂移，字段会在 条目→主插件 边界被静默改写/丢弃。默认值是最低限度的同步契约。
-  // 摊平走的是 Host 自己那道 plainConfig：卡片与主插件看到的都是摊平后的值。
   assert.deepEqual(plainConfig(CapitalConfig({})), MainConfig({}))
   assert.deepEqual(MainConfig({}).selectedSkills, Object.fromEntries(SELECTED_SKILL_CATALOG.map(({ key }) => [key, false])), 'selected skill 默认必须全部关闭')
   assert.deepEqual(plainConfig(CapitalConfig({})).selectedSkills, MainConfig({}).selectedSkills,
@@ -1151,7 +1021,6 @@ test('capital-config Host：schema 默认值必须与主插件 Config 完全一�
 test('capital-config Host：localFetch 默认值两处一致且消费点独立生效', () => {
   const capital = plainConfig(CapitalConfig({})).retriever.localFetch
   const main = MainConfig({}).retriever.localFetch
-  // 主插件 schema 与消费点共用同一个导出常量，对照用例不靠重复字面量。
   assert.deepEqual(main, LOCAL_FETCH_DEFAULTS, '主插件 schema 默认值必须引用 LOCAL_FETCH_DEFAULTS')
   assert.deepEqual(capital, main, '两处 schema 的 localFetch 默认值必须逐字一致')
   assert.equal(main.enabled, true, '本地回退默认开启')
@@ -1163,8 +1032,7 @@ test('capital-config Host：localFetch 默认值两处一致且消费点独立�
   assert.equal(main.maxContentChars, 100000, '对齐官方 dsh-web-fetch-http 的 maxBodyChars；切在原始 HTML 上，必须按 HTML 体积给足')
   assert.equal(main.maxRedirects, 5)
 
-  // 消费点（apply 装配段）在 localFetch 为 undefined 时独立补齐同样的默认值；
-  // 只有 userAgent 例外：显式空串在消费点解析成插件版本号（唯一版本真值来源）。
+  // The consumer fills the same defaults independently; an explicit empty UA resolves to the plugin version.
   const consumed = resolveLocalFetchConfig(undefined)
   assert.equal(consumed.enabled, main.enabled)
   assert.equal(consumed.timeoutMs, main.timeoutMs)
@@ -1181,14 +1049,6 @@ test('capital-config Host：localFetch 默认值两处一致且消费点独立�
   assert.equal(resolveLocalFetchConfig({ userAgent: 'custom/1' }).userAgent, 'custom/1', '显式 UA 覆盖版本号')
 })
 
-/**
- * 标题右侧的两枚外链（槽 `plugins.detail.badge`）。钉三件事：
- * ① **只在**本组合包的详情页出现——同一格座位在行详情页与官方插件页也会渲染，判错就是在
- *    别人的页面上挂我们的链接，且不报错；
- * ② list 座位的注册必须带 `id`（上游 `SlotCore.register` 对 list 缺 id 直接抛，同 id 二次注册也抛）；
- * ③ 两个地址与根 `package.json` 同字：仓库地址 = `repository.url` 去掉 `git+` 与 `.git`，
- *    npm 地址由包名拼出。改了包名而不改这里，链接就指向别人的仓库。
- */
 test('capital-config Client：详情页外链只认本包，两枚图标各去 GitHub 与 npm', () => {
   const scope = readyScope()
   const { mod } = loadClient({ scope })
@@ -1231,15 +1091,13 @@ test('capital-config Client：详情页外链只认本包，两枚图标各去 G
 
 test('capital-config 包清单：声明运行期 schemastery 依赖，且客户端 bundle 会随包发布', () => {
   const manifest = JSON.parse(readFileSync(join(ROOT, 'config', 'package.json'), 'utf8'))
-  // index.js 顶部 `import z from '@deepseek-ai/schemastery'` 是运行期外部导入，必须声明；
-  // 且版本必须够新——`.volatile()` 是 3.18.4 才有的（3.18.2 上整颗行在 import 期就抛错）。
+  // schemastery is a runtime import; .volatile() needs >= 3.18.4 or the row throws on import.
   assert.equal(manifest.dependencies?.['@deepseek-ai/schemastery'], '^3.18.4')
-  // 声明了 dsh.client 就必须有 exports["./client"]，且 bundle 出现在 files 里（L2 闸门同口径）。
   assert.equal(manifest.exports?.['./client']?.default, './client.js')
   assert.ok(manifest.files.includes('client.js'), 'client.js 必须随包发布，否则 web profile 起不来')
   assert.ok(manifest.files.includes('index.js'))
   assert.equal(manifest.dsh?.client?.platform, 'web')
-  // dsh.client.inject 列的是**模块表**依赖：写一个本机 dsh 里没有的包名，bundle 就加载不了。
+  // dsh.client.inject lists module-table deps; an unknown name prevents bundle loading.
   const inject = manifest.dsh.client.inject ?? []
   assert.ok(inject.includes('@deepseek-ai/dsh-client-ui-plugin-manager'), 'plugins.bundle.config 槽主在该包里')
   assert.ok(inject.includes('@deepseek-ai/dsh-api-remotes'),

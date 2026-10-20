@@ -12,7 +12,7 @@ function defaultChartRef(): string {
   return `chart_${suffix}`
 }
 
-/** Dataset/profile 的一跳 scope 规则；token 让 nested child 复用这个 owner scope。 */
+/** One-hop scope: a token lets a nested child reuse its owner's scope. */
 export function chartSessionScopeId(session: SessionLike): string {
   const parent = session.header?.parentSession
   return typeof parent === 'string' && parent.length > 0 ? parent : session.id
@@ -47,13 +47,8 @@ export interface ChartArtifactRegistryOptions {
 }
 
 /**
- * In-process registry for chart_ref capabilities.
- *
- * The chart files live in the workspace, while this registry keeps the
- * session/task binding that makes a chart safe to present to its own session
- * (and to derive the `deliverables/presented` owner scope).
- * Process restart invalidates chart_ref capabilities; chart.html remains the
- * explicit offline fallback.
+ * In-process chart_ref capabilities: session/task/workspace binding and the deliverable owner
+ * scope. Process restart invalidates them; chart.html remains the offline fallback.
  */
 export class ChartArtifactRegistry {
   private readonly records = new Map<string, ChartArtifactRecord>()

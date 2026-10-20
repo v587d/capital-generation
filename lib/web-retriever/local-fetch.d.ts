@@ -1,10 +1,7 @@
 /**
- * SSRF-gated local HTTP fetcher used after AnySearch extraction fails.
- *
- * Known limitation: DNS is resolved before each request, but the resolved IP is
- * not pinned into the subsequent HTTP connection. A DNS rebinding window remains
- * between validation and connect. Closing that window would require a custom
- * dispatcher; this module keeps the same explicit trade-off as dsh-search-first.
+ * SSRF-gated local HTTP fetcher, used after AnySearch extraction fails.
+ * Known limit: DNS resolves per request but the IP is not pinned to the connection,
+ * so a rebinding window remains (same trade-off as dsh-search-first).
  */
 export declare const LOCAL_FETCH_CLIENT_VERSION = "2.8.3";
 export declare const LOCAL_FETCH_MAX_URL_LENGTH = 2048;
@@ -35,67 +32,36 @@ export interface LocalFetchOutcome {
 /** Return true only for an address safe to use as a public outbound target. */
 export declare function isPublicIp(address: string): boolean;
 /**
- * 上游返回的 URL 字段（搜索结果的 `url`、各来源条目的 `url`）会**变成用户可点击的
- * markdown 链接**（docs/dev/web-retriever.md §4.2 回传引用格式），所以这里按"要展示"的口径再收一道；
- * `validateUrl` 是"要请求"的口径，抛错语义不适合逐条字段。
- * 返回 `''` 表示这个值不配成为链接，调用方据此**丢字段**（不是丢条目）：
- * - 非 http(s) 协议：`javascript:` / `data:` 点下去就是执行；
- * - 含空白或控制符：换行能把后半截甩出链接语法，变成正文里的新内容；
- * - 带凭据：`https://sseinfo.com.cn@evil.example/` 显示的是官方域名、跳的是别的站；
- * - 超长串：不是链接该占的体积（条目的输出预算见 `tools.ts` 的 `SOURCE_OUTPUT_BUDGET_CHARS`）。
- * 返回**剥完不可见字符的原串**而不是 `url.toString()`：后者会把非 ASCII 路径按
- * percent-encoding 展开（中文 URL 一字 9 字符），模型引用时白白吃掉预算。
+ * Upstream URLs become clickable markdown, so: http(s) only (javascript:/data: execute),
+ * no whitespace/control chars (newlines escape the link), no credentials (displayed host
+ * != target), length cap. Raw string, not `href`, to avoid percent-encoding non-ASCII;
+ * `''` means drop the field, never the item.
  */
 export declare function safeUrl(value: unknown, maxChars?: number): string;
 /**
- * 「把这条 URL 交给**别人**去取」的闸门：只判形态与主机，不发任何请求。
- *
- * `ocr` 的 `url` 形态本机不抓这个文件——上游解析服务替我们取。但本插件不能成为
- * "把内网 URL 交给第三方去戳"的通道，所以这里复用与本机直连**同一份**主机校验
- * （形态走 `safeUrl` + `validateUrl`，公网性走 `assertAllowedHost`），只是跳过后面的
- * 重定向与体积那几步。SSRF 面因此不新长第二份实现，也不会随两处漂移。
- *
- * 返回**原串**（不是 `url.href`）：`href` 会把非 ASCII 路径 percent-encode 展开，
- * 白吃输出预算；`allowPrivate` 在这里恒为 false，不提供开关——关掉的不是我们的风险面。
+ * Gate for a URL fetched by someone else (ocr url form): same shape + public-host
+ * check, no request. `allowPrivate` is always false — that risk is not ours to waive.
+ * Returns the raw string (href would percent-encode non-ASCII and eat budget).
  */
 export declare function assertPublicUrlTarget(value: unknown, signal: AbortSignal, resolveAddresses?: LocalFetchOptions['resolveAddresses']): Promise<string>;
 /**
- * 请求描述符：`createLocalFetcher`（GET+markdown 化，回退链用）与来源工具
- * （`src/web-retriever/sources.ts`，硬编码主机的 JSON/HTML 接口）共用同一个出口校验。
- *
- * 为什么共用而不是各写一份：出口校验（URL 合法性 + DNS 公网 IP 闸门 + 手动重定向重校验 +
- * 大小/超时上限）一旦有第二份实现，两份就会各自漂移，而**安全闸门漂移不会报错**——
- * 本仓在"同一个便利能力接在多个入口、只覆盖接好的那个"上已经踩过两次（AGENTS.md §9.7）。
+ * Request descriptor shared by `createLocalFetcher` (GET + markdown for fallback)
+ * and the named-source tools, so there is exactly one egress gate.
  */
 export interface HttpRequest {
     url: string;
     method?: 'GET' | 'POST';
-    /** 额外请求头（如上证e互动要求 `Referer`）。仅由来源配方内部提供，不接受模型入参。 */
+    /** Extra headers (e.g. Referer); source recipes only, never model input. */
     headers?: Record<string, string>;
-    /**
-     * 请求体。字符串按 `application/x-www-form-urlencoded` 发（互动易第二步要求 POST 但 body 为空）；
-     * `FormData` 则**故意不写 content-type**——boundary 必须由实现自己带，写死就是把请求写坏。
-     */
+    /** String body -> x-www-form-urlencoded; FormData sets no content-type (impl supplies the boundary). */
     body?: string | FormData;
-    /** 覆盖本次请求的 accept 头；省略用默认。 */
+    /** Override the accept header for this request. */
     accept?: string;
-    /**
-     * 正文编码。省略时用响应头声明的 charset，缺省 UTF-8。
-     *
-     * 为什么需要**工具内部**的显式声明：2026-09-24 实测 `basic.10jqka.com.cn` 声明
-     * `content-type: text/html`（**不带 charset**）而正文是 **GBK**——按 UTF-8 解会产出 11,800 个
-     * U+FFFD 替换字符，中文全部不可读、正则全部失配（`gbk` 解码后 0 个替换字符）。
-     * ⚠️ 这个字段**绝不能暴露成模型入参**：配错编码只会静默产出乱码，属"看起来成功"的坏形态。
-     * 与 `headers` 一样，只由来源实现按硬编码知识填写。
-     */
+    /** Body encoding, overrides the response charset. Source-internal: a wrong value silently mojibakes. */
     encoding?: string;
     /**
-     * 逐请求覆盖响应体/正文上限（省略用 `LocalFetchOptions` 的全局值）。
-     *
-     * 为什么要覆盖而不是把全局值调大：全局 `maxBytes` 是给"抓一个网页正文"定的（512 KB），
-     * 网页抓取的响应体积就是风险体积；OCR 结果 JSONL 是**我们自己提交出去再取回来**的解析产物
-     * （实测 15 页研报 258 KB），把它挤进网页的额度会让大文档静默 `truncated`——
-     * 而截断的 JSONL 是解析失败，不是"少读了几条"。调大全局值等于放宽所有网页出口。
+     * Per-request caps: global ones fit a web page, but parsed OCR JSONL can hit 258 KB
+     * and a truncated result is a parse failure, not "a few fewer rows".
      */
     maxBytes?: number;
     maxContentChars?: number;
@@ -103,7 +69,7 @@ export interface HttpRequest {
 export interface HttpOutcome {
     url: string;
     status: number;
-    /** 正文原文，**不做任何转换**（JSON 原文直通、HTML 原样返回，由工具自己决定如何呈现）。 */
+    /** Raw body, no conversion (JSON passes through, HTML stays raw; the tool decides). */
     text: string;
     truncated: boolean;
 }
@@ -111,10 +77,8 @@ export declare function createHttpRequester(options: LocalFetchOptions): {
     request(request: HttpRequest, signal?: AbortSignal): Promise<HttpOutcome>;
 };
 /**
- * 回退链用的抓取器：GET 取回后按内容类型决定**呈现**（JSON 原文直通、HTML 转 markdown）。
- *
- * 出口校验 / 重定向 / 上限 / 取消语义全部委托给 {@link createHttpRequester}——
- * 这里只保留"如何呈现正文"这一层，避免同一套闸门出现第二份实现（见 `HttpRequest` 注释）。
+ * Fallback fetcher: GET, then choose presentation (JSON raw, HTML -> markdown).
+ * Egress, redirects, limits and cancellation all delegate to `createHttpRequester`.
  */
 export declare function createLocalFetcher(options: LocalFetchOptions): {
     fetch(url: string, signal?: AbortSignal): Promise<LocalFetchOutcome>;

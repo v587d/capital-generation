@@ -7,34 +7,20 @@ import { DEFAULT_FUYAO_BASE_URL, FUYAO_MAX_PARAM_LENGTH, fuyaoQuery, fuyaoReques
 const DEFAULT_BASE_URL = DEFAULT_FUYAO_BASE_URL
 type CredentialLike = { resolve(ref: string): Promise<{ value: string } | undefined> }
 
-/** 每次执行时解析 API Key 的注入点：符合 credentials 服务「按次解析、不跨操作缓存」的约定。 */
+/** API key resolved per execution; credentials service caches nothing across calls. */
 export type FuyaoApiKeyResolver = () => Promise<string | undefined>
 
 type Params = Record<string, unknown>
 
 /**
- * 参数规范化与校验的契约：
- *
- * - `normalize` 同时完成「未知参数拦截 → 必填检查 → 语义校验 → 规范化」四件事，
- *   并且必须幂等：Hub 会在入队前调用一次（用于 merge key 与 params_digest），
- *   execute 再调用一次（直接调用 source 时也要生效）。
- * - 规范化在 digest 之前发生，保证「语义相同、书写不同」的请求（大小写、空白、
- *   逗号列表中的重复项、可忽略的默认值）命中同一个 Dataset，而不是各写一份。
- * - 所有错误都是本地错误：不发请求、不落盘、不做网络层猜测。
- * - **不注入上游默认值**：省略参数与显式传默认值是两种请求形态，各自的 digest 稳定；
- *   把上游默认值写进本地代码，会让 digest 的含义随上游默认值漂移而悄悄改变。
+ * normalize must be idempotent: Hub calls it before enqueue (digest) and execute calls it again.
+ * Canonicalize before the digest so equivalent spellings share one Dataset; never inject upstream
+ * defaults, which would make omitted and explicit defaults drift apart.
  */
 
-/** A 股完整代码：六位数字 + 交易所后缀。裸代码会被拒绝（上游禁止自行拼接后缀）。 */
 const A_SHARE_CODE = /^\d{6}\.(SH|SZ|BJ)$/
-/** 指数代码：交易所指数（`.SH`/`.SZ`）与同花顺指数（`.TI`）。 */
 const INDEX_CODE = /^\d{6}\.(SH|SZ|BJ|TI)$/
 const EXCHANGES = ['SH', 'SZ', 'BJ']
-/**
- * ticker_search 的交易所与资产类型**按官方契约全量放开**（含期货/期权交易所与 futures/options）。
- * 注意这是元数据域：本 preset 主动不接入期货/期权的**数据**端点，但"能否消歧一个代码"与
- * "能否取到它的行情"是两件事——本地收窄枚举只会让上游支持的查询在这里莫名失败。
- */
 const SEARCH_EXCHANGES = ['SH', 'SZ', 'BJ', 'SSE', 'SZSE', 'CFFEX', 'SHFE', 'INE', 'DCE', 'CZCE', 'GFEX']
 const SEARCH_ASSET_TYPES = ['a-share', 'a-share-index', 'forex', 'fund-otc', 'fund-etf', 'fund-lof', 'fund-reits', 'futures', 'options']
 const CATALOG_ASSET_TYPES = ['a-share', 'a-share-index', 'fund-otc', 'fund-etf', 'fund-lof', 'fund-reits', 'forex', 'futures', 'options']
@@ -50,33 +36,24 @@ const ANOMALY_TAGS = ['LIMIT_UP', 'LIMIT_DOWN', 'SHARP_RISE', 'SHARP_FALL', 'RAP
 const DRAGON_TIGER_BOARDS = ['all', 'org', 'hot_money']
 const LIMIT_DOWN_SORT_FIELDS = ['last_limit_time', 'first_limit_time', 'last_price', 'price_change_ratio_pct', 'turnover_ratio_pct']
 const LIMIT_BREAK_SORT_FIELDS = ['price_change_ratio_pct', 'open_times', 'last_price', 'turnover_ratio_pct', 'turnover']
-/** 个股异动批量查询的原始 token 上限（按文档：去重前校验）。 */
 const MAX_ANOMALY_CODES = 50
-/** 基金代码：六位数字 + 市场后缀（.OF 场外 / .SH / .SZ）。 */
 const FUND_CODE = /^\d{6}\.(OF|SH|SZ)$/
 const NAV_RANGES = ['week', 'month', 'tmonth', 'hyear', 'year', 'twoyear', 'tyear', 'fyear']
 const NAV_TYPES = ['unit', 'adj', 'unit,adj']
 const MERGE_SCOPES = ['all', 'merged', 'separate']
-/** 基金场内历史 K 线窗口上限：上游规定最长 5 个自然年（不是 A 股的 10 年）。 */
+/** Fund on-exchange K-line window: 5 natural years max, not the A-share 10. */
 const MAX_FUND_HISTORY_WINDOW_MS = 1830 * 24 * 60 * 60 * 1000
-/** 基金前十大持有人的 limit 上限（实测 0 / 11 / 201 均返回 1003）。 */
+/** Top-10 holders limit max is 10; 0/11/201 return 1003. */
 const MAX_TOP_HOLDERS_LIMIT = 10
-/** 基金经理区间收益的 range 枚举（与 nav 的 8 值枚举不同，只有 5 个）。 */
 const MANAGER_RANGES = ['month', 'tmonth', 'year', 'nowyear', 'now']
 const OFFERING_SUBSCRIBE = ['active', 'upcoming']
 
-/** 单值参数长度上限；与 `fuyao-core` 的查询串硬上限同值（同一份知识）。 */
 const MAX_PARAM_LENGTH = FUYAO_MAX_PARAM_LENGTH
 const MAX_TEXT_LENGTH = 512
-/** 批量代码接口的原始 token 上限（按文档：去重前校验）。 */
 const MAX_BATCH_CODES = 100
-/**
- * 历史 K 线 / 财务时间区间上限：上游规定 end - start 不超过 10 年（超出返回 1003）。
- * 本地用 3660 天（含闰日冗余）保守前置拦截，只挡明显越界，不与上游口径冲突。
- */
+/** Upstream max end - start is 10 years (overrun returns 1003); 3660 days is a conservative pre-check. */
 const MAX_HISTORY_WINDOW_MS = 3660 * 24 * 60 * 60 * 1000
 
-/** 递归按键排序的规范化 JSON：语义相同、键序不同的 JSON 参数会归一到同一个 digest。 */
 function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
@@ -84,11 +61,6 @@ function canonicalJson(value: unknown): string {
   return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`
 }
 
-/**
- * 需要 URL 编码 JSON 传参的端点（backtest 条件、indicators 选择器、quota 分类）。
- * 校验只做"能解析 + 顶层形状正确 + 长度受限"，不臆造上游的内部字段白名单；
- * 规范化后重新序列化，保证等价 JSON 命中同一 Dataset。
- */
 function jsonParam(value: unknown, name: string, kind: 'array' | 'object' | 'object-or-array', maxLength = MAX_PARAM_LENGTH): string {
   const raw = requiredText(value, name, maxLength)
   let parsed: unknown
@@ -109,7 +81,6 @@ function optionalJsonParam(value: unknown, name: string, kind: 'array' | 'object
   return jsonParam(value, name, kind)
 }
 
-/** 小写枚举的统一规范化：`LIVE` 与 `live` 是同一个请求。 */
 const lowerCase = (input: string): string => input.toLowerCase()
 
 function fail(message: string): never {
@@ -125,7 +96,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-/** 未知参数一律拒绝：normalize 会重建参数对象，放行等于静默丢弃模型的拼写错误。 */
 function assertKnownParameters(values: Params, allowed: string[]): void {
   for (const name of Object.keys(values)) {
     if (!allowed.includes(name)) fail(`unsupported parameter: ${name}`)
@@ -179,7 +149,6 @@ function requiredEnum(value: unknown, name: string, allowed: string[], normalize
   return enumValue(value, name, allowed, normalize)
 }
 
-/** `YYYY-MM-DD` 日期（企业行为事件的 from/to）：格式与日历有效性都校验。 */
 function dateString(value: unknown, name: string): string {
   const raw = text(value, name, 32)
   const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw)
@@ -198,7 +167,7 @@ function dateString(value: unknown, name: string): string {
   return raw
 }
 
-/** 财务指标报告期：`yyyy-1`..`yyyy-4`（1 一季报 / 2 中报 / 3 三季报 / 4 年报）。 */
+/** `yyyy-1`..`yyyy-4` = Q1 / interim / Q3 / annual. */
 function reportPeriod(value: unknown, name: string): string {
   const raw = text(value, name, 16)
   const matched = /^(\d{4})-([1-4])$/.exec(raw)
@@ -207,7 +176,6 @@ function reportPeriod(value: unknown, name: string): string {
   return raw
 }
 
-/** 规范化单个 A 股代码：trim + 大写 + 后缀校验。 */
 function codeToken(value: unknown, name: string): string {
   const raw = text(value, name, 32).toUpperCase()
   if (!A_SHARE_CODE.test(raw)) {
@@ -216,7 +184,6 @@ function codeToken(value: unknown, name: string): string {
   return raw
 }
 
-/** 规范化单个指数代码（允许同花顺 `.TI`）。 */
 function indexCodeToken(value: unknown, name: string): string {
   const raw = text(value, name, 32).toUpperCase()
   if (!INDEX_CODE.test(raw)) {
@@ -225,10 +192,7 @@ function indexCodeToken(value: unknown, name: string): string {
   return raw
 }
 
-/**
- * 规范化逗号分隔代码列表：去空白、去重、保序；空串与非法代码都拒绝。
- * `maximum` 按文档口径在**去重前**校验原始 token 数。
- */
+/** `maximum` counts raw tokens before dedupe. */
 function codeList(value: unknown, name: string, options: { maximum?: number; kind?: 'a-share' | 'index' } = {}): string {
   const raw = requiredText(value, name, MAX_PARAM_LENGTH)
   const tokens = raw.split(',').map((token) => token.trim()).filter((token) => token.length > 0)
@@ -245,7 +209,6 @@ function codeList(value: unknown, name: string, options: { maximum?: number; kin
   return unique.join(',')
 }
 
-/** 逗号分隔的枚举列表：小写、去重、保序；任一非法值整体拒绝。 */
 function enumList(value: unknown, name: string, allowed: string[]): string {
   const raw = requiredText(value, name, MAX_TEXT_LENGTH)
   const unique: string[] = []
@@ -261,28 +224,15 @@ function objectSchema(properties: Record<string, object>, required: string[] = [
   return { type: 'object', properties, required, additionalProperties: false, ...(description ? { description } : {}) }
 }
 
-/**
- * 能力执行侧的信封调用：请求与 `code` 判定住在 `fuyao-core.ts`（host 平面的自选股
- * 与这里共用一份），本层只把它恢复成 Hub 期望的 `{ data, schema }` 形态。
- * 错误文案逐字保持历史形态（2004 / 4001 / 1002 那几条都会透到 Agent 眼前）。
- */
+/** Envelope call lives in `fuyao-core.ts`; error texts are passed through verbatim. */
 async function callFuyao(baseUrl: string, apiKey: string, path: string, params: URLSearchParams, signal: AbortSignal, outputSchema: object): Promise<{ data: unknown; schema: object }> {
   const envelope = await fuyaoRequest({ baseUrl, apiKey, path, search: params, signal })
   return { data: envelope.data ?? null, schema: outputSchema }
 }
 
 /**
- * 字段契约（`?` 后缀 = 允许缺失）：
- * - `text` / `number` / `boolean` / `object` 是基础类型；
- * - 显式 `null` 一律放行（上游用 null 表示未披露/无数据，语义与 0 不同）；
- * - `number` 接受有限数值或数值字符串（上游历史上存在 decimal 序列化为字符串的情况）；
- * - 缺失与显式 null 语义不同：带 `?` 的字段允许缺失，不带 `?` 的字段缺失即判契约不符。
- *
- * 严格度口径（Phase 2 起）：
- * - **主标识与结构字段严格**（行的 `thscode` / `date` / 财务期间标识、顶层容器对象）：
- *   这些字段缺失意味着响应结构与契约不符，属于必须拦下的情况。
- * - **数值/附属字段宽容**（带 `?`）：上游指标随发布增减，单个指标缺失不等于结构损坏，
- *   而"整份 Dataset 因一个指标缺失被拒"会直接阻断用户任务。
+ * `?` = may be missing; explicit null always passes (upstream means "not disclosed", unlike 0).
+ * Numbers may arrive as strings. Identity fields are strict; metric fields are optional.
  */
 type FieldSpec =
   | 'text' | 'text?'
@@ -312,8 +262,7 @@ function matchesField(value: unknown, spec: FieldSpec): boolean {
     case 'array':
       return Array.isArray(value)
     case 'json':
-      // "保留上游结构"的字段：文档可能写 object、实际返回 array 或 null
-      // （实测基金诊断的 dimensions/resilience 就是数组）。只拒绝 undefined。
+      // Documentation says object but upstream may return an array or null; reject only undefined.
       return true
   }
 }
@@ -322,7 +271,6 @@ function matchesFields(record: Record<string, unknown>, fields: Record<string, F
   return Object.keys(fields).every((name) => matchesField(record[name], fields[name]))
 }
 
-/** envelope 元数据：字段可缺席或为 null；出现时必须是可用的整数。 */
 function optionalInteger(value: unknown): boolean {
   if (value === undefined || value === null) return true
   if (typeof value === 'number') return Number.isSafeInteger(value)
@@ -330,38 +278,23 @@ function optionalInteger(value: unknown): boolean {
   return false
 }
 
-/** 输出护栏规格：data 顶层字段 + data.item[] 行契约，或一个自定义校验函数。 */
 interface GuardSpec {
-  /** data 顶层字段契约（识别/结构字段）。 */
   data?: Record<string, FieldSpec>
-  /** 行数组契约；提供时要求该数组存在且每行符合字段契约。 */
   item?: Record<string, FieldSpec>
-  /** 行数组的键名，默认 `item`（龙虎榜用 `stock_items`）。 */
+  /** Row array key, default `item` (dragon-tiger uses `stock_items`). */
   itemKey?: string
-  /** 可选的多个行数组路径，按响应中实际存在且非空的路径选择。 */
   rowKeys?: string[]
-  /**
-   * `data` **本身**就是数组时的行契约（quota/list、quota/summary、backtest/indicators）。
-   * 这类响应没有 `{timestamp, item[]}` 信封，因此不适用 data/item 两级校验。
-   */
   dataArray?: Record<string, FieldSpec>
-  /**
-   * 自定义校验（财务指标的 abilities、quota/list 的三层嵌套、indicators 的序列结构）。
-   * 只给 `custom` 而不给 data/item 时，它**完全接管顶层形状判断**——因为这类响应的
-   * `data` 本身可能就是数组，不能用 isRecord 前置拦截。
-   */
+  /** With no data/item spec it owns top-level shape, since `data` itself may be an array. */
   custom?: (data: unknown) => boolean
 }
 
-/** 输出护栏：只拒绝结构不可用的响应，不做业务推断。 */
 function buildGuard(spec: GuardSpec): (data: unknown) => boolean {
   return (data: unknown): boolean => {
     if (spec.dataArray) {
       if (!Array.isArray(data)) return false
       return data.every((row) => isRecord(row) && matchesFields(row, spec.dataArray!))
     }
-    // custom-only：顶层可能是数组（quota/list、indicators/line、indicators/table），
-    // 由校验器自己判断形状，不能在这里先做 isRecord 拦截。
     if (spec.custom && !spec.data && !spec.item) return spec.custom(data)
     if (!isRecord(data)) return false
     if (!optionalInteger(data.timestamp) || !optionalInteger(data.total)) return false
@@ -376,7 +309,7 @@ function buildGuard(spec: GuardSpec): (data: unknown) => boolean {
   }
 }
 
-/** 财务指标：data.abilities[].indicators[]，value 是原始数值字符串或 null（不转 number，保留精度）。 */
+/** Value stays a raw numeric string to preserve precision. */
 function validateAbilities(data: unknown): boolean {
   if (!isRecord(data)) return false
   if (!Array.isArray(data.abilities)) return false
@@ -389,8 +322,6 @@ function validateAbilities(data: unknown): boolean {
   })
 }
 
-// timestamp 与 total 在无有效数据时可以是 null（文档明确，如基金行情快照）；运行时护栏一直放行 null，
-// 模型可见 schema 也必须一致，否则 describe_capability 给出的契约是错的。
 const nullableInteger = { oneOf: [{ type: 'integer' }, { type: 'null' }] }
 const envelopeData = (item: object): object => ({ type: 'object', properties: { timestamp: nullableInteger, total: nullableInteger, item }, additionalProperties: true })
 const searchOutput = envelopeData({ type: 'array', items: { type: 'object', properties: { thscode: { type: 'string' }, ticker: { type: 'string' }, name: { type: 'string' }, exchange: { type: 'string' }, asset_type: { type: 'string' }, currency: { type: 'string' } }, additionalProperties: true } })
@@ -398,7 +329,6 @@ const snapshotOutput = envelopeData({ type: 'array', items: { type: 'object', pr
 const klineOutput = envelopeData({ type: 'array', items: { type: 'object', properties: { date_ms: { type: 'integer' }, open_price: { type: 'number' }, high_price: { type: 'number' }, low_price: { type: 'number' }, close_price: { type: 'number' }, volume: { type: 'number' }, turnover: { type: 'number' } }, additionalProperties: true } })
 const calendarOutput = envelopeData({ type: 'array', items: { type: 'object', properties: { date_ms: { type: 'integer' }, date: { type: 'string' } }, additionalProperties: true } })
 
-/** 行契约 -> 输出 schema 的字段描述（模型可见，只描述字段名与类型）。 */
 function rowSchema(fields: Record<string, FieldSpec>): object {
   const properties: Record<string, object> = {}
   for (const [name, spec] of Object.entries(fields)) {
@@ -425,10 +355,8 @@ const indexConstituentFields: Record<string, FieldSpec> = { thscode: 'text', tic
 const indexQuoteFields: Record<string, FieldSpec> = { thscode: 'text', ticker: 'text?', last_price: 'number?', price_change: 'number?', price_change_ratio_pct: 'number?', open_price: 'number?', high_price: 'number?', low_price: 'number?', prev_price: 'number?', volume: 'number?', turnover: 'number?' }
 const indexHistoryFields: Record<string, FieldSpec> = { date_ms: 'number', open_price: 'number?', high_price: 'number?', low_price: 'number?', close_price: 'number?', volume: 'number?', turnover: 'number?' }
 
-/** 财务三表共有的期间标识字段（严格）与币种（宽容）。 */
 const limitDownFields: Record<string, FieldSpec> = { thscode: 'text', ticker: 'text?', name: 'text?', last_price: 'number?', price_change_ratio_pct: 'number?', first_limit_time: 'text?', last_limit_time: 'text?', turnover_ratio_pct: 'number?' }
 const limitBreakFields: Record<string, FieldSpec> = { thscode: 'text', ticker: 'text?', name: 'text?', last_price: 'number?', price_change_ratio_pct: 'number?', open_times: 'number?', turnover_ratio_pct: 'number?', turnover: 'number?' }
-/** 飙升榜与热股榜共用字段；heat 是上游原始**字符串**（保留精度，不转 number）。 */
 const rankListFields: Record<string, FieldSpec> = { thscode: 'text', ticker: 'text?', name: 'text?', rank: 'number?', heat: 'text?', rank_change: 'number?', rank_trend: 'text?' }
 const hotStockHistoryFields: Record<string, FieldSpec> = { thscode: 'text', ticker: 'text?', name: 'text?', rank: 'number?' }
 const rankTrendFields: Record<string, FieldSpec> = { thscode: 'text', ticker: 'text?', date: 'text', date_ms: 'number?', rank: 'number?' }
@@ -441,10 +369,8 @@ const fundQuoteFields: Record<string, FieldSpec> = { thscode: 'text', ticker: 't
 const fundHistoryFields: Record<string, FieldSpec> = { date_ms: 'number', open_price: 'number?', high_price: 'number?', low_price: 'number?', close_price: 'number?', volume: 'number?', turnover: 'number?' }
 const fundNavFields: Record<string, FieldSpec> = { nav_date: 'number', unit_nav: 'number?', adj_nav: 'number?' }
 /**
- * 收益率行没有主标识字段，且**任何单个 return_* 都可能缺席**：官方示例就只有 8 个
- * （return_month / tmonth / hyear / year / tyear / fyear / nowyear / now，没有 return_week）。
- * 因此全部字段设为可选，另用 validateFundReturns 要求"至少命中一个收益/排名族字段"，
- * 既不放行垃圾结构，也不会误杀官方合法响应。
+ * No identity field and any single `return_*` may be absent (official example has 8, no return_week);
+ * all fields optional, but a row needs one return/rank field.
  */
 const fundReturnsFields: Record<string, FieldSpec> = {
   return_week: 'number?', return_month: 'number?', return_tmonth: 'number?', return_hyear: 'number?',
@@ -458,7 +384,6 @@ const fundReturnsFields: Record<string, FieldSpec> = {
   rank_total_year: 'number?', rank_total_twoyear: 'number?', rank_total_tyear: 'number?', rank_total_fyear: 'number?',
 }
 
-/** 收益/排名族的字段前缀；一行至少命中一个才算可用，其余情况判契约不符。 */
 const FUND_RETURN_PREFIXES = ['return_', 'peer_average_', 'rank_']
 
 function validateFundReturns(data: unknown): boolean {
@@ -490,11 +415,10 @@ const fundFinancialIndicatorFields: Record<string, FieldSpec> = { ...fundFinanci
 const fundDividendFields: Record<string, FieldSpec> = { per_ten_cash_before_tax: 'number?', per_ten_cash_after_tax: 'number?', progress: 'text?', publish_date_ms: 'number?', registration_date_ms: 'number?', ex_dividend_date_ms: 'number?', payment_date_ms: 'number?', reinvestment_date_ms: 'number?', profit_base_date_ms: 'number?', in_dividend_date_ms: 'number?' }
 const fundOfferingFields: Record<string, FieldSpec> = { thscode: 'text', ticker: 'text?', subscription_start_ms: 'number?', subscription_end_ms: 'number?' }
 const fundQuotaSummaryFields: Record<string, FieldSpec> = { name: 'text', unlimited: 'text?', total_limit: 'text?', total: 'text?', buy: 'text?' }
-/** 实测：dimensions/peer_dimensions/resilience/peer_resilience 是**数组**、probabilities/ranges 为 null（文档写 object）。 */
+/** dimensions/peer_* /resilience are arrays and probabilities/ranges null, despite docs saying object. */
 const fundDiagnosticsFields: Record<string, FieldSpec> = { thscode: 'text', ticker: 'text?', fund_type: 'text?', peer_code: 'text?', dimensions: 'json?', peer_dimensions: 'json?', probabilities: 'json?', ranges: 'json?', resilience: 'json?', peer_resilience: 'json?' }
 const fundBacktestIndicatorFields: Record<string, FieldSpec> = { indicator_code: 'text', indicator_name: 'text?', id: 'number?', type: 'number?', value_kind: 'number?', support_operation: 'text?', unit: 'text?', description: 'text?', state_rules: 'text?', create_time: 'text?', update_time: 'text?' }
 
-/** quota/list 是三层嵌套（data[] → sub_tab[] → fund_list[]），没有 item[] 信封。 */
 function validateQuotaList(data: unknown): boolean {
   if (!Array.isArray(data)) return false
   return data.every((category) => {
@@ -511,7 +435,6 @@ function validateQuotaList(data: unknown): boolean {
   })
 }
 
-/** indicators/line：time_range 时间轴 + indexes 元信息 + data 序列，三层结构。 */
 function validateIndicatorLine(data: unknown): boolean {
   if (!isRecord(data)) return false
   if (!Array.isArray(data.time_range)) return false
@@ -524,7 +447,6 @@ function validateIndicatorLine(data: unknown): boolean {
   })
 }
 
-/** indicators/table：total + indexes + data[]，值可为 JSON 或 null。 */
 function validateIndicatorTable(data: unknown): boolean {
   if (!isRecord(data)) return false
   if (!Number.isSafeInteger(data.total)) return false
@@ -549,18 +471,14 @@ const financialCommonFields: Record<string, FieldSpec> = {
 const financialNumber = (names: string[]): Record<string, FieldSpec> =>
   Object.fromEntries(names.map((name) => [name, 'number?' as FieldSpec]))
 
-/** 单个端点的完整定义：模型可见 schema、内部路由、参数语义与输出护栏同处一处。 */
 interface EndpointDefinition {
   name: string
   capability: string
-  /** 一行摘要：进能力目录，选能力够用（~50 字内）。 */
   summary: string
-  /** 完整说明：进 describe_capability 详情（单位、null 语义、时间与分页口径）。 */
   description: string
   path: string
   inputSchema: object
   outputSchema: object
-  /** 允许出现的参数名（顺序即 query 顺序）。 */
   allowed: string[]
   normalize(params: Params): Params
   guard: GuardSpec
@@ -572,7 +490,7 @@ function normalizeQuote(params: Params): Params {
   const normalized: Params = {}
   if (params.thscodes !== undefined) {
     normalized.thscodes = codeList(params.thscodes, 'thscodes')
-    // 按文档：传入 thscodes 时上游忽略分页；这里直接丢弃，避免产生语义等价的多个 Dataset。
+    // Upstream ignores paging with thscodes; drop it so equivalent requests share one Dataset.
     return normalized
   }
   if (params.limit !== undefined) normalized.limit = integer(params.limit, 'limit', { minimum: 1 })
@@ -580,7 +498,6 @@ function normalizeQuote(params: Params): Params {
   return normalized
 }
 
-/** 时间区间型请求的共用校验：成对出现、end >= start、窗口不超过 10 年。 */
 function timeWindow(params: Params, normalized: Params): void {
   const { start, end } = params
   if ((start === undefined) !== (end === undefined)) fail('parameters start and end must be provided together')
@@ -635,7 +552,6 @@ function normalizeCorporateActions(params: Params): Params {
   return normalized
 }
 
-/** 财务三表共用参数：最近 N 期（limit）与时间区间（start+end）互斥、二选一。 */
 function normalizeFinancial(params: Params): Params {
   const normalized: Params = {
     thscode: codeToken(requiredText(params.thscode, 'thscode', 32), 'thscode'),
@@ -691,7 +607,6 @@ function normalizeIndexQuote(params: Params): Params {
   return { thscodes: codeList(params.thscodes, 'thscodes', { kind: 'index' }) }
 }
 
-/** 基金代码规范化：trim + 大写 + 市场后缀校验（不接受逗号与裸代码）。 */
 function fundCodeToken(value: unknown, name: string): string {
   const raw = text(value, name, 32).toUpperCase()
   if (!FUND_CODE.test(raw)) {
@@ -700,12 +615,10 @@ function fundCodeToken(value: unknown, name: string): string {
   return raw
 }
 
-/** 基金经理 / 基金公司标识：格式上游未公开，只做非空与长度约束。 */
 function identifierToken(value: unknown, name: string): string {
   return requiredText(value, name, 64)
 }
 
-/** 只带 thscode 的基金端点（基本资料、业绩快照、持仓、持有人等）。 */
 function onlyFundCode(params: Params): Params {
   return { thscode: fundCodeToken(requiredText(params.thscode, 'thscode', 32), 'thscode') }
 }
@@ -732,8 +645,8 @@ function normalizeFundNav(params: Params): Params {
 function normalizeFundStockHistory(params: Params): Params {
   return {
     thscode: fundCodeToken(requiredText(params.thscode, 'thscode', 32), 'thscode'),
-    // report_type 的枚举上游未公开（实测 quarter 可用；annual/half 返回 5003 即上游无该类型数据，
-    // 而不是参数错误），因此本地不做白名单，只拒绝空值与明显非法字符，避免误拒上游新增类型。
+    // report_type enum is undocumented: quarter works; annual/half return 5003 (no such data, not a
+    // bad parameter), so do not whitelist.
     report_type: text(requiredText(params.report_type, 'report_type', 32), 'report_type'),
     end_date: dateString(requiredText(params.end_date, 'end_date', 32), 'end_date'),
   }
@@ -759,7 +672,6 @@ function normalizeFundCompany(params: Params): Params {
   return { company_id: identifierToken(params.company_id, 'company_id') }
 }
 
-/** 报告期查询（bond-history 与 stock-history 同构）。 */
 function normalizeFundReportType(params: Params): Params {
   const normalized: Params = { thscode: fundCodeToken(requiredText(params.thscode, 'thscode', 32), 'thscode') }
   if (params.report_type !== undefined) normalized.report_type = text(params.report_type, 'report_type', 32)
@@ -783,7 +695,6 @@ function normalizeManagerRange(params: Params): Params {
   }
 }
 
-/** 指标画线：indexes 为分组数组，time_range 为时间范围对象（都是 JSON 字符串）。 */
 function normalizeFundIndicatorLine(params: Params): Params {
   const indexes = jsonParam(params.indexes, 'indexes', 'array')
   const groups = JSON.parse(indexes) as unknown[]
@@ -868,7 +779,6 @@ function normalizeLimitBreakPool(params: Params): Params {
   return normalizePoolQuery(params, LIMIT_BREAK_SORT_FIELDS)
 }
 
-/** 飙升榜 / 热股榜：period 取 day（日/24 小时级）或 hour（小时级）。 */
 function normalizeRankList(params: Params): Params {
   const normalized: Params = {}
   if (params.period !== undefined) normalized.period = enumValue(params.period, 'period', RANK_PERIODS, lowerCase)
@@ -890,7 +800,7 @@ function normalizeHotStockRankTrend(params: Params): Params {
   }
 }
 
-/** 异动标签：大小写不敏感、去重保序；空 token 与未知标签都拒绝（上游对二者都返回 1002）。 */
+/** Empty or unknown tags return 1002. */
 function anomalyTagList(value: unknown, name: string): string {
   const raw = requiredText(value, name, MAX_TEXT_LENGTH)
   const tokens = raw.split(',').map((token) => token.trim().toUpperCase())
@@ -1004,7 +914,6 @@ function endpointDefinitions(): EndpointDefinition[] {
       guard: { item: { date_ms: 'number', date: 'text' } },
     },
 
-    // ── Phase 2：代码表与除复权事件 ──────────────────────────────────────────
     {
       name: 'get_meta_tickers_list',
       capability: 'ticker_list',
@@ -1050,7 +959,6 @@ function endpointDefinitions(): EndpointDefinition[] {
       },
     },
 
-    // ── Phase 2：财务三表与财务指标 ──────────────────────────────────────────
     {
       name: 'get_a_share_financials_income_statements',
       capability: 'income_statement',
@@ -1142,7 +1050,6 @@ function endpointDefinitions(): EndpointDefinition[] {
       guard: { data: { thscode: 'text', report: 'text' }, custom: validateAbilities },
     },
 
-    // ── Phase 2：估值与集合竞价 ─────────────────────────────────────────────
     {
       name: 'get_a_share_valuations_snapshot',
       capability: 'valuation',
@@ -1175,7 +1082,6 @@ function endpointDefinitions(): EndpointDefinition[] {
       guard: { data: { auction_phase: 'text?', data_status: 'text?' }, item: auctionFields },
     },
 
-    // ── Phase 2：盘面特色数据 ───────────────────────────────────────────────
     {
       name: 'get_a_share_special_data_limit_up_pool',
       capability: 'limit_up_pool',
@@ -1223,7 +1129,6 @@ function endpointDefinitions(): EndpointDefinition[] {
       guard: { data: { window: 'object' }, item: ladderFields },
     },
 
-    // ── Phase 2：指数 ───────────────────────────────────────────────────────
     {
       name: 'get_a_share_index_catalog_ths_index_list',
       capability: 'index_catalog',
@@ -1285,7 +1190,6 @@ function endpointDefinitions(): EndpointDefinition[] {
       guard: { item: indexHistoryFields },
     },
 
-    // ── Phase 3：盘面特色数据（doc 详情段 + 真实探针确认可用）────────────────
     {
       name: 'get_a_share_special_data_limit_down_pool',
       capability: 'limit_down_pool',
@@ -1462,7 +1366,6 @@ function endpointDefinitions(): EndpointDefinition[] {
       },
     },
 
-    // ── Phase 3：短线风向标竞价基准 ─────────────────────────────────────────
     {
       name: 'get_a_share_auction_short_term_benchmark',
       capability: 'auction_benchmark',
@@ -1482,11 +1385,7 @@ function endpointDefinitions(): EndpointDefinition[] {
       guard: { data: { date: 'text', date_ms: 'number' }, item: auctionBenchmarkFields },
     },
 
-    // ── Phase 3B：公募基金（14 个核心端点；契约 = 文档详情段 + 真实探针）────────
-    // 定位规则：这些端点全部只吃**单数 thscode**（基金代码带 .OF/.SH/.SZ 后缀），
-    // 经理与公司分别用 manager_id / company_id；ths_api.md 里的 fund_type(otc/exchange/reits)
-    // 实测并不存在（上游会忽略未知参数，我们不忽略）。金额/份额单位多处文档未给出，
-    // 一律按原值转述、不擅自换算。
+    // Fund endpoints take a singular thscode; `fund_type` does not exist; amount units are undocumented.
     {
       name: 'get_fund_profile_detail',
       capability: 'fund_profile',
@@ -1708,9 +1607,8 @@ function endpointDefinitions(): EndpointDefinition[] {
       guard: { item: fundCompanyFields },
     },
 
-    // ── Phase 3C：基金进阶子模块（19 个端点；已确证全部开放、非 AI 客户端专用）──
-    // 口径提醒：基金各页**金额币种单位文档未给出**（对比 A 股财务页明写"原币元"），
-    // 一律按原值转述；多处百分比为"百分数原值"，但回测 metrics 口径文档自相矛盾。
+    // Fund amount/currency units are undocumented (A-share statements say 原币元, funds do not):
+    // report raw values; percentages are raw but the backtest metrics docs contradict themselves.
     {
       name: 'get_fund_performance_indicators_historical',
       capability: 'fund_performance_history',
@@ -2058,20 +1956,18 @@ function createSource(definition: EndpointDefinition, baseUrl: string, resolveAp
     time_contract: getDataTimeContract(capability),
     name,
     source: 'api:fuyao',
-    // 内部数据源身份证（provider.kind.resource）：宿主路由/审计用，不进入模型协议。
     data_key: buildDataKey('fuyao', 'api', path),
     source_label: 'fuyao',
     paginated: definition.paginated === true,
     cacheMaxAgeMs: definition.cacheMaxAgeMs,
-    // 行数组位置由端点自己声明（护栏里的 itemKey 就是同一份知识）：龙虎榜的行
-    // 在 `stock_items` 下，不声明就会被存储层按 `item` 猜成「非行集合」。
+    // The endpoint declares its row array; dragon-tiger rows are under `stock_items`, otherwise
+    // storage guesses `item` and sees no row collection.
     rowShape: { rowKey: definition.guard.itemKey ?? 'item', ...(definition.guard.rowKeys === undefined ? {} : { rowKeys: definition.guard.rowKeys }) },
     summary,
     description,
     input_schema: inputSchema,
     output_schema: outputSchema,
   }
-  /** 幂等：Hub 入队前调用一次（digest 口径），execute 再调用一次（直连调用也要生效）。 */
   const normalize = (params: unknown): Params => {
     const values = paramsObject(params)
     assertKnownParameters(values, allowed)

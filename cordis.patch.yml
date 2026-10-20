@@ -1,42 +1,29 @@
 # Capital Generation is a distributable DSH profile bundle.
-#
-# 本文件只挂 **host 平面** 的客户端 bundle 行（下面三个 insert）。预设不在这里：0.1.7 起
-# 预设是普通条目行，本包的预设声明住在 `preset/capital-generation/agent.patch.yml`，由
-# package.json 的 `dsh.bundle.patch` 数组按序应用（`agent-preset-registry` 行由 dsh-web-app
-# 自己提供，我们只 insert 自己的预设声明，不动它的 config）。
-#
-# ⛔ 升级事故（2026-09-26，issue #3）：这里原先是 patch `agent-presets` 行 + `config.roots`
-# 的目录式注册。0.1.7 把该条目改名为 `agent-preset-registry` 并**删掉了 roots 机制**（registry
-# 「既不扫目录也不接受预设路径」），于是每次启动静默报
-# `dsh: [@v587d/capital-generation] patch: entry "agent-presets" not found` —— 预设永不注册，
-# 历史会话（头部记着 `"agentPreset":"capital-generation"`）全部 `Unknown agent preset` 读不回。
+# This file mounts host-plane rows only (the inserts below). Presets are ordinary entry rows and
+# live in preset/capital-generation/agent.patch.yml, applied in order by package.json's
+# `dsh.bundle.patch`; we insert our own preset declaration and never touch the registry's config.
+# ⛔ Do not register presets by patching an `agent-presets` row's `config.roots`: 0.1.7 renamed the
+# entry to `agent-preset-registry` and deleted the roots mechanism. The failure is a single boot warn
+# (`patch: entry "agent-presets" not found`), so presets never register and every saved session
+# reopening with `"agentPreset":"capital-generation"` reports `Unknown agent preset`.
 
-# ── 图表前端组件（host 平面行）────────────────────────────────────────────────
+# ── Chart frontend (host plane) ────────────────────────────────────────────────
+# Host plane because client bundles are injected at index.html render time; a bundle mounted on a
+# preset row never reaches an already-open page (see chart-ui/README.md).
+# `name` must be a literal, path-like relative path — three pitfalls, each hit for real:
+#  1. only `config` is interpolated, so `!!js` in `name` reaches the ESM import verbatim
+#     (`name.startsWith is not a function`, whole profile fails to boot).
+#  2. a subpath specifier (`@v587d/capital-generation/chart-ui`) is neither path-like nor a
+#     resolvable package name, so locatePkgJson silently classifies the row as "not a client
+#     bundle": the bundle never enters __DSH_BOOT__, the UI is missing, nothing is logged.
+#  3. the resolution base is this file's directory, not the profile root, so `./chart-ui/index.js`
+#     works under any node_modules layout; package identity comes from chart-ui/package.json
+#     (@v587d/capital-charts), which is why it cannot collide with the main package.
+# Regression: test/chart-composition.test.mjs (name stays a literal path-like string and resolves).
 #
-# 为什么这一行必须在这里、必须是 host 平面：客户端 bundle 的注入发生在
-# index.html 渲染那一刻，运行期新增 entry 没有送达浏览器的通道；挂在 preset 行上的
-# 客户端 bundle 到不了已经打开的页面。见 chart-ui/README.md。
-#
-# 为什么行名是**相对本包目录的路径**（三个坑都踩过，都不是猜的）：
-#  1. **`name` 不接受 `!!js`**：loader 只对 fiber 的 `config` 做插值
-#     （cordis-plugin-loader 的 `internal/config` 钩子），`name` 永远按字面量送进 ESM import。
-#     写过 !!js 的后果是启动期 `name.startsWith is not a function`——整个 profile 起不来。
-#  2. **`name` 也不能是 subpath 说明符**（如 `@v587d/capital-generation/chart-ui`）：
-#     dsh-client-modules 的 locatePkgJson 里
-#       `if (!pathLike && exactPackageSpecifier(loaderName) === undefined) return undefined`
-#     —— subpath 既非 path-like、打包名解析又返回 undefined，于是这颗行被**静默**当成
-#     "不是客户端包"，bundle 永不进 __DSH_BOOT__（表现是图表 UI 不出现，且不报错）。
-#  3. 解析基址是**本 patch 文件所在目录**，不是 profile 根：
-#     cordis-plugin-include 装载 patch 时会 `ctx.baseUrl = new URL('.', pathToFileURL(filename))`。
-#     所以这里的相对路径就是本包目录下的 chart-ui/index.js —— 与 profile 的 node_modules
-#     布局无关（pnpm 的 isolated 布局也照常工作）。
-#     locatePkgJson 随后按"最近的 package.json"归属，正好是 chart-ui/package.json，
-#     包身份为 @v587d/capital-charts，与主包不撞名。
-# 回归断言见 test/chart-composition.test.mjs（name 必须是字面量且 path-like，并真的解析一次）。
-#
-# ⚠ 目录名 / 包名与**行 id 是两条独立的链**（AGENTS.md §5.1）：下面两颗行住在 `config/` 与
-# `watchlist/`，行 id 却仍是 `capital-config` / `capital-watchlist`——后者是 settings 命名空间与
-# 「包含的组件」里那两行的身份，改了就会吃掉用户已保存的配置。不许"顺手对齐"。
+# ⚠ Directory name and row id are two independent chains (AGENTS.md §5.1): the rows below live in
+# `config/` and `watchlist/`, yet keep ids `capital-config` / `capital-watchlist` — those ids are
+# the settings namespace and the identity of the user's saved config; "aligning" them discards it.
 - insert:
     - id: capital-config
       name: './config/index.js'
@@ -55,22 +42,30 @@
     - id: capital-charts
       name: './chart-ui/index.js'
 
-# ── 用户自选股（host 平面行）──────────────────────────────────────────────────
-#
-# 为什么也必须在 host 平面：自选股是**跨 workspace 的用户侧资产**（清单与报价快照落
-# `~/.dsh/storages/capital_watchlist.json`），而客户端 bundle 的注入只发生在 index.html
-# 渲染那一刻——挂在 preset 行上就到不了已经打开的页面（同 chart-ui 的理由）。
-#
-# 与上一颗 preset 行的方向是**反的**：chart-ui 的数据由插件侧 push 进来（`ctx.get` 只能
-# 从会话作用域向外解析），本行则要在 host 平面自己出网，所以它 import
-# `../lib/sources/fuyao-core.js`（零 import 的叶子内核）——**同一份** key 解析 / 信封判定 /
-# 错误映射，不许有第二份（AGENTS.md §9.7）。这条跨包相对导入在本仓没有先例，因此由
-# `test/watchlist-quote.test.mjs` 的**模块同一性探针**钉住：两处 import 必须拿到同一实例，
-# 探针不过就重新设计，而不是先上线再说。
-#
-# `id` 与 `./watchlist/index.js` 的 path-like 字面量规则同上（!!js / subpath 两个坑
-# 对这颗行同样成立）。
+# ── User watchlist (host plane) ───────────────────────────────────────────────
+# Cross-workspace user asset (~/.dsh/storages/capital_watchlist.json), so host plane for the same
+# injection reason as chart-ui; the `name` rules above apply here too.
+# Direction is the opposite of chart-ui's: this row reaches the network itself, so it imports
+# ../lib/sources/fuyao-core.js (a zero-import leaf) rather than a second copy of key resolution,
+# envelope checks and error mapping (AGENTS.md §9.7). No precedent for that cross-package relative
+# import here, so test/watchlist-quote.test.mjs pins module identity: both import sites must get
+# the same instance, and if the probe fails the design is wrong — don't ship it and hope.
 - insert:
     - id: capital-watchlist
       name: './watchlist/index.js'
+
+# ── Cross-preset runtime / policy (0.2.1) ─────────────────────────────────────
+# Root and role presets mount separately, so apply() runs several times per process. Shared state
+# (chart source tokens, chart artifacts) and the agent/created listeners (root convergence, shell
+# and fs guards) must exist exactly once, which only a host-plane provide gives.
+# These two rows use package subpath entries (@v587d/capital-generation/runtime and /policy): they
+# are server-side, so the literal-path rule above doesn't apply — DSH composes its own
+# @deepseek-ai/dsh-tool-subagent-control rows the same way.
+- insert:
+    - id: capital-runtime
+      name: '@v587d/capital-generation/runtime'
+
+- insert:
+    - id: capital-policy
+      name: '@v587d/capital-generation/policy'
 

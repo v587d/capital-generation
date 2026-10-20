@@ -1,14 +1,5 @@
-/**
- * 图表 spec 的归一化与校验。
- *
- * 设计要点（见内部设计文档 docs/design/chart-visualization.md §3.3）：
- *  - spec 用**自由对象**表达，协议细节写在 skill 里按需加载，常驻的只有工具 schema——
- *    这是"可视化不污染上下文"的关键：模型不需要在每轮都看一遍图表 DSL。
- *  - 但自由对象不等于放任：这里做一次严格归一化，错误必须**可自愈**（点名字段 + 给候选）。
- *  - 与 query_dataset 同源的宽容度：模型经常把对象/数组序列化成 JSON 字符串再传
- *    （实测教训见 src/data-collector/dataset-tools.ts 的注释），这里在**工具边界**
- *    做一次宽容解析，内部保持严格。
- */
+/** Normalize/validate the chart spec at the tool boundary. Errors must be self-correcting
+ * (name the field, list candidates); JSON-string forms are tolerated here, strict inside. */
 import { ChartError } from './errors.js'
 
 export type ChartKind = 'line' | 'area' | 'column' | 'candlestick' | 'bar'
@@ -31,15 +22,15 @@ export interface ChartOhlcSpec {
 export interface ChartMarkerSpec {
   text: string
   position: MarkerPosition
-  /** 与 x 同口径的时间值；与 index 二选一。 */
+  /** Time value matching x; mutually exclusive with index. */
   time?: string | number
-  /** 过滤后序列中的 0 基行号。 */
+  /** 0-based row index into the filtered series. */
   index?: number
 }
 
 export interface NormalizedChartSpec {
   kind: ChartKind
-  /** time = 有真实时间列；index = 按行序（分类轴），标签由 labels 映射。 */
+  /** time = real time column; index = row order (category axis, labels mapped at render time). */
   axis: 'time' | 'index'
   timeField?: string
   series: ChartSeriesSpec[]
@@ -51,14 +42,8 @@ export interface NormalizedChartSpec {
 }
 
 export const CHART_KINDS: readonly ChartKind[] = ['line', 'area', 'column', 'candlestick', 'bar']
-/**
- * 需要 OHLC 四字段（而不是单值字段选择）的 kind。
- *
- * 依据是图表库的数据契约本身：`CandlestickData` 与 `BarData` 都继承 `OhlcData`，
- * 而 `LineData` / `HistogramData` 继承 `SingleValueData`。把单值序列塞进 BarSeries
- * 不会报错，只会画出一张**空图** —— 所以这个约束必须在 spec 层硬拦，
- * 不能指望"模型会写对"（这是实测出来的坑，不是推演）。
- */
+/** OHLC kinds need four fields (library OhlcData vs SingleValueData); a single-value series in
+ * BarSeries silently draws an empty chart, so reject it at the spec layer. */
 export const OHLC_KINDS: readonly ChartKind[] = ['candlestick', 'bar']
 export const CHART_SERIES_TYPES: readonly ChartSeriesType[] = ['line', 'area', 'column']
 export const MARKER_POSITIONS: readonly MarkerPosition[] = ['aboveBar', 'belowBar', 'inBar']
@@ -67,14 +52,7 @@ export const MAX_CHART_MARKERS = 50
 export const MAX_FIELD_NAME = 128
 export const MAX_CHART_TITLE = 200
 
-/**
- * 容忍的说法 → canonical 名。
- *
- * `histogram` 是图表库的类名，但它画的是**着色柱**、不是统计分箱直方图；直接把它当
- * canonical 名会让模型以为"可以画分布"。canonical 用 `column`，同时接受旧说法以免硬失败。
- * 同理 `bar` 在中文语境里常被当成"柱状图"，而它其实是 OHLC 柱：单值柱状图会得到一条
- * 明确指向 `column` 的错误，而不是一张空图。
- */
+/** `histogram` maps to `column` (a colored bar, not a statistical bin); `bar` is an OHLC bar. */
 const KIND_ALIASES: Record<string, ChartKind> = {
   histogram: 'column',
   candles: 'candlestick',
@@ -84,7 +62,7 @@ const KIND_ALIASES: Record<string, ChartKind> = {
 }
 const SERIES_TYPE_ALIASES: Record<string, ChartSeriesType> = { histogram: 'column' }
 
-/** 面向模型的 kind 说明（错误信息与工具描述共用一处，避免两处措辞漂移）。 */
+/** Shared model-facing kind description so error text and tool docs cannot drift. */
 export function describeKinds(): string {
   return `${CHART_KINDS.join(' / ')}（candlestick 与 bar 需要 ohlc 四字段与真实时间列；单值柱状图用 column，本库没有统计分箱直方图）`
 }
@@ -93,7 +71,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-/** 宽容解析：真对象直接用；JSON 字符串解析成对象后使用；其余返回 undefined。 */
+/** Tolerate JSON-string spec fragments at the tool boundary. */
 function coerceObject(value: unknown): Record<string, unknown> | undefined {
   if (isRecord(value)) return value
   if (typeof value !== 'string') return undefined
@@ -107,7 +85,6 @@ function coerceObject(value: unknown): Record<string, unknown> | undefined {
   }
 }
 
-/** 宽容解析对象数组：真数组、JSON 数组字符串、单个对象（或其 JSON 字符串）都接受。 */
 function coerceObjectList(value: unknown): unknown[] | undefined {
   if (Array.isArray(value)) return value
   if (isRecord(value)) return [value]
@@ -141,7 +118,6 @@ function readOptionalFieldName(value: unknown, where: string): string | undefine
   return readFieldName(value, where)
 }
 
-/** 取第一个出现的别名键；用于容忍模型用 x / time / time_field 等等价说法。 */
 function pickAlias(source: Record<string, unknown>, names: readonly string[]): unknown {
   for (const name of names) if (source[name] !== undefined) return source[name]
   return undefined

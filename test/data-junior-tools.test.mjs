@@ -82,7 +82,8 @@ function definitionsFor(store) {
     get: (name) => name === 'tools' ? { register: (definition) => { definitions.push(definition); return () => {} } } : undefined,
     effect: (fn) => fn(),
   }
-  registerDatasetTools(ctx, store)
+  // Monolithic carrier shape: the tools/dataset-read row omits write_profile (the host computes profiles).
+  registerDatasetTools(ctx, store, { writeProfile: true })
   return definitions
 }
 
@@ -237,8 +238,7 @@ test('Phase 1 profile：扫描并持久化超过 64 个字段，不静默截断'
 test('Phase 2 profile：首末值必须来自真实首末行，不能拿 min/max 充当走势', async () => {
   let next = 0
   const { store, fs } = makeStore({ newId: (prefix) => `${prefix}_${++next}` })
-  // 实测教训：只有 min/max 时，模型把区间极值讲成「从 74 涨到 105 以上随后可能回落」。
-  // 这条数据末行既不是最大值也不是最小值，用来钉住 first/last 的语义。
+  // The last row is neither min nor max, so first/last cannot collapse into the extremes.
   const ref = await store.save(saveInput({
     session: COLLECTOR_CHILD,
     data: { item: [
@@ -254,7 +254,6 @@ test('Phase 2 profile：首末值必须来自真实首末行，不能拿 min/max
   assert.equal(result.time_facts.covered_to, 3)
   assert.deepEqual(result.time_facts.first, { date_ms: 1, close_price: 80 })
   assert.deepEqual(result.time_facts.last, { date_ms: 3, close_price: 70 })
-  // 首值是 80、末值是 70，而 min=70 / max=105：三者不同，模型据此才能说清「期间最高 105、最新 70」
   assert.equal(result.statistics.close_price.min, 70)
   assert.equal(result.statistics.close_price.max, 105)
   const stored = JSON.parse(fs.files.get(`/workspace/proj/capital-data/profiles/${result.profile_id}/profile.json`))
@@ -272,7 +271,7 @@ test('Phase 2 profile：时间列按取值判定，不把 report_type 之类的�
     ] },
   }))
   const result = await store.profileDataset({ session: JUNIOR_CHILD, dataset_id: ref.dataset_id })
-  // report_type 先出现在列序里且匹配 report 候选，但它全是枚举字符串 → 跳过；report 是日期样式 → 采用
+  // report_type matches the candidate pattern but is enum-only, so the date-shaped report wins.
   assert.equal(result.time_facts.time_column, 'report')
   assert.equal(result.time_facts.first.report, '2025-2')
   assert.equal(result.time_facts.last.report, '2025-1')
@@ -294,14 +293,13 @@ test('Phase 2 profile：类别事实给出 distinct 与高频取值，未列全�
   const result = await store.profileDataset({ session: JUNIOR_CHILD, dataset_id: ref.dataset_id })
   assert.deepEqual(result.categories.industry, {
     distinct_count: 3,
-    // 先按次数降序，次数相同按取值排序（码位序），保证同一份数据每次结果一致
+    // Count descending, then value by code point, so the same data always yields the same order.
     top_values: [{ value: '银行', count: 2 }, { value: '医药', count: 1 }, { value: '电子', count: 1 }],
     truncated: false,
   })
   assert.equal(result.categories.name.distinct_count, 4)
   assert.equal(result.categories.name.truncated, false, '全部取值都在 top_values 里时不该标记 truncated')
 
-  // 取值超过展示上限时必须显式披露「还有没列出的取值」
   const wide = await store.save(saveInput({
     session: COLLECTOR_CHILD,
     params_digest: 'digest-wide-category',
@@ -351,7 +349,7 @@ test("Phase 2 profile：超过 50 个嵌套元素时明确返回 sampled_element
 test('Phase 2 profile：嵌套数组/对象展开成路径摘要，total_elements 即叶子总数', async () => {
   let next = 0
   const { store } = makeStore({ newId: (prefix) => `${prefix}_${++next}` })
-  // QDII 额度形状：data[] → sub_tab[] → fund_list[]，顶层行（分类）不是叶子事实。
+  // Nested data[] -> sub_tab[] -> fund_list[]: top-level rows are categories, not leaf facts.
   const ref = await store.save(saveInput({
     session: COLLECTOR_CHILD,
     row_count: 1,
@@ -371,7 +369,7 @@ test('Phase 2 profile：嵌套数组/对象展开成路径摘要，total_element
   assert.deepEqual(result.structure['sub_tab[].fund_list[]'].fields.map((field) => field.name), ['thscode'])
   assert.equal(result.structure.sub_tab.total_elements, 2)
   assert.equal(result.structure['sub_tab[]'].fields.find((field) => field.name === 'fund_list').type, 'array')
-  // 空数组与嵌套对象字段同样要可见
+  // Empty arrays and nested object fields must stay visible.
   const ladder = await store.save(saveInput({
     session: COLLECTOR_CHILD,
     params_digest: 'digest-ladder',
@@ -397,11 +395,11 @@ test('Phase 2 profile：事实块的体积有界，不随行数膨胀', async ()
     const result = await store.profileDataset({ session: JUNIOR_CHILD, dataset_id: saved.dataset_id })
     return JSON.stringify(result).length
   }
-  // 行数不是瓶颈：profile 是「每列一段统计」，1000 行与 100 行体积几乎一致
+  // Row count is not the driver: one stats block per column, so 100 and 1000 rows weigh the same.
   const small = await profileSize(100, 5)
   const large = await profileSize(1_000, 5)
   assert.ok(large - small < 200, `行数从 100 涨到 1000，profile 体积不应显著变化（${small} → ${large}）`)
-  // 列数才是瓶颈：12 列仍应留在工具结果剪枝阈值（preset 配 8192）以内
+  // Column count is the driver: 12 columns must stay under the tool-result pruning threshold (8192).
   assert.ok(await profileSize(200, 12) < 5_000, '12 列 profile 应显著低于剪枝阈值')
 })
 
@@ -476,7 +474,7 @@ test('Dataset Phase 3：inspect、profile 与 query 工具真实注册，schema 
     get: (name) => name === 'tools' ? { register: (definition) => { definitions.push(definition); return () => {} } } : undefined,
     effect: (fn) => fn(),
   }
-  registerDatasetTools(ctx, makeStore().store)
+  registerDatasetTools(ctx, makeStore().store, { writeProfile: true })
   assert.deepEqual(definitions.map((definition) => definition.name), ['inspect_dataset', 'profile_dataset', 'query_dataset', 'describe_dataset', 'write_profile'])
   const inspect = definitions[0]
   assert.equal(inspect.parameters.additionalProperties, false)
@@ -488,18 +486,17 @@ test('Dataset Phase 3：inspect、profile 与 query 工具真实注册，schema 
   assert.equal(profile.output.schema.required.includes('schema'), false)
   assert.equal(profile.output.schema.required.includes('validation'), false)
   const query = definitions[2]
-  // 根必须是单一 object：根级 oneOf（无 type）会被模型 API 以 400 拒绝，见 dataset-tools.ts 注释。
+  // Root must be a single object: a root-level oneOf without type is rejected with a 400, see dataset-tools.ts.
   assert.equal(query.parameters.type, 'object')
   assert.equal(query.parameters.additionalProperties, false)
   assert.deepEqual(query.parameters.required, ['dataset_id'])
-  // flat 形态：QuerySpec 字段平铺在根上
   assert.equal(query.parameters.properties.limit.type, 'integer')
   assert.equal('minimum' in query.parameters.properties.limit, false)
   assert.equal('maximum' in query.parameters.properties.limit, false)
   assert.ok(query.parameters.properties.select)
   assert.ok(!query.parameters.required.includes('select'), 'select 可以省略，由执行器默认生成结果列')
   assert.equal('maxItems' in query.parameters.properties.filters, false)
-  // envelope 形态：query 是可选嵌套对象，且自身就是完整 QuerySpec
+  // envelope form: query is an optional nested object that is itself a full QuerySpec.
   assert.ok(query.parameters.properties.query)
   assert.ok(query.parameters.properties.query.properties.group_by)
   assert.equal(query.parameters.properties.type.enum[0], 'query_request')
@@ -633,13 +630,21 @@ test('Phase 2 query：禁止 raw select、类型冲突、未知字段和超限�
   } }), /dataset_session_mismatch/)
 })
 
-test('Phase 2 query 工具：只注册受控 QuerySpec，data_junior 执行仍需 delegated session', async () => {
+test('族行默认：tools/dataset-read 不注册 write_profile（profile 由宿主算）', () => {
+  const { ctx, store } = makeStore()
+  const definitions = []
+  registerDatasetTools({ get: (name) => (name === 'tools' ? { register: (d) => { definitions.push(d); return () => {} } } : undefined), effect: (fn) => { fn(); return () => {} } }, store)
+  assert.deepEqual(definitions.map((d) => d.name), ['inspect_dataset', 'profile_dataset', 'query_dataset', 'describe_dataset'])
+  assert.ok(!definitions.some((d) => d.name === 'write_profile'), '这一族把 write_profile 留给单体载体')
+})
+
+test('Phase 2 query 工具：只注册受控 QuerySpec，执行需**数据人设**授权（不再是 parentSession）', async () => {
   const definitions = []
   const ctx = {
     get: (name) => name === 'tools' ? { register: (definition) => { definitions.push(definition); return () => {} } } : undefined,
     effect: (fn) => fn(),
   }
-  registerDatasetTools(ctx, makeStore().store)
+  registerDatasetTools(ctx, makeStore().store, { writeProfile: true })
   assert.deepEqual(definitions.map((definition) => definition.name), ['inspect_dataset', 'profile_dataset', 'query_dataset', 'describe_dataset', 'write_profile'])
   const query = definitions.find((definition) => definition.name === 'query_dataset')
   assert.ok(query)
@@ -688,8 +693,7 @@ test('Phase 2 query：严格执行 QuerySpec 参数、分组数和输出字节�
 test('Phase 2 文档型 Dataset：可 inspect、可 profile 结构摘要，不再「不可读」', async () => {
   let next = 0
   const { store, fs } = makeStore({ newId: (prefix) => `${prefix}_${++next}` })
-  // 真实形状：财务指标 data = {thscode, report, abilities[].indicators[]}，没有行数组。
-  // 实测教训：这类响应此前一律判 dataset_format_unsupported，data_junior 零路径。
+  // Financial indicators shape: data = {thscode, report, abilities[].indicators[]}, no row array.
   const ref = await store.save(saveInput({
     session: COLLECTOR_CHILD,
     format: 'json',
@@ -712,7 +716,7 @@ test('Phase 2 文档型 Dataset：可 inspect、可 profile 结构摘要，不�
   const result = await store.profileDataset({ session: JUNIOR_CHILD, dataset_id: ref.dataset_id })
   assert.equal(result.row_count, 0)
   assert.equal(result.statistics, undefined, '文档没有行列统计')
-  // 结构摘要：$ 是文档根，数组路径用 []，total_elements 即该路径下的条目总数
+  // Structure paths: `$` is the document root, `[]` marks array levels, total_elements counts entries under the path.
   assert.deepEqual(result.structure.$.fields, [
     { name: 'thscode', type: 'string' },
     { name: 'report', type: 'string' },
@@ -724,11 +728,10 @@ test('Phase 2 文档型 Dataset：可 inspect、可 profile 结构摘要，不�
     { name: 'index_id', type: 'string' },
     { name: 'value', type: 'string' },
   ])
-  // 小文档整份交给 data_junior，不截断
   assert.equal(result.document.truncated, false)
   assert.deepEqual(result.document.omitted, [])
   assert.equal(result.document.content.abilities[0].indicators.length, 8)
-  // 但 profile 产物里不能留原始内容：持久化的只有机器事实
+  // The profile artifact must not retain raw content: only machine facts are persisted.
   const stored = JSON.parse(fs.files.get(`/workspace/proj/capital-data/profiles/${result.profile_id}/profile.json`))
   assert.ok(!('document' in stored.profile), 'profile.json 不应包含文档内容')
   assert.ok(stored.profile.structure['$.abilities'])
@@ -757,9 +760,8 @@ test('Phase 2 文档型 Dataset：长数组按档位截断并逐条披露省略�
   assert.ok(tradeOmission, `应披露 trades 的省略情况，实际：${JSON.stringify(result.document.omitted)}`)
   assert.ok(tradeOmission.kept < 300)
   assert.equal(tradeOmission.kept + tradeOmission.omitted, 300)
-  // 小字段不能被截断误伤
   assert.deepEqual(result.document.content.metrics, { annual_return: 0.12, max_drawdown: -0.08 })
-  // 交付给模型的内容必须留在剪枝阈值以内
+  // What reaches the model must stay under the pruning threshold.
   assert.ok(JSON.stringify(result).length < 8192, `文档型 profile 结果必须在剪枝阈值内，实际 ${JSON.stringify(result).length}`)
 })
 
@@ -793,8 +795,7 @@ test('Phase 2 query 兼容：数组/对象参数被序列化成 JSON 字符串�
   const query = definitionsFor(store).find((definition) => definition.name === 'query_dataset')
   const exec = { agent: { session: JUNIOR_CHILD }, signal: new AbortController().signal }
 
-  // 实测事故：模型把 select / group_by / aggregates / order_by / limit 全部序列化成字符串，
-  // 参数其实是对的，却报 "select must contain 1-32 column names"，模型于是反复试错。
+  // select / group_by / aggregates / order_by / limit can all arrive JSON-stringified.
   const stringified = await query.execute({
     dataset_id: ref.dataset_id,
     select: '["symbol", "rows"]',
@@ -806,7 +807,6 @@ test('Phase 2 query 兼容：数组/对象参数被序列化成 JSON 字符串�
   assert.deepEqual(stringified.rows, [{ symbol: 'A', rows: 1 }])
   assert.equal(stringified.limit, 1)
 
-  // 单个列名/单个对象用字符串传也要能用
   const singles = await query.execute({
     dataset_id: ref.dataset_id,
     select: ['symbol', 'rows'],
@@ -815,14 +815,13 @@ test('Phase 2 query 兼容：数组/对象参数被序列化成 JSON 字符串�
   }, exec)
   assert.deepEqual(singles.rows, [{ symbol: 'A', rows: 1 }, { symbol: 'B', rows: 1 }])
 
-  // 整个 envelope 被序列化成字符串：解析后按 envelope 处理
   const envelope = await query.execute({
     dataset_id: ref.dataset_id,
     query: JSON.stringify({ dataset_id: ref.dataset_id, group_by: ['symbol'], aggregates: [{ function: 'count', as: 'rows' }] }),
   }, exec)
   assert.deepEqual(envelope.rows, [{ symbol: 'A', rows: 1 }, { symbol: 'B', rows: 1 }])
 
-  // flat 形式带上 envelope 元数据（type/task_id）：按协议原样传时应被忽略，而不是报 unsupported fields
+  // Flat form carrying envelope metadata (type/task_id) must be ignored, not rejected.
   const flatWithEnvelopeMeta = await query.execute({
     type: 'query_request',
     task_id: 'task-query',
@@ -832,13 +831,13 @@ test('Phase 2 query 兼容：数组/对象参数被序列化成 JSON 字符串�
   }, exec)
   assert.equal(flatWithEnvelopeMeta.returned_count, 2)
 
-  // 解析不了的 query 字符串要给出可行动的报错，而不是 "unsupported fields"
+  // Unparseable query strings need an actionable error, not "unsupported fields".
   await assert.rejects(
     () => query.execute({ dataset_id: ref.dataset_id, query: 'not-json' }, exec),
     /query must be an object/,
   )
 
-  // 宽容解析不能放过真正违规的查询：无 group_by / 聚合就是原始行投影，必须仍然被拒
+  // Lenient parsing must not admit a real violation: no group_by / aggregate means raw row projection.
   await assert.rejects(
     () => query.execute({
       dataset_id: ref.dataset_id,
@@ -851,12 +850,7 @@ test('Phase 2 query 兼容：数组/对象参数被序列化成 JSON 字符串�
   )
 })
 
-/**
- * 时间轴（2026-09-23 真机会话 1e44050e 的教训）：
- * data_junior 拿到的 `date_ms` 只会是 epoch 毫秒，而它需要的是"近 1 个月/近 3 个月/年初至今"
- * 这些日历窗口。宿主不接手换算，模型就得自己把 12+ 个日期算成毫秒——实测单步思考 41,961
- * 字符，且它自己都写了 "Risky"。以下断言锁住"日历由宿主换算"这条边界。
- */
+// Time axis: `date_ms` is epoch ms but the model needs calendar windows, so the host converts.
 const SHANGHAI_DAY_MS = (date) => Date.UTC(...date.split('-').map((part, index) => (index === 1 ? Number(part) - 1 : Number(part)))) - 8 * 3_600_000
 
 function dailyBars(dates, prices = []) {
@@ -888,7 +882,7 @@ test('时间轴 query：filter 直接写 YYYY-MM-DD，宿主按列自身偏移�
   }))
   const { query, exec } = await queryToolFor(store)
 
-  // >= 用当地午夜；结果里自动补 *_iso 可读日期。
+  // >= uses local midnight; the result adds a readable *_iso date.
   const since = await query.execute({
     dataset_id: ref.dataset_id,
     filters: [{ column: 'date_ms', operator: '>=', value: '2026-09-21' }],
@@ -902,10 +896,10 @@ test('时间轴 query：filter 直接写 YYYY-MM-DD，宿主按列自身偏移�
     { date_ms: SHANGHAI_DAY_MS('2026-09-23'), avg_close: 1252.22, date_ms_iso: '2026-09-23' },
   ])
   assert.deepEqual(since.columns, ['date_ms', 'avg_close', 'date_ms_iso'])
-  // 宿主会按 output.schema 校验返回值（多了 *_iso 列也必须仍在声明范围内）。
+  // The host validates output.schema, so the extra *_iso column must still be declared.
   assertToolOutput(query, since)
 
-  // `<= 2026-09-21` 必须包含当天（按当地日末比较），而不是把当天排掉。
+  // `<= 2026-09-21` must include that day (compare against local end of day), not drop it.
   const until = await query.execute({
     dataset_id: ref.dataset_id,
     filters: [{ column: 'date_ms', operator: '<=', value: '2026-09-21' }],
@@ -913,7 +907,6 @@ test('时间轴 query：filter 直接写 YYYY-MM-DD，宿主按列自身偏移�
   }, exec)
   assert.equal(until.rows[0].n, 2)
 
-  // `= 2026-09-22` 展开成当天的上下界。
   const onDay = await query.execute({
     dataset_id: ref.dataset_id,
     filters: [{ column: 'date_ms', operator: '=', value: '2026-09-22' }],
@@ -921,7 +914,7 @@ test('时间轴 query：filter 直接写 YYYY-MM-DD，宿主按列自身偏移�
   }, exec)
   assert.equal(onDay.rows[0].avg_close, 1253.8)
 
-  // 月份与年份写法同样按区间处理。
+  // Month and year forms are ranges too.
   const month = await query.execute({
     dataset_id: ref.dataset_id,
     filters: [{ column: 'date_ms', operator: '>=', value: '2026-09' }],
@@ -942,14 +935,14 @@ test('时间轴 query：日期写法落到数值时间列时响亮失败，绝�
   }))
   const { query, exec } = await queryToolFor(store)
 
-  // 严格比较：日期只有整天语义，> / < 会把边界悄悄挪一天，必须报错而不是猜。
+  // Strict comparison: dates carry whole-day semantics, so > / < must fail instead of shifting a boundary.
   await assert.rejects(() => query.execute({
     dataset_id: ref.dataset_id,
     filters: [{ column: 'date_ms', operator: '>', value: '2026-09-21' }],
     aggregates: [{ function: 'count', as: 'n' }],
   }, exec), /query_type_conflict.*operator >/)
 
-  // in / != 同样拒绝：要求模型把要哪些天写成 >= / <= 的范围。
+  // in / != are rejected too: express wanted days as >= / <= ranges.
   await assert.rejects(() => query.execute({
     dataset_id: ref.dataset_id,
     filters: [{ column: 'date_ms', operator: 'in', value: ['2026-09-21'] }],
@@ -961,7 +954,7 @@ test('时间轴 query：日期写法落到数值时间列时响亮失败，绝�
     aggregates: [{ function: 'count', as: 'n' }],
   }, exec), /query_type_conflict.*!=/)
 
-  // 对照：不用日期写法的数值筛选仍然照常工作（新闸门只针对日期串）。
+  // Control: numeric filters without date strings keep working; the gate targets date strings only.
   const numeric = await query.execute({
     dataset_id: ref.dataset_id,
     filters: [{ column: 'close_price', operator: '>=', value: 1001 }],
@@ -1033,7 +1026,7 @@ test('时间轴 describe：time_facts 自带 ISO 日期、列偏移与常用窗�
   assert.equal(ytd.data_from, '2026-08-21')
   assert.equal(ytd.value_ge, SHANGHAI_DAY_MS('2026-01-01'))
   assert.equal(ytd.value_le > ytd.value_ge, true)
-  // time_facts 新增的 axis / windows 必须仍在 output.schema 声明范围内（否则真机上整次调用作废）。
+  // Newly added axis / windows fields must stay inside output.schema, or the whole call is voided.
   assertToolOutput(describe, result)
 })
 
@@ -1045,12 +1038,7 @@ test('输出契约：Dataset 系列工具的 output.schema 不得声明未公开
   }
 })
 
-/**
- * `resolve_data_time_range` 的 Dataset 形态**接线**验证（真机会话 66fa9666 事故）：
- * 该形态最初把 session 读成 `exec.session`，而框架放在 `exec.agent.session` ⇒ 对每个调用方
- * 都报 "requires an authorized session"，模型只能绕道。这里用**真实 store + 框架形状的 exec**
- * 走一遍，fake reader 的单测覆盖不到"registerTimeTool 有没有拿到 store"这一段接线。
- */
+// Wiring check for the Dataset form of resolve_data_time_range: real store plus the framework exec shape (exec.agent.session).
 test('时间工具接线：Dataset 形态在委派子 Agent 下可用，主 Agent 被拒（与 Dataset 系列同一道边界）', async () => {
   const { registerTimeTool } = await import('../lib/time/tools.js')
   let next = 0
@@ -1071,7 +1059,6 @@ test('时间工具接线：Dataset 形态在委派子 Agent 下可用，主 Agen
   assert.equal(resolved.mode, 'dataset')
   assert.deepEqual([resolved.data.from, resolved.data.to], ['2026-08-24', '2026-09-23'])
   assert.equal(resolved.bounds.bound_ge, SHANGHAI_DAY_MS('2026-08-23'))
-  // 边界可直接填进 filter（与 query_dataset 的日期写法等价）。
   const viaBound = await store.queryDataset({
     session: JUNIOR_CHILD,
     dataset_id: ref.dataset_id,
@@ -1079,12 +1066,12 @@ test('时间工具接线：Dataset 形态在委派子 Agent 下可用，主 Agen
   })
   assert.equal(viaBound.rows[0].n, 2)
 
-  // 主 Agent（无 parentSession）不得用 Dataset 形态直连数据工具。
+  // The main agent (no parentSession) must not reach data tools through the Dataset form.
   await assert.rejects(
     () => range.execute({ dataset_id: ref.dataset_id, period: 'ytd' }, { signal, agent: { session: SESSION } }),
     /dataset_session_mismatch/,
   )
-  // 取数形态对所有角色开放（主 Agent 用它生成 request_data 参数）。
+  // The capability form stays open to every role (the main agent builds request_data args with it).
   const capability = await range.execute({ capability: 'history', period: 'last_2_years' }, { signal, agent: { session: SESSION } })
   assert.equal(capability.mode, 'capability')
   assert.ok(capability.params.start < capability.params.end)

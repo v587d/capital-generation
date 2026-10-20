@@ -1,9 +1,7 @@
 /**
- * `/capital-watchlist/*` 路由闸门。
- *
- * ⛔ 认证围栏是这个包存在的前提：`webServer.register({kind:'prefix'})` **不做任何认证**，
- * 不接 `connection.requestRejection` 就等于"任何本机进程凭路径即可读写用户的自选股"。
- * 所以这里第一条用例断言的就是"被拒时连服务都没碰"。
+ * `/capital-watchlist/*` route gates. Auth is the precondition for this package existing:
+ * `webServer.register({kind:'prefix'})` performs no authentication, so without
+ * `connection.requestRejection` any local process could read and write the user's watchlist by path.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -160,7 +158,7 @@ test('POST /pin：置顶那条排到最前；不在清单 404、裸代码 400，
   const stub = stubFuyao()
   const { handler } = harness()
   try {
-    // 置顶一条**港美股键**：`remove` / `pin` 这一路零出网，只换 `normalizeThscode` 的接受形状（§4.2）。
+    // Pin an offshore key: `remove` / `pin` stay zero-outbound, only `normalizeThscode`'s accepted shapes changed (§4.2).
     const pinned = await call(handler, { method: 'POST', url: '/capital-watchlist/pin', body: { thscode: 'INX.US' } })
     assert.equal(pinned.statusCode, 200)
     assert.equal(pinned.json().items[0].thscode, 'INX.US', '回包里就是新顺序（客户端照它贴）')
@@ -216,20 +214,19 @@ test('POST /holding：标记与取消都只写那一格；非法比例 / 指数 
     assert.equal(missing.statusCode, 404)
     assert.equal(missing.json().code, 'not_found', '标记持仓不是添加自选：清单外的一只票不许被这一格凭空建出来')
 
-    // 类型闸门在 HTTP 这一路同样在（面板不画那一行是形状，宿主拒才是围栏）：
-    // 直接打路由也不该能把一根指数说成仓位。
+    // The type gate also lives on the HTTP route: the panel not drawing a row is shape, the host rejecting it is the fence.
     const index = await call(handler, { method: 'POST', url: '/capital-watchlist/holding', body: { thscode: 'HSI.HK', weight_pct: 10 } })
     assert.equal(index.statusCode, 400)
     assert.equal(index.json().code, 'invalid_query')
     assert.equal(fake.records.get('HSI.HK').holding, undefined, '被拒的请求不许改动那一格')
-    // 但"取消"不查类型：一条遗留的指数持仓必须退得掉（否则面板没这个出口、宿主又不收，就被锁死了）。
+    // Clearing checks no type: a legacy index holding must still be removable (no panel exit, host refuses it ⇒ locked).
     await fake.table.put('HSI.HK', { ...fake.records.get('HSI.HK'), holding: { weight_pct: 40, marked_at: 1_790_586_000_000 } })
     const legacy = await call(handler, { method: 'POST', url: '/capital-watchlist/holding', body: { thscode: 'HSI.HK', clear: true } })
     assert.equal(legacy.statusCode, 200)
     assert.equal(fake.records.get('HSI.HK').holding, undefined)
 
-    // 合计闸门在 HTTP 这一路同样在（`+` 置灰是形状，宿主拒才是围栏）：只做多、没有 put，
-    // 两只各 100% 已经越过 120%，第三只填任何数都该被挡，而"勾上没填"不占额度、照放行。
+    // The aggregate gate also lives on HTTP: two 100% rows pass 120%, so a third is blocked for any
+    // value, while "marked, left blank" costs nothing and stays allowed.
     await fake.table.put('300750.SZ', { ...fake.records.get('300750.SZ'), holding: { weight_pct: 100, marked_at: 1 } })
     await fake.table.put('600519.SH', { ...fake.records.get('600519.SH'), holding: { weight_pct: 100, marked_at: 1 } })
     const overBudget = await call(handler, { method: 'POST', url: '/capital-watchlist/holding', body: { thscode: '00700.HK', weight_pct: 10 } })
@@ -265,11 +262,8 @@ test('refresh 回包里 always 有 items / failures / refreshed_at 三件（面�
   }
 })
 
-/**
- * 存储失败的对外形态。**不靠任何"预热时记一笔、之后一律改口"的闩**：那条闩会把一次装配期
- * 抢跑（`storageDomain` 还没 provide）钉成进程一生的 `store_unavailable`。失败由每条路由
- * **逐次**从服务拿到，所以下面这些路径的 503 都是从真实调用里出来的。
- */
+// Storage failures are read per call, never latched: a "record once at warm-up, then change the story" flag would
+// pin an early mount race to a process-lifetime `store_unavailable`, so every 503 below comes from a real call.
 test('域打不开时所有路径改口 store_unavailable，不返回空清单骗用户，也不烧出网配额', async () => {
   const stub = stubFuyao()
   const broken = () => Promise.reject(Object.assign(new Error('storage backend missing'), { code: 'backend-not-found' }))
@@ -311,11 +305,8 @@ test('响应里绝不出现密钥与上游原文', async () => {
   }
 })
 
-/**
- * 两颗 host 行的 webServer 取用形状（2026-09-30 桌面端实机：这行炸成 异常，
- * 而 chart 那颗同因同炸）。fake 用的是 cordis 真实语义，见 test/cordis-fake.mjs——
- * 之前这颗行**根本没有 apply() 用例**，所以错路只在真机上暴露。
- */
+// Both host rows must take `webServer` through inject with real cordis semantics (test/cordis-fake.mjs);
+// without an apply() case this class of failure only surfaces on a real host.
 test('apply()：webServer 已就绪的载体（桌面端形状）当场挂上路由，不许炸在属性访问', () => {
   const routes = []
   const fake = createFakeDomain()
@@ -333,10 +324,8 @@ test('apply()：webServer 已就绪的载体（桌面端形状）当场挂上路
 })
 
 test('⛔ apply()：认证围栏必须真的接到注册出去的那颗 handler 上', async () => {
-  // 上面那些围栏用例是**自己造 authorize** 喂给 createRouteHandler 的——所以把 apply() 里
-  // 从 `connection` 取 requestRejection、再传进去的那两行删掉，全套测试照样全绿，而真实宿主上
-  // `/capital-watchlist/*` 就退化成"任何本机进程凭路径即可读写用户的自选股"（清单与报价快照是
-  // 跨 workspace 的用户资产）。这条走完整装配：假 connection 说 401，注册出去的 handler 必须拒。
+  // The fence cases above build their own `authorize`, so dropping the two apply() lines that pass
+  // `connection.requestRejection` in would keep the suite green while the real route becomes unauthenticated.
   const routes = []
   const fake = createFakeDomain()
   const asked = []
@@ -355,10 +344,8 @@ test('⛔ apply()：认证围栏必须真的接到注册出去的那颗 handler 
   assert.equal(res.body, 'unauthorized')
   assert.equal(res.headers['cache-control'], 'no-store')
 
-  // 写路径也要过一次：`/holding` 会改用户自报的持仓那一格，而这条正是 `get_watchlist` 读给
-  // 主 Agent 的数据。只测 GET /list 的话，"给写路由漏接围栏"不会让任何断言变红。
-  // ⛔ 标的必须挑一条**可交易**的：换成指数，宿主自己的类型闸门就会先拒一次，
-  // 于是"围栏被拆掉"这件事仍然测不出来（断言会为了错误的原因绿）。
+  // Write paths need one call too: `/holding` mutates the same cell `get_watchlist` reads to the main Agent.
+  // The row must be holdable — an index would be refused by the type gate first, so the assertion would pass for the wrong reason.
   await fake.table.put('300750.SZ', { thscode: '300750.SZ', ticker: '300750', name: '宁德时代', exchange: 'SZ', asset_type: 'a-share', added_at: 1, source: 'user', quote: null })
   const write = httpFixture({ method: 'POST', url: '/capital-watchlist/holding', body: { thscode: '300750.SZ', weight_pct: 50 } })
   await routes[0].handler(write.req, write.res)
@@ -404,8 +391,8 @@ test('apply()：webServer 缺席的载体（web profile 形状）仍激活，出
 })
 
 test('tencent_unavailable 的 HTTP 映射与 scope：两路上游的错误码各有各的状态位', async () => {
-  // 闭集里新增的那一条必须有独立文案位与独立状态码：混进 `fuyao_unavailable` 就叫用户去配
-  // 一个本来不需要的密钥（港美股那一路无密钥可查）。
+  // A new member of the closed error set needs its own status slot: folding it into `fuyao_unavailable`
+  // sends users to configure a key that route never uses.
   const failing = (result) => createRouteHandler({ search: async () => result }, {})
   for (const [code, expected] of [['tencent_unavailable', 502], ['fuyao_unavailable', 502], ['rate_limited', 429], ['credential_missing', 503], ['invalid_query', 400]]) {
     const res = await call(failing({ ok: false, code, message: code, scope: 'all' }), { method: 'GET', url: '/capital-watchlist/search?q=腾讯' })

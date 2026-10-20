@@ -83,7 +83,7 @@ function runTool(runtime, name, args, session) {
   })
 }
 
-/** 工具级夹具：假客户端 + 假 workspace（沙箱与落盘本身在 `test/ocr-store.test.mjs` 钉）。 */
+/** Tool-layer fixtures; upstream protocol and store behavior are covered separately. */
 function fakeOcrDeps(options = {}) {
   const files = new Map()
   const bytes = new Map(options.bytes ?? [])
@@ -139,7 +139,7 @@ function ocrDocument(pages, pageChars = 120) {
   })))
 }
 
-/** 公网性闸门默认走真实 DNS，测试里注入一个"全是公网地址"的解析器（生产路径不传）。 */
+/** Inject a public-only resolver so tests do not depend on real DNS. */
 const PUBLIC_DNS = async () => [{ address: '93.184.216.34', family: 4 }]
 const SESSION = { id: 'web-s1', header: { cwd: '/workspace/proj' } }
 
@@ -284,9 +284,7 @@ test('web_retriever_fetch：两边都失败必须抛错（isError），结构化
     localFetch: local,
   })
   const runtime = registerAll(retriever, fakeWindClient().client)
-  // 回归（2026-09 实测缺陷）：失败此前被做成 ok:false 信封**正常返回**，于是子 Agent
-  // 会话日志里 7 次实际失败的抓取全部记成 isError:false，UI 与模型都当成成功。
-  // DSH 的 createSuccessResult 硬编码 isError:false ⇒ 唯一通道是从 execute 抛出。
+  // Host success results always set isError:false, so real failures must throw.
   let payload
   await assert.rejects(
     () => runTool(runtime, 'web_retriever_fetch', { url: 'https://example.test/blocked' }, 's1'),
@@ -322,10 +320,7 @@ test('web_retriever_fetch 描述声明自动回退与 via 来源标注', () => {
   assert.match(definition.description, /本机直连/u)
 })
 
-// ── ocr：四形态、预算装载与失败映射 ───────────────────────────────────────
-//
-// `ocr` 的形态歧义、超预算装载与"超时不是失败"都是**模型会踩**的形状，所以这一组只测工具层：
-// 上游协议在 `test/ocr-client.test.mjs`，落盘与编排在 `test/ocr-store.test.mjs`（§9.7 各层各测一份）。
+// OCR tool layer: four input forms, receipt budgets and failure mapping (§9.7).
 
 const OCR_URL = 'https://pdf.dfcfw.com/pdf/H3_AN202404021629466789_1.pdf'
 
@@ -430,7 +425,7 @@ test('ocr 续查形态：job_id + doc_id 不重复提交；仍在跑就回 pendi
   assert.equal(pending.content, undefined)
   assert.equal(fixture.submitCalls.length, 1)
 
-  // 续查：作业跑完了 → 落盘并回 done，全程只提交过一次。
+  // A completed job persists once and returns done without resubmitting.
   fixture.client.wait = async (jobId) => ({ status: 'done', job_id: jobId, elapsed_ms: 30_000, document: ocrDocument(2) })
   const done = await runTool(runtime, 'ocr', { job_id: 'job-1', doc_id: pending.doc_id }, SESSION)
   assertToolOutput(definition, done)
@@ -484,9 +479,9 @@ test('ocr 装载受预算约束：整篇放不下就只给页索引 + 首页，�
   assert.match(result.page_one.text, /营业收入/)
   assert.match(result.note, /页索引/)
   assert.match(result.note, /不再出网、不再花钱/)
-  // 一次最多 8 页：多要就是响亮拒绝，不静默少给。
+  // Reject more than eight pages loudly; never silently return fewer.
   await assert.rejects(() => runTool(runtime, 'ocr', { doc_id: result.doc_id, pages: '1-9' }, SESSION), /一次最多读 8 页/)
-  // 8 页也装不下这份预算：整页让路并点名省略了哪几页（不许给半页）。
+  // If eight whole pages still exceed the receipt budget, omit named pages rather than ship half a page.
   const partial = await runTool(runtime, 'ocr', { doc_id: result.doc_id, pages: '1-8' }, SESSION)
   assertToolOutput(definition, partial)
   assert.ok(JSON.stringify(partial).length <= 6144)
@@ -497,8 +492,7 @@ test('ocr 装载受预算约束：整篇放不下就只给页索引 + 首页，�
 })
 
 test('ocr 预算说明必须算得过来：正文本身没超、是整份回执装不下时不许写"正文超出预算"', async () => {
-  // 真机第 9 步抓到的口径缺陷：5717 字符的正文配一句"整篇 5717 字符超出回执预算 6144"，
-  // 数字自己打自己。被装的从来不只是正文，还有信封与那 35 条页索引。
+  // The note describes text + envelope + page index; claiming text alone exceeds the cap is false.
   const fixture = ocrDnsDeps({ document: ocrDocument(35) })
   const { runtime, definition } = registerOcr(fixture.deps)
   const result = await runTool(runtime, 'ocr', { url: OCR_URL }, SESSION)
@@ -577,8 +571,7 @@ test('ocr 落盘失败不假装成功：写不进去就响亮报错并指到 wor
     throw new DatasetStoreError('workspace_not_writable', 'current workspace permission is read-only')
   }
   const { runtime } = registerOcr(fixture.deps)
-  // ⚠️ 这条钉的是"异步返回必须在 try 内 await"：少了 await，落盘失败会绕过下面的错误映射，
-  //    模型只剩一句 `workspace_not_writable: …`，丢掉 code / hint / doc_id / 检索回声。
+  // ⚠️ Async failures must be awaited inside try; otherwise structured hints are lost.
   await assert.rejects(() => runTool(runtime, 'ocr', { url: OCR_URL }, SESSION), (error) => {
     const payload = JSON.parse(error.message)
     assert.equal(payload.code, 'STORE_UNAVAILABLE')
@@ -619,7 +612,7 @@ test('ocr 半件产物（meta 在、正文丢了）：回执给一次可照抄�
   })
   assert.equal(fixture.submitCalls.length, 1, '发现半件产物也不许顺手重跑——重跑要再花一次整篇的钱')
 
-  // ⛔ hint 必须是能照做的：读形态不接受 refresh，所以要把 meta 里的来源指认写回去。
+  // ⛔ Hints must be executable: a read form cannot refresh, so replay the stored source identity.
   const repair = /\{ url: ("(?:[^"\\]|\\.)*"), refresh: true \}/u.exec(receipt.hint)
   assert.ok(repair, `hint 要给出可照抄的那一次调用，实际是：${receipt.hint}`)
   assert.equal(JSON.parse(repair[1]), OCR_URL, '来源指认取自 meta，不是把入参里的 doc_id 换个位置再念一遍')
@@ -643,7 +636,7 @@ test('ocr 作业失败：已经把 doc_id 与 job_id 花出去的指认必须随
     return true
   })
   assert.equal(fixture.submitCalls.length, 1)
-  // ⛔ 回执里那两个 id 必须是**能照做的**：拿它们续查不得再提交一次作业。
+  // ⛔ Returned ids must enable resume without paying for another submission.
   fixture.client.wait = async (jobId) => ({ status: 'done', job_id: jobId, elapsed_ms: 5_000, document: ocrDocument(2) })
   const resumed = await runTool(runtime, 'ocr', { job_id: receipt.job_id, doc_id: receipt.doc_id }, SESSION)
   assert.equal(resumed.status, 'done')

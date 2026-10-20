@@ -13,8 +13,7 @@ import {
   safeUrl,
 } from '../lib/web-retriever/local-fetch.js'
 
-// `URL.pathname` 不是文件路径：Windows 上它是 `/D:/Projects/…`（多一个前导斜杠），
-// 拿去 existsSync/readFile 就全落空。仓库里其余用例都用 fileURLToPath，这里对齐。
+// URL.pathname is not a filesystem path on Windows; use fileURLToPath like the rest of the suite.
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
 function makeResponse(status, headers = {}, body = '') {
@@ -77,13 +76,13 @@ test('isPublicIp：拒绝保留 IPv4/IPv6 地址，允许公网地址', () => {
     '100.64.0.1', '224.0.0.1', '0.0.0.0', '192.0.2.1', '198.18.0.1',
     '198.51.100.1', '203.0.113.1', '::', '::1', 'fe80::1', 'fd00::1',
     'ff02::1', '::ffff:127.0.0.1',
-    // 6to4（2002::/16）内嵌私网 IPv4：2002:0a00:0001:: = 10.0.0.1，不得因前缀 2002 放行。
+    // A public 6to4 prefix may still embed a private IPv4; decode the embedded address.
     '2002:0a00:0001::', '2002:7f00:0001::', '2002:c0a8:0001::',
-    // Teredo（2001::/32）客户端 IPv4 按位取反存储：末两组取反后 = 127.0.0.1 / 10.0.0.1。
+    // Teredo stores the client IPv4 inverted; unmask it before checking private/loopback ranges.
     '2001:0000:0000:0000:0000:0000:80ff:fffe', '2001:0000:0000:0000:0000:0000:f5ff:ffff',
   ]) assert.equal(isPublicIp(address), false, address)
   for (const address of ['8.8.8.8', '1.1.1.1', '2606:4700::1111',
-    // 6to4 内嵌公网 IPv4：2002:0808:0808:: = 8.8.8.8 → 仍应放行。
+    // 6to4 embedding a public IPv4 remains allowed after decoding.
     '2002:0808:0808::',
   ]) {
     assert.equal(isPublicIp(address), true, address)
@@ -263,8 +262,7 @@ test('状态码与 Content-Type 闸门拒绝错误页和 PDF', async () => {
 })
 
 test('4xx/5xx 把上游写在响应体里的缘由带进错误消息（只报状态码等于什么也没说）', async () => {
-  // 实测：PaddleOCR 对某些直链回 HTTP 400 + {"code":10004,"msg":"文件格式不支持"}。
-  // 模型拿到 `HTTP 400` 决定不了换链接还是换形态，拿到那句 msg 才可能决定。
+  // Preserve the JSON error body so the model can distinguish a bad URL from a bad input form.
   const restore = installFetch(async () => makeResponse(400, { 'content-type': 'application/json' }, '{"code":10004,"msg":"文件格式不支持"}'))
   try {
     await assert.rejects(() => makeRequester().request({ url: 'https://example.test/jobs' }), (error) => {
@@ -276,7 +274,7 @@ test('4xx/5xx 把上游写在响应体里的缘由带进错误消息（只报状
   } finally {
     restore()
   }
-  // 摘录读不出来（这里连流都没有）也必须**保持原失败**：加信息不能改成另一种失败。
+  // Adding an excerpt hint must not replace the original failure classification.
   const broken = installFetch(async () => ({
     status: 502,
     headers: { get: () => null },
@@ -294,9 +292,7 @@ test('4xx/5xx 把上游写在响应体里的缘由带进错误消息（只报状
 })
 
 test('缺 Content-Type 时按正文保守嗅探：HTML 放行（cls.cn 回归）', async () => {
-  // 实测 https://www.cls.cn/detail/2188659 的 GET 响应不带任何 Content-Type，
-  // 而同一 URL 的 HEAD 带 text/html；正文是完好的 SSR HTML。原实现"缺头即拒"
-  // 把它误判成 UNSUPPORTED_CONTENT_TYPE。
+  // Some live GET responses omit Content-Type while returning valid SSR HTML; reject-on-missing-header was wrong.
   const restore = installFetch(async () => makeResponse(200, {}, '<!DOCTYPE html><html><head><title>财联社</title></head><body><p>正文</p></body></html>'))
   try {
     const result = await makeFetcher().fetch('https://example.test/detail')
@@ -309,8 +305,7 @@ test('缺 Content-Type 时按正文保守嗅探：HTML 放行（cls.cn 回归）
 })
 
 test('缺 Content-Type 时按正文保守嗅探：JSON 与裸标签放行', async () => {
-  // 本用例只负责"嗅探放行"这一半；**只有 JSON 承诺原样返回**——HTML/XML 仍走标签剥除
-  // （实测 `<?xml version="1.0"?><r/>` 会被剥成空串，属既有行为、不在本次 JSON 修复范围内）。
+  // Only JSON promises pass through unchanged; HTML/XML remain stripped.
   for (const [body, expected] of [['{"ok":true}', '{"ok":true}'], ['<div>x</div>', 'x'], ['<?xml version="1.0"?><r/>', '']]) {
     const restore = installFetch(async () => makeResponse(200, {}, body))
     try {
@@ -324,8 +319,7 @@ test('缺 Content-Type 时按正文保守嗅探：JSON 与裸标签放行', asyn
 })
 
 test('JSON 正文原文直通：字段名与数组括号不得被 markdown 转义（2026-09 缺陷回归）', async () => {
-  // 事故形态：此前一律走 htmlToMarkdown，`\[ ... \]` 让 JSON.parse 失效、
-  // `content_text` 变 `content\_text` 让按字段名读取失效。声明头与缺头两条路都要守住。
+  // Markdown conversion escapes brackets/underscores, so declared and sniffed JSON must bypass it.
   const payload = '{"code":20000,"items":[{"content_text":"正文","score":2}]}'
   for (const headers of [{ 'content-type': 'application/json' }, {}]) {
     const restore = installFetch(async () => makeResponse(200, headers, payload))
@@ -361,7 +355,7 @@ test('缺 Content-Type 且正文认不出类型时仍拒绝（嗅探不放宽闸
 })
 
 test('响应头存在但不支持的类型仍然拒绝，不因嗅探放宽', async () => {
-  // 嗅探只在**缺头**时启用：显式声明为二进制的响应必须照旧拒绝。
+  // Sniffing runs only when the header is absent; explicit binary responses remain rejected.
   const restore = installFetch(async () => makeResponse(200, { 'content-type': 'application/octet-stream' }, '<!DOCTYPE html><p>伪装成 HTML</p>'))
   try {
     await expectCode(makeFetcher().fetch('https://example.test/x'), 'UNSUPPORTED_CONTENT_TYPE')
@@ -384,10 +378,7 @@ test('字节截断使用增量解码，不产生 U+FFFD，并披露 truncated', 
   }
 })
 
-// ── createHttpRequester 直调：multipart 与逐请求上限（`ocr` 用到的两条分支）──────────
-//
-// 这一层此前只被 `fetch()` 与九个来源**间接**覆盖，而那两类调用都不传 `FormData`、也不覆盖
-// 上限。分支坏了只有 `ocr` 的上传/取回会坏，网页链路全绿——正是 §9.7 说的"只测接好的那个入口"。
+// Call createHttpRequester directly so multipart and per-request limits are not only indirectly covered (§9.7).
 
 function makeRequester(overrides = {}) {
   return createHttpRequester({
@@ -520,7 +511,7 @@ test('调用方 abort 与内部超时区分错误码', async () => {
 test('safeUrl：只有能安全展示给用户的 http(s) 链接才留下', () => {
   assert.equal(safeUrl('https://static.sse.com.cn/disclosure/a.pdf?id=1'), 'https://static.sse.com.cn/disclosure/a.pdf?id=1')
   assert.equal(safeUrl('http://a.example/x'), 'http://a.example/x')
-  // 不可见字符会改变链接的显示文字与真实目标之间的关系：先剥再判。
+  // Strip invisibles before validating a link: display text and target can otherwise diverge.
   assert.equal(safeUrl('https://a.example/x\u200By'), 'https://a.example/x\u200By'.replace(/\u200B/u, ''))
   for (const bad of [
     'javascript:alert(1)',

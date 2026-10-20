@@ -1,28 +1,14 @@
 /**
- * `@v587d/watchlist` 的 host half。
- *
- * 用户自选股是**宿主级（跨 workspace）的用户侧资产**：清单与报价快照住在官方
- * `storage-domain` 域 `capital_watchlist`（`~/.dsh/storages/capital_watchlist.json`），
- * 浏览器半边经 `/capital-watchlist/*` 读写。出网只由用户动作触发（开面板一次 + 手动
- * 刷新按钮），没有轮询、没有定时器、没有自动重试。
- *
- * 三条纪律在这里落地：
- *  - ⛔ 认证围栏与 `/capital-charts` 同一写法（`connection.requestRejection`）——
- *    不接就是"任何本机进程凭路径即可读写用户的自选股"。
- *  - 出网复用 `lib/sources/fuyao-core.js` 与 `lib/sources/tencent-public-core.js`（**同一份实现**，
- *    AGENTS.md §9.7）；key 引用名从 `capital-config` 卡片读，不硬编码 `FUYAO_API_KEY`。
- *    两路上游按**行类**分工：A 股族走 Fuyao（要密钥），港美股走腾讯公开端点（不要密钥）——
- *    所以一路上游失败只降它自己那一路，`credential_missing` 的射程从"整块面板"缩到"A 股那一路"。
- *  - 报价按 `asset_type` 分流；ETF 上游只接受单只（实测 `code=1002`），所以逐只扇出，规模由清单
- *    上限（30）钉住、由 `REFRESH_CONCURRENCY` 收敛成约 8 波，总预算随条数走。港美股每个市场
- *    一次批量（≤50），比 A 股 ETF 逐只便宜。
- *  - 清单的读-改-写在**进程内串行**（`serialize`）：出网不进这一道，跨进程只到"同一键"为止，
- *    两条边界都写在 `serialize` 的注释里，不假装我们锁住了磁盘。
+ * Host half of `@v587d/watchlist`. The list is a host-level user asset in the
+ * official `storage-domain` domain `capital_watchlist`, reached by the browser
+ * half through `/capital-watchlist/*`. Network is user-triggered only (no polling,
+ * timers or retries); auth uses `connection.requestRejection`; quote fetching
+ * reuses the shared source cores rather than a second parser.
  */
 import z from 'zod'
 import { DEFAULT_FUYAO_BASE_URL, FuyaoError, fuyaoItems, fuyaoQuery, fuyaoRequest, fuyaoTimestamp } from '../lib/sources/fuyao-core.js'
-// 港美股快照、指数点位与检索复用插件侧那一份内核（同一条节流链、同一张字段位序表、同一套守卫）：
-// 复制第二份解析就是 AGENTS.md §9.7 那一族事故，`test/watchlist-quote.test.mjs` 有模块同一性探针。
+// Reuse the plugin-side offshore core (same throttle, field table and guards);
+// a second parser would repeat the §9.7 incident class.
 import {
   fetchOffshoreIndexQuotes,
   fetchOffshoreQuotes,
@@ -34,81 +20,41 @@ import { ASSET_TYPES, isHoldable, weightCeiling, otherHeldWeightPct, MAX_ROW_WEI
 export const name = 'capital-watchlist'
 
 export const ROUTE_PATH = '/capital-watchlist'
-/**
- * 域名走 storage 的 **unit name** 规则：`UNIT_NAME_RE = /^[a-z][a-z0-9_]*$/`
- * （`@deepseek-ai/dsh-storage`），**连字符会被拒**——实测报
- * `malformed-medium：invalid unit name 'capital-watchlist'`。所以路由叫
- * `/capital-watchlist`，域却叫 `capital_watchlist`，落盘
- * `~/.dsh/storages/capital_watchlist.json`。这不是风格问题，是上游硬约束。
- */
+/** Storage unit names allow only lowercase/underscore, so the hyphen belongs to the route. */
 export const DOMAIN_NAME = 'capital_watchlist'
-/**
- * 清单条目上限（2026-10-01 从 10 抬到 30：用户点名 10 条不可接受）。它同时是**一次刷新的
- * 请求个数上限**——ETF 上游只认单只，30 只全 ETF 就是 30 个请求，所以扇出必须并发（见
- * `REFRESH_CONCURRENCY`）并且总预算随条数走（见 `refreshBudgetFor`）；它也约束 `single`
- * 布局的整写体积。
- */
+/** List cap = per-refresh request cap; the ETF endpoint takes one code per call. */
 export const MAX_ITEMS = 30
-/** ETF 扇出的并发路数：30 个单只请求压成约 8 波，正常网络一次刷新几秒内落地。 */
 export const REFRESH_CONCURRENCY = 4
-/**
- * 每一路自己能拿到几条——**这就是候选池的全部**（2026-10-08 起不再做显示切片：上游没有第二页，
- * 用户点名"既然翻不了页，就直接放出来"）：`50 + 10 + 10 = 70` 是三路上游硬顶之和，天然有界，
- * 不会出现"搜个词回几千行"。
- *
- * `truncated` 那句"还有更多"**只按这一表判**：某一路回满自己那一档，就是上游那侧被砍了；
- * 我们这边一行都没藏，所以那句 tip 里也不再有"候选不止这些"（只留下"请输入更准确的…"那半句）。
- *
- * 数字的来路：Fuyao `ticker_search` 的 `limit` 官方取值 1~50（默认 10），这里取到**官方上限**；
- * smartbox 实测**硬顶 10 条**（`n=` / `count=` / `size=` / `limit=` / `max=` / `hits=` / `num=` /
- * `rows=` 八种抬条数的写法全无效，分页的 `p=` / `page=` / `offset=` / `start=` / `from=` / `pn=` /
- * `o=` 七种回包与基线**逐字节相同**；2026-10-07 与 10-08 两轮实测），多要也不会多给。
- */
+/** Upstream hard caps per branch: A-share 50, HK 10, US 10; the pool is bounded at 70. */
 export const SEARCH_BRANCH_LIMITS = { 'a-share': 50, hk: 10, us: 10 }
-/** A 股那一路的搜索白名单（Fuyao 与报价端点双端都有可靠支撑）；场外基金 / 北交所不进候选。
- * 港美股那两路各有自己的白名单（`SMARTBOX_STOCK_TYPES` + `SMARTBOX_INDEX_TYPE`），互不通用。 */
+/** A-share search whitelist; HK/US branches use their own smartbox type whitelists. */
 export const SEARCH_ASSET_TYPES = 'a-share,a-share-index,fund-etf'
-// `ASSET_TYPES`（域里允许的类型）、"哪些类型可以是一个仓位"与"占比合计封顶多少"都住在
-// `./holding-rules.js` **一份**里：浏览器半边（`client.src.cjs`）也引它，菜单画不画那一行、
-// `+` 什么时候置灰，与这里收不收这一格不可能各说一套。
-/**
- * `exchange` 这一格存的是**市场**而不是交易所：A 股沿用 `SH`/`SZ`，港美股落 `HK`/`US`。
- * 具体交易所（美股的 `OQ` / `N` / `AM` / 粉单 `PS`）留在 canonical 代码里（`AAPL.OQ`）——
- * 这两个维度在三个市场里不是同一件事（港股没有交易所分裂、美股的点是级别码还是交易所在
- * 字面上分不开），塞进同一格就会有一格在说谎。
- */
+// Holdability and weight ceiling live only in `./holding-rules.js`, shared with the browser half.
+/** `exchange` stores the market; US venue suffixes stay inside the canonical code. */
 const EXCHANGES = ['SH', 'SZ', 'HK', 'US']
 const SEARCH_TIMEOUT_MS = 15_000
-/**
- * smartbox 可用的市场段：只能是单值。实测 `t=hk,us` 这种列表形态回 `N` 哨兵——与"查无此票"
- * 同一个回文，所以段值必须是这里的常量，不能让一个拼错的值伪装成"没有匹配的标的"。
- */
+/** smartbox market segment is single-valued; a list form returns the `N` sentinel. */
 const SMARTBOX_MARKETS = ['hk', 'us']
-/** smartbox 的类型段白名单：`GP` 个股、`GP-FUND` 基金类（港美股 ETF 都落在这两档）、`ZS` 指数。 */
+/** smartbox type whitelist: `GP` stock, `GP-FUND` fund/ETF, `ZS` index. */
 const SMARTBOX_STOCK_TYPES = ['GP', 'GP-FUND']
 const SMARTBOX_INDEX_TYPE = 'ZS'
-/** 指数码与美股身份码的形状判据：与内核 `normalizeOffshoreIndexCode` / `parseUsQuoteRows` 的守卫同一条
- * （尾段同样排除我们自己占用的四个市场标记，见下面 `KEY_FORMS` 里那条注释）。 */
+/** Same shape guards as the core; the US suffix excludes our four market markers. */
 const SMARTBOX_INDEX_CODE = /^[A-Z][A-Z0-9.]{1,9}$/u
 const SMARTBOX_US_IDENTITY = /^[A-Z][A-Z.]{0,9}\.(?!SH$|SZ$|HK$|US$)[A-Z]{1,3}$/u
 /**
- * 一次刷新的总预算：**随清单条数走**——`20s + 2.5s × 条数`，下界 45 秒、上界 90 秒。
- * 下界保住 10 条这一档与 2.5.2 的行为完全一致（20 + 2.5×10 = 45），抬到 30 条时不必把小清单
- * 一起拖长。预算在**每个工作线程领下一组之前**检查，所以真实上界是 `budget + 一次请求的超时`
- * （一次超时 = `SEARCH_TIMEOUT_MS`）；被预算切掉的行如实记 `refresh_timeout`——它们这次没被问过，
- * 不是"这个标的没有报价"。最坏情形（每只都撞超时）由并发路数收敛：30 只 ETF ≈ 8 波。
+ * Refresh budget `20s + 2.5s × items`, 45–90s; checked before claiming each group,
+ * so the real bound is budget + one timeout. Cut rows report `refresh_timeout`.
  */
 const REFRESH_BUDGET_BASE_MS = 20_000
 const REFRESH_BUDGET_PER_ITEM_MS = 2_500
 const REFRESH_BUDGET_FLOOR_MS = 45_000
 const REFRESH_BUDGET_CEIL_MS = 90_000
-/** 一次刷新的总预算：`options.refreshBudgetMs` 给了就用给的，没给按这次要问的条数算。 */
 export function refreshBudgetFor(count) {
   return Math.min(REFRESH_BUDGET_CEIL_MS, Math.max(REFRESH_BUDGET_FLOOR_MS, REFRESH_BUDGET_BASE_MS + REFRESH_BUDGET_PER_ITEM_MS * count))
 }
 const MAX_BODY_BYTES = 65_536
 const MAX_QUERY_LENGTH = 64
-/** 与 `capital-config` 卡片同一条目 id：0.1.7 起 settings 命名空间恒等于 profile 条目 id。 */
+/** Same entry id as the `capital-config` card (settings namespace = entry id). */
 const CAPITAL_CONFIG_ENTRY_ID = 'capital-config'
 const DEFAULT_CREDENTIAL_REF = 'FUYAO_API_KEY'
 
@@ -120,8 +66,8 @@ const ENDPOINTS = {
 }
 
 /**
- * A 股那三档报价模板（**一字未动**地沿用 2.6 的行为：同一端点、同一批 / 逐只形状、同一套参数白名单）。
- * `currency` 这一格是全仓唯一写 `CNY` 的地方，指数档故意不写（点位无量纲，R9）。
+ * A-share quote templates: unchanged endpoint shapes and whitelist. `currency`
+ * is written only here (`CNY`), never for indices (points are unitless).
  */
 const FUYAO_TEMPLATES = [
   ['a-share', { path: ENDPOINTS.stock, allowed: ['thscodes'], batch: true, scope: 'a-share', currency: 'CNY' }],
@@ -129,11 +75,7 @@ const FUYAO_TEMPLATES = [
   ['fund-etf', { path: ENDPOINTS.fund, allowed: ['thscode'], batch: false, scope: 'a-share', currency: 'CNY' }],
 ]
 
-/**
- * 港美股四档的规格：一个市场一族行类 = 一次批量（清单上限 30，实测的 ≤50 之内用不到分片）。
- * `index` 决定走内核哪一个取数编排（两市的字段位序表都在内核里，面板不抄第二份）；
- * `withCurrency` 只在个股档为真——指数档即便上游在同一列塞了 `HKD` / `USD` 也不收（§3.5）。
- */
+/** One market family = one batch; currency only for stocks, never indices. */
 const OFFSHORE_SPECS = [
   { assetType: 'hk-stock', market: 'hk', index: false, withCurrency: true, scope: 'hk' },
   { assetType: 'hk-index', market: 'hk', index: true, withCurrency: false, scope: 'hk' },
@@ -142,14 +84,8 @@ const OFFSHORE_SPECS = [
 ]
 
 /**
- * 一组港美股代码 → 内核的取数入参。
- *
- * canonical 键**不能**直接当请求写法：美股的键是上游回显的带后缀身份（`AAPL.OQ`），而快照只认
- * 不带后缀的那个写法（实测 `usAAPL.OQ` 整行不回、`usAAPL` 回）。这里的剥法与内核参数层的
- * `normalizeUsCode` **不是同一条规则**，也不能是同一条：参数层要在"级别码"（BRK.B）与
- * "交易所码"（BABA.N）之间猜，所以单字母尾段必须留着；而面板存的就是回显身份，最后一个点号
- * 之后那一段**已知**是交易所码，剥掉即可，不用猜、也不用多一轮请求。
- * 剥完仍不认识的那几只由内核的三轮写法回退保兜（`BRK.B` → 没回行再退 `BRK`）。
+ * Canonical US keys are echoed identities (`AAPL.OQ`) but snapshots want `AAPL`;
+ * here the trailing segment is known to be the venue, so strip it without guessing.
  */
 function offshoreGroup(spec, keys) {
   const codeByKey = new Map()
@@ -158,8 +94,7 @@ function offshoreGroup(spec, keys) {
     const stem = stemOf(thscode)
     const code = spec.market === 'us' && !spec.index ? stem.replace(/\.[A-Z]{2,3}$/u, '') : stem
     if (!/^(?:\d{5}|[A-Z][A-Z0-9.]{1,9})$/u.test(code)) {
-      // 指不到一个可请求的写法：这一条不进组、照实记 `quote_unavailable`，绝不拿半截代码去问
-      // （键形状本该挡住这种行，走到这里说明磁盘上的键与形状表已经不对账了）。
+      // Not requestable: record `quote_unavailable`, never ask with a truncated code.
       failures.push({ thscode, code: 'quote_unavailable' })
       continue
     }
@@ -169,7 +104,7 @@ function offshoreGroup(spec, keys) {
   return { group: { ...spec, kind: 'tencent', keys: [...codeByKey.keys()], codes: [...new Set(codeByKey.values())] }, failures }
 }
 
-/** 回包第 2 位（上游自己的身份）→ 本仓的 canonical 键。港股两个市场标记本来就是我们加的。 */
+/** Upstream identity → canonical key; the `.HK` / `.US` markers are ours. */
 function offshoreKeyOf(row, group) {
   const code = typeof row.code === 'string' ? row.code.trim().toUpperCase() : ''
   if (code.length === 0) return ''
@@ -177,14 +112,7 @@ function offshoreKeyOf(row, group) {
   return group.index ? `${code}.US` : code
 }
 
-/**
- * 播种条目：三个市场各给一根"今天有没有开盘"的标尺。A 股那条走 Fuyao 的 `index` 端点，
- * 恒指走腾讯港股指数窄表，纳指/标普走腾讯美股指数窄表——四条均已用 2026-10-07 真报文验证
- * 有值（`usINX` 是标普在腾讯的写法，`SPX` / `usSSPX` 不回指数，见设计文档 P18 / P19）。
- * 2026-10-07 由用户定为这四条，替换掉原先的深证成指 / 创业板指 / 沪深300。
- * ⚠ 只对新域生效：老用户磁盘上仍是旧四条，**不补种、不替换**（清单是用户资产，
- * 我们没有任何依据替他改掉三行）。
- */
+/** Seed one index per market, fresh domains only: existing lists are never migrated. */
 export const SEED_ITEMS = [
   { thscode: '000001.SH', ticker: '000001', name: '上证指数', exchange: 'SH', asset_type: 'a-share-index' },
   { thscode: 'HSI.HK', ticker: 'HSI', name: '恒生指数', exchange: 'HK', asset_type: 'hk-index' },
@@ -193,36 +121,24 @@ export const SEED_ITEMS = [
 ]
 
 /**
- * 五种 canonical 键形状（设计文档 §3.4）。**判序有语义**，不是写法偏好：
- * `HSI.HK` 若先落进字母分支、`.US` 若排在个股分支之后，都会得到一行"能加进清单、永远取不到数"
- * 的条目（更糟的是取到**别人的**数，见 P19 的 `SSPX.AM`——它的 stem 与那只 ETF 完全相等）。
- * 所以这一张表就是 `keyFormOf()` 的遍历顺序，顺序即规则；改顺序必须先回答"哪两串会互相吃掉"。
- * 第一档 `a-share` 是唯一一"形"对多"类"（个股 / 指数 / ETF 同形），故 `assetTypes` 是集合：
- * 这一族的 `asset_type` 只能来自搜索侧给的值，形状只负责否证。
+ * Canonical key shapes. Order is semantics: a `.HK` or `.US` key must not fall
+ * into an earlier branch, or it can be added and never quoted. The A-share shape
+ * covers several asset types; types come from search.
  */
 const KEY_FORMS = [
   { form: 'a-share', regex: /^\d{6}\.(SH|SZ)$/u, assetTypes: ['a-share', 'a-share-index', 'fund-etf'] },
   { form: 'hk-stock', regex: /^\d{5}\.HK$/u, assetTypes: ['hk-stock'] },
   { form: 'hk-index', regex: /^[A-Z][A-Z.]{0,9}\.HK$/u, assetTypes: ['hk-index'] },
   { form: 'us-index', regex: /^[A-Z]{2,8}\.US$/u, assetTypes: ['us-index'] },
-  // 尾段排除 `SH` / `SZ` / `HK` / `US` 这四个**我们自己占用的市场标记**：不放行的话
-  // `ABCDEF.SH` 会同时命中"美股身份"那一档（`[A-Z]{1,3}` 装得下任何两个字母），
-  // 于是一个不存在的键能进清单、还能去敲腾讯的门。交易所码本身的取值域不归我们发明
-  // （实测有 OQ / N / AM / PS，内核 `parseUsQuoteRows` 因此只约束长度），这一条只收自己的账。
+  // Exclude our own market markers, or `ABCDEF.SH` could pass as a US identity.
   { form: 'us-stock', regex: /^[A-Z][A-Z.]{0,9}\.(?!SH$|SZ$|HK$|US$)[A-Z]{1,3}$/u, assetTypes: ['us-stock'] },
 ]
-/** 命中即返回；不返回"最像的那档"——判不中就是不是我们认得的键。 */
+/** Returns the first match, never the closest: unrecognized means unrecognized. */
 export function keyFormOf(thscode) {
   if (typeof thscode !== 'string') return null
   return KEY_FORMS.find((entry) => entry.regex.test(thscode)) ?? null
 }
 const KEY_REGEX = /^(?:\d{6}\.(?:SH|SZ)|\d{5}\.HK|[A-Z][A-Z.]{0,9}\.HK|[A-Z]{2,8}\.US|[A-Z][A-Z.]{0,9}\.(?!SH$|SZ$|HK$|US$)[A-Z]{1,3})$/u
-/**
- * `not_found` 那句话里要说清"这一档支持什么"（市场名从键的形状读，不写死"沪深 A 股 / 指数 /
- * 场内 ETF"——那句在港美股进来之后会指错路）。指数两档要把"写法不许猜"写进用户看得见的句子：
- * 实测 `usSPX` / `usNDQ` / `usSSPX` 都不回指数（最后那个回了一只真 ETF 且不报错），
- * 只有搜索回来的那一串才被腾讯认。
- */
 const FORM_SCOPE_TEXT = {
   'a-share': '沪深 A 股 / 指数 / 场内 ETF',
   'hk-stock': '港股现货',
@@ -233,28 +149,13 @@ const FORM_SCOPE_TEXT = {
 
 const quoteSchema = z.object({
   price: z.number(),
-  /**
-   * 涨跌可以是**没有**：上游用 `null` 表示"这个数没有"（停牌、未开盘），此时最新价仍然有值。
-   * 早先这里写死 `z.number()`，于是 `quoteOf` 拿 `pct ?? 0` 兜底——停牌标的被画成「+0.00%」，
-   * 一次刷新把上一次真实的涨跌顶掉、页脚照报"刷新于此刻"、还不记任何失败。金融应用里
-   * "没有这个数"和"这个数是零"必须分开；客户端把 null 画成破折号并降到陈旧那一档的灰。
-   */
+  /** Null means "no number" (halted, not open), while the price still exists; never coerce to 0. */
   change_pct: z.number().nullable(),
   captured_at: z.number().int(),
   source_ts: z.number().int().nullable(),
-  /**
-   * 币种**只跟着钱走**：个股与 ETF 每份回包都带（港美股从上游那一列读、A 股由本文件唯一一处写
-   * `CNY`），指数族一律不落——点位是无量纲的数，腾讯确实在指数行的同一位塞了 `HKD` / `USD`，
-   * 画上去等于替上游说了一句它没说的话（设计文档 §3.5 / R9）。
-   * 取值域**不是闭集**：这个列归上游所有（今天已看见 `HKD` / `USD` / `CNY` 三种，`-R` 柜台就是
-   * CNY 报价的港股），我们不拥有它，所以只限形状不限内容，面板对不认识的币种照字面画。
-   */
+  /** Currency follows money: stocks/ETFs only; indices are unitless. Upstream owns the value domain. */
   currency: z.string().min(1).max(8).optional(),
-  /**
-   * 交易所**当地时间**的原串（`2026-10-05 16:08:09`，HKT / 美东），只有港美股那一路有；
-   * `source_ts`（epoch）只由 Fuyao 信封填。两者不互相伪造、也不互相换算——换算要用到我们没有的
-   * 偏移表与夏令时口径（§7-N4）。页脚那句"刷新于此刻"讲的仍是我们的取数时刻（`captured_at`）。
-   */
+  /** Exchange-local wall time, offshore only; never fabricated from `source_ts` (no DST table). */
   source_time: z.string().max(32).nullable().optional(),
 })
 
@@ -267,26 +168,11 @@ const itemSchema = z.object({
   added_at: z.number().int(),
   source: z.enum(['seed', 'user']),
   quote: quoteSchema.nullable(),
-  /**
-   * 置顶时刻（用户动作写入；缺省 = 未置顶，读法见 `rowsOf`）。
-   * **可选是刻意的**：磁盘上已有的 v1 记录没有这一格，写成必填会把整份清单判成
-   * `invalid-record`（域在加载边界逐条校验，读一次就 `store_unavailable`），而新写的记录
-   * 永远带它——两个方向的兼容因此都不需要迁移、也不需要抬 domain version。
-   */
+  /** Optional on purpose: v1 records lack it; required would invalidate the whole list. */
   pinned_at: z.number().int().optional(),
   /**
-   * 用户**自报**的持仓标记（缺这一格 = 不是持仓，只是关注）。
-   *
-   * 三态两轴，不许糊成一态：缺 `holding` = 未持仓；`weight_pct === null` = 标了持仓但比例没填；
-   * `0` = 用户真填了 0——与上面 `change_pct` 同一条口径，"没有这个数"永远不等于"这个数是零"。
-   * 所以这一格**外部可选、内部 nullable**：外面写成 `.nullable()` 会让"未持仓"与"持仓没填比例"
-   * 共用一种写法，里面写 `.default(null)` 会把磁盘上手改出来的缺字段读成一份 0% 仓位。
-   * 可选同样是为了不迁移、不抬 domain version（见上面 `pinned_at` 那一段）。
-   *
-   * `marked_at` 记的是**标记时刻**，不是"持仓起始日"：比例归用户所有、没有到期日，但"这句话是
-   * 哪天说的"必须能自证——`get_watchlist` 把它交给主 Agent 判断要不要向用户复核。合计是否正好
-   * 100、分母含不含现金，仍不由我们校验（那本账只有用户自己知道怎么记的）；我们只挡一个**上限**：
-   * 只做多、不算 put，全组合加起来不许超过 120%（判据在 `./holding-rules.js`，面板与宿主共用）。
+   * User-reported holding: absent = not held, `null` = held without weight, `0` =
+   * a real zero. `marked_at` is when the claim was last made, not a start date.
    */
   holding: z.object({
     weight_pct: z.number().min(0).max(100).nullable(),
@@ -294,25 +180,20 @@ const itemSchema = z.object({
   }).optional(),
 })
 
-/**
- * 域声明。`defineDomain` 只是同一个 spec 的恒等校验器，host 半边因此不 import dsh 的
- * 运行时包、只 import `zod`——与 `capital-config` 只 import schemastery 是同一条纪律
- * （少一个上游耦合面；域名与版本号由下面的常量与 schema 自己保证）。
- */
+/** `defineDomain` only validates this spec; keeping imports to zod avoids dsh runtime coupling. */
 export const domainSpec = {
   name: DOMAIN_NAME,
   version: 1,
   layout: 'single',
   global: {
     schema: z.object({ seeded_at: z.number().int(), schema: z.literal(1) }),
-    // `seeded_at: 0` = 从未播种。用户删空后不重建，靠的就是这个非 0 的戳。
+    // `seeded_at: 0` = never seeded; a non-zero stamp prevents reseeding after deletion.
     initial: { seeded_at: 0, schema: 1 },
   },
   tables: { items: { valueSchema: itemSchema } },
 }
 
-/** 规范化 canonical 键：trim + 大写，只接受 §3.4 的五种形状。裸代码一律拒绝——`AAPL` 少了交易所段就
- * 没法和回显身份核对，`000001` 到底是指数还是平安银行由上游裁决、不由我们猜。 */
+/** Trim + uppercase; only the five shapes above. Bare codes are rejected: the market is not ours to guess. */
 export function normalizeThscode(value) {
   if (typeof value !== 'string') return undefined
   const cleaned = value.trim().toUpperCase()
@@ -320,27 +201,23 @@ export function normalizeThscode(value) {
 }
 
 /**
- * 取"最后一个点号之前"那一段。**⛔ 不许用 `split('.')[0]` / `split('.')[1]`**：
- * `BRK.B.N` 会拆成 `['BRK','B','N']`——实测那是一级股票（伯克希尔 B）而不是畸形代码。
- * 这一串同时是三处共用的"检索/请求写法"：smartbox 只认它（把 canonical 键原样丢过去一律回
- * `N` 哨兵，2026-10-07 实测 `TCEHY.PS` / `00700.HK` / `HSI.HK` / `IXIC.US` 全部不回行），
- * 美指数用 `IXIC.US` → `IXIC` 也正好是腾讯认的写法（回显是 `.IXIC`，差一个前导点）。
+ * Text before the last dot; never `split('.')[0]` (`BRK.B.N` is a real identity).
+ * smartbox accepts this stem, not the canonical key.
  */
 export function stemOf(thscode) {
   const dot = thscode.lastIndexOf('.')
   return dot > 0 ? thscode.slice(0, dot) : thscode
 }
 
-/** 键所属市场（`SH` / `SZ` / `HK` / `US`），只从形状的**尾段**取，不从中间的点号取。 */
+/** Market is the suffix only, never a middle dot segment. */
 function marketOfKey(thscode) {
   const dot = thscode.lastIndexOf('.')
   return dot > 0 ? thscode.slice(dot + 1) : ''
 }
 
 /**
- * 这一行归哪一路报价：`'fuyao'` 或 `'tencent'`（后者带市场）。判据是**键的形状**而不是 `asset_type`
- * 那一格——形状由 `KEY_FORMS` 的判序给出，与加进来时用的是同一份判据，磁盘上被人手改过的
- * `asset_type` 不能让一行港股悄悄流进 Fuyao 端点（那边根本不认它）。
+ * Route by key shape, not `asset_type`: the shape gate is the same one used when
+ * adding, so a hand-edited type cannot send HK rows to the Fuyao endpoints.
  */
 function quoteRoute(item) {
   const entry = keyFormOf(item.thscode)
@@ -349,14 +226,8 @@ function quoteRoute(item) {
 }
 
 /**
- * 上游错误 → 本路由自己的错误码。`perItem` 决定"这个标的取不到"还是"这一路不通"：
- * 逐条失败绝不能升格成整批失败，整批失败也绝不能伪装成某一条的缺口。
- *
- * `source` 决定**哪一家**不通：两路的处置动作完全不同——Fuyao 那一路要去看密钥卡片，
- * 腾讯那一路无密钥可查（公开端点，只可能是上游或网络）。混成一条就是叫用户去配一个
- * 本来不需要的 key。腾讯侧的判定读内核挂在 Error 上的 `code`（`tencent_*`）：这一家
- * 没有"凭据"与"限流"之外的可处置区分，所以报文畸形与传输失败在**批级**都说成
- * `tencent_unavailable`，不假装我们能指出是哪一只。
+ * Upstream error → local code. `perItem` separates a missing symbol from an
+ * unreachable branch; `source` separates Fuyao (key card) from Tencent (public).
  */
 export function watchlistErrorCode(error, { perItem = false, source = 'fuyao' } = {}) {
   if (source === 'tencent') return perItem ? 'quote_unavailable' : (error?.code === 'tencent_rate_limit' ? 'rate_limited' : 'tencent_unavailable')
@@ -376,12 +247,7 @@ export function watchlistErrorCode(error, { perItem = false, source = 'fuyao' } 
   }
 }
 
-/**
- * 清单读法（KvTable 只有 `entries()`，没有 `values()`）+ 置顶排序，**只有这一份实现**：
- * 带 `pinned_at` 的排前面（后置顶的在前），其余保持表里的插入顺序（用原始下标兜底，
- * 比较稳定）。持久化文件里的键序**不动**——顺序是"读"出来的，不是"写"进去的：
- * 官方单文件后端是 Map，`put` 已有键保留原位置，靠删了重插来改顺序会把整份 JSON 写 N 遍。
- */
+/** Pinned rows first (newest pin first), others in insertion order; persistence order untouched. */
 function rowsOf(table) {
   return [...table.entries()]
     .map(([, value], index) => ({ value, index }))
@@ -396,33 +262,28 @@ function rowsOf(table) {
     .map((entry) => entry.value)
 }
 
-/** Fuyao 候选行 → 本面板的候选形状。 */
+/** Upstream candidate row → panel shape. */
 function candidateOf(row) {
   const thscode = typeof row.thscode === 'string' ? row.thscode : ''
   return {
     thscode,
     ticker: typeof row.ticker === 'string' && row.ticker.length > 0 ? row.ticker : stemOf(thscode),
     name: typeof row.name === 'string' && row.name.length > 0 ? row.name : thscode,
-    // ⛔ 市场优先取上游给的值（Fuyao 给 `exchange`、smartbox 给市场段），字符串推导只当兜底，
-    // 且只能取**最后一个**点号之后：`BRK.B.N` 用 `split('.')[1]` 会取出 `'B'`。
+    // Prefer the upstream market; fall back to the last suffix, never a middle segment.
     exchange: typeof row.exchange === 'string' && row.exchange.length > 0 ? row.exchange.toUpperCase() : marketOfKey(thscode),
     asset_type: typeof row.asset_type === 'string' ? row.asset_type : '',
   }
 }
 
 /**
- * smartbox 一行候选 → 本面板的候选形状；判不成立回 `undefined`（**不进候选**，不报错）。
- *
- * 两条闸门叠在一起用（设计文档 §3.6）：类型白名单收掉衍生品，键形状收掉"类型说的和形状
- * 不是一回事"的行。市场段由调用方给（`t=hk` / `t=us` 各一次请求），所以这里不再从 `row.market`
- * 猜——实测 `t=hk&q=纳指` 十条里七条是窝轮，白名单必须事后收而不是指望上游收。
- * 名称直接用上游给的（smartbox 的 `~` 第 3 位已是解过 `\uXXXX` 的正文）。
+ * smartbox row → candidate, or `undefined`: the type whitelist drops derivatives
+ * and the key shape must agree with the type.
  */
 function offshoreCandidateOf(row, market) {
   if (typeof row?.code !== 'string' || row.code.length === 0) return undefined
   if (!SMARTBOX_STOCK_TYPES.includes(row.type) && row.type !== SMARTBOX_INDEX_TYPE) return undefined
   const isIndex = row.type === SMARTBOX_INDEX_TYPE
-  // 实测美指数行给的是 `ixic`（不带上游回显时那个前导点）；两种写法都收，判形状后统一成裸码。
+  // Accept both index spellings; normalize to the bare code.
   const code = row.code.trim().toUpperCase().replace(/^\./u, '')
   const stem = isIndex
     ? (SMARTBOX_INDEX_CODE.test(code) ? code : undefined)
@@ -430,19 +291,16 @@ function offshoreCandidateOf(row, market) {
       ? fiveDigitHk(code)
       : (SMARTBOX_US_IDENTITY.test(code) ? code : undefined)
   if (stem === undefined) return undefined
-  // 美股个股的键**就是**上游回显的身份（`TCEHY.PS` / `BRK.B.N`，实测 smartbox 每行都带后缀），
-  // 不再补市场标记；其余四档都补（港股上游只回 `00700` / `HSI`，`.HK` 本来就是我们加的）。
+  // US stock keys are the echoed identity; the other forms get our market marker.
   const thscode = market === 'us' && !isIndex ? stem : `${stem}.${market === 'hk' ? 'HK' : 'US'}`
   const assetType = market === 'hk' ? (isIndex ? 'hk-index' : 'hk-stock') : isIndex ? 'us-index' : 'us-stock'
   const entry = keyFormOf(thscode)
-  // ⛔ 形状与类型必须互相认账：`ZS` 行给成个股形状（或反过来）说明这一行不是我们能表达的行类，
-  // 收进清单就是一行"加得进去、永远取不到数"的条目。宁可少一条候选。
+  // Shape and type must agree, or the row could be added but never quoted.
   if (entry === null || !entry.assetTypes.includes(assetType)) return undefined
   const name = typeof row.name === 'string' && row.name.length > 0 ? row.name : thscode
   return { thscode, ticker: stemOf(thscode), name, exchange: market === 'hk' ? 'HK' : 'US', asset_type: assetType }
 }
 
-/** 港股代码的"5 位左补零"只有一份实现（内核 `normalizeHkCode`）；判不成立回 `undefined`，不抛。 */
 function fiveDigitHk(code) {
   try {
     return normalizeHkCode(code, 'smartbox.code')
@@ -452,10 +310,8 @@ function fiveDigitHk(code) {
 }
 
 /**
- * 上游用 `null` 表示"这个数没有"（本仓 `fuyao-rest.ts` 的 `matchesField` 就是为此放行 null 的，
- * 理由是不能让一个指标缺失打挂整份数据）。这里绝不能拿 `Number()` 硬转：`Number(null)` 是 **0**，
- * 停牌 / 未开盘的标的会被写成一份"0.00 元、涨跌 0%"的新快照——顶掉上一次成功的值、页脚照报
- * "刷新于此刻"、还不记任何失败。数字字符串照收（与 `matchesField` 的 number 分支同口径）。
+ * Never `Number(null)` (0): halted symbols would be written as a real flat quote.
+ * Numeric strings are accepted like `matchesField`.
  */
 function numberValue(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : undefined
@@ -470,28 +326,19 @@ function quoteOf(row, sourceTs, capturedAt, currency) {
   const pct = numberValue(row.price_change_ratio_pct)
   const quote = {
     price,
-    // **没有涨跌就是没有**，不许补 0：`0` 在 A 股口径里是一个真值（今日平盘），把它写成
-    // 停牌 / 未开盘的标的，等于伪造一份"横盘"的新快照顶掉上一次的真涨跌，还不记任何失败。
-    // 客户端读到 null 画破折号（与"取不到报价"同一档，而不是红/绿/平三档里的平）。
+    // Missing change is missing, never 0: 0 is a real flat day for A-shares.
     change_pct: pct ?? null,
     captured_at: capturedAt,
     source_ts: typeof sourceTs === 'number' ? sourceTs : null,
   }
-  // 全仓**唯一**一处写 `CNY` 的地方：Fuyao 的快照回包里没有币种这一列，而面板要每只个股与 ETF
-  // 都说清币种（R9）。指数族不写——点位无量纲。港美股那一路的币种从回包取，见 `offshoreQuoteOf`。
+  // Fuyao snapshots carry no currency column; write `CNY` for stocks/ETFs only.
   if (currency !== undefined) quote.currency = currency
   return quote
 }
 
 /**
- * 腾讯回包一行 → 报价。三条口径与 A 股那一路不同，都在设计文档 §3.5：
- *  - **涨跌**：港股/美股停牌与半日市上游回的是 `+0.00%`（实测 `hk00465`），判据只用内核算好的
- *    `is_stale`（成交额 0 且现价等于昨收）落成 `null`，不自建"接近 0 就当没有"的猜测。
- *    指数行没有 `is_stale` 这一格（内核不给成交额），所以平盘的指数照实回 `0.00`——那是真值。
- *  - **币种**：只有个股/ETF 读 `[75]` / `[35]`（实测 `-R` 柜台那批是 `CNY`，按市场猜必错）；
- *    指数族一律不写，上游在同一位置塞了 `HKD` / `USD` 也不接（点位不是钱）。
- *  - **时刻**：`source_time` 存交易所当地原串，`source_ts`（epoch）留给 Fuyao 那一路，两边不互相
- *    伪造、不换算时区。
+ * Offshore quote: `is_stale` becomes null; currency for stocks/ETFs only;
+ * exchange-local time stays a raw string.
  */
 function offshoreQuoteOf(row, capturedAt, { withCurrency }) {
   const price = numberValue(row.price)
@@ -511,15 +358,8 @@ function offshoreQuoteOf(row, capturedAt, { withCurrency }) {
 }
 
 /**
- * 自选股服务本体：域打开、key 解析、Fuyao base URL 全部注入，于是 store / route / 出网
- * 三组断言都不必碰真实文件系统与真实网络。
- *
- * @param options.openDomain - `() => Promise<Domain>`（host 里是 `storageDomain.open`）。
- * @param options.resolveApiKey - `(ref: string) => Promise<string | undefined>`。
- * @param options.credentialRef - `() => string`，取自 `capital-config` 卡片。
- * @param options.baseUrl - Fuyao base URL；省略时用内核里的官方默认值。
- * @param options.now - 时间源（测试可注入）。
- * @param options.refreshBudgetMs - 一次刷新的总预算；省略时按这次要问的条数算（`refreshBudgetFor`）。
+ * Domain, key resolution, base URL and clock are injected, so store / route /
+ * network assertions avoid the real filesystem and network.
  */
 export function createWatchlistService(options = {}) {
   const {
@@ -533,14 +373,12 @@ export function createWatchlistService(options = {}) {
   } = options
 
   let domainPromise
-  /** 全局单闸门：开面板与手动刷新共用；后来者等同一次结果，而不是并排放第二个请求。 */
+  /** Single gate for panel open and manual refresh: later callers share the in-flight run. */
   let refreshing = null
 
   /**
-   * 域只开一次，但**开失败的痕迹不许留下**。`storageDomain` 是 `dsh-storage-domain` 在自己
-   * `inject(backendServices, …)` 的回调里才 provide 的——host 平面这一行的预热完全可能跑在它前面，
-   * 把 rejection memoize 住就等于"装配期抢跑一次，功能锁到进程结束"（AGENTS.md §9.7 ⑤ 的形状，
-   * 与 webServer 那条同一个族）。facility 的 `open()` 失败时已经 `reserved.delete`，所以重试安全。
+   * Never memoize a failed open: `storageDomain` may not be provided yet during
+   * warm-up, and caching the rejection would disable the feature for the process.
    */
   const domain = () => {
     if (domainPromise === undefined) {
@@ -555,23 +393,13 @@ export function createWatchlistService(options = {}) {
   const table = async () => (await domain()).table('items')
 
   /**
-   * 清单的**读-改-写串行队列**（进程内）。同进程的多个窗口打的是同一条路由、同一份内存域，
-   * 所以它们互相看得见；但这里原本没有互斥：`add` 的上限检查发生在最长 15 秒的上游搜索**之前**，
-   * 两个并发 `/add` 都先通过 `size >= MAX_ITEMS`、再各写一条 → 清单能写成 31 条（2.5.2 是 11 条）。
-   * 刷新写回拿批次快照整条覆写、撤销并发删除与置顶，也是同一族（下面 `doRefresh` 里逐键重读那一处）。
-   *
-   * 出网**不进**这一道：只有"读当前记录 → 改 → 落盘"这几步排队。否则一次预算 90 秒的刷新会把
-   * 用户随后的删除与置顶全堵在门外，而那正是这次审查里用户体验最差的一条。
-   *
-   * ⛔ 射程只有本进程。跨进程（桌面端 App 与本机的另一个宿主 profile）共用同一个
-   * `~/.dsh/storages/capital_watchlist.json`，官方原子写只保证文件不撕裂、不保证不丢更新；
-   * 清单必须走官方 storage-domain，本仓不许自建文件锁或文件路径，所以这里的边界是**如实收窄**
-   * 而不是解决：写回改成逐键重读之后，跨进程丢失面从"整张清单"缩到"同一只标的的报价那一格"。
+   * Read-modify-write queue, in-process only; network stays outside it. Cross-process
+   * writes are not locked, but per-key re-read on write-back limits the loss to one row.
    */
   let queue = Promise.resolve()
   function serialize(task) {
     const run = queue.then(task, task)
-    // 队列本身不能被一次失败堵住：吞掉这一环的 rejection，让后来者照常跑。
+    // Swallow this link's rejection so one failure cannot block the queue.
     queue = run.then(() => {}, () => {})
     return run
   }
@@ -596,43 +424,31 @@ export function createWatchlistService(options = {}) {
   }
 
   /**
-   * 一次输入三路并发：Fuyao `ticker_search` **一笔**（`asset_type` 白名单照旧，`limit` 取**官方上限
-   * 50**——参数面 1~50，不是我们自己放宽的）\+ smartbox 两笔（`t=hk` / `t=us`，各硬顶 10 条）。
-   * 例外在 `searchAShare`：`q` 含 ASCII 小写字母时 A 股那一路**问两笔**（原样 + 全大写），
-   * 因为上游对 `q` 是区分大小写的子串匹配——那是"三路"之外唯一会多出一笔的地方。
-   * 为什么 smartbox 不共用一次 `t=all`：实测 `t=all&q=富通`
-   * 回 9 条 A 股 + 1 条 hk + **0 条 us**，`q=00700` 只回 1 条 hk——共用一次会让"美股这一档根本没进
-   * 候选"从偶发变成常态，那是"入口统一"最直接的反面（设计文档 P17 / §3.2）。
-   * 每一路各自失败只进 `partial`，**只有三路全挂**才整块失败：没配 Fuyao 密钥时港美股照常可加
-   * 可刷（R12），`credential_missing` 的射程因此从整块面板缩到 A 股那一路。
+   * Three branches in parallel: one Fuyao `ticker_search` plus smartbox `t=hk`
+   * and `t=us` (they must not share `t=all`). Each branch fails independently;
+   * only all three failing fails the panel, so HK/US work without a Fuyao key.
    */
   async function search(query) {
     const q = typeof query === 'string' ? query.trim() : ''
     if (q.length === 0 || q.length > MAX_QUERY_LENGTH) {
       return { ok: false, code: 'invalid_query', message: '输入为空或过长' }
     }
-    // 先碰存储再出网：域打不开时 `/search` 不该白烧一次上游配额（候选也根本写不进清单）。
-    // 存储失败因此从这一路也走响亮那条（路由层的逐次 catch → store_unavailable），不靠预热闩住。
+    // Touch storage before the network so an unavailable domain does not burn quota.
     const items = await table()
-    // `SMARTBOX_MARKETS` 是常量表，`t` 的值没有第二条来路：实测上游对不认识的 `t` 回的是 `N`
-    // 哨兵——与"查无此票"同一个回文，拼错一次就是静默少一路（§3.6）。
+    // `t` has one source: an unknown value returns the `N` sentinel, i.e. a silent empty branch.
     const branches = await Promise.all([searchAShare(q), ...SMARTBOX_MARKETS.map((market) => searchOffshore(q, market))])
     const failures = branches.filter((branch) => branch.ok !== true)
     if (failures.length === branches.length) {
-      // 全挂才占用居中位。代码挑"用户还能动手"的那一路：密钥 → 限流 → 服务不通。
+      // Only all-branch failure takes center stage; prefer the code the user can act on.
       const worst = worstProblem(failures)
       return { ok: false, code: worst.code, message: messageFor(worst.code, 'all'), scope: 'all' }
     }
     const merged = mergeCandidates(branches.filter((branch) => branch.ok === true).flatMap((branch) => branch.rows), q)
     const result = {
       ok: true,
-      // **一行不落地全画出来**（2026-10-08 用户点名"既然没有翻页就直接放出来"）：候选池的上界
-      // 由三路上游各自的硬顶定死（A 股 50 + 港 10 + 美 10 = 70），不需要再切一刀给"一屏"。
+      // No display slicing: the pool is bounded by upstream caps (50 + 10 + 10).
       items: merged.map((row) => ({ ...row, in_list: items.get(row.thscode) !== undefined })),
-      // "还有更多"只剩一种 truthful 形态：**某一路回满了它自己那一档**（上游那侧被砍）。
-      // 合并后的总条数不再参与判断——我们一行没藏，条数多不等于还有没显示的；
-      // "回满自己那档"由每一路在**它自己的那一笔**上算好带回来（A 股可能问了两笔，两笔各 50
-      // 合起来 100 时我们只留 50，那也算被砍，`saturated` 里已经记了）。
+      // "More" is truthful only when a branch filled its own cap.
       truncated: branches.some((branch) => branch.ok === true && branch.saturated === true),
     }
     if (failures.length > 0) result.partial = failures.map((failure) => ({ market: failure.market, code: failure.code }))
@@ -640,23 +456,8 @@ export function createWatchlistService(options = {}) {
   }
 
   /**
-   * A 股那一路。⛔ 不许拿港美股那两条白名单顺手再过滤一遍：这边已有 `asset_type` + 键形状两道闸。
-   *
-   * **大小写要问两遍**（2026-10-08 真上游实测）：Fuyao 的 `q` 是区分大小写的子串匹配——
-   * `q=tcl` 0 条而 `q=TCL` 3 条、`q=etf` 0 条而 `q=ETF` 50 条、`q=a50` 0 条而 `q=A50` 50 条、
-   * `q=600519.sh` 0 条而 `q=600519.SH` 1 条。而全量 8708 条 A 股 / 指数 / ETF 名称里含**小写**
-   * 拉丁字母的只有 8 条、且全是 `.TI` 概念指数（下一行就过滤掉），含大写的 2092 条——
-   * 所以大写那一支是现实的主力，原样那一支是"不丢小写专有命中"的保险：`q` 与 `q.toUpperCase()`
-   * 不同时**两笔并发**，按 canonical 键去重、原样那份排前面（保持"上游顺序"的既有口径）；
-   * 两者相同（数字 / 中文 / 已经全大写）就只发一笔，不白烧一次配额。
-   *
-   * `saturated` 讲的是"**这一路被砍在自己那一档**"，按笔 + 按并集一起判：某一笔回满 50 是上游
-   * 砍的；两笔并起来超过 50 时我们自己也会砍一刀（见下），那同样是"还有没显示的"。反过来说，
-   * 两笔各 15 条、并起来 30 条并不说明上游还有货——按合并后的条数判就会凭空给一句假 tip。
-   *
-   * 半边失败：**拿到候选就算这一路答上了**——`partial` 那行的文案是"A股搜索不可用"，
-   * 与同屏的 A 股候选并排是自相矛盾；一支候选都没拿到时才走整路失败，绝不把"这一支没答上来"
-   * 说成"查无此票"（大写那支挂掉时，我们并不知道该词在 A 股到底有没有票）。
+   * A-share branch. Fuyao `q` is case-sensitive, so query raw + uppercase when they
+   * differ, raw first; rows count as answered once any candidate is found.
    */
   async function searchAShare(q) {
     const variants = [q, q.toUpperCase()].filter((value, index, all) => all.indexOf(value) === index)
@@ -664,8 +465,7 @@ export function createWatchlistService(options = {}) {
     const outcomes = await Promise.all(variants.map(async (variant) => {
       try {
         const envelope = await callFuyao(ENDPOINTS.search, { q: variant, asset_type: SEARCH_ASSET_TYPES, limit }, ['q', 'asset_type', 'limit'])
-        // 后缀也要收口：实测 `q=宁德时代` 会带回 `885789.TI 宁德时代概念`（同花顺指数），
-        // 它既不在本版报价范围、也过不了域 schema——不挡掉就是"添加"那一下 500。
+        // Drop out-of-scope suffixes (e.g. `.TI` concept indices): the domain schema rejects them.
         const rows = fuyaoItems(envelope).map(candidateOf).filter((row) => ASSET_TYPES.includes(row.asset_type) && normalizeThscode(row.thscode) !== undefined)
         return { rows, saturated: rows.length >= limit, code: undefined }
       } catch (error) {
@@ -683,14 +483,12 @@ export function createWatchlistService(options = {}) {
     }
     const codes = outcomes.filter((outcome) => outcome.code !== undefined).map((outcome) => outcome.code)
     if (union.length === 0 && codes.length > 0) return { ok: false, market: 'a-share', code: worstErrorCode(codes) }
-    // 并集也只留这一档的量：两笔各 50、几乎不重叠时 A 股这一路最多画 50 行，候选池上界因此是
-    // 50 + 10 + 10 = 70（`SEARCH_BRANCH_LIMITS` 那条注释里的算法）。自己砍掉的那几行同样算"被砍"，
-    // 否则 truncated 会在还有没显示的行时说"就这些"。
+    // Union also caps at this branch's limit; our own slice still counts as saturated.
     const saturated = outcomes.some((outcome) => outcome.saturated) || union.length > limit
     return { ok: true, market: 'a-share', rows: union.slice(0, limit), saturated }
   }
 
-  /** smartbox 那两路之一：类型白名单 + 键形状一起收，衍生品（窝轮 `QZ`）不进候选。 */
+  /** smartbox branch: type whitelist plus key shape; derivatives never reach candidates. */
   async function searchOffshore(q, market) {
     try {
       const found = await fetchSmartbox(q, market, AbortSignal.timeout(timeoutMs))
@@ -701,11 +499,7 @@ export function createWatchlistService(options = {}) {
     }
   }
 
-  /**
-   * 合并三路：按 canonical 键去重（同一只票从任一路加过，另一路那条也标"已添加"），
-   * **输入完全等于代码的行排最前**（比对到 stem：`00700` 要认 `00700.HK`、`TCEHY` 要认 `TCEHY.PS`），
-   * 其余保持上游顺序（A 股 → 港 → 美）。`Array.prototype.sort` 是稳定排序，同分不换序。
-   */
+  /** Dedupe by key; rows equal to the query (by stem) first, then stable upstream order. */
   function mergeCandidates(rows, q) {
     const seen = new Map()
     for (const row of rows) {
@@ -720,7 +514,7 @@ export function createWatchlistService(options = {}) {
     return stemOf(row.thscode) === needle ? 1 : 0
   }
 
-  /** 三路全挂时挑一句最能指导动作的错误码。 */
+  /** Pick the most actionable code when every branch failed. */
   function worstErrorCode(codes) {
     for (const candidate of ['credential_missing', 'rate_limited', 'invalid_query', 'fuyao_unavailable', 'tencent_unavailable']) {
       if (codes.includes(candidate)) return candidate
@@ -731,19 +525,16 @@ export function createWatchlistService(options = {}) {
   async function list() {
     await ensureSeeded()
     const opened = await domain()
-    // `limit` 跟着回包走（与 `add` 的 `list_full` 同一口径）：上限这个数字归本包所有，
-    // 面板那句话和 `get_watchlist` 那句都不许自己抄一份。
+    // Limit travels in the response so client copy never duplicates the number.
     return { ok: true, items: rowsOf(opened.table('items')), seeded_at: opened.global.get().seeded_at, limit: MAX_ITEMS }
   }
 
   async function add(input) {
     await ensureSeeded()
     const items = await table()
-    // `limit` 跟着回包走：客户端那句「最多 N 条，先删一条再加」不许自己抄一份数字（2.5.2 就是
-    // 服务端常量 10 + 中文字典写死"10"两处各写一遍，抬上限只会改红一边）。
     const full = () => ({ ok: false, code: 'list_full', limit: MAX_ITEMS, message: `自选股最多 ${MAX_ITEMS} 条，先删一条再加` })
 
-    // 先到上限就不出网（一次搜索也是配额）；**这挡不住并发**，锁里还要再验一次，见下。
+    // Early exit avoids a search, but concurrency means the lock still re-checks.
     if (items.size >= MAX_ITEMS) return full()
 
     const direct = input?.thscode
@@ -753,15 +544,14 @@ export function createWatchlistService(options = {}) {
         return { ok: false, code: 'invalid_query', message: '代码格式不符：要带市场或交易所后缀的完整代码，例如 300750.SZ / 00700.HK / HSI.HK / AAPL.OQ / IXIC.US' }
       }
       const entry = keyFormOf(thscode)
-      // 存在性核对用**上游认的那个写法**问：A 股沿用带后缀的完整代码（Fuyao 那侧本来就是它给的身份），
-      // 港美股只能问 stem——实测把 canonical 键原样丢给 smartbox 一律回 `N` 哨兵（`00700.HK`、
-      // `TCEHY.PS`、`HSI.HK`、`IXIC.US` 全都不回行），拿它当"查无此票"会把一只真票判成不存在。
+      // Existence check uses the upstream-accepted spelling: full code for A-shares,
+      // stem for HK/US (canonical keys return the `N` sentinel).
       const found = await search(entry.form === 'a-share' ? thscode : stemOf(thscode))
       if (!found.ok) return found
       const hit = found.items.find((row) => row.thscode === thscode)
       if (hit === undefined) return { ok: false, code: 'not_found', message: `该标的不在本版支持范围（${FORM_SCOPE_TEXT[entry.form] ?? '可检索的证券代码'}）` }
       return serialize(() => {
-        // 出网最长 15 秒，这期间别的窗口可能已经填满：上限必须在"读 size → put"这一段的锁内复查。
+        // Up to 15s of network passed: re-check the cap inside the lock.
         if (items.size >= MAX_ITEMS) return full()
         return write(hit, items)
       })
@@ -803,17 +593,14 @@ export function createWatchlistService(options = {}) {
   }
 
   /**
-   * 置顶 = 给这一条打一个 `pinned_at` 时间戳；排序归 `rowsOf`（后置顶的在前）。
-   * 不把"键挪到最前"当成实现：顺序是读法的一部分，写进去就要求整表重写。
-   * 重复置顶是幂等的用户动作（只是把时间戳推新，行不会跳走），`not_found` 则响亮失败。
+   * Pin = timestamp; ordering belongs to `rowsOf` (no key moves, no table rewrite).
    */
   async function pin(input) {
     await ensureSeeded()
     const items = await table()
     const thscode = normalizeThscode(input?.thscode)
     if (thscode === undefined) return { ok: false, code: 'invalid_query', message: '代码格式不符' }
-    // 读 → 改 → 写在同一环里：否则"取到旧记录"与"put 回去"之间正好删了这一行，
-    // 置顶会把刚删掉的标的连同它的旧报价一起写回来（和刷新写回同一族，见 `doRefresh`）。
+    // Read-modify-write inside the lock, or a concurrent delete gets resurrected.
     return serialize(async () => {
       const existing = items.get(thscode)
       if (existing === undefined) return { ok: false, code: 'not_found', message: '该标的不在自选清单里' }
@@ -823,22 +610,9 @@ export function createWatchlistService(options = {}) {
   }
 
   /**
-   * 标记持仓 = 给这一条写 `holding`；比例留空（`undefined` / `null` / 空串）表示"标了持仓、
-   * 比例还没填"，落 `null` 而不是 0。`clearHolding` 抹掉这一格，关注条目本身不动。
-   *
-   * 与 `pin()` 同一条读—改—写口径：**锁内逐键重读**——刷新在途刚被用户删掉的那一行不许被旧记录
-   * 连同持仓一起写回来（那还会重新占掉一格）。比例只收 0–100，越界与"根本不是数"都回
-   * `invalid_query`：这一格是用户自报的权重，我们不替用户核对券商账，但**也不接一个明显不成立的数**。
-   * ⛔ `Number(null)` 是 0——空值一律先在这外面判成"未填"，绝不放进 `numberValue` 硬转。
-   *
-   * 还有一道**类型闸门**（`isHoldable`，与面板共用 `./holding-rules.js` 那一份）：指数不是一个可以
-   * 持有并配比率的标的。`marked_at` 每次写入都重打——它是"这句话最后一次说出来的时刻"，
-   * 不是"仓位建立日"；用户把 20% 调成 30%，那句自报的话确实就是刚刚说的。
-   *
-   * 第三道是**合计闸门**（`weightCeiling`，同一份模块）：只做多、没有 put，所以全组合的自报占比
-   * 合计封顶 120%（2026-10-09 用户点名"我居然可以对多只标的都填超过 50%"）。额度按**其余持仓**
-   * 算，不含这一格自己，所以 lowering 永远走得通。⛔ 勾上但没填（`weight === null`）不加任何敞口，
-   * 因此**不因合计被拒**——否则一条手改出来的超额数据会把"先勾上再慢慢填"这条路一起堵死。
+   * Mark holding: empty weight stays `null`, never 0; `clearHolding` removes the
+   * field. Gates: 0–100 weight, holdable type, total ceiling (unset weight adds no
+   * exposure), all evaluated inside the lock after `not_found`.
    */
   async function markHolding(input) {
     await ensureSeeded()
@@ -857,16 +631,11 @@ export function createWatchlistService(options = {}) {
     return serialize(async () => {
       const existing = items.get(thscode)
       if (existing === undefined) return { ok: false, code: 'not_found', message: '该标的不在自选清单里' }
-      // 类型闸门排在 `not_found` **之后**：一个根本不在这份清单里的代码，该听到的是"不在清单里"，
-      // 不是"指数不能标持仓"——后者会把人引去查类型，而真正的问题是那一行不存在。
-      // `existing.holding === undefined` 这一半是给"重标"留的门：已经标过的行（包括在旧版本或
-      // 手改数据里标上的指数）改比例仍走得通，⛔ 否则那一格会退不掉——面板不画取消出口、宿主又不收。
-      // 只拦"标"、不拦"取消"（见 `clearHolding`）：抹一格不声明任何领域事实。
+      // Type gate after `not_found`; legacy holdings stay editable so they can be removed.
       if (existing.holding === undefined && !isHoldable(existing)) {
         return { ok: false, code: 'invalid_query', message: '这一条不是一个可以持有并配比率的标的（指数是市场读数，不是券），因此不能标记为持仓' }
       }
-      // 合计闸门也排在锁内：额度取决于**其余持仓此刻**是多少，读—判—写不在同一环里就会
-      // 被并发写入各放一只过去（两行都看到"还有额度"，落盘的合计却超了）。
+      // Ceiling also inside the lock: concurrent writes would otherwise each see room.
       if (weight !== null) {
         const rows = rowsOf(items)
         const ceiling = weightCeiling(rows, thscode)
@@ -881,15 +650,8 @@ export function createWatchlistService(options = {}) {
   }
 
   /**
-   * 取消持仓 = 写回一份**没有** `holding` 那一格的记录。
-   *
-   * 不删键再插：官方单文件后端是 `Map` + 整份 JSON 原子写，`put` 已有键保留原位置，
-   * 而删了重插会把这一行甩到插入顺序的末尾——用户取消一个持仓标记，清单却跟着重排，
-   * 那是"动作与位移对不上"的静默副作用（与 `pin()` 不改键序同一条理由，设计文档 §3.2）。
-   *
-   * ⛔ 这里**故意不查类型**：`markHolding` 拒的是"把指数说成仓位"这句新话，`clearHolding` 只是
-   * 不再说那句话。两边都拦，一条遗留或手改出来的"指数持仓"就永远退不掉——面板不画取消出口
-   * （它按类型决定画不画），宿主又拒绝写，那一格被锁死在域里。
+   * Clear by writing the record without `holding`; no delete/reinsert, so order is
+   * preserved. Deliberately no type gate: legacy index holdings must be removable.
    */
   async function clearHolding(input) {
     await ensureSeeded()
@@ -906,7 +668,7 @@ export function createWatchlistService(options = {}) {
     })
   }
 
-  /** 一个分组 = 一次快照请求（只有场内 ETF 那一档是逐只）；单组失败只记该组，不拖垮其它组。 */
+  /** One group = one snapshot request (only ETF is per-symbol); group failure stays local. */
   function fetchGroup(group) {
     return group.kind === 'tencent' ? fetchOffshoreGroup(group) : fetchFuyaoGroup(group)
   }
@@ -940,12 +702,8 @@ export function createWatchlistService(options = {}) {
   }
 
   /**
-   * 港美股一档 = 该市场这一族的一次批量（清单上限 30，永远在实测的 ≤50 之内）。
-   * 取数与守卫全部走内核（同一节流链、同一张字段位序表）；这一层只负责**身份核对**：
-   * 回包第 2 位推回来的 canonical 键必须正是我们问出去的那一只，否则这一行**不落价**，
-   * 让它照实落在 `quote_unavailable`（设计文档 §3.4 / §3.9 第 4 点：实测 `usSSPX` 会回一只
-   * 真 ETF 且不报错，只比 stem 抓不住，形状由内核的守卫给、身份由这一句"必须是问出去的那只"给）。
-   * 这一句同时就是日志：面板那一格写着"取不到报价"，用户看得见，不存在静默丢弃。
+   * One batch per offshore family. The core supplies quotes and guards; this layer
+   * only ensures the returned key is exactly the one requested.
    */
   async function fetchOffshoreGroup(group) {
     const capturedAt = now()
@@ -977,9 +735,8 @@ export function createWatchlistService(options = {}) {
   }
 
   /**
-   * 单闸门：开面板、手动刷新、以及添加完那一次顺手刷新共用；并发只发一次出网。
-   * 复位必须发生在**同一条 settle 链**里（`.finally` 挂在 doRefresh 上），否则刚刷完再点
-   * 一次会拿到上一次的结果——用户看到的症状是"点了刷新没反应"。
+   * Single gate for panel open, manual refresh and post-add refresh; reset on the
+   * same settle chain, or the next click returns the previous run.
    */
   function refresh() {
     if (refreshing !== null) return refreshing
@@ -994,14 +751,11 @@ export function createWatchlistService(options = {}) {
     await ensureSeeded()
     const opened = await domain()
     const items = opened.table('items')
-    // 这份快照**只用来决定这次要问哪些代码**，不是写回的基底（写回逐键重读，见下）。
+    // Snapshot only decides which codes to ask for; write-back re-reads per key.
     const batch = rowsOf(items)
     if (batch.length === 0) return { ok: true, items: [], refreshed_at: null, failures: [] }
 
-    // 七档分组：A 股个股 / A 股指数各一次逗号批量、场内 ETF 逐只、港个股与港指数各一次批量、
-    // 美个股与美指数各一次批量。分派判据是**键的形状与 `asset_type` 互相认账**（同一张 `KEY_FORMS`
-    // 表，与加入清单时同一条），不认账的行不进任何一组、照实记 `quote_unavailable`——
-    // 磁盘上被人改过的那一格不能让一行港股流进 Fuyao 端点（那边根本不认它，反之亦然）。
+    // Seven groups dispatch on key shape + asset_type; disagreement stays `quote_unavailable`.
     const groups = []
     const failures = []
     const keysByType = new Map()
@@ -1034,23 +788,21 @@ export function createWatchlistService(options = {}) {
     const budgetMs = refreshBudgetMs ?? refreshBudgetFor(batch.length)
     const startedAt = now()
     const results = new Array(groups.length)
-    // `cursor` 的自增在单线程里是原子的：每个工作线程领到一个**独占**的组号。
+    // `cursor` increments atomically on one thread: each worker gets an exclusive group.
     let cursor = 0
     const worker = async () => {
       for (;;) {
         const index = cursor
         cursor += 1
         if (index >= groups.length) return
-        // 0 号组永远跑（否则一次都刷不动）；之后每领一组先看预算：超了就停在这里，
-        // 剩下的行如实记 refresh_timeout——它们这次没被问过，不是"没有报价"。
+        // Group 0 always runs; later groups check the budget before being asked.
         if (index > 0 && now() - startedAt >= budgetMs) return
         results[index] = await fetchGroup(groups[index])
       }
     }
     await Promise.all(Array.from({ length: Math.min(REFRESH_CONCURRENCY, groups.length) }, () => worker()))
 
-    // 按**组序**归并，不按完成序：回包里的 failures 顺序是断言与面板读法的依赖，
-    // 并发不能把它变成"谁先回来谁在前"。
+    // Merge by group order, not completion order: failures order is part of the contract.
     const quotes = new Map()
     const problems = []
     let failedGroups = 0
@@ -1068,25 +820,20 @@ export function createWatchlistService(options = {}) {
       }
     }
 
-    // 写回整段进串行队列，并且**逐键重读当前记录**，只换 quote 那一格：
-    // 拿批次快照整条覆写会撤销刷新在途期间用户的两个动作——刚删的标的被原样写回来
-    // （还重新占掉一格），刚置顶的被旧记录里的空 pinned_at 盖掉、静默掉回原位。
-    // 面板一打开就自动刷新，所以这扇窗几乎每次都开着；ETF 逐只扇出时它最宽。
+    // Write-back re-reads each key; a batch overwrite would undo in-flight deletes and pins.
     const written = await serialize(async () => {
       let count = 0
       for (const [thscode, quote] of quotes) {
         const fresh = items.get(thscode)
-        if (fresh === undefined) continue // 在途被删：不复活、不占格。
+        if (fresh === undefined) continue // Deleted in flight: do not resurrect or take a slot.
         await items.put(thscode, { ...fresh, quote })
         count += 1
       }
       return { count, items: rowsOf(items) }
     })
-    // 一条都没落地就不报"刷新于此刻"：页脚那个时间讲的是最后一次**真取到数**的时刻，
-    // 跟着一次全失败的点击往前走，就成了每一行都陈旧、只有页脚是新的（客户端据此保留上一个值）。
+    // Nothing landed = no "refreshed at" timestamp: the footer tracks the last real success.
     const result = { ok: true, items: written.items, refreshed_at: written.count > 0 ? now() : null, failures }
-    // ⛔ `scope` 的语义纪律：**只有整块一次都没成功**（每个分组都报了批级失败）才允许 `all`，
-    // 面板据此决定要不要占用居中位。把"半边失败"说成"服务不可用"就是面板对用户说谎。
+    // `scope: 'all'` only when every group failed; half-failure must not claim "service down".
     if (problems.length > 0) {
       const worst = worstProblem(problems)
       const scope = failedGroups === groups.length && groups.length > 0 ? 'all' : worst.scope
@@ -1112,16 +859,13 @@ export function createWatchlistService(options = {}) {
   }
 }
 
-/** 只有会把**整批**都打挂的失败才升格成 batch error（限流 / 没配 key / 某一家服务不通）。 */
+/** Only whole-batch failures become batch errors (rate limit, missing key, service down). */
 function batchLevelCode(error, source = 'fuyao') {
   const code = watchlistErrorCode(error, { source })
   return ['credential_missing', 'rate_limited', 'fuyao_unavailable', 'tencent_unavailable'].includes(code) ? code : undefined
 }
 
-/**
- * 多路失败时挑一句最能指导动作的：密钥缺失是唯一"用户现在就能自己修"的，其次是限流，
- * 最后才是服务不通。`scope` 跟着这一条走（谁最该被修，就报谁的射程）。
- */
+/** Most actionable problem wins: missing key, then rate limit, then service down. */
 const ERROR_CODE_PRIORITY = ['credential_missing', 'rate_limited', 'invalid_query', 'fuyao_unavailable', 'tencent_unavailable']
 function worstProblem(problems) {
   for (const code of ERROR_CODE_PRIORITY) {
@@ -1131,7 +875,7 @@ function worstProblem(problems) {
   return problems[0]
 }
 
-/** 错误码 → 用户看得见的一句话。`scope` 只用来决定"行情服务"要不要点名是哪一路（A 股 / 港美股）。 */
+/** Error code → user copy; `scope` only decides whether to name the failing branch. */
 function messageFor(code, scope) {
   if (code === 'credential_missing') return '未配置 Fuyao 密钥：在「插件」页的 Capital 模式卡片里填 API Key（只影响 A 股那一路，港美股照常用）'
   if (code === 'rate_limited') return '行情服务限流，请稍后再试'
@@ -1140,7 +884,7 @@ function messageFor(code, scope) {
   return '行情服务暂时不可用，请稍后再试'
 }
 
-/** 读 `capital-config` 条目里用户配的 Fuyao 引用名；没有 settings 的载体回退默认名。 */
+/** Read the configured Fuyao ref from `capital-config`; falls back to the default name. */
 export function readCredentialRef(ctx) {
   try {
     const settings = ctx.get('settings')
@@ -1184,10 +928,8 @@ const FAILURE_STATUS = {
 }
 
 /**
- * 路由：GET 走 query，POST 走 JSON body。
- *
- * @param service - `createWatchlistService` 的返回。
- * @param options.authorize - `(req) => 401 | 403 | undefined`，接 `connection.requestRejection`。
+ * GET uses query params, POST a JSON body. `authorize` is
+ * `connection.requestRejection` and runs before any service call.
  */
 export function createRouteHandler(service, options = {}) {
   const { authorize } = options
@@ -1241,14 +983,12 @@ export function createRouteHandler(service, options = {}) {
       if (method === 'POST' && pathname === '/remove') return sendBusiness(res, await service.remove(input))
       if (method === 'POST' && pathname === '/pin') return sendBusiness(res, await service.pin(input))
       if (method === 'POST' && pathname === '/holding') {
-        // 标记与取消共用一条路由、靠 body 里那一个布尔分流：面板上的概念只有一个（"这条是不是
-        // 我的持仓"），拆两条要多一套字典与一份围栏回归，而两者差别只是写不写那一格。
+        // One route for mark and clear: the panel has one concept, split only by `clear`.
         const next = input?.clear === true ? service.clearHolding(input) : service.markHolding(input)
         return sendBusiness(res, await next)
       }
       if (method === 'POST' && pathname === '/refresh') {
-        // 刷新是"部分成功 + 逐条失败"的形态：整批失败也带 items 与 error 回来，
-        // 面板按 error.code 居中显示，绝不清空列表。
+        // Refresh is "partial success + per-row failures": always 200 with items and error.
         return send(res, 200, await service.refresh())
       }
       if (method === 'GET' && pathname === '/list') return send(res, 200, await service.list())
@@ -1260,11 +1000,7 @@ export function createRouteHandler(service, options = {}) {
   }
 }
 
-/**
- * 存储侧失败的对外一句话：code 与 message 都要留。只留 code 运维看的是天书（实测
- * `malformed-medium` 单独出现时完全指不出是哪份介质、哪一步），只留 message 又丢掉
- * `backend-not-found` / `invalid-record` 这类可定位的判据。
- */
+/** Storage failure copy keeps both code (locatable) and message (human-readable). */
 function storeCause(error) {
   return [error?.code, error?.message ?? error].filter(Boolean).join('：') || 'unknown'
 }
@@ -1299,17 +1035,13 @@ export function apply(ctx) {
 
   ctx.provide('capitalWatchlist', service)
 
-  // 预热一次只为了把"域打不开"写进启动日志。它**不设闩**：真正的响亮失败在每条路由的逐次
-  // catch 里（`store_unavailable`），而预热跑在装配期，此刻 `storageDomain` 完全可能还没
-  // provide——把这一次失败当结论钉住，就是"抢跑一次锁到进程结束"（见 `domain()`）。
+  // Warm-up logs domain failures only; no latch — each route retries and reports loudly.
   service.list().catch((error) => {
     ctx.logger?.error?.(`capital-watchlist: 域预热失败，下一次动作会重试（${storeCause(error)}）`)
   })
 
   /**
-   * 认证围栏：解析 host 平面的 `connection`（web profile 由 `dsh-client-connection`
-   * 提供），把它的 `requestRejection` 接到本路由上——trusted-Host（403）+ 签名 cookie（401）。
-   * 惰性解析：`connection` 与本行的挂载先后不由我们决定。
+   * Resolve `connection` lazily; absent = no auth plane, throwing = fail closed 401.
    */
   const authorize = (req) => {
     let connection
@@ -1338,12 +1070,10 @@ export function apply(ctx) {
       'capital-watchlist: route',
     )
   }
-  // 只走 inject：`ctx.get('webServer')` 有值不代表 `ctx.webServer` 属性可访问（cordis 只认
-  // "本层声明过 inject"）。先探测再直接调用 = 把正确性押在装配顺序上，桌面端就是这么炸的
-  // （2026-09-30 实机，与 capital-charts 同一处形状）。
+  // Only via inject: a resolved `ctx.get('webServer')` does not make `ctx.webServer` legal.
   ctx.inject(['webServer'], registerRoute)
 
-  // 域是我们打开的，就得自己关（facility 只在自己卸载时兜底）；同名重复 open 会 already-open。
+  // The domain is ours to close; a duplicate open of the same name reports already-open.
   ctx.effect(() => () => {
     service.close().catch(() => {})
   }, 'capital-watchlist: domain')

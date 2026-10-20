@@ -8,32 +8,23 @@ import type { AnySearchClient, AnySearchErrorCode, SearchResult } from './engine
 import { LocalFetchError } from './local-fetch.js'
 import type { LocalFetchErrorCode } from './local-fetch.js'
 
-/** 最终产出这份正文的来源；`ok:false` 时恒为 `'anysearch'`（主路）。 */
+/** Which path produced the body; always `'anysearch'` when `ok:false`. */
 export type FetchVia = 'anysearch' | 'local-http'
 
-/** 触发回退的那次 AnySearch 失败；永远只描述 AnySearch 侧。 */
+/** The AnySearch failure that triggered fallback. */
 export interface FetchFallbackNote {
   from: 'anysearch'
   code: AnySearchErrorCode
   error: string
 }
 
-/** 本地抓取自己失败的原因；只在"回退被尝试且本地也失败"时出现。 */
+/** Why local fetching failed; only when fallback ran and also failed. */
 export interface FetchLocalErrorNote {
   code: LocalFetchErrorCode
   error: string
 }
 
-/**
- * `web_retriever_fetch` 的回执。
- *
- * - `via`：最终产出这份正文的来源；`ok:false` 时恒为 `'anysearch'`（主路）。
- * - `fallback`：触发回退的那次 AnySearch 失败，永远只描述 AnySearch 侧
- *   （回退成功与"回退尝试后本地也失败"两种情形都会出现）。
- * - `local_error`：本地抓取自己失败的原因，只在"回退被尝试且本地也失败"时出现。
- *   `fallback.error` 是 AnySearch 的错、`local_error.error` 是本地的错，两者不重复。
- * - `truncated`：正文被截断过（AnySearch 侧截断、本地字节截断、本地字符截断、转换省略，任一为真）。
- */
+/** `web_retriever_fetch` receipt; `truncated` covers any truncation path. */
 export interface FetchResult {
   url: string
   ok: boolean
@@ -47,10 +38,7 @@ export interface FetchResult {
   local_error?: FetchLocalErrorNote
 }
 
-/**
- * 本地抓取器的结构类型。构造函数不传 `localFetch` 即"不启用回退"，
- * 由 `src/index.ts` 按配置决定是否传入。
- */
+/** Structural fetcher; omitting it disables fallback (decided in `src/index.ts`). */
 export interface LocalFetcherLike {
   fetch(url: string, signal?: AbortSignal): Promise<{
     url: string
@@ -65,12 +53,12 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-/** 调用方取消必须原样抛出，不能被降级成"失败信封"。 */
+/** Caller cancellation must rethrow, never become a failure envelope. */
 function abortError(signal: AbortSignal): unknown {
   return signal.reason ?? new Error('request aborted')
 }
 
-/** 无状态的 AnySearch 适配器：不缓存、不排队、不维护回合或材料索引。 */
+/** Stateless AnySearch adapter: no cache, queue, turn or corpus index. */
 export class WebRetriever {
   constructor(
     private readonly client: AnySearchClient,
@@ -100,25 +88,25 @@ export class WebRetriever {
           ...(normalized.truncated ? { truncated: true } : {}),
         }
       }
-      // "取到了但没有内容"与失败等价，按可回退失败处理。
+      // "Fetched but empty" is equivalent to failure and is fallback-eligible.
       trigger = {
         from: 'anysearch',
         code: 'UPSTREAM',
         error: normalized.error ?? 'fetch returned no content',
       }
     } catch (error) {
-      // 调用方取消：原样抛出，不回退、不吞。
+      // Caller cancel: rethrow, no fallback.
       if (error instanceof AnySearchError && error.code === 'ABORTED') throw error
       const code: AnySearchErrorCode = error instanceof AnySearchError ? error.code : 'UPSTREAM'
       const message = errorText(error)
-      // 非法 URL / 不支持的二进制：本机同样会拒，回退只是白跑一次。
+      // Invalid URL / unsupported content: local would reject too, fallback is wasted.
       if (!shouldFallbackToLocalFetch(code)) {
         return { url, ok: false, via: 'anysearch', code, error: message }
       }
       trigger = { from: 'anysearch', code, error: message }
     }
 
-    // 回退前的取消闸门（硬）：调用方已经不要这个结果了，绝不再发一次网络请求。
+    // Hard cancel gate before fallback: never spend another request on an abandoned result.
     if (signal?.aborted) throw abortError(signal)
     if (!this.localFetch) {
       return { url, ok: false, via: 'anysearch', code: trigger.code, error: trigger.error }
@@ -136,7 +124,7 @@ export class WebRetriever {
         fallback: trigger,
       }
     } catch (error) {
-      // 本地抓取侧的取消同样原样抛出。
+      // Cancel raised on the local side also rethrows as-is.
       if (error instanceof LocalFetchError && error.code === 'ABORTED') throw error
       const localMessage = errorText(error)
       const localCode: LocalFetchErrorCode = error instanceof LocalFetchError ? error.code : 'HTTP'

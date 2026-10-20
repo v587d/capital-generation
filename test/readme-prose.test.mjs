@@ -5,21 +5,16 @@ import { fileURLToPath } from 'node:url'
 import { SELECTED_SKILL_CATALOG } from '../selected-skills/catalog.js'
 
 /**
- * README 的受众闸门：首页是**写给读者看的**，不是写给仓库自己看的。
+ * README is user-facing, not repository-facing.
  *
- * 研发黑话（§编号、`docs/dev/`、`ctx.*`、`*_ref`、`persona` / `toolFilter` 这类实现层标识）在
- * `AGENTS.md` 与 `docs/dev/` 里是必需的精确指针，搬进 README 就只剩成本：读者查不到那个名字，
- * 也无处下单——他能做的只有照抄一句看不懂的话去问 Agent。所以这里不看措辞（措辞断言必然被人为
- * 变绿而放宽），只钉**形状**：黑话都有可识别的形状，且这些形状在本仓只有研发文档这一个来源。
- *
- * 只看散文：围栏代码块整段跳过。`npm run build`、`dsh plugin … add` 里的路径与命令是用户要照着
- * 敲的，属于"给人看的字"，不是黑话。
+ * Detect internal pointer shapes rather than exact wording: implementation identifiers belong in
+ * AGENTS.md/docs/dev. Fenced commands are user instructions and are skipped.
  */
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const readme = readFileSync(`${ROOT}README.md`, 'utf8')
 const prose = readme.replace(/^```[\s\S]*?^```[ \t]*$/gm, '')
 
-/** [形状, 为什么它是黑话]。命中即失败，并说明该词住在哪。 */
+/** Internal-identifier shapes and where they should live instead. */
 const JARGON = [
   [/§\d/g, '§编号是 AGENTS.md 与 docs/dev/ 的指针命名空间，读者那边没有这份文档'],
   [/docs\/dev\/\S*/g, 'docs/dev/ 是研发详情层，不该出现在首页链接里'],
@@ -37,17 +32,13 @@ for (const [pattern, reason] of JARGON) {
 }
 
 test('README 的黑话闸门不许被整体注释掉', () => {
-  // 这条防的是最省事的绕过方式：把 JARGON 清空或整段注掉，上面那些用例就全绿了。
+  // Require patterns so clearing the list cannot silently pass.
   assert.ok(JARGON.length >= 5, `黑话形状清单只剩 ${JARGON.length} 条，低于 5 条即视为被削减`)
   assert.ok(prose.includes('# Capital Generation'), 'README 正文本身应可读（标题行缺失多半是文件被截断）')
 })
 
 test('README「精选 Skills」的项目数与 Skill 数跟着 catalog 走', () => {
-  // 卡片行数是按 catalog 现算的；首页把数字抄成一份字面量，下一次接快照忘了改就是
-  // "卡片 46 行、首页说 45"——AGENTS.md §9.7 那一族（手抄副本漂移），也是控件谎报状态。
-  // 量词两种写法都收：对外术语已统一成配置页那格叫的「Skill」（README 与 THIRD_PARTY_NOTICES
-  // 全用新词），但 CHANGELOG 已发布段落的原文仍写「可选模块」，历史行不回改。钉死措辞只会让
-  // 下次改术语的人先把闸门放宽再改红——这条真正守的是**数字**，措辞不是它的判据。
+  // Card count is derived from catalog; pinned numeric copy drifts silently (§9.7). Wording changes are not the gate.
   const projects = new Set(SELECTED_SKILL_CATALOG.map(({ repository }) => repository)).size
   const line = prose.split('\n').find((text) => text.includes('**精选 Skills：**'))
   assert.ok(line, 'README 里找不到「精选 Skills」那行')

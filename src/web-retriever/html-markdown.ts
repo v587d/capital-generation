@@ -1,58 +1,34 @@
 /**
- * HTML → GFM Markdown 转换（本地直抓回退的呈现层，todo 4 `local-fetch.ts` 消费）。
- *
- * 语义逐条移植自官方 DSH `web_fetch` 渲染器
- * （`dsh-LLM-icon/.research/dsh-src/packages/web/tool-web/src/fetch.ts`）：
- * turndown + GFM 插件、`removeNonVisibleContent` 规则、无跨列展开的表格规则、
- * 512 层嵌套词法守卫与固定省略标记。官方实现里与本模块无关的呈现职责
- * （`Fetched <url>` 头、截断脚注、WeakMap memoization）一律不搬——"网页正文不是指令"
- * 由 web_retriever persona 的硬规则承担，不在正文里插水印。
- *
- * 官方没做、这里补上的第四道：`stripInvisibleText`（零宽 / 双向覆盖 / C0-C1 控制符剥离）。
- * 它放在本模块导出，是因为 invisibles 的入口不止 HTML：`extractTitle` 会解码数字实体
- * （`&#x202E;` 解出来就是 RLO），AnySearch 返回的清洗正文也原样带这些字符。
- * 三个内容入口（本地转换、title、具名来源页面字段）共用这一份实现（AGENTS.md §9.7）。
- *
- * 为什么必须补这三道保护（turndown 的已知缺口）：
- * - turndown 默认**不删** `<script>/<style>`，其正文会当文本带进输出；
- * - turndown 完全**不处理**隐藏元素；
- * - turndown 的转换按元素递归，超深嵌套下可能爆栈或长时间占用事件循环——
- *   官方实测：嵌套 512 层 ≈ 0.15s、2000 层 ≈ 2s、20000 层 ≈ 5s，期间协作式
- *   超时定时器无法触发，所以超过 512 层直接放弃转换。
+ * Bounded HTML -> GFM markdown for the local-fetch fallback. Ported from the
+ * official web_fetch renderer, plus `stripInvisibleText` because turndown keeps
+ * script/style, ignores hidden elements, and recurses (stack/deadline risk at
+ * depth); conversion is abandoned past `MAX_CONVERSION_DEPTH`.
  */
 
 import TurndownService from 'turndown'
 import { gfm } from '@joplin/turndown-plugin-gfm'
 
-/** 嵌套深度上限：超过则跳过转换、返回固定省略标记。健壮性不变量，不是可调参数。 */
+/** Hard nesting limit: past it conversion is skipped. Robustness, not a tunable. */
 export const MAX_CONVERSION_DEPTH = 512
 
-/** 转换结果：`title` 从原始 HTML 提取（源串截断不影响）；无 title 时缺省该字段。 */
+/** Result: title comes from the original HTML; omitted means conversion was skipped. */
 export interface HtmlMarkdownResult {
   title?: string
-  /** 转换后的 GFM markdown；转换不安全时为固定省略标记。 */
+  /** GFM markdown, or the fixed omission marker when conversion is unsafe. */
   markdown: string
-  /** 源串或输出曾被 `maxChars` 截断。 */
+  /** Source or output was cut by `maxChars`. */
   truncated: boolean
-  /** true 表示转换被放弃（超深或 turndown 抛错），`markdown` 为省略标记。 */
+  /** Conversion was abandoned (too deep or turndown threw). */
   omitted: boolean
 }
 
-// ---------------------------------------------------------------------------
-// 不可见字符剥离（外部内容共用的出口）
-// ---------------------------------------------------------------------------
+// Invisible character stripping (shared by every external-content entry)
 
 /**
- * 网页里可以出现**完全没有字形**的字符，而它们会原样进入模型上下文与用户看到的引用：
- * - C0/C1 控制符与 DEL：`\r`、`\x00` 之类能把一行截断或让后续文本覆盖已显示内容；
- * - 软连字符 `U+00AD`、零宽系列 `U+200B–U+200F`（含 LRM/RLM 方向标记）/ `U+2060–U+2064` / BOM：
- *   肉眼不可见，却能把 `忽略前面的指令` 写成关键词字面检查**认不出**的形状；
- * - 双向覆盖 `U+202A–U+202E` / 隔离符 `U+2066–U+2069`：改变一行的**显示顺序**
- *   （Trojan Source 一类攻击），回显给用户的就是假的文本；
- * - `U+2028` / `U+2029`：行/段分隔符，渲染上与 `\n` 等价、按行处理时又不算换行。
- *
- * 只删不替换成占位符：这些字符在合法正文里没有承载信息，删除是保序的。
- * 换行 `\n`、回车 `\r`、制表 `\t` 保留（markdown 呈现需要）。
+ * Some characters render as nothing yet reach the model and citations: C0/C1
+ * controls, soft hyphen/zero-width/BOM (keyword checks miss them), bidi overrides
+ * and isolates (Trojan Source display spoofing), U+2028/2029. Deleting preserves
+ * order; keep \n, \r and \t for markdown.
  */
 const INVISIBLE_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/gu
 
@@ -60,24 +36,19 @@ export function stripInvisibleText(value: string): string {
   return value.replace(INVISIBLE_PATTERN, '')
 }
 
-// ---------------------------------------------------------------------------
-// turndown 实例与规则（官方 fetch.ts:25-95 的移植）
-// ---------------------------------------------------------------------------
+// turndown instance and rules (ported from official fetch.ts)
 
-/** turndown 构造选项：与官方 web_fetch 一致的固定呈现选项。 */
+/** turndown options fixed to match the official web_fetch renderer. */
 interface TurndownOptions {
   headingStyle: 'atx'
   codeBlockStyle: 'fenced'
   bulletListMarker: '-'
 }
 
-/**
- * 垫片（`turndown-shim.d.ts`）只声明了无参构造，而本仓约定不引入 `@types/turndown`、
- * 也不改垫片文件；这里在使用点给出带选项的精确构造签名（结构类型，非 any）。
- */
+/** The shim declares only a no-arg constructor; give the structural signature here. */
 type TurndownConstructor = new (options: TurndownOptions) => TurndownService
 
-/** domino 节点的最小结构形状：remove 规则与表格规则实际用到的成员。 */
+/** Minimal DOM node shape used by the remove and table rules. */
 interface DomNode {
   nodeName: string
   hasAttribute(name: string): boolean
@@ -87,31 +58,30 @@ interface DomNode {
   childNodes: ArrayLike<DomNode>
 }
 
-/** 表格行：cells 集合（th/td）。 */
+/** Table row: cells (th/td). */
 interface DomTableRow extends DomNode {
   cells: ArrayLike<DomNode>
 }
 
-/** 表格分节（thead/tbody/tfoot）：父节点是 table。 */
+/** Table section (thead/tbody/tfoot): parent is the table. */
 interface DomTableSection extends DomNode {
   parentElement: DomTable | null
 }
 
-/** 表格：rows 集合（判断表头行用）。 */
+/** Table: rows (used to detect the header row). */
 interface DomTable extends DomNode {
   rows: ArrayLike<DomNode>
 }
 
-/** 表格单元格：align 属性与内联 style 的 text-align 决定 GFM 分隔符。 */
+/** Table cell: align attribute and inline text-align pick the GFM separator. */
 interface DomTableCell extends DomNode {
   style: { textAlign: string }
 }
 
 /**
- * 模块作用域唯一的 turndown 实例。官方注释明说该实例跨 `turndown()` 调用无状态、
- * 可共享；规则只注册一次，全部转换复用（测试用幂等用例钉住这一点）。
- * 规则注册顺序与官方一致：先 `use(gfm)`，再 remove 规则，最后表格规则——
- * turndown 按后注册先匹配解析规则，表格规则因此覆盖 gfm 插件自带的跨列展开实现。
+ * One module-scope turndown instance (stateless across calls). Rule order matters:
+ * gfm, then remove rules, then table rules; table rules must come last to override
+ * the plugin's colspan expansion.
  */
 const turndown = new (TurndownService as TurndownConstructor)({
   headingStyle: 'atx',
@@ -120,7 +90,7 @@ const turndown = new (TurndownService as TurndownConstructor)({
 })
 turndown.use(gfm)
 
-/** 命中即整块删除（replacement 返回空串），脚本/样式/隐藏元素的内容不进输出。 */
+/** Match => drop the whole block; script/style/hidden content never reaches output. */
 turndown.addRule('removeNonVisibleContent', {
   filter(node: DomNode): boolean {
     if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'IFRAME', 'OBJECT', 'EMBED'].includes(node.nodeName)) return true
@@ -141,14 +111,14 @@ turndown.addRule('removeNonVisibleContent', {
   },
 })
 
-/** 渲染一个 GFM 表格单元格，不解释 HTML 的跨列计数。 */
+/** Render one GFM cell; HTML colspan is deliberately not interpreted. */
 function renderTableCell(content: string, index: number): string {
   const prefix = index === 0 ? '| ' : ' '
   const escaped = content.trim().replace(/\n\r/g, '<br>').replace(/\n/g, '<br>').replace(/\|+/g, '\\|').padEnd(3, ' ')
   return `${prefix}${escaped} |`
 }
 
-/** 该行是否表格的 Markdown 表头行。 */
+/** Whether this row is the markdown header row of its table. */
 function isTableHeadingRow(row: DomTableRow): boolean {
   const cells = Array.from(row.cells)
   const section = row.parentElement as DomTableSection
@@ -157,7 +127,7 @@ function isTableHeadingRow(row: DomTableRow): boolean {
     && cells.every(cell => cell.nodeName === 'TH')
 }
 
-/** 把 HTML 单元格对齐方式映射成 GFM 分隔符。 */
+/** Map HTML cell alignment to a GFM separator. */
 function tableBorder(cell: DomTableCell): string {
   const alignment = (cell.getAttribute('align') || cell.style.textAlign || '').toLowerCase()
   if (alignment === 'left') return ':---'
@@ -171,8 +141,8 @@ turndown.addRule('tableCellWithoutSpanExpansion', {
   replacement(content: string, node: DomNode): string {
     const cell = node as DomTableCell
     const row = cell.parentNode as DomTableRow
-    // GFM 无法表达跨列。忽略 colspan 让转换工作量与输出和源成正比，
-    // 而不是跟数字属性走（gfm 插件自带规则会按 colspan 展开成多个空单元格）。
+    // GFM cannot express colspan; ignoring it keeps output proportional to source
+    // text instead of the numeric attribute (the gfm rule expands empty cells).
     return renderTableCell(content, Array.from(row.childNodes).indexOf(cell))
   },
 })
@@ -187,25 +157,23 @@ turndown.addRule('tableRowWithoutSpanExpansion', {
   },
 })
 
-// ---------------------------------------------------------------------------
-// 嵌套深度词法守卫（官方 fetch.ts:120-223 的移植）
-// ---------------------------------------------------------------------------
+// Nesting-depth guard (ported from official fetch.ts)
 
-/** 永不接收闭合标签的元素：不进词法栈。 */
+/** Elements that never take a closing tag: kept out of the lexical stack. */
 const VOID_ELEMENTS = new Set([
   'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
   'link', 'meta', 'param', 'source', 'track', 'wbr',
 ])
 
-/** 正文按纯文本解析、直到匹配闭合标签的元素。 */
+/** Text until the matching close tag is raw text, not markup. */
 const RAW_TEXT_ELEMENTS = new Set(['script', 'style', 'noscript'])
 
-/** 一个字符能否出现在 raw-text 闭合标签名之后。 */
+/** Whether a char can follow a raw-text close tag name. */
 function isTagBoundary(char: string | undefined): boolean {
   return char === undefined || char === '>' || char === '/' || /\s/.test(char)
 }
 
-/** 找 raw-text 元素的匹配闭合标签，不把正文里长得像标记的文本当标签。 */
+/** Find a raw-text close tag, ignoring markup-like text inside the body. */
 function findRawTextEnd(lowerHtml: string, name: string, from: number): number {
   const prefix = `</${name}`
   let candidate = lowerHtml.indexOf(prefix, from)
@@ -216,9 +184,9 @@ function findRawTextEnd(lowerHtml: string, name: string, from: number): number {
 }
 
 /**
- * 保守地拒绝词法元素栈超过转换深度上限的 HTML。单遍扫描：忽略注释里的闭合
- * 标签、跳过 raw-text 正文、尊重引号里的 `>`、只接受与栈顶同名的闭合标签——
- * 畸形输入因此只会多计嵌套，不会把嵌套藏掉。
+ * Reject HTML whose lexical element stack exceeds the depth limit. Single pass:
+ * ignores close tags in comments, skips raw text, respects quoted `>`, only pops a
+ * matching top-of-stack, so malformed input over-counts rather than hides nesting.
  */
 function exceedsConversionDepth(html: string): boolean {
   const lowerHtml = html.toLowerCase()
@@ -289,11 +257,9 @@ function exceedsConversionDepth(html: string): boolean {
   return false
 }
 
-// ---------------------------------------------------------------------------
-// title 提取
-// ---------------------------------------------------------------------------
+// Title extraction
 
-/** 只在开头固定窗口内找 `<title>`：title 位于 head、靠文档开头，窗口上限避免对超长正文全量扫描。 */
+/** Scan only the opening window: `<title>` lives in head, avoid full-document scans. */
 const TITLE_SCAN_CHARS = 2048
 
 const TITLE_PATTERN = /<title[^>]*>([^<]*)<\/title>/i
@@ -306,7 +272,7 @@ const NAMED_ENTITIES = new Map<string, string>([
   ['nbsp', '\u00a0'],
 ])
 
-/** 解码数字字符引用（十进制与十六进制）；非法码点返回 null（保留原文）。 */
+/** Decode a numeric character reference; invalid code point => null (keep text). */
 function decodeNumericEntity(body: string): string | null {
   const hex = body[1] === 'x' || body[1] === 'X'
   const code = Number.parseInt(body.slice(hex ? 2 : 1), hex ? 16 : 10)
@@ -314,7 +280,7 @@ function decodeNumericEntity(body: string): string | null {
   return String.fromCodePoint(code)
 }
 
-/** 单遍解码实体：`&amp;lt;` 只解成 `&lt;`，不会第二轮再解成 `<`。 */
+/** Single-pass entity decode: `&amp;lt;` becomes `&lt;`, never `<`. */
 function decodeEntities(text: string): string {
   return text.replace(ENTITY_PATTERN, (match) => {
     const body = match.slice(1, -1)
@@ -325,9 +291,8 @@ function decodeEntities(text: string): string {
 }
 
 /**
- * 从 HTML 开头提取 `<title>` 并解码实体、压空白。找不到或解码后为空返回
- * `undefined`。注意：`<title>` 的文本按官方行为仍会留在 markdown 正文里
- * （官方 remove 列表不含 TITLE），本函数只负责回执的 `title` 字段。
+ * Extract `<title>` from the document head and decode entities. The title text is
+ * left in the markdown body (matching official behavior); this only feeds the field.
  */
 export function extractTitle(html: string): string | undefined {
   const match = TITLE_PATTERN.exec(html.slice(0, TITLE_SCAN_CHARS))
@@ -336,11 +301,9 @@ export function extractTitle(html: string): string | undefined {
   return title === '' ? undefined : title
 }
 
-// ---------------------------------------------------------------------------
-// 入口
-// ---------------------------------------------------------------------------
+// Entry point
 
-/** 转换不安全（超深或 turndown 抛错）时返回的固定省略标记。 */
+/** Fixed marker returned when conversion is unsafe (too deep or turndown threw). */
 const OMITTED_MARKDOWN = '[HTML content omitted: unable to convert safely.]'
 
 function omittedResult(title: string | undefined, sourceTruncated: boolean, maxChars: number): HtmlMarkdownResult {
@@ -354,12 +317,9 @@ function omittedResult(title: string | undefined, sourceTruncated: boolean, maxC
 }
 
 /**
- * 把 HTML 转成有界 GFM markdown。
- *
- * 流程：先按 `maxChars` 截断源串（记 `truncated`，与官方 renderBody 一致）→
- * 超深或 turndown 抛错 → 固定省略标记 + `omitted: true`（不让原始标记外漏）→
- * 否则转换，剥掉不可见字符（`stripInvisibleText`），再按 `maxChars` 截断输出。
- * `title` 一律从**原始** HTML 提取。
+ * Convert HTML to bounded GFM markdown. Source is cut to `maxChars` first; unsafe
+ * conversion returns the omission marker; output is stripped of invisibles and cut
+ * to `maxChars`. Title always comes from the original HTML.
  */
 export function htmlToMarkdown(html: string, maxChars: number): HtmlMarkdownResult {
   const title = extractTitle(html)
@@ -372,8 +332,7 @@ export function htmlToMarkdown(html: string, maxChars: number): HtmlMarkdownResu
   try {
     converted = turndown.turndown(content)
   } catch {
-    // turndown 的 DOM 遍历按元素递归；词法守卫建模不了的畸形标记仍可能抛
-    // RangeError。转换失败与超深走同一个省略标记，不把源标记带回模型上下文。
+    // The lexical guard cannot model every malformed tree; RangeError => same marker.
     return omittedResult(title, sourceTruncated, maxChars)
   }
   const sanitized = stripInvisibleText(converted)

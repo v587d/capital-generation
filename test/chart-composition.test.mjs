@@ -7,15 +7,9 @@ import { fileURLToPath } from 'node:url'
 import { load as yamlLoad } from 'js-yaml'
 
 /**
- * 组合层面的契约测试：patch 行、嵌套包声明、客户端 bundle 注册格式。
- *
- * 这里钉住的是**部署时才会暴露的致命错误**（下面两条都真实发生过，都让 profile 无法启动或
- * 客户端半边静默消失）：
- *  - 行名写成 `!!js` → loader 只对 `config` 插值，`name` 原样进 import，
- *    启动期 `name.startsWith is not a function`；
- *  - 行名写成 **subpath 说明符** → `locatePkgJson` 直接 `return undefined`，
- *    这颗行被静默当成"不是客户端包"，bundle 永不进 `__DSH_BOOT__`。
- * 所以这里既断言方言与形状，也**真的从模拟的 profile 根解析并导入一次**。
+ * Composition contract: patch rows, nested package manifest, client bundle registration. Pins
+ * deploy-only failures that really happened: a `!!js` row name makes the whole profile fail to
+ * start, and a subpath row name is silently dropped by `locatePkgJson` (bundle never boots).
  */
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -23,13 +17,8 @@ const CHART_UI = join(ROOT, 'chart-ui')
 const PATCH_TEXT = readFileSync(join(ROOT, 'cordis.patch.yml'), 'utf8')
 
 /**
- * 复刻 `dsh-client-modules` 的 `locatePkgJson` 守卫：不满足的行会被**静默**判为
- * "不是客户端包"（返回 undefined），既没有日志也没有报错。
- *
- * 上游原文：
- *   const pathLike = loaderName.startsWith(".") || loaderName.startsWith("file:") || isAbsolute(loaderName)
- *   const expectedPackageName = pathLike ? void 0 : exactPackageSpecifier(loaderName)
- *   if (!pathLike && expectedPackageName === void 0) return void 0
+ * Replica of `dsh-client-modules`' `locatePkgJson` guard: a rejected row is silently treated as
+ * "not a client package" (undefined), with no log and no error.
  */
 function exactPackageSpecifier(specifier) {
   if (specifier.startsWith('@')) {
@@ -45,15 +34,12 @@ function clientModulesAcceptsRowName(loaderName) {
   return pathLike || expectedPackageName !== undefined
 }
 
-/**
- * 读 patch。`!!js` 不是 js-yaml 的已知标签（本仓 persona.test.mjs 同一处理），
- * 去掉标签后表达式就是一段普通字符串。
- */
+/** Reads the patch. `!!js` is unknown to js-yaml, so strip the tag and the expression stays a plain string. */
 function loadPatch() {
   return yamlLoad(PATCH_TEXT.replace(/!!js\s+/g, ''))
 }
 
-/** 从模块 URL 向上找最近的 package.json 的 name——复刻 dsh-client-modules 的归属判定。 */
+/** Nearest package.json name above a module URL, mirroring dsh-client-modules' ownership check. */
 function nearestPackageName(fileUrl) {
   let dir = dirname(fileURLToPath(fileUrl))
   for (;;) {
@@ -65,11 +51,7 @@ function nearestPackageName(fileUrl) {
   }
 }
 
-/**
- * 行名的解析基址是**本 patch 文件所在目录**（cordis-plugin-include 装载 patch 时
- * `ctx.baseUrl = new URL('.', pathToFileURL(filename))`），所以 probe 脚本就写在本仓根目录，
- * 与部署时的解析基址同构。用完即删。
- */
+/** Row names resolve from the patch file's own directory, so the probe lives at repo root. Deleted after use. */
 function resolveFromPatchDirectory(specifier) {
   const probePath = join(ROOT, `.probe-resolve-${process.pid}.mjs`)
   writeFileSync(probePath, [
@@ -113,9 +95,8 @@ test('patch：行名必须是 path-like 的字面量（subpath 会被静默丢�
   const row = findRow(loadPatch(), 'capital-charts')
   assert.equal(typeof row.name, 'string')
 
-  // 上游事实：subpath 说明符既非 path-like、exactPackageSpecifier 又返回 undefined，
-  // 于是 locatePkgJson 直接 return undefined —— 这颗行**静默**不是客户端包。
-  // 把这条规则也断言下来：上游一旦放宽，这里先失败，我们就能改用更干净的 subpath 写法。
+  // Upstream fact: a subpath is neither path-like nor an exact package specifier, so the row is
+  // silently not a client package. If upstream relaxes this, fail here and simplify the patch.
   assert.equal(clientModulesAcceptsRowName('@v587d/capital-generation/chart-ui'), false,
     '上游已不再丢弃 subpath 行名：可以简化 cordis.patch.yml 的写法和本文件的这条注释')
 
@@ -125,10 +106,7 @@ test('patch：行名必须是 path-like 的字面量（subpath 会被静默丢�
 })
 
 test('patch：任何行的 name 都必须是字面量字符串（name 不接受 !!js）', () => {
-  // 事故回归：loader 只对 fiber 的 config 做插值（cordis-plugin-loader 的
-  // `internal/config` 钩子），`name` 原样进入 ESM import。曾经把图表行的 name 写成
-  // !!js，后果是启动期 `failed to import loader entry capital-charts ([object Object]):
-  // name.startsWith is not a function`，**整个 profile 起不来**。
+  // Regression: the loader interpolates only `config`, so a `!!js` name breaks the whole profile at startup.
   const nameLines = PATCH_TEXT.split('\n').filter((line) => /^\s*-?\s*name:/.test(line))
   assert.ok(nameLines.length >= 2, `patch 里的 name 行太少（${nameLines.length}），断言可能失效`)
   for (const line of nameLines) {
@@ -155,7 +133,7 @@ test('patch：行名能从 profile 根解析并导入，且归属到 chart-ui �
   assert.ok(existsSync(fileURLToPath(probe.url)), `解析结果必须是真实存在的文件：${probe.url}`)
   assert.equal(basename(probe.url), 'index.js')
 
-  // 关键：包身份必须是嵌套包，不能落到主包（落到主包就是重复 Loader source 组合错误）。
+  // Package identity must be the nested package; falling back to the root package duplicates a Loader source.
   const nearest = nearestPackageName(probe.url)
   const rootName = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).name
   assert.equal(nearest, '@v587d/capital-charts')
@@ -186,7 +164,7 @@ test('客户端 bundle：注册 id 必须等于包名，且是模块表格式而
   assert.match(source, /window\.__ModuleLoader__\.load\(/, '必须是客户端模块表的注册格式')
   assert.ok(source.includes(`id: '${manifest.name}'`), 'ModuleLoader 的 id 必须等于 package.json 的 name（消费者按 <id>/client 取）')
   assert.match(source, /exports\.apply\s*=/, '必须导出 apply')
-  // 模块体只能在工厂函数内执行：顶层不得有页面副作用。
+  // The module body must run only inside the factory: no page side effects at registration.
   const beforeFactory = source.slice(0, source.indexOf('factory:'))
   assert.equal(/document\.|globalThis\./.test(beforeFactory), false, '登记阶段不得触碰页面')
 })

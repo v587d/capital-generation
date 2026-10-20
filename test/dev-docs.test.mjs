@@ -1,22 +1,17 @@
-// 研发文档层（AGENTS.md + docs/dev/）的结构闸门。
-//
-// 为什么存在：AGENTS.md 上一版手工维护一份"哪节被谁引用"的清单，代码注释一改就失真；
-// 拆分到 docs/dev/ 之后，指针跨文件了，靠人记必然漏。这里把三件事钉成测试：体积（注入
-// 预算与"尾部静默消失"）、索引与正文一致（内容搬走但索引没改 = 文档说谎）、指针可解析
-// （§编号与「章节名」引用指向真实存在的节）。
+// Structure gate for the docs layer: injected size (over budget truncates the tail silently),
+// index/body agreement, and file-qualified §pointers resolving to a real section in a real file.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { presetRows } from './preset-rows.mjs'
+import { allPresets } from './preset-rows.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const read = (rel) => readFileSync(join(ROOT, rel), 'utf8')
 
 const DEV_DIR = 'docs/dev'
-// 行数上限来自"一份 md 不超过 150 行"的拆分约定；字节上限 = preset 注入闸门
-// （agent-instructions 的 maxBytes: 16384）的 75%，与 §1.5 / §4.2 的输出预算同一口径。
+// MAX_LINES = one-md-file split convention; MAX_AGENTS_BYTES = 75% of the injection gate.
 const MAX_LINES = 150
 const MAX_AGENTS_BYTES = 12288
 
@@ -30,13 +25,12 @@ const headingsOf = (text) => [...text.matchAll(HEADING)].map((m) => m[1])
 const rootHeadings = headingsOf(agentsText)
 const devHeadings = new Map([...devTexts].map(([file, text]) => [file, headingsOf(text)]))
 
-/** 全仓文档层的 §定义：整数节只住 AGENTS.md，详情文件只有小数节；小数节全局唯一。 */
+// §definitions: integer sections live only in AGENTS.md, detail files only in decimals, one carrier each.
 const defined = new Set(rootHeadings)
 const decimalOwners = new Map()
 for (const [file, list] of devHeadings) {
   for (const h of list) {
-    // 对称性：详情文件里出现整数节就意味着"同一节两个载体"——根说一遍、详情再说一遍，
-    // 迟早失真（§8.2 的落点判据同样适用于文档层自己）。拆成 §N.1… 并把整数节留在根。
+    // An integer section here would mean two carriers for one section: split into §N.1… and keep the integer in the root.
     assert.ok(h.includes('.'), `${file} 定义了整数节 ## ${h}——整数节只住 AGENTS.md，这里按 §${h}.1… 拆小节`)
     assert.ok(!decimalOwners.has(h), `§${h} 同时在 ${decimalOwners.get(h)} 与 ${file} 里定义——§编号是全仓唯一命名空间`)
     decimalOwners.set(h, file)
@@ -44,7 +38,7 @@ for (const [file, list] of devHeadings) {
   }
 }
 
-/** 索引行的编号写法：`§4.2`、`§9.1–§9.6`（连字符展开为连续区间）；只写小数节，整数节属于根。 */
+// Index-cell §forms: `§4.2`, `§9.1–§9.6` (hyphen expands to the contiguous range).
 function expandIndexCell(cell) {
   const out = []
   for (const m of cell.matchAll(/§(\d+(?:\.\d+)?)(?:–§?(\d+(?:\.\d+)?))?/g)) {
@@ -58,18 +52,15 @@ function expandIndexCell(cell) {
   return out
 }
 
-// 按行切要认 CRLF：`\r` 在 JS 里算行终止符、`.` 不匹配它，所以逐行喂给非 multiline 的
-// `(.*)$` 时，带 `\r` 尾的行**整行配不上**——下面 persona 抽取会一段都抓不到（真 Windows node 实测）。
+// Split must accept CRLF: `.` does not match `\r`, so line-anchored patterns miss every CR-terminated line.
 const lines = (text) => text.split(/\r?\n/)
-// 行数：CRLF 下 split('\n') 只是每行尾多带一个 `\r`，条数不变，所以这里不需要额外归一。
+// lineCount: under CRLF each entry keeps a trailing `\r`, so counts need no fixup.
 const lineCount = (text) => text.replace(/\n$/, '').split('\n').length
 const filesToScan = []
 const walk = (dir) => {
   for (const entry of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
-    // rel 只用 `/` 拼：`join()` 在 Windows 上产出 `docs\dev`，而下面比较的是字面量
-    // （排除表里的 DEV_DIR、`rel !== 'AGENTS.md'`），反斜杠版本永不等于 →
-    // docs/dev/ 被当成根文档扫，报出来的行数/指针错全是假警报。
-    // 落盘访问交给 join(ROOT, rel)，path 模块会把 `/` 换成本机分隔符。
+    // rel uses `/` only: join() yields `docs\dev` on Windows, never equal to the literals below, so docs/dev/
+    // would be scanned as a root doc and every line-count / pointer report would be a false alarm.
     const rel = `${dir}/${entry.name}`
     if (entry.isDirectory()) {
       if (!['node_modules', 'lib', '.git', '.review', DEV_DIR].includes(rel)) walk(rel)
@@ -92,17 +83,21 @@ test('AGENTS.md 与 docs/dev/*.md 守住体积闸门', () => {
 })
 
 test('agent-instructions 的 maxBytes 与本文体积匹配，且不被擅自放大', () => {
-  const rows = presetRows()
-  const instructions = rows.find((row) => row?.id === 'agent-instructions')
-  assert.ok(instructions, 'preset 必须有 agent-instructions 行')
-  const maxBytes = instructions.config?.maxBytes
-  assert.equal(maxBytes, 16384, '注入预算改动要有明确设计决策（放大掩盖膨胀，缩小会截断尾部规则）')
-  assert.ok(Buffer.byteLength(agentsText, 'utf8') <= maxBytes, 'AGENTS.md 超出注入预算，尾部规则会静默消失')
+  // Every preset carries its own agent-instructions row, so this gate runs per preset: an enlarged budget truncates silently.
+  const instructions = allPresets()
+    .flatMap((preset) => (preset.config.plugins ?? []).filter((row) => row?.id === 'agent-instructions').map((row) => ({ presetId: preset.config.id, row })))
+  assert.ok(instructions.length >= 2, `agent-instructions 行应覆盖每颗 preset，实际 ${instructions.length} 行`)
+  for (const { presetId, row } of instructions) {
+    const maxBytes = row.config?.maxBytes
+    assert.equal(maxBytes, 16384, `${presetId} 的注入预算改动要有明确设计决策（放大掩盖膨胀，缩小会截断尾部规则）`)
+    assert.ok(Buffer.byteLength(agentsText, 'utf8') <= maxBytes, `${presetId}: AGENTS.md 超出注入预算，尾部规则会静默消失`)
+  }
 })
 
-test('AGENTS.md 保留十个顶层节，§编号不因拆分而漂移', () => {
-  for (let n = 1; n <= 10; n += 1) {
-    assert.ok(rootHeadings.includes(String(n)), `AGENTS.md 缺少顶层 §${n}（代码注释按 §编号与章节名引用，不许删或改号）`)
+test('AGENTS.md 顶层节连续，§编号不因拆分而漂移', () => {
+  const ints = rootHeadings.filter((h) => !h.includes('.')).map(Number)
+  for (let n = 1; n <= Math.max(...ints); n += 1) {
+    assert.ok(ints.includes(n), `AGENTS.md 缺少顶层 §${n}（代码注释按 §编号与章节名引用，不许删或改号）`)
   }
 })
 
@@ -131,12 +126,10 @@ test('§0 阅读路径表与 docs/dev/ 正文一一对应', () => {
 })
 
 test('§编号规则：整数节只在 AGENTS.md 索引，小数节按父节从 .1 连续编号', () => {
-  // 编号是全仓唯一的指针命名空间（代码注释按 § 找文档）。上一版的手工引用清单会失真，
-  // 所以这里不查"谁引用了谁"，只查编号本身是否自洽：
-  // ① 一个小数节只能有一个载体文件（前面的定义阶段已断言）；
-  // ② 同一父节下的小数必须从 .1 起连续（跨载体判定）——有洞就意味着某节被删了却没重编号，
-  //    或者列表项没升级成小节（曾经的 §9：只有 §9.7，正文第 1-6 条无处可指）。
-  // 连续性是全命名空间的性质，与载体无关：§8.3 与 §9.7 就住在 AGENTS.md 里。
+  // Numbering is the repo-wide pointer namespace, so this checks self-consistency rather than citations:
+  // one carrier per decimal (asserted at definition time), and decimals contiguous from .1 per parent
+  // across carriers — a hole means a section was deleted without renumbering, or a list item never
+  // became a section. Continuity spans carriers: §8.3 and §9.7 live in the root file itself.
   const byParent = new Map()
   const collect = (file, list) => {
     for (const h of list) {
@@ -204,8 +197,7 @@ test('「章节名」式引用不因改名而失效', () => {
 })
 
 test('研发文档不外泄进使用者 Agent 的运行时文本', () => {
-  // 受众分离：persona / skill 是使用者 Agent 的运行时指令，docs/dev 与 AGENTS.md 是研发约定。
-  // 这条断言挡掉"为腾 AGENTS.md 空间把内容搬进 persona"的反向操作。
+  // Audience split: persona / skill is runtime text, so maintainer docs never get moved into it.
   const skillFiles = readdirSync(join(ROOT, 'preset/capital-generation/skills'))
     .flatMap((dir) => [join('preset/capital-generation/skills', dir, 'SKILL.md')])
     .filter((rel) => existsSync(join(ROOT, rel)))
@@ -213,7 +205,8 @@ test('研发文档不外泄进使用者 Agent 的运行时文本', () => {
     assertNotDevRef(read(rel), rel)
   }
   assert.ok(skillFiles.length >= 5, `skills/ 下应有长协议与任务 SKILL.md（≥5，实际数量以目录为准），实际：${skillFiles.join(', ')}`)
-  const rows = presetRows()
+  // Walk all presets: role personas live in their own presets and are the easiest to leak doc voice into.
+  const rows = allPresets().flatMap((preset) => preset.config.plugins ?? [])
   const texts = []
   for (const row of rows) {
     const config = row?.config
@@ -228,7 +221,7 @@ test('研发文档不外泄进使用者 Agent 的运行时文本', () => {
       }
     }
   }
-  assert.ok(texts.length >= 4, `应至少抓到主 persona 与三个子 persona，实际 ${texts.length} 段`)
+  assert.ok(texts.length >= 6, `应抓到主 persona 与全部角色 persona（现共六段），实际 ${texts.length} 段：${texts.length}`)
   for (const text of texts) assertNotDevRef(text, 'agent.patch.yml persona')
 })
 

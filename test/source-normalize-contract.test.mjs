@@ -8,10 +8,8 @@ import { DataCollectorHub } from '../lib/data-collector/hub.js'
 const signal = new AbortController().signal
 const session = { id: 'normalize-contract', header: { cwd: '/workspace/project' } }
 
-/**
- * 公开 HTTP 与 MCP 面每条能力的最小合法参数（Fuyao 那 61 条的同一张表在
- * `scripts/smoke-fuyao.mjs` 的 `PARAMS`，两边口径一致：缺了就失败，不静默跳过）。
- */
+// Minimum valid params for every public HTTP / MCP capability. Fuyao's 61 rows live in
+// scripts/smoke-fuyao.mjs `PARAMS`; same rule on both sides — missing coverage fails, never skipped.
 const SAMPLES = {
   eastmoney_top_buy_sell_market: { start_date: '2026-09-01', end_date: '2026-09-24' },
   eastmoney_top_buy_sell_ticker: { ticker: '600519.SH', start_date: '2026-09-01', end_date: '2026-09-24' },
@@ -55,14 +53,11 @@ test('参数样例表必须覆盖全部已注册的公开 HTTP 能力：新增�
   assert.deepEqual(registered, Object.keys(SAMPLES).sort(), 'SAMPLES 与注册表不一致：缺样例的能力不会被下面的归一化回归覆盖')
 })
 
-/**
- * 归一化会被跑**两遍**：Hub 入队前一次（merge key 与 digest 用规范化参数，hub.ts 的
- * normalizeRequest），`createSource` 的 execute 内再一次（直连调用也要生效）。所以两条硬不变量：
- * ① 输出的键必须是模型声明过的键——把 `ticker` 改名成内部叫法 `thscode` 会让第二遍撞在
- *   自己的 `assertKnown` 上，报出 `unsupported parameter: thscode`，而这条能力的参数明明合法
- *   （2026-10-05 实测：融资融券/分红/主力资金/股东户数四条的单票过滤全因此失效）；
- * ② 幂等——第二遍的输入就是第一遍的输出，必须原样返回。
- */
+// normalizeParams runs TWICE per call: once at Hub enqueue (merge key + digest use the normalized
+// params, hub.ts normalizeRequest) and once inside createSource's execute, so direct calls get it too.
+// Two invariants: ① output keys must be ones the model declared — renaming `ticker` to the internal
+// `thscode` trips the second pass's own `assertKnown` (`unsupported parameter: thscode`) and kills
+// ticker filters; ② idempotent — the second pass's input is the first pass's output.
 test('公开 HTTP 与 MCP 归一化：不发明未声明的键，且双跑幂等', () => {
   for (const source of sources) {
     const capability = source.schema.capability
@@ -92,7 +87,8 @@ test('走 Hub 的真实入口：原始 ticker 参数一路落到上游 filter，
   try {
     for (const [capability, params, filterPattern] of cases) {
       requested.length = 0
-      // 空结果是真数据缺口，会抛数据侧错误；这里要钉的是**没有**参数侧错误、且请求真的带上了这只票。
+      // An empty result is a real data gap and throws data-side. Pinned here: no parameter-side
+      // rejection, and the request really carried the ticker.
       await hub.request({ capability, params, session }, { signal }).catch(() => undefined)
       assert.equal(requested.length, 1, `${capability} 必须走到上游，而不是在归一化阶段就被拒`)
       const filter = requested[0].searchParams.get('filter') ?? ''

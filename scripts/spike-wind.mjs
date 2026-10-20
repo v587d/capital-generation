@@ -1,17 +1,9 @@
 /**
- * Wind 结构化 MCP 探针（§6 第 4 步的 spike 仪器，不是产品面）。
- *
- * 为什么要有它：`docs/design/wind-market-source.md` 的结论全部抄自上游 skill 2.0.4 的文档，
- * 而"注册成 capability"要求的是**真报文**——键名是不是 ASCII、并行数组长什么样、
- * 同参数打两次是不是同一份结果。没实测过的能力不许注册（`docs/dev/tool-schema.md` §10.2 / §10.6）。
- *
- *   node scripts/spike-wind.mjs --list                      # 七个 server 的 tools/list（不计费）
- *   node scripts/spike-wind.mjs --list stock_data
- *   node scripts/spike-wind.mjs --auth                      # 逐 server initialize，只验 Key 通不通
- *   node scripts/spike-wind.mjs --call stock_data::get_stock_kline --args '{"windcode":"600519.SH"}' --repeat 2
- *
- * Key 只从 credentials 解析后放进 Bearer，脚本**不打印 Key、不落盘响应正文**。
- * 真实调用消耗上游积分：默认串行、单条，探针数量按问题数算。
+ * Wind structured MCP spike instrument, not a product surface. Capabilities may only be registered
+ * after seeing real payloads (key names, parallel arrays, repeatability) — docs/dev/tool-schema.md
+ * §10.2 / §10.6.
+ * Key goes into the Bearer header only; ⛔ never printed and bodies are never written to disk.
+ * Real calls burn credits: serial, one probe per question.
  */
 import { parseArgs } from 'node:util'
 import { createWindClient } from '../lib/web-retriever/wind-client.js'
@@ -73,7 +65,7 @@ const initializeParams = {
   clientInfo: { name: 'capital-generation-spike', version: 'spike' },
 }
 
-/** 键名风险标记：§10.6 要求进入 data_collector 的行键是 ASCII snake_case。 */
+/** Key-name risk flags: data_collector row keys must be ASCII snake_case (§10.6). */
 function keyFlags(key) {
   const flags = []
   if (/[^\x20-\x7E]/.test(key)) flags.push(/[\uFF00-\uFFEF]/.test(key) ? '全角' : '非ASCII')
@@ -92,7 +84,7 @@ function typeTag(value) {
   return '对象'
 }
 
-/** Wind 表格形态 `{columns:[{name,type}], rows:[[标量]]}`：行不是对象，必须按列名转置。 */
+/** Wind tables are `{columns:[{name,type}], rows:[[scalar]]}`: rows are arrays, not objects. */
 function dumpTables(value, path = '$', out = []) {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     const columns = value.columns
@@ -104,8 +96,7 @@ function dumpTables(value, path = '$', out = []) {
       const cellTypes = new Set(rows.flat().map(typeTag))
       out.push(`\n表 ${path}  ${rows.length} 行 × ${names.length} 列  列名宽=[${widths.has(names.length) ? '与行数一致' : `不一致：${[...widths]}`}]  空格/INVALID 每行=${nulls.join(',') || 0}  单元类型=${[...cellTypes].join('/')}`)
       out.push(`  列名: ${names.map((name) => `${name}${keyFlags(name).length ? `⚠️[${keyFlags(name).join('+')}]` : ''}`).join(' | ')}`)
-      // 空表（非交易日/无数据）是合法成功，别在这里把探针自己打崩——那会把"上游回了空"
-      // 误记成"探针挂了"，而这两种结论在实现里走的是完全不同的分支。
+      // An empty table (non-trading day / no data) is a legal success — don't crash the probe.
       if (rows.length === 0) out.push('  （0 行：columns 仍给出，unit 见下）')
       else {
         out.push(`  首行: ${JSON.stringify(rows[0]).slice(0, 260)}`)
@@ -125,7 +116,6 @@ function dumpTables(value, path = '$', out = []) {
   return out
 }
 
-/** 找出所有"行数组"（元素为对象），并逐列统计类型、null 与后端 INVALID 文本。 */
 function surveyRows(value, path = '$', rows = []) {
   if (Array.isArray(value)) {
     if (value.length > 0 && value.every((item) => item && typeof item === 'object' && !Array.isArray(item))) {
@@ -163,7 +153,6 @@ function topLevelShape(value, path = '$', out = []) {
   return out
 }
 
-/** 两个结果的结构差异：键集合与取值都比，只报前若干条差异路径。 */
 function diffPaths(a, b, path = '$', out = []) {
   if (out.length >= 12) return out
   const sameType = typeof a === typeof b && Array.isArray(a) === Array.isArray(b)

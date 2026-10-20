@@ -1,35 +1,19 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { DataTimeContract } from '../time/tools.js';
 import type { DatasetRef, SaveDatasetInput, SessionLike } from './store.js';
-/**
- * 规范化内部 data_key 片段：斜杠/冒号等路径分隔符一律映射为点，其余非常规
- * 字符折叠为点、合并连续点、去掉首尾点。data_key 只是宿主内部路由/审计身份，
- * 不出现在模型可见协议、人设或工具输出中。
- */
+/** Normalize an internal data_key token; data_key is host-only and never model-visible. */
 export declare function normalizeKeyToken(value: string): string;
-/**
- * 生成内部 data_key：provider.kind.resource（例如
- * buildDataKey('fuyao', 'api', '/api/a-share/prices/snapshot')
- * => 'fuyao.api.api.a-share.prices.snapshot'）。
- */
 export declare function buildDataKey(provider: string, kind: string, resource: string): string;
-/**
- * 数据请求：capability 是模型可见的短能力名（全局唯一），session 由工具层以
- * exec.agent.session 注入，不接受模型传参。内部 data_key 不出现在请求协议里。
- */
+/** capability is the model-visible unique key; session is injected by the tool layer, not supplied by the model. */
 export interface DataRequest {
     capability: string;
     params: Record<string, unknown>;
-    /** force_refresh=true 绕过已验证 manifest 并生成新的不可变 Dataset。 */
+    /** force_refresh bypasses manifest reuse and creates a new immutable Dataset. */
     force_refresh?: boolean;
-    /** 本次用户任务关联 id（可复用）；只用于追溯，不要求模型理解。 */
     task_id?: string;
     session: SessionLike;
 }
-/**
- * 数据源契约：capability 为唯一注册键与模型可见名；name/source/data_key
- * 均为宿主内部字段（日志、路由、审计），不得进入工具 schema、输出或人设。
- */
+/** capability is the unique registration key; name/source/data_key stay host-internal (logs, routing, audit). */
 export interface SchemaDescriptor {
     capability: string;
     name: string;
@@ -37,34 +21,29 @@ export interface SchemaDescriptor {
     data_key: string;
     source_label?: string;
     paginated?: boolean;
-    /** 可复用 Dataset 的最长采集年龄；未声明时仅受 Dataset 保留期约束。宿主内部字段。 */
+    /** Longest reusable Dataset age; defaults to the retention window. Host-only. */
     cacheMaxAgeMs?: number;
-    /**
-     * 行数组位置的显式声明。龙虎榜这类响应的行数组不在 `item` 下（`stock_items`），
-     * 只靠形状推断会把整份数据判成「不可读的文档」。谁产出数据谁声明行在哪里，
-     * 存储层不再猜。
-     */
+    /** Where the row array lives; without it, envelopes such as `stock_items` look unreadable. */
     rowShape?: RowShapeHint;
-    /** 一行摘要：只用于能力目录（选能力够用），控制在 ~50 字以内。 */
+    /** One-line catalog summary (~50 chars max). */
     summary?: string;
-    /** 完整说明：只在 describe_capability 详情里返回（单位、null 语义、时间口径、分页口径）。 */
+    /** Full detail for describe_capability only (units, null semantics, time/pagination rules). */
     description?: string;
     input_schema: object;
-    /** 机器可读时间参数契约，由时间工具与数据源共同使用。 */
+    /** Machine-readable time-parameter contract shared with the time tools. */
     time_contract?: DataTimeContract;
     output_schema?: object;
 }
-/** 能力目录项：只带"选能力"所需的信息，体积必须远小于工具结果剪枝阈值。 */
+/** Catalog entry: just enough to pick a capability. */
 export interface CapabilitySummary {
     capability: string;
     summary: string;
     paginated: boolean;
 }
-/** 单个能力的完整契约：参数与输出字段字典，调用前必读。 */
+/** Full contract for one capability; must be read before calling. */
 export interface CapabilityDetail extends CapabilitySummary {
     description: string;
     input_schema: object;
-    /** `output_schema` 的模型可见投影，见 renderOutputFields；声明不出字段时为 null。 */
     output_fields: string | null;
 }
 export interface DataSource {
@@ -73,22 +52,16 @@ export interface DataSource {
         data: unknown;
         schema?: object | null;
     }>;
-    /** Optional source-specific output guard; false rejects the result before persistence. */
+    /** Optional source guard; false rejects the result before persistence. */
     validateOutput?: (data: unknown) => boolean;
     /**
-     * Optional parameter canonicalization. The Hub calls it BEFORE computing the
-     * in-flight merge key and params_digest, so requests that differ only in
-     * case/whitespace/list order/default values share one Dataset instead of
-     * writing several. It must be idempotent (execute calls it again) and may
-     * throw to reject invalid parameters before anything is queued. Sources that
-     * omit it keep their previous behaviour exactly.
+     * Optional canonicalization; the Hub calls it before merge key and params_digest, so equivalent
+     * requests share one Dataset. Must be idempotent (execute calls it again) and may throw.
      */
     normalizeParams?: (params: Record<string, unknown>) => Record<string, unknown>;
 }
-/** Dataset 落盘器（Hub 的唯一成功出口）。 */
 export interface DatasetStoreLike {
     save(input: SaveDatasetInput): Promise<DatasetRef>;
-    /** Optional for compatibility with lightweight test stores; production store implements manifest lookup. */
     findLatest?(input: {
         session: SessionLike;
         capability: string;
@@ -96,35 +69,29 @@ export interface DatasetStoreLike {
         signal?: AbortSignal;
     }): Promise<DatasetRef | undefined>;
 }
-/** 数据源声明的行数组位置；缺省按 `item` 推断。 */
 export interface RowShapeHint {
-    /** 行数组所在的顶层键名（默认 `item`）。 */
+    /** Top-level key holding rows (default `item`). */
     rowKey?: string;
-    /** 可选的多个行数组路径，支持 `[]` 展开并合并为一组 rows。 */
+    /** Multiple row paths; `[]` expands and merges them into one row set. */
     rowKeys?: string[];
-    /** 顶层本身就是行数组。 */
+    /** The top level is itself the row array. */
     rootArray?: boolean;
 }
 export interface DataCollectorHubOptions {
-    /** 必需：宿主侧 Dataset store；缺失时 request 直接失败。 */
+    /** Required Dataset store; request fails without it. */
     store: DatasetStoreLike;
-    /** 队列最大长度；默认 50。 */
+    /** Queue length (default 50). */
     maxQueueLength?: number;
-    /** 传输层执行超时；默认 30_000 ms。只是请求超时，不是数据生命周期。 */
+    /** Transport timeout only (30s default), not data lifetime. */
     requestTimeoutMs?: number;
-    /** 时钟注入（测试用）；默认 Date.now。 */
     now?: () => number;
 }
 /**
- * Phase 1 数据执行器：FIFO 串行执行外部数据源，成功后由宿主 store 立即
- * 原子落盘为不可变 Dataset，只回传 DatasetRef。
- *
- * 明确不做：长期 raw data 内存缓存、按 data_key 的查询、source_preference 路由。
- * 已验证 DatasetRef 的复用由 workspace manifest 提供，内存只保留 in-flight 队列。
+ * FIFO executor: success is persisted immediately as an immutable Dataset and only a DatasetRef is
+ * returned. In-flight queue is the only in-memory raw data; reuse comes from workspace manifests.
  */
 export declare class DataCollectorHub {
     private readonly queue;
-    /** 正在执行的队列项（执行期间不在 queue 中，但仍参与合并与容量判断）。 */
     private active;
     private readonly sources;
     private readonly cacheLookups;
@@ -136,46 +103,21 @@ export declare class DataCollectorHub {
     constructor(options: DataCollectorHubOptions);
     registerSource(source: DataSource): () => void;
     /**
-     * 入队并阻塞等待完成：先按 capability+params_digest 查找当前 session 下仍有效的
-     * manifest；force_refresh=true 或没有可复用 Dataset 时才进入数据源队列。相同的
-     * in-flight 请求仍共享一次执行，成功后立即由宿主 store 原子落盘。
-     *
-     * 参数规范化（source 可选）发生在这里：merge key 与 digest 都用规范化后的参数，
-     * 因此「大小写/空白/重复项不同、语义相同」的请求命中同一个 Dataset。未知
-     * capability 不做处理，仍由执行阶段抛出统一的 no data source 错误。
+     * Enqueue and wait: reuse a valid manifest unless force_refresh; identical in-flight requests share
+     * one execution. Params are normalized before merge key and digest.
      */
     request(request: DataRequest, options?: {
         signal?: AbortSignal;
     }): Promise<DatasetRef>;
-    /** 应用 source 的可选参数规范化；未声明或 capability 未注册时原样返回。 */
     private normalizeRequest;
-    /** 挂一个等待者并返回其结算承诺；signal 触发时摘除等待者并拒绝（不影响共享执行）。 */
     private awaitSettlement;
-    /** 结算一个等待者：无论成败都摘除监听，防止重复结算。 */
     private settleWaiter;
-    /**
-     * 能力目录（模型可见的最外层发现入口）：只含 capability、一行摘要与是否分页。
-     *
-     * 目录刻意不带 input_schema / output_schema —— 全量 schema 一度达 23KB，
-     * 会被工具结果剪枝器截掉中间部分，导致排在中间的能力在发现阶段不可见。
-     * 目录必须一次性全部返回（体积预算由测试守住），详情走 describeCapability。
-     * 不含任何内部路由字段（name/source/data_key/source_label）。
-     */
+    /** Catalog: capability, one-line summary, paginated only. Full schemas would be pruned; details come from describeCapability. */
     listCapabilities(): CapabilitySummary[];
-    /** 当前已注册的能力名（用于未知名字的引导与诊断）。 */
     capabilityNames(): string[];
-    /**
-     * 能力目录的模型可见形态：一行一条 `capability|summary|paginated`（1=分页、0=不分页）。
-     * 同等信息量下 JSON 数组要 5530 字符（69 条实测，其中 58% 是键名与标点），行编码 2435、
-     * 均摊从 80 降到 35 字符——目录余量从 +7 条变成 +105 条。信息量没变、依然一次性全量返回，
-     * §1.1 那条"不分页、不裁剪"的硬约束原样成立。结构化形态仍由 listCapabilities 提供（测试与内部消费）。
-     */
+    /** Model-visible catalog: one `capability|summary|paginated` line each; JSON costs about twice the tokens. */
     capabilityDirectory(): string;
-    /**
-     * 单个能力的完整契约；名字未注册时返回 undefined，由工具层分类成可引导的错误。
-     * 返回值只含模型可见字段，是新建的普通对象，不回传内部 live data。
-     * `output_fields` 是 `output_schema` 的投影：详情体积按列数增长会被宽表打穿，见 renderOutputFields。
-     */
+    /** Single capability contract; undefined for unknown names (the tool layer classifies it). */
     describeCapability(capability: string): CapabilityDetail | undefined;
     private processNext;
 }

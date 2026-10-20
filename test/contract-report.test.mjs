@@ -1,9 +1,7 @@
 /**
- * Issue 正文形状的回归。
- *
- * 为什么值得钉：这份 Markdown 是整套巡检**唯一被人读的东西**。它坏法很安静——
- * 表格错位、真故障被并进噪声、或者把响应正文/查询串带进一张 public 仓库的公开 Issue。
- * 最后那一条是安全问题，不是格式问题。
+ * Issue body shape. This Markdown is the only human-read output of the probe suite, and it fails
+ * quietly: misaligned tables, real failures folded into noise, or response bodies / query strings
+ * leaking into a public Issue (that last one is a security issue, not formatting).
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -60,7 +58,7 @@ test('⛔ 渲染器只读白名单字段：报告里混进响应正文也不会�
     failing: [{
       capability: 'quote', family: 'fuyao', state: 'active', verdict: 'HTTP_STATUS', ms: 10, budgetMs: 1000,
       detail: 'returned HTTP 401',
-      // 万一将来有人把响应体或凭据塞进 result，渲染器也不许把它抄进公开 Issue。
+      // Even if a future caller stuffs a response body or credential into result, the renderer must not copy it.
       body: '{"data":{"item":[{"secret":"LEAKED-BODY-CONTENT"}]}}',
       url: 'https://fuyao.aicubes.cn/api/a-share/prices/snapshot?thscodes=600519.SH&x-api-key=LEAKED-KEY',
     }],
@@ -82,9 +80,10 @@ test('详情里的竖线被转义，不把表格劈开', () => {
 })
 
 /**
- * 关单判据。**只有"本单提到的能力，本次都真打过且都没判不合格"才关**。
- * 这一组用例存在的理由是一个真实的误关形状：日档那天 weekly 能力根本不在 `report.results` 里，
- * 按"没出现在失败中"就关单，等于给没复核过的东西发通过证明，还顺手清零「连续第 N 天」。
+ * Close decision: an Issue closes only when every capability it names was actually exercised this
+ * run and none is failing. A real misfire: on the daily tier a weekly capability was absent from
+ * `report.results`, and "not among failures" closed the Issue, certifying something never rechecked
+ * and resetting the streak counter.
  */
 const ACTIVE = new Set(['quote', 'fund_manager'])
 const passed = [{ capability: 'quote', family: 'fuyao', state: 'active', verdict: 'PASS', ms: 90 }]
@@ -103,7 +102,7 @@ test('其中一条本次仍不合格 → 不关，理由点名是哪条', () => 
 })
 
 test('日档那天 weekly 能力没真打 → 不许当成"已通过"关单', () => {
-  // 旧逻辑在这里会把单关掉：results 里根本没有 fund_manager，"没出现在失败里"被当成了通过。
+  // The old logic closed here: fund_manager was simply absent from results, read as passing.
   const d = closeDecision('上周六 `fund_manager` 报 5003', passed, ACTIVE)
   assert.equal(d.action, 'keep')
   assert.match(d.reason, /没真打/)
@@ -116,15 +115,15 @@ test('SKIPPED（id 没解析出来所以没发请求）也不算复核过', () =
 })
 
 test('看门狗告警单只提文件名，巡检结果无权关它', () => {
-  // 它带同一个 label，会被 `opens` 捞进来；旧逻辑在任何全绿早晨都会把"调度没跑"的警报偷偷收掉。
+  // Same label, so `opens` picks it up; the old logic silently closed a "scheduler did not run" alarm on any green morning.
   const d = closeDecision('`data-source-contract.yml` 没有 schedule 记录', passed, ACTIVE)
   assert.equal(d.action, 'keep')
   assert.deepEqual(d.mentioned, [])
 })
 
 test('正文的 run-date 用北京日期，不是 UTC 日期', () => {
-  // 排程是北京 04:00 = UTC 前一天 20:00。Issue 标题、同天去重、关单留言都读这个字符串，
-  // 切 UTC 日会让每天那张单都盖着昨天的日期（2026-10-09 那次定时跑就是这个形状）。
+  // The schedule is 04:00 Beijing = 20:00 UTC the previous day; Issue title, same-day dedupe and
+  // close comments all read this string, so a UTC date would stamp every Issue with yesterday.
   const body = renderReport(report({ at: '2026-10-09T20:00:00.000Z' }))
   assert.match(body, /run-date 2026-10-10/, `正文首行应当是北京日期：${body.split('\n')[2] ?? ''}`)
   assert.doesNotMatch(body, /run-date 2026-10-09/)
