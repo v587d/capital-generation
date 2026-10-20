@@ -1,6 +1,6 @@
 # @v587d/capital-charts
 
-Capital 模式的图表前端组件。**它不是独立安装的包**——它是 `@v587d/capital-generation`
+自动模式的图表前端组件。**它不是独立安装的包**——它是 `@v587d/capital-generation`
 随包携带的嵌套包，由后者 `cordis.patch.yml` 里的 `insert` 行以 host 平面挂载。
 
 ## 为什么是一个嵌套包，而不是主包的一部分

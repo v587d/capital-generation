@@ -3,7 +3,8 @@
  * Root convergence (visibility already closed by family rows), per-name sibling deny,
  * call-level guards for the `ocr` url form and role `interrupt_agent`, plus shell and fs
  * guards. Identity must be read per call: the host creates the Agent before selecting a
- * preset. Listens on `ctx.root`; one registration per process.
+ * preset. Also hides delegation-only roles from the remote roster. Listens on `ctx.root`;
+ * one registration per process.
  */
 import type { Context } from '@deepseek-ai/cordis';
 export declare const name = "capital-policy";

@@ -12,11 +12,11 @@
   行数组。由 `package.json` 的 `dsh.bundle.patch`（**数组**：主 patch + 这一份 yml）随包挂载，
   `trust=system`。**不要**手抄进 `~/.dsh/.agent-presets`，也不要编辑 DSH 自带安装目录
   （`standard` / `ptc` / `minimal` / `cordis`）——要改就复制成本地 preset。
-- ⛔ 注册表**没有"隐藏"概念**（0.2.1 实测 `agentPresets.list()` 只认声明行）：每颗 preset 都是
-  用户在「Agent 预设 → 自定义」里能手工开成会话的模式。所以角色工具面收敛的判据**只有 preset
-  id、不分根会话还是 child**——手开一条 web_retriever 会话那条路径也必须收敛，否则人设说的是网页
-  材料，工具表里躺着 `request_data` 与 `render_chart`。D0 之后这件事主要由**行组合**保证（那一颗
-  preset 压根没注册取数工具），运行期只剩逐名减掉的同行兄弟。
+- ⛔ 注册表**没有"隐藏"概念**（`list()` 只认声明行），六颗都仍注册；插件在 host 平面包一层
+  `remoteExportList()`，只把 `capital-data-junior` / `capital-visualization-specialist` 从选择器与
+  预设管理里滤掉（`list()` / `resolve()` / 委派全量；过滤器 fail-open；设置卡片另有 `data-agent-preset-id`
+  CSS 兜底）。内部角色按 id 仍可解析/启动，所以角色工具面收敛判据**只有 preset id、不分根会话还是 child**：
+  手开 web_retriever 也必须收敛；D0 后主要由**行组合**保证。卡片顺序：三个用户模式用负 `order` 排在官方四颗（1–4）之前，内部角色 5/6 在后；选择器是宿主按 `order` 排的扁平列表，没有分组字段。
 - ⛔ **`config.id`（`capital-generation`）是写进会话日志的身份**：0.1.7 的
   `dsh-agent-preset-registry` **既不扫目录也不接受 preset 路径**，只认声明行。旧写法
   （registry 行 `config.roots` 指目录）整体失效，漂移的表现是**历史会话恢复时
@@ -97,10 +97,10 @@
 
 ## 8.4 不许改（除非有明确设计决策，并同步测试）
 
-- **persona 只放每轮硬规则**（判据 §8.2）：`list_agents` 每轮预检、label 精确复用、同角色复用
-  不新建、`description` = 角色标签、durable id、委派清单与 `waiting_data`、路由表、禁主 Agent
-  直连数据工具与检索、子 Agent 互通经主 Agent 中继、全部 continuable、安全合规底线、叶子边界与
-  「第一步先加载协议」。长协议 / 示例 JSON / 重试表 / 清单格式一律进 `skills/`。
+- **persona 只放每轮硬规则**（判据 §8.2）：`list_agents` 每轮预检、按角色映射复用（label 优先，
+  旧标题按 durable id 沿用）、同角色复用不新建、`description` = 角色标签、durable id、委派清单与
+  `waiting_data`、路由表、质检 gate 不以用户提图为触发条件、禁主 Agent 直连数据工具与检索、子 Agent
+  互通经主 Agent 中继、全部 continuable、安全合规底线、叶子边界与「第一步先加载协议」。长协议 / 示例 JSON / 重试表 / 清单格式一律进 `skills/`。
 - **插件代码默认不注册 skill provider**：preset 自带 skills 继续由 `skill-filesystem` / `tool-skill` 组合行承载。唯一例外是用户显式选择的 community `selected-skills`：只在 `agent/created` 中同时确认 Capital preset 与 root Agent 后，注册到该 Agent 自己的 scope（`agent/created` 等注入完成再放行，开关每轮 `agent/pre-step` 重读并按需失效目录缓存，切换不需要新建会话）；配置默认全关，provider 只扫描 `selected-skills/catalog.js` 批准的快照目录并按 catalog 过滤，catalog 条目可带 `experimental` / `watchlist` 状态和能力标签，随 Agent scope 注销并停止 watcher。冷启动阶段维护频率和评分是用户可见的风险信号，不是自动拒绝条件；未来可随 catalog 规模和评测成熟逐步收紧。不得注册到 preset standing scope 或 Host scope；子 Agent 侧不受影响（provider 注册在 agent scope，restriction 只过滤继承层）。同一个 provider 还给三颗任务型内置 skill 提供**同名遮蔽候选**（正文 + 外部精选索引，读取期拼装、不改磁盘），条件与失败姿态见 §8.7。回归 `test/selected-skills-provider.test.mjs`、`test/selected-skill-tags.test.mjs` 与 `test/persona.test.mjs`。
 - **子 Agent 读 skill 的开关**：由该角色 preset 自己挂的 `tool-skill` 行提供（D0 之后每颗角色
   都挂那一行，没有"仍挂单体"的例外了）。restriction 过滤继承层、只豁免本 scope 自注册工具；
@@ -113,8 +113,8 @@
   名字就整批失败、**该角色完全没被收敛**（静默 fail-open）。D0 换成**逐名 tolerant deny**（只减
   `interrupt_agent` 那颗焊死的兄弟），失败方向跟着翻：错一个只少减一个，且记进 `failed` 可见。
   宿主自己挂的 `web_search` / `web_fetch` 因此**不在 `ROOT_AGENT_DENIED_TOOLS` 里**（2026-09-30 双端实测
-  本 preset 作用域没有这两个名字，deny 只会抛错被跳过，目前只剩 persona 文案在管）；**宿主若把它们挂出来，
-  加回根侧名单**（逐名 restrict 能容忍"没这个名字"），别拿那份兄弟 deny 当工具面清单。
+  本 preset 作用域没有这两个名字）；但 2026-10-20 的 web profile 里 AnySearch 会补注册 `web_fetch`，它进
+  所有 preset，说明"没挂行"不等于"看不见"；要收窄就加回根侧/角色名单或关掉宿主 provider。
 - **四组结构件，删任一处该闸门就退回"persona 软建议"**：① 可视化 gate（§6.1 三件套 + §6.3 两处
   联动 → `chart-presentation.md` / `chart-delivery-events.md`）；② shell 闸门与 fs 写口
   （shell 槽位 + 升级 guard + `write`/`edit` 的根侧名单与全局 guard，2026-10-15「开 read、

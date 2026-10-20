@@ -877,7 +877,7 @@ function worstProblem(problems) {
 
 /** Error code → user copy; `scope` only decides whether to name the failing branch. */
 function messageFor(code, scope) {
-  if (code === 'credential_missing') return '未配置 Fuyao 密钥：在「插件」页的 Capital 模式卡片里填 API Key（只影响 A 股那一路，港美股照常用）'
+  if (code === 'credential_missing') return '未配置 Fuyao 密钥：在「插件」页的 自动模式卡片里填 API Key（只影响 A 股那一路，港美股照常用）'
   if (code === 'rate_limited') return '行情服务限流，请稍后再试'
   if (code === 'invalid_query') return '输入不被接受'
   if (code === 'tencent_unavailable') return scope === 'a-share' ? '行情服务暂时不可用，请稍后再试' : '港美股行情暂时取不到，请稍后再试'

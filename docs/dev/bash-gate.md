@@ -33,7 +33,8 @@
   式文案）——被委派或身份不可考的调用方 fail closed，主 Agent 的升级走正常 ask 审批；
   ③ 角色工具面由 preset 挂的**族行**表达（D0，2026-10-19：`src/agents/role-tool-policy.ts` 那份
   整批 allow 已删，只剩逐名减掉 `tool-subagent-control` 焊进来的 `interrupt_agent`；2026-10-18
-  通用 child 连同它的 deny 名单一起删除）：**本仓那 28 颗工具**谁能使，只看哪颗 preset 挂了哪几行
+  通用 child 连同它的 deny 名单一起删除）：**本仓当前由 preset 族行暴露的 27 颗工具**谁能使，
+  只看哪颗 preset 挂了哪几行
   ——挂漏 = 该角色整族用不上（fail-closed），多挂一行才是越权。宿主自带的名字不在这套判据里
   （上面那条⛔），`read_image` / `find` / `glob` / `grep` / `ls` / `todo_write` 这些条件注册或
   global 注册的名字因此**不进任何清单**，别处也没有第二份名字表要维护。
@@ -74,7 +75,8 @@
 - **⛔ 根侧收敛在桌面端整条没走，而 Linux / Web 上是生效的（两端对账，2026-09-30）**：同一段
   `request/header.tools` 与同一份探针记录，两端结果相反——
   探针都报 `preset_id = capital-generation`、`outcome = restricted`、17 颗名字 `restrict()` 没抛错
-  （`web_search` / `web_fetch` 两端都抛错＝那个 scope 里压根没有这两个名字，**已从名单清掉**，见 `preset-persona.md` §8.4）；
+  （`web_search` / `web_fetch` 当时都抛错＝那个 scope 里没有这两个名字；2026-10-20 起 AnySearch 会在
+  web profile 补注册 `web_fetch`，见 `preset-persona.md` §8.4）；
   而**真发给模型的工具表**：Linux 那 17 颗 **0 颗可见**，桌面端那 17 颗 **一颗不少全在**（并且真的执行了
   21 次 `pwsh`）。结论收窄成一句：**`restrict()` 在桌面端不抛错却没写进这个根 Agent 的链路层**。
   `restrict(filter)` 没有 scope 参数、靠 `scopeOf(this.ctx)` 决定落点，所以"通过 `agent.ctx.tools`

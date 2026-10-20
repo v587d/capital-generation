@@ -11,7 +11,7 @@ description: Use when the user requests a review of their actual holdings or inv
 
 1. 先调 `get_watchlist`：用户标过持仓的条目照它给的 `weight_pct` 与标记日期用（这是**自报值**，原样引用、不改写、不补满 100%），再确认复盘截止日与必要的估值基准。清单里没有用户提到的标的、或那一格比例为空（`weight_pct: null`），就向用户要比例或数量；只需分析风险时可只要比例，不索取姓名、账户号、截图上的凭据或全部资产明细。成本、买入时间、期间交易与现金流、现金/负债及风险期限仅在用户要相应计算或适配判断时按需询问；用户不愿提供可做定性复盘并明确缺口。没有任何仓位信息时先澄清，不假设等权。
 2. 用户提供的持仓表、文字或本地附件是本轮输入，不等于已验证市场数据；本地 OCR 仅按主 persona 规则，敏感字段不抄入子 Agent 消息。外部取证只委派必要的标的代码、市场、时窗与问题，不把用户的数量、成本、账户信息发送给 `web_retriever` 或 `data_collector`。`get_watchlist` 只读——本 skill 不写回持仓，也不调用自选股面板的宿主路由（那条路由不是给 Agent 的入口）。
-3. 第一次创建子 Agent 前依 `capital-orchestration` 做 `list_agents` 预检、统一 `task_id`、复用和结算对账。需要最新行情、历史价格、基金净值、财报等结构化证据时按 `capital-data-protocol` 交 `data_collector`，转 `data_junior` 做 profile/query；确有重大公告或解释所需材料才按 `capital-web-protocol` 交 `web_retriever`。不猜 capability、不直读 Dataset、不传原始 rows；图表遵守 `capital-visualization-protocol` 的 gate，`data_analyst` 未启用。
+3. 第一次创建子 Agent 前依 `capital-orchestration` 做 `list_agents` 预检、统一 `task_id`、复用和结算对账。需要最新行情、历史价格、基金净值、财报等结构化证据时按 `capital-data-protocol` 交 `data_collector`，转 `data_junior` 做 profile/query；确有重大公告或解释所需材料才按 `capital-web-protocol` 交 `web_retriever`。不猜 capability、不直读 Dataset、不传原始 rows；是否出图按 `capital-visualization-protocol` 的 gate 判断，`data_analyst` 未启用。
 
 ## 2. 组合核验门
 

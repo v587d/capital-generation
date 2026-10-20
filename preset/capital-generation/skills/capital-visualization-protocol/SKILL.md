@@ -81,6 +81,8 @@ failed
 
 `recommended` 回答的是“这份数据该不该被画出来”，不是“这次委派要不要出图”。委派 prompt 显式限定范围（如「只到 profile」「不要图」）时，仍按上面的判据给出 `recommended`，但**停在结论不出图**，并在回传里写明未执行是**委派收窄**——它既不是 `blocked`（字段不足）也不是 `failed`（工具失败），三者混淆会让主 Agent 把范围决定误读成能力结论。范围下一轮放开时无需重新 profile，按同一结论直接走 `prepare_chart_source` 即可。
 
+data_junior 对每份结构化 Dataset 都要做 gate；主 Agent 不能因为用户没提图就不派 data_junior。用户要求图表只是禁止 `not_needed` 的信号之一，不是 gate 的触发条件。
+
 
 ### 2.1 描述后判断
 

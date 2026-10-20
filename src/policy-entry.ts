@@ -3,11 +3,13 @@
  * Root convergence (visibility already closed by family rows), per-name sibling deny,
  * call-level guards for the `ocr` url form and role `interrupt_agent`, plus shell and fs
  * guards. Identity must be read per call: the host creates the Agent before selecting a
- * preset. Listens on `ctx.root`; one registration per process.
+ * preset. Also hides delegation-only roles from the remote roster. Listens on `ctx.root`;
+ * one registration per process.
  */
 import type { Context } from '@deepseek-ai/cordis'
 
 import { registerBashGuard } from './agents/bash-guard.js'
+import { registerPresetRosterFilter } from './agents/preset-roster.js'
 import { registerFsWriteGuard, registerRootOcrGuard, registerRootToolPolicy, type PolicyContext } from './agents/root-tool-policy.js'
 import { registerRoleSiblingGuard, registerRoleToolPolicy } from './agents/role-tool-policy.js'
 
@@ -29,4 +31,5 @@ export function apply(ctx: Context): void {
   registerRoleSiblingGuard(policy)
   registerBashGuard(policy)
   registerFsWriteGuard(policy)
+  registerPresetRosterFilter(ctx)
 }

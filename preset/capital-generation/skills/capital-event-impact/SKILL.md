@@ -11,7 +11,7 @@ description: Use for a focused impact analysis of a listed company's announcemen
 
 1. 确认公司、市场与完整代码、事件或公告的身份，以及用户关心的持有期限和问题。事件不明确时先澄清；用户要求“最新”时先用 `get_local_datetime`，不能猜发布或交易日。没有核实事件前，不预设它已经发生。
 2. 第一次创建子 Agent 前按 `capital-orchestration` 完成本轮 `list_agents` 预检、`task_id`、复用与结算对账。公告/新闻原文和修订稿交 `web_retriever`（`capital-web-protocol`）；需要检验的行情、财务、公司行动等结构化数值交 `data_collector`（`capital-data-protocol`），转 `data_junior` 做 profile/query。主 Agent 不直连外部检索或 Dataset；本地文件仅按主 persona 的 OCR 边界处理。没有分析需要时不为每个角色凑调用。
-3. 委派只给身份、时窗、待核问题与证据用途，不猜 capability 名；跨角色只转 DatasetRef、profile_ref、有限聚合结果或可追溯的正文摘要，不传原始 rows。要图按 `capital-visualization-protocol` 的 gate。`data_analyst` 未启用，不要求它做事件收益、估值模型或统计显著性检验。
+3. 委派只给身份、时窗、待核问题与证据用途，不猜 capability 名；跨角色只转 DatasetRef、profile_ref、有限聚合结果或可追溯的正文摘要，不传原始 rows。是否出图按 `capital-visualization-protocol` 的 gate。`data_analyst` 未启用，不要求它做事件收益、估值模型或统计显著性检验。
 
 ## 2. 最小证据链
 

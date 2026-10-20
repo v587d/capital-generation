@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { locateDshCli } from './lib/run-tool.mjs'
 // Assembly rows come from test/preset-rows.mjs (ledger L17), never a second list.
 import { allPresets, capitalRowsOf } from '../test/preset-rows.mjs'
+import { INTERNAL_ROLE_PRESET_IDS, ROLE_PRESET_IDS, ROOT_PRESET_ID } from '../lib/preset-ids.js'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const SANDBOX = join(ROOT, '.tmp-boot')
@@ -39,6 +40,9 @@ const FAMILY_ROWS_BY_PRESET = Object.fromEntries(
     .filter((preset) => preset.disabled !== true)
     .map((preset) => [preset.config.id, capitalRowsOf(preset.config.id).map((row) => row.id)]),
 )
+/** The selector must show the three standalone modes and hide the two delegation-only roles. */
+const VISIBLE_PRESET_IDS = [ROOT_PRESET_ID, ROLE_PRESET_IDS.collector, ROLE_PRESET_IDS.retriever]
+const INTERNAL_PRESET_IDS = [...INTERNAL_ROLE_PRESET_IDS]
 /** `__DSH_BOOT__` keys by package name: derive it from package.json, never hardcode the directory name. */
 const CLIENT_BUNDLES = [
   { dir: 'chart-ui', label: '图表客户端 bundle' },
@@ -178,7 +182,7 @@ function probeSource() {
     `}`,
     ``,
     `async function attempt(ctx) {`,
-    `  const result = { preset: null, broken: null, entry: null, localFetchEnabled: null, rows: null, presetRows: null, rolePresets: null, familyRows: null, hostRuntime: null, identityGuards: null, problems: [] }`,
+    `  const result = { preset: null, broken: null, entry: null, localFetchEnabled: null, rows: null, presetRows: null, rolePresets: null, remoteRoster: null, familyRows: null, hostRuntime: null, identityGuards: null, problems: [] }`,
     `  try {`,
     `    const agentPresets = ctx.get('agentPresets')`,
     `    if (!agentPresets) result.problems.push('agentPresets 服务未提供')`,
@@ -202,6 +206,24 @@ function probeSource() {
     `        const role = await agentPresets.resolve(item.id)`,
     `        result.rolePresets.push({ id: item.id, broken: role?.broken ?? null })`,
     `        if (role?.broken) result.problems.push('角色预设激活失败：' + item.id + '：' + role.broken)`,
+    `      }`,
+    `      // 新会话选择器走 remoteExportList（remote 方法 agentPresets/list），不是 list()：`,
+    `      // 内部角色必须从远端名单消失，但 list()/resolve() 仍要全量给委派与诊断用。`,
+    `      const VISIBLE_PRESET_IDS = ${JSON.stringify(VISIBLE_PRESET_IDS)}`,
+    `      const INTERNAL_PRESET_IDS = ${JSON.stringify(INTERNAL_PRESET_IDS)}`,
+    `      if (typeof agentPresets.remoteExportList !== 'function') {`,
+    `        result.problems.push('agentPresets.remoteExportList 不存在：新会话选择器无法隐藏内部角色')`,
+    `      } else {`,
+    `        const remote = await agentPresets.remoteExportList()`,
+    `        const remoteRows = Array.isArray(remote?.presets) ? remote.presets : []`,
+    `        result.remoteRoster = remoteRows.map((row) => row?.id ?? null)`,
+    `        const capitalIds = result.remoteRoster.filter((id) => typeof id === 'string' && id.startsWith('capital-'))`,
+    `        if (JSON.stringify(capitalIds) !== JSON.stringify(VISIBLE_PRESET_IDS)) {`,
+    `          result.problems.push('新会话选择器里的 Capital 模式应为 ' + VISIBLE_PRESET_IDS.join(' / ') + '，实际 ' + capitalIds.join(' / '))`,
+    `        }`,
+    `        for (const id of INTERNAL_PRESET_IDS) {`,
+    `          if (result.remoteRoster.includes(id)) result.problems.push('内部角色仍出现在新会话选择器：' + id)`,
+    `        }`,
     `      }`,
     `      // D0：工具面 = preset 挂的族行。每一颗 preset 的每一行都必须 fiberState=2，`,
     `      // 否则那一族工具在该角色的会话里整族缺席（装载失败只打一行 warn，没有别的信号）。`,
@@ -460,6 +482,9 @@ try {
     if (probe.printed) {
       console.log(`smoke-boot: ${probe.preset === PRESET_ID && !probe.broken ? '✅' : '❌'} 预设 ${probe.preset}（broken=${probe.broken ?? 'null'}）`)
       console.log(`smoke-boot: ${Array.isArray(probe.rolePresets) && probe.rolePresets.every((item) => !item.broken) ? '✅' : '❌'} 角色 preset：${JSON.stringify(probe.rolePresets ?? [])}`)
+      // Selector roster: three standalone modes, in order, and no delegation-only role.
+      const remoteCapital = (probe.remoteRoster ?? []).filter((id) => typeof id === 'string' && id.startsWith('capital-'))
+      console.log(`smoke-boot: ${JSON.stringify(remoteCapital) === JSON.stringify(VISIBLE_PRESET_IDS) ? '✅' : '❌'} 新会话选择器的 Capital 模式：${JSON.stringify(remoteCapital)}（应 ${JSON.stringify(VISIBLE_PRESET_IDS)}）`)
       // Tool surface = family rows; local tests see only the row contract, not the host's load result.
       const familyRows = probe.familyRows ?? []
       const familyBad = familyRows.filter((row) => row.state !== 2)

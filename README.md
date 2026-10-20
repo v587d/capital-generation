@@ -26,7 +26,7 @@
 
 > Next-Gen AI-Driven Capital Generation.
 
-Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 里的证券研究插件，面向关注 A股/港股/美股 的个人投资者。安装后，在新会话中选择 **Capital 模式**，就可以用自然语言查行情、财务数据、公告和新闻，整理分析并生成图表。它不是独立应用，需要先安装 DSH。
+Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 里的证券研究插件，面向关注 A股/港股/美股 的个人投资者。安装后，在新会话中选择 **自动模式**，就可以用自然语言查行情、财务数据、公告和新闻，整理分析并生成图表。它不是独立应用，需要先安装 DSH。
 
 **🎞️视频演示：**[安装、配置与使用](https://www.bilibili.com/video/BV1fzaZ6CE9J/)。
 
@@ -78,7 +78,7 @@ https://github.com/v587d/capital-generation
    | [FTShare（非凸科技）](https://market.ft.tech/gateway/doc/p/pb8eizu3) | A 股行情与日 K 截面、主力资金流、涨跌停、龙虎榜席位、股东人数、指数权重、可转债行情、宏观利率，以及期货合约与贵金属行情等第二家上游口径 |
 
     这些都是第三方服务的密钥，需分别向服务方申请；额度和条款以各服务方为准。
-    保存后**新建 Capital 模式会话**即可生效，无需重启。
+    保存后**新建自动模式会话**即可生效，无需重启。
     也可以不走卡片，直接把密钥写入 `~/.dsh/.credentials.yaml`，名称依次为 `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`、`PADDLE_OCR_TOKEN`、`FTSHARE_API_KEY`。
     密钥由 DSH 凭据服务保存，不会显示在会话配置中。
 
@@ -88,17 +88,17 @@ https://github.com/v587d/capital-generation
      </a>
    </p>
 
-3. **新建会话。** 在 Agent Preset 选择器中选 **Capital 模式**，然后直接描述研究问题。也可以到「设置」→「Agent 预设」把它设为默认模式。
+3. **新建会话。** 在 Agent Preset 选择器中选 **自动模式**，然后直接描述研究问题。也可以到「设置」→「Agent 预设」把它设为默认模式。
 
    <p align="center">
      <a href="assets/mode_selector.png">
-       <img src="assets/mode_selector.png" alt="新会话选择 Capital 模式" width="800">
+       <img src="assets/mode_selector.png" alt="新会话选择自动模式" width="800">
      </a>
    </p>
 
 ## 试试这么用
 
-在新的 Capital 模式会话中使用以下指令。将方括号内容换成自己的标的、公告或持仓；证券代码写完整市场后缀，例如 `600519.SH`。每条指令单独发送，便于观察结果。
+在新的自动模式会话中使用以下指令。将方括号内容换成自己的标的、公告或持仓；证券代码写完整市场后缀，例如 `600519.SH`。每条指令单独发送，便于观察结果。
 
 [样例：假期后研判报告（20261007）](docs/sample/假期后研判报告.md)
 
@@ -169,7 +169,7 @@ https://github.com/v587d/capital-generation
 
 ## 常见问题
 
-- **安装后找不到 Capital 模式？** 确认插件出现在「插件」→ 已安装列表；Web / CLI profile 安装后要重启该 profile，并在新会话选择模式。
+- **安装后找不到自动模式？** 确认插件出现在「插件」→ 已安装列表；Web / CLI profile 安装后要重启该 profile，并在新会话选择模式。
 - **配置在哪？** 打开「插件」→ 已安装的 **Capital Generation**，页面顶部就是「数据源 / 精选 Skills / 包含的组件」三格，五把密钥都在第一格；不在 DSH 的普通「设置」页面，也不用点进任何一行组件。保存密钥后新建会话再试。
 - **升级到 2.7.11 后，卡片里的开关回到默认值了？** 这一版把插件内部两个组件换了目录名，宿主按旧路径记住的那份保存值因此接不上。四把 API Key、你的自选股清单与持仓标记都不受影响；「精选 Skills」的勾选、附加人设与「本机直连」开关需要重新设一次并保存，之后就稳定了。已经设过的话，旧的那份仍写在 DSH 的 profile 文件里，手改那一行的路径也能取回来。
 - **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.8.2` 或 `@2.8.2`。

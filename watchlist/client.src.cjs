@@ -98,7 +98,7 @@ const zh = {
   /** `{max}` comes from the host's `limit`; fall back to the no-number sentence. */
   'error.list_full': '自选股最多 {max} 条，先删一条再加',
   'error.list_full_noMax': '自选股已达上限，先删一条再加',
-  'error.credential_missing': '未配置 Fuyao 密钥：在「插件」页的 Capital 模式卡片里填 API Key（只影响 A 股那一路，港美股照常用）',
+  'error.credential_missing': '未配置 Fuyao 密钥：在「插件」页的 自动模式卡片里填 API Key（只影响 A 股那一路，港美股照常用）',
   'error.rate_limited': '行情服务限流，请稍后再试',
   'error.fuyao_unavailable': 'A 股行情暂时取不到，请稍后再试',
   'error.tencent_unavailable': '港美股行情暂时取不到，请稍后再试',

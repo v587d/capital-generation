@@ -123,7 +123,7 @@ function sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {
 function mapTransportFailure(error: unknown): OcrError {
   const message = error instanceof Error ? error.message : String(error)
   if (/HTTP\s*(401|403)\b/u.test(message)) {
-    return new OcrError('NO_CREDENTIAL', `PaddleOCR 拒绝鉴权（${message}）：请在 设置 → 插件 → Capital 模式 填写 PaddleOCR Token`)
+    return new OcrError('NO_CREDENTIAL', `PaddleOCR 拒绝鉴权（${message}）：请在 设置 → 插件 → 自动模式填写 PaddleOCR Token`)
   }
   return new OcrError('UPSTREAM', message)
 }
@@ -140,7 +140,7 @@ export function createPaddleOcrClient(options: PaddleOcrClientOptions): PaddleOc
   async function authorizedHeaders(): Promise<Record<string, string>> {
     const token = await options.resolveToken()
     if (!token) {
-      throw new OcrError('NO_CREDENTIAL', 'PaddleOCR Token 未配置：在 设置 → 插件 → 插件配置 → Capital 模式 填写（credentials 引用 PADDLE_OCR_TOKEN，环境变量同名亦可）')
+      throw new OcrError('NO_CREDENTIAL', 'PaddleOCR Token 未配置：在 设置 → 插件 → 插件配置 → 自动模式填写（credentials 引用 PADDLE_OCR_TOKEN，环境变量同名亦可）')
     }
     return { authorization: `bearer ${token}` }
   }
@@ -168,7 +168,7 @@ export function createPaddleOcrClient(options: PaddleOcrClientOptions): PaddleOc
     const code = parsed.code
     if (code !== undefined && code !== 0) {
       const message = typeof parsed.msg === 'string' ? parsed.msg : '(无 msg)'
-      if (code === 401) throw new OcrError('NO_CREDENTIAL', `PaddleOCR 未鉴权（code 401 ${message}）：请在 设置 → 插件 → Capital 模式 填写 Token`)
+      if (code === 401) throw new OcrError('NO_CREDENTIAL', `PaddleOCR 未鉴权（code 401 ${message}）：请在 设置 → 插件 → 自动模式填写 Token`)
       throw new OcrError('UPSTREAM', `PaddleOCR 返回业务错误 code=${String(code)}：${message}`)
     }
     return parsed

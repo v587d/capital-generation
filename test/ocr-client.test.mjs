@@ -242,7 +242,7 @@ test('鉴权被拒（HTTP 401）翻成 NO_CREDENTIAL 并指到设置卡片；消
   })
   await assert.rejects(() => client.submit({ fileUrl: 'https://pdf.test/a.pdf', charts: true, signal: signal() }), (error) => {
     assert.equal(error.code, 'NO_CREDENTIAL')
-    assert.match(error.message, /设置.*插件.*Capital/)
+    assert.match(error.message, /设置.*插件.*自动模式/)
     assert.ok(!error.message.includes(TOKEN), '⛔ 密钥出现在任何输出里即失败')
     return true
   })

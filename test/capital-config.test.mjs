@@ -890,6 +890,19 @@ test('capital-config Client：宿主组件段的收起规则只认自家 tab，�
   assert.match(css, /\.capital-config-panel\[hidden\]\s*\{\s*display: none/, 'hidden 一侧单独钉死')
 })
 
+test('capital-config Client：只隐藏两颗内部角色卡片，委派注册仍在宿主侧', () => {
+  const scope = readyScope()
+  const { mod, styles } = loadClient({ scope })
+  const { ctx } = fakeCtx({ scope })
+  mod.apply(ctx)
+  const css = styles.map((node) => String(node.textContent)).join('\n').replace(/\/\*[\s\S]*?\*\//g, '')
+  const hiddenIds = Array.from(css.matchAll(/\[data-agent-preset-id="([^"]+)"\]/g), (match) => match[1])
+  assert.deepEqual(hiddenIds, ['capital-data-junior', 'capital-visualization-specialist'],
+    '只隐藏分析师与绘图专员；自动模式、行情专家、资讯专员必须仍可选')
+  assert.match(css, /\[data-agent-preset-id="capital-data-junior"\][\s\S]{0,100}\[data-agent-preset-id="capital-visualization-specialist"\][\s\S]{0,100}\{\s*display:\s*none\s*!important/,
+    '两张内部角色卡片都由同一条 display:none !important 收起')
+})
+
 test('capital-config Client：筛选器吸顶、三格首行等距，且不许冒出第二个滚动容器', () => {
   const scope = readyScope()
   const { mod, styles } = loadClient({ scope })

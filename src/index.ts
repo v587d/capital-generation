@@ -86,15 +86,15 @@ export interface Config {
 const SelectedSkillsSchema = z.object(
   Object.fromEntries(SELECTED_SKILL_CATALOG.map(({ key, name }) => [
     key,
-    z.boolean().default(false).description(`Enable the community experiment "${name}" for the Capital root Agent`),
+    z.boolean().default(false).description(`Enable the community experiment "${name}" for the Auto mode root Agent`),
   ])),
 ).default(Object.fromEntries(SELECTED_SKILL_CATALOG.map(({ key }) => [key, false])))
 
 export const Config = z.object({
   customPersona: z.string()
     .default('')
-    .description('Capital 模式 的附加人设文本（独立 section，非 deployment:persona）；核心安全约束始终保留'),
-  selectedSkills: SelectedSkillsSchema.description('Community selected-skill experiments; default off and visible only to the Capital root Agent'),
+    .description('自动模式的附加人设文本（独立 section，非 deployment:persona）；核心安全约束始终保留'),
+  selectedSkills: SelectedSkillsSchema.description('Community selected-skill experiments; default off and visible only to the Auto mode root Agent'),
   fuyaoCredentialRef: z.string()
     .default('FUYAO_API_KEY')
     .description('Fuyao credentials 引用名，空 = FUYAO_API_KEY'),
@@ -147,13 +147,13 @@ export function apply(ctx: Context, config: Config) {
   }
   const effectiveConfig = readEffectiveConfig()
 
-  // Same construction as the `tools/collect` row; only the reserved analyst preset still mounts the monolith.
+  // Same construction as the `tools/collect` row.
   const { store, hub: collectorHub, diagnostics: collectorDiagnostics } = createCollectorRuntime(ctx, {
     fuyaoCredentialRef: effectiveConfig.fuyaoCredentialRef,
     ftshareCredentialRef: effectiveConfig.ftshareCredentialRef,
     windCredentialRef: effectiveConfig.retriever?.windDocs?.credentialRef,
   })
-  // Monolith carrier registers all four families explicitly; each matches a preset row.
+  // Monolith carrier registers every family explicitly; no shipped preset mounts this entry.
   registerDataCollectorTools(ctx, collectorHub, collectorDiagnostics)
   registerTimeTool(ctx, store)
   registerDatasetTools(ctx, store, { writeProfile: true })

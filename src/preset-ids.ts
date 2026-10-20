@@ -30,6 +30,21 @@ export function isCapitalPresetId(id: string | undefined): boolean {
 }
 
 /**
+ * Roles reached only through delegation. They stay registered because delegation rows resolve
+ * `config.id`, but the host roster filter hides them from the new-session selector.
+ */
+export const INTERNAL_ROLE_PRESET_IDS: readonly string[] = [
+  ROLE_PRESET_IDS.junior,
+  ROLE_PRESET_IDS.specialist,
+]
+
+const INTERNAL_ROLE_PRESET_ID_SET: ReadonlySet<string> = new Set(INTERNAL_ROLE_PRESET_IDS)
+
+export function isInternalRolePresetId(id: unknown): boolean {
+  return typeof id === 'string' && INTERNAL_ROLE_PRESET_ID_SET.has(id)
+}
+
+/**
  * Which preset may use which tool (enforced by `src/tool-exec.ts`). This replaces the old
  * session-topology check, which rejected manually opened role sessions.
  *

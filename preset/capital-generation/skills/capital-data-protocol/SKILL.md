@@ -152,7 +152,7 @@ description: Use when composing or reading a Capital data message — data_reque
 | 网页获取 | 网络或服务错误 | 最多重试 1 次，仍失败如实回传 |
 
 底线：绝不幻觉填充数据，绝不用编造的来源补位，绝不声称数据已保存；
-同一请求重试 2 次仍失败就回传 `failed` 并注明已重试，不再继续。
+同一请求累计最多重试 2 次，仍失败就回传 `failed` 并注明已重试，不再继续。
 
 ## 5. 输出必须披露的字段
 

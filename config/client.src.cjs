@@ -69,17 +69,17 @@ const zh = {
   componentsTitle: '包含的组件',
   componentsHint: '组件清单由 DSH 绘制，显示在下方。',
   fuyaoLabel: 'Fuyao API Key',
-  fuyaoHint: '同花顺 Fuyao 结构化数据接口。保存后新 Capital 模式会话生效。',
+  fuyaoHint: '同花顺 Fuyao 结构化数据接口。保存后新自动模式会话生效。',
   ftshareLabel: 'FTShare API Key',
-  ftshareHint: '非凸科技 FTShare 结构化数据接口（免费档）。保存后新 Capital 模式会话生效。',
+  ftshareHint: '非凸科技 FTShare 结构化数据接口（免费档）。保存后新自动模式会话生效。',
   anysearchLabel: 'AnySearch API Key',
-  anysearchHint: 'AnySearch 网页搜索 / 提取接口。保存后新 Capital 模式会话生效。',
+  anysearchHint: 'AnySearch 网页搜索 / 提取接口。保存后新自动模式会话生效。',
   localFetchLabel: '允许启动本地提取网页内容',
-  localFetchHint: '开启后本地抓取兜底（回执来源 local-http）。保存后新 Capital 模式会话生效。',
+  localFetchHint: '开启后本地抓取兜底（回执来源 local-http）。保存后新自动模式会话生效。',
   windLabel: 'Wind Alice API Key',
-  windHint: 'Wind 金融信披类文档检索接口。保存后新 Capital 模式会话生效。',
+  windHint: 'Wind 金融信披类文档检索接口。保存后新自动模式会话生效。',
   paddleocrLabel: 'PaddleOCR 文档解析 Token',
-  paddleocrHint: '配置 Token 后自动解析 PDF、图片。保存后新 Capital 模式会话生效。',
+  paddleocrHint: '配置 Token 后自动解析 PDF、图片。保存后新自动模式会话生效。',
   selectedSkillsTitle: '精选 Skills',
   selectedSkillsFilterLabel: '按能力筛选',
   selectedSkillsEmpty: '没有匹配这个标签的 Skill。',
@@ -113,17 +113,17 @@ const en = {
   componentsTitle: 'Components',
   componentsHint: 'The component list is drawn by DSH and appears below.',
   fuyaoLabel: 'Fuyao API Key',
-  fuyaoHint: 'Tonghuashun Fuyao structured-data API. Takes effect in new Capital mode sessions.',
+  fuyaoHint: 'Tonghuashun Fuyao structured-data API. Takes effect in new Auto mode sessions.',
   ftshareLabel: 'FTShare API Key',
-  ftshareHint: 'Feikon FTShare structured-data API (free tier). Takes effect in new Capital mode sessions.',
+  ftshareHint: 'Feikon FTShare structured-data API (free tier). Takes effect in new Auto mode sessions.',
   anysearchLabel: 'AnySearch API Key',
-  anysearchHint: 'AnySearch web search / extract interface. Takes effect in new Capital mode sessions.',
+  anysearchHint: 'AnySearch web search / extract interface. Takes effect in new Auto mode sessions.',
   localFetchLabel: 'Allow local web page extraction',
-  localFetchHint: 'When on, a failed fetch falls back to local direct fetching (receipt via: local-http). Takes effect in new Capital mode sessions.',
+  localFetchHint: 'When on, a failed fetch falls back to local direct fetching (receipt via: local-http). Takes effect in new Auto mode sessions.',
   windLabel: 'Wind Alice API Key',
-  windHint: 'Wind financial disclosure document retrieval interface. Takes effect in new Capital mode sessions.',
+  windHint: 'Wind financial disclosure document retrieval interface. Takes effect in new Auto mode sessions.',
   paddleocrLabel: 'PaddleOCR document token',
-  paddleocrHint: 'Configure the token to parse PDFs and images automatically. Takes effect in new Capital mode sessions.',
+  paddleocrHint: 'Configure the token to parse PDFs and images automatically. Takes effect in new Auto mode sessions.',
   selectedSkillsTitle: 'Selected Skills',
   selectedSkillsFilterLabel: 'Filter by capability',
   selectedSkillsEmpty: 'No skills match this tag.',
@@ -174,6 +174,9 @@ function installStyles() {
     /* Host rows section: positive :has rules only, so any mismatch leaves it visible. */
     [data-plugin-detail="${BUNDLE_NAME}"]:has(.capital-config-card[data-capital-config-tab="sources"]) section[data-plugin-rows] { display: none; }
     [data-plugin-detail="${BUNDLE_NAME}"]:has(.capital-config-card[data-capital-config-tab="skills"]) section[data-plugin-rows] { display: none; }
+    /* Internal roles must stay declared for delegation; hide their user-selectable cards in Settings. */
+    [data-agent-preset-id="capital-data-junior"],
+    [data-agent-preset-id="capital-visualization-specialist"] { display: none !important; }
     .capital-config-secret-row { display: flex; flex-direction: column; gap: 2px; }
     /* Doc link is portaled into the host head row: shrink its label, keep the badge at the end. */
     .capital-config-secret-row label { flex: 0 1 auto; }

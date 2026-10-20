@@ -455,12 +455,14 @@ const probes = [
   },
   {
     id: 'L17',
-    title: '预设声明面：@deepseek-ai/dsh-agent-preset 声明行（Config = PresetDefinition{id, plugins}）+ registry 不吃 roots + agentPresets.composedPreset',
+    title: '预设声明面：@deepseek-ai/dsh-agent-preset 声明行（Config = PresetDefinition{id, plugins}）+ registry 不吃 roots + agentPresets.composedPreset + remoteExportList',
     why: 'issue #3 的第二条根因：0.1.7 把预设挂载从"registry 行 config.roots 指目录"换成"一颗声明行"，'
       + 'registry 既不扫目录也不接受路径。这一面漂移最阴——启动期什么都正常，直到用户点开历史会话才 '
       + 'RemoteError: Unknown agent preset: capital-generation（config.id 是写进会话日志的身份）。'
       + '同时 src/agents/root-tool-policy.ts 靠 agentPresets.composedPreset(agent.ctx) 筛本 preset，'
-      + '那个方法改名就是根收敛静默失效（主 Agent 又看见 render_chart）。',
+      + '那个方法改名就是根收敛静默失效（主 Agent 又看见 render_chart）。'
+      + 'src/agents/preset-roster.ts 还包着 remoteExportList 隐藏两颗内部角色；方法改名或 gateway 改成'
+      + '缓存实现引用，过滤就静默失效，内部角色重新出现在新会话选择器。',
     run() {
       const presetTypesFile = join(PKG('dsh-agent-preset'), 'lib/types/index.d.ts')
       const presetTypes = readIfPresent(presetTypesFile)
@@ -471,6 +473,13 @@ const probes = [
       const registryTypesFile = join(PKG('dsh-agent-preset-registry'), 'lib/types/index.d.ts')
       const registryTypes = readIfPresent(registryTypesFile)
       if (registryTypes === undefined) return { status: FAIL, detail: `读不到 ${registryTypesFile}` }
+      // The plugin hides internal roles by wrapping this method; a rename would only reshape the selector.
+      const registryHostFile = join(PKG('dsh-agent-preset-registry'), 'lib/typert.host.js')
+      const registryHost = readIfPresent(registryHostFile)
+      if (registryHost === undefined) return { status: FAIL, detail: `读不到 ${registryHostFile}` }
+      const gatewayFile = join(PKG('dsh-api-gateway'), 'lib/index.js')
+      const gateway = readIfPresent(gatewayFile)
+      if (gateway === undefined) return { status: FAIL, detail: `读不到 ${gatewayFile}` }
       const checks = [
         ['声明行的 config 就是 PresetDefinition', /export type Config = PresetDefinition/, presetTypes, presetTypesFile],
         ['声明行把子行收进 EntryGroup（保留表达式到子插件激活）', /EntryGroup\.key\] = true/, presetTypes, presetTypesFile],
@@ -479,6 +488,11 @@ const probes = [
         ['registry 服务名仍是 agentPresets', /agentPresets:\s*AgentPresetRegistry/, registryTypes, registryTypesFile],
         ['root 收敛用的 composedPreset(ctx) 仍在', /composedPreset\(ctx: Context\): string \| undefined/, registryTypes, registryTypesFile],
         ['registry 仍按声明注册（register(definition)）', /register\(definition: PresetDefinition\)/, registryTypes, registryTypesFile],
+        ['远端 roster 仍由 remoteExportList 提供', /remoteExportList\(\): Promise<AgentPresetRoster>/, registryTypes, registryTypesFile],
+        ['agentPresets/list 仍映射到 remoteExportList', /implementation:\s*'remoteExportList'/, registryHost, registryHostFile],
+        ['roster 仍是 direct 调用', /invocation:\s*\{\s*kind:\s*'direct'\s*\}/, registryHost, registryHostFile],
+        ['gateway 仍在调用期解析 implementation', /const implementation = descriptor\.implementation \?\? descriptor\.method/, gateway, gatewayFile],
+        ['gateway 仍按 implementation 取服务方法（own-property 包装可见）', /Reflect\.get\(callReceiver, implementation\)/, gateway, gatewayFile],
       ]
       const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
       // Reverse assertion: the old "registry points at a directory" form must not return (it now
@@ -487,7 +501,7 @@ const probes = [
         missing.push(`registry 又出现 roots 字段（${registryTypesFile}；0.1.7 的声明式挂载与之互斥）`)
       }
       return missing.length === 0
-        ? { status: PASS, detail: '预设声明行 / PresetDefinition.id / composedPreset 都仍在，且 registry 无 roots' }
+        ? { status: PASS, detail: '预设声明行 / PresetDefinition.id / composedPreset / remoteExportList 都仍在，且 registry 无 roots' }
         : { status: FAIL, detail: `预设声明面变了：${missing.join(' / ')}（见账本 L17；历史会话恢复依赖它，改本仓装配行不要改探针）` }
     },
   },

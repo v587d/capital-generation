@@ -532,6 +532,10 @@ test('主 persona：图表由 data_junior 出品——主 Agent 不出图、不�
   assertNoRule(MAIN_PERSONA, /render_chart/, '主 persona 不应再引用 render_chart（主 Agent 已无此工具）')
   assertNoRule(MAIN_PERSONA, /present 声明 html_path/, '主 persona 不应再要求 present 图表文件')
   assertNoRule(MAIN_PERSONA, /chart_field_not_found|chart_spec_invalid|candlestick/, '图表协议细节应进 skill capital-chart-protocol')
+  // data_junior is the quality/statistics gate, not a chart-request handler: every Dataset goes through it.
+  assertRule(MAIN_PERSONA, /结构化数据到达就必须派 data_junior/, '主 persona 必须把 data_junior 设为结构化数据的必经环节')
+  assertRule(MAIN_PERSONA, /无论用户是否要图/, 'data_ready 转交 data_junior 不得以提图为条件')
+  assertRule(MAIN_PERSONA, /把「不要图」一并传入/, '用户明确不要图时必须把收窄传给 data_junior')
 })
 
 test('主 persona：预热与回合纪律——每会话一个 dc、等待期不做外部检索、失败按重试纪律', () => {
@@ -543,14 +547,15 @@ test('主 persona：预热与回合纪律——每会话一个 dc、等待期不
   assertRuleAny(MAIN_PERSONA, [/抽样核对/, /异常抽样/], '主 persona 应把网页比对限定为抽样核对')
 })
 
-test('主 persona：最终结论前对账结算通知——排序规则，不等于任务完成', () => {
+test('主 persona：最终结论前对账结算通知——逐行结算，不等于任务完成', () => {
   // No official "final turn" exists: once every settlement notice is in, the next step must be the final one.
   assertRuleAny(MAIN_PERSONA, [/写最终结论前对账/, /结论前先对账/], '主 persona 必须要求写最终结论前对账结算通知')
   assertRule(MAIN_PERSONA, /缺一条本轮只写等待行/, '对账不齐时本轮只写等待行，结论留到收齐那一步')
   assertRule(MAIN_PERSONA, /重新对账/, '结论之后又唤醒子 Agent 必须重新对账')
-  // Reconciliation orders output; it is not a completion signal.
-  assertRuleAny(MAIN_PERSONA, [/结算通知只用于排序/, /结算.*只用于排序/], '新规则必须写明结算通知只用于排序')
-  assertRuleAny(MAIN_PERSONA, [/仍不等于任务完成/, /仍不等于完成/], '排序规则不得被读成完成判据')
+  // Each settlement closes one child turn, not the whole task; all rows must close before the final answer.
+  assertRuleAny(MAIN_PERSONA, [/结算通知只证明该子 Agent 本轮结束/, /结算.*只证明.*本轮结束/], '结算通知只证明单个子 Agent 本轮结束，不是排序信号')
+  assertRule(MAIN_PERSONA, /所有委派行都结算后才可收口/, '全部委派行结算后才允许收口')
+  assertRuleAny(MAIN_PERSONA, [/仍不等于任务完成/, /仍不等于完成/], '结算规则不得被读成整体完成判据')
 })
 
 test('主 persona + skill：对账必须是逐行产物（结算对账表），✗ 只由结算通知翻正', () => {
@@ -594,7 +599,7 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
     'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'wscn_lives',
   ], 'web_retriever 的组合工具面必须恰好是这些：多挂一行就是越权，少挂一行等于能力消失')
   // Persona keeps only per-turn hard rules; retrieval tactics, return format and the domain whitelist live in the skill.
-  for (const pattern of [/金融数据分析师（web_retriever）/, /anysearch_search/, /web_retriever_fetch/, /先定来源再动手/, /不要等 anysearch 空转后才想起/, /禁止把搜索结果全部 fetch/, /一次只能提交一个 URL/, /search_engine_provider/, /Wind 三要素/, /public_document/, /wind_docs_announcements/, /wind_docs_news/, /recent_retrievals/, /provider_tally/, /不得重试 wind/, /每条证据都要有来源/, /不得编造链接/, /无来源的信息不得作为证据/, /verified_official 只能来自/, /verified_official/, /unverified/, /not_verified/, /不调用官方名称为 web_search 或 web_fetch/, /不索取或保存.*API Key/, /resolve_data_time_range/, /skill capital-web-protocol/]) {
+  for (const pattern of [/金融信息检索专员（web_retriever）/, /anysearch_search/, /web_retriever_fetch/, /先定来源再动手/, /不要等 anysearch 空转后才想起/, /禁止把搜索结果全部 fetch/, /一次只能提交一个 URL/, /search_engine_provider/, /Wind 三要素/, /public_document/, /wind_docs_announcements/, /wind_docs_news/, /recent_retrievals/, /provider_tally/, /不得重试 wind/, /每条证据都要有来源/, /不得编造链接/, /无来源的信息不得作为证据/, /verified_official 只能来自/, /verified_official/, /unverified/, /not_verified/, /宿主若暴露 web_search \/ web_fetch 等其他检索工具/, /不索取或保存.*API Key/, /resolve_data_time_range/, /skill capital-web-protocol/]) {
     assertRule(RETRIEVER_PERSONA, pattern, `web_retriever persona 缺少要点: ${pattern}`)
   }
   // Named-source hard rules: all nine tool names, plus reproducibility, paging-to-empty and the SSE/SZSE split.
@@ -858,7 +863,7 @@ test('subagent_data_collector 行：叶子执行器工具边界', () => {
 
 test('data_collector persona：覆盖 Phase 1 数据集协议全部必须要点', () => {
   const required = [
-    /金融数据分析师（data_collector）/,
+    /金融数据采集专员（data_collector）/,
     /不是分析师|不是下单员|不负责投资建议/,
     /request_data/,
     /list_capabilities/,
@@ -963,11 +968,10 @@ test('主 persona：子 Agent 中途请求按工单处理——取数后发回�
 
 test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质量统计，绝不回传 rows', () => {
   for (const pattern of [
-    /金融数据分析师（data_junior）/,
+    /数据分析师（data_junior）/,
     /profile_request/,
-    /dataset_profile_completed/,
-    /profile_failed/,
     /profile_ref/,
+    /profile_failed/,
     /DatasetRef/,
     /describe_dataset/,
     /同一条消息/,
@@ -976,13 +980,12 @@ test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质�
     /profile_dataset/,
     /query_dataset/,
     /query_request/,
-    /dataset_query_completed/,
     /query_failed/,
     /QuerySpec/,
     /group_by|聚合/,
     /get_local_datetime/,
     /artifact_ref/,
-    /不是分析师/,
+    /不是投资分析师/,
     /不改写原始 Dataset/,
     /data_junior_ready/,
     /data_gap/,
@@ -1070,7 +1073,7 @@ test('visualization_specialist 行：创建权只在 data_junior 手里，工具
   for (const forbiddenRow of ['@deepseek-ai/dsh-tool-subagent-control', '@deepseek-ai/dsh-tool-bash', '@deepseek-ai/dsh-tool-pwsh', '@deepseek-ai/dsh-tool-fs']) {
     assert.ok(!specialistPlugins.some((row) => row?.name === forbiddenRow), `specialist 不应挂 ${forbiddenRow}`)
   }
-  for (const pattern of [/可视化专家/, /委派创建/, /capital-visualization-protocol/, /capital-chart-protocol/, /chart_source_ref/, /chart_ref/, /不向主 Agent发送消息/, /不要?调用 send_message/, /不创建下游 Agent/, /不回传原始 rows/]) {
+  for (const pattern of [/绘图专员/, /委派创建/, /capital-visualization-protocol/, /capital-chart-protocol/, /chart_source_ref/, /chart_ref/, /不向主 Agent发送消息/, /不要?调用 send_message/, /不创建下游 Agent/, /不回传原始 rows/]) {
     assertRule(VISUALIZATION_PERSONA, pattern, `visualization_specialist persona 缺少要点: ${pattern}`)
   }
   assert.ok(existsSync(`${SKILL_DIR}capital-visualization-protocol/SKILL.md`))
@@ -1131,17 +1134,20 @@ test('族行不带任何行配置：没有"以为裁了、其实没人读"的开
 })
 
 test('data_junior persona：profile 后负责可视化 gate、签发 token、等待出图 barrier', () => {
-  for (const pattern of [/可视化协议/, /capital-visualization-protocol/, /描述完成\s*（describe_dataset \/ profile_dataset）后无条件加载/, /用户明确要求图表/, /时间序列/, /OHLC\+volume/, /多个可比数值序列/, /必须选择 recommended/, /prepare_chart_source/, /subagent_visualization_specialist/, /not_needed/, /recommended/, /blocked/, /failed/, /出图 barrier/, /chart_ref/, /rendered \/ skipped \/ failed/]) {
+  for (const pattern of [/可视化协议/, /capital-visualization-protocol/, /描述完成\s*（describe_dataset \/ profile_dataset）后无条件加载/, /用户明确要求图表/, /每份 profile 后都跑/, /不是用户是否说“要图”/, /“不要图”/, /时间序列/, /OHLC\+volume/, /多个可比数值序列/, /必须选择 recommended/, /prepare_chart_source/, /subagent_visualization_specialist/, /not_needed/, /recommended/, /blocked/, /failed/, /出图 barrier/, /chart_ref/, /rendered \/ skipped \/ failed/]) {
     assertRule(JUNIOR_PERSONA, pattern, `data_junior persona 缺少可视化编排要点: ${pattern}`)
   }
   assertRuleAny(MAIN_PERSONA, [/visualization_specialist/, /可视化.*data_junior/], '主 persona 必须说明 visualization_specialist 由 data_junior 管理')
   // Delegation narrowing must be stated by the caller and honoured by junior, which then says why no chart was drawn.
   assertRule(JUNIOR_PERSONA, /只到 profile/, 'data_junior 必须认委派 prompt 的显式收窄（只到 profile 就不出图）')
   assertRule(JUNIOR_PERSONA, /委派收窄/, 'data_junior 未出图时必须写明是委派收窄，不是数据不支持')
-  assertRuleAny(MAIN_PERSONA, [/写明「只到 profile」/], '主 persona 必须要求"不要图就显式写明「只到 profile」"')
+  assertRuleAny(MAIN_PERSONA, [/写明「只到 profile」/], '主 persona 必须要求首段委派写明「只到 profile」')
   // The long protocol must keep persona's wording, or the skill rewrites the gate step into an unconditional duty.
-  assertRule(readFileSync(`${SKILL_DIR}capital-visualization-protocol/SKILL.md`, 'utf8'),
+  const vizProtocol = readFileSync(`${SKILL_DIR}capital-visualization-protocol/SKILL.md`, 'utf8')
+  assertRule(vizProtocol,
     /委派收窄/, 'capital-visualization-protocol 必须写明委派收窄时仍给 recommended 但不出图')
+  assertRule(vizProtocol, /不能因为用户没提图就不派 data_junior/, '协议必须禁止把"用户没提图"读成跳过 data_junior')
+  assertRule(vizProtocol, /不是 gate 的触发条件/, '协议必须写明"用户要图"不是可视化 gate 的触发条件')
 })
 
 test('capital-generation preset：组合面只有时间 / 本地文档 / 自选股，tool-fs 行级只读', () => {
@@ -1182,10 +1188,10 @@ test('subagent_data_analyst 行：仍在开发中——preset 与委派行都 di
 
 test('主 persona：data_junior 是直接子 Agent，dc 不得创建它', () => {
   assertRule(MAIN_PERSONA, /subagent_data_junior/)
-  assertRuleAny(MAIN_PERSONA, [/data_junior 是你的直接子 Agent，与 data_collector 是兄弟/, /data_junior 一律由你直接创建/], '主 persona 必须写明 data_junior 由主 Agent 直接创建')
+  assertRuleAny(MAIN_PERSONA, [/data_junior 是你的直接子 Agent/, /data_junior 一律由你直接创建/], '主 persona 必须写明 data_junior 由主 Agent 直接创建')
   assertRule(MAIN_PERSONA, /兄弟子 Agent/)
   assertRuleAny(MAIN_PERSONA, [/data_collector\s*不得也不应创建它/, /data_collector 不得创建或指挥它/], '主 persona 必须写明 data_collector 不得创建/指挥 data_junior')
-  assertRuleAny(MAIN_PERSONA, [/质检 Agent 一律由你直接创建/, /data_junior 一律由你直接创建/], '主 persona 必须写明质检 Agent 由主 Agent 直接创建')
+  assertRuleAny(MAIN_PERSONA, [/质检 Agent 一律由你直接创建/, /data_junior 一律由你直接创建/, /data_junior 是你的直接子 Agent，一律由你直接创建/], '主 persona 必须写明质检 Agent 由主 Agent 直接创建')
   assertRule(MAIN_PERSONA, /profile_ref/)
   assertRule(MAIN_PERSONA, /data_junior 不归 dc 创建\s*或指挥|data_collector 不得创建或指挥它/)
   // Payload names live in the skill and junior persona; the root only points at the contract.
@@ -1366,6 +1372,57 @@ test('preset 名册：六颗 preset、id 唯一、每颗角色都被某条委派
   }
   assert.ok(!selected.has(ROOT_PRESET_ID), '主 preset 不由委派行选中（它是会话预设，不是角色）')
   assert.ok(!ids.includes('capital-generic-restricted'), '通用 child 已删除：没有明确场景就不该有「其他」这格（2026-10-18 用户决策）')
+})
+
+test('preset 卡片显示名：自动模式 + 四颗角色，config.id 保持会话身份', () => {
+  // Display names are user-facing; config.id stays untouched because it is the session-log identity.
+  const expected = new Map([
+    [ROOT_PRESET_ID, '自动模式'],
+    [ROLE_PRESET_IDS.collector, '行情专家'],
+    [ROLE_PRESET_IDS.retriever, '资讯专员'],
+    [ROLE_PRESET_IDS.junior, '分析师'],
+    [ROLE_PRESET_IDS.specialist, '绘图专员'],
+    [ROLE_PRESET_IDS.analyst, '专业分析（未启用）'],
+  ])
+  const configs = new Map(allPresets().map((preset) => [preset.config.id, preset.config]))
+  for (const [presetId, name] of expected) {
+    const config = configs.get(presetId)
+    assert.ok(config, `缺少 preset ${presetId}`)
+    assert.equal(config.name, name, `${presetId} 的卡片名漂移`)
+    assert.ok(typeof config.description === 'string' && config.description.length > 0, `${presetId} 缺卡片说明`)
+    assert.ok(!/Capital 模式/.test(config.description), `${presetId} 的卡片说明还留着旧名 Capital 模式`)
+  }
+  // Short titles keep the host card from ellipsizing; the full role name stays in the description.
+  assert.match(configs.get(ROOT_PRESET_ID).description, /^自动模式：/)
+  assert.match(configs.get(ROLE_PRESET_IDS.collector).description, /^市场行情专家：/)
+  assert.match(configs.get(ROLE_PRESET_IDS.retriever).description, /^资讯公文专员：/)
+  assert.match(configs.get(ROLE_PRESET_IDS.junior).description, /^分析师（内部角色）：/)
+  assert.match(configs.get(ROLE_PRESET_IDS.specialist).description, /^绘图专员（内部角色）：/)
+  // Standalone capability is a product promise, not a layout detail: pin the four different answers.
+  assert.match(configs.get(ROLE_PRESET_IDS.collector).description, /可以单独打开取数/)
+  assert.match(configs.get(ROLE_PRESET_IDS.junior).description, /单独打开时没有取数入口/)
+  assert.match(configs.get(ROLE_PRESET_IDS.specialist).description, /不建议单独使用/)
+  assert.match(configs.get(ROLE_PRESET_IDS.retriever).description, /可单独使用/)
+  assert.doesNotMatch(configs.get(ROLE_PRESET_IDS.specialist).description, /gate/i)
+})
+
+test('新会话选择器顺序：三个用户模式在官方预设之前，内部角色之后', () => {
+  const configs = new Map(allPresets().map((preset) => [preset.config.id, preset.config]))
+  const orderOf = (presetId) => {
+    const order = configs.get(presetId)?.order
+    assert.equal(typeof order, 'number', `${presetId} 缺 order：宿主按 Infinity 排到最后`)
+    return order
+  }
+  // Shipped presets use 1–4. Negative orders put the three user-facing modes above them, so the
+  // selector reads project modes first instead of interleaving with standard/ptc/minimal/cordis.
+  assert.ok(orderOf(ROOT_PRESET_ID) < orderOf(ROLE_PRESET_IDS.collector), '自动模式必须排在行情专家之前')
+  assert.ok(orderOf(ROLE_PRESET_IDS.collector) < orderOf(ROLE_PRESET_IDS.retriever), '行情专家必须排在资讯专员之前')
+  assert.ok(orderOf(ROLE_PRESET_IDS.retriever) < 0, '三个用户模式都必须排在官方预设（order 1–4）之前')
+  // Internal roles stay below the shipped block: if the roster filter fails open, their fallback
+  // position must still be after the modes a user can actually choose.
+  assert.ok(orderOf(ROLE_PRESET_IDS.junior) > 4, '分析师必须排在官方预设之后')
+  assert.ok(orderOf(ROLE_PRESET_IDS.specialist) > 4, '绘图专员必须排在官方预设之后')
+  assert.ok(orderOf(ROLE_PRESET_IDS.junior) < orderOf(ROLE_PRESET_IDS.specialist), '内部角色顺序：分析师在绘图专员之前')
 })
 
 test('角色 preset 自带人设，通用 child 不自带：正文缺失就是人设整段消失', () => {

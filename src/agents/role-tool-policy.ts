@@ -21,7 +21,7 @@ export interface RoleSurface {
 }
 
 /** Leaf roles need `send_message`, so they inherit the welded `interrupt_agent`; specialist
- * and analyst mount no control row. Tolerant per-name deny records misses without failing open. */
+ * mounts no control row. Tolerant per-name deny records misses without failing open. */
 export const ROLE_TOOL_SURFACES: Record<RolePresetId, RoleSurface> = {
   [ROLE_PRESET_IDS.collector]: { denySiblings: SIBLING_DENIED_TOOLS },
   [ROLE_PRESET_IDS.junior]: { denySiblings: SIBLING_DENIED_TOOLS },

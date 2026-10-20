@@ -17,5 +17,5 @@ export interface CapitalShared {
  */
 export declare function capitalDatasetStore(ctx: RuntimeContext): WorkspaceDatasetStore;
 export declare function capitalSharedRuntime(ctx: RuntimeContext): CapitalShared;
-/** Test-only: drop the singleton cache. */
+/** Test-only: drop the per-root cache. */
 export declare function resetCapitalRuntime(): void;

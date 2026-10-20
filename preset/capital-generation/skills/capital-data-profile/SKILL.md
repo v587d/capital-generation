@@ -9,7 +9,7 @@ description: Use when reading a Dataset back — describe_dataset as the default
 受控查询与派生算术在第三册 `capital-data-query`；三册 §编号连续，跨册引用照原编号点名。
 
 **重试那张表（§5）住在第一册** `capital-data-protocol`，本册不重复它：参数类按 `input_schema` 修正后重试、
-瞬时与执行超时重试 1 次、同一请求重试 2 次仍失败就回传 `failed` 并注明已重试。
+瞬时与执行超时各最多重试 1 次；同一请求累计最多重试 2 次，仍失败就回传 `failed` 并注明已重试。
 
 ## 3.0 读取 Dataset 的默认入口：`describe_dataset`
 
@@ -78,7 +78,7 @@ description: Use when reading a Dataset back — describe_dataset as the default
 
 - `schema` 是字段类型和计数的有限摘要；完整 profile 以 `profile_ref` 为准，不把完整 profile 或 raw rows 放进消息。
 - `validation.status=fail` 表示 profile 发现结构化 violations，不表示原始 Dataset 被删除或不可用。
-- 主 Agent 可以在 collector 继续取数时逐份委派 data_junior，显式说「只到 profile」（包括必要的受控 queries）；后续只送新到的 dataset_id，不重做已完成的 profile。等 `data_collection_completed` 和补数据回执后，再指示同一个 junior 综合已有结果并完成可视化 gate。
+- 主 Agent 应在 collector 继续取数时逐份委派 data_junior，显式说「只到 profile」（包括必要的受控 queries）；后续只送新到的 dataset_id，不重做已完成的 profile。等 `data_collection_completed` 和补数据回执后，再指示同一个 junior 综合已有结果并完成可视化 gate。
 
 失败：`{ "type": "profile_failed", "task_id": "task_01J...", "error": "...", "code": "..." }`
 

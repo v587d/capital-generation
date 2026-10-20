@@ -1,4 +1,4 @@
-# Capital 模式 preset：组合设计说明
+# 自动模式 preset：组合设计说明
 
 本文件是 `agent.patch.yml`（那六颗 `@deepseek-ai/dsh-agent-preset` 声明行）的**维护者文档**（人类可读），
 不是模型可见内容：`skill-filesystem` 只扫 `skills/`，本文件既不会进 skill 目录，也不会被注入上下文。
@@ -9,6 +9,7 @@
   挂载；**不要**手抄进 `~/.dsh/.agent-presets`。
 - 长协议在 `skills/`（同目录），由本 preset 自己的 `skill-filesystem` 行发现；`capital-visualization-protocol` 同时供 data_junior 的 gate 和 visualization_specialist 按需加载。
 - visualization_specialist 是 data_junior 委派出图的子 Agent（0.2.1 起所有子会话都是异步 continuable，没有 one-shot / 前台模式），不进入主 Agent 的 direct-child 复用清单；它只消费 chart_source_ref 并使用受控 render_chart。
+- data_junior 的质检与可视化 gate 对每份结构化 Dataset 都执行，用户是否要图不是触发条件；显式「不要图」只收窄出图，不跳过 profile。
 - 验证方式与"改 preset 前后的必做检查"见仓库根 `AGENTS.md` §8.3；设计理由与「不许改」全表见
 `docs/dev/preset-persona.md`。
 
@@ -100,7 +101,8 @@
   **不能按 Agent 区分**（全仓只有这一个 pruner 实例），主/子 Agent 共用。
 - **工具面 = preset 挂的行**（D0，2026-10-19）：`toolFilter` 已从委派行删除，上游报错原文指明的
   替代是「persona 与工具插件改住 Agent Preset，委派行只用 `agentPreset` 选它」——这一条我们做到底：
-  本仓 28 颗模型工具按族拆成 `@v587d/capital-generation/tools/<family>` 的 subpath 入口行
+  本仓当前由 preset 族行暴露的 27 颗模型工具，按族拆成
+  `@v587d/capital-generation/tools/<family>` 的 subpath 入口行
   （`package.json` 的 `exports`），每颗 preset 只挂自己那几族，**不再有运行期名字级 allow 名单**。
   行契约（那一行注册哪些名字）只有一份，住 `test/family-rows.mjs`：`test/family-entries.test.mjs`
   拿它实测每个入口注册了什么，`test/persona.test.mjs` 拿它核对 YAML 的组合结果。
@@ -134,11 +136,10 @@
   **`ocr` 那一行由根与 retriever 各挂一次**：主 Agent 要能解析用户 `@` 进来的本地文档；host 的
   `installRootOcrGuard` 只拒它的 `url` 形态，retriever 侧拿到完整形态
   （见 §4.3 → `docs/dev/web-retriever.md`）。
-  **宿主自己挂的 `web_search` / `web_fetch`
-  绝不能写进任何名单**：它们不由本插件注册，双端实测本 preset 的作用域里没有这两个名字（2026-09-30
-  起它们也已从 `ROOT_AGENT_DENIED_TOOLS` 清掉）。根侧逐名 `restrict` 的 try/catch 能把"这个 scope
-  里没有"变成无害跳过，但那只会留下一条看不见用的 `failed`。**宿主若把它们挂进本 preset 的作用域，
-  加回根侧名单，并想清楚哪颗 preset 该挂带它们的那一行。**
+  **宿主自己挂的 `web_search` / `web_fetch` 不由本插件注册**：2026-09-30 双端实测当时的作用域里
+  没有这两个名字，所以从 `ROOT_AGENT_DENIED_TOOLS` 清掉；但 2026-10-20 的 web profile 里 AnySearch
+  会补注册 `web_fetch`，它因此出现在所有 preset 的工具表里。**没挂行不等于看不见**：要收窄就加回根侧/
+  角色名单（逐名 restrict 容忍 absent），或关掉宿主 provider；别拿组合表当宿主工具的隔离证明。
 - 不用 `dsh-time-context` 行：它每个 step 自动注入时钟读数，与自研 `get_local_datetime`
   重复；时间读数只来自后者（会话组作用域内注册，主 Agent 与全部子 Agent 共享，支持
   `timezone` 换算）。

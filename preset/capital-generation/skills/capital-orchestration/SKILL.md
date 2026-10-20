@@ -23,7 +23,7 @@ description: Use when delegating in Capital mode — running the per-round list_
 委派清单的 `task_id` 是授权账本，不是描述性备注。`DatasetRef.task_id`、`profile_ref.task_id`、`chart_source_ref` 和 `chart_ref` 必须能沿同一个值对账。引用 chart receipt 前先核对它绑定的 task；若错误返回 `expected_task_id`，使用错误中给出的实际绑定值修正，不要猜测或反复试不同 id。
 
 
-只处理 `kind=child` 的条目。按 `label` 精确匹配三个稳定角色标签：`data_collector`、
+只处理 `kind=child`。按 `label` 匹配三个稳定角色标签：`data_collector`、
 `data_junior`、`web_retriever`。
 
 1. **标签非标准但已映射**：历史 child 的 label 仍是旧任务标题时，只要委派清单或工具回执
@@ -85,7 +85,7 @@ A 角色的请求投给 B 角色。官方机制是 **`list_agents` 即权威 id 
 | 行情、财务、历史、交易日历等结构化数据 | `data_collector` |
 | 数据集质量检查、缺失/重复/时间范围/基础统计 | `data_junior` |
 | 网页材料、公告、新闻、传闻原文、公司背景、需要最新信息的事实 | `web_retriever` |
-| 专业分析（Python、回测、统计检验、图表） | 尚未启用——先由 `data_junior` 出基础 profile，并如实告知用户 |
+| 专业分析（Python、回测、统计检验） | 尚未启用——先由 `data_junior` 出基础 profile，并如实告知用户 |
 
 - 拿不准归属就按四问过一遍，别凭"看起来像不像数据"：① 每行同构、可分页、同参数能复现出同形状吗？
   不能 → `web_retriever`；② 使用者要拿它做算术（聚合、排序、时序对比、进图）吗？要 → `data_collector`；
@@ -94,9 +94,9 @@ A 角色的请求投给 B 角色。官方机制是 **`list_agents` 即权威 id 
 - 终判据是**错法**而不是形状：`data_collector` 出错给的是响亮错误码，`web_retriever` 是抓到什么算什么、
   上游改版只会静默变样。**凡要写进用户结论的数字，一律委派 `data_collector`**；网页里的数字只能当线索
   或异常抽样，回传里标明"来源是某篇文章"而不是承诺口径。
-- 多个角色都要时并行委派，但每个角色都必须先按第 2 节复用或创建，各记清单，等结算通知齐了再综合
+- 多角色可并行委派，但每个角色都必须先按第 2 节复用或创建，各记清单，等结算通知齐了再综合
   （齐不齐按 §6.1 的对账表逐行判定，不靠"看起来都回了"）。
-- 主 Agent 给 collector 的问题写清标的、时间范围、证据用途和所需新鲜度，由 collector 按实际目录选足相关能力，不预设“只取一个”或固定上限。
+- 主 Agent 给 collector 的问题写清标的、时间范围、证据用途和所需新鲜度，由 collector 按目录选足能力，不预设“只取一个”或固定上限。
 - 给 `web_retriever` 的事实核查委派**分级写需求**：核心事实（直接改变结论或风险判断的——审计意见、
   商誉、质押/担保/资金占用、现金流与利润背离、有息负债、再融资/重组等）≤10 条逐条核验、每条一行
   来源；外围事实（分红方案、互动平台问答、媒体花絮）一句话清单即可。不预设"每条 URL+日期+原文/
@@ -109,10 +109,10 @@ A 角色的请求投给 B 角色。官方机制是 **`list_agents` 即权威 id 
 
 - 子 Agent 完成会通过**结算通知**唤醒你；在它尚未结束前不要向用户断言其已完成。
 - **中途消息是工单，不是完成**：collector 的 `dataset_ready` 每到一份就立即登记并转发
-  给同一个 data_junior（先限定「只到 profile」），按 task_id + dataset_id 去重；收到
+  给同一个 data_junior（先限定「只到 profile」；用户没提图也照转），按 task_id + dataset_id 去重；收到
   `data_collection_completed` 后才让 junior 综合既有 profile 并完成可视化 gate。
-  子 Agent 也可能发来就绪登记或 `data_gap`（补数据请求）。收到后立即按清单复用对应角色取数，再用 `send_message` 把结果发回
-  **同一个**子 Agent；这不算新一轮用户任务，不必重跑预检，也不要新建同角色 Agent。
+  子 Agent 也可能发来就绪登记或 `data_gap`（补数据）。就绪登记继续等；`data_gap` 按清单复用对应角色补齐，再用 `send_message` 把结果发回
+  **同一个**子 Agent；这不算新任务，不必重跑预检，不要新建同角色 Agent。
   取数失败要回一条失败消息，不能让它一直等。
 - **结算通知 ≠ 任务完成**：collector 未发 `data_collection_completed`，或者清单里标 `waiting_data` 的子 Agent 结束本轮是在等回信，
   不要向用户断言它已完成，也不要新建替代实例。
@@ -166,7 +166,7 @@ A 角色的请求投给 B 角色。官方机制是 **`list_agents` 即权威 id 
 | 结论已输出后才被结算通知唤醒 | 无新增信息/纠正 → 只回一行确认，禁止复述结论；有新事实或推翻口径 → 重写完整结论（§6.1） |
 | `send_message` 投错对象（目标 child 的回应与角色不符） | `interrupt_agent` 停错投目标当前轮（已结束则为 no-op）→ 重新 `list_agents` → 向正确 id 重发；委派消息正文自带角色字样与任务标识可让错投被及时发现 |
 | 子 Agent 回告「工具未挂载」 | 如实转述状态与检查建议，不要编造工具或数据；数据侧提示检查 `request_data`/`list_capabilities`，统计侧提示检查 `inspect_dataset`/`profile_dataset` |
-| 子 Agent 回传 `failed` | 按 `error` 与 `code` 判断：参数问题先修正参数再 `send_message` 重试；网络/服务类最多重试 1 次；同一请求重试 2 次仍失败就如实告知用户 |
+| 子 Agent 回传 `failed` | 按 `error` 与 `code` 判断：参数问题修正后 `send_message` 重试；网络/服务类最多重试 1 次；同一请求累计最多重试 2 次仍失败就如实告知用户 |
 | 子 Agent 回传 wind_docs 失败（AUTH/RATE_LIMIT/额度类） | Wind 检索暂不可用（Key 缺失/过期或额度不足）：如实告知用户 Wind 能力暂不可用，本轮材料由 anysearch 承担（公告线索搜索 + 官方披露页 fetch）；不要重试 Wind，也不要索取或改配 Key |
 | 出现「想直接读取 Dataset 内容」的冲动 | 改为委派 `data_junior`（`inspect_dataset` / `profile_dataset`）；主 Agent 直接调用 Dataset 系列工具会被工具层拒绝（`dataset_session_mismatch`），被拒后不要重试直读，改走委派 |
 | 任务需要分钟级数据 | 检查 `tencent_kline`：支持 m1/m5/m15/m30/m60，仅支持最近 `count` 根（最多 320），不支持 `start/end` 历史分钟区间；旧分钟/小时历史不可编造，不满足时再披露边界 |

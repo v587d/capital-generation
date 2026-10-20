@@ -129,6 +129,6 @@ description: Use when returning or labelling what was retrieved — the numbered
   链接只是文件所在。`verified_official` 的授予条件不变（第 6 节）：OCR 解析不改变域名核验结论，
   但官方域名下的 PDF（如巨潮、交易所披露页给出的直链）其正文可按官方文档对待。
 - **失败处置**：`NO_CREDENTIAL` ⇒ token 未配置，如实回传"需要用户在 设置 → 插件 → 插件配置 →
-  Capital 模式 填写 PaddleOCR Token"，**绝不**用标题或摘要补一篇正文出来；`UPSTREAM` /
+  自动模式的「配置」卡片中填写 PaddleOCR Token"，**绝不**用标题或摘要补一篇正文出来；`UPSTREAM` /
   `JOB_FAILED` / `TOO_MANY_PAGES` ⇒ 最多重试一次，仍失败就按边界如实回传。
   `ocr` 在检索回声（`recent_retrievals` / `provider_tally`）里**记一次**，与 fetch 同口径。

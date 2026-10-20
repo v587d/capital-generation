@@ -41,7 +41,7 @@ export function capitalSharedRuntime(ctx: RuntimeContext): CapitalShared {
   return shared
 }
 
-/** Test-only: drop the singleton cache. */
+/** Test-only: drop the per-root cache. */
 export function resetCapitalRuntime(): void {
   cached.clear()
 }
