@@ -20,6 +20,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
   <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.9.1-9cf" alt="Version"></a>
   <a href="https://www.npmjs.com/package/@v587d/capital-generation"><img src="https://img.shields.io/npm/v/%40v587d%2Fcapital-generation" alt="npm version"></a>
+  <a href="https://github.com/deepseek-ai/deepseek-harness"><img src="https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white" alt="powered-by-dsh"></a>
 </p>
 
 # Capital Generation
