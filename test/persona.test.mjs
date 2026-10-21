@@ -129,6 +129,8 @@ const PLUGIN_TOOLS = [
   'resolve_data_time_range',
   // Read-only and attached only to the Capital root row.
   'get_watchlist',
+  // Root-only final-turn delivery step for the auto-mode chart pipeline.
+  'present_charts',
   'anysearch_search', 'web_retriever_fetch', 'ocr',
   'wind_docs_announcements', 'wind_docs_news',
   // Named source query tools must resolve against real registrations; a phantom name hides the tool.
@@ -505,9 +507,9 @@ test('主 persona：数据调度纪律——通过 list_agents + send_message �
   assertRule(MAIN_PERSONA, /媒体转述旁证/)
   assertRule(MAIN_PERSONA, /不得冒充行情证据/)
   assertRuleAny(MAIN_PERSONA, [/不得用网页数字/, /网页数字只能标/], '主 persona 需限制网页数字的使用方式')
-  // Returned structured data is quoted verbatim; nothing is re-output after an answer.
+  // Returned structured data is quoted verbatim; a wake-up with nothing new must not re-output a pointer line.
   assertRule(MAIN_PERSONA, /按原样引用/, '主 persona 应要求回传数据按原样引用')
-  assertRule(MAIN_PERSONA, /不(再)?重复输出/, '主 persona 应禁止已答复后的重复输出')
+  assertRule(MAIN_PERSONA, /不输出可见正文/, '主 persona 必须禁止已答复后用一行确认代替结论')
   assertRuleAny(MAIN_PERSONA, [/所有 Agent 消息一律禁止携带完整原始 rows/, /禁止任何消息携带完整原始 rows/], '主 persona 应禁止原始 rows 进消息')
   assertNoRule(MAIN_PERSONA, /官方|DSH|exec\.agent/, '主 persona 不应出现框架术语')
   // Drifted artefacts stay gone: requester_agent_id param, subscription mechanism, request_id reconciliation.
@@ -522,8 +524,9 @@ test('主 persona：图表由 data_junior 出品——主 Agent 不出图、不�
   assertRuleAny(MAIN_PERSONA, [/图表由 data_junior 的可视化 gate 统一出品/, /图表由 data_junior/], '主 persona 必须写明图表由 data_junior 出品')
   assertRuleAny(MAIN_PERSONA, [/你不画图/, /主 Agent 不出图/, /不直接出图/], '主 persona 必须写明主 Agent 不出图')
   assertRuleAny(MAIN_PERSONA, [/不在正文里罗列图表文件/, /不要?在正文里罗列/, /也不要罗列图表文件/], '主 persona 必须禁止在正文罗列图表文件')
-  // Presentation wording must match the current delivery-line implementation.
-  assertRuleAny(MAIN_PERSONA, [/图表会在本轮答复后的「交付」行里自动出现/, /「交付」行/, /交付行/], '主 persona 必须说明图表在交付行呈现')
+  // Presentation wording must match the current delivery step: the card is declared before the closing answer.
+  assertRuleAny(MAIN_PERSONA, [/答复末尾的「交付」行/, /写最终答复前先调用一次 present_charts/], '主 persona 必须说明图表在最终答复的交付行呈现')
+  assertNoRule(MAIN_PERSONA, /自动出现/, '交付已改为显式 present_charts，persona 不得再承诺“自动出现”')
   assertNoRule(MAIN_PERSONA, /收尾卡片|本轮答复下方的卡片/, '卡片通道已移除，persona 不得再承诺"收尾卡片"')
   assertRuleAny(MAIN_PERSONA, [/正文不要提图表/, /不要在正文提图表/], '主 persona 必须禁止正文提图表本身（用户口径：不提，自己看）')
   assertRuleAny(MAIN_PERSONA, [/图表是呈现不是分析/, /呈现不是分析/], '主 persona 需说明图表是呈现不是分析')
@@ -536,6 +539,29 @@ test('主 persona：图表由 data_junior 出品——主 Agent 不出图、不�
   assertRule(MAIN_PERSONA, /结构化数据到达就必须派 data_junior/, '主 persona 必须把 data_junior 设为结构化数据的必经环节')
   assertRule(MAIN_PERSONA, /无论用户是否要图/, 'data_ready 转交 data_junior 不得以提图为条件')
   assertRule(MAIN_PERSONA, /把「不要图」一并传入/, '用户明确不要图时必须把收窄传给 data_junior')
+})
+
+test('主 persona + 协议：最终答复自足，图表由主 Agent 在最终答复前统一登记', () => {
+  // DSH folds earlier turns and only shows the closing reply: a pointer-style closing line hides the whole report.
+  assertRule(MAIN_PERSONA, /写最终答复前先调用一次 present_charts/, '主 persona 必须把 present_charts 放在最终答复之前')
+  assertRuleAny(MAIN_PERSONA, [/一次传全部 ref/, /一次全部传入/], '图表登记必须一次传完，不许分批留在中间轮')
+  assertRule(MAIN_PERSONA, /禁止“分析已完成/, '主 persona 必须点名禁止指针式收尾')
+  assertRule(MAIN_PERSONA, /必须自足/, '主 persona 必须要求最终答复自足（折叠后仍可独立阅读）')
+  assertRuleAny(MAIN_PERSONA, [/不输出可见正文/, /重发一份自足总结/], '被唤醒且无新信息时必须给出两种正确收尾')
+  assertRule(MAIN_PERSONA, /前面轮次会被折叠/, '必须写明折叠机制，否则该规则会被当成风格建议')
+
+  const vizProtocol = readFileSync(`${SKILL_DIR}capital-visualization-protocol/SKILL.md`, 'utf8')
+  assertRule(vizProtocol, /呈现由主 Agent/, '可视化协议必须写明呈现由主 Agent 的最终答复承载')
+  assertRule(vizProtocol, /present_charts/, '可视化协议必须点名 present_charts')
+  assertRule(vizProtocol, /都不得.*present_charts|不得.*调用.*present_charts/, 'data_junior / specialist 不得自行登记交付')
+
+  const chartProtocol = readFileSync(`${SKILL_DIR}capital-chart-protocol/SKILL.md`, 'utf8')
+  assertRule(chartProtocol, /不会自动登记交付/, '图表协议必须说明 render_chart 不再自动登记交付')
+  assertRule(chartProtocol, /present_charts/, '图表协议必须把交付步骤指向 present_charts')
+
+  const equityResearch = readFileSync(`${SKILL_DIR}capital-equity-research/SKILL.md`, 'utf8')
+  assertRule(equityResearch, /present_charts/, '投研报告协议必须在最后一轮交付前登记图表')
+  assertRule(equityResearch, /最后一轮的唯一可见内容/, '投研报告协议必须写明报告就是最后一轮的可见内容')
 })
 
 test('主 persona：预热与回合纪律——每会话一个 dc、等待期不做外部检索、失败按重试纪律', () => {
@@ -569,8 +595,10 @@ test('主 persona + skill：对账必须是逐行产物（结算对账表），�
   assertRule(orchestration, /✗ 只能被结算通知翻正/, 'skill 必须写明唯一判据：✗ 只由结算通知翻正')
   assertRule(orchestration, /不构成 ✓/, 'skill 必须写明回传完成正文不构成 ✓')
   assertRule(orchestration, /只写等待行/, 'skill 必须要求欠结算时本步只写等待行')
-  assertRule(orchestration, /只回一行确认/, 'skill 必须写明结论已被追上且无新信息时只回一行确认')
-  assertRule(orchestration, /禁止复述/, 'skill 必须禁止在尾部回执里复述已交付的结论')
+  assertRule(orchestration, /不要写一行确认/, 'skill 必须禁止"结论已被追上"时只回一行确认（那会盖掉整份结论）')
+  assertRule(orchestration, /自足总结/, 'skill 必须给出被追上后的正确收尾：自足总结或不出可见正文')
+  assertRuleAny(orchestration, [/绝不写“分析已完成\/结论见上\/如上”/, /绝不写.*结论见上/], 'skill 必须点名禁止指针式收尾')
+  assertRule(orchestration, /present_charts/, 'skill 必须在收口顺序里给出图表交付步骤')
 })
 
 test('主 persona：web_retriever 编排与检索路由', () => {
@@ -734,6 +762,9 @@ test('委派出口只有专用角色：没有通用 subagent，也没有谁自�
     chart_issue: [ROLE_PRESET_IDS.junior],
     chart_render: [ROLE_PRESET_IDS.specialist],
     watchlist: [ROOT_PRESET_ID],
+    // Final-turn delivery belongs to the user-facing root; a role row would let a child write
+    // deliverables into the root conversation.
+    present: [ROOT_PRESET_ID],
   }
   const groups = {
     network: [...NETWORK_TOOLS],
@@ -744,6 +775,7 @@ test('委派出口只有专用角色：没有通用 subagent，也没有谁自�
     chart_render: ['render_chart'],
     // Only the main Agent reads the user's positions.
     watchlist: ['get_watchlist'],
+    present: ['present_charts'],
   }
   for (const presetId of [...SURFACE_GATE_PRESETS, ROOT_PRESET_ID]) {
     const face = capitalFace(presetId)
@@ -1090,10 +1122,12 @@ const PRESET_ROW_COMPOSITION = {
   ],
   // A disabled role preset can still be opened by hand, so reserved roles go through family rows too.
   [ROLE_PRESET_IDS.analyst]: ['@v587d/capital-generation/tools/dataset-read', '@v587d/capital-generation/tools/time'],
-  // Root: time, local document parsing, watchlist, and root-extras (which registers no tool itself).
+  // Root: time, local document parsing, watchlist, present (final-turn chart delivery), and
+  // root-extras (which registers no tool itself).
   [ROOT_PRESET_ID]: [
     '@v587d/capital-generation/tools/time', '@v587d/capital-generation/tools/ocr',
-    '@v587d/capital-generation/tools/watchlist', '@v587d/capital-generation/tools/root-extras',
+    '@v587d/capital-generation/tools/watchlist', '@v587d/capital-generation/tools/present',
+    '@v587d/capital-generation/tools/root-extras',
   ],
 }
 
@@ -1150,14 +1184,15 @@ test('data_junior persona：profile 后负责可视化 gate、签发 token、等
   assertRule(vizProtocol, /不是 gate 的触发条件/, '协议必须写明"用户要图"不是可视化 gate 的触发条件')
 })
 
-test('capital-generation preset：组合面只有时间 / 本地文档 / 自选股，tool-fs 行级只读', () => {
+test('capital-generation preset：组合面只有时间 / 本地文档 / 自选股 / 最终交付，tool-fs 行级只读', () => {
   const root = allPresets().find((preset) => preset?.config?.id === ROOT_PRESET_ID)
   assert.ok(root, '必须存在 Capital 根 preset')
   const plugins = root.config.plugins ?? []
   // The root orchestrates by dispatching: no fetch / retrieval / rendering tool may reach the main session.
+  // present_charts is the exception by design: it renders nothing and only writes the final-turn deliverable row.
   assert.deepEqual(capitalFace(ROOT_PRESET_ID),
-    ['get_local_datetime', 'get_watchlist', 'ocr', 'resolve_data_time_range'],
-    '主 Agent 的本仓工具面必须恰好是这四颗；多一颗就是又开一个自己动手的入口（§1.1 的委派硬约束）')
+    ['get_local_datetime', 'get_watchlist', 'ocr', 'present_charts', 'resolve_data_time_range'],
+    '主 Agent 的本仓工具面必须恰好是这五颗；多一颗就是又开一个自己动手的入口（§1.1 的委派硬约束）')
   assert.ok(!plugins.some((row) => row?.id === 'capital-generation-scope'), '根 preset 不再需要 collector 的 hub/store isolate 组')
   const fsRow = plugins.find((row) => row?.id === 'tool-fs')
   assert.ok(fsRow, '根 preset 仍保留只读文件口')

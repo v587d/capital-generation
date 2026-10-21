@@ -12,9 +12,12 @@ function defaultChartRef(): string {
   return `chart_${suffix}`
 }
 
-/** One-hop scope: a token lets a nested child reuse its owner's scope. */
+/**
+ * Subagent children carry `origin: 'subagent'`; a user fork/branch root also has `parentSession`
+ * (seed lineage) and must stay its own scope. One hop: the token lets a nested child reuse its owner.
+ */
 export function chartSessionScopeId(session: SessionLike): string {
-  const parent = session.header?.parentSession
+  const parent = session.header?.origin === 'subagent' ? session.header.parentSession : undefined
   return typeof parent === 'string' && parent.length > 0 ? parent : session.id
 }
 
@@ -27,6 +30,7 @@ export interface ChartArtifactRef {
   captured_at: number | null
   kind: string
   axis: 'time' | 'index'
+  title: string
   chart_url: string | null
   spec_path: string
   series_path: string
@@ -80,6 +84,7 @@ export class ChartArtifactRegistry {
     captured_at?: number | null
     kind: string
     axis: 'time' | 'index'
+    title: string
     chart_url: string | null
     spec_path: string
     series_path: string
@@ -106,6 +111,7 @@ export class ChartArtifactRegistry {
       captured_at: input.captured_at ?? null,
       kind: input.kind,
       axis: input.axis,
+      title: input.title,
       chart_url: input.chart_url,
       spec_path: input.spec_path,
       series_path: input.series_path,
@@ -143,13 +149,30 @@ export class ChartArtifactRegistry {
     return this.records.delete(chartRef)
   }
 
+  /** Charts of one session scope, for the model's final-turn delivery step; newest last. */
+  list(input: { session: SessionLike; task_id?: string | null }): ChartArtifactRef[] {
+    const now = this.now()
+    this.purgeExpired(now)
+    const scope = chartSessionScopeId(input.session)
+    const cwd = input.session.header?.cwd ?? null
+    const records: ChartArtifactRecord[] = []
+    for (const record of this.records.values()) {
+      if (record.owner_scope_id !== scope || record.owner_cwd !== cwd) continue
+      if (input.task_id !== undefined && input.task_id !== null && record.task_id !== input.task_id) continue
+      records.push(record)
+    }
+    return records
+      .sort((left, right) => left.created_at - right.created_at)
+      .map((record) => this.publicRecord(record))
+  }
+
   size(): number {
     this.purgeExpired(this.now())
     return this.records.size
   }
 
   private publicRecord(record: ChartArtifactRecord): ChartArtifactRef {
-    const { owner_scope_id: _ownerScope, ...publicRecord } = record
+    const { owner_scope_id: _ownerScope, owner_cwd: _ownerCwd, ...publicRecord } = record
     return publicRecord
   }
 }

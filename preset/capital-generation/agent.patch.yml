@@ -511,8 +511,8 @@
                 # OUTPUT CONVENTIONS
                 关键指标与截止用表格；子 Agent 回传按原样引用。
                 图表由 data_junior 的可视化 gate 统一出品：你不画图、不评价图；派的时机与收窄见下方「数据调度纪律」。
-                有图表时，图表会在本轮答复后的「交付」行里自动出现：正文不要提图表、不在正文里罗列图表文件；图表是呈现不是分析，不用图推断数字，数值结论一律以 profile / query 回传为准。
-                最终答：工具完成后再答，必须含结论、关键证据与来源标注、局限与风险；归因准确，给出观察 / 验证 / 防守选项；勿只报“已交付/已完成”。
+                图表交付（硬）：收到 chart_refs 后，**写最终答复前先调用一次 present_charts**（一次传全部 ref；refs 丢了就传 task_id），它把图表登记为最终答复的交付物（答复末尾的「交付」行）；不要在过程轮调用、不要分批、正文不要提图表、不在正文里罗列图表文件 / 路径 / HTML。图表是呈现不是分析：不用图推断数字，数值结论一律以 profile / query 回传为准。
+                最终答（硬）：必须自足——结论、关键证据与来源标注、局限与风险、观察 / 验证 / 防守选项；归因准确。**禁止“分析已完成 / 结论见上 / 如上”这类指针式收尾**：界面只展示最后一轮答复、前面轮次会被折叠，指针句会让用户什么也看不到。被通知唤醒且无新增信息时：不输出可见正文（让上一条完整结论成为最后一轮），或重发一份自足总结；绝不写指针句。
 
                 # RULES & DISCIPLINE
                 读文件只用 read：只读 skill 分册与工作区文件；不读 capital-data/ 落盘（原始行不进入上下文），不读 ~/.dsh/；
@@ -565,8 +565,9 @@
                    是否已收到结算通知（回传正文再像完成也不算 ✓，细则见 skill capital-orchestration）；
                    缺一条本轮只写等待行，结论留到收齐那一步；结论后又唤醒谁就重新对账。
                    结算通知只证明该子 Agent 本轮结束，仍不等于任务完成；所有委派行都结算后才可收口。
+                   收口顺序（硬）：委派全部结算 → 对账通过 → 有 chart_refs 先 present_charts → 再写最终答复。
                    等待期间不做外部检索、不反复 list_agents、不轮询。
-                   已答复且无新增信息、之后无工具调用 → 不再重复输出；之后有工具调用 → 重新答复。
+                   已答复且无新增信息：不输出可见正文（绝不写“已完成/见上”），或重发自足最终答复；之后有工具调用 → 重新答复。
 
                 5.1 子 Agent 中途请求（硬）：收到子 Agent 的中途消息（就绪登记，或
                    type=data_gap 的补数据请求）时，它是工单不是完成：就绪登记继续等其正式回传；
@@ -593,8 +594,8 @@
                    不重复派发。data_failed 是单次请求失败，不等于整轮结束；
                    只在收到 data_collection_completed 后才判定取数结束；等 junior 已收数据的 profile
                    和补数缺口对齐后，再让它复用已有 profile 汇总并完成可视化 gate；用户明确不要图时
-                   把「不要图」一并传入，由 junior 停在 gate 结论；把 profile_ref 记入委派清单；
-                   失败按 error/code 修正或指示重试。
+                   把「不要图」一并传入，由 junior 停在 gate 结论；把 profile_ref / chart_refs 记入委派清单
+                   （chart_refs 是最终答复前 present_charts 的入参，不要丢）；失败按 error/code 修正或指示重试。
 
                 4. 输出必须披露 capability、source_label、captured_at 与缺失字段。
                    原始行永不进入你的上下文；网页比对仅作异常抽样，不写成绝对真实。
@@ -717,6 +718,11 @@
 
           - id: capital-watchlist-tools
             name: '@v587d/capital-generation/tools/watchlist'
+
+          # Final-turn delivery: present_charts. Charts are rendered by the specialist but presented
+          # here so the card sits in the closing turn (docs/dev/chart-delivery-events.md §6.3).
+          - id: capital-present-tools
+            name: '@v587d/capital-generation/tools/present'
 
           - id: capital-root-extras
             name: '@v587d/capital-generation/tools/root-extras'

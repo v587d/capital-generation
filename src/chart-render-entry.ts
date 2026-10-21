@@ -1,12 +1,11 @@
 /**
  * `tools/chart-render` row: render_chart only. Row-level expression of "only the
  * visualization specialist holds the chart pipeline"; shares token/artifact state with
- * `tools/chart-source`.
+ * `tools/chart-source`. No chartEvents here: delivery is the root Agent's final-turn
+ * `present_charts` step, so the card never lands in a folded process turn.
  */
 import type { Context } from '@deepseek-ai/cordis'
 
-import { createChartEventPublisher } from './chart/events.js'
-import { chartEventContextOf } from './chart/event-context.js'
 import { registerChartTool, type ChartPublisher } from './chart/tool.js'
 import { capitalDatasetStore, type RuntimeContext } from './runtime.js'
 import { capitalSharedRuntimeOf } from './chart-source-entry.js'
@@ -21,6 +20,5 @@ export function apply(ctx: Context): void {
     sourceTokens: shared.sourceTokens,
     artifacts: shared.artifacts,
     charts: () => ctx.get('capitalCharts') as ChartPublisher | undefined,
-    chartEvents: () => createChartEventPublisher(chartEventContextOf(ctx)),
   })
 }

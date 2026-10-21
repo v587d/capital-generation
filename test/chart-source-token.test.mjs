@@ -6,9 +6,9 @@ import { WorkspaceDatasetStore } from '../lib/data-collector/store.js'
 
 const WORKSPACE = '/workspace/proj'
 const MAIN = { id: 'main-1', header: { cwd: WORKSPACE } }
-const COLLECTOR = { id: 'collector-1', header: { cwd: WORKSPACE, parentSession: MAIN.id } }
-const JUNIOR = { id: 'junior-1', header: { cwd: WORKSPACE, parentSession: MAIN.id } }
-const GRANDCHILD = { id: 'visual-1', header: { cwd: WORKSPACE, parentSession: JUNIOR.id } }
+const COLLECTOR = { id: 'collector-1', header: { cwd: WORKSPACE, parentSession: MAIN.id, origin: 'subagent' } }
+const JUNIOR = { id: 'junior-1', header: { cwd: WORKSPACE, parentSession: MAIN.id, origin: 'subagent' } }
+const GRANDCHILD = { id: 'visual-1', header: { cwd: WORKSPACE, parentSession: JUNIOR.id, origin: 'subagent' } }
 
 function execAs(session) {
   return { agent: { session }, signal: new AbortController().signal }

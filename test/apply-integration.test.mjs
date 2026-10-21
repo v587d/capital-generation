@@ -566,7 +566,7 @@ test('apply()：render_chart 注册在 standing 层（由根 Agent 收敛决定�
 
     const renderChart = toolNamed(tools, 'render_chart')
     assert.ok(renderChart, 'render_chart 必须仍被注册：visualization_specialist 的 toolFilter.allow 依赖它')
-    const delegatedSession = { id: 'child-1', header: { cwd: '/workspace/proj', parentSession: 'main-1' } }
+    const delegatedSession = { id: 'child-1', header: { cwd: '/workspace/proj', parentSession: 'main-1', origin: 'subagent' } }
     await assert.rejects(
       () => renderChart.execute({ dataset_id: 'ds_1', spec: { kind: 'line', series: ['close'] } }, exec(delegatedSession)),
       (error) => error.code === 'chart_source_scope_mismatch',

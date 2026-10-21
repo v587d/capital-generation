@@ -14,7 +14,7 @@ import { renderChart, registerChartTool } from '../lib/chart/tool.js'
 
 const WORKSPACE = '/workspace/proj'
 const MAIN = { id: 'main-1', header: { cwd: WORKSPACE } }
-const COLLECTOR = { id: 'child-1', header: { cwd: WORKSPACE, parentSession: 'main-1' } }
+const COLLECTOR = { id: 'child-1', header: { cwd: WORKSPACE, parentSession: 'main-1', origin: 'subagent' } }
 const exec = () => ({ agent: { session: MAIN }, signal: new AbortController().signal })
 const execAs = (session) => ({ agent: { session }, signal: new AbortController().signal })
 

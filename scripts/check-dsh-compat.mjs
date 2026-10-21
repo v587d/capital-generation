@@ -154,6 +154,9 @@ const probes = [
       const projectionFile = join(PKG('dsh-session-projection'), 'lib/index.js')
       const projection = readIfPresent(projectionFile)
       if (projection === undefined) return { status: FAIL, detail: `读不到 ${projectionFile}` }
+      const deliverablesFile = join(PKG('dsh-client-ui-deliverables'), 'lib/client.js')
+      const deliverables = readIfPresent(deliverablesFile)
+      if (deliverables === undefined) return { status: FAIL, detail: `读不到 ${deliverablesFile}` }
 
       const checks = [
         ['Session.append(type, data)', /append\(type, data/, session, sessionFile],
@@ -164,10 +167,14 @@ const probes = [
         // Key invariant: the delivery event must stay in the closed vocabulary, or written logs are
         // rejected at cold load and the whole session becomes unopenable.
         ['deliverables/presented 属于 KNOWN_SESSION_EVENT_TYPES', /"deliverables\/presented"/, session, sessionFile],
+        // Our present_charts step depends on this replay rule: a card declared AFTER the closing
+        // assistant message is silently dropped, which is why delivery is a pre-answer model step.
+        ['交付卡片只重放收尾消息之前的事件（presentedForClosing: file.seq < owner.seq）',
+          /presentedForClosing\(owner\)[\s\S]{0,800}?file\.seq\s*<\s*owner\.seq/, deliverables, deliverablesFile],
       ]
       const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
       return missing.length === 0
-        ? { status: PASS, detail: 'append / sessions.get / stateOf 都还在，deliverables/presented 仍在闭集词汇表内，非 surface 事件不进消息历史' }
+        ? { status: PASS, detail: 'append / sessions.get / stateOf 都还在，deliverables/presented 仍在闭集词汇表内，交付卡片只重放收尾消息之前的事件' }
         : { status: FAIL, detail: `图表交付通道的接口变了：${missing.join(' / ')}（见账本 L11）` }
     },
   },

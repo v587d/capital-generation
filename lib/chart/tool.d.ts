@@ -12,6 +12,7 @@ type AgentExecutionLike = {
         header?: {
             cwd?: string;
             parentSession?: string;
+            origin?: 'subagent';
         };
     };
 };

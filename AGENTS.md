@@ -36,7 +36,7 @@
   （created 时人设未定）。委派出口只有专用角色，工具面 = preset 挂的族行（allow 清单禁恢复）。
 - **§6.1** `/capital-charts` 序列旁路必须接 `connection.requestRejection`，否则是无认证端点。
 - **§6.3** 会话事件词汇表是闭集，交付必须走 first-party `deliverables/presented`；cordis ctx 不能用
-  `{ ...ctx }` 展开（`get`/`on`/`effect` 挂在原型上）；寄存队列按 owner（根会话）归档。
+  `{ ...ctx }` 展开；队列按 owner 归档；auto 模式交付由主 Agent 在最终答复前 `present_charts` 一步写入。
 - **§8.6** 接入必查清单先过：取数一律委派、不许用记忆回填、不带执行面；frontmatter/目录须可发现；catalog 与打包约束见详情。
 - **§9.5 / §9.6** 工具返回值必须无损 JSON（`undefined` / `NaN` / 空洞不许带出），且必须满足自己
   声明的 `output.schema`——多返回一个未声明字段同样致命。
@@ -66,7 +66,7 @@ capital-generation/
 │   ├── tool-exec.ts              # callerSession / delegatedSession 唯一实现
 │   ├── data-collector/           # Dataset store / hub / dataset 工具 / 时间轴
 │   ├── sources/fuyao-rest.ts     # Fuyao 端点定义表（能力清单见 list_capabilities）
-│   ├── chart/                    # render_chart：spec 归一化 / 自包含 HTML / events.ts 交付登记
+│   ├── chart/                    # render_chart（出图）+ present_charts（收尾交付）/ events.ts 交付登记
 │   ├── agents/                   # root-tool-policy（根收敛）+ bash-guard（§1.6）
 │   ├── net/                      # 出网共用实现（§9.7）
 │   ├── web-retriever/            # anysearch / wind-client / 具名来源 / 检索工具

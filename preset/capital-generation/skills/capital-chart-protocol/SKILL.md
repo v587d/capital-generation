@@ -131,7 +131,9 @@ description: Use before calling render_chart — the full chart spec vocabulary 
 `series_labels`、`has_volume`、`markers`、来源标注（`dataset_id`/`source_label`/`captured_at`）、
 三个产物路径、`warnings`。**没有任何数据行** —— 序列不进上下文，这正是这套设计的意义。
 
-呈现路径：`render_chart` 只负责生成图产物和小型回执。出图成功后，**宿主**会把这张图登记为
-当前对话的**本轮交付物**（官方 `deliverables/presented` 事件 → 收尾「本轮文件改动 / 交付」行，
-点开即在右侧渲染自包含 `chart.html`）。因此调用方**不要**在回传或正文里罗列图表文件、路径或 HTML
-—— 那既进不了交付行，也只会污染上下文。结论的文字部分仍需写清来源与口径。
+呈现路径：`render_chart` 只负责生成图产物和小型回执，**不会自动登记交付**。`chart_ref` 随
+data_junior 的汇总回传主 Agent；主 Agent 在写最终答复前调用一次 `present_charts`，这些图才成为
+**最后一轮**答复末尾的交付物（官方 `deliverables/presented` 事件 → 收尾「本轮文件改动 / 交付」行，
+点开即在右侧渲染自包含 `chart.html`）。因此 data_junior 与 specialist 都**不要**调用
+`present_charts`，也不要罗列图表文件、路径或 HTML —— 那既进不了交付行，也只会污染上下文。
+结论的文字部分仍需写清来源与口径。

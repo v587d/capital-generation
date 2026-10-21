@@ -10,6 +10,7 @@ import * as chartRenderEntry from '../lib/chart-render-entry.js'
 import * as searchEntry from '../lib/search-entry.js'
 import * as sourcesEntry from '../lib/sources-entry.js'
 import * as ocrEntry from '../lib/ocr-entry.js'
+import * as presentEntry from '../lib/present-entry.js'
 import * as timeEntry from '../lib/time-entry.js'
 import * as watchlistEntry from '../lib/watchlist-entry.js'
 import * as rootExtrasEntry from '../lib/root-extras-entry.js'
@@ -67,6 +68,7 @@ const ENTRIES = {
   '@v587d/capital-generation/tools/retrieve-search': searchEntry,
   '@v587d/capital-generation/tools/retrieve-sources': sourcesEntry,
   '@v587d/capital-generation/tools/ocr': ocrEntry,
+  '@v587d/capital-generation/tools/present': presentEntry,
   '@v587d/capital-generation/tools/time': timeEntry,
   '@v587d/capital-generation/tools/watchlist': watchlistEntry,
   '@v587d/capital-generation/tools/root-extras': rootExtrasEntry,
@@ -135,6 +137,17 @@ test('tools/time：两颗一组，没有行成员开关', () => {
 
 test('tools/dataset-read：write_profile 不在这颗默认行上（junior 的旧边界不退化）', () => {
   assert.ok(!namesOf(applyDatasetRead).includes('write_profile'), 'write_profile 只在单体入口里注册，族行默认关')
+})
+
+test('出图行不再自动登记交付：chartEvents 只留在单体载体，交付归 tools/present', () => {
+  // Auto-delivery would write the card wherever the specialist's turn happens to be — the exact bug
+  // (artifacts land in folded waiting turns). The root's present_charts step is the only auto-mode path.
+  const renderEntry = readFileSync(fileURLToPath(new URL('../src/chart-render-entry.ts', import.meta.url)), 'utf8')
+  assert.doesNotMatch(renderEntry, /chartEvents\s*:/, 'tools/chart-render 入口传了 chartEvents：图表又会落进 specialist 所在的中间轮')
+  const monolith = readFileSync(fileURLToPath(new URL('../src/index.ts', import.meta.url)), 'utf8')
+  assert.match(monolith, /chartEvents: \(\) => createChartEventPublisher/, '单体载体仍保留自动登记（它没有 present_charts 这一步）')
+  const presentEntry = readFileSync(fileURLToPath(new URL('../src/present-entry.ts', import.meta.url)), 'utf8')
+  assert.match(presentEntry, /createChartEventPublisher/, 'tools/present 才是 auto 模式的交付出口')
 })
 
 test('tools/retrieve-sources：本地直连开关关掉也照样注册（失败留到调用期点名）', () => {

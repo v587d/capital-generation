@@ -1,5 +1,8 @@
 import type { SessionLike } from '../data-collector/store.js';
-/** One-hop scope: a token lets a nested child reuse its owner's scope. */
+/**
+ * Subagent children carry `origin: 'subagent'`; a user fork/branch root also has `parentSession`
+ * (seed lineage) and must stay its own scope. One hop: the token lets a nested child reuse its owner.
+ */
 export declare function chartSessionScopeId(session: SessionLike): string;
 export interface ChartArtifactRef {
     chart_ref: string;
@@ -10,6 +13,7 @@ export interface ChartArtifactRef {
     captured_at: number | null;
     kind: string;
     axis: 'time' | 'index';
+    title: string;
     chart_url: string | null;
     spec_path: string;
     series_path: string;
@@ -42,6 +46,7 @@ export declare class ChartArtifactRegistry {
         captured_at?: number | null;
         kind: string;
         axis: 'time' | 'index';
+        title: string;
         chart_url: string | null;
         spec_path: string;
         series_path: string;
@@ -55,6 +60,11 @@ export declare class ChartArtifactRegistry {
         task_id?: string | null;
     }): ChartArtifactRef;
     revoke(chartRef: string): boolean;
+    /** Charts of one session scope, for the model's final-turn delivery step; newest last. */
+    list(input: {
+        session: SessionLike;
+        task_id?: string | null;
+    }): ChartArtifactRef[];
     size(): number;
     private publicRecord;
 }

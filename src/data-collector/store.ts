@@ -249,7 +249,7 @@ export class DatasetStoreError extends Error {
 
 export interface SessionLike {
   readonly id: string
-  readonly header?: { readonly cwd?: string; readonly parentSession?: string }
+  readonly header?: { readonly cwd?: string; readonly parentSession?: string; readonly origin?: 'subagent' }
 }
 
 export interface SandboxPolicyResultLike {

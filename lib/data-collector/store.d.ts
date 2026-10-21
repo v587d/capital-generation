@@ -184,6 +184,7 @@ export interface SessionLike {
     readonly header?: {
         readonly cwd?: string;
         readonly parentSession?: string;
+        readonly origin?: 'subagent';
     };
 }
 export interface SandboxPolicyResultLike {

@@ -13,7 +13,7 @@ import { ChartArtifactRegistry, chartSessionScopeId } from './artifact-ref.js'
 import { chartTraceEnabled, type ChartEventPublisher } from './events.js'
 
 type ToolRuntimeLike = { register(definition: unknown): () => void }
-type AgentExecutionLike = { session?: { id?: string; header?: { cwd?: string; parentSession?: string } } }
+type AgentExecutionLike = { session?: { id?: string; header?: { cwd?: string; parentSession?: string; origin?: 'subagent' } } }
 type ToolExecLike = { agent?: AgentExecutionLike; signal: AbortSignal }
 
 const jsonObject = (properties: Record<string, unknown> = {}, required: string[] = []): object =>
@@ -31,12 +31,12 @@ function newChartId(): string {
   return `ch_${suffix}`
 }
 
-function sessionOf(exec: ToolExecLike): { id: string; header?: { cwd?: string; parentSession?: string } } {
+function sessionOf(exec: ToolExecLike): { id: string; header?: { cwd?: string; parentSession?: string; origin?: 'subagent' } } {
   const session = exec.agent?.session
   if (!session || typeof session.id !== 'string' || session.id.length === 0) {
     throw new ChartError('chart_source_invalid', 'the calling agent session was not provided')
   }
-  return session as { id: string; header?: { cwd?: string; parentSession?: string } }
+  return session as { id: string; header?: { cwd?: string; parentSession?: string; origin?: 'subagent' } }
 }
 
 function stripErrorCode(message: string): string {
@@ -169,7 +169,7 @@ export async function renderChart(input: RenderChartInput, args: Record<string, 
   if (sourceCount !== 1) {
     throw new ChartError('chart_source_invalid', 'provide exactly one data source: dataset_id, path, or chart_source_ref')
   }
-  if (session.header?.parentSession && chartSourceRef === undefined) {
+  if (session.header?.origin === 'subagent' && chartSourceRef === undefined) {
     throw new ChartError('chart_source_scope_mismatch', 'delegated visualization callers must use chart_source_ref')
   }
   const tokenSource = chartSourceRef === undefined ? undefined : chartSourceTokenForRender(input.sourceTokens, {
@@ -236,6 +236,7 @@ export async function renderChart(input: RenderChartInput, args: Record<string, 
     captured_at: meta.captured_at ?? null,
     kind: payload.kind,
     axis: payload.axis,
+    title: payload.title,
     chart_url: chartUrl,
     spec_path: pathOf('spec.json'),
     series_path: pathOf('series.json'),
@@ -245,9 +246,10 @@ export async function renderChart(input: RenderChartInput, args: Record<string, 
   // Unit callers without the registry still get a stable receipt.
   const chartRef = artifact?.chart_ref ?? `chart_${chartId.slice(3)}`
 
-  // Register as this turn's deliverable via first-party deliverables/presented — never a custom
-  // event type (closed vocabulary breaks cold load; see src/chart/events.ts). Owner scope matches
-  // chart_ref; these events never enter model message history.
+  // Monolith carriers still register this turn's deliverable here (first-party
+  // deliverables/presented only — never a custom event type; closed vocabulary breaks cold load).
+  // The auto-mode specialist row passes no chartEvents: the root Agent presents chart_refs in its
+  // final turn instead, so the card cannot land in a folded process turn.
   let deliverableTrace: string
   try {
     const publisher = input.chartEvents?.()
@@ -316,7 +318,9 @@ export function registerChartTool(ctx: Context, options: RenderChartInput): void
       `最多保留 ${MAX_CHART_POINTS} 个点（超出由宿主下采样并如实标注）。` +
       '字段语义、可用键与错误码见 skill capital-chart-protocol —— 首次画图前先加载它。' +
       '是否出图由 data_junior 的可视化协议决定；本工具只负责安全生成图表产物和小型回执。' +
-      '出图成功后宿主会把这张图登记为当前对话的**本轮交付物**（官方 deliverables/presented），用户可从收尾的交付行点开自包含图表；调用方**不要**在回传或正文里罗列图表文件、路径或 HTML。' +
+      (typeof options.chartEvents === 'function'
+        ? '出图成功后宿主会把这张图登记为当前对话的**本轮交付物**（官方 deliverables/presented），用户可从收尾的交付行点开自包含图表；调用方**不要**在回传或正文里罗列图表文件、路径或 HTML。'
+        : '交付登记由主 Agent 在最终答复前调用 present_charts 完成：你只把 chart_ref 回传给 data_junior 汇总，**不要**调用 present_charts、不要在回传或正文里罗列图表文件、路径或 HTML。') +
       '图表是呈现不是分析：需要数值结论（首末值、涨跌幅、分位数等）仍走 data_junior 的 profile / query，不要用图去推断数字。',
     parameters,
     output: { schema: receiptSchema, render },

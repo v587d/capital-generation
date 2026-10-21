@@ -82,7 +82,9 @@ function isAppendableSession(value: unknown): value is AppendableSession {
     && typeof (value as { id?: unknown }).id === 'string'
 }
 
+/** `parentSession` alone is seed lineage (a user fork); only `origin: 'subagent'` is delegation. */
 function parentSessionOf(session: AppendableSession): string | undefined {
+  if (session.header?.origin !== 'subagent') return undefined
   const parent = session.header?.parentSession
   return typeof parent === 'string' && parent.length > 0 ? parent : undefined
 }

@@ -23,7 +23,7 @@ function fakeSession(id, parentSession) {
   const appended = []
   return {
     id,
-    header: parentSession === undefined ? { cwd: '/w' } : { cwd: '/w', parentSession },
+    header: parentSession === undefined ? { cwd: '/w' } : { cwd: '/w', parentSession, origin: 'subagent' },
     appended,
     append(type, data) { appended.push({ type, data }); return { type, seq: appended.length - 1, data } },
   }
@@ -129,6 +129,34 @@ test('resolveOwnerSession：从 owner scope 向上走到根会话', () => {
 
 // The event vocabulary is closed and validated fail-closed on cold load; a custom type
 // makes the whole session unreadable, so the source may only append the first-party constant.
+test('resolveOwnerSession：fork/branch 顶层会话是根，不沿 seed 谱系走到被 fork 的旧会话', () => {
+  const old = fakeSession('main-old')
+  const branch = {
+    id: 'main-branch',
+    header: { cwd: '/w', parentSession: 'main-old', isSeeded: true },
+    appended: [],
+    append(type, data) { this.appended.push({ type, data }); return { type, seq: 0, data } },
+  }
+  const junior = fakeSession('junior-branch', 'main-branch')
+  const sessions = { get: (id) => ({ 'main-old': old, 'main-branch': branch, 'junior-branch': junior })[id] }
+
+  assert.equal(resolveOwnerSession(sessions, 'main-branch').id, 'main-branch', 'branch 的 parentSession 是 seed 谱系，不是委派')
+  assert.equal(resolveOwnerSession(sessions, 'junior-branch').id, 'main-branch', 'branch 下的子 Agent 仍落到 branch 根')
+
+  resetChartEventPublisher()
+  resetChartEventPending()
+  const publisher = createChartEventPublisher(fakeCtx({
+    sessions,
+    projections: { stateOf: () => ({ openTurnStartSeq: 1, lastTurn: 7 }) },
+  }))
+  assert.ok(publisher)
+  assert.equal(publisher.publish({ ...baseInput, ownerSessionId: 'main-branch' }), true)
+  assert.equal(branch.appended.length, 1, '卡片必须落在 branch 会话')
+  assert.equal(old.appended.length, 0, '不能写进被 fork 的旧会话')
+  resetChartEventPublisher()
+  resetChartEventPending()
+})
+
 test('契约：交付事件必须是 first-party `deliverables/presented`，且 append 只能用它', () => {
   assert.equal(CHART_DELIVERABLE_EVENT, 'deliverables/presented', '必须是官方 present 用的同一事件类型')
   assert.equal(CHART_CALL_ID_PREFIX, 'capital-chart:')

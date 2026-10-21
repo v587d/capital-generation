@@ -16,6 +16,8 @@ export const CAPITAL_ROW_TOOLS = {
     'eastmoney_724', 'eastmoney_stock_news', 'eastmoney_reports', 'sina_reports', 'ths_eps_forecast',
   ],
   '@v587d/capital-generation/tools/ocr': ['ocr'],
+  // Main Agent's final-turn delivery step; the card must be written by the closing turn.
+  '@v587d/capital-generation/tools/present': ['present_charts'],
   '@v587d/capital-generation/tools/time': ['get_local_datetime', 'resolve_data_time_range'],
   '@v587d/capital-generation/tools/watchlist': ['get_watchlist'],
   // Root presence settings only; this row registers no tools.

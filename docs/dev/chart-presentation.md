@@ -6,7 +6,7 @@
 ## 6.1 准入与 gate
 
 - **根 Agent 的工具面在组合期封闭**（2026-10-19 D0）：`capital-generation` 只挂 time / ocr /
-  watchlist / root-extras 四行，`render_chart` / `prepare_chart_source` / 出网那十三颗**根本不在根的
+  watchlist / present / root-extras 五行，`render_chart` / `prepare_chart_source` / 出网那十三颗**根本不在根的
   composition 里**，所以 `src/agents/root-tool-policy.ts` 在生产装配下以 `deny: false` 注册——created
   监听只记现场、不再逐名 deny（`ROOT_AGENT_DENIED_TOOLS` 那份名单留给单体载体）。**不要在 preset /
   standing 层写 deny**（allow/deny 只是交集过滤，加不回来，会把 specialist 一起砍掉）；**也不要**把
@@ -43,8 +43,12 @@
   组装——persona 或 skill 里各有**被测试钉住的**一份，此处不复述。
 - **数据的物理路径**：`render_chart` 只回小回执，序列写 `capital-analysis/charts/<id>/`，浏览器
   经旁路取，**不进任何 Agent 上下文**；交付事件也不进 `deriveMessages()`。进对话流的**唯一**方式
-  是官方 `deliverables/presented`（§6.3 → `chart-delivery-events.md`）。跨数据集归一化对照当前
-  **没有**合规路径。
+  是官方 `deliverables/presented`（§6.3 → `chart-delivery-events.md`）；auto 模式下它由主 Agent
+  在最终答复前调用 `present_charts` 写入，不在出图时自动登记。跨数据集归一化对照当前**没有**
+  合规路径。
+- **工具面落点**：出图链仍只在 `visualization_specialist`（`tools/chart-render`）；根 preset 多挂
+  的一条是 `tools/present`（只带 `present_charts`，不渲染、不读数据）。它是「主 Agent 只在收尾写
+  交付」的模型可见出口——不要把它并进出图行，也不要把 `render_chart` 加回根 preset。
 - **降级底线**：`chart.html` 自包含可离线打开，也是官方文档 preview iframe 的渲染目标
   （接管见 `chart-ui/README.md`）；`html_path` 始终在回执里。
 - **构建产物**：`chart-ui/client.js` 是 esbuild 产物（源码 `client.src.cjs`）；改源码或
