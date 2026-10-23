@@ -101,7 +101,7 @@
   **不能按 Agent 区分**（全仓只有这一个 pruner 实例），主/子 Agent 共用。
 - **工具面 = preset 挂的行**（D0，2026-10-19）：`toolFilter` 已从委派行删除，上游报错原文指明的
   替代是「persona 与工具插件改住 Agent Preset，委派行只用 `agentPreset` 选它」——这一条我们做到底：
-  本仓当前由 preset 族行暴露的 27 颗模型工具，按族拆成
+  本仓当前由 preset 族行暴露的 29 颗模型工具，按族拆成
   `@v587d/capital-generation/tools/<family>` 的 subpath 入口行
   （`package.json` 的 `exports`），每颗 preset 只挂自己那几族，**不再有运行期名字级 allow 名单**。
   行契约（那一行注册哪些名字）只有一份，住 `test/family-rows.mjs`：`test/family-entries.test.mjs`
@@ -109,8 +109,8 @@
   - collector：`tools/collect` + `tools/time`；junior：`tools/dataset-read` + `tools/chart-source` +
     `tools/time`；specialist：`tools/chart-render` + `tools/time`；retriever：`tools/retrieve-search` +
     `tools/retrieve-sources` + `tools/ocr` + `tools/time`；根：`tools/time` +
-    `tools/ocr` + `tools/watchlist` + `tools/root-extras`（最后一行一颗工具都不带，只挂精选
-    skills 的 provider 与用户自定义人设分节）。**`tools/time` 每颗 preset 都挂、且不带任何行配置**：
+    `tools/ocr` + `tools/watchlist` + `tools/present` + `tools/orchestration` + `tools/root-extras`
+    （最后一行一颗工具都不带，只挂精选 skills 的 provider 与用户自定义人设分节）。**`tools/time` 每颗 preset 都挂、且不带任何行配置**：
     通用能力不按角色裁（2026-10-19 决策，retriever 那颗继承自 0.2.0 `toolFilter` 的
     `localDatetime: false` 已删——行契约里没有开关，写了就是"以为裁了、其实没人读"）。
   - 运行期只剩**一格**：`tool-subagent-control` 把 `send_message` 与 `interrupt_agent` 焊在同一行，

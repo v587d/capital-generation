@@ -200,6 +200,12 @@ data_junior 在 `run_code` 里调用 `tools.prepare_chart_source(...)`；special
 data_junior 只在 `run_code` 程序里用 `tools.subagent_visualization_specialist(...)` 创建 specialist；
 specialist 是 native，照旧直调 `render_chart`。以下步骤属于 specialist。
 
+**并发与重试（硬）**：单次最多同时创建 8 个 specialist；超过就分批，等前一批释放子槽位再发下一批。
+`run_code` 内用 `Promise.allSettled`，不要用 `Promise.all`；一个 `subagent limit reached` 不能吞掉其他任务。
+按 `dataset_id + chart_source_ref` 记录成功；拿到 `chart_ref` 的任务不得重发（会生成重复 K 线）。
+槽位不足时优先补用户问题直接相关的估值/现金流/主图；不要重发已成功的 K 线，不要用资产负债表图占满槽位。
+只在 `run_code` 里调 `tools.subagent_visualization_specialist`；不要直调该工具。
+
 第一次调用前加载：
 
 ```text
@@ -241,7 +247,7 @@ warnings
 ```text
 series.json
 raw rows
-chart.html 内容
+HTML 内容
 绝对路径
 ```
 

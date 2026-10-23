@@ -11,6 +11,8 @@ export interface ChartArtifactRef {
     dataset_id: string | null;
     source_label: string | null;
     captured_at: number | null;
+    /** Six-digit security/index code parsed from the Dataset envelope or rows, when present. */
+    subject_code: string | null;
     kind: string;
     axis: 'time' | 'index';
     title: string;
@@ -28,7 +30,7 @@ export interface ChartArtifactRegistryOptions {
 }
 /**
  * In-process chart_ref capabilities: session/task/workspace binding and the deliverable owner
- * scope. Process restart invalidates them; chart.html remains the offline fallback.
+ * scope. Process restart invalidates them; the title-named self-contained HTML remains the offline fallback.
  */
 export declare class ChartArtifactRegistry {
     private readonly records;
@@ -44,6 +46,7 @@ export declare class ChartArtifactRegistry {
         dataset_id?: string | null;
         source_label?: string | null;
         captured_at?: number | null;
+        subject_code?: string | null;
         kind: string;
         axis: 'time' | 'index';
         title: string;

@@ -10,6 +10,7 @@ import * as chartRenderEntry from '../lib/chart-render-entry.js'
 import * as searchEntry from '../lib/search-entry.js'
 import * as sourcesEntry from '../lib/sources-entry.js'
 import * as ocrEntry from '../lib/ocr-entry.js'
+import * as orchestrationEntry from '../lib/orchestration-entry.js'
 import * as presentEntry from '../lib/present-entry.js'
 import * as timeEntry from '../lib/time-entry.js'
 import * as watchlistEntry from '../lib/watchlist-entry.js'
@@ -68,6 +69,7 @@ const ENTRIES = {
   '@v587d/capital-generation/tools/retrieve-search': searchEntry,
   '@v587d/capital-generation/tools/retrieve-sources': sourcesEntry,
   '@v587d/capital-generation/tools/ocr': ocrEntry,
+  '@v587d/capital-generation/tools/orchestration': orchestrationEntry,
   '@v587d/capital-generation/tools/present': presentEntry,
   '@v587d/capital-generation/tools/time': timeEntry,
   '@v587d/capital-generation/tools/watchlist': watchlistEntry,

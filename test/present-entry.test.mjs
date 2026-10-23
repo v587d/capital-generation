@@ -38,6 +38,20 @@ test('tools/present：present_charts 记录清单，收尾 finish 帧才写官�
     })
     const listeners = new Map()
     const tools = []
+    const inbox = {
+      nextTurn: [],
+      nextStep: [],
+      remove(id) {
+        for (const list of [this.nextStep, this.nextTurn]) {
+          const index = list.findIndex((message) => message.id === id)
+          if (index < 0) continue
+          list.splice(index, 1)
+          return true
+        }
+        return false
+      },
+    }
+    const agent = { session: main, inbox }
     const ctx = {
       get(name) {
         if (name === 'tools') return { register(definition) { tools.push(definition); return () => {} } }
@@ -61,9 +75,10 @@ test('tools/present：present_charts 记录清单，收尾 finish 帧才写官�
     assert.ok(typeof listeners.get('agent/assistant-stream') === 'function', '必须订阅 assistant-stream')
     assert.ok(typeof listeners.get('subagent/start') === 'function', '必须跟踪子 Agent 启动')
     assert.ok(typeof listeners.get('subagent/end') === 'function', '必须跟踪子 Agent 结束')
+    assert.ok(typeof listeners.get('agent/inbox/inserted') === 'function', '必须接住收尾后插入的结算通知')
 
     const stream = listeners.get('agent/assistant-stream')
-    stream({ agent: { session: main }, frame: { type: 'start', attemptId: 'a1', turn: 5 } })
+    stream({ agent, frame: { type: 'start', attemptId: 'a1', turn: 5 } })
     const receipt = await tool.execute(
       { chart_refs: [chart.chart_ref] },
       { agent: { session: main }, signal: new AbortController().signal },
@@ -75,19 +90,50 @@ test('tools/present：present_charts 记录清单，收尾 finish 帧才写官�
     listeners.get('subagent/start')({ id: 'junior-1' })
     const sessionEvent = listeners.get('session/event')
     assert.ok(typeof sessionEvent === 'function', '必须订阅 session/event 以对账结算通知')
+    // The child already reported its result; this admitted relay is what makes the later
+    // settlement notice redundant.
+    sessionEvent(main, {
+      type: 'user/message',
+      time: 1_700_000_000_090,
+      data: { source: { kind: 'agent-message', senderSessionId: 'junior-1' } },
+    })
+    inbox.nextStep.push({
+      id: 'settled-1',
+      source: { kind: 'subagent-settled', senderSessionId: 'junior-1' },
+    })
     sessionEvent(main, {
       type: 'user/message',
       time: 1_700_000_000_100,
       data: { source: { kind: 'subagent-settled', senderSessionId: 'junior-1' } },
     })
 
-    stream({ agent: { session: main }, frame: { type: 'chunk', attemptId: 'a1', turn: 5, chunk: { type: 'finish', reason: { kind: 'stop' } } } })
+    stream({ agent, frame: { type: 'chunk', attemptId: 'a1', turn: 5, chunk: { type: 'finish', reason: { kind: 'stop' } } } })
 
     assert.equal(main.appended.length, 1, '收尾 finish 帧必须写入交付事件')
     assert.equal(main.appended[0].type, 'deliverables/presented')
     assert.equal(main.appended[0].data.turn, 5)
     assert.equal(main.appended[0].data.files[0].path, chart.html_path)
     assert.equal(main.appended[0].data.files[0].description, '营收趋势')
+    assert.equal(inbox.nextStep.length, 0, '收尾帧必须撤掉冗余的结算通知')
+
+    // A notice that lands after the closing frame must be removed at insertion time too.
+    const late = { id: 'settled-late', source: { kind: 'subagent-settled', senderSessionId: 'junior-2' } }
+    sessionEvent(main, {
+      type: 'user/message',
+      time: 1_700_000_000_105,
+      data: { source: { kind: 'user' } },
+    })
+    sessionEvent(main, {
+      type: 'user/message',
+      time: 1_700_000_000_110,
+      data: { source: { kind: 'agent-message', senderSessionId: 'junior-2' } },
+    })
+    // A new relay resets the closing marker; the following finish restores it.
+    stream({ agent, frame: { type: 'start', attemptId: 'a2', turn: 5 } })
+    stream({ agent, frame: { type: 'chunk', attemptId: 'a2', turn: 5, chunk: { type: 'finish', reason: { kind: 'stop' } } } })
+    inbox.nextStep.push(late)
+    listeners.get('agent/inbox/inserted')({ agent, message: late })
+    assert.equal(inbox.nextStep.length, 0, '收尾后插入的通知也必须当场移除')
   } finally {
     resetChartEventPublisher()
     resetChartEventPending()

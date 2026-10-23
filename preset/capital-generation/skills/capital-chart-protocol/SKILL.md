@@ -123,7 +123,8 @@ description: Use before calling render_chart — the full chart spec vocabulary 
 
 产物写进 `capital-analysis/charts/<chart_id>/`：
 
-- `chart.html` —— **自包含**单文件（内联图表库与数据），离线可开；回执里的 `html_path` 就是它。
+- `<slug>.html` —— **自包含**单文件（内联图表库与数据），离线可开；文件名优先带股票代码/ASCII 标题与图形类型
+  （如 `300803-kline-ab12cd34.html`），同目录下不再是千篇一律的 `chart.html`；回执里的 `html_path` 就是它。
 - `series.json` —— 归一化后的载荷（重绘或调试用）。
 - `spec.json` —— 归一化后的 spec 与来源（可复现）。
 
@@ -134,6 +135,6 @@ description: Use before calling render_chart — the full chart spec vocabulary 
 呈现路径：`render_chart` 只负责生成图产物和小型回执，**不会自动登记交付**。`chart_ref` 随
 data_junior 的汇总回传主 Agent；主 Agent 在写最终答复前调用一次 `present_charts`，这些图才成为
 **最后一轮**答复末尾的交付物（官方 `deliverables/presented` 事件 → 收尾「本轮文件改动 / 交付」行，
-点开即在右侧渲染自包含 `chart.html`）。因此 data_junior 与 specialist 都**不要**调用
+点开即在右侧渲染自包含 HTML，文件名带代码/标题或图形类型）。因此 data_junior 与 specialist 都**不要**调用
 `present_charts`，也不要罗列图表文件、路径或 HTML —— 那既进不了交付行，也只会污染上下文。
 结论的文字部分仍需写清来源与口径。

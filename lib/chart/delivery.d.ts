@@ -31,6 +31,15 @@ export interface AssistantStreamFrameLike {
         };
     };
 }
+/** Live root Agent passed to the closing hook so it can cancel inbox notices before the loop claims them. */
+export interface DeliveryAgentLike {
+    readonly session?: SessionLike;
+    readonly inbox?: {
+        readonly nextTurn?: readonly unknown[];
+        readonly nextStep?: readonly unknown[];
+        remove?(messageId: string): boolean;
+    };
+}
 interface InboxStateLike {
     'next-turn'?: readonly unknown[];
     'next-step'?: readonly unknown[];
@@ -41,13 +50,18 @@ export interface ChartDeliveryOptions {
     publish: (sessionId: string, inputs: ChartTurnEventInput[]) => boolean;
     /** Durable pending input; synchronous projection read. Absent means "cannot tell" → proceed. */
     inboxOf?: (session: SessionLike) => InboxStateLike | undefined;
+    /**
+     * Runs on every closing finish, including exchanges with no chart. The wake guard removes
+     * redundant settlement notices here; it must never be allowed to block delivery.
+     */
+    onClosing?: (session: SessionLike, agent: DeliveryAgentLike | undefined, turn: number | undefined) => void;
     /** Bounded batch; the card collapses past four files and expands on demand. */
     maxCharts?: number;
 }
 export interface ChartDelivery {
     /** `present_charts` selection; merged across calls because models often retry in batches. */
     request(session: SessionLike, inputs: ChartTurnEventInput[]): void;
-    acceptStream(session: SessionLike | undefined, frame: AssistantStreamFrameLike): void;
+    acceptStream(session: SessionLike | undefined, frame: AssistantStreamFrameLike, agent?: DeliveryAgentLike): void;
     /** A new human message starts a new exchange: old charts must not ride into it. */
     acceptUserMessage(sessionId: string, time: number): void;
     acceptSubagentStart(info: {

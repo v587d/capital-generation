@@ -29,6 +29,16 @@ export interface AssistantStreamFrameLike {
   }
 }
 
+/** Live root Agent passed to the closing hook so it can cancel inbox notices before the loop claims them. */
+export interface DeliveryAgentLike {
+  readonly session?: SessionLike
+  readonly inbox?: {
+    readonly nextTurn?: readonly unknown[]
+    readonly nextStep?: readonly unknown[]
+    remove?(messageId: string): boolean
+  }
+}
+
 interface InboxStateLike {
   'next-turn'?: readonly unknown[]
   'next-step'?: readonly unknown[]
@@ -54,6 +64,11 @@ export interface ChartDeliveryOptions {
   publish: (sessionId: string, inputs: ChartTurnEventInput[]) => boolean
   /** Durable pending input; synchronous projection read. Absent means "cannot tell" → proceed. */
   inboxOf?: (session: SessionLike) => InboxStateLike | undefined
+  /**
+   * Runs on every closing finish, including exchanges with no chart. The wake guard removes
+   * redundant settlement notices here; it must never be allowed to block delivery.
+   */
+  onClosing?: (session: SessionLike, agent: DeliveryAgentLike | undefined, turn: number | undefined) => void
   /** Bounded batch; the card collapses past four files and expands on demand. */
   maxCharts?: number
 }
@@ -61,7 +76,7 @@ export interface ChartDeliveryOptions {
 export interface ChartDelivery {
   /** `present_charts` selection; merged across calls because models often retry in batches. */
   request(session: SessionLike, inputs: ChartTurnEventInput[]): void
-  acceptStream(session: SessionLike | undefined, frame: AssistantStreamFrameLike): void
+  acceptStream(session: SessionLike | undefined, frame: AssistantStreamFrameLike, agent?: DeliveryAgentLike): void
   /** A new human message starts a new exchange: old charts must not ride into it. */
   acceptUserMessage(sessionId: string, time: number): void
   acceptSubagentStart(info: { id?: string }): void
@@ -81,7 +96,8 @@ export function createChartDelivery(options: ChartDeliveryOptions): ChartDeliver
   let explicit: ChartTurnEventInput[] = []
   const exchangeStarts = new Map<string, number>()
   const fallbackStart = Date.now()
-  let lastFlushedTurn: number | undefined
+  /** One card per exchange. `turn` is unreliable: a later finish in the same turn may omit it. */
+  let flushed = false
   let sawFrame = false
   const attempts = new Map<string, { toolCall: boolean }>()
   const running = new Map<string, number>()
@@ -120,12 +136,19 @@ export function createChartDelivery(options: ChartDeliveryOptions): ChartDeliver
     return inboxMessages(inbox).every(isSettledNotice)
   }
 
-  const flush = (session: SessionLike, turn: number | undefined): void => {
+  const flush = (session: SessionLike, turn: number | undefined, agent: DeliveryAgentLike | undefined): void => {
     // A later step in the same exchange may omit `turn`; it still must not write a second card.
-    if (lastFlushedTurn !== undefined && (turn === undefined || lastFlushedTurn === turn)) return
+    if (flushed) return
     const inbox = options.inboxOf?.(session)
     reconcileSettled(inbox)
     if (!idle(inbox)) return
+    // The wake guard drops notices that would otherwise make the loop open another step after
+    // this answer. Run it even when no chart is selected, and never let it block delivery.
+    try {
+      options.onClosing?.(session, agent, turn)
+    } catch {
+      // A guard failure must not strand an already-selected card.
+    }
     const inputs = (explicit.length > 0 ? explicit : autoInputs(session)).slice(0, maxCharts)
     if (inputs.length === 0) return
     let written = false
@@ -134,8 +157,8 @@ export function createChartDelivery(options: ChartDeliveryOptions): ChartDeliver
     } catch {
       written = false
     }
-    // Sentinel keeps a second turn-less finish in the same exchange from duplicating the card.
-    if (written) lastFlushedTurn = turn ?? -1
+    // A failed write keeps the exchange open so a later closing finish can retry.
+    if (written) flushed = true
   }
 
   return {
@@ -149,7 +172,7 @@ export function createChartDelivery(options: ChartDeliveryOptions): ChartDeliver
       }
       if (explicit.length > maxCharts) explicit = explicit.slice(0, maxCharts)
     },
-    acceptStream(session, frame) {
+    acceptStream(session, frame, agent) {
       if (!owns(session) || frame === undefined) return
       sawFrame = true
       const attemptId = frame.attemptId ?? '__default__'
@@ -172,13 +195,13 @@ export function createChartDelivery(options: ChartDeliveryOptions): ChartDeliver
         return
       }
       if (chunk.type !== 'finish' || chunk.reason?.kind !== 'stop' || attempt.toolCall) return
-      flush(session, frame.turn)
+      flush(session, frame.turn, agent)
     },
     acceptUserMessage(id, time) {
       exchangeStarts.set(id, time)
       if (id !== sessionId) return
       explicit = []
-      lastFlushedTurn = undefined
+      flushed = false
     },
     acceptSubagentStart(info) {
       if (typeof info?.id !== 'string' || info.id.length === 0) return

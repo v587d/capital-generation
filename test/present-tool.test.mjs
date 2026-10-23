@@ -48,17 +48,19 @@ function fakePublisher(accepted = true, { batch = false } = {}) {
 }
 
 let refSeq = 0
-function seed(registry, { task_id = 'task-1', title = '日线', html = 'capital-analysis/charts/ch_a/chart.html', session = JUNIOR } = {}) {
+function seed(registry, { task_id = 'task-1', title = '日线', html = 'capital-analysis/charts/ch_a/chart.html', session = JUNIOR, subject_code = null, dataset_id = null, kind = 'line' } = {}) {
   refSeq += 1
   const chartId = `ch_present_${refSeq}`
+  const resolvedDatasetId = dataset_id ?? `ds_present_${refSeq}`
   const ref = registry.issue({
     session,
     chart_id: chartId,
     task_id,
-    dataset_id: 'ds_01',
+    dataset_id: resolvedDatasetId,
     source_label: '同花顺日线',
     captured_at: 1_700_000_000_000,
-    kind: 'line',
+    subject_code,
+    kind,
     axis: 'time',
     title,
     chart_url: null,
@@ -100,6 +102,44 @@ test('present_charts：主 Agent 按 chart_refs 逐个登记为 first-party 交�
   // Owner is the root conversation, titles ride along as the card description.
   assert.ok(publisher.published.every((item) => item.ownerSessionId === MAIN.id))
   assert.deepEqual(publisher.published.map((item) => item.title), ['日线', '营收'])
+})
+
+test('present_charts：标题里的股票代码与 dataset 不一致时拒绝登记', async () => {
+  const { registry, publisher, tools } = setup()
+  const wrong = seed(registry, {
+    title: '同花顺 300803 日K',
+    subject_code: '300033',
+    kind: 'candlestick',
+    html: 'capital-analysis/charts/ch_wrong/chart.html',
+  })
+  const right = seed(registry, {
+    title: '同花顺 300033 日K',
+    subject_code: '300033',
+    kind: 'candlestick',
+    html: 'capital-analysis/charts/ch_right/chart.html',
+  })
+
+  const receipt = await tools[0].execute({ chart_refs: [wrong.chart_ref, right.chart_ref] }, exec(MAIN))
+
+  assert.deepEqual(receipt.presented.map((item) => item.chart_ref), [right.chart_ref])
+  assert.equal(receipt.failed.length, 1)
+  assert.equal(receipt.failed[0].chart_ref, wrong.chart_ref)
+  assert.match(receipt.failed[0].reason, /300803.*300033|300033.*300803/)
+  assert.deepEqual(publisher.published.map((item) => item.html_path), ['capital-analysis/charts/ch_right/chart.html'])
+})
+
+test('present_charts：同 dataset + kind + 标题的重复图只登记第一张', async () => {
+  const { registry, publisher, tools } = setup()
+  const first = seed(registry, { title: '同花顺 300033 日K', kind: 'candlestick', subject_code: '300033', dataset_id: 'ds_dup', html: 'capital-analysis/charts/ch_dup_a/chart.html' })
+  const duplicate = seed(registry, { title: '同花顺 300033 日K', kind: 'candlestick', subject_code: '300033', dataset_id: 'ds_dup', html: 'capital-analysis/charts/ch_dup_b/chart.html' })
+
+  const receipt = await tools[0].execute({ chart_refs: [first.chart_ref, duplicate.chart_ref] }, exec(MAIN))
+
+  assert.deepEqual(receipt.presented.map((item) => item.chart_ref), [first.chart_ref])
+  assert.equal(receipt.failed.length, 1)
+  assert.equal(receipt.failed[0].chart_ref, duplicate.chart_ref)
+  assert.match(receipt.failed[0].reason, /重复图表/)
+  assert.equal(publisher.published.length, 1)
 })
 
 test('present_charts：refs 丢失时按 task_id 登记该任务全部图表，别的任务不混入', async () => {

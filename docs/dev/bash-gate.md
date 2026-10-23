@@ -36,7 +36,7 @@
   式文案）——被委派或身份不可考的调用方 fail closed，主 Agent 的升级走正常 ask 审批；
   ③ 角色工具面由 preset 挂的**族行**表达（D0，2026-10-19：`src/agents/role-tool-policy.ts` 那份
   整批 allow 已删，只剩逐名减掉 `tool-subagent-control` 焊进来的 `interrupt_agent`；2026-10-18
-  通用 child 连同它的 deny 名单一起删除）：**本仓当前由 preset 族行暴露的 27 颗工具**谁能使，
+  通用 child 连同它的 deny 名单一起删除）：**本仓当前由 preset 族行暴露的 29 颗工具**谁能使，
   只看哪颗 preset 挂了哪几行
   ——挂漏 = 该角色整族用不上（fail-closed），多挂一行才是越权。宿主自带的名字不在这套判据里
   （上面那条⛔），`read_image` / `find` / `glob` / `grep` / `ls` / `todo_write` 这些条件注册或

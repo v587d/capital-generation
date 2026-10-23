@@ -33,7 +33,7 @@ export interface ChartTurnEventInput {
     ownerSessionId: string;
     chart_id: string;
     title: string;
-    /** Workspace-relative chart.html path; the official preview resolves it against session.cwd. */
+    /** Workspace-relative self-contained HTML path; the official preview resolves it against session.cwd. */
     html_path: string;
 }
 export interface ChartEventPublisher {

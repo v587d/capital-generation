@@ -353,6 +353,7 @@ export declare class WorkspaceDatasetStore {
     }): Promise<{
         ref: DatasetRef;
         rows: unknown[];
+        envelope?: Record<string, unknown>;
     }>;
     /**
      * Host-internal workspace text read; with readWorkspaceBytes it shares containment and size

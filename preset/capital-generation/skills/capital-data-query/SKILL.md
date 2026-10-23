@@ -57,6 +57,19 @@ return { pct: ((b - a) / a) * 100, from: a, to: b }
 - **时间窗仍归宿主**：窗口边界一律用 `time_facts.windows` / `resolve_data_time_range`
   （`capital-data-profile` §3.2），不要在程序里把日期算成毫秒——口径错了数字就全错。
 
+**均线/区间窗口（硬）**：`N 日` 一律指最近 N 个**交易日**，不是自然日窗口。`MA20` 不能用
+`date_ms >= 某个日历日` 求平均；用 `group_by:['date_ms']`、
+`aggregates:[{function:'avg',column:'close_price',as:'avg_close'}]`、
+`order_by:[{column:'date_ms',direction:'desc'}]`、`limit:20`，在程序里对返回的 20 行求平均。
+`10 日高/低` 同理取最近 10 行，`5 日` 取 5 行。返回的 `n` / `matched_row_count` 不等于 N 时，
+不要把它叫 MA20 / 10 日高；先回查覆盖范围。A 股 `history` 的 `volume` 原值是**股**，展示写
+“万股”，不写“万手”；`turnover` 是元。量比用“当日 / 前 N 日均量”时分母不含当日；用含当日
+N 日均量必须写明。
+
+**财报口径（硬）**：`operating_income` 与媒体“营业总收入”不是同义词；H1 累计与 Q2 单季分开算，
+不要把两者放进同一个增速对比。归母写 `parent_holder_net_profit`，`net_profit` 写“净利润”；
+`扣非` 只有字段存在才报结构化值，引用媒体扣非必须标“媒体口径”。
+
 `profile_dataset` 的统计项：数值字段的 count 与 sum（合计多少、覆盖多少条）、字符串字段的
 `distinct_count` 与高频取值、字段类型（observed / contract）、缺失值与显式 null、类型冲突、
 重复主键、时间范围、最小/最大/均值/分位数——**只报告可计算的部分**，数据不足就如实说明。

@@ -21,6 +21,15 @@
   晚于收尾消息，被客户端 `presentedForClosing` 过滤。也不能只信模型：真机 `session-32e54e60` 在
   junior 尚未结算时提前调用 `present_charts`，随后又继续查询，最终报告落到 turn 16、卡片留在
   turn 14——写入点必须由宿主判定。
+- **收尾帧必须撤掉冗余的 `subagent-settled`**：只把结算通知排除在 idle 判定外不够——宿主 loop 仍
+  把它当 inbox 输入；收尾后还剩一条就会再开一步，完整结论被折叠、短句成为最后一条（真机
+  `session-be2c9dd4`：结论 seq 198 后 step 3 又写"任务已完成"）。收尾帧到达时，若该通知的 sender
+  在本 exchange 内已有 **admitted** 的 `agent-message`，用 `agent.inbox.remove()` 撤掉；没有消息
+  或消息尚未 admitted 的保留（它可能是唯一结果/失败信号）。人类消息重置 exchange，子 Agent 新
+  activation 清掉旧 marker。`src/agents/settled-wake.ts` 是唯一实现。
+- **⛔ 交付去重按 exchange，不按 `turn` 是否存在**：同一次 exchange 只写一次
+  `deliverables/presented`；收尾帧可能一次带 `turn`、一次不带，用 `turn ?? -1` 当哨兵会让卡片
+  又落进结论后的短句（`lastFlushedTurn` 已改为 `flushed` 布尔，写失败不置位、可重试）。
 - **就绪条件**：`inbox` 的 `next-turn` / `next-step` 里没有可执行消息，且没有
   `activity='running'` 的直属子 Agent（用 `subagent/start` / `subagent/end` 维护同步集合；流回调里
   不能等异步查询）。`subagent-settled` 结算通知不算待处理：它可能在模型已经写收尾答复时才到，

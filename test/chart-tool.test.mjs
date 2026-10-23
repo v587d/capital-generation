@@ -5,6 +5,7 @@ import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WorkspaceDatasetStore } from '../lib/data-collector/store.js'
 import { renderChart, registerChartTool } from '../lib/chart/tool.js'
+import { ChartArtifactRegistry } from '../lib/chart/artifact-ref.js'
 
 /**
  * render_chart end-to-end (fake fs + real store, so sandbox ownership checks really run). Pins:
@@ -115,11 +116,14 @@ test('render_chart：dataset 来源产出三件产物，回执不含任何原始
   assert.equal(receipt.chart_url, null, '宿主平面路由属于 Step 2，当前应如实为 null')
   assert.equal(receipt.markers, 0)
 
-  for (const name of ['spec.json', 'series.json', 'chart.html']) {
+  for (const name of ['spec.json', 'series.json']) {
     const path = `${WORKSPACE}/capital-analysis/charts/${receipt.chart_id}/${name}`
     assert.ok(fs.files.has(path), `应写出产物 ${path}`)
   }
-  assert.equal(receipt.html_path, `capital-analysis/charts/${receipt.chart_id}/chart.html`)
+  const htmlName = receipt.html_path.split('/').pop()
+  assert.match(htmlName, /^kline-[A-Za-z0-9-]+\.html$/, 'HTML 必须按标题/图形类型命名，不再统一叫 chart.html')
+  assert.notEqual(htmlName, 'chart.html')
+  assert.ok(fs.files.has(`${WORKSPACE}/${receipt.html_path}`), '回执 html_path 必须能打开')
 
   // Hardest invariant: the receipt contains no data values and no undeclared fields. Pin it by
   // exact key set rather than a keyword blocklist (legit fields like `has_volume` trip those);
@@ -131,6 +135,29 @@ test('render_chart：dataset 来源产出三件产物，回执不含任何原始
     'html_path', 'kind', 'markers', 'original_points', 'points', 'series_labels', 'series_path',
     'source_label', 'spec_path', 'title', 'warnings',
   ])
+})
+
+test('render_chart：从 Dataset envelope 提取 thscode，供标题代码校验', async () => {
+  const { store } = makeStore()
+  const rows = historyRows(3)
+  const ref = await store.save({
+    session: COLLECTOR,
+    capability: 'history',
+    params_digest: 'digest-300033',
+    source_label: '同花顺 日线',
+    format: 'json_rows',
+    schema: { rowShape: 'item' },
+    row_count: rows.length,
+    data: { thscode: '300033.SZ', item: rows },
+  })
+  const artifacts = new ChartArtifactRegistry({ now: () => 1_700_000_000_000, newRef: () => 'chart_subject_1' })
+  const receipt = await renderChart({ store, artifacts }, {
+    dataset_id: ref.dataset_id,
+    spec: { kind: 'candlestick', x: 'trade_date', ohlc: { open: 'open', high: 'high', low: 'low', close: 'close' }, title: '同花顺 300033 日K' },
+  }, exec())
+  const artifact = artifacts.resolve({ session: MAIN, chart_ref: receipt.chart_ref })
+  assert.equal(artifact.subject_code, '300033')
+  assert.match(receipt.html_path, /300033-K-[A-Za-z0-9-]+\.html$/)
 })
 
 test('render_chart：chart.html 自包含（内联库与数据，无外部请求）', async () => {
@@ -145,6 +172,7 @@ test('render_chart：chart.html 自包含（内联库与数据，无外部请求
   assert.ok(html.startsWith('<!doctype html>'))
   assert.match(html, /TradingView Lightweight Charts/, '必须内联 vendored 图表库')
   assert.match(html, /__capitalChart/)
+  assert.match(html, /横轴为|序列：|K 线/, 'HTML 必须带读图指引')
   assert.equal(/<script[^>]+src=/.test(html), false, '不允许外部脚本')
   assert.equal(/(src|href)\s*=\s*["']https?:/i.test(html), false, '不允许外部资源引用')
   // Dark mode and theme vars ship inside the HTML, so it renders without DSH.

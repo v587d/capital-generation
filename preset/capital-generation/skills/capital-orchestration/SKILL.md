@@ -116,7 +116,7 @@ A 角色的请求投给 B 角色。官方机制是 **`list_agents` 即权威 id 
   取数失败要回一条失败消息，不能让它一直等。
 - **结算通知 ≠ 任务完成**：collector 未发 `data_collection_completed`，或者清单里标 `waiting_data` 的子 Agent 结束本轮是在等回信，
   不要向用户断言它已完成，也不要新建替代实例。
-- 等待回传期间：不做任何外部检索/抓取、不反复 `list_agents`、不轮询等待。
+- 等待：用 `wait_for_agents`；不检索、不反复 `list_agents`。
 - 回传到达后集中核对材料与结论，再决定继续委派或汇总输出。
 - **收口顺序（硬）**：所有委派行结算 → 对账通过 → 有 `chart_refs` 先 `present_charts` 一次
   （全部 ref；记不清就传 `task_id`）→ 再写最终答复；登记必须早于最终答复。

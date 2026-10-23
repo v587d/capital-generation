@@ -14,7 +14,7 @@
 
 | 你要动什么 | 详情在 |
 |---|---|
-| 角色边界、Dataset 消息 / 返回边界、capability 目录预算 | `docs/dev/data-roles.md`（§1.1 §1.2 §1.4 §1.5）|
+| 角色边界、Dataset 消息 / 返回边界、capability 目录预算 | `docs/dev/data-roles.md`（§1.1 §1.2 §1.4 §1.5 §1.7）|
 | 时间轴、日期归一、session 读取 | `docs/dev/time-axis.md`（§1.3）|
 | shell 闸门、PTC 执行面、fs 写口与挂载 | `docs/dev/bash-gate.md`（§1.6）|
 | web_retriever、本地回退、九个具名来源、文档解析 `ocr` | `docs/dev/web-retriever.md`（§4.1 §4.2 §4.3）|
@@ -53,7 +53,7 @@ main Agent
 ```
 
 一句话版：**原始 rows 永不出工具层**，Agent 间只传 `DatasetRef` / profile 引用 / 聚合结果；主 Agent
-一律委派（工具层拒绝它直连 Dataset 系列）、自己不出图；专用角色是叶子、互通须经主 Agent 中继；data_junior 的唯一执行面是 PTC `run_code`（不挂 shell），程序只调度工具与算术、不读落盘文件。
+一律委派（工具层拒绝它直连 Dataset 系列）、自己不出图；专用角色是叶子、互通须经主 Agent 中继；data_junior 的唯一执行面是 PTC `run_code`（不挂 shell），程序只调度工具与算术、不读落盘文件。主 Agent 委派后调 `wait_for_agents` 等子树收敛，不以等待行结束回合。
 
 ## 2. 项目结构
 

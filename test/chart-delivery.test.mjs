@@ -32,7 +32,7 @@ function seed(registry, { task_id = 'task-1', title = '图表', created_at } = {
   })
 }
 
-function harness({ inbox = { 'next-turn': [], 'next-step': [] }, now = 1_700_000_100_000 } = {}) {
+function harness({ inbox = { 'next-turn': [], 'next-step': [] }, now = 1_700_000_100_000, onClosing } = {}) {
   const registry = new ChartArtifactRegistry({ now: () => now })
   const batches = []
   let writes = true
@@ -43,6 +43,7 @@ function harness({ inbox = { 'next-turn': [], 'next-step': [] }, now = 1_700_000
       return writes
     },
     inboxOf: () => inbox,
+    ...(onClosing === undefined ? {} : { onClosing }),
   })
   return { registry, batches, delivery, failWrites: () => { writes = false } }
 }
@@ -79,6 +80,34 @@ test('closing finish：写入发生在收尾消息之前（listener 内同步 pu
   delivery.acceptStream(MAIN, start('a3'))
   delivery.acceptStream(MAIN, finish(undefined, 'a3'))
   assert.equal(batches.length, 1, '同一 exchange 的后续 finish 缺 turn 时也不能再写一张卡')
+})
+
+test('第一次 finish 缺 turn、第二次带 turn：哨兵仍必须拦住第二张卡', () => {
+  // Real sequence: a turn-less closing finish is followed by a step whose finish carries `turn`.
+  // `lastFlushedTurn = turn ?? -1` compared -1 against 9 and let the duplicate through.
+  const { registry, batches, delivery } = harness()
+  const chart = seed(registry)
+  delivery.request(MAIN, [{ ownerSessionId: MAIN.id, chart_id: chart.chart_id, title: chart.title, html_path: chart.html_path }])
+
+  delivery.acceptStream(MAIN, start())
+  delivery.acceptStream(MAIN, finish(undefined))
+  assert.equal(batches.length, 1, '第一次无 turn 的收尾仍要写')
+
+  delivery.acceptStream(MAIN, end())
+  delivery.acceptStream(MAIN, start('a2'))
+  delivery.acceptStream(MAIN, finish(9, 'a2'))
+  assert.equal(batches.length, 1, '同一 exchange 的第二次 finish 不能因为补上了 turn 就再写一张')
+})
+
+test('没有图表也要触发收尾回调：结算通知清理不依赖 present_charts', () => {
+  let closings = 0
+  const { batches, delivery } = harness({ onClosing: () => { closings += 1 } })
+
+  delivery.acceptStream(MAIN, start())
+  delivery.acceptStream(MAIN, finish(7))
+
+  assert.equal(closings, 1, '收尾帧必须通知 wake guard，即使本轮没有图')
+  assert.equal(batches.length, 0, '没有图表时不能凭空写交付')
 })
 
 test('等待轮不写：子 Agent 在运行或 inbox 有待处理消息时，finish 不能落交付', () => {
@@ -205,7 +234,7 @@ test('显式选择合并去重，并优先于自动收集；新的人类消息�
   assert.equal(batches.length, 1)
 })
 
-test('写入失败/超出上限：不推进 lastFlushedTurn，下一次 finish 还能重试', () => {
+test('写入失败/超出上限：不推进 flushed，下一次 finish 还能重试', () => {
   const { registry, batches, delivery, failWrites } = harness()
   const chart = seed(registry, { created_at: 1_700_000_120_000 })
   delivery.request(MAIN, [{ ownerSessionId: MAIN.id, chart_id: chart.chart_id, title: chart.title, html_path: chart.html_path }])

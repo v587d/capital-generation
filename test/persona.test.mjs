@@ -131,6 +131,8 @@ const PLUGIN_TOOLS = [
   'get_watchlist',
   // Root-only final-turn delivery step for the auto-mode chart pipeline.
   'present_charts',
+  // Root-only one-turn wait across delegated children; leaf roles never mount it.
+  'wait_for_agents',
   'anysearch_search', 'web_retriever_fetch', 'ocr',
   'wind_docs_announcements', 'wind_docs_news',
   // Named source query tools must resolve against real registrations; a phantom name hides the tool.
@@ -380,6 +382,7 @@ test('capital-equity-research：核心数字先勾稽，弱证据不升级为硬
   for (const pattern of [
     /本期累计减上期累计推单季/, /profile validation=pass.*不证明跨来源数字一致/,
     /不能勾稽的数值不得进入核心判断/, /冲突先于结论/,
+    /operating_income.*营业总收入/, /parent_holder_net_profit/, /扣非.*媒体口径/, /估值分化/,
     /销售费用不能直接解释毛利率变化/, /合同负债余额下降也不能单独解释经营现金流增长/,
     /不能直接当成确定的价格底线/, /在已检索范围内未查到/,
     /取得足以支持或限制核心判断的证据后停止扩展检索/,
@@ -602,6 +605,15 @@ test('主 persona + skill：对账必须是逐行产物（结算对账表），�
   assertRule(orchestration, /present_charts/, 'skill 必须在收口顺序里给出图表交付步骤')
 })
 
+test('主 persona：委派后用 wait_for_agents 收敛，四种状态各走各的出口', () => {
+  assertRule(MAIN_PERSONA, /wait_for_agents/, '主 persona 必须点名单轮等待工具')
+  assertRule(MAIN_PERSONA, /message\/user_input/, '主 persona 必须说明收到回传/用户输入后先处理')
+  assertRule(MAIN_PERSONA, /all_settled/, '主 persona 必须说明 all_settled 才进入对账')
+  assertRuleAny(MAIN_PERSONA, [/超时才写等待行/, /timeout/], '主 persona 必须说明 timeout 才退回等待行')
+  const orchestration = readFileSync(`${SKILL_DIR}capital-orchestration/SKILL.md`, 'utf8')
+  assertRule(orchestration, /wait_for_agents/, '编排 skill 必须把等待指向 wait_for_agents（不能只留在 persona）')
+})
+
 test('主 persona：web_retriever 编排与检索路由', () => {
   assertRule(MAIN_PERSONA, /subagent_web_retriever/)
   assertRule(MAIN_PERSONA, /web_retriever/)
@@ -766,6 +778,8 @@ test('委派出口只有专用角色：没有通用 subagent，也没有谁自�
     // Final-turn delivery belongs to the user-facing root; a role row would let a child write
     // deliverables into the root conversation.
     present: [ROOT_PRESET_ID],
+    // Single-turn wait is root orchestration; a child must report with send_message, not wait.
+    orchestration: [ROOT_PRESET_ID],
   }
   const groups = {
     network: [...NETWORK_TOOLS],
@@ -777,6 +791,7 @@ test('委派出口只有专用角色：没有通用 subagent，也没有谁自�
     // Only the main Agent reads the user's positions.
     watchlist: ['get_watchlist'],
     present: ['present_charts'],
+    orchestration: ['wait_for_agents'],
   }
   for (const presetId of [...SURFACE_GATE_PRESETS, ROOT_PRESET_ID]) {
     const face = capitalFace(presetId)
@@ -1147,12 +1162,12 @@ const PRESET_ROW_COMPOSITION = {
   ],
   // A disabled role preset can still be opened by hand, so reserved roles go through family rows too.
   [ROLE_PRESET_IDS.analyst]: ['@v587d/capital-generation/tools/dataset-read', '@v587d/capital-generation/tools/time'],
-  // Root: time, local document parsing, watchlist, present (final-turn chart delivery), and
-  // root-extras (which registers no tool itself).
+  // Root: time, local document parsing, watchlist, present (final-turn chart delivery),
+  // orchestration (single-turn wait), and root-extras (which registers no tool itself).
   [ROOT_PRESET_ID]: [
     '@v587d/capital-generation/tools/time', '@v587d/capital-generation/tools/ocr',
     '@v587d/capital-generation/tools/watchlist', '@v587d/capital-generation/tools/present',
-    '@v587d/capital-generation/tools/root-extras',
+    '@v587d/capital-generation/tools/orchestration', '@v587d/capital-generation/tools/root-extras',
   ],
 }
 
@@ -1209,17 +1224,21 @@ test('data_junior persona：profile 后负责可视化 gate、签发 token、等
     /委派收窄/, 'capital-visualization-protocol 必须写明委派收窄时仍给 recommended 但不出图')
   assertRule(vizProtocol, /不能因为用户没提图就不派 data_junior/, '协议必须禁止把"用户没提图"读成跳过 data_junior')
   assertRule(vizProtocol, /不是 gate 的触发条件/, '协议必须写明"用户要图"不是可视化 gate 的触发条件')
+  assertRule(vizProtocol, /最多同时创建 8 个/, '协议必须给 specialist 并发上限')
+  assertRule(vizProtocol, /Promise\.allSettled/, '协议必须要求 allSettled，避免一个 limit 错误吞掉整批')
+  assertRule(vizProtocol, /chart_ref.*不得重发/, '协议必须禁止重发已成功的 specialist')
+  assertRule(vizProtocol, /不要直调/, '协议必须禁止直调 specialist 工具')
 })
 
-test('capital-generation preset：组合面只有时间 / 本地文档 / 自选股 / 最终交付，tool-fs 行级只读', () => {
+test('capital-generation preset：组合面只有时间 / 本地文档 / 自选股 / 最终交付 / 单轮等待，tool-fs 行级只读', () => {
   const root = allPresets().find((preset) => preset?.config?.id === ROOT_PRESET_ID)
   assert.ok(root, '必须存在 Capital 根 preset')
   const plugins = root.config.plugins ?? []
   // The root orchestrates by dispatching: no fetch / retrieval / rendering tool may reach the main session.
   // present_charts is the exception by design: it renders nothing and only writes the final-turn deliverable row.
   assert.deepEqual(capitalFace(ROOT_PRESET_ID),
-    ['get_local_datetime', 'get_watchlist', 'ocr', 'present_charts', 'resolve_data_time_range'],
-    '主 Agent 的本仓工具面必须恰好是这五颗；多一颗就是又开一个自己动手的入口（§1.1 的委派硬约束）')
+    ['get_local_datetime', 'get_watchlist', 'ocr', 'present_charts', 'resolve_data_time_range', 'wait_for_agents'],
+    '主 Agent 的本仓工具面必须恰好是这六颗；多一颗就是又开一个自己动手的入口（§1.1 的委派硬约束）')
   assert.ok(!plugins.some((row) => row?.id === 'capital-generation-scope'), '根 preset 不再需要 collector 的 hub/store isolate 组')
   const fsRow = plugins.find((row) => row?.id === 'tool-fs')
   assert.ok(fsRow, '根 preset 仍保留只读文件口')
@@ -1412,6 +1431,11 @@ test('run_code 派生计算（2026-10-10 真机教训）：字段直接取、不
   assertRuleAny(dataProtocol, [/不整行复制/], 'capital-data-query §3.3 必须禁止整行复制到程序里')
   assertRuleAny(dataProtocol, [/只返回结论/], 'capital-data-query §3.3 必须要求只返回结论')
   assertRuleAny(dataProtocol, [/tools\.describe_dataset/], 'capital-data-query §3.3 的示例必须使用 tools.* 绑定')
+  assertRule(dataProtocol, /MA20.*不能用/, 'capital-data-query 必须禁止用日历窗口冒充 MA20')
+  assertRule(dataProtocol, /最近 10 行/, 'capital-data-query 必须把 10 日窗口写成最近 10 个交易日')
+  assertRule(dataProtocol, /volume.*股/, 'capital-data-query 必须写清 A 股 history volume 的单位是股')
+  assertRule(dataProtocol, /parent_holder_net_profit/, 'capital-data-query 必须区分归母与净利润字段')
+  assertRule(dataProtocol, /扣非.*媒体/, 'capital-data-query 必须把媒体扣非标成媒体口径')
   assertRuleAny(JUNIOR_PERSONA, [/字段直接取|不手抄/], 'data_junior persona PROGRAM DISCIPLINE 必须留“直接取字段”硬规则')
 })
 

@@ -1,6 +1,6 @@
 {
   "name": "@v587d/capital-generation",
-  "version": "2.9.2",
+  "version": "2.10.0",
   "description": "Capital Generation：面向中国散户的 AI 投资助手插件（自动模式 Agent Preset）",
   "icon": "assets/cg-icon.png",
   "author": "v587d",
@@ -56,6 +56,11 @@
       "types": "./lib/ocr-entry.d.ts",
       "import": "./lib/ocr-entry.js",
       "default": "./lib/ocr-entry.js"
+    },
+    "./tools/orchestration": {
+      "types": "./lib/orchestration-entry.d.ts",
+      "import": "./lib/orchestration-entry.js",
+      "default": "./lib/orchestration-entry.js"
     },
     "./tools/present": {
       "types": "./lib/present-entry.d.ts",

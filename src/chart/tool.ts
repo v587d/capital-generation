@@ -31,6 +31,48 @@ function newChartId(): string {
   return `ch_${suffix}`
 }
 
+const SUBJECT_KEYS = ['thscode', 'ts_code', 'ticker', 'symbol', 'stock_code', 'sec_code', 'code'] as const
+
+/** Six-digit A-share/HK/US ticker; `thscode` wins over generic API status fields such as `code`. */
+function subjectCodeOf(value: unknown): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  for (const key of SUBJECT_KEYS) {
+    const raw = record[key]
+    if (typeof raw === 'string') {
+      const match = /(?<!\d)(\d{6})(?!\d)/.exec(raw)
+      if (match) return match[1]
+    }
+    if (typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 100_000 && raw <= 999_999) {
+      return String(raw)
+    }
+  }
+  return null
+}
+
+function chartSubjectCode(envelope: unknown, rows: readonly unknown[]): string | null {
+  const fromEnvelope = subjectCodeOf(envelope)
+  if (fromEnvelope !== null) return fromEnvelope
+  for (const row of rows.slice(0, 3)) {
+    const fromRow = subjectCodeOf(row)
+    if (fromRow !== null) return fromRow
+  }
+  return null
+}
+
+/** Readable, collision-resistant filename: ASCII title slug + short chart id. The store's artifact
+ * name gate is deliberately ASCII, so Chinese titles fall back to the chart kind (code stays when
+ * the title/envelope carries one). */
+function chartHtmlName(title: string, kind: string, chartId: string, subjectCode: string | null): string {
+  const kindSlug = kind === 'candlestick' ? 'kline' : kind === 'bar' ? 'ohlc' : kind === 'column' ? 'column' : kind === 'area' ? 'area' : 'line'
+  const words: string[] = title.normalize('NFKC').match(/[A-Za-z0-9]+/g) ?? []
+  const parts = subjectCode !== null && !words.includes(subjectCode) ? [subjectCode, ...words] : [...words]
+  if (parts.length === 0 || (subjectCode !== null && parts.every((part) => part === subjectCode))) parts.push(kindSlug)
+  const safe = parts.join('-').replace(/-+/g, '-').replace(/^[.\-]+|[.\-]+$/g, '').slice(0, 48)
+  const suffix = chartId.replace(/^ch_/, '').slice(0, 8)
+  return `${safe.length > 0 ? safe : kindSlug}-${suffix}.html`
+}
+
 function sessionOf(exec: ToolExecLike): { id: string; header?: { cwd?: string; parentSession?: string; origin?: 'subagent' } } {
   const session = exec.agent?.session
   if (!session || typeof session.id !== 'string' || session.id.length === 0) {
@@ -183,17 +225,26 @@ export async function renderChart(input: RenderChartInput, args: Record<string, 
 
   // The token carries the direct data-agent session; the nested child never sees raw rows.
   let rows: readonly unknown[]
-  let meta: { source_kind: 'dataset' | 'path'; dataset_id?: string; source_label?: string; captured_at?: number }
+  let subjectCode: string | null
+  let meta: { source_kind: 'dataset' | 'path'; dataset_id?: string; source_label?: string; captured_at?: number; subject_code?: string }
   if (datasetId !== undefined) {
     const readSession = tokenSource?.sourceSession ?? session
-    const { ref, rows: datasetRows } = await input.store.readPresentationRows({ session: readSession, dataset_id: datasetId, signal: exec.signal })
+    const { ref, rows: datasetRows, envelope } = await input.store.readPresentationRows({ session: readSession, dataset_id: datasetId, signal: exec.signal })
     rows = datasetRows
-    meta = { source_kind: 'dataset', dataset_id: ref.dataset_id, source_label: ref.source_label, captured_at: ref.captured_at }
+    subjectCode = chartSubjectCode(envelope, datasetRows)
+    meta = {
+      source_kind: 'dataset',
+      dataset_id: ref.dataset_id,
+      source_label: ref.source_label,
+      captured_at: ref.captured_at,
+      ...(subjectCode === null ? {} : { subject_code: subjectCode }),
+    }
   } else {
     const parsed = await input.store.readWorkspaceJson({ session, path: path!, signal: exec.signal })
     const extracted = extractRows(parsed)
     rows = extracted.rows
-    meta = { source_kind: 'path' }
+    subjectCode = chartSubjectCode(parsed, extracted.rows)
+    meta = { source_kind: 'path', ...(subjectCode === null ? {} : { subject_code: subjectCode }) }
   }
 
   const chartId = newChartId()
@@ -202,13 +253,14 @@ export async function renderChart(input: RenderChartInput, args: Record<string, 
   const generatedAt = now()
   const html = buildStandaloneHtml({ payload, library, generatedAt })
   const dir = `${CHART_ARTIFACT_DIR}/${chartId}`
+  const htmlName = chartHtmlName(payload.title, payload.kind, chartId, subjectCode)
   const written = await input.store.writeWorkspaceFiles({
     session,
     dir,
     files: [
-      { name: 'spec.json', content: `${JSON.stringify({ chart_id: chartId, created_at: generatedAt, source: { dataset_id: meta.dataset_id ?? null, path: path ?? null }, spec }, null, 2)}\n` },
+      { name: 'spec.json', content: `${JSON.stringify({ chart_id: chartId, created_at: generatedAt, source: { dataset_id: meta.dataset_id ?? null, path: path ?? null, subject_code: subjectCode }, spec }, null, 2)}\n` },
       { name: 'series.json', content: `${JSON.stringify(payload)}\n` },
-      { name: 'chart.html', content: html },
+      { name: htmlName, content: html },
     ],
     signal: exec.signal,
   })
@@ -234,13 +286,14 @@ export async function renderChart(input: RenderChartInput, args: Record<string, 
     dataset_id: meta.dataset_id ?? null,
     source_label: meta.source_label ?? null,
     captured_at: meta.captured_at ?? null,
+    subject_code: subjectCode,
     kind: payload.kind,
     axis: payload.axis,
     title: payload.title,
     chart_url: chartUrl,
     spec_path: pathOf('spec.json'),
     series_path: pathOf('series.json'),
-    html_path: pathOf('chart.html'),
+    html_path: pathOf(htmlName),
     created_at: generatedAt,
   })
   // Unit callers without the registry still get a stable receipt.
@@ -261,7 +314,7 @@ export async function renderChart(input: RenderChartInput, args: Record<string, 
         ownerSessionId,
         chart_id: chartId,
         title: payload.title,
-        html_path: pathOf('chart.html'),
+        html_path: pathOf(htmlName),
       })
       deliverableTrace = `publish=${accepted ? '受理' : '拒绝'} ownerSessionId=${ownerSessionId} | ${publisher.lastTrace?.() ?? '(无轨迹)'}`
     }
@@ -300,7 +353,7 @@ export async function renderChart(input: RenderChartInput, args: Record<string, 
     chart_url: chartUrl,
     spec_path: pathOf('spec.json'),
     series_path: pathOf('series.json'),
-    html_path: pathOf('chart.html'),
+    html_path: pathOf(htmlName),
     warnings: payload.meta.warnings,
   }
 }
@@ -311,7 +364,7 @@ export function registerChartTool(ctx: Context, options: RenderChartInput): void
   const definition = {
     name: 'render_chart',
     description:
-      `把已经取到的数据渲染成一张可交互图，产物落在 workspace 的 ${CHART_ARTIFACT_DIR}/<chart_id>/（chart.html 可离线打开）。` +
+      `把已经取到的数据渲染成一张可交互图，产物落在 workspace 的 ${CHART_ARTIFACT_DIR}/<chart_id>/（HTML 以标题/代码命名，如「600519-kline-<短id>.html」，可离线打开）。` +
       '**只回一条小回执，不回任何原始数据行**：序列走旁路，不进入上下文。' +
       '来源三选一：dataset_id（已授权的 DatasetRef）、path（workspace 相对路径的 JSON，支持顶层数组或含行数组的 envelope），或 chart_source_ref（宿主签发给 visualization_specialist 的短期 token；使用它时还要提供 task_id）。' +
       'spec 是自由对象，至少给出 kind（line / area / column / candlestick / bar；后两者要 ohlc 四字段与真实时间列）与字段选择（series 或 ohlc），' +

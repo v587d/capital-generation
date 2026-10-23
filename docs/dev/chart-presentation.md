@@ -49,7 +49,7 @@
 - **工具面落点**：出图链仍只在 `visualization_specialist`（`tools/chart-render`）；根 preset 多挂
   的一条是 `tools/present`（只带 `present_charts`，不渲染、不读数据）。它是「主 Agent 只在收尾写
   交付」的模型可见出口——不要把它并进出图行，也不要把 `render_chart` 加回根 preset。
-- **降级底线**：`chart.html` 自包含可离线打开，也是官方文档 preview iframe 的渲染目标
+- **降级底线**：自包含 HTML（文件名带代码/标题或图形类型，如 `300803-kline-ab12cd34.html`）可离线打开，也是官方文档 preview iframe 的渲染目标
   （接管见 `chart-ui/README.md`）；`html_path` 始终在回执里。
 - **构建产物**：`chart-ui/client.js` 是 esbuild 产物（源码 `client.src.cjs`）；改源码或
   `src/chart/runtime.ts` 后必须 `npm run build` **并提交产物**、**刷新页面**（bundle 在页面加载

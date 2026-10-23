@@ -80,8 +80,10 @@ export interface BuildStandaloneHtmlInput {
 export function buildStandaloneHtml(input: BuildStandaloneHtmlInput): string {
   const { payload, library } = input
   const meta = payload.meta
+  const kindLabel = payload.kind === 'candlestick' ? 'K 线图' : payload.kind === 'bar' ? 'OHLC 图' : payload.kind === 'column' ? '柱状图' : payload.kind === 'area' ? '面积图' : '折线图'
 
   const facts: string[] = []
+  facts.push(kindLabel)
   facts.push(`${meta.points} 个数据点`)
   if (meta.downsampled) facts.push(`已从 ${meta.original_points} 点下采样（保留极值形状，非全量）`)
   if (meta.dataset_id) facts.push(`dataset ${meta.dataset_id}`)
@@ -89,6 +91,14 @@ export function buildStandaloneHtml(input: BuildStandaloneHtmlInput): string {
   if (meta.captured_at !== undefined) facts.push(`数据截至 ${formatCapturedAt(meta.captured_at)}`)
   if (meta.time_field) facts.push(`时间字段 ${meta.time_field}`)
   if (meta.axis === 'index') facts.push('分类轴（按行序）')
+
+  const guide: string[] = []
+  guide.push(meta.axis === 'index' ? '横轴为分类，按数据行序排列；纵轴为数值。' : '横轴为时间；纵轴为数值。')
+  if (payload.ohlc) guide.push('K 线红涨绿跌，下方成交量柱按当日涨跌着色。')
+  else if (payload.volume) guide.push('下方成交量柱按涨跌方向着色。')
+  if (payload.series.length > 0) guide.push(`序列：${payload.series.map((item) => item.label).join('、')}。`)
+  if (meta.downsampled) guide.push('曲线为下采样后的形状，数值结论请回到表格/查询结果。')
+  if (meta.warnings.length > 0) guide.push('数据提示见下方 warnings。')
 
   const warnings = meta.warnings.length > 0
     ? `<ul class="warnings">${meta.warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join('')}</ul>`
@@ -126,6 +136,7 @@ export function buildStandaloneHtml(input: BuildStandaloneHtmlInput): string {
   body { font: 14px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; padding: 16px 20px 24px; }
   h1 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
   .facts { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 12px; }
+  .guide { margin: 6px 0 0; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 1.7; }
   main { margin-top: 12px; height: 460px; min-height: 320px; }
   .warnings { margin: 12px 0 0; padding-left: 18px; color: var(--dsw-alias-label-secondary); font-size: 12px; }
   footer { margin-top: 16px; color: var(--dsw-alias-label-secondary); font-size: 11px; }
@@ -135,6 +146,7 @@ export function buildStandaloneHtml(input: BuildStandaloneHtmlInput): string {
 <header>
   <h1>${escapeHtml(payload.title)}</h1>
   <p class="facts">${facts.map((fact) => escapeHtml(fact)).join(' · ')}</p>
+  <p class="guide">${guide.map((line) => escapeHtml(line)).join(' ')}</p>
 </header>
 <main id="chart"></main>
 ${warnings}

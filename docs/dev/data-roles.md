@@ -107,3 +107,21 @@
   **测试**先失败而非运行时静默截断（`test/data-collector-hub.test.mjs`）：**目录 < 6144、单能力
   详情 < 4096**（2026-10-05 实测 69 条：目录 2435 = 40%、最大详情 2771 = 68%；编码前的 JSON 数组
   是 5530 = 90%，58% 的字节是键名和标点）；`test/data-collector-capabilities.test.mjs` 断言能力总表与实现一致。
+
+## 1.7 单轮等待：`wait_for_agents`
+
+- **问题**：宿主把根 inbox 的每条消息都当成新的 step；子 Agent 每发一次回传或结算通知，都会把主
+  Agent 从收尾步重新唤醒，同一任务因此被拆成多个可见轮次——界面只展示最后一轮，中间结论被折叠。
+- **出口**：根 preset 挂 `tools/orchestration`，只注册 `wait_for_agents`。工具在**一次调用内**等待：
+  先 `ctx.subagents.waitForChildren(root)` 观察整棵子树，同时听根 inbox 的 `agent/inbox/inserted`；
+  任一可执行消息到达、子树收敛或 30 秒片到期就返回。这样中间回传仍在同一回合内处理，不落成新 turn。
+- **四态**：`all_settled` = 没有在推进的子树，进入逐行对账；`message` = 有 `agent-message`（下一步带上，
+  处理后继续等）；`user_input` = 用户插话；`timeout` = 片到期，`running` 列出仍存活的子 Agent；仍有
+  `running` 就继续等，无法继续才如实说明。`timeout` 既不是完成也不是失败。
+- **纪律**：委派 / `send_message` 后先等，不以“请稍候”式可见正文结束回合；`wait_for_agents` 是
+  ordering barrier（不声明并发安全），不能用 `list_agents` 轮询代替；`data_gap` 仍是工单，处理后发回
+  同一个子 Agent 再等。`waitForChildren` 只等**推进中**的子树；空闲但在等父消息的子 Agent 不算完成，
+  仍按 §1.4 的 `waiting_data` 对账。空的 `all_settled` 只说明生命周期收敛，回传正文仍不构成结算 ✓（§1.4）。
+- **失败面**：`subagents` 服务缺失时工具响亮失败；`waitForChildren` 没有 abort 参数，取消由工具
+  自己的 signal 竞速处理，后台观察不会写入 inbox。实现 `src/agents/wait-for-agents.ts`；宿主契约
+  账本 L36；回归 `test/wait-for-agents.test.mjs`、`test/persona.test.mjs`。

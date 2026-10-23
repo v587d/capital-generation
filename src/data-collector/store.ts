@@ -335,7 +335,7 @@ export interface ProfileDocument {
 }
 
 type RawDataset =
-  | { kind: 'rows'; rows: unknown[]; shape: 'array' | 'envelope_item' }
+  | { kind: 'rows'; rows: unknown[]; shape: 'array' | 'envelope_item'; envelope?: Record<string, unknown> }
   | { kind: 'document'; value: Record<string, unknown> }
 
 export interface FindDatasetInput {
@@ -663,7 +663,7 @@ export class WorkspaceDatasetStore {
     dataset_id: string
     signal?: AbortSignal
     maxRows?: number
-  }): Promise<{ ref: DatasetRef; rows: unknown[] }> {
+  }): Promise<{ ref: DatasetRef; rows: unknown[]; envelope?: Record<string, unknown> }> {
     const stored = await this.requireStoredRef(input.dataset_id, input.session, input.signal)
     const { session_scope_id: _scope, row_key: rowKey, ...ref } = stored
     const raw = await this.readRaw(ref, input.session, input.signal, rowKey)
@@ -674,7 +674,7 @@ export class WorkspaceDatasetStore {
     if (raw.rows.length > maxRows) {
       throw new DatasetStoreError('dataset_too_large', `Dataset has ${raw.rows.length} rows; presentation reads are capped at ${maxRows}`)
     }
-    return { ref, rows: raw.rows }
+    return { ref, rows: raw.rows, ...(raw.envelope === undefined ? {} : { envelope: raw.envelope }) }
   }
 
   /**
@@ -844,7 +844,7 @@ export class WorkspaceDatasetStore {
     if (Array.isArray(value)) return { kind: 'rows', rows: value, shape: 'array' }
     if (isRecord(value)) {
       const rows = rowsAtPath(value, rowKey ?? 'item')
-      if (rows !== undefined) return { kind: 'rows', rows, shape: 'envelope_item' }
+      if (rows !== undefined) return { kind: 'rows', rows, shape: 'envelope_item', envelope: value }
     }
     if (isRecord(value)) return { kind: 'document', value }
     throw new DatasetStoreError('dataset_not_row_readable', 'raw Dataset does not contain a supported row array or document object')

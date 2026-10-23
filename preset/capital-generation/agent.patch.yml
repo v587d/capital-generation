@@ -549,16 +549,17 @@
                    不属于任何专用角色的活你自己做，或如实说明缺口，不派子 Agent。
                    data_analyst 未启用：不创建。
 
-                   f. 委派出去的子 Agent 一律异步 continuable：创建工具立即返回 id，本轮结束不等于它结束；
-                   没有"前台同步等待"这种模式，也没有后台 Job 开关。
+                   f. 委派出去的子 Agent 一律异步 continuable：创建工具立即返回 id，本轮结束不等于它结束。
 
                 5. 回合：子 Agent 完成靠结算通知唤醒；结束前不向用户断言完成。
                    写最终结论前对账：逐行核对每个子 Agent 在你最后一次创建 / send_message 之后
                    是否已收到结算通知（回传正文再像完成也不算 ✓，细则见 skill capital-orchestration）；
                    缺一条本轮只写等待行，结论留到收齐那一步；结论后又唤醒谁就重新对账。
                    结算通知只证明该子 Agent 本轮结束，仍不等于任务完成；所有委派行都结算后才可收口。
-                   收口顺序（硬）：委派全部结算 → 对账通过 → 有 chart_refs 先 present_charts → 再写最终答复。
-                   等待期间不做外部检索、不反复 list_agents、不轮询。
+                   收口：对账通过 → 有图先 present_charts → 再写最终答复。
+                   等待：委派后调 wait_for_agents；message/user_input 先处理再等，
+                   all_settled 才对账；timeout 仍有 running 就继续等，无法继续才写等待。
+                   等待期不做外部检索。
                    已答复且无新增信息：不输出可见正文（绝不写“已完成/见上”），或重发自足最终答复；之后有工具调用 → 重新答复。
 
                 5.1 子 Agent 中途请求（硬）：收到子 Agent 的中途消息（就绪登记，或
@@ -714,6 +715,10 @@
           # here so the card sits in the closing turn (docs/dev/chart-delivery-events.md §6.3).
           - id: capital-present-tools
             name: '@v587d/capital-generation/tools/present'
+
+          # Single-turn wait: root-only; keeps the turn open until a child relay or the whole tree settles.
+          - id: capital-orchestration-tools
+            name: '@v587d/capital-generation/tools/orchestration'
 
           - id: capital-root-extras
             name: '@v587d/capital-generation/tools/root-extras'

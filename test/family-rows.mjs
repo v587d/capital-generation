@@ -16,6 +16,8 @@ export const CAPITAL_ROW_TOOLS = {
     'eastmoney_724', 'eastmoney_stock_news', 'eastmoney_reports', 'sina_reports', 'ths_eps_forecast',
   ],
   '@v587d/capital-generation/tools/ocr': ['ocr'],
+  // Root-only one-turn wait across delegated children and their descendants.
+  '@v587d/capital-generation/tools/orchestration': ['wait_for_agents'],
   // Main Agent's final-turn delivery step; the card must be written by the closing turn.
   '@v587d/capital-generation/tools/present': ['present_charts'],
   '@v587d/capital-generation/tools/time': ['get_local_datetime', 'resolve_data_time_range'],

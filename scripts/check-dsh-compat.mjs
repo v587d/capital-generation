@@ -1130,6 +1130,44 @@ const probes = [
         : { status: FAIL, detail: `PTC 契约漂移：${missing.join(' / ')}（见账本 L35；先重判 junior 的执行面，再动 preset）` }
     },
   },
+  {
+    id: 'L36',
+    title: '子 Agent 等待面：waitForChildren + live inbox / status + agent/inbox/inserted',
+    why: 'wait_for_agents 在工具调用里等整棵子树，同时靠 inbox 插入事件提前处理 relay；'
+      + 'waitForChildren 改名、inbox/status 投影改名、或 agent-message / subagent-settled 源类型合并，'
+      + '症状都不是报错：工具会退回“每条回执各开一轮”，或把结算通知当成新消息唤醒。',
+    run() {
+      const subTypesFile = join(PKG('dsh-subagent'), 'lib/types/index.d.ts')
+      const subTypes = readIfPresent(subTypesFile)
+      if (subTypes === undefined) return { status: FAIL, detail: `读不到 ${subTypesFile}` }
+      const subJsFile = join(PKG('dsh-subagent'), 'lib/index.js')
+      const subJs = readIfPresent(subJsFile)
+      if (subJs === undefined) return { status: FAIL, detail: `读不到 ${subJsFile}` }
+      const agentTypesFile = join(PKG('dsh-agent'), 'lib/types/runtime-types.d.ts')
+      const agentTypes = readIfPresent(agentTypesFile)
+      if (agentTypes === undefined) return { status: FAIL, detail: `读不到 ${agentTypesFile}` }
+      const continuationFile = join(PKG('dsh-subagent'), 'lib/types/continuation-messages.js')
+      const continuation = readIfPresent(continuationFile)
+      if (continuation === undefined) return { status: FAIL, detail: `读不到 ${continuationFile}` }
+      const checks = [
+        ['waitForChildren(parent: Agent): Promise<boolean>', /waitForChildren\(parent: Agent\): Promise<boolean>;/, subTypes, subTypesFile],
+        ['waitForChildren 仍对 local child 调 whenIdle', /async waitForChildren\(parent\)[\s\S]{0,900}?item\.handle\.agent\.whenIdle\(\)/, subJs, subJsFile],
+        ['空闲子树的 result / poke 仍被等待', /Promise\.race\(\[item\.result\.promise\.catch[\s\S]{0,160}?item\.poke\.promise/, subJs, subJsFile],
+        ['Agent.inbox 仍在', /readonly inbox: Inbox;/, agentTypes, agentTypesFile],
+        ['Agent.inbox.nextTurn 仍在', /readonly nextTurn: readonly UserMessage\[\];/, agentTypes, agentTypesFile],
+        ['Agent.inbox.nextStep 仍在', /readonly nextStep: readonly UserMessage\[\];/, agentTypes, agentTypesFile],
+        ['Agent.status 仍在', /readonly status: AgentStatus;/, agentTypes, agentTypesFile],
+        ['agent/inbox/inserted 仍是公开事件', /'agent\/inbox\/inserted'/, agentTypes, agentTypesFile],
+        ['agent-message 源类型仍在', /kind: 'agent-message'/, continuation, continuationFile],
+        ['subagent-settled 源类型仍在', /kind: 'subagent-settled'/, continuation, continuationFile],
+      ]
+      const missing = checks.filter(([, pattern, source]) => !pattern.test(source))
+        .map(([label, , , source]) => `${label}（${source}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: 'waitForChildren / live inbox / status / relay 与结算源类型都还在' }
+        : { status: FAIL, detail: `子 Agent 等待面变了：${missing.join(' / ')}（见账本 L36；先改 wait_for_agents，不要改探针）` }
+    },
+  },
 ]
 
 const results = []
