@@ -1048,6 +1048,88 @@ const probes = [
         : { status: FAIL, detail: `Cordis 服务解析的失败方向变了：${missing.join(' / ')}（见账本 L33；先检查 capital-policy 的 inject 与三颗 guard 的 warn，再动探针）` }
     },
   },
+  {
+    id: 'L34',
+    title: '`agent/assistant-stream` 的终端 finish 帧先于 `assistant/message` 落盘（收尾交付的写入时机）',
+    why: '图表交付事件必须写在收尾 assistant 消息**之前**，否则客户端 `presentedForClosing` 不重放。'
+      + '唯一同时满足"知道这轮是纯文本收尾（finish=stop、无 tool-call）"和"消息还没 append"的位置，就是流式终端帧。'
+      + '事件改名、finish 形状变化、或消息改到流结束前 append，都会让交付卡静默落空或留在被折叠的中间轮。',
+    run() {
+      const agentTypesFile = join(PKG('dsh-agent'), 'lib/types/runtime-types.d.ts')
+      const agentTypes = readIfPresent(agentTypesFile)
+      if (agentTypes === undefined) return { status: FAIL, detail: `读不到 ${agentTypesFile}` }
+      const llmTypesFile = join(PKG('dsh-llm'), 'lib/types/types.d.ts')
+      const llmTypes = readIfPresent(llmTypesFile)
+      if (llmTypes === undefined) return { status: FAIL, detail: `读不到 ${llmTypesFile}` }
+      const loopFile = join(PKG('dsh-agent-loop'), 'lib/index.js')
+      const loop = readIfPresent(loopFile)
+      if (loop === undefined) return { status: FAIL, detail: `读不到 ${loopFile}` }
+      const checks = [
+        ['agent/assistant-stream 仍是公开事件', /'agent\/assistant-stream'/, agentTypes, agentTypesFile],
+        ['终端帧携带 finish.reason', /type: 'finish'[\s\S]{0,200}?reason: FinishReason/, llmTypes, llmTypesFile],
+        ['finish reason 里有 stop', /'stop': \{[\s\S]{0,40}?kind: 'stop'/, llmTypes, llmTypesFile],
+        ['流循环在消息 settle 之前跑完（live.push 在 for-await 内）', /for await \(const chunk of stream\) \{[\s\S]{0,500}?live\.push\(chunk\)/, loop, loopFile],
+        ['assistant/message 在流消费之后才 append', /for await \(const chunk of stream\)[\s\S]{0,6000}?live\.settle\("assistant\/message"/, loop, loopFile],
+      ]
+      const missing = checks.filter(([, pattern, source]) => !pattern.test(source))
+        .map(([label, , , source]) => `${label}（${source}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: 'assistant-stream 终端帧仍在消息落盘之前 ⇒ 收尾交付可以在消息之前同步写入' }
+        : { status: FAIL, detail: `收尾交付的写入时机变了：${missing.join(' / ')}（见账本 L34；要么改交付触发点，要么改探针，先别发版）` }
+    },
+  },
+  {
+    id: 'L35',
+    title: 'PTC：preset 级 presentation 行 + 宿主 ptc-runtime + run_code / SDK 契约',
+    why: 'data_junior 的唯一执行面是 run_code：presentation 行按 preset scope 声明，runtime 必须由宿主提供；'
+      + 'presentation 被改成 composition-wide、runtime 行被移出 dsh-base、run_code 名字/并发池/绑定 agent 任一处漂移，'
+      + '症状都不是报错，而是 junior 拿不到 run_code、或嵌套工具调用绕过原有授权与并发语义。'
+      + 'tool-skill 的 canonical value 与 subagent 的 parent id 提示也必须仍按当前形状：PTC 程序拿到的是对象，'
+      + '不是原生 render 出来的 <skill_content>。',
+    run() {
+      const presentationFile = join(PKG('dsh-agent-tool-presentation'), 'lib/index.js')
+      const presentation = readIfPresent(presentationFile)
+      if (presentation === undefined) return { status: FAIL, detail: `读不到 ${presentationFile}` }
+      const basePatchFile = join(PKG('dsh-base'), 'cordis.patch.yml')
+      const basePatch = readIfPresent(basePatchFile)
+      if (basePatch === undefined) return { status: FAIL, detail: `读不到 ${basePatchFile}` }
+      const runtimeReadmeFile = join(PKG('dsh-ptc-runtime-node'), 'README.md')
+      const runtimeReadme = readIfPresent(runtimeReadmeFile)
+      if (runtimeReadme === undefined) return { status: FAIL, detail: `读不到 ${runtimeReadmeFile}` }
+      const toolsFile = join(PKG('dsh-tools'), 'lib/index.js')
+      const tools = readIfPresent(toolsFile)
+      if (tools === undefined) return { status: FAIL, detail: `读不到 ${toolsFile}` }
+      const skillFile = join(PKG('dsh-tool-skill'), 'lib/index.js')
+      const skill = readIfPresent(skillFile)
+      if (skill === undefined) return { status: FAIL, detail: `读不到 ${skillFile}` }
+      const subagentFile = join(PKG('dsh-subagent'), 'lib/index.js')
+      const subagent = readIfPresent(subagentFile)
+      if (subagent === undefined) return { status: FAIL, detail: `读不到 ${subagentFile}` }
+      const checks = [
+        ['presentation 行 inject 仍是 tools', /const inject = \["tools"\];/, presentation, presentationFile],
+        ['mode 仍是 native|ptc 的必填枚举', /z\.union\(\["native", "ptc"\]\)\.required\(\)/, presentation, presentationFile],
+        ['ptc 分支仍等 ptcRuntime 后 presentAs', /ctx\.inject\(\["ptcRuntime"\][\s\S]{0,160}runtimeCtx\.tools\.presentAs\(config\.mode\)/, presentation, presentationFile],
+        ['dsh-base 仍挂宿主 ptc-runtime 行', /- id: ptc-runtime[\s\S]{0,120}name: '@deepseek-ai\/dsh-ptc-runtime-node'/, basePatch, basePatchFile],
+        ['runtime 默认 per-call', /\| `executionMode` \| `per-call` \|/, runtimeReadme, runtimeReadmeFile],
+        ['runtime 默认 120s / 上限 600s', /\| `timeoutMs` \| `120,000` \|[\s\S]{0,200}\| `maxTimeoutMs` \| `600,000` \|/, runtimeReadme, runtimeReadmeFile],
+        ['run_code 仍是保留传输名', /const RUN_CODE_NAME = "run_code";/, tools, toolsFile],
+        ['presentAs(mode) 仍在 registry 上', /presentAs\(mode\) \{/, tools, toolsFile],
+        ['并发池默认仍是 10', /maxParallelSubCalls = value \?\? 10/, tools, toolsFile],
+        ['嵌套绑定仍带 agent: exec.agent', /agent: exec\.agent,/, tools, toolsFile],
+        ['SDK 仍渲染工具 description（docLines）', /docLines\$1\(schema\.description, 1\)/, tools, toolsFile],
+        ['可见 bash 时才注入 tools.bash 示例', /renderBashExample\(sorted, programFormat\)/, tools, toolsFile],
+        ['skill 的 canonical value 仍有 content', /content: skill\.content/, skill, skillFile],
+        ['skill 的 native render 仍是 renderSkillContent', /text: renderSkillContent\(value\)/, skill, skillFile],
+        ['subagent 仍注入 parent agent id 提示', /Your parent agent id is \$\{encodedParentId\}/, subagent, subagentFile],
+        ['提示仍是原生 send_message 写法', /send_message\(\{ agent_id: \$\{encodedParentId\}/, subagent, subagentFile],
+      ]
+      const missing = checks.filter(([, pattern, source]) => !pattern.test(source))
+        .map(([label, , , source]) => `${label}（${source}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: 'presentation 按 preset、runtime 在宿主、run_code/SDK/skill/parent id 契约未变' }
+        : { status: FAIL, detail: `PTC 契约漂移：${missing.join(' / ')}（见账本 L35；先重判 junior 的执行面，再动 preset）` }
+    },
+  },
 ]
 
 const results = []

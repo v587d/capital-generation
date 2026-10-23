@@ -1,6 +1,6 @@
 {
   "name": "@v587d/capital-generation",
-  "version": "2.9.1",
+  "version": "2.9.2",
   "description": "Capital Generation：面向中国散户的 AI 投资助手插件（自动模式 Agent Preset）",
   "icon": "assets/cg-icon.png",
   "author": "v587d",
@@ -140,7 +140,8 @@
     "contract:probe": "node scripts/contract-probe.mjs",
     "docs:capabilities": "npm run build && node scripts/gen-capability-table.mjs",
     "verify:sessions": "node scripts/verify-sessions.mjs",
-    "audit:tool-errors": "node scripts/audit-tool-errors.mjs"
+    "audit:tool-errors": "node scripts/audit-tool-errors.mjs",
+    "ptc:report": "node scripts/ptc-session-report.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",

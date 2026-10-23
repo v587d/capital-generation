@@ -54,6 +54,8 @@ export const ROOT_AGENT_DENIED_TOOLS = [
   'write',
   'edit',
 ] as const
+// ⛔ `run_code` belongs nowhere in this list: it is a reserved PTC transport name, so `restrict()`
+// throws on it. The root stays native; deployment-level `dsh-tools.mode` must not be set to ptc.
 
 export const CAPITAL_PRESET_ID = ROOT_PRESET_ID
 interface ToolRestriction { allow?: readonly string[]; deny?: readonly string[] }

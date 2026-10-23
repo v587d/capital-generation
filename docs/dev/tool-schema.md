@@ -17,7 +17,8 @@
 ## 9.3 回归只覆盖经 `apply()` 注册的工具
 
 `test/apply-integration.test.mjs` 遍历 `apply()` 注册的全部工具断言以上不变量——新增工具
-**必须经 `apply()` 注册**才在保护内。
+**必须经 `apply()` 注册**才在保护内。框架保留名 `run_code` 由宿主按 PTC presentation 投影，
+本仓不注册、也不进这条遍历；它不属于任何族行。
 
 ## 9.4 改完 `src/` 必须重建并重启进程
 

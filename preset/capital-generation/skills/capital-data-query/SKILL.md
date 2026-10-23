@@ -1,46 +1,61 @@
 ---
 name: capital-data-query
-description: Use when aggregating a Dataset or computing a derived number — the controlled QuerySpec (filters, group_by, aggregates, calendar time values, error codes) and data_junior's bash channel for derived arithmetic. Volume 3 of the Capital data protocol; payloads in capital-data-protocol, profile facts and the time axis in capital-data-profile.
+description: Use when aggregating a Dataset or computing a derived number — the controlled QuerySpec (filters, group_by, aggregates, calendar time values, error codes) and data_junior's run_code programs for derived arithmetic. Volume 3 of the Capital data protocol; payloads in capital-data-protocol, profile facts and the time axis in capital-data-profile.
 ---
 
 # Capital 数据协议 · 第三册：受控查询与派生算术
 
-本册是数据协议的第三册（§3.3 bash 只做纯计算 / §4 受控查询）。时间轴与 `time_facts` 在第二册
+本册是数据协议的第三册（§3.3 run_code 只做派生算术 / §4 受控查询）。时间轴与 `time_facts` 在第二册
 `capital-data-profile` §3.2，载荷契约与重试纪律在第一册 `capital-data-protocol`。
 
-## 3.3 bash：派生算术的兜底，不是第二条取数通道
+## 3.3 run_code：派生算术，不是第二条取数通道
 
-只有 data_junior 有 `bash`。它存在的唯一理由是 `query_dataset` 的聚合只有
-`count / min / max / avg / sum`——**变化量、增幅、CAGR、比值、单位换算**这类派生指标没有宿主
-工具，硬心算既慢又容易错。
+只有 data_junior 有 `run_code`；主 Agent 读本节是为了理解回传格式，不要照着执行。它存在的唯一
+理由是 `query_dataset` 的聚合只有 `count / min / max / avg / sum`——**变化量、增幅、CAGR、比值、
+单位换算**这类派生指标没有宿主工具。数字必须从工具返回值直接取，不手抄、不整行复制、不中转到
+别的语言。
 
-**可以做的**（拿手里已有的数字算）：
+**可以做的**（值来自工具返回对象，算完只返回结论）。第一段程序只读协议，`content` 必须打印出来，
+只 `await` 等于没读；也不要和 describe 混在同一段：
 
-```bash
-node -e 'const a=98.2,b=120.5; console.log(((b-a)/a*100).toFixed(2))'   # 区间涨幅
-python3 -c "print((120.5/98.2)**(252/60)-1)"                            # 年化
+```ts
+const s = await tools.skill({ name: 'capital-data-profile' })
+console.log(s.content)
 ```
 
-- **只敲最终参与计算的标量，一次 ≤20 个**：不整行/整表复制原始数字进脚本（2026-10-10 真机：
-  两次 bash 把整段聚合行逐数敲进去，转写出笔误又花 7.2K 字符发更正）；从工具回执到脚本的每个
-  数字**逐一核对**再执行，算完抽查 1-2 个对得上来源。要算的数超过 20 个就拆几批。
+```ts
+const r = await tools.describe_dataset({ dataset_id, task_id })
+const a = r.time_facts.first.close_price
+const b = r.time_facts.last.close_price
+return { pct: ((b - a) / a) * 100, from: a, to: b }
+```
+
+- `describe_dataset` 返回 `{status:'too_large', columns, hint}` 时，它在同一个程序里按 hint 用
+  `columns_of_interest` 重发一次；这是返回值不是异常，别用 `catch` 接、也别另起一轮。
+- 多份 Dataset 用 `Promise.all` 并发 describe（只有 `describe_dataset` 声明了并发安全）；
+  `query_dataset` 串行，不要混进同一批。某份可能失败时用 `Promise.allSettled`。
+- 一次程序只做一段事：先 `console.log(s.content)` 读协议，再 describe/算数，最后回传；
+  不要把整份 profile 或多个工具结果 `return` 回去（外层结果会过 8192 剪枝）。
+- 回传与 `data_gap` 用 `await tools.send_message({ agent_id, message })`；它返回 `{messageId}`，
+  不结束本轮。`agent_id` 取系统提示里的 parent agent id。
 
 **不许做的**（这是纪律，不是沙箱限制——沙箱只拦写，不拦读与网络）：
 
 | 不许 | 为什么 | 正确做法 |
 |---|---|---|
-| 读 `capital-data/**`、`raw.json` | 原始行**永不**进入你的上下文；而且工具结果会被剪枝成 head+tail，读了也算错 | 数值走 `describe_dataset` / `query_dataset` 的统计与聚合 |
+| 读 `capital-data/**`、`raw.json` | 原始行**永不**进入你的上下文；读了也算错 | 数值走 `describe_dataset` / `query_dataset` 的统计与聚合 |
 | 读 `~/.dsh/**`、`sessions/**` | 那是宿主凭据与全部会话日志 | 不碰；需要元数据用工具回执 |
 | 读 / 改 `preset/`、`src/`、`test/` | 那是装配与门禁本身 | 不碰 |
-| `curl` / `wget` / 任何网络请求、`git clone`、`npm i`、`pip install` | 你的角色没有网络能力，外部材料只经主 Agent 转交 `web_retriever` | 缺外部事实就在回传里写明缺口 |
-| 申请更高权限（`sandbox_permissions`） | 委派会话的审批策略被框架固定为 `never`，必然失败 | 不要试；缺数据发 `data_gap` |
+| `fetch` / 任何网络请求、`git clone`、`npm i`、`pip install` | 你的角色没有网络职责，外部材料只经主 Agent 转交 `web_retriever` | 缺外部事实就在回传里写明缺口 |
+| 申请更高权限（`sandbox_permissions`） | 委派会话的审批固定为 `never`，必然失败 | 不要试；缺数据发 `data_gap` |
 
 另外两条：
 
-- **输出只留结论数字**：bash 的工具结果同样会过剪枝器（>8192 字符中间段被剪掉），把中间过程
-  打印出来只会挤掉真正要看的东西；回传时注明算法与口径（如「按首末收盘价、未复权」）。
+- **输出只留结论数字**：`run_code` 的外层结果同样会过剪枝器（>8192 字符中间段被剪掉），把中间
+  过程或整份 profile 打印出来只会挤掉真正要看的东西；回传时注明算法与口径（如「按首末收盘价、
+  未复权」）。只返回结论，不要 `return` 整份 profile。
 - **时间窗仍归宿主**：窗口边界一律用 `time_facts.windows` / `resolve_data_time_range`
-  （`capital-data-profile` §3.2），不要用 `date` 命令自己造边界——口径错了数字就全错，而且没人会发现。
+  （`capital-data-profile` §3.2），不要在程序里把日期算成毫秒——口径错了数字就全错。
 
 `profile_dataset` 的统计项：数值字段的 count 与 sum（合计多少、覆盖多少条）、字符串字段的
 `distinct_count` 与高频取值、字段类型（observed / contract）、缺失值与显式 null、类型冲突、

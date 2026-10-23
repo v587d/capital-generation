@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  EXECUTION_ESCALATION_TOOL_NAMES,
   SHELL_ESCALATION_UNREACHABLE,
   bashGuardReason,
   registerBashGuard,
@@ -9,14 +10,15 @@ import { ROOT_AGENT_DENIED_TOOLS, SHELL_TOOL_NAMES } from '../lib/agents/root-to
 import { PRESET_PATCH_TEXT, allPresets } from './preset-rows.mjs'
 
 /**
- * Shell gate contract: the gate recognizes both `bash` and `pwsh` (one per platform), so every case
- * runs against both names -- feeding only `bash` once left it dead code on Windows with no error.
- * Command content is deliberately not parsed (the sandbox blocks writes, not reads/network), so
- * tests pin that a regex never poses as a boundary. The root-session case is the migrated form of
- * the old "delegated child only" rule.
+ * Execution gate contract: the gate recognizes both shells plus the PTC `run_code` transport, so
+ * every case runs against all three names -- feeding only `bash` once left it dead code on Windows
+ * with no error. Command/program content is deliberately not parsed (the sandbox blocks writes,
+ * not reads/network), so tests pin that a regex never poses as a boundary. The root-session case is
+ * the migrated form of the old "delegated child only" rule.
  */
 
 const shellNames = [...SHELL_TOOL_NAMES]
+const executionNames = [...EXECUTION_ESCALATION_TOOL_NAMES]
 
 const childAgent = (overrides = {}) => ({
   session: { id: 'child-1', header: { cwd: '/w', parentSession: 'main-1' } },
@@ -24,22 +26,22 @@ const childAgent = (overrides = {}) => ({
 })
 const rootAgent = (overrides = {}) => ({ session: { id: 'main-1', header: { cwd: '/w' } }, ...overrides })
 
-test('bashGuardReason：只认 shell 两个名字，别的工具一律放行', () => {
+test('bashGuardReason：只认执行工具三个名字，别的工具一律放行', () => {
   // Deny-shaped input (delegated + escalation) so "unknown name" is distinguishable from "known but allowed".
   for (const name of ['describe_dataset', 'query_dataset', 'render_chart', 'subagent_data_junior', undefined]) {
     assert.equal(bashGuardReason({ name, agent: childAgent(), arguments: { sandbox_permissions: 'x' } }), undefined,
-      `${name} 不是 shell，闸门不得插手`)
+      `${name} 不是执行工具，闸门不得插手`)
   }
-  // Both shell names must be caught in the same shape, or the platform's check never fires.
-  for (const name of shellNames) {
+  // Both shell names and `run_code` must be caught in the same shape, or one execution surface never fires.
+  for (const name of executionNames) {
     assert.equal(bashGuardReason({ name, agent: childAgent(), arguments: { sandbox_permissions: 'x' } }), SHELL_ESCALATION_UNREACHABLE,
-      `闸门必须认 ${name}：不认就意味着该平台的判定一次都不触发，而且不报错`)
+      `闸门必须认 ${name}：不认就意味着该执行面的判定一次都不触发，而且不报错`)
   }
 })
 
-test('bashGuardReason：主 Agent 的 shell 调用放行（2026-10-15 决策「开 read、同时保留 bash」）', () => {
+test('bashGuardReason：主 Agent 的 shell / run_code 调用放行（2026-10-15 决策「开 read、同时保留 bash」）', () => {
   // Migrated from the old "delegated child only" rule: root-shaped sessions, including the empty-string guard, now pass.
-  for (const name of shellNames) {
+  for (const name of executionNames) {
     assert.equal(bashGuardReason({ name, agent: rootAgent(), arguments: { command: 'date' } }), undefined, `主 Agent 保留 ${name}`)
     // Empty string counts as absent (header is host-written).
     assert.equal(bashGuardReason({ name, agent: { session: { header: { parentSession: '' } } }, arguments: { command: 'date' } }), undefined)
@@ -49,7 +51,7 @@ test('bashGuardReason：主 Agent 的 shell 调用放行（2026-10-15 决策「�
 })
 
 test('bashGuardReason：拦掉必然失败的沙箱升级——被委派 / 身份不可考 fail closed，主 Agent 走正常审批', () => {
-  for (const name of shellNames) {
+  for (const name of executionNames) {
     const withEscalation = { name, agent: childAgent(), arguments: { command: 'node -e 1', sandbox_permissions: 'danger-full-access', justification: '需要写文件' } }
     assert.equal(bashGuardReason(withEscalation), SHELL_ESCALATION_UNREACHABLE)
     // justification without sandbox_permissions: the tool layer rejects it anyway; here it gets a readable reason.
@@ -63,13 +65,14 @@ test('bashGuardReason：拦掉必然失败的沙箱升级——被委派 / 身�
   assert.match(SHELL_ESCALATION_UNREACHABLE, /never/)
   assert.match(SHELL_ESCALATION_UNREACHABLE, /data_gap/)
   assert.match(SHELL_ESCALATION_UNREACHABLE, /不会去问用户/)
-  // Both tools read this text, so it must name both.
+  // All three names read this text, so it must name all three.
   assert.match(SHELL_ESCALATION_UNREACHABLE, /bash/)
   assert.match(SHELL_ESCALATION_UNREACHABLE, /pwsh/)
+  assert.match(SHELL_ESCALATION_UNREACHABLE, /run_code/)
 })
 
 test('bashGuardReason：arguments 形状异常不抛（事件来自模型，宁可放行也别炸调用链）', () => {
-  for (const name of shellNames) {
+  for (const name of executionNames) {
     for (const args of [undefined, null, 'command', 42, []]) {
       assert.equal(bashGuardReason({ name, agent: childAgent(), arguments: args }), undefined)
     }
@@ -93,9 +96,13 @@ test('shell 名字只有一份定义：preset 挂的每一行 shell，闸门都�
   assert.deepEqual(mountedShellNames, [...shellNames].sort(),
     '挂出来的 shell 行必须全在 SHELL_TOOL_NAMES 里：多挂一行而名字没跟上，闸门对它一次都不会触发')
   assert.deepEqual(shellNames, ['bash', 'pwsh'], 'shell 名字集合就是这两行；改动它要有明确设计决策')
+  assert.deepEqual([...EXECUTION_ESCALATION_TOOL_NAMES], ['bash', 'pwsh', 'run_code'],
+    '执行面名字 = 两颗 shell + PTC 的 run_code：run_code 带同一组 sandbox_permissions / justification')
+  assert.ok(!ROOT_AGENT_DENIED_TOOLS.includes('run_code'),
+    'run_code 是框架保留名：restrict() 点名它会抛错，根侧只靠“不部署 ptc”保证看不见')
 })
 
-test('bashGuardReason：命令内容不参与判定——禁区命令照样放行（软约束在 persona，不在这里假装成边界）', () => {
+test('bashGuardReason：命令与程序内容不参与判定——禁区命令照样放行（软约束在 persona，不在这里假装成边界）', () => {
   const commands = [
     'cat capital-data/datasets/ds_1/raw.json',
     'cat ~/.dsh/.credentials.yaml',
@@ -111,6 +118,11 @@ test('bashGuardReason：命令内容不参与判定——禁区命令照样放�
       assert.equal(bashGuardReason({ name, agent: rootAgent(), arguments: { command } }), undefined,
         `主 Agent 侧同样不得按命令内容 deny：${name} ${command}`)
     }
+  }
+  // run_code reaches the same files/network; inspecting `code` would be the same false boundary.
+  for (const code of ['await import("node:fs/promises")', 'await fetch("https://example.com")', 'await tools.bash({ command: "pwd" })']) {
+    assert.equal(bashGuardReason({ name: 'run_code', agent: childAgent(), arguments: { code, description: 'probe' } }), undefined,
+      `不得按程序内容 deny（正则挡不住动态 import / 字符串拼接）：${code}`)
   }
 })
 
@@ -157,7 +169,7 @@ test('registerBashGuard：agent scope 没有 tools.guard 时留诊断但不抛�
   registerBashGuard(ctx)
   assert.doesNotThrow(() => rootListeners[0].listener({ agent: childAgent({ ctx: { preset: 'capital-generation', tools: {} } }) }))
   assert.equal(warnings.length, 1)
-  assert.match(warnings[0], /shell 闸门未生效/)
+  assert.match(warnings[0], /执行工具闸门未生效/)
 })
 
 test('registerBashGuard：agent/disposed 释放该 agent 的 guard（不跨实例残留）', () => {

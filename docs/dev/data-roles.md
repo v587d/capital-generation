@@ -12,14 +12,14 @@
   （回归 `test/persona.test.mjs`，下同「叶子边界」）。
 - **`data_junior`**（`subagent_data_junior`）：主 Agent 直接子 Agent，与 data_collector 是兄弟、
   后者不得指挥它；只接收 `DatasetRef`。用法口径在工具 description、子 persona 与 skill
-  `capital-data-protocol`，本节只留维护者约束：
+  `capital-data-profile` / `capital-data-query`，本节只留维护者约束：
   - **⛔ 省往返靠 `isConcurrencySafe: () => true` + 框架并发池**：**不要**改成"一次调用合并返回
     多份 dataset"——会同时废掉体积闸门和 hint。宿主这一侧 **fail-closed**（不标就串行），2026-10-16
     用一次性 headless 探针在真机核过（账本 L30：三颗已声明整批 706 毫秒、三颗未声明 1426 毫秒、
     混发 2116 毫秒——**并发池在第一颗未声明的调用处断开**）。所以两件事要分开判：**标不标按工具定**
     （纯读才标，理由写在注册处注释；`query_dataset` 刻意不标——单颗中位 17 毫秒且成本主体是
-    `JSON.parse` + 聚合，单线程下并发也不重叠），**别把已声明的纯读与未声明的调用混进同一条消息**
-    （混发只会把纯读那颗一起拖成串行）。
+    `JSON.parse` + 聚合，单线程下并发也不重叠），**别把已声明的纯读与未声明的调用混进同一个
+    `run_code` 程序**（混发只会把纯读那颗一起拖成串行；PTC 的 `Promise.all` 仍走这条分类器）。
   - **⛔ 体积闸门只有一道**：超过 `SAFE_RESULT_CHARS = 7000` 码点返回 `{status:'too_large',
     profile_ref, columns, bytes, facts_bytes, queries_bytes, hint}` 小回执，回执自带体积归因
     （哪边大砍哪边：queries 大 → 去 queries 单走 query_dataset；facts 大 → `columns_of_interest`
@@ -30,9 +30,13 @@
     data_junior 仍按"可视化 gate 是硬步骤"一路出图——工具行为符合协议，但用户的范围指令没被遵守。
     现在两侧都有言：**委派方**要显式写「只到 profile」，**被委派方**认收窄、仍给 gate 结论但不出图，
     并写明"未出图是委派收窄而非数据不支持"。回归 `test/persona.test.mjs`「可视化 gate」用例。
-  - **能力边界**：没有外部行情 API、网页检索、通用 filesystem、Python coding，不自查凭据。
-    `bash` 是**纯计算兜底**，**不是取数通道**（§1.6 → `bash-gate.md`）。data_analyst 启用前逐行 /
-    序列级分析没有合规路径，须如实告知用户并降级到统计能力。
+  - **能力边界**：工具面没有外部行情 API、网页检索、通用 filesystem、Python coding，不自查凭据；
+    `run_code` 里的 Node 能力也不是这些入口（软边界，见 §1.6）。
+    2026-10-23 起它不挂 shell，唯一执行面是 PTC `run_code`（`tool-presentation: ptc`）；程序只调度
+    已授权工具与做算术，**不是取数通道**，也不读 `capital-data/**` 落盘（§1.6 → `bash-gate.md`）。
+    外层 `run_code` 结果只走宿主的 `tool-result-pruner`（8192），本仓不新设第二道闸门；程序只
+    `return` 结论是纪律，不是 gate。data_analyst 启用前逐行 / 序列级分析没有合规路径，须如实告知
+    用户并降级到统计能力。
 - **主 Agent 读数据一律委派 data_junior**，绝不直接调用 Dataset 系列工具（工具层拒绝主 Agent，
   `dataset_session_mismatch`）。**这道闸门的判据是人设，不是会话拓扑**（2026-10-19，设计
   `docs/design/agent-preset-four-modes.md` §4.1）：`src/tool-exec.ts` 的 `authorizedSession` 读

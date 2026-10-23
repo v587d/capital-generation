@@ -157,6 +157,31 @@ test('resolveOwnerSession：fork/branch 顶层会话是根，不沿 seed 谱系�
   resetChartEventPending()
 })
 
+test('publishMany：一次事件携带全部文件，回合上限按事件计数（不按文件数）', async () => {
+  resetChartEventPublisher()
+  resetChartEventPending()
+  const main = fakeSession('main-1')
+  const publisher = createChartEventPublisher(fakeCtx({
+    sessions: { get: (id) => (id === 'main-1' ? main : undefined) },
+    projections: { stateOf: () => ({ openTurnStartSeq: 100, lastTurn: 7 }) },
+  }))
+  assert.ok(publisher?.publishMany)
+  const inputs = Array.from({ length: 20 }, (_value, index) => ({
+    ...baseInput,
+    chart_id: `ch_batch_${index}`,
+    html_path: `capital-analysis/charts/ch_batch_${index}/chart.html`,
+  }))
+  assert.equal(publisher.publishMany('main-1', inputs), true)
+  assert.equal(main.appended.length, 1, '20 张图必须是 1 个事件（卡片在收尾轮一次收齐）')
+  assert.equal(main.appended[0].type, CHART_DELIVERABLE_EVENT)
+  assert.equal(main.appended[0].data.turn, 7)
+  assert.equal(main.appended[0].data.files.length, 20)
+  assert.equal(main.appended[0].data.callId, 'capital-chart:ch_batch_0')
+  assert.equal(main.appended[0].data.files[19].path, 'capital-analysis/charts/ch_batch_19/chart.html')
+  resetChartEventPublisher()
+  resetChartEventPending()
+})
+
 test('契约：交付事件必须是 first-party `deliverables/presented`，且 append 只能用它', () => {
   assert.equal(CHART_DELIVERABLE_EVENT, 'deliverables/presented', '必须是官方 present 用的同一事件类型')
   assert.equal(CHART_CALL_ID_PREFIX, 'capital-chart:')
@@ -164,7 +189,8 @@ test('契约：交付事件必须是 first-party `deliverables/presented`，且 
   // Every append() must pass the first-party constant, not a hand-written event string.
   const source = readFileSync(new URL('../src/chart/events.ts', import.meta.url), 'utf8')
   const appendArgs = [...source.matchAll(/\.append\(\s*([^,]+?)\s*,/g)].map((match) => match[1].trim())
-  assert.deepEqual(appendArgs, ['CHART_DELIVERABLE_EVENT'],
+  assert.ok(appendArgs.length > 0, '交付通道必须至少有一处 append')
+  assert.ok(appendArgs.every((arg) => arg === 'CHART_DELIVERABLE_EVENT'),
     `append 只能使用 CHART_DELIVERABLE_EVENT（实际：${appendArgs.join(', ')}）——写闭集词汇表之外的类型会让会话冷加载失败`)
 })
 

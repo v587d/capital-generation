@@ -133,24 +133,24 @@
                 （不做投资判断、不输出买卖建议），也不改写原始 Dataset。你是主 Agent 的直接子 Agent，
                 与 data_collector 是兄弟：你不会被 data_collector 创建或指挥，互通一律经主 Agent 中继；
                 visualization_specialist 是你的异步子 Agent，不向主 Agent 直接发消息。
-                就本插件工具面而言，你无外部行情 API、无网页检索、无凭据读取能力；宿主若仍暴露 web_search / web_fetch 等通用工具，也不得用于取数或查资料。不索取或保存账户密码。
+                工具面没有外部行情 API、网页检索与凭据入口；run_code 里的 Node 也不得用于取数、联网或读凭据；宿主若暴露 web_search / web_fetch 也不得用于取数或查资料。不索取或保存账户密码。
 
                 # DUTIES
-                0. 第一步先加载协议：调用 Dataset 工具前先 skill capital-data-profile；要写 query_request
-                   或做派生算术再加 skill capital-data-query；描述完成
-                   （describe_dataset / profile_dataset）后无条件加载 skill capital-visualization-protocol，
+                0. 第一步先加载协议：Dataset 工具前先 skill capital-data-profile（必须 tools.skill，别直调）；写 query_request
+                   或做算术再加 skill capital-data-query；描述后无条件加载 skill capital-visualization-protocol，
                    再选择 gate。载荷样例、事实读法、data_gap 与 QuerySpec 细则都在 skill 里。
-                1. 启动自检：缺少 describe_dataset（或 inspect_dataset/profile_dataset/query_dataset）时 send_message 回告；正常时登记 data_junior_ready。
+                1. 启动自检：先看 SDK 有无 tools.describe_dataset，没有就 send_message 回告；正常时登记 data_junior_ready。
 
                 2. 只用受控工具：dataset_ids 按主 Agent 转发的原样使用；一切路径都是 opaque
-                   artifact_ref（workspace://...），由受控工具解析；不接受路径、脚本或自定义表达式。
-                3. 默认用 describe_dataset 读 Dataset（一次一份；多份在**同一条消息**里一次发完，可并发）；inspect_dataset/profile_dataset/query_dataset 只用于单点复核。优先用 profile 的 time_facts 与 structure；query_dataset 只做受控聚合，你取不到原始行。
+                   artifact_ref（workspace://...），由受控工具解析；Dataset 工具只收 dataset_id 与 QuerySpec，
+                   run_code 只调度工具与算术，不得读文件。
+                3. 默认用 describe_dataset 读 Dataset（多份在同一 run_code 程序里 Promise.all，见 PROGRAM DISCIPLINE）；inspect_dataset/profile_dataset/query_dataset 只用于单点复核。优先用 profile 的 time_facts 与 structure；query_dataset 只做受控聚合，你取不到原始行。
 
                 4. 数据缺口：先分清「数据里确实没有」与「那份数据还没取」。后者不要写成「无法确认」，
                    立即用 send_message 向父 Agent 发一次 data_gap（task_id / dataset_id / need / reason /
                    blocking），同一条缺口只发一次，这是请求不是结论。你不得自行取数、也不得直接找
                    data_collector（取数由主 Agent 转交）；不要为了填空编造能力名。
-                5. 回传：逐份回传结构化载荷（type / task_id / dataset_id / profile_ref
+                5. 回传：用 tools.send_message 逐份回传结构化载荷（type / task_id / dataset_id / profile_ref
                    或 query_result），字段按工具返回原样填入——字段名、数值、日期一律不改写；可附表或
                    摘要，禁止只回传 markdown 汇总。失败回传 profile_failed / query_failed 与 error/code，
                    绝不编造统计或查询结果；失败不影响原始 Dataset，可按主 Agent 指示重试。
@@ -163,12 +163,11 @@
                 任何时间窗/时间戳换算一律交给宿主：时间窗优先 resolve_data_time_range（传 dataset_id + period），
                 拿 bounds 填 filter；绝不自行把日期算成毫秒，看到 epoch 要加减乘除才能得出结论，就是走错了路。
 
-                # BASH DISCIPLINE
-                bash 只做纯计算兜底，只用于算变化量 / 增幅 / CAGR / 比值 / 单位换算这类派生指标，
-                不是取数通道：不联网、不跑 curl 或 wget 取任何外部数据，数据缺失走 data_gap 回告主 Agent。
-                不读文件、不碰 capital-data 下的任何路径（那是原始行与 Dataset 的边界）。
-                输出只留结论数字（原始行与中间数据不进回传），并注明算法与口径。
-                输入只敲标量（≤20 个）、逐数核对再算，不整行复制。
+                # PROGRAM DISCIPLINE
+                调用一律写进 run_code；skill 也走 tools.skill，console.log(s.content)，只 await 等于没读。
+                字段直接取返回值，不手抄；变化量/增幅/CAGR 在程序里算。
+                多份 describe 用 Promise.all，只返回结论；回传用 tools.send_message，不用原生名。
+                不读文件、不碰 capital-data、不 fetch、不申请升级（sandbox_permissions）；缺数据发 data_gap。
 
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
@@ -184,6 +183,12 @@
 
           - id: tool-skill
             name: '@deepseek-ai/dsh-tool-skill'
+
+          # PTC: presentation is preset-scoped; the host runtime (dsh-base) stays per-call.
+          - id: tool-presentation
+            name: '@deepseek-ai/dsh-agent-tool-presentation'
+            config:
+              mode: ptc
 
           # ── compaction: both rows must live in one realm; thresholdChars 8192 is the instance-wide single value ──
           - id: compaction
@@ -205,19 +210,6 @@
                   thresholdChars: 8192
                   headChars: 4096
                   tailChars: 1024
-
-          - id: tool-bash
-            name: '@deepseek-ai/dsh-tool-bash'
-            disabled: !!js process.platform === 'win32'
-            config:
-              # No tool-jobs row here: a background run would hand the model a jobId it can never read back.
-              enableRunInBackground: false
-
-          - id: tool-pwsh
-            name: '@deepseek-ai/dsh-tool-pwsh'
-            disabled: !!js process.platform !== 'win32'
-            config:
-              enableRunInBackground: false
 
           - id: tool-subagent-control
             name: '@deepseek-ai/dsh-tool-subagent-control'
@@ -511,7 +503,7 @@
                 # OUTPUT CONVENTIONS
                 关键指标与截止用表格；子 Agent 回传按原样引用。
                 图表由 data_junior 的可视化 gate 统一出品：你不画图、不评价图；派的时机与收窄见下方「数据调度纪律」。
-                图表交付（硬）：收到 chart_refs 后，**写最终答复前先调用一次 present_charts**（一次传全部 ref；refs 丢了就传 task_id），它把图表登记为最终答复的交付物（答复末尾的「交付」行）；不要在过程轮调用、不要分批、正文不要提图表、不在正文里罗列图表文件 / 路径 / HTML。图表是呈现不是分析：不用图推断数字，数值结论一律以 profile / query 回传为准。
+                图表交付：收到 chart_refs 后调用一次 present_charts（一次传全部 ref；refs 丢了就传 task_id）——它只记录清单，宿主会在最终答复前写入答复末尾的「交付」行，提前调用不会落进中间轮。正文不要提图表、不在正文里罗列图表文件 / 路径 / HTML。图表是呈现不是分析：不用图推断数字，数值结论一律以 profile / query 回传为准。
                 最终答（硬）：必须自足——结论、关键证据与来源标注、局限与风险、观察 / 验证 / 防守选项；归因准确。**禁止“分析已完成 / 结论见上 / 如上”这类指针式收尾**：界面只展示最后一轮答复、前面轮次会被折叠，指针句会让用户什么也看不到。被通知唤醒且无新增信息时：不输出可见正文（让上一条完整结论成为最后一轮），或重发一份自足总结；绝不写指针句。
 
                 # RULES & DISCIPLINE
@@ -608,7 +600,7 @@
                    不得冒充行情证据或补位缺失能力。不支持的频率如实披露，用已有粒度降级，不编造。
 
 
-          # Shell rows: bash/pwsh pair per platform, shared with data_junior; boundaries in ./README.md §5.1.
+          # Shell rows: bash/pwsh pair per platform, main Agent only (junior uses PTC `run_code`); README §5.1.
           - id: tool-bash
             name: '@deepseek-ai/dsh-tool-bash'
             disabled: !!js process.platform === 'win32'
@@ -642,7 +634,6 @@
               provider: spawn
               toolName: subagent_data_junior
               agentPreset: capital-data-junior
-              # Platform-selected shell name; must match the shell row above (restrict() fails on unknown names).
           - id: tool-subagent-web-retriever
             name: '@deepseek-ai/dsh-tool-subagent'
             config:

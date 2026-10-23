@@ -1,22 +1,35 @@
-# 交付登记与回合归属（`src/chart/events.ts` / `src/chart/present-tool.ts`）
+# 交付登记与回合归属（`src/chart/events.ts` / `src/chart/delivery.ts`）
 
-> 索引见仓库根 `AGENTS.md` §6.3。改 `src/chart/events.ts`、`src/chart/present-tool.ts`、`src/index.ts`
-> 的交付 ctx 或会话事件类型之前读这里。§编号沿用 `AGENTS.md` 的全局命名空间。
+> 索引见仓库根 `AGENTS.md` §6.3。改 `src/chart/events.ts`、`src/chart/delivery.ts`、
+> `src/chart/present-tool.ts`、`src/index.ts` 的交付 ctx 或会话事件类型之前读这里。
+> §编号沿用 `AGENTS.md` 的全局命名空间。
 
-> 事故经过与机制解释住在 `src/chart/events.ts` / `src/index.ts` 注释、账本「事故记录」与
-> `test/chart-turn-events.test.mjs` / `test/present-tool.test.mjs` 用例名里；本文只列判据。
+> 事故经过与机制解释住在 `src/chart/events.ts` / `src/chart/delivery.ts` / `src/index.ts` 注释、
+> 账本 L11/L14/L34 与 `test/chart-turn-events.test.mjs` / `test/chart-delivery.test.mjs` 用例名里；
+> 本文只列判据。
 
 ## 6.3 判据
 
-- **交付是模型步骤，不是回合钩子**：auto 模式下 `render_chart` 只回 `chart_ref`（`tools/chart-render`
-  不再传 `chartEvents`），主 Agent 在写最终答复前调用一次 `present_charts`，交付事件才落进收尾轮。
-  依据是宿主 `deliverables` 卡片的折叠规则：它只重放 `seq < 收尾 assistant 消息 seq` 的
-  `deliverables/presented`（`presentedForClosing`）⇒ 事件必须写在最终答复**之前**；在
-  `turn-stopping` 里补登记一定被丢掉，`present_charts` 因此是模型可见的一步。
-- **⛔ 禁止用回合钩子猜"最终轮"**：DSH 没有"最终轮"概念，一轮是否最终在事件发生那一刻不可知。
-  在 `turn/start` 上补登记会落进被折叠的过程轮（真机 `session-16129aa9`：5 张图分两轮落在中间轮，
-  最后一轮只剩一句"见上"），在 `turn-stopping` 上补登记则落后于收尾消息、被卡片过滤。唯一可靠
-  信号是模型自己"现在要写最终答复了"——这就是 `present_charts` 存在的理由。
+- **交付写在收尾流里，不在工具调用 / 回合钩子里**：auto 模式下 `render_chart` 只回 `chart_ref`；
+  `present_charts` 只记录本轮清单（refs 或 task_id，提前调用也安全）。真正的
+  `deliverables/presented` 由 `agent/assistant-stream` 的终端 `finish` 帧触发：只有
+  `reason.kind === 'stop'`、本次 attempt 没出现 tool-call、inbox 没有可执行消息、且没有运行中的
+  直属子 Agent 时才写（`subagent-settled` 通知不算可执行消息）。宿主要等流结束后才 `append('assistant/message')`，所以事件的 seq 必然早于收尾消息——
+  这是唯一同时满足"知道这轮是纯文本收尾"与"消息还没落盘"的时机（探针 L34）。
+- **⛔ 禁止用回合钩子猜"最终轮"**：在 `turn/start` 补登记会落进被折叠的过程轮（真机
+  `session-16129aa9`：5 张图分两轮落在中间轮，最后一轮只剩一句"见上"）；在 `turn-stopping` 补登记
+  晚于收尾消息，被客户端 `presentedForClosing` 过滤。也不能只信模型：真机 `session-32e54e60` 在
+  junior 尚未结算时提前调用 `present_charts`，随后又继续查询，最终报告落到 turn 16、卡片留在
+  turn 14——写入点必须由宿主判定。
+- **就绪条件**：`inbox` 的 `next-turn` / `next-step` 里没有可执行消息，且没有
+  `activity='running'` 的直属子 Agent（用 `subagent/start` / `subagent/end` 维护同步集合；流回调里
+  不能等异步查询）。`subagent-settled` 结算通知不算待处理：它可能在模型已经写收尾答复时才到，
+  把它当 pending 会让卡片永远等不到"干净"的 finish；通知同时用来删掉已结算的直属子 Agent。
+  真正的 relay / 人类输入仍不写。等待轮不写；写失败不推进"本轮已写"，下一次收尾可重试。
+  `present_charts` 的 `readiness` 只在流监听缺失的回退路径上使用，并遵守同一判据。
+- **模型没调也交付**：按当前 exchange 自动收集 `created_at >= 最近人类消息时间` 的图表；人类消息
+  重置 exchange 与显式清单，旧 exchange 的图不会混进新回答。显式 `present_charts` 选择优先，按
+  `chart_id` 合并去重。单次上限 32 张，全部文件写进**同一条**事件（`publishMany`，卡片自行折叠）。
 - **主 Agent 独占**：`present_charts` 只由根 preset 的 `tools/present` 行带出（行契约
   `test/family-rows.mjs`）；子 Agent 的工具面由行组合封闭，不挂就没有。**不要给它加运行期名单**——
   §1.3 的授权判据只有 `tool-exec.ts` 一份，根独占靠组合表钉（`test/persona.test.mjs` 的族归属断言）。
@@ -42,10 +55,10 @@
   specialist 孙会话 ⇒ `flush()` 永远查不到、图永久滞留 pending）。**新用例不要再用同 id 的
   简化拓扑**。
 - **发布器进程级单例、队列模块级**（每次调用都惰性调用，新建实例会让寄存与冲刷落在不同实例）；
-  发布器只在 auto 模式的 `present_charts` 与单体载体的自动登记两条路径上使用，两处共用同一个
+  发布器只在 auto 模式的收尾流与单体载体的自动登记两条路径上使用，两处共用同一个
   `createChartEventPublisher`。
 - **诊断默认关闭，按需 `CAPITAL_CHART_TRACE=1`**：stderr 成对日志 + 产物目录
   `deliverable-trace.txt`；**排查"图表 / 交付行不出现"先开它再复现**，不要靠读代码推断。
-- **三处联动（准入 `ROOT_AGENT_DENIED_TOOLS`、交付登记 `CHART_DELIVERABLE_EVENT`、交付步骤
-  `present_charts` 的行契约），改完全跑 `npm test` + `npm run check:dsh`**；单独改任一处都会让图表
-  静默不出现或会话无法加载。
+- **四处联动（准入 `ROOT_AGENT_DENIED_TOOLS`、交付登记 `CHART_DELIVERABLE_EVENT`、收尾写入点
+  `agent/assistant-stream`（探针 L34）、交付步骤 `present_charts` 的行契约），改完全跑
+  `npm test` + `npm run check:dsh`**；单独改任一处都会让图表静默不出现或会话无法加载。

@@ -15,6 +15,7 @@ description: Use when reading a Dataset back — describe_dataset as the default
 
 `data_junior` 读一份 Dataset 用 **`describe_dataset`**（一次调用完成 inspect + profile + 可选 queries），
 **不要再走 `inspect_dataset → profile_dataset → query_dataset` 三步**——那三步只保留给单点复核。
+`run_code` 与 `Promise.all` 的执行方式只对 data_junior 生效；主 Agent 只读事实块与回传格式。
 
 ```json
 {
@@ -27,8 +28,8 @@ description: Use when reading a Dataset back — describe_dataset as the default
 }
 ```
 
-- **一次一份**：一次调用只传一个 `dataset_id`。本轮有多份数据时，**在同一条 assistant 消息里一次发完**
-  多个调用（宿主会并发执行，结果一起返回），不要一份一份等。
+- **一次一份**：一次调用只传一个 `dataset_id`。本轮有多份数据时，在同一个 `run_code` 程序里用
+  `Promise.all` 并发 describe；结果留在程序里，只把结论 `return`。不要一份一份等。
 - 返回 = inspect 元数据（`artifact_ref` / `capability` / `source_label` / `captured_at` / `retention_until` /
   `query_access.shape`）+ profile 四类事实（`statistics` / `categories` / `time_facts` / `structure`）+
   `profile_ref` + 每条 query 的 `result`，或该条自己的 `error`（单条失败不影响其余）。
@@ -36,8 +37,9 @@ description: Use when reading a Dataset back — describe_dataset as the default
 - `columns_of_interest` 只对这些列返回 `statistics` / `categories` / `schema`（并同样收窄 `time_facts` 的首末值投影；时间列永远保留），是收窄结果体积的唯一手段。
 - **体积闸门**：结果超过 7000 码点时返回
   `{"status":"too_large","profile_ref":"...","columns":[...],"hint":"..."}`，而不是超长载荷。
-  按 hint 用 `columns_of_interest`（或减少 `queries`，一次最多 8 条）重发一次；文档型按 hint 直接调
-  `profile_dataset`。**看到 `too_large` 不是失败**——它带着完整列名，用来让你收窄。
+  在同一个程序里按 hint 用 `columns_of_interest`（或减少 `queries`，一次最多 8 条）重发一次；文档型按
+  hint 直接调 `profile_dataset`。**看到 `too_large` 不是失败**——它带着完整列名，用来让你收窄；
+  不要把它当异常、也不要另起一轮。
 - 单点复核（只看元数据 / 只要一份完整 profile / 补一条查询）仍可用 `inspect_dataset`、`profile_dataset`、
   `query_dataset`。
 
@@ -152,6 +154,9 @@ data_junior 发现「问题需要的那份数据还没取」时（不是「数�
   "blocking": true
 }
 ```
+
+PTC 下发送是 `await tools.send_message({ agent_id: PARENT, message: JSON.stringify(payload) })`；
+payload 的 JSON 形状不变，父 Agent id 仍来自系统提示。
 
 | 字段 | 规则 |
 |------|------|

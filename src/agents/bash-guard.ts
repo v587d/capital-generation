@@ -1,13 +1,16 @@
-/** Shell guard for bash/pwsh: blocks only doomed sandbox escalation; command content is never
- * inspected (the sandbox blocks writes, not reads/network). Delegated approvals are fixed to
- * `never`, so escalation auto-rejects with a misleading "user rejected"; block early instead.
- * Root escalation still uses ask; do not pin delegated sessions read-only (`store.writeContext`
- * needs workspace-write). `tools.guard` is monotonic; pre-execute is a rewritable waterfall. */
+/** Execution guard for bash/pwsh/run_code: blocks only doomed sandbox escalation; command/program
+ * content is never inspected (the sandbox blocks writes, not reads/network). Delegated approvals
+ * are fixed to `never`, so escalation auto-rejects with a misleading "user rejected"; block early
+ * instead. Root escalation still uses ask; do not pin delegated sessions read-only
+ * (`store.writeContext` needs workspace-write). `tools.guard` is monotonic; pre-execute is a
+ * rewritable waterfall. */
 
 import { agentSessionId, isCapitalPresetAgent, SHELL_TOOL_NAMES, type AgentLike, type GuardedExecution, type PolicyContext } from './root-tool-policy.js'
 
-/** Both names on every platform: the preset mounts a pair, so matching only the local platform kills the Windows gate. */
-const shellToolNames: ReadonlySet<string> = new Set(SHELL_TOOL_NAMES)
+/** Both shell names on every platform plus the PTC transport: the preset mounts one shell pair for
+ * the root and `run_code` for data_junior, so matching only the local platform kills the Windows gate. */
+export const EXECUTION_ESCALATION_TOOL_NAMES = [...SHELL_TOOL_NAMES, 'run_code'] as const
+const executionToolNames: ReadonlySet<string> = new Set(EXECUTION_ESCALATION_TOOL_NAMES)
 /** One listener set per root context: host policy and legacy call sites install once. */
 const installedRoots = new WeakSet<object>()
 
@@ -15,7 +18,7 @@ export type BashGuardExecution = GuardedExecution
 
 /** States that the rejection is the system's, not the user's, and gives the recovery path. */
 export const SHELL_ESCALATION_UNREACHABLE
-  = 'shell 工具（bash / pwsh）的沙箱升级只有主 Agent 的会话能拿到用户审批：被委派的子会话拿不到'
+  = '执行工具（bash / pwsh / run_code）的沙箱升级只有主 Agent 的会话能拿到用户审批：被委派的子会话拿不到'
     + '（框架把委派会话的审批策略固定为 never，不会去问用户），当前调用方也不是可确认的主 Agent 会话。'
     + '不要重试升级：缺数值用 describe_dataset / query_dataset，缺数据用 send_message 发 data_gap 回主 Agent。'
 
@@ -23,9 +26,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** Reads identity plus `sandbox_permissions`/`justification`, never `command`; unknown identity fails closed. */
+/** Reads identity plus `sandbox_permissions`/`justification`, never `command`/`code`; unknown identity fails closed. */
 export function bashGuardReason(exec: BashGuardExecution | undefined): string | undefined {
-  if (exec === undefined || typeof exec.name !== 'string' || !shellToolNames.has(exec.name)) return undefined
+  if (exec === undefined || typeof exec.name !== 'string' || !executionToolNames.has(exec.name)) return undefined
   const args = isRecord(exec.arguments) ? exec.arguments : undefined
   const escalated = args !== undefined && (args.sandbox_permissions !== undefined || args.justification !== undefined)
   if (!escalated) return undefined
@@ -70,13 +73,13 @@ export function registerBashGuard(ctx: PolicyContext): void {
         if (!isCapitalPresetAgent(ctx, agent)) return
         const dispose = installAgentGuard(agent)
         if (dispose === undefined) {
-          ctx.logger?.warn('capital-generation: shell 闸门未生效（agent scope 上没有 tools.guard）：沙箱升级拦截只剩 persona 软约束')
+          ctx.logger?.warn('capital-generation: 执行工具闸门未生效（agent scope 上没有 tools.guard）：沙箱升级拦截只剩 persona 软约束')
           return
         }
         const id = agentSessionId(agent)
         if (id !== undefined) guards.set(id, dispose)
       } catch (error) {
-        ctx.logger?.warn(`capital-generation: bash 闸门安装异常：${error instanceof Error ? error.message : String(error)}`)
+        ctx.logger?.warn(`capital-generation: 执行工具闸门安装异常：${error instanceof Error ? error.message : String(error)}`)
       }
     })
     const stopDisposed = listenCtx.on?.('agent/disposed', (payload: AgentEventPayload) => {

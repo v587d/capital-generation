@@ -16,7 +16,7 @@
 |---|---|
 | 角色边界、Dataset 消息 / 返回边界、capability 目录预算 | `docs/dev/data-roles.md`（§1.1 §1.2 §1.4 §1.5）|
 | 时间轴、日期归一、session 读取 | `docs/dev/time-axis.md`（§1.3）|
-| shell 闸门、fs 写口与挂载 | `docs/dev/bash-gate.md`（§1.6）|
+| shell 闸门、PTC 执行面、fs 写口与挂载 | `docs/dev/bash-gate.md`（§1.6）|
 | web_retriever、本地回退、九个具名来源、文档解析 `ocr` | `docs/dev/web-retriever.md`（§4.1 §4.2 §4.3）|
 | settings 卡片（host 平面嵌套包，座位在「插件」页） | `docs/dev/settings-config.md`（§5.1–§5.4）|
 | `render_chart` 准入与呈现 | `docs/dev/chart-presentation.md`（§6.1 §6.2）|
@@ -30,13 +30,13 @@
 
 - **§1.1** 省往返靠 `isConcurrencySafe` + 框架并发池；体积闸门只有一道（`SAFE_RESULT_CHARS=7000` 小回执 + hint）——不合并多份 dataset，也不引入 digest / 裁剪阶梯。
 - **§1.3** 日期串落到数值时间列必须 `query_type_conflict` 响亮失败；日期归一、session 读取与**工具授权判据**各只有一份实现、不提供兜底（`src/tool-exec.ts`；授权按 preset 身份判、不看 `parentSession`，§1.1）。
-- **§1.6** bash 闸门不是安全边界（沙箱只拦写），别把它写成边界；guard 刻意不解析命令内容。
+- **§1.6** bash / `run_code` 闸门不是安全边界（沙箱只拦写），别把它写成边界；guard 刻意不解析命令或程序内容。
 - **§5.1** 可编辑配置只坐 `plugins.bundle.config`（key = 组合包名）一处，不开行级座位：每深一跳就多一次"设置里没这个插件"。
 - **§6.1** 根收敛监听挂 `ctx.root`（standing 层收不到）；身份闸门全局装、调用期现读
   （created 时人设未定）。委派出口只有专用角色，工具面 = preset 挂的族行（allow 清单禁恢复）。
 - **§6.1** `/capital-charts` 序列旁路必须接 `connection.requestRejection`，否则是无认证端点。
 - **§6.3** 会话事件词汇表是闭集，交付必须走 first-party `deliverables/presented`；cordis ctx 不能用
-  `{ ...ctx }` 展开；队列按 owner 归档；auto 模式交付由主 Agent 在最终答复前 `present_charts` 一步写入。
+  `{ ...ctx }` 展开；队列按 owner 归档；auto 模式在收尾流 finish 帧写交付（L34），回合钩子会落空。
 - **§8.6** 接入必查清单先过：取数一律委派、不许用记忆回填、不带执行面；frontmatter/目录须可发现；catalog 与打包约束见详情。
 - **§9.5 / §9.6** 工具返回值必须无损 JSON（`undefined` / `NaN` / 空洞不许带出），且必须满足自己
   声明的 `output.schema`——多返回一个未声明字段同样致命。
@@ -46,14 +46,14 @@
 ```text
 main Agent
   +-- data_collector   外部取数，立即持久化，只回传 DatasetRef
-  +-- data_junior      质量 / 统计 / 可视化 gate，只回传 profile_ref / 聚合结果 / chart_ref
+  +-- data_junior      质量 / 统计 / 可视化 gate（PTC `run_code`），只回传 profile_ref / 聚合结果 / chart_ref
   |     └── visualization_specialist  异步出图，只回传 chart_ref / 小回执
   +-- data_analyst     Python 分析（仅预留，未启用）
   +-- web_retriever    网页材料获取（一次一个）
 ```
 
 一句话版：**原始 rows 永不出工具层**，Agent 间只传 `DatasetRef` / profile 引用 / 聚合结果；主 Agent
-一律委派（工具层拒绝它直连 Dataset 系列）、自己不出图；专用角色是叶子、互通须经主 Agent 中继。
+一律委派（工具层拒绝它直连 Dataset 系列）、自己不出图；专用角色是叶子、互通须经主 Agent 中继；data_junior 的唯一执行面是 PTC `run_code`（不挂 shell），程序只调度工具与算术、不读落盘文件。
 
 ## 2. 项目结构
 

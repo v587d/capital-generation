@@ -122,7 +122,8 @@ ohlc
 prepare_chart_source({ dataset_id, task_id })
 ```
 
-只使用工具返回的 `chart_source_ref`。不要自己构造 token、路径或 `raw.json` 地址。
+data_junior 在 `run_code` 里调用 `tools.prepare_chart_source(...)`；specialist 是 native，
+照旧直调 `render_chart`，不经过 `run_code`。只使用工具返回的 `chart_source_ref`。不要自己构造 token、路径或 `raw.json` 地址。
 
 **token 有 15 分钟 TTL，同一 task_id + dataset_id 重复签发幂等返回同一个 token**：仍建议先定好
 要出哪几张图、每张用哪份 Dataset，再一次性签发（省往返）；万一改了视图方案再签一次也无妨——
@@ -195,6 +196,9 @@ prepare_chart_source({ dataset_id, task_id })
 不要为了达到数量上限而重复绘制同一信息。
 
 ## 4. 调用 render_chart
+
+data_junior 只在 `run_code` 程序里用 `tools.subagent_visualization_specialist(...)` 创建 specialist；
+specialist 是 native，照旧直调 `render_chart`。以下步骤属于 specialist。
 
 第一次调用前加载：
 

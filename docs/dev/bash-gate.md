@@ -1,18 +1,19 @@
-# shell 闸门、fs 写口与工具收敛（工具可见性不是权限隔离）
+# shell / PTC 执行面闸门、fs 写口与工具收敛（工具可见性不是权限隔离）
 
 > 索引见仓库根 `AGENTS.md` §1.6。改 shell / tool-fs 行挂载、`src/agents/bash-guard.ts` 或
 > `ROOT_AGENT_DENIED_TOOLS` 之前读这里。§编号沿用 `AGENTS.md` 的全局命名空间。
 
 > 2026-10-15 用户决策「开 read、同时保留 bash」：主 Agent 保留 `bash` / `pwsh`（读 skill 分册、
 > 纯计算），新开 `read` 读文件；文件写口（`write` / `edit`）不开——落盘只走工具实现。
-> `bash` 的本职仍是**纯计算兜底**（`query_dataset` 只有 count/min/max/avg/sum），不是取数通道。
+> 2026-10-23 起 data_junior 改用宿主 PTC：只挂 `tool-presentation`（`mode: ptc`），不挂 shell；
+> 它的程序面是 `run_code`，同样只做工具调度与派生算术，不是取数通道。
 
 ## 1.6 接线与结构件
 
 - **接线**：shell 行 preset 自持、**平台成对**挂载（Linux `tool-bash` / Windows `tool-pwsh`；Web
   平面把 host 层两行都 disabled，Windows 没有 bash-sandbox，只挂 bash 会实际执行 PowerShell），
-  主 Agent 与 data_junior 共用（2026-10-15 起不再只给 data_junior）。`enableRunInBackground: false`。
-  文件口一颗 `tool-fs`（本层只注册 `read`，`write` / `edit` 留在这里不注册——但**这不等于看不见**，见下）。
+  **只给主 Agent**（2026-10-23 起 data_junior 改挂 `tool-presentation` 的 `mode: ptc`，程序面是
+  `run_code`）。`enableRunInBackground: false`。文件口一颗 `tool-fs`（本层只注册 `read`，`write` / `edit` 留在这里不注册——但**这不等于看不见**，见下）。
 - **⛔ 行组合管得住的只有"我们自己的工具"与"同名变体的替换"**（2026-10-19 真机实测）：宿主
   `dsh-base` 在 **global 层**挂了 `dsh-tool-bash` / `dsh-tool-pwsh` / `dsh-tool-fs` /
   `dsh-tool-fs-search` / `dsh-tool-subagent-control`(+`/list-agents`) / `dsh-tool-todo` /
@@ -23,11 +24,13 @@
   那两档的可见性成因未实测清楚，但能确定的结论只有一条：指望行 config 收窄宿主面是靠不住的。）
   要减**可见面**只有 `tools.restrict({deny})`（且只对被委派的那一支有效，账本 L32）；要真**拦下**
   只能靠调用级 guard。写口与兄弟名字都属于后者。
-- **shell 名的判据仍要认全集**：两行都声明、靠 `disabled: !!js process.platform …` 互斥，所以
-  `bash-guard.ts` 的闸门必须认**两个名字的全集**——只认本平台那颗，另一端就是静默放行（§9.7）。
-- **结构件**（都不看命令内容）：① `ROOT_AGENT_DENIED_TOOLS` = 出图三件套 + 十三个出网工具 +
+- **执行面名字的判据仍要认全集**：shell 两行都声明、靠 `disabled: !!js process.platform …` 互斥，
+  再加 PTC 的 `run_code`，所以 `bash-guard.ts` 的闸门必须认 `EXECUTION_ESCALATION_TOOL_NAMES`
+  （`bash` / `pwsh` / `run_code`）——只认本平台那颗，另一端就是静默放行（§9.7）。
+- **结构件**（都不看命令或程序内容）：① `ROOT_AGENT_DENIED_TOOLS` = 出图三件套 + 十三个出网工具 +
   `write` / `edit`（shell 名 2026-10-15 起**移出**名单，旧钉子随决策迁移，见
-  `test/root-tool-policy.test.mjs`）；② `src/agents/bash-guard.ts` 在每个本 preset agent 自己的
+  `test/root-tool-policy.test.mjs`；`run_code` 是框架保留名，**不能**进 `restrict()`，根侧看不见只靠
+  “部署级 `dsh-tools.mode` 保持 native”）；② `src/agents/bash-guard.ts` 在每个本 preset agent 自己的
   scope 装单调 guard，只拦**必然失败的沙箱升级**（`sandbox_permissions` / `justification`：委派会话
   审批策略固定为 `never`，`decide()` 直接 rejected、answerer 不被调用，模型却收到「user rejected」
   式文案）——被委派或身份不可考的调用方 fail closed，主 Agent 的升级走正常 ask 审批；
@@ -60,15 +63,17 @@
   按 `read` 的参数做路径闸门是**假边界**：shell 还在，`cat` 同一个文件不需要任何权限，而沙箱实测
   只拦写不拦读。回归住 `test/persona.test.mjs`「read 的边界」四条——闸门管不到的地方，要写清是谁在管。
 - **⛔ 这道闸门不是安全边界，别把它写成边界**：实测沙箱只拦写、不拦读、不拦网络（`SandboxMode`
-  词汇表只覆盖文件效果）。`bashGuardReason()` **刻意不解析 `command`**——正则挡不住 `node -e` /
-  `python3 -c`，而 node / python 正是引入 bash 的目的。禁区与出网纪律是 data_junior persona 的
-  软约束（`# BASH DISCIPLINE`）。真要收紧：换掉 `ctx.shell`（容器 / 远端执行器）或做出网限制。
-- **⛔ 闸门认的是两个名字，不是一个**（2026-09-30 实测教训）：`bash-guard.ts` 原先只认 `bash`，
+  词汇表只覆盖文件效果）。`bashGuardReason()` **刻意不解析 `command` / `code`**——正则挡不住
+  `node -e` / `python3 -c` / 动态 `import()`，而 node / python 正是引入程序面的目的。禁区与出网纪律
+  是 data_junior persona 的 `# PROGRAM DISCIPLINE` 软约束。真要收紧：换掉 `ctx.shell` / PTC runtime
+  （容器 / 远端执行器）或做出网限制。
+- **⛔ 闸门认的是执行面全集，不是一个名字**（2026-09-30 实测教训）：`bash-guard.ts` 原先只认 `bash`，
   而 Windows 上模型调的是 `pwsh` ⇒ 判定在 Windows 上**一次都不触发，且不报错**。现在 shell 名字
-  只在 `SHELL_TOOL_NAMES`（`src/agents/root-tool-policy.ts`）定义一份，guard 与测试都从它取
-  （根侧 deny 不再含 shell 之后，两名字钉子继续住在 guard 判定与文案上）。这仍是 §9.7 那个族：
-  同一能力两个入口，回归只喂了接好的那一个。现在 `test/bash-guard.test.mjs` 每条判定对
-  `bash` / `pwsh` 各跑一遍，并另有一条断言「preset 挂的每一行 shell，guard 都必须认」。
+  只在 `SHELL_TOOL_NAMES`（`src/agents/root-tool-policy.ts`）定义一份，`run_code` 由
+  `EXECUTION_ESCALATION_TOOL_NAMES` 并进来，guard 与测试都从它取（根侧 deny 不再含 shell 之后，
+  名字钉子继续住在 guard 判定与文案上）。这仍是 §9.7 那个族：同一能力多个入口，回归只喂了接好的
+  那一个。现在 `test/bash-guard.test.mjs` 每条判定对 `bash` / `pwsh` / `run_code` 各跑一遍，
+  并另有一条断言「preset 挂的每一行 shell，guard 都必须认」。
 - **pwsh 侧只量到一半**（2026-09-30 桌面端记录）：一份 Capital 会话日志里有 **21 次 `pwsh` 调用，全部是读**
   （读到 workspace 外的 `~/.dsh/.credentials.yaml`、`app.asar`、`%APPDATA%`）⇒ **「不拦读」在 pwsh 上已实测**；
   「拦写」与「不拦网」两条仍无记录，别把 bash 的结论当 pwsh 的承诺。
@@ -100,8 +105,9 @@
   `workspace-write`，而 `describe_dataset` 会用 data_junior 的 session 写 `profile.json`——钉成
   read-only 直接打断它：bash 与 Dataset 管线共用同一把尺子（session policy）。模型侧的写口
   由上文 ③ 的调用期闸门收，工具实现侧的落盘不在此列。
-- 回归：`test/bash-guard.test.mjs`（「主 Agent 的 shell 调用放行」「命令内容不参与判定」与两个
-  名字的对等判定）、`test/root-tool-policy.test.mjs`（「shell 不点名，写口点名」+
+- 回归：`test/bash-guard.test.mjs`（「主 Agent 的 shell / run_code 调用放行」「命令与程序内容不参与
+  判定」与三个名字的对等判定）、`test/root-tool-policy.test.mjs`（「shell 不点名，写口点名」+
   `fsWriteGuardReasonFor` / `registerFsWriteGuard` 用例）、`test/persona.test.mjs`（「平台成对
-  挂载」「tool-fs 行」「纯计算兜底」）、`test/apply-integration.test.mjs`（闸门按行为分流 + fs
+  挂载」「tool-fs 行」「program discipline」）、`test/ptc-preset.test.mjs`（只有 junior 有
+  presentation 行、无 shell 行）、`test/apply-integration.test.mjs`（闸门按行为分流 + fs
   写口全局装一次）。

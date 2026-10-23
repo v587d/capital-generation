@@ -43,8 +43,8 @@
   组装——persona 或 skill 里各有**被测试钉住的**一份，此处不复述。
 - **数据的物理路径**：`render_chart` 只回小回执，序列写 `capital-analysis/charts/<id>/`，浏览器
   经旁路取，**不进任何 Agent 上下文**；交付事件也不进 `deriveMessages()`。进对话流的**唯一**方式
-  是官方 `deliverables/presented`（§6.3 → `chart-delivery-events.md`）；auto 模式下它由主 Agent
-  在最终答复前调用 `present_charts` 写入，不在出图时自动登记。跨数据集归一化对照当前**没有**
+  是官方 `deliverables/presented`（§6.3 → `chart-delivery-events.md`）；auto 模式下由收尾流的
+  终端帧写入（`present_charts` 只记录清单），不在出图时自动登记。跨数据集归一化对照当前**没有**
   合规路径。
 - **工具面落点**：出图链仍只在 `visualization_specialist`（`tools/chart-render`）；根 preset 多挂
   的一条是 `tools/present`（只带 `present_charts`，不渲染、不读数据）。它是「主 Agent 只在收尾写

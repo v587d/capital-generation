@@ -445,6 +445,12 @@ test('capital-policy + tools/root-extras：注册根 Agent 工具收敛监听（
     assert.equal(guarded.every((guard) => bashGuards.includes(guard)), true, '识别出的 shell 闸门就是全部按 agent 安装的闸门')
     assert.equal(bashGuards[0](rootBashCall()), undefined, '主 Agent 的 shell 调用放行')
     assert.match(String(bashGuards[0](childBashEscalation())), /不会去问用户/)
+    // Same gate now covers data_junior's PTC transport: escalation there is just as doomed.
+    assert.match(String(bashGuards[0]({
+      name: 'run_code',
+      agent: { session: { header: { cwd: '/w', parentSession: 'main-1' } } },
+      arguments: { code: 'return 1', description: 'probe', sandbox_permissions: 'danger-full-access', justification: 'needs write' },
+    })), /run_code/)
     assert.equal(bashGuards[0]({ name: 'bash', agent: { session: { header: { cwd: '/w', parentSession: 'main-1' } } }, arguments: { command: 'node -e 1' } }), undefined)
 
     // Policy failures (unknown tool, missing ctx) must not throw: runs on agent creation.

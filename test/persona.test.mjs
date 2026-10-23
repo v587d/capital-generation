@@ -158,9 +158,6 @@ const mountsRow = (presetId, rowName) => allRowsOf(presetId).some((row) => row?.
 /** Network tool names must come from root-tool-policy; a copied list would drift and leak web access. */
 const NETWORK_TOOLS = [...RETRIEVAL_DENIED_TOOLS]
 
-/** Platform rows mount exactly one shell name; asserting the other name silently misleads the model. */
-const SHELL_TOOL = process.platform === 'win32' ? 'pwsh' : 'bash'
-
 /** Size gates measure content, not YAML indentation. */
 const dedent = (value) => value.split('\n').map((line) => line.trimStart()).join('\n')
 
@@ -543,7 +540,7 @@ test('主 persona：图表由 data_junior 出品——主 Agent 不出图、不�
 
 test('主 persona + 协议：最终答复自足，图表由主 Agent 在最终答复前统一登记', () => {
   // DSH folds earlier turns and only shows the closing reply: a pointer-style closing line hides the whole report.
-  assertRule(MAIN_PERSONA, /写最终答复前先调用一次 present_charts/, '主 persona 必须把 present_charts 放在最终答复之前')
+  assertRule(MAIN_PERSONA, /调用一次 present_charts/, '主 persona 必须要求调用 present_charts 记录清单')
   assertRuleAny(MAIN_PERSONA, [/一次传全部 ref/, /一次全部传入/], '图表登记必须一次传完，不许分批留在中间轮')
   assertRule(MAIN_PERSONA, /禁止“分析已完成/, '主 persona 必须点名禁止指针式收尾')
   assertRule(MAIN_PERSONA, /必须自足/, '主 persona 必须要求最终答复自足（折叠后仍可独立阅读）')
@@ -562,6 +559,10 @@ test('主 persona + 协议：最终答复自足，图表由主 Agent 在最终�
   const equityResearch = readFileSync(`${SKILL_DIR}capital-equity-research/SKILL.md`, 'utf8')
   assertRule(equityResearch, /present_charts/, '投研报告协议必须在最后一轮交付前登记图表')
   assertRule(equityResearch, /最后一轮的唯一可见内容/, '投研报告协议必须写明报告就是最后一轮的可见内容')
+  // Delivery is executed by the host at the closing stream; the model's call only records the list.
+  assertRule(equityResearch, /只记录本轮图表清单/, '协议必须说明 present_charts 只记录清单')
+  assertRule(equityResearch, /提前调用也安全/, '协议必须打消“必须在最后一刻调用”的时机压力')
+  assertRule(equityResearch, /最终答复之前/, '协议必须写明宿主在最终答复之前写入交付行')
 })
 
 test('主 persona：预热与回合纪律——每会话一个 dc、等待期不做外部检索、失败按重试纪律', () => {
@@ -814,7 +815,7 @@ test('行组合指认得出真东西：行名都在行契约里，且没有一�
 })
 
 
-test('shell 行：平台成对挂载（主 Agent 与 data_junior 共用），且不给后台执行', () => {
+test('shell 行：平台成对挂载（只给主 Agent），且不给后台执行', () => {
   const bashRow = rowById('tool-bash')
   const pwshRow = rowById('tool-pwsh')
   assert.ok(bashRow, 'preset 必须自己挂 tool-bash（web 平面把 host 层那一行 disabled 了）')
@@ -832,6 +833,11 @@ test('shell 行：平台成对挂载（主 Agent 与 data_junior 共用），且
 
   // The preset layer must not deny these rows: a preset deny strips them from children too (allow is an intersection).
   assertNotMatches(COMPOSITION_TEXT, /id: tool-bash[\s\S]{0,80}deny/)
+  // data_junior's only execution surface is the PTC program; a shell row would re-open the
+  // "bash or program" choice and make the SDK inject its own tools.bash example.
+  for (const rowName of ['@deepseek-ai/dsh-tool-bash', '@deepseek-ai/dsh-tool-pwsh']) {
+    assert.ok(!mountsRow(ROLE_PRESET_IDS.junior, rowName), `data_junior 不挂 ${rowName}：它只有 run_code 一个执行面`)
+  }
 })
 
 test('tool-fs 行：本层变体只开 read；写口真正的拦阻住在全局 guard（宿主的 write/edit 删不掉）', () => {
@@ -843,16 +849,23 @@ test('tool-fs 行：本层变体只开 read；写口真正的拦阻住在全局 
   assert.deepEqual(fsRow.config, { read: true, write: false, edit: false }, 'tool-fs 的本层变体只开 read；改动要有设计决策')
 })
 
-test('data_junior persona：bash 是纯计算兜底，且禁区/出网纪律必须写明（软约束）', () => {
-  assertRule(JUNIOR_PERSONA, /BASH DISCIPLINE/)
-  assertRuleAny(JUNIOR_PERSONA, [/只用于算/, /只做纯计算/], 'persona 必须写明 bash 的用途边界')
-  assertRule(JUNIOR_PERSONA, /变化量|增幅|CAGR/, 'persona 必须点明 bash 是给哪类派生指标兜底的')
-  assertRule(JUNIOR_PERSONA, /优先 resolve_data_time_range/, '时间窗仍归宿主：bash 不得取代 resolve_data_time_range')
+test('data_junior persona：program discipline——值从工具返回对象取，程序只调度与算术', () => {
+  assertRule(JUNIOR_PERSONA, /PROGRAM DISCIPLINE/)
+  assertRule(JUNIOR_PERSONA, /run_code/)
+  assertRuleAny(JUNIOR_PERSONA, [/console\.log\(s\.content\)/, /console\.log/], '加载 skill 后必须打印 content，只 await 等于没读')
+  assertRule(JUNIOR_PERSONA, /skill也走tools\.skill/, 'PTC 下 skill 也必须经 run_code 里的 tools.skill，不能直调原生 skill 工具')
+  assertRule(JUNIOR_PERSONA, /别直调/, '第一次点名 skill 时就要写明不能直调，不能只把约束藏在后面的 PROGRAM DISCIPLINE')
+  assertRule(JUNIOR_PERSONA, /Promise\.all/, '多份 describe 的并发形状必须写进 persona')
+  assertRuleAny(JUNIOR_PERSONA, [/字段直接取/, /不手抄/], '数字必须从返回值直接取，不经过模型文本')
+  assertRule(JUNIOR_PERSONA, /变化量|增幅|CAGR/, 'persona 必须点明程序是给哪类派生指标用的')
+  assertRuleAny(JUNIOR_PERSONA, [/优先 resolve_data_time_range/, /resolve_data_time_range/], '时间窗仍归宿主：程序不得取代 resolve_data_time_range')
   assertRuleAny(JUNIOR_PERSONA, [/不读文件/, /不碰 capital-data/], 'persona 必须写明不读文件（原始行边界）')
   assertRule(JUNIOR_PERSONA, /capital-data/, '禁区要具体到路径，否则等于没说')
-  assertRuleAny(JUNIOR_PERSONA, [/不联网/, /不跑 curl/], 'persona 必须写明不出网')
+  assertRuleAny(JUNIOR_PERSONA, [/不 fetch/, /不联网/], 'persona 必须写明不出网')
   assertRule(JUNIOR_PERSONA, /data_gap/, '缺数据的正确路径必须写明')
-  assertRuleAny(JUNIOR_PERSONA, [/只留结论数字/, /输出只留/], 'bash 输出体积纪律必须写明（工具结果同样过 pruner）')
+  assertRule(JUNIOR_PERSONA, /sandbox_permissions/, '委派会话申请升级必然失败，persona 必须点名')
+  assertRuleAny(JUNIOR_PERSONA, [/只返回结论/, /不要 return 整份/], '程序输出体积纪律必须写明（外层结果同样过 pruner）')
+  assertRule(JUNIOR_PERSONA, /tools\.send_message/, 'PTC 下回传必须写 tools.send_message，避免先发原生调用')
 })
 
 test('子 Agent 按需协议：子 persona 点名的每一册都真实存在，写错名字会静默拿不到契约', () => {
@@ -980,9 +993,11 @@ test('subagent_data_junior 行：选对角色 preset，工具面只含只读 Dat
   for (const forbiddenTool of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status', 'write_profile', 'render_chart', 'ocr', 'anysearch_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'python']) {
     assert.ok(!face.includes(forbiddenTool), `角色工具面不应包含 ${forbiddenTool}`)
   }
-  // Shell comes from a row: junior mounts the platform pair, the other half blocked by `disabled`.
-  assert.ok(mountsRow(ROLE_PRESET_IDS.junior, `@deepseek-ai/dsh-tool-${SHELL_TOOL}`),
-    `data_junior 必须挂本平台的 ${SHELL_TOOL} 行（纯计算兜底，persona 的 BASH DISCIPLINE 靠它落地）`)
+  // Execution comes from PTC, not a shell row: only `run_code` may be called directly.
+  assert.ok(!mountsRow(ROLE_PRESET_IDS.junior, '@deepseek-ai/dsh-tool-bash') && !mountsRow(ROLE_PRESET_IDS.junior, '@deepseek-ai/dsh-tool-pwsh'),
+    'data_junior 不挂 shell：程序面是唯一执行入口（否则 SDK 会主动塞 tools.bash 示例）')
+  assert.ok(mountsRow(ROLE_PRESET_IDS.junior, '@deepseek-ai/dsh-agent-tool-presentation'),
+    'data_junior 必须挂 tool-presentation 行，mode: ptc 才让 SDK 成为它的工具面')
   assert.ok(mountsRow(ROLE_PRESET_IDS.junior, '@deepseek-ai/dsh-tool-skill') && mountsRow(ROLE_PRESET_IDS.junior, '@deepseek-ai/dsh-tool-subagent-control'),
     'junior 要能按需加载协议册子并 send_message 回传：skill 行与 control 行都得挂')
 })
@@ -1006,7 +1021,8 @@ test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质�
     /profile_failed/,
     /DatasetRef/,
     /describe_dataset/,
-    /同一条消息/,
+    /run_code/,
+    /tools\.describe_dataset/,
     /单点复核/,
     /inspect_dataset/,
     /profile_dataset/,
@@ -1025,9 +1041,10 @@ test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质�
     /原样填入/,
     /字段名、数值、日期一律不改写/,
     /不得出现原始数据行|绝不把 rows 写进|不含任何数据行/,
-    /无外部行情 API/,
-    /无网页检索/,
-    /无凭据读取能力/,
+    /没有外部行情 API/,
+    /网页检索/,
+    /凭据入口|读凭据/,
+    /run_code 里的 Node 也不得/,
     /不索取或保存账户密码/,
     /不会被\s*data_collector 创建/,
     /经主 Agent 中继/,
@@ -1072,14 +1089,22 @@ test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质�
     /只能是\*\*手上 DatasetRef 里出现过的 capability 原值\*\*|手上 DatasetRef 里出现过的 capability/,
     /`?time_facts`? 已经给了首末行取值/,
     /不得出现原始数据行|绝不把 rows 写进|不含任何数据行/,
-    // describe_dataset: default entry, one per call, batched in one message, size gate and narrowing knobs.
+    // describe_dataset: default entry, one per call, batched inside one program, size gate and narrowing knobs.
     /describe_dataset/,
     /一次一份|一次调用只传一个/,
-    /同一条 assistant 消息|同一条消息/,
+    /Promise\.all/,
     /too_large/,
     /columns_of_interest/,
     /7000/,
   ]) assertRule(dataProtocol, pattern, `capital-data-protocol 缺少要点: ${pattern}`)
+
+  // Batch execution moved from "one message" to "one program": a stale native wording here would
+  // tell data_junior to send direct calls that PTC no longer accepts.
+  const profileVolume = skillVolume('capital-data-profile')
+  assertRule(profileVolume, /同一个 `run_code` 程序/, 'capital-data-profile §3.0 必须把并发 describe 写进同一个程序')
+  assertRule(profileVolume, /Promise\.all/, 'capital-data-profile §3.0 必须给出 Promise.all')
+  assertRule(profileVolume, /tools\.send_message/, 'capital-data-profile §3.1 必须给出 PTC 下的 tools.send_message')
+  assertNoRule(profileVolume, /同一条 assistant 消息里一次发完/, 'capital-data-profile 不得残留 native 的“同一条消息”批量写法')
 })
 
 test('visualization_specialist 行：创建权只在 data_junior 手里，工具面只允许 skill + render_chart', () => {
@@ -1150,10 +1175,12 @@ test('data_collector preset：hub / store 仍住 isolate realm，realm 里只有
     'realm 里只许挂 tools/collect：hub 与 128 个数据源只能由它建，别挂进来就会跨 preset 重名')
 })
 
-test('data_junior preset：bash 与出图委派仍是 YAML 框架行，不靠运行期名单', () => {
+test('data_junior preset：PTC presentation 与出图委派仍是 YAML 框架行，不靠运行期名单', () => {
   const plugins = allRowsOf(ROLE_PRESET_IDS.junior)
   assert.ok(!plugins.some((row) => row?.id === 'capital-generation-scope'), 'junior 不建 hub，也就不需要 collector 的 isolate 组')
-  assert.ok(plugins.some((row) => row?.name === '@deepseek-ai/dsh-tool-bash'), 'bash 仍由 YAML 框架行提供')
+  assert.ok(plugins.some((row) => row?.name === '@deepseek-ai/dsh-agent-tool-presentation' && row?.config?.mode === 'ptc'),
+    'junior 的呈现方式由 preset 自己的 tool-presentation 行声明（mode: ptc）')
+  assert.ok(!plugins.some((row) => /^@deepseek-ai\/dsh-tool-(bash|pwsh)$/.test(row?.name ?? '')), 'junior 不挂 shell 行')
   assert.ok(plugins.some((row) => row?.name === '@deepseek-ai/dsh-tool-subagent' && row?.config?.toolName === 'subagent_visualization_specialist'),
     'specialist 委派行仍由 YAML 提供')
 })
@@ -1168,7 +1195,7 @@ test('族行不带任何行配置：没有"以为裁了、其实没人读"的开
 })
 
 test('data_junior persona：profile 后负责可视化 gate、签发 token、等待出图 barrier', () => {
-  for (const pattern of [/可视化协议/, /capital-visualization-protocol/, /描述完成\s*（describe_dataset \/ profile_dataset）后无条件加载/, /用户明确要求图表/, /每份 profile 后都跑/, /不是用户是否说“要图”/, /“不要图”/, /时间序列/, /OHLC\+volume/, /多个可比数值序列/, /必须选择 recommended/, /prepare_chart_source/, /subagent_visualization_specialist/, /not_needed/, /recommended/, /blocked/, /failed/, /出图 barrier/, /chart_ref/, /rendered \/ skipped \/ failed/]) {
+  for (const pattern of [/可视化协议/, /capital-visualization-protocol/, /描述后无条件加载/, /用户明确要求图表/, /每份 profile 后都跑/, /不是用户是否说“要图”/, /“不要图”/, /时间序列/, /OHLC\+volume/, /多个可比数值序列/, /必须选择 recommended/, /prepare_chart_source/, /subagent_visualization_specialist/, /not_needed/, /recommended/, /blocked/, /failed/, /出图 barrier/, /chart_ref/, /rendered \/ skipped \/ failed/]) {
     assertRule(JUNIOR_PERSONA, pattern, `data_junior persona 缺少可视化编排要点: ${pattern}`)
   }
   assertRuleAny(MAIN_PERSONA, [/visualization_specialist/, /可视化.*data_junior/], '主 persona 必须说明 visualization_specialist 由 data_junior 管理')
@@ -1342,7 +1369,7 @@ test('协议拆册只搬家不删规则：每一节都在某一册里，正文�
   const families = [
     { label: '数据协议', volumes: ['capital-data-protocol', 'capital-data-profile', 'capital-data-query'], floor: 17150,
       sections: ['## 0. 谁读哪一节', '## 1. 数据请求', '## 1.1 能力发现', '## 2. 逐份回传', '## 3.0 读取 Dataset',
-        '## 3. 质检请求与回传', '### 3.2 时间轴', '## 3.3 bash', '## 3.1 数据缺口', '## 4. 受控查询',
+        '## 3. 质检请求与回传', '### 3.2 时间轴', '## 3.3 run_code', '## 3.1 数据缺口', '## 4. 受控查询',
         '## 5. 重试纪律', '## 5. 输出必须披露的字段'] },
     { label: '检索协议', volumes: ['capital-web-protocol', 'capital-web-evidence'], floor: 10822,
       sections: ['## 1. 来源边界', '### 1.1 来源查询的纪律', '### 1.2 遇到结构化数值诉求', '## 2. 搜索收敛',
@@ -1378,13 +1405,14 @@ test('核查分级（2026-10-10 真机）：核心事实逐条、外围一句话
   assertRuleAny(orchestration, [/不预设.*审计级格式/], '委派侧必须禁止默认审计级清单')
 })
 
-test('bash 派生计算（2026-10-10 真机）：只敲标量、逐数核对，不整行复制', () => {
+test('run_code 派生计算（2026-10-10 真机教训）：字段直接取、不手抄、只返回结论', () => {
   // This section lives in capital-data-query, so it is checked by volume rather than anywhere in the family.
   const dataProtocol = skillVolume('capital-data-query')
-  assertRuleAny(dataProtocol, [/只敲最终参与计算的标量/], 'capital-data-query §3.3 必须限定只敲标量')
-  assertRuleAny(dataProtocol, [/逐一核对/], 'capital-data-query §3.3 必须要求转写后逐数核对')
-  assertRuleAny(dataProtocol, [/不整行\/?整表复制/], 'capital-data-protocol §3.3 必须禁止整行复制')
-  assertRuleAny(JUNIOR_PERSONA, [/逐数核对|逐一核对/], 'data_junior persona BASH DISCIPLINE 必须留核对硬规则')
+  assertRuleAny(dataProtocol, [/字段.*直接取|不手抄/], 'capital-data-query §3.3 必须要求从返回对象直接取字段')
+  assertRuleAny(dataProtocol, [/不整行复制/], 'capital-data-query §3.3 必须禁止整行复制到程序里')
+  assertRuleAny(dataProtocol, [/只返回结论/], 'capital-data-query §3.3 必须要求只返回结论')
+  assertRuleAny(dataProtocol, [/tools\.describe_dataset/], 'capital-data-query §3.3 的示例必须使用 tools.* 绑定')
+  assertRuleAny(JUNIOR_PERSONA, [/字段直接取|不手抄/], 'data_junior persona PROGRAM DISCIPLINE 必须留“直接取字段”硬规则')
 })
 
 test('preset 名册：六颗 preset、id 唯一、每颗角色都被某条委派行选中', () => {

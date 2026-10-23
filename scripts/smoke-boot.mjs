@@ -43,6 +43,9 @@ const FAMILY_ROWS_BY_PRESET = Object.fromEntries(
 /** The selector must show the three standalone modes and hide the two delegation-only roles. */
 const VISIBLE_PRESET_IDS = [ROOT_PRESET_ID, ROLE_PRESET_IDS.collector, ROLE_PRESET_IDS.retriever]
 const INTERNAL_PRESET_IDS = [...INTERNAL_ROLE_PRESET_IDS]
+/** PTC is selected by this preset row, while the runtime itself is a host-plane row. */
+const PTC_PRESET_ID = ROLE_PRESET_IDS.junior
+const PTC_PRESENTATION_ROW = 'tool-presentation'
 /** `__DSH_BOOT__` keys by package name: derive it from package.json, never hardcode the directory name. */
 const CLIENT_BUNDLES = [
   { dir: 'chart-ui', label: '图表客户端 bundle' },
@@ -182,7 +185,7 @@ function probeSource() {
     `}`,
     ``,
     `async function attempt(ctx) {`,
-    `  const result = { preset: null, broken: null, entry: null, localFetchEnabled: null, rows: null, presetRows: null, rolePresets: null, remoteRoster: null, familyRows: null, hostRuntime: null, identityGuards: null, problems: [] }`,
+    `  const result = { preset: null, broken: null, entry: null, localFetchEnabled: null, rows: null, presetRows: null, rolePresets: null, remoteRoster: null, familyRows: null, ptcRow: null, ptcRuntime: null, hostRuntime: null, identityGuards: null, problems: [] }`,
     `  try {`,
     `    const agentPresets = ctx.get('agentPresets')`,
     `    if (!agentPresets) result.problems.push('agentPresets 服务未提供')`,
@@ -240,6 +243,14 @@ function probeSource() {
     `        }`,
     `        if (compositionOf.rows?.some((row) => row.entryId === 'capital-generation')) result.problems.push(presetId + ' 仍然挂着单体 capital-generation 行')`,
     `      }`,
+    `      // PTC：presentation 是 preset 级行，runtime 是宿主级服务；两者缺一，junior 的执行面直接不存在。`,
+    `      const PTC_PRESET_ID = ${JSON.stringify(PTC_PRESET_ID)}`,
+    `      const PTC_PRESENTATION_ROW = ${JSON.stringify(PTC_PRESENTATION_ROW)}`,
+    `      const ptcComposition = inventory.find((item) => item.id === PTC_PRESET_ID)`,
+    `      result.ptcRow = ptcComposition?.rows?.find((row) => row.entryId === PTC_PRESENTATION_ROW)?.fiberState ?? null`,
+    `      result.ptcRuntime = Boolean(ctx.get('ptcRuntime'))`,
+    `      if (result.ptcRow !== 2) result.problems.push(PTC_PRESET_ID + ' 的 ' + PTC_PRESENTATION_ROW + ' 行未激活（fiberState=' + result.ptcRow + '）：data_junior 不会得到 run_code')`,
+    `      if (result.ptcRuntime !== true) result.problems.push('ctx.get(\\'ptcRuntime\\') 为空：宿主的 ptc-runtime 行没装，tool-presentation: ptc 会在 mount 阶段失败')`,
     `    }`,
     `    result.hostRuntime = Boolean(ctx.get('capitalChartRuntime'))`,
     `    if (!result.hostRuntime) result.problems.push('capital-runtime 未提供 capitalChartRuntime（chart source token 无法跨 preset 共享）')`,
@@ -491,6 +502,7 @@ try {
       const expectedFamilyRows = Object.values(FAMILY_ROWS_BY_PRESET).reduce((sum, ids) => sum + ids.length, 0)
       console.log(`smoke-boot: ${familyRows.length === expectedFamilyRows && familyBad.length === 0 ? '✅' : '❌'} 族行装配（共 ${familyRows.length}/${expectedFamilyRows} 行）${familyBad.length === 0 ? '' : '，未激活：' + familyBad.map((row) => row.preset + '/' + row.rowId + '=' + row.state).join(', ')}`)
       console.log(`smoke-boot: ${probe.hostRuntime === true ? '✅' : '❌'} host runtime capitalChartRuntime（${probe.hostRuntime === true ? 'present' : 'absent'}）`)
+      console.log(`smoke-boot: ${probe.ptcRow === 2 && probe.ptcRuntime === true ? '✅' : '❌'} data_junior PTC：tool-presentation fiberState=${probe.ptcRow ?? '读不到'}，ptcRuntime=${probe.ptcRuntime === true ? 'present' : 'absent'}`)
       console.log(`smoke-boot: ${probe.identityGuards === 3 ? '✅' : '❌'} 身份闸门在宿主 global guard 层：${probe.identityGuards ?? '读不到'} / 3 颗（fs 写口 + ocr 形态 + 兄弟名字）`)
       console.log(`smoke-boot: ${probe.presetRows?.every((row) => row.state === 2) ? '✅' : '❌'} 关键预设行：${JSON.stringify(probe.presetRows ?? [])}`)
       console.log(`smoke-boot: ${probe.entry === 'present' && typeof probe.localFetchEnabled === 'boolean' ? '✅' : '❌'} settings 条目 ${SETTINGS_ENTRY_ID}：${probe.entry}，retriever.localFetch.enabled=${probe.localFetchEnabled}`)

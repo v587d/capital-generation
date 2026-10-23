@@ -90,9 +90,9 @@ route owner 自己负责，平台自己的 `/api` 与首页分别走 `connection
 
 ## 本轮呈现（官方交付通道）
 
-auto 模式下 `render_chart` 不再自动登记：主 Agent 在写最终答复前调用一次 `present_charts`，
-把本轮 `chart_ref` 汇总成一条**官方** `deliverables/presented` 事件写进"用户正在看的根会话"，
-把 `capital-analysis/charts/<chart_id>/chart.html` 登记为**收尾轮交付物**（单体载体仍在出图时
+auto 模式下 `render_chart` 不再自动登记：`present_charts` 只记录本轮图表，宿主在**收尾流结束、
+收尾消息落盘之前**写一条**官方** `deliverables/presented` 事件到"用户正在看的根会话"，把
+`capital-analysis/charts/<chart_id>/chart.html` 登记为**收尾轮交付物**（单体载体仍在出图时
 自动登记）：
 
 - 载荷只有官方契约字段：`turn` / `callId`（`capital-chart:<chart_id>` 句柄）/ `files[]`

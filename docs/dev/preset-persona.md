@@ -30,9 +30,9 @@
   0.2.1 起委派行**不再带 persona**（报错原文：`persona and tool plugins … configure them in an
   Agent Preset and select it with agentPreset`），子 persona 因此住在角色 preset 自己的声明行里，
   那是**另一颗 generation**，不是往主 persona 上追加一节。
-- **工具面落点（D0，2026-10-19）**：六颗 preset 全部只挂 `@v587d/capital-generation/tools/<family>`
-  的**族行**——组合表住 `test/persona.test.mjs`、行契约住 `test/family-rows.mjs`（十行清单抄两份就是
-  §9.7 的开端）。运行期那份名字级 allow 清单已删，只剩 control 焊进来的 `interrupt_agent` 逐名减掉。
+- **工具面落点（D0，2026-10-19）**：六颗 preset 只挂 `.../tools/<family>` 的**族行**——组合表住
+  `test/persona.test.mjs`、行契约住 `test/family-rows.mjs`（抄两份就是 §9.7 的开端）；运行期 allow 已删，
+  只剩 `interrupt_agent` 逐名减掉。2026-10-23 起 junior 另挂 `tool-presentation`（`mode: ptc`）、删 shell 两行：唯一直调是 `run_code`（`test/ptc-preset.test.mjs`）。
 - **host 平面**：`capital-runtime` 只 provide 一份 chart token/artifact；`capital-policy` 在 host
   装一次 root/role/shell/fs 监听；root 可见性已由组合期负责（deny:false），旧单体调用点已删。
 - 长协议由 `skill-filesystem` + `tool-skill` 两行发现；组合设计理由住同目录 `README.md`（不注入
@@ -116,9 +116,9 @@
   本 preset 作用域没有这两个名字）；但 2026-10-20 的 web profile 里 AnySearch 会补注册 `web_fetch`，它进
   所有 preset，说明"没挂行"不等于"看不见"；要收窄就加回根侧/角色名单或关掉宿主 provider。
 - **四组结构件，删任一处该闸门就退回"persona 软建议"**：① 可视化 gate（§6.1 三件套 + §6.3 两处
-  联动 → `chart-presentation.md` / `chart-delivery-events.md`）；② shell 闸门与 fs 写口
-  （shell 槽位 + 升级 guard + `write`/`edit` 的根侧名单与全局 guard，2026-10-15「开 read、
-  同时保留 bash」→ `bash-gate.md` §1.6）；③ 出网只有一个入口：`RETRIEVAL_DENIED_TOOLS`
+  联动 → `chart-presentation.md` / `chart-delivery-events.md`）；② shell / `run_code` 闸门与 fs 写口
+  （主 Agent shell 槽位、junior 的 PTC 程序面、升级 guard + `write`/`edit` 的根侧名单与全局 guard
+  2026-10-15「开 read、同时保留 bash」，2026-10-23 junior 转 PTC → `bash-gate.md` §1.6）；③ 出网只有一个入口：`RETRIEVAL_DENIED_TOOLS`
   （`src/agents/root-tool-policy.ts`，13 个检索 / 来源工具名的**唯一事实来源**，spread 进
   `ROOT_AGENT_DENIED_TOOLS`，**新增来源只改这一处**）+ 主 persona 禁直连
   文案；这批名字同时**只由 `capital-web-retriever` 挂的 `tools/retrieve-search` +

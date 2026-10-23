@@ -148,15 +148,32 @@
   （新工具必须先有族行带它、行契约同步）；更新 `AGENTS.md`、`docs/dev/data-roles.md` 与
   `test/persona.test.mjs` 的预留期断言。
 
-## 5.1 shell 与文件口：开 read、保留 bash、不给写（2026-10-15 用户决策）
+## 5.1 shell 与文件口：主 Agent 保留 shell，data_junior 用 PTC（2026-10-15 / 2026-10-23）
 
 - **动机**：`query_dataset` 只有 `count/min/max/avg/sum`，变化量 / 增幅 / CAGR / 比值这类派生
   指标没有宿主工具；模型只能拿 `time_facts.first/last` 心算——那正是 §1.3 那次 41,961 字符
-  时间戳心算的同型浪费。所以给 data_junior 一个纯计算兜底。**不是**给它开取数通道。
+  时间戳心算的同型浪费。所以给 data_junior 一个程序面。**不是**给它开取数通道。
 - **2026-10-15 起主 Agent 也持有 shell 与 `read`**（用户决策「开 read、同时保留 bash」，推翻
   2026-09-30 的"主 Agent 不给 shell"）：主 Agent 需要 `read` 读 skill 分册与工作区文件
   （此前只能 `bash cat`，能力等价但绕远），shell 保留纯计算兜底。`ROOT_AGENT_DENIED_TOOLS`
   里的 `bash` / `pwsh` 随之移出，名单改为出图三件套 + 十三个出网工具 + `write` / `edit`。
+
+### 5.1.1 PTC：只给 data_junior，主 Agent 仍是 native
+
+- **一行怎么落**：junior preset 挂 `@deepseek-ai/dsh-agent-tool-presentation`（`mode: ptc`），
+  同时删掉 `tool-bash` / `tool-pwsh`。宿主 `ptc-runtime` 由 `dsh-base` 提供，preset 写不进去；
+  `smoke:boot` 同时断言 presentation 行 `fiberState=2` 与 `ctx.get('ptcRuntime')` 在场。
+- **为什么删 shell 而不是并存**：PTC SDK 在可见 `bash` 时会主动塞一条 `tools.bash({command:'pwd'})`
+  示例，并存等于官方提示词把模型往 shell 引；junior 只需要一个执行面。主 Agent 仍是 native，
+  拿到的是原生 shell，根侧 `restrict()` 不能点名保留名 `run_code`（只在部署级 `tools.mode`
+  被改成 `ptc` 时才会出现，本仓只允许 preset 行）。
+- **省的是回合与抄写，不是安全升级**：`run_code` 里的 Node 仍能 `import('node:fs/promises')` /
+  `fetch` / `child_process`；宿主沙箱只拦写。`# PROGRAM DISCIPLINE` 与
+  `capital-data-query` §3.3 是纪律，不是边界；要硬隔离只能换容器 / VM / 远端 runtime。
+- **结果体积不变**：describe 仍是 7000 码点小回执 + hint；`run_code` 外层只过宿主 pruner（8192），
+  本仓不新设第二道闸门。per-call（每次新进程）是默认，不使用 `persistent-in-memory`。
+- **回滚**：整颗改动（composition 行 + persona + 三册 skill + guard）是一个 commit；回滚后
+  junior 回到 bash + native，恢复两行 YAML 与 `# BASH DISCIPLINE` 即可。
 - **文件写口不开，但"不开"靠的是调用级闸门，不是行配置**：根 preset 那行 `read: true /
   write: false / edit: false` 只决定**本层变体**——2026-10-19 实测手开 Capital 里 `write` 仍在工具表
   中且真的落盘，缺席不等于移除（`ScopedLayers.merge` 用 global 打底，账本 L33）。所以拦下写口的只有一颗：全局 `tools.guard()`
@@ -167,25 +184,26 @@
   本来就有正路（`store.writeContext` 等工具实现）。角色一侧同一条判据：本插件的六颗 preset 一律
   不许直接写文件，原始 rows 也永不出工具层。
 - **平台成对挂载**：Windows 上 host 层挂的是 `pwsh-sandbox`，没有 `bash-sandbox`；只挂
-  `tool-bash` 会让名为 bash 的工具实际执行 PowerShell。所以两行互补 `disabled: !!js`。0.2.1 起
-  这份 YAML 里不再出现工具名，shell 名改为在 `src/agents/role-tool-policy.ts` 按平台取一颗
-  （`SHELL_TOOL`）进 data_junior 的清单——取错那颗会整批 restrict 报错、该角色完全不收敛，
-  所以 `test/bash-guard.test.mjs` 另钉一条"preset 挂的每一行 shell，闸门与角色工具面都必须认"，
+  `tool-bash` 会让名为 bash 的工具实际执行 PowerShell。所以两行互补 `disabled: !!js`。
+  0.2.1 起这份 YAML 里不再出现工具名，shell 名在 `src/agents/root-tool-policy.ts` 的
+  `SHELL_TOOL_NAMES` 定义一份，`bash-guard.ts` 再并进 `run_code`；
+  `test/bash-guard.test.mjs` 钉"preset 挂的每一行 shell，闸门都必须认"，
   成对挂载与后台执行那一格仍由 `test/persona.test.mjs`「shell 行：平台成对挂载……」看着。
+  2026-10-23 起 junior 不再挂这两行，成对挂载只剩主 Agent。
 - **不给后台执行**：`enableRunInBackground: false`。本 preset 不挂 `tool-jobs`，开着后台只会让
   模型拿到一个永远读不回来的 jobId（本 preset 压根没挂 `tool-jobs` 那一行）。
-- **shell 闸门只剩一层，且不是安全边界**（`src/agents/bash-guard.ts`）：拦掉
+- **执行面闸门只剩一层，且不是安全边界**（`src/agents/bash-guard.ts`）：拦掉
   `sandbox_permissions` / `justification`——被委派会话的审批策略由框架固定为 `never`，升级必然
   失败，而且模型会收到「the user rejected…」这种把系统拒绝说成用户拒绝的文案；被委派或身份
   不可考的调用方 fail closed。主 Agent 的升级走正常 ask 审批（2026-10-15 前的"只对被委派子会话
-  开放"一层随决策移除，断言迁移见 `test/bash-guard.test.mjs`）。**刻意不解析 `command`**：本仓
-  实测沙箱只拦写、不拦读（`~/.dsh/.credentials.yaml` 与 `sessions/**` 整机可读）、不拦网络
-  （`curl` 直连 200），而正则挡不住 `node -e` / `python3 -c`——那正是引入 bash 的目的。禁区与
-  出网纪律是 data_junior persona 的 `# BASH DISCIPLINE` 软约束。
+  开放"一层随决策移除，断言迁移见 `test/bash-guard.test.mjs`）。**刻意不解析 `command` / `code`**：
+  本仓实测沙箱只拦写、不拦读（`~/.dsh/.credentials.yaml` 与 `sessions/**` 整机可读）、不拦网络
+  （`curl` 直连 200），而正则挡不住 `node -e` / `python3 -c` / 动态 `import()`——那正是引入程序面的
+  目的。禁区与出网纪律是 data_junior persona 的 `# PROGRAM DISCIPLINE` 软约束。
 - **写边界收不窄到会话**：`store.writeContext()` 用**调用方 session** 的 policy 且要求
   `mode ∈ {workspace-write, danger-full-access}`，而 `describe_dataset` 会用 data_junior 的会话写
-  `profile.json`；把它的会话钉成 `read-only` 会直接打断 describe_dataset。bash 与 Dataset 管线
-  共用同一把尺子（session policy），所以模型侧写口只能靠上一条的调用期闸门收。
+  `profile.json`；把它的会话钉成 `read-only` 会直接打断 describe_dataset。`run_code` / bash 与
+  Dataset 管线共用同一把尺子（session policy），所以模型侧写口只能靠上一条的调用期闸门收。
 - **要真正收紧**只有两条路：换掉 `ctx.shell`（容器 / 微 VM / 远端执行器），或给 dsh 进程做出网
   限制。两者都不是 `ctx.sandbox` 能提供的。
 

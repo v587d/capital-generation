@@ -3,12 +3,14 @@
  * Read-only audit for tool results that failed but were recorded as success (isError false).
  * dsh-tools' createSuccessResult hardcodes isError:false, so only a thrown error marks failure;
  * a returned `{ ok:false }` envelope is indistinguishable from success in the session log.
+ * PTC hides nested calls from `tool/call`: they are persisted as `tool/ptc-dispatch`.
  * Heuristic lead generator, not an assertion: exit code stays 0 even when suspects are found.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { zstdDecompressSync } from 'node:zlib'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { latestSessionFile } from './lib/session-files.mjs'
 
 function argValue(name, fallback) {
   const index = process.argv.indexOf(name)
@@ -80,16 +82,14 @@ for (const workspace of readdirSync(ROOT)) {
     continue
   }
   for (const sessionId of entries) {
-    const file = join(workspaceDir, sessionId, 'session.v3.jsonl.zstd')
-    try {
-      if (!statSync(file).isFile()) continue
-    } catch {
-      continue
-    }
+    // The host moved v3 → v4; a hardcoded name scans 0 sessions and prints a clean report.
+    const found = latestSessionFile(join(workspaceDir, sessionId))
+    if (found === undefined) continue
     scannedSessions += 1
     let events
     try {
-      events = decodeSession(file)
+      const text = found.file.endsWith('.jsonl') ? readFileSync(found.file, 'utf8') : decodeSession(found.file)
+      events = text
         .split('\n')
         .filter(Boolean)
         .map((line) => { try { return JSON.parse(line) } catch { return null } })
@@ -103,6 +103,23 @@ for (const workspace of readdirSync(ROOT)) {
       if (event.type === 'tool/call' && event.data?.callId) callNames.set(event.data.callId, event.data.name)
     }
     for (const event of events) {
+      // Nested PTC calls never emit tool/call: the dispatch event is the only trace.
+      if (event.type === 'tool/ptc-dispatch') {
+        const data = event.data ?? {}
+        const tool = typeof data.name === 'string' ? data.name : '(unknown)'
+        if (ONLY_TOOL !== undefined && tool !== ONLY_TOOL) continue
+        if (data.isError === true) {
+          record(tool, 'isError')
+          continue
+        }
+        const text = (data.content ?? []).filter((part) => part.type === 'text').map((part) => part.text).join('\n')
+        if (looksLikeUnmarkedFailure(text)) {
+          record(tool, 'unmarked', { workspace, sessionId, tool, text: text.slice(0, 240) })
+        } else {
+          record(tool, undefined)
+        }
+        continue
+      }
       if (event.type !== 'tool/result') continue
       for (const block of event.data?.message?.content ?? []) {
         if (block.type !== 'tool-result') continue
@@ -151,6 +168,6 @@ if (AS_JSON) {
   }
   console.log('')
   console.log('说明：疑似未标记 = 结果 JSON 里 ok:false 或有 error 且 ok 不为 true，但 isError 是 false。')
-  console.log('      这是启发式线索，不是断言；确认后按 docs/design/tool-result-error-signal.md 处置。')
+  console.log('      来源同时包括 tool/result 与 PTC 嵌套的 tool/ptc-dispatch；这是启发式线索，不是断言。')
 }
 process.exit(0)

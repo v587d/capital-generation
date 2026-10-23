@@ -38,6 +38,8 @@ export interface ChartTurnEventInput {
 }
 export interface ChartEventPublisher {
     publish(input: ChartTurnEventInput): boolean;
+    /** One first-party event carrying every file; the turn cap counts events, not files. */
+    publishMany(ownerSessionId: string, inputs: ChartTurnEventInput[]): boolean;
     /** Diagnostics: queued charts not yet written. */
     pendingCount?(ownerSessionId?: string): number;
     /** Diagnostics: last publish trace, surfaced in receipts / disk so failures are visible without a terminal. */
