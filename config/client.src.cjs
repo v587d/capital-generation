@@ -5,13 +5,26 @@ const {
   SettingsSecretField,
   SettingsFormModel,
   SegmentedControl,
+  Pill,
   Switch,
+  Tag,
   Modal,
-  writeClipboard,
   IconRightUpOutlineRegular,
 } = require('@deepseek-ai/dsh-client-ui-primitives')
 const { SELECTED_SKILL_CATALOG, SELECTED_SKILL_TAG_LABELS } = require('../selected-skills/catalog.js')
-const { SELECTED_SKILL_ROLES, SELECTED_SKILL_ROUTING } = require('../selected-skills/routing.js')
+const {
+  SELECTED_SKILL_FILTER_ALL,
+  filterSelectedSkills,
+  selectedSkillFacetCounts,
+  selectedSkillPresetTotals,
+  selectedSkillRoles,
+  selectedSkillTraitOrder,
+} = require('../selected-skills/filter.js')
+const {
+  SELECTED_SKILL_PRESETS,
+  SELECTED_SKILL_PRESET_ORDER,
+  SELECTED_SKILL_ROUTING,
+} = require('../selected-skills/routing.js')
 
 /**
  * Two different strings: `ENTRY_ID` is the settings namespace (= profile entry
@@ -51,6 +64,9 @@ const DOC_URLS = {
 /** Render order = array order; one list drives status, refs, drafts and event refresh. */
 const CREDENTIAL_FIELDS = ['fuyao', 'ftshare', 'anysearch', 'wind', 'paddleocr']
 const SELECTED_SKILL_FIELDS = SELECTED_SKILL_CATALOG.map(({ key }) => key)
+// Stable orders: facet counts change with the other dimension, but chips must not jump under the cursor.
+const SELECTED_SKILL_TRAITS = selectedSkillTraitOrder()
+const SELECTED_SKILL_PRESET_TOTALS = selectedSkillPresetTotals()
 const DEFAULT_REFS = {
   fuyao: FUYAO_DEFAULT_REF,
   ftshare: FTSHARE_DEFAULT_REF,
@@ -81,16 +97,17 @@ const zh = {
   paddleocrLabel: 'PaddleOCR 文档解析 Token',
   paddleocrHint: '配置 Token 后自动解析 PDF、图片。保存后新自动模式会话生效。',
   selectedSkillsTitle: '精选 Skills',
-  selectedSkillsModeLabel: '自动选择方法',
-  selectedSkillsModeHint: '开启后按角色开放该角色全部方法，由模型按触发条件选择；下方勾选只在手动模式生效。',
-  selectedSkillsModeShort: '自动',
-  selectedSkillsFilterLabel: '按能力筛选',
-  selectedSkillsEmpty: '没有匹配这个标签的 Skill。',
-  selectedSkillsRoles: '角色：',
-  selectedSkillsWhen: '何时使用：',
-  selectedSkillsCopyName: '复制 /技能名',
-  selectedSkillsCopied: '已复制',
-  selectedSkillsDetail: '详情',
+  selectedSkillsModeLabel: '智能装载 Skills',
+  selectedSkillsModeHint: '开启后，由大模型根据用户提问，智能装载合适的精选「Skills」。',
+  selectedSkillsFilterLabel: '筛选精选 Skills',
+  selectedSkillsTraitGroup: 'Skill 特点',
+  selectedSkillsPresetGroup: '适用预设',
+  selectedSkillsAll: '全部',
+  selectedSkillsEmpty: '没有符合当前筛选条件的 Skill。',
+  selectedSkillsWhen: '何时使用',
+  selectedSkillsKeywords: '关键词',
+  selectedSkillsOpenDetail: '查看 Skill 原文',
+  selectedSkillsPresetUnavailable: '该预设不加载精选 Skills',
   selectedSkillsDetailClose: '关闭',
   selectedSkillsDocLoading: '原文读取中…',
   selectedSkillsDocFailed: '原文读不到：这份快照没随包落地，或暂时读不出来。',
@@ -127,16 +144,17 @@ const en = {
   paddleocrLabel: 'PaddleOCR document token',
   paddleocrHint: 'Configure the token to parse PDFs and images automatically. Takes effect in new Auto mode sessions.',
   selectedSkillsTitle: 'Selected Skills',
-  selectedSkillsModeLabel: 'Pick methods automatically',
-  selectedSkillsModeHint: 'When on, every method owned by a role is exposed and the model picks by trigger; the switches below apply to Manual mode only.',
-  selectedSkillsModeShort: 'Auto',
-  selectedSkillsFilterLabel: 'Filter by capability',
-  selectedSkillsEmpty: 'No skills match this tag.',
-  selectedSkillsRoles: 'Roles: ',
-  selectedSkillsWhen: 'Use when: ',
-  selectedSkillsCopyName: 'Copy /name',
-  selectedSkillsCopied: 'Copied',
-  selectedSkillsDetail: 'Details',
+  selectedSkillsModeLabel: 'Auto-load Skills',
+  selectedSkillsModeHint: 'When on, the model picks the relevant selected Skills for each question.',
+  selectedSkillsFilterLabel: 'Filter selected Skills',
+  selectedSkillsTraitGroup: 'Skill traits',
+  selectedSkillsPresetGroup: 'Preset',
+  selectedSkillsAll: 'All',
+  selectedSkillsEmpty: 'No skills match the current filters.',
+  selectedSkillsWhen: 'Use when',
+  selectedSkillsKeywords: 'Keywords',
+  selectedSkillsOpenDetail: 'Open skill source',
+  selectedSkillsPresetUnavailable: 'This preset does not load selected Skills.',
   selectedSkillsDetailClose: 'Close',
   selectedSkillsDocLoading: 'Loading the source…',
   selectedSkillsDocFailed: 'The source could not be read: this snapshot is not in the installed package, or it cannot be opened right now.',
@@ -172,7 +190,6 @@ function installStyles() {
   style.dataset.capitalConfig = 'true'
   style.textContent = `
     .capital-config-card { display: flex; flex-direction: column; gap: 12px; }
-    .capital-config-title { margin: 0; font-size: 14px; font-weight: 500; line-height: 20px; }
     /* Declare display only when not hidden, or the hidden attribute loses to author display. */
     .capital-config-panel { flex-direction: column; gap: 12px; }
     .capital-config-panel:not([hidden]) { display: flex; }
@@ -188,25 +205,39 @@ function installStyles() {
     .capital-config-secret-row label { flex: 0 1 auto; }
     .capital-config-secret-row label ~ span { order: 1; margin-left: auto; }
     .capital-config-field { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; border-top: 0.5px solid var(--dsw-alias-border-l2); }
-    /* Filter column stays sticky while the 35-row list scrolls; padding-top matches the 24px rhythm. */
-    .capital-config-selected-layout { display: flex; align-items: flex-start; gap: 16px; padding-top: 12px; }
-    .capital-config-selected-filter { position: sticky; top: 12px; flex: 0 0 132px; display: flex; flex-direction: column; align-items: stretch; gap: 3px; }
-    .capital-config-selected-filter-button { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; min-height: 26px; padding: 3px 8px; border: 0.5px solid var(--dsw-alias-border-l1); border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 12px; line-height: 18px; text-align: left; cursor: pointer; }
-    .capital-config-selected-filter-button:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
-    .capital-config-selected-filter-button[aria-pressed="true"] { border-color: var(--dsw-alias-brand-primary); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent); color: var(--dsw-alias-label-primary); }
-    .capital-config-selected-filter-count { flex: none; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }
-    .capital-config-selected-filter-button[aria-pressed="true"] .capital-config-selected-filter-count { color: inherit; }
-    .capital-config-selected-list { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
-    .capital-config-skill-tags { display: flex; flex-wrap: wrap; gap: 4px; }
-    .capital-config-skill-tag { padding: 1px 5px; border-radius: 4px; background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 16px; }
-    .capital-config-skill-heading { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-    .capital-config-skill-actions { flex: none; display: inline-flex; align-items: center; gap: 6px; }
-    .capital-config-skill-action { flex: none; min-height: 22px; padding: 2px 8px; border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 6px; background: color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent); color: var(--dsw-alias-brand-primary); font: inherit; font-size: 11px; line-height: 16px; white-space: nowrap; cursor: pointer; }
-    .capital-config-skill-action:hover { border-color: var(--dsw-alias-brand-primary); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 18%, transparent); }
-    .capital-config-skill-action:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-brand-primary)); outline-offset: 1px; }
-    .capital-config-skill-repo { display: inline-flex; align-items: center; gap: 3px; color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 16px; text-decoration: none; }
-    .capital-config-skill-repo:hover { color: var(--dsw-alias-brand-primary); text-decoration: underline; }
+    .capital-config-selected-mode { padding: 12px 14px; border: 0.5px solid var(--dsw-alias-border-l1); border-radius: 10px; background: var(--dsw-alias-bg-layer-2); }
+    .capital-config-switch-row { align-items: center; gap: 12px; display: flex; }
+    .capital-config-switch-text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+    .capital-config-switch-label { color: var(--dsw-alias-label-primary); font-size: 13px; font-weight: 500; line-height: 20px; }
+    .capital-config-hint { margin: 0; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
+    .capital-config-skills-browser { display: flex; flex-direction: column; gap: 16px; }
+    .capital-config-filters { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 0.5px solid var(--dsw-alias-border-l1); border-radius: 10px; background: var(--dsw-alias-bg-layer-2); }
+    .capital-config-filter-row { display: flex; align-items: flex-start; gap: 12px; }
+    .capital-config-filter-label { flex: 0 0 auto; min-width: 64px; padding-top: 3px; color: var(--dsw-alias-label-tertiary); font-size: 11.5px; font-weight: 500; line-height: 18px; }
+    .capital-config-filter-options { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: 4px; min-width: 0; }
+    .capital-config-filter-pill { height: 22px; padding: 0 7px; gap: 5px; font-size: 11.5px; line-height: 16px; }
+    .capital-config-filter-pill:disabled { opacity: 0.45; cursor: not-allowed; }
+    .capital-config-filter-pill:disabled:hover { background: var(--dsw-alias-bg-layer-2); }
+    .capital-config-filter-count { color: var(--dsw-alias-label-tertiary); font-size: 10px; line-height: 14px; font-variant-numeric: tabular-nums; }
+    .capital-config-filter-pill[aria-pressed="true"] .capital-config-filter-count { color: inherit; opacity: 0.72; }
+    .capital-config-selected-list { display: flex; flex-direction: column; border-top: 0.5px solid var(--dsw-alias-border-l1); }
+    .capital-config-skill-item { border-bottom: 0.5px solid var(--dsw-alias-border-l1); }
+    .capital-config-skill-row { display: flex; align-items: flex-start; gap: 16px; padding: 14px 2px; }
+    .capital-config-skill-main { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 6px; }
+    .capital-config-skill-heading { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+    .capital-config-skill-name { padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 13px; font-weight: 500; line-height: 20px; text-align: left; cursor: pointer; }
+    .capital-config-skill-name:hover { color: var(--dsw-alias-brand-primary); }
+    .capital-config-skill-name:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-brand-primary)); outline-offset: 2px; }
+    .capital-config-skill-tags, .capital-config-skill-presets { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+    .capital-config-skill-tag { font-weight: 400; }
+    .capital-config-skill-preset { font-weight: 500; }
     .capital-config-skill-description { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
+    .capital-config-skill-meta { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 10px; row-gap: 2px; margin: 0; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
+    .capital-config-skill-meta dt { color: var(--dsw-alias-label-tertiary); font-weight: 500; white-space: nowrap; }
+    .capital-config-skill-meta dd { min-width: 0; margin: 0; }
+    .capital-config-skill-repo { display: inline-flex; align-items: center; gap: 3px; width: max-content; max-width: 100%; margin-top: 2px; color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 16px; text-decoration: none; }
+    .capital-config-skill-repo:hover { color: var(--dsw-alias-brand-primary); text-decoration: underline; }
+    .capital-config-selected-empty { margin: 0; padding: 28px 0; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; text-align: center; }
     /* Official Modal defaults to 380px; the div prefix outranks the hashed .dialog class. */
     div.capital-config-skill-modal { width: min(820px, 100%); max-height: 100%; }
     /* Scroll the body so the dialog's overflow:hidden cannot clip it. */
@@ -221,14 +252,6 @@ function installStyles() {
     .capital-config-doc-link { display: inline-flex; align-items: center; gap: 3px; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 20px; white-space: nowrap; text-decoration: none; }
     .capital-config-doc-link:hover { color: var(--dsw-alias-brand-primary); text-decoration: underline; }
     .capital-config-doc-link:focus-visible { border-radius: 3px; outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-brand-primary)); outline-offset: 2px; }
-    .capital-config-selected-mode { margin-bottom: 12px; }
-    .capital-config-switch-row { align-items: center; gap: 12px; display: flex; }
-    .capital-config-switch-text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
-    .capital-config-switch-label { color: var(--dsw-alias-label-primary); font-size: 13px; font-weight: 500; line-height: 20px; }
-    .capital-config-hint { margin: 0; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
-    .capital-config-skill-roles { display: flex; flex-wrap: wrap; gap: 4px; }
-    .capital-config-skill-role { padding: 1px 5px; border-radius: 4px; border: 0.5px solid var(--dsw-alias-border-l1); color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 16px; }
-    .capital-config-skill-when { margin: 0; color: var(--dsw-alias-label-tertiary); font-size: 11.5px; line-height: 17px; }
     .capital-config-write-failed { margin: 0; color: var(--dsw-alias-state-error-primary); font-size: 12px; line-height: 18px; }
     /* Own inline-flex group so the host's wrapping never splits the two links. */
     .capital-config-plugin-links { flex: none; align-items: center; gap: 2px; display: inline-flex; }
@@ -537,27 +560,27 @@ function loadSkillDoc(name) {
   return pending
 }
 
-const COPIED_FLASH_MS = 1600
+function presetLabel(role, locale) {
+  return SELECTED_SKILL_PRESETS[role]?.[locale] ?? role
+}
 
-function SelectedSkillRow({ entry, state, copyable, disabled, onChange, t }) {
+/** Routing text stays one sentence; split the keyword tail so both lines share a type scale. */
+function splitUseWhen(value, locale) {
+  const marker = locale === 'en' ? 'Triggers on ' : '；关键词：'
+  const index = value.lastIndexOf(marker)
+  if (index <= 0) return { when: value, keywords: '' }
+  return {
+    when: value.slice(0, index).trim(),
+    keywords: value.slice(index + marker.length).trim().replace(locale === 'en' ? /\.$/ : /。$/, ''),
+  }
+}
+
+function SelectedSkillRow({ entry, state, disabled, onChange, t }) {
   const locale = skillLocale()
   const label = entry.label[locale]
   const repositoryUrl = `https://github.com/${entry.owner}/${entry.repository}`
-  const copyTimer = useRef(null)
-  const [copied, setCopied] = useState(false)
   const [detailOpen, setDetailOpen] = useState(false)
   const [doc, setDoc] = useState(null)
-  useEffect(() => () => {
-    if (copyTimer.current !== null) clearTimeout(copyTimer.current)
-  }, [])
-  const copyName = async () => {
-    const accepted = await writeClipboard(`/${entry.name}`)
-    // Do not flip the label if the clipboard rejected it.
-    if (!accepted) return
-    setCopied(true)
-    if (copyTimer.current !== null) clearTimeout(copyTimer.current)
-    copyTimer.current = setTimeout(() => setCopied(false), COPIED_FLASH_MS)
-  }
   const prefetchDoc = () => {
     if (doc?.status === 'ready' || doc?.status === 'loading') return
     if (skillDocs.has(entry.name)) {
@@ -578,48 +601,56 @@ function SelectedSkillRow({ entry, state, copyable, disabled, onChange, t }) {
     : doc?.status === 'failed'
       ? h('p', { className: 'capital-config-skill-doc-state' }, t(doc.code === 'route_missing' ? 'selectedSkillsDocStale' : 'selectedSkillsDocFailed'))
       : h('p', { className: 'capital-config-skill-doc-state' }, t('selectedSkillsDocLoading'))
-  return h('div', { className: 'capital-config-field' },
-    h('div', { className: 'capital-config-switch-row' },
-      h('div', { className: 'capital-config-switch-text' },
+  const { when, keywords } = splitUseWhen(SELECTED_SKILL_ROUTING[entry.name]?.useWhen?.[locale] ?? '', locale)
+  const roles = entry.roles ?? []
+  return h('div', { className: 'capital-config-skill-item' },
+    h('div', { className: 'capital-config-skill-row' },
+      h('div', { className: 'capital-config-skill-main' },
         h('div', { className: 'capital-config-skill-heading' },
-          h('span', { className: 'capital-config-title' }, label),
-          h('div', { className: 'capital-config-skill-actions' },
-            // Manual: only enabled rows. Auto: the role owns every method, so copying any name is meaningful.
-            copyable === true ? h('button', {
-              type: 'button',
-              className: 'capital-config-skill-action',
-              title: `${t('selectedSkillsCopyName')}: ${entry.name}`,
-              'aria-label': `${t('selectedSkillsCopyName')}: ${entry.name}`,
-              onClick: copyName,
-            }, copied ? t('selectedSkillsCopied') : t('selectedSkillsCopyName')) : null,
-            h('button', {
-              type: 'button',
-              className: 'capital-config-skill-action',
-              'aria-label': `${t('selectedSkillsDetail')}: ${entry.name}`,
-              'aria-haspopup': 'dialog',
-              // Prefetch on hover / focus so the modal opens with content; click is the action.
-              onPointerEnter: prefetchDoc,
-              onFocus: prefetchDoc,
-              onClick: () => {
-                prefetchDoc()
-                setDetailOpen(true)
-              },
-            }, t('selectedSkillsDetail')),
-            h(Modal, {
-              open: detailOpen,
-              onClose: () => setDetailOpen(false),
-              title: label,
-              description: entry.name,
-              closeLabel: t('selectedSkillsDetailClose'),
-              className: 'capital-config-skill-modal',
-              contentClassName: 'capital-config-skill-modal-content',
-            }, detailContent),
-          ),
+          h('button', {
+            type: 'button',
+            className: 'capital-config-skill-name',
+            title: t('selectedSkillsOpenDetail'),
+            'aria-haspopup': 'dialog',
+            // Prefetch on hover / focus so the modal opens with content; click is the action.
+            onPointerEnter: prefetchDoc,
+            onFocus: prefetchDoc,
+            onClick: () => {
+              prefetchDoc()
+              setDetailOpen(true)
+            },
+          }, label),
+          h('div', { className: 'capital-config-skill-tags', role: 'group', 'aria-label': t('selectedSkillsTraitGroup') },
+            entry.tags.map((tag) => h(Tag, {
+              key: tag,
+              tone: 'neutral',
+              className: 'capital-config-skill-tag',
+            }, SELECTED_SKILL_TAG_LABELS[locale][tag] ?? tag))),
+          roles.length > 0 ? h('div', { className: 'capital-config-skill-presets', role: 'group', 'aria-label': t('selectedSkillsPresetGroup') },
+            roles.map((role) => h(Tag, {
+              key: role,
+              tone: 'info',
+              className: 'capital-config-skill-preset',
+            },
+            h('span', { className: 'capital-config-sr-only' }, `${t('selectedSkillsPresetGroup')}：`),
+            presetLabel(role, locale)))) : null,
+          h(Modal, {
+            open: detailOpen,
+            onClose: () => setDetailOpen(false),
+            title: label,
+            description: entry.name,
+            closeLabel: t('selectedSkillsDetailClose'),
+            className: 'capital-config-skill-modal',
+            contentClassName: 'capital-config-skill-modal-content',
+          }, detailContent),
         ),
         h('p', { className: 'capital-config-skill-description' }, entry.description[locale]),
-        h('p', { className: 'capital-config-skill-when' }, `${t('selectedSkillsWhen')}${SELECTED_SKILL_ROUTING[entry.name]?.useWhen?.[locale] ?? ''}`),
-        entry.roles?.length ? h('div', { className: 'capital-config-skill-roles' }, entry.roles.map((role) =>
-          h('span', { key: role, className: 'capital-config-skill-role' }, SELECTED_SKILL_ROLES[role]?.[locale] ?? role))) : null,
+        h('dl', { className: 'capital-config-skill-meta' },
+          h('dt', { key: 'when-label' }, t('selectedSkillsWhen')),
+          h('dd', { key: 'when' }, when),
+          keywords ? h('dt', { key: 'keywords-label' }, t('selectedSkillsKeywords')) : null,
+          keywords ? h('dd', { key: 'keywords' }, keywords) : null,
+        ),
         h('a', {
           className: 'capital-config-skill-repo',
           href: repositoryUrl,
@@ -627,8 +658,6 @@ function SelectedSkillRow({ entry, state, copyable, disabled, onChange, t }) {
           rel: 'noopener noreferrer',
           title: t('selectedSkillsOpenRepo'),
         }, `${entry.owner}/${entry.repository}`, h(IconRightUpOutlineRegular, { size: 12 })),
-        h('div', { className: 'capital-config-skill-tags' }, entry.tags.map((tag) =>
-          h('span', { key: tag, className: 'capital-config-skill-tag' }, SELECTED_SKILL_TAG_LABELS[locale][tag] ?? tag))),
       ),
       h(Switch, {
         label,
@@ -654,7 +683,8 @@ function CapitalCard(props) {
   const autoMode = state.selectedSkillsMode?.auto === true
   const locale = skillLocale()
   const [tab, setTab] = useState('sources')
-  const [tagFilter, setTagFilter] = useState('all')
+  const [traitFilter, setTraitFilter] = useState(SELECTED_SKILL_FILTER_ALL)
+  const [presetFilter, setPresetFilter] = useState(SELECTED_SKILL_FILTER_ALL)
   // Fetch on mount: tab labels carry numbers; hooks must precede the unavailable return.
   useEffect(() => { props.ensureBundleRows() }, [])
   // Pinned order is snapshotted on tab entry so rows never move under the cursor.
@@ -662,17 +692,11 @@ function CapitalCard(props) {
     .filter((entry) => state.selectedSkills?.[entry.key]?.on === true)
     .map((entry) => entry.key))
   const [pinnedSkills, setPinnedSkills] = useState(enabledKeys)
-  useEffect(() => { if (state.available) setPinnedSkills(enabledKeys()) }, [state.available])
-  const tagCounts = new Map()
-  for (const entry of SELECTED_SKILL_CATALOG) {
-    for (const tag of entry.tags) tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1)
-  }
-  tagCounts.set('all', SELECTED_SKILL_CATALOG.length)
-  const tags = ['all', ...Array.from(tagCounts.keys())
-    .filter((tag) => tag !== 'all')
-    .sort((left, right) => tagCounts.get(right) - tagCounts.get(left))]
-  const visibleSkills = SELECTED_SKILL_CATALOG
-    .filter((entry) => tagFilter === 'all' || entry.tags.includes(tagFilter))
+  useEffect(() => {
+    if (state.available && !autoMode) setPinnedSkills(enabledKeys())
+  }, [state.available, autoMode])
+  const facetCounts = selectedSkillFacetCounts({ trait: traitFilter, preset: presetFilter })
+  const visibleSkills = filterSelectedSkills({ trait: traitFilter, preset: presetFilter })
     .sort((left, right) => (pinnedSkills.has(left.key) ? 0 : 1) - (pinnedSkills.has(right.key) ? 0 : 1))
   const form = h(SettingsForm, {
     labels: {
@@ -708,7 +732,7 @@ function CapitalCard(props) {
     ),
     state.localFetch?.failed ? h('p', { role: 'status', className: 'capital-config-write-failed' }, t('saveFailed')) : null,
   )
-  const modeSection = h('div', { className: 'capital-config-field capital-config-selected-mode' },
+  const modeSection = h('div', { className: 'capital-config-selected-mode' },
     h('div', { className: 'capital-config-switch-row' },
       h('div', { className: 'capital-config-switch-text' },
         h('span', { className: 'capital-config-switch-label' }, t('selectedSkillsModeLabel')),
@@ -723,37 +747,60 @@ function CapitalCard(props) {
     ),
     state.selectedSkillsMode?.failed ? h('p', { role: 'status', className: 'capital-config-write-failed' }, t('saveFailed')) : null,
   )
-  const tagLabels = SELECTED_SKILL_TAG_LABELS[locale]
-  const skillsFilter = h('div', { className: 'capital-config-selected-filter', role: 'group', 'aria-label': t('selectedSkillsFilterLabel') },
-    ...tags.map((tag) => h('button', {
-      key: tag,
+  const traitLabels = SELECTED_SKILL_TAG_LABELS[locale]
+  const filterRow = (label, pills) => h('div', { className: 'capital-config-filter-row' },
+    h('span', { className: 'capital-config-filter-label' }, label),
+    h('div', { className: 'capital-config-filter-options', role: 'group', 'aria-label': label }, ...pills),
+  )
+  const traitPills = SELECTED_SKILL_TRAITS.map((trait) => h(Pill, {
+    key: trait,
+    type: 'button',
+    className: 'capital-config-filter-pill',
+    active: traitFilter === trait,
+    'aria-pressed': traitFilter === trait ? 'true' : 'false',
+    onClick: () => setTraitFilter(trait),
+  },
+  trait === SELECTED_SKILL_FILTER_ALL ? t('selectedSkillsAll') : (traitLabels[trait] ?? trait),
+  h('span', { className: 'capital-config-filter-count' }, String(facetCounts.traits.get(trait) ?? 0))))
+  const presetPills = [SELECTED_SKILL_FILTER_ALL, ...SELECTED_SKILL_PRESET_ORDER].map((preset) => {
+    const total = preset === SELECTED_SKILL_FILTER_ALL
+      ? SELECTED_SKILL_CATALOG.length
+      : SELECTED_SKILL_PRESET_TOTALS.get(preset) ?? 0
+    const unavailable = preset !== SELECTED_SKILL_FILTER_ALL && total === 0
+    return h(Pill, {
+      key: preset,
       type: 'button',
-      className: 'capital-config-selected-filter-button',
-      'aria-pressed': tagFilter === tag ? 'true' : 'false',
-      onClick: () => setTagFilter(tag),
-    }, tagLabels[tag] ?? tag, h('span', { className: 'capital-config-selected-filter-count' }, String(tagCounts.get(tag))))),
+      className: 'capital-config-filter-pill',
+      active: presetFilter === preset,
+      'aria-pressed': presetFilter === preset ? 'true' : 'false',
+      disabled: unavailable,
+      title: unavailable ? t('selectedSkillsPresetUnavailable') : undefined,
+      onClick: () => setPresetFilter(preset),
+    },
+    preset === SELECTED_SKILL_FILTER_ALL ? t('selectedSkillsAll') : presetLabel(preset, locale),
+    h('span', { className: 'capital-config-filter-count' }, String(facetCounts.presets.get(preset) ?? 0)))
+  })
+  const skillsFilter = h('div', { className: 'capital-config-filters', role: 'group', 'aria-label': t('selectedSkillsFilterLabel') },
+    filterRow(t('selectedSkillsTraitGroup'), traitPills),
+    filterRow(t('selectedSkillsPresetGroup'), presetPills),
   )
   // No cap: the user builds the set; the role prompt caps only how many it lists.
-  const enabledSkills = SELECTED_SKILL_CATALOG.filter(
-    (entry) => state.selectedSkills?.[entry.key]?.on === true,
-  ).length
   const skillRows = visibleSkills.length > 0
     ? visibleSkills.map((entry) => h(SelectedSkillRow, {
       key: entry.key,
-      entry: { ...entry, roles: SELECTED_SKILL_ROUTING[entry.name]?.roles ?? [] },
+      entry: { ...entry, roles: selectedSkillRoles(entry) },
       state: state.selectedSkills?.[entry.key],
-      copyable: autoMode || state.selectedSkills?.[entry.key]?.on === true,
-      disabled: disabled || state.saving || autoMode,
+      disabled: disabled || state.saving,
       onChange: (value) => props.toggleSelectedSkill(entry.key, value),
       t,
     }))
-    : [h('p', { key: 'empty', className: 'capital-config-hint' }, t('selectedSkillsEmpty'))]
+    : [h('p', { key: 'empty', className: 'capital-config-selected-empty' }, t('selectedSkillsEmpty'))]
   // No cap banner: the icon is the only explanation. Unknown count prints no number.
   const withCount = (label, count) => (Number.isInteger(count) ? `${label} ${count}` : label)
   const options = [
     // A dirty draft while Save is off-screen must be announced on the tab.
     { value: 'sources', label: state.dirty ? t('titleUnsaved') : t('title') },
-    { value: 'skills', label: `${t('selectedSkillsTitle')} ${autoMode ? t('selectedSkillsModeShort') : `${enabledSkills}/${SELECTED_SKILL_CATALOG.length}`}` },
+    { value: 'skills', label: t('selectedSkillsTitle') },
     { value: 'components', label: withCount(t('componentsTitle'), state.components?.count) },
   ]
   const panel = (value, children) => h('section', {
@@ -780,13 +827,12 @@ function CapitalCard(props) {
       },
     }),
     panel('sources', [form, localFetchSection]),
-    panel('skills', [
-      modeSection,
-      h('div', { className: 'capital-config-selected-layout' },
+    panel('skills', autoMode
+      ? [modeSection]
+      : [modeSection, h('div', { className: 'capital-config-skills-browser' },
         skillsFilter,
         h('div', { className: 'capital-config-selected-list' }, ...skillRows),
-      ),
-    ]),
+      )]),
     // The panel is the host's rows list; keep the aria-controls target non-empty via sr-only.
     panel('components', [h('span', { className: 'capital-config-sr-only' }, t('componentsHint'))]),
   )

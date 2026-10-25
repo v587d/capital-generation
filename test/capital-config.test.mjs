@@ -10,6 +10,12 @@ import { fakeCtx as hostFakeCtx } from './cordis-fake.mjs'
 import { CAPITAL_CONFIG_ENTRY_ID, Config as MainConfig, LOCAL_FETCH_DEFAULTS, resolveLocalFetchConfig } from '../lib/index.js'
 import { LOCAL_FETCH_CLIENT_VERSION } from '../lib/web-retriever/local-fetch.js'
 import { SELECTED_SKILL_CATALOG, SELECTED_SKILL_TAG_LABELS } from '../selected-skills/catalog.js'
+import {
+  SELECTED_SKILL_FILTER_ALL,
+  selectedSkillPresetTotals,
+  selectedSkillTraitOrder,
+} from '../selected-skills/filter.js'
+import { SELECTED_SKILL_PRESET_ORDER, SELECTED_SKILL_PRESETS } from '../selected-skills/routing.js'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const CLIENT = join(ROOT, 'config', 'client.js')
@@ -203,8 +209,10 @@ function loadClient({ scope, primitives = {}, fetchImpl = defaultFetch } = {}) {
         },
         SettingsSecretField(props) { return { type: 'SettingsSecretField', props, children: props.children ?? [] } },
         SegmentedControl(props) { return { type: 'SegmentedControl', props, children: [] } },
+        Pill(props) { return { type: 'Pill', props, children: props.children ?? [] } },
         Modal(props) { return { type: 'Modal', props, children: props.children ?? [] } },
         Switch(props) { return { type: 'Switch', props, children: props.children ?? [] } },
+        Tag(props) { return { type: 'Tag', props, children: props.children ?? [] } },
         IconRightUpOutlineRegular: () => ({ type: 'icon', props: {}, children: [] }),
         IconWarningTriangleOutlineRegular: () => ({ type: 'warning-icon', props: {}, children: [] }),
         SettingsFormModel: function SettingsFormModel() { return model },
@@ -313,8 +321,8 @@ function collect(node, type, out = []) {
   return out
 }
 
-function detailButtons(page) {
-  return collect(page, 'button').filter((button) => String(button.props['aria-label']).startsWith('selectedSkillsDetail'))
+function skillNameButtons(page) {
+  return collect(page, 'button').filter((button) => button.props.className === 'capital-config-skill-name')
 }
 
 function cardProps(injected) {
@@ -358,6 +366,8 @@ test('capital-config Client：五个密钥按序渲染，本机回退与 selecte
   assert.equal(tabs.props.label, 'tabsLabel', 'tablist 的名字走字典')
   assert.deepEqual(Array.from(tabs.props.options, (option) => option.value), ['sources', 'skills', 'components'])
   assert.equal(tabs.props.options[0].label, 'title', '第一格文案仍走卡片字典，不硬编码')
+  assert.equal(tabs.props.options[1].label, 'selectedSkillsTitle',
+    '第二格只写「精选 Skills」：自动 / 已开启数都不进 tab，数字搬到列表上方的筛选条')
   assert.deepEqual(
     collect(card, 'section').filter((node) => node.props.role === 'tabpanel').map((node) => node.props.hidden),
     [false, true, true],
@@ -378,9 +388,12 @@ test('capital-config Client：五个密钥按序渲染，本机回退与 selecte
   assert.equal(switches[0].props.checked, true, '段缺省 ⇒ 本机回退默认开')
   assert.equal(switches[1].props.checked, false, '精选模式默认 manual')
   assert.ok(switches.slice(2).every((node) => node.props.checked === false), 'selected skills 必须全部默认关闭')
-  assert.equal(collect(card, 'button').filter((button) => button.props.className === 'capital-config-skill-action').length,
-    SELECTED_SKILL_CATALOG.length,
-    '全默认关闭 ⇒ 每行只有「详情」一颗按钮：复制技能名只给已开启的技能')
+  const skillButtons = skillNameButtons(card)
+  assert.equal(skillButtons.length, SELECTED_SKILL_CATALOG.length, '每行技能名本身就是开原文的按钮')
+  assert.ok(skillButtons.every((button) => button.props['aria-haspopup'] === 'dialog'),
+    '点名字弹出对话框，无障碍树要先把形状说出来')
+  assert.deepEqual(collect(card, 'button').filter((button) => button.props.className === 'capital-config-skill-action'), [],
+    '复制技能名与「详情」按钮都已移除，不再和名字抢同一行')
   const order = []
   const walk = (node) => {
     if (node?.type === 'SettingsSecretField') order.push(node.props.id)
@@ -421,9 +434,9 @@ test('capital-config Client：catalog 用到的每个能力标签都有中英两
   for (const locale of ['zh', 'en']) assert.ok(SELECTED_SKILL_TAG_LABELS[locale].all, `${locale} 的筛选条缺「全部」`)
 })
 
-test('capital-config Client：精选 Skills 每行给复制技能名与仓库链接，不再显示 slug', async () => {
+test('capital-config Client：精选 Skills 以名称开原文，标签与适用预设同排展示', async () => {
   const scope = readyScope({ selectedSkills: { buffettFramework: true } })
-  const { mod, clipboardWrites, timers } = loadClient({ scope })
+  const { mod } = loadClient({ scope })
   const { ctx, registrations, dictionaries } = fakeCtx({ scope })
   mod.apply(ctx)
   const { render } = cardRenderer(registrations)
@@ -447,33 +460,44 @@ test('capital-config Client：精选 Skills 每行给复制技能名与仓库链
     assert.match(String(link.props.rel), /noopener/)
   }
   assert.deepEqual(collect(page, 'code'), [], '卡片不再显示 slug')
-  const copyButtons = collect(page, 'button').filter((button) => button.props.className === 'capital-config-skill-action'
-    && String(button.props['aria-label']).startsWith('selectedSkillsCopyName'))
-  assert.equal(copyButtons.length, 1, '⛔ 复制技能名只给**已开启**的技能：没开的复制了也用不上（那串名字是给会话用的）')
-  assert.equal(detailButtons(page).length, SELECTED_SKILL_CATALOG.length,
-    '「详情」不留这一道闸门——开之前正是要读原文的时候')
-  assert.deepEqual(copyButtons.map((button) => button.props['aria-label']),
-    [`selectedSkillsCopyName: ${SELECTED_SKILL_CATALOG[0].name}`], '复制的目标写进无障碍名')
-  assert.deepEqual(copyButtons.map((button) => button.props.title),
-    [`selectedSkillsCopyName: ${SELECTED_SKILL_CATALOG[0].name}`], '悬停提示与无障碍名同一句')
-  assert.equal(copyButtons[0].children[0], 'selectedSkillsCopyName', '按钮文案是「复制技能名」')
-  await copyButtons[0].props.onClick()
-  assert.deepEqual(clipboardWrites, [`/${SELECTED_SKILL_CATALOG[0].name}`], '走官方 writeClipboard 写入 /name，粘贴即可强制加载')
-  assert.equal(timers.length, 1, '「已复制」必须定时复位：一直亮着等于把一次性动作说成一个状态')
-  assert.equal(timers[0].ms, 1600)
-  assert.ok(collect(page, 'button').some((button) => button.props['aria-pressed'] === 'true'), '能力标签筛选有可见选中态')
+  const nameButtons = skillNameButtons(page)
+  assert.equal(nameButtons.length, SELECTED_SKILL_CATALOG.length, '每行技能名都是开原文的按钮')
+  for (const [index, button] of nameButtons.entries()) {
+    assert.equal(button.children[0], SELECTED_SKILL_CATALOG[index].label.zh, '按钮文案就是技能名本身')
+    assert.equal(button.props.title, 'selectedSkillsOpenDetail', '悬停说明点下去会发生什么')
+    assert.equal(button.props['aria-haspopup'], 'dialog', '无障碍树先说明打开的是对话框')
+  }
+  assert.deepEqual(collect(page, 'button').filter((button) => button.props.className === 'capital-config-skill-action'), [],
+    '复制技能名与「详情」按钮都已移除')
+  assert.equal(collect(page, 'Modal').length, SELECTED_SKILL_CATALOG.length, '每行一颗详情对话框（关着时由官方组件自己收起）')
+  assert.ok(collect(page, 'Pill').some((pill) => pill.props['aria-pressed'] === 'true'), '两个筛选维度都有可见的选中态')
   assert.equal(collect(page, 'Switch').length, SELECTED_SKILL_CATALOG.length + 2)
   assert.deepEqual(collect(page, 'h5'), [], '精选 Skills 不再是数据源底下的 h5：它与数据源平级，如今各占一格')
   const [tabs] = collect(page, 'SegmentedControl')
-  assert.equal(tabs.props.options[1].label, `selectedSkillsTitle 1/${SELECTED_SKILL_CATALOG.length}`,
-    '第二格标"已开启/总数"：只标总数会让人以为整张 catalog 都开着')
+  assert.equal(tabs.props.options[1].label, 'selectedSkillsTitle', '第二格不再带已开启数或「自动」后缀')
   const skillsPanel = collect(page, 'section').find((node) => node.props.id === 'capital-config-tabs-skills-panel')
   assert.equal(skillsPanel.props.hidden, true, '不在屏的那格 hidden 收起（仍在渲染树上，所以以上断言量的是真内容）')
   assert.equal(collect(page, 'p').filter((node) => node.props.className === 'capital-config-skill-description').length,
     SELECTED_SKILL_CATALOG.length, '只展示技能简述，不渲染额外风险提示')
-  assert.equal(collect(page, 'p').filter((node) => node.props.className === 'capital-config-skill-when').length,
+  assert.equal(collect(page, 'dl').filter((node) => node.props.className === 'capital-config-skill-meta').length,
+    SELECTED_SKILL_CATALOG.length, '简述、触发条件与关键词共用一套元信息排版')
+  assert.equal(collect(page, 'dt').filter((node) => node.children[0] === 'selectedSkillsWhen').length,
     SELECTED_SKILL_CATALOG.length, '每行展示路由触发句（useWhen），不只给一段主题摘要')
-  assert.ok(collect(page, 'span').some((node) => node.props.className === 'capital-config-skill-role'), '每行展示角色徽标，用户知道它归主 Agent 还是数据侧')
+  assert.equal(collect(page, 'dt').filter((node) => node.children[0] === 'selectedSkillsKeywords').length,
+    SELECTED_SKILL_CATALOG.length, '关键词从触发句里拆出来，和 when 同一字号、同一行高')
+  const [heading] = collect(page, 'div').filter((node) => node.props.className === 'capital-config-skill-heading')
+  const headingParts = heading.children.filter((child) => child.type !== 'Modal')
+  assert.deepEqual(headingParts.map((node) => (node.type === 'button' ? 'name' : node.props.className)),
+    ['name', 'capital-config-skill-tags', 'capital-config-skill-presets'],
+    '名称 → Skill 特点 → 适用预设排在同一行；标签不再单独占下面一行')
+  const traitTags = collect(heading, 'Tag').filter((node) => node.props.className === 'capital-config-skill-tag')
+  assert.equal(traitTags.length, SELECTED_SKILL_CATALOG[0].tags.length, 'Skill 特点标签跟着标题')
+  assert.ok(traitTags.every((node) => node.props.tone === 'neutral'), '特点标签用中性色')
+  const presetTags = collect(heading, 'Tag').filter((node) => node.props.className === 'capital-config-skill-preset')
+  assert.deepEqual(presetTags.map((node) => node.children[1]), ['自动模式'], '角色徽标改用预设名，排在特点标签右边')
+  assert.ok(presetTags.every((node) => node.props.tone === 'info'), '适用预设用信息色，和特点标签一眼分得开')
+  assert.equal(collect(page, 'span').some((node) => node.props.className === 'capital-config-skill-role'), false,
+    '旧的「主 Agent / 数据分析」角色徽标不再出现')
   assert.equal(collect(page, 'p').some((node) => /实验中|观察中|最近提交|下次复查/.test(JSON.stringify(node.children))), false)
 
   const dict = dictionaries.get('settings.capital')
@@ -481,52 +505,73 @@ test('capital-config Client：精选 Skills 每行给复制技能名与仓库链
   assert.equal(dict.zh.title, '数据源')
   assert.equal(dict.zh.selectedSkillsTitle, '精选 Skills')
   assert.equal(dict.zh.selectedSkillsHint, undefined, '已移除整段精选 Skills 说明')
+  assert.equal(dict.zh.selectedSkillsModeLabel, '智能装载 Skills')
+  assert.equal(dict.zh.selectedSkillsModeHint, '开启后，由大模型根据用户提问，智能装载合适的精选「Skills」。')
+  assert.equal(dict.zh.selectedSkillsTraitGroup, 'Skill 特点')
+  assert.equal(dict.zh.selectedSkillsPresetGroup, '适用预设')
+  assert.equal(dict.zh.selectedSkillsAll, '全部')
+  assert.equal(dict.zh.selectedSkillsCopyName, undefined, '复制技能名整套退休')
+  assert.equal(dict.zh.selectedSkillsCopied, undefined)
+  assert.equal(dict.zh.selectedSkillsDetail, undefined, '「详情」按钮退休：名字本身就是入口')
+  assert.equal(dict.zh.selectedSkillsOpenDetail, '查看 Skill 原文')
   assert.equal(dict.zh.openDocs, '官方文档')
   // Must match the host's partsLabel, or the tab and section names diverge.
   assert.equal(dict.zh.componentsTitle, '包含的组件')
   assert.equal(dict.en.componentsTitle, 'Components')
   assert.equal(typeof dict.zh.tabsLabel, 'string')
   assert.equal(typeof dict.zh.componentsHint, 'string', '那句"清单在下方"仍在字典里：它只是从画面上挪到了读屏侧')
-  assert.equal(dict.zh.selectedSkillsCopyAction, undefined, '复制按钮只剩一套文案（visible 与 aria 同名，不再分两个键）')
-  assert.equal(dict.zh.selectedSkillsDetail, '详情')
   assert.equal(typeof dict.zh.selectedSkillsDocFailed, 'string', '原文取不到时要有一句人话')
 })
 
-test('capital-config Client：筛选器在左侧、每个标签带"点它会显示几行"', () => {
+test('capital-config Client：筛选器在清单上方，两个维度各带"点它会显示几行"', () => {
   const scope = readyScope()
   const { mod } = loadClient({ scope })
   const { ctx, registrations } = fakeCtx({ scope })
   mod.apply(ctx)
   const { render } = cardRenderer(registrations)
   const page = render()
-  const [layout] = collect(page, 'div').filter((node) => node.props.className === 'capital-config-selected-layout')
-  assert.ok(layout, '第二格是一行两列（上下布局时 35 行清单里根本回不去筛选器）')
-  const [filter, list] = layout.children
-  assert.equal(filter.props.className, 'capital-config-selected-filter', '左列是筛选器')
-  assert.equal(list.props.className, 'capital-config-selected-list', '右列是清单')
-  const tagCount = new Map()
+  const [browser] = collect(page, 'div').filter((node) => node.props.className === 'capital-config-skills-browser')
+  assert.ok(browser, '筛选器与清单同属一组，排在上方而不是左列')
+  const [filters, list] = browser.children
+  assert.equal(filters.props.className, 'capital-config-filters', '筛选条在清单上方')
+  assert.equal(list.props.className, 'capital-config-selected-list', '清单跟在筛选条下面')
+  assert.equal(filters.props['aria-label'], 'selectedSkillsFilterLabel')
+  const rows = collect(filters, 'div').filter((node) => node.props.className === 'capital-config-filter-row')
+  assert.equal(rows.length, 2, '两个筛选维度各一行')
+  assert.deepEqual(rows.map((row) => row.children[0].children[0]),
+    ['selectedSkillsTraitGroup', 'selectedSkillsPresetGroup'], '群组名逐字对应「Skill 特点」与「适用预设」')
+
+  const traitPills = collect(rows[0], 'Pill')
+  const traits = selectedSkillTraitOrder()
+  assert.deepEqual(traitPills.map((pill) => pill.children[0]),
+    traits.map((tag) => (tag === SELECTED_SKILL_FILTER_ALL ? 'selectedSkillsAll' : SELECTED_SKILL_TAG_LABELS.zh[tag])),
+    '特点标签按全量条数从高到低排，「全部」恒在第一格')
+  const traitTotals = new Map([[SELECTED_SKILL_FILTER_ALL, SELECTED_SKILL_CATALOG.length]])
   for (const entry of SELECTED_SKILL_CATALOG) {
-    for (const tag of entry.tags) tagCount.set(tag, (tagCount.get(tag) ?? 0) + 1)
+    for (const tag of entry.tags) traitTotals.set(tag, (traitTotals.get(tag) ?? 0) + 1)
   }
-  tagCount.set('all', SELECTED_SKILL_CATALOG.length)
-  const tags = ['all', ...Array.from(tagCount.keys()).filter((tag) => tag !== 'all')
-    .sort((left, right) => tagCount.get(right) - tagCount.get(left))]
-  const buttons = collect(filter, 'button')
-  assert.deepEqual(buttons.map((button) => button.children[0]), tags.map((tag) => SELECTED_SKILL_TAG_LABELS.zh[tag]),
-    '筛选器按个数从高到低排，「全部」不参与排序')
-  assert.equal(buttons[0].children[0], SELECTED_SKILL_TAG_LABELS.zh.all, '「全部」恒在第一格')
-  assert.equal(collect(filter, 'span').filter((node) => node.children[0] === 'selectedSkillsFilterLabel').length, 0,
-    '「按能力筛选」那句字面提示删了（名字仍挂在 role=group 的 aria-label 上）')
-  assert.equal(filter.props['aria-label'], 'selectedSkillsFilterLabel')
-  const ordered = buttons.slice(1).map((button) => Number(button.children[1].children[0]))
-  assert.deepEqual(ordered, [...ordered].sort((left, right) => right - left), '数字必须单调不升')
-  const shown = buttons.map((button) => Number(button.children[1].children[0]))
-  assert.deepEqual(shown, tags.map((tag) => tagCount.get(tag)), '数字 = catalog 里带这个标签的条数')
-  assert.equal(shown[0], collect(list, 'div').filter((node) => node.props.className === 'capital-config-field').length,
-    '「全部」那个数与右边当场渲染的行数必须相等')
-  for (const [index, button] of buttons.entries()) {
-    assert.equal(button.children[1].props.className, 'capital-config-selected-filter-count', `${index} 的数字是自己的元素，不拼在名字里`)
-  }
+  assert.deepEqual(traitPills.map((pill) => Number(pill.children[1].children[0])),
+    traits.map((tag) => traitTotals.get(tag)), '数字 = catalog 里带这个特点的条数')
+  assert.ok(traitPills.every((pill) => pill.children[1].props.className === 'capital-config-filter-count'),
+    '数字是自己的元素，不拼在名字里')
+
+  const presetPills = collect(rows[1], 'Pill')
+  assert.deepEqual(presetPills.map((pill) => pill.children[0]),
+    ['selectedSkillsAll', ...SELECTED_SKILL_PRESET_ORDER.map((preset) => SELECTED_SKILL_PRESETS[preset].zh)],
+    '五个预设全部在筛选条上，顺序跟选择器一致')
+  const presetTotals = selectedSkillPresetTotals()
+  assert.deepEqual(presetPills.map((pill) => Number(pill.children[1].children[0])),
+    [SELECTED_SKILL_CATALOG.length, ...SELECTED_SKILL_PRESET_ORDER.map((preset) => presetTotals.get(preset))])
+  assert.deepEqual(presetPills.map((pill) => pill.props.disabled === true),
+    [false, ...SELECTED_SKILL_PRESET_ORDER.map((preset) => presetTotals.get(preset) === 0)],
+    '不加载精选 Skills 的两个预设仍列出来，但置灰不可选')
+  assert.deepEqual(presetPills.filter((pill) => pill.props.disabled === true).map((pill) => pill.props.title),
+    ['selectedSkillsPresetUnavailable', 'selectedSkillsPresetUnavailable'], '置灰时说明原因')
+  assert.equal(traitPills[0].props['aria-pressed'], 'true', '默认特点维度是全部')
+  assert.equal(presetPills[0].props['aria-pressed'], 'true', '默认预设维度也是全部')
+  assert.equal(Number(traitPills[0].children[1].children[0]),
+    collect(list, 'div').filter((node) => node.props.className === 'capital-config-skill-item').length,
+    '「全部」那个数与清单当场渲染的行数必须相等')
 })
 
 // Enabled skills sort first, and the order is frozen on tab entry so toggling does not move a row under the cursor.
@@ -540,21 +585,14 @@ test('capital-config Client：已开启的 Skill 置顶，但只在进入那一�
   // Copy before sorting: the catalog is shared module state.
   const ordered = [...SELECTED_SKILL_CATALOG]
     .sort((left, right) => (enabled[left.key] === true ? 0 : 1) - (enabled[right.key] === true ? 0 : 1))
-  const titles = collect(page, 'span')
-    .filter((node) => node.props.className === 'capital-config-title')
-    .map((node) => node.children[0])
+  const titles = skillNameButtons(page).map((node) => node.children[0])
   assert.equal(titles.length, SELECTED_SKILL_CATALOG.length, '每行一个标题')
   assert.deepEqual(titles, ordered.map((entry) => entry.label.zh), '开了的两颗在最前，组内还是 catalog 顺序')
   assert.equal(titles[0], SELECTED_SKILL_CATALOG[1].label.zh, '开了的那颗真的不在它原本的位子上')
-  const copyRows = collect(page, 'button')
-    .filter((button) => String(button.props['aria-label']).startsWith('selectedSkillsCopyName'))
-  assert.deepEqual(copyRows.map((button) => button.props['aria-label']),
-    ordered.slice(0, 2).map((entry) => `selectedSkillsCopyName: ${entry.name}`),
-    '「复制技能名」只给已开启的行 ⇒ 它们跟着聚在最上面')
 })
 
 // Opening must be a click: HoverCard only times pointerenter and closes on anchor click.
-test('capital-config Client：「详情」点击开对话框、悬停预热原文，成功才缓存', async () => {
+test('capital-config Client：点击 Skill 名称开对话框、悬停预热原文，成功才缓存', async () => {
   const scope = readyScope()
   const { mod, docRequests } = loadClient({ scope })
   const { ctx, registrations } = fakeCtx({ scope })
@@ -568,22 +606,22 @@ test('capital-config Client：「详情」点击开对话框、悬停预热原�
     assert.equal(typeof modal.props.onClose, 'function', '关闭是应用侧动作：Esc / 遮罩 / 关闭按钮都走它')
     assert.equal(typeof modal.props.closeLabel, 'string', '非 headless 的 Modal 必须给关闭按钮一句本地化文案')
   }
-  const details = detailButtons(page)
-  assert.equal(details.length, SELECTED_SKILL_CATALOG.length, '「详情」不留"已开启"这道闸门——开之前正是要读原文的时候')
+  const names = skillNameButtons(page)
+  assert.equal(names.length, SELECTED_SKILL_CATALOG.length, '名称不留"已开启"这道闸门——开之前正是要读原文的时候')
   assert.deepEqual(collect(page, 'HoverCard'), [], '悬浮预览卡已经不用了：它点不开')
   assert.equal(modals[0].props.description, SELECTED_SKILL_CATALOG[0].name, 'slug 从行面上删了，但打开的那一刻要说清读的是哪一份')
   assert.equal(modals[0].children[0].props.children[0], 'selectedSkillsDocLoading', '还没取到时先把"读取中"摆好，不给一个空对话框')
-  assert.equal(details[0].props['aria-haspopup'], 'dialog', '点下去开的是对话框，无障碍树上得先说出来')
+  assert.equal(names[0].props['aria-haspopup'], 'dialog', '点下去开的是对话框，无障碍树上得先说出来')
   assert.equal(docRequests.length, 0, '没悬停也没点击就一份都不取')
-  details[0].props.onPointerEnter({})
+  names[0].props.onPointerEnter({})
   await settle()
   assert.deepEqual(docRequests.map((item) => item.url), [`/capital-skills/${SELECTED_SKILL_CATALOG[0].name}.md`])
   assert.equal(docRequests[0].init.cache, 'no-store')
   assert.equal(docRequests[0].init.credentials, 'same-origin', '本机旁路要带着宿主的 cookie，不带就是匿名请求本地文件')
-  details[0].props.onPointerEnter({})
+  names[0].props.onPointerEnter({})
   await settle()
   assert.equal(docRequests.length, 1, '同一行来回不重复要同一份')
-  details[1].props.onClick()
+  names[1].props.onClick()
   await settle()
   assert.equal(docRequests.length, 2, '另一行的原文是另一份')
   assert.equal(docRequests[1].url, `/capital-skills/${SELECTED_SKILL_CATALOG[1].name}.md`)
@@ -601,15 +639,15 @@ test('capital-config Client：原文读不到不写缓存，再点一次还会�
   const { ctx, registrations } = fakeCtx({ scope })
   mod.apply(ctx)
   const { render } = cardRenderer(registrations)
-  const [detail] = detailButtons(render())
-  detail.props.onClick()
+  const [name] = skillNameButtons(render())
+  name.props.onClick()
   await settle()
   assert.equal(docRequests.length, 1)
-  detail.props.onClick()
+  name.props.onClick()
   await settle()
   assert.equal(docRequests.length, 2, '把一次失败缓存住 = 这一整场会话都读不到原文')
   fail = false
-  detail.props.onClick()
+  name.props.onClick()
   await settle()
   assert.equal(docRequests.length, 3)
   assert.match(warnings.join('\n'), /skill_doc_unreadable/)
@@ -624,8 +662,8 @@ test('capital-config Client：宿主还没这条路由时，分类落 route_miss
   const { ctx, registrations } = fakeCtx({ scope })
   mod.apply(ctx)
   const { render } = cardRenderer(registrations)
-  const [detail] = detailButtons(render())
-  detail.props.onPointerEnter({})
+  const [name] = skillNameButtons(render())
+  name.props.onPointerEnter({})
   await settle()
   assert.match(warnings.join('\n'), /route_missing/, '回包不是我们的形状 ⇒ 判成"宿主没这条路由"')
   const dict = (() => {
@@ -681,7 +719,7 @@ test('capital-config Client：三块面板各有 tabpanel 身份，第三块也�
 })
 
 // Enabled count is live snapshot state; row count comes only from listBundles(), and an unknown count is never drawn as 0.
-test('capital-config Client：tab 上的两个计数，取不到的数字宁可不画', async () => {
+test('capital-config Client：精选格不报数，组件格取不到行数时宁可不画', async () => {
   const scope = readyScope({ selectedSkills: { financialHealth: true, valuationInvestmentStrategy: true } })
   const { mod } = loadClient({ scope })
   const { ctx, registrations, listBundlesCalls } = fakeCtx({ scope })
@@ -689,8 +727,8 @@ test('capital-config Client：tab 上的两个计数，取不到的数字宁可�
   const { injected, render } = cardRenderer(registrations)
 
   let tabs = collect(render(), 'SegmentedControl')[0]
-  assert.equal(tabs.props.options[1].label, `selectedSkillsTitle 2/${SELECTED_SKILL_CATALOG.length}`,
-    '已开启 2 颗 ⇒ 2/35')
+  assert.equal(tabs.props.options[1].label, 'selectedSkillsTitle',
+    '已开启 2 颗也只在筛选条里报数，tab 上不带 n/m 或「自动」')
   assert.equal(tabs.props.options[2].label, 'componentsTitle', '没取过行数之前，第三格只有标题、没有数字')
 
   await injected.ensureBundleRows()
@@ -826,7 +864,7 @@ test('capital-config Client：只隐藏两颗内部角色卡片，委派注册�
     '两张内部角色卡片都由同一条 display:none !important 收起')
 })
 
-test('capital-config Client：筛选器吸顶、三格首行等距，且不许冒出第二个滚动容器', () => {
+test('capital-config Client：筛选条在清单上方、三格首行等距，且不许冒出第二个滚动容器', () => {
   const scope = readyScope()
   const { mod, styles } = loadClient({ scope })
   const { ctx } = fakeCtx({ scope })
@@ -838,15 +876,28 @@ test('capital-config Client：筛选器吸顶、三格首行等距，且不许�
     assert.ok(match, `样式表里没有 ${selector} 这条：布局纪律靠它，掉了就是页面自己变样`)
     return match[1]
   }
-  assert.match(rule('.capital-config-selected-filter'), /position:\s*sticky/, '筛选器要随滚动钉在左边')
-  assert.match(rule('.capital-config-selected-filter'), /top:/, 'sticky 没有 top 等于不吸顶')
-  // Sticky references the nearest scroll container; overflow on either column breaks it silently.
-  for (const selector of ['.capital-config-selected-layout', '.capital-config-selected-list']) {
-    assert.doesNotMatch(rule(selector), /overflow:/, `${selector} 不许开第二个滚动容器：那会让 sticky 静默失效`)
+  assert.match(rule('.capital-config-filters'), /display:\s*flex/, '两个筛选维度在清单上方成组')
+  assert.match(rule('.capital-config-filter-row'), /align-items:\s*flex-start/, '群组名与标签顶端对齐')
+  assert.match(rule('.capital-config-filter-options'), /flex-wrap:\s*wrap/, '标签多了换行，不做横向滚动')
+  assert.match(rule('.capital-config-filter-label'), /min-width:/, '两行群组名对齐成一列')
+  assert.match(rule('.capital-config-filter-pill'), /height:\s*22px/, '筛选 chip 比正式按钮矮一档')
+  assert.match(rule('.capital-config-filter-pill:disabled'), /opacity:/, '不加载方法的预设要看出不可选')
+  // No second scroll container: the filters belong to the page, not to a nested scroller.
+  for (const selector of ['.capital-config-filters', '.capital-config-selected-list']) {
+    assert.doesNotMatch(rule(selector), /overflow:/, `${selector} 不许开第二个滚动容器`)
   }
-  assert.match(rule('.capital-config-field'), /padding:\s*12px\s+0/, '行的上内边距仍是一档 12px')
-  assert.match(rule('.capital-config-selected-layout'), /padding-top:\s*12px/,
-    '左列第一颗按钮要顶到 24px：面板只有一个子元素时 flex gap 不发生作用，不补这一档就是 12px')
+  assert.match(rule('.capital-config-selected-mode'), /border:/, '智能装载开关单独成卡，与下面的清单分开')
+  assert.match(rule('.capital-config-field'), /padding:\s*12px\s+0/, '数据源行的上内边距仍是一档 12px')
+  assert.match(rule('.capital-config-skill-row'), /display:\s*flex/)
+  assert.match(rule('.capital-config-skill-row'), /padding:\s*14px\s+2px/, '每行靠一致的上下留白分隔')
+  assert.match(rule('.capital-config-skill-name'), /font-size:\s*13px/, '技能名比正文大一档')
+  assert.match(rule('.capital-config-skill-description'), /font-size:\s*12px/)
+  assert.match(rule('.capital-config-skill-description'), /line-height:\s*18px/)
+  assert.match(rule('.capital-config-skill-meta'), /font-size:\s*12px/, '何时使用 / 关键词与简述同一字号')
+  assert.match(rule('.capital-config-skill-meta'), /line-height:\s*18px/, '三块正文同一行高')
+  assert.match(rule('.capital-config-skill-meta'), /grid-template-columns:/, '标签列与内容列对齐')
+  assert.match(rule('.capital-config-skill-tag'), /font-weight:\s*400/, 'Skill 特点读起来更轻')
+  assert.match(rule('.capital-config-skill-preset'), /font-weight:\s*500/, '适用预设比特点再重一档（颜色另由 Tag tone 区分）')
   assert.match(rule('.capital-config-panel[data-capital-config-panel="components"]'), /margin-bottom:\s*-\d+px/,
     '第三格自己不留内容，靠这条把它的首行文字顶到与另两格等距（负数：宿主那段本来就离得远）')
   assert.match(rule('div.capital-config-skill-modal'), /width:\s*min\(\d{3,}px/, '详情对话框要宽过官方默认的 380px')
@@ -857,11 +908,24 @@ test('capital-config Client：筛选器吸顶、三格首行等距，且不许�
   assert.match(rule('.capital-config-skill-doc'), /max-height:/, '封顶的是正文那一块，标题与关闭按钮因此留在原位')
   // Only reference tokens the theme defines; an undefined var() falls back to inherited color.
   assert.doesNotMatch(css, /--dsw-alias-label-error/, '主题里不存在的 token 不许引用')
-  assert.match(rule('.capital-config-skill-when'), /line-height:/, '触发句要有自己的行高，长句不挤在标题上')
-  assert.match(rule('.capital-config-skill-role'), /border:/, '角色徽标要有边框，和标签区分开')
   assert.match(rule('.capital-config-write-failed'), /color:\s*var\(--dsw-alias-state-error-primary\)/,
     '写失败红字用 error-primary：同一个坏 token 的另一处，一并钉住')
-  for (const retired of ['capital-config-skill-slug', 'capital-config-skill-copy', 'capital-config-selected-filter-label', 'capital-config-cap-hint', 'capital-config-selected-cap-count']) {
+  for (const retired of [
+    'capital-config-title',
+    'capital-config-selected-layout',
+    'capital-config-selected-filter',
+    'capital-config-selected-filter-button',
+    'capital-config-selected-filter-count',
+    'capital-config-skill-action',
+    'capital-config-skill-roles',
+    'capital-config-skill-role',
+    'capital-config-skill-when',
+    'capital-config-skill-slug',
+    'capital-config-skill-copy',
+    'capital-config-selected-filter-label',
+    'capital-config-cap-hint',
+    'capital-config-selected-cap-count',
+  ]) {
     assert.ok(!css.includes(`.${retired}`), `.${retired} 已经从渲染树上 retire 了，样式表里不许留死规则`)
   }
 })
@@ -947,7 +1011,7 @@ test('capital-config Client：selected skill 开关只写允许的 volatile 路�
   assert.equal(writes.length, 1, '只读设置不得发起写入')
 })
 
-test('capital-config Client：auto 模式标自动、勾选只读，切换只写 selectedSkillsMode', async () => {
+test('capital-config Client：打开智能装载后清单与筛选条一起收起，切换只写 selectedSkillsMode', async () => {
   const doc = { value: { selectedSkillsMode: 'auto', selectedSkills: { buffettFramework: false } } }
   const writes = []
   const scope = {
@@ -969,15 +1033,19 @@ test('capital-config Client：auto 模式标自动、勾选只读，切换只写
   const { render } = cardRenderer(registrations)
   const card = render()
   const [tabs] = collect(card, 'SegmentedControl')
-  assert.equal(tabs.props.options[1].label, 'selectedSkillsTitle selectedSkillsModeShort',
-    'auto 模式不按「已开启/总数」报数：勾选在这一模式下不参与过滤')
+  assert.equal(tabs.props.options[1].label, 'selectedSkillsTitle', 'tab 文案不随模式变化，也不报数')
   const switches = collect(card, 'Switch')
+  assert.deepEqual(switches.map((node) => node.props.label),
+    ['localFetchLabel', 'selectedSkillsModeLabel'], 'auto 下只留本机回退与智能装载两颗开关')
   assert.equal(switches[1].props.checked, true, '模式开关必须反映 auto')
-  assert.ok(switches.slice(2).every((node) => node.props.disabled === true),
-    'auto 下逐颗勾选只读：拨了也不会生效，不能让它看起来可操作')
+  assert.equal(collect(card, 'div').filter((node) => node.props.className === 'capital-config-skills-browser').length, 0,
+    '智能装载打开后，筛选条与逐项清单一起隐藏')
+  assert.equal(collect(card, 'Pill').length, 0, '筛选 chip 不在屏')
+  assert.equal(collect(card, 'button').filter((node) => node.props.className === 'capital-config-skill-name').length, 0,
+    '技能名称入口也不在屏')
   assert.equal(collect(card, 'button')
-    .filter((button) => String(button.props['aria-label']).startsWith('selectedSkillsCopyName')).length,
-  SELECTED_SKILL_CATALOG.length, 'auto 下每个角色都能加载自己的方法，复制入口必须全开')
+    .filter((button) => String(button.props['aria-label'] ?? '').startsWith('selectedSkillsCopyName')).length, 0,
+  '复制技能名已整体移除')
 
   await injected.toggleSelectedSkillsMode(false)
   assert.equal(JSON.stringify(writes), JSON.stringify([[{ op: 'set', path: ['selectedSkillsMode'], value: 'manual' }]]),

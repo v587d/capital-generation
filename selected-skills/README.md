@@ -29,8 +29,9 @@ for the user to review the source and decide whether it fits the task.
 Tags describe what a skill helps with, not whether it is trustworthy or recommended.
 `status`, `lastCommit`, `reviewBy` and `riskNote` are review metadata for this repository:
 they drive the quarterly review cadence and the scan record, and they are deliberately not
-rendered in the settings card, which shows the skill name, summary, capability tags and the
-upstream repository link. A tag is not a guarantee of financial validity.
+rendered in the settings card, which shows the skill name, summary, capability tags, the
+preset that can load it, its trigger/keyword line and the upstream repository link. A tag
+is not a guarantee of financial validity.
 
 ## Operating posture
 

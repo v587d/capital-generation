@@ -1,6 +1,6 @@
 {
   "name": "@v587d/capital-generation",
-  "version": "2.10.1",
+  "version": "2.10.2",
   "description": "Capital Generation：面向中国散户的 AI 投资助手插件（自动模式 Agent Preset）",
   "icon": "assets/cg-icon.png",
   "author": "v587d",
@@ -108,6 +108,7 @@
     "watchlist",
     "preset",
     "selected-skills/catalog.js",
+    "selected-skills/filter.js",
     "selected-skills/routing.js",
     "selected-skills/ROUTING.md",
     "selected-skills/README.md",

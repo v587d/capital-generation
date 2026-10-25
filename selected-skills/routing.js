@@ -17,6 +17,29 @@ export const SELECTED_SKILL_ROLES = Object.freeze({
 /** `data_analyst` is reserved; until it is enabled it executes the data_junior method set. */
 export const SELECTED_SKILL_ROLE_ALIASES = Object.freeze({ data_analyst: 'data_junior' })
 
+/**
+ * Settings-card preset names. These are the five cards a user can pick in the
+ * agent selector, not the execution-role table above: `data_collector` and
+ * `visualization_specialist` load no selected skills, but the Preset filter
+ * still shows them with a zero count.
+ */
+export const SELECTED_SKILL_PRESETS = Object.freeze({
+  main: Object.freeze({ zh: '自动模式', en: 'Auto mode' }),
+  data_collector: Object.freeze({ zh: '行情专家', en: 'Market specialist' }),
+  web_retriever: Object.freeze({ zh: '资讯专员', en: 'News specialist' }),
+  data_junior: Object.freeze({ zh: '分析师', en: 'Analyst' }),
+  visualization_specialist: Object.freeze({ zh: '绘图专员', en: 'Chart specialist' }),
+})
+
+/** Display order in the settings card's preset filter. */
+export const SELECTED_SKILL_PRESET_ORDER = Object.freeze([
+  'main',
+  'data_collector',
+  'web_retriever',
+  'data_junior',
+  'visualization_specialist',
+])
+
 export const SELECTED_SKILL_STAGES = Object.freeze({
   'research': Object.freeze({ zh: '研究', en: 'Research' }),
   'pre-event': Object.freeze({ zh: '事件前', en: 'Pre-event' }),

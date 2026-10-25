@@ -96,8 +96,8 @@ test('打包闸门：selected-skills 的运行时半边逐条落在发布清单�
   const { SELECTED_SKILL_CATALOG, SELECTED_SKILL_SKILL_DIRS } = await import('../selected-skills/catalog.js')
   assert.ok(SELECTED_SKILL_CATALOG.length >= 1, 'catalog 一条都没有，这条闸门就变成空断言了')
 
-  for (const required of ['selected-skills/catalog.js', 'selected-skills/README.md']) {
-    assert.ok(paths.has(required), `发布清单里缺少 ${required}（settings 卡片与 provider 都 import catalog）`)
+  for (const required of ['selected-skills/catalog.js', 'selected-skills/filter.js', 'selected-skills/routing.js', 'selected-skills/README.md']) {
+    assert.ok(paths.has(required), `发布清单里缺少 ${required}（settings 卡片与 provider 都 import catalog / routing）`)
   }
 
   // Every catalog repository needs a registered skills root, or the provider cannot resolve its path.
