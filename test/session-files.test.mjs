@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { findSessionRecords, latestSessionFile } from '../scripts/lib/session-files.mjs'
+import { findSessionRecords, findWorkspaceSessionRecords, latestSessionFile } from '../scripts/lib/session-files.mjs'
 
 // `verify:sessions` needed a gate on its own gate: scripts/verify-sessions.mjs hardcoded
 // `session.v3.jsonl.zstd` while the host writes `session.v4.jsonl.zstd` — no error ever, it read 0
@@ -74,6 +74,21 @@ test('findSessionRecords：store 不存在或没有候选时返回空数组（�
   try {
     mkdirSync(root, { recursive: true })
     assert.deepEqual(findSessionRecords(root), [])
+  } finally {
+    cleanup()
+  }
+})
+
+
+test('findWorkspaceSessionRecords：直接指向一个工作区时也能读到会话（报告脚本用它避免扫全库）', () => {
+  const { root, cleanup } = store()
+  try {
+    const dir = sessionDir(root, 'session-scoped')
+    writeFileSync(join(dir, 'session.v4.jsonl.zstd'), 'x')
+    const records = findWorkspaceSessionRecords(join(root, '--home-user-project--'))
+    assert.equal(records.length, 1)
+    assert.equal(records[0].id, 'session-scoped')
+    assert.deepEqual(findWorkspaceSessionRecords(join(root, 'missing')), [])
   } finally {
     cleanup()
   }

@@ -1,129 +1,149 @@
-# 精选 Skill 索引：任务型内置 skill ↔ 外部精选 skill
+# 精选 Skill 路由：角色、触发条件与注册边界
 
-> 索引见仓库根 `AGENTS.md` §8。本文记录**能力标签注册表**（三轴 + `serves` + `fallback`）、任务型
-> 内置 skill 在**读取期**拼索引的机制、编辑期上限与四条闸门。标签怎么入场、快照怎么接见
-> `docs/dev/selected-skills.md` §8.6；角色边界与「不许改」全表见 `docs/dev/preset-persona.md` §8.1–§8.5。
+> 索引见仓库根 `AGENTS.md` §8。本文记录外部精选 Skill 的**角色归属**、**触发条件**、**注册边界**
+> 与当前闸门；快照接入清单在 `docs/dev/selected-skills.md` §8.6，provider 代码在
+> `src/agents/selected-skills-provider.ts`。任务型内置 skill 不再携带精选索引。
 
-## 8.7 索引机制与标签注册表
+## 8.7 角色化路由
 
-**要让主 Agent 在适当时候加载精选 skill，靠的不是把 68 颗塞进 persona，而是把"这次任务相关的
-那几条"送到它在读的那颗任务型 skill 里。** 三颗任务型内置 skill（`capital-equity-research` /
-`capital-event-impact` / `capital-portfolio-review`）的正文在读取期被拼上一段索引；磁盘上的
-`SKILL.md` 一个字节都不动。
+精选 Skill 不是任务型内置 skill 的附录，也不是“只有主 Agent 能用的参考资料”。它们是独立的方法层，
+按**执行角色**分发：同一个方法可以只给一个角色，也可以同时给多个角色。
 
-### 标签注册表：一处登记，两处生效
+### 协议层与方法层
 
-`selected-skills/catalog.js` 的 `SELECTED_SKILL_TAGS` 是**唯一来源**：条目的 `tags` 既决定设置卡片
-左侧筛选条怎么分类它，也决定它进哪几颗任务型 skill 的索引。卡片的标签词表
-（`SELECTED_SKILL_TAG_LABELS`）由注册表现算派生，导出形状不变。
+内置 `capital-*` 是**流程协议**（工具委派、证据门、回传格式、输出形状），精选 Skill 是
+**分析方法层**（估值步骤、财务勾稽、组合归因、事件研究）。两者正交：同时命中就都加载，先协议定
+流程、再方法定分析；⛔ 不得用协议替代同主题方法，也不得让方法改写协议的工具边界与证据门。
 
-三轴判据（`SELECTED_SKILL_TAG_AXES`）：
+### 角色表
 
-| 轴 | 判据 | 路由 |
-|---|---|---|
-| `market` | 什么市场口径（A 股 / 美股 / 将来的港股…） | **不路由**，只做标注 |
-| `capability` | 调用什么分析方法（估值 / 财务健康 / 证据核验…） | 路由 |
-| `topic` | 落在什么场景或对象上（组合、监控、税务…） | 路由 |
+| 角色键 | 会话 preset | 能加载什么 | 典型工作 |
+|---|---|---|---|
+| `main` | `capital-generation` | 研究框架、组合/交易流程、写作、教学、税务 | 组织证据、最终答复、用户决策 |
+| `data_junior` | `capital-data-junior` | 估值、会计、财务质量、风险、筛选、技术/期权/ETF、取证 | `run_code` 计算、表格、统计 |
+| `web_retriever` | `capital-web-retriever` | 10-K 深读、电话会纪要、逐条核验 | 取证、文档阅读、来源核对 |
+| `data_analyst` | `capital-data-analyst`（未启用） | 与 `data_junior` 同一方法集 | 预留的独立分析角色 |
+| `data_collector` | `capital-data-collector` | 无 | 只取结构化数据，不套方法 |
+| `visualization_specialist` | `capital-visualization-specialist` | 无 | 只出图，不套方法 |
 
-市场轴**不路由**是实测纠错的结果：最初写成"对所有任务型 skill 生效"，于是 10 个启用项（9 颗带
-`a-share`）在三颗任务型 skill 里得到**完全相同**的清单，索引等于失效。判据是"是 A 股"不蕴含
-"服务单股研究 / 事件影响 / 组合复盘"。改成不路由后，`10k-digest`（美股 10-K 深读）只进 equity 与
-event-impact，`tax-lens` 只进 portfolio。**顺带白拿一个自动化**：新增市场口径标签零决策——不写
-`serves`、不重跑任何分配，只登记一行（zh / en / axis）。
+`roles` 是**执行角色**，不是“谁可能感兴趣”。主 Agent 需要数字时交给 `data_junior`，不要为了同一个
+方法再加载一遍；`data_junior` 也不写最终结论。多角色的判据只有一条：这个方法的两部分确实由两个角色
+分别执行（例如 `fact-check` 由检索侧取证、主 Agent 判定；`china-break-trace` 由分析侧勾稽、检索侧
+取公告）。
 
-路由轴的 `serves`（可重叠）与 `fallback` **二选一**，两者都不给就是孤儿，闸门会红。
+### 元数据：`selected-skills/routing.js`
 
-### 兜底：一切兜底都往 equity 装
+每条 catalog 条目在 `SELECTED_SKILL_ROUTING` 有且只有一行：
 
-一条 `serves` 都挂不上的条目，只在 `capital-equity-research` 的索引里出现（`SELECTED_SKILL_FALLBACK_TASK`）。
-当前兜底名单必须为空（`fallbackOnlySkillNames()`），闸门钉住它：多出来一条就点名。
+```js
+{
+  market: ['a-share'],        // a-share | us-stock | global
+  stage: 'post-event',        // research | pre-event | post-event | monitoring | execution | review | learning
+  methods: ['earnings', 'financial-health'],
+  roles: ['main', 'data_junior'],
+  primaryRole: 'main',        // 角色短清单把它排在最前
+  useWhen: { zh, en },        // 唯一路由描述；zh 给模型，en 给英文界面/测试
+  requires: ['financial_statements', 'filings'],
+  overlaps: ['china-variance-commentary'],
+  canonicalFor: ['a-share/post-event/earnings-note'], // 同族默认项，可空
+}
+```
 
-### 读取期拼装：遮蔽候选，不改磁盘
+`useWhen` 是**路由描述**，不是正文摘要。它必须写清“市场 + 阶段 + 产出 + 关键词 + 不适用条件”，
+不以“分析 X”这种主题句充数。宿主技能目录、角色短清单与设置卡片都读同一份 `useWhen`；上游
+frontmatter 的 `description` 只作溯源，不再直接进模型目录（provider 在 `list()` 时覆盖）。
 
-provider（`src/agents/selected-skills-provider.ts`）在 `list()` 里多做一件事：**只为"确实有索引可给"
-的任务型 skill** 列出一个同名候选（rank 150 < 自定义根 `CUSTOM_RANK = 300`），`get()` 返回
-「磁盘正文 + 索引块」。三条边界：
+### 角色短清单：`capital:selected-skills`
 
-- **不改磁盘**：装好的包常常整棵只读；`skill-filesystem` 的 watcher 会被写文件搅动，多会话并行时
-  互相打架；`test/persona.test.mjs` 正钉着那些文件的 frontmatter 与体积。
-- **fail-open**：读不到底稿、或算下来索引为空，就**不列这个候选**——让给 fs provider 的原文。
-  遮蔽是加法不是替换，"没有索引"永远不许演变成"这颗 skill 不见了"（§9.7 ⑤）。
-- **一行都不启用时不遮蔽**：默认态与没有这个 provider 时逐字相同。
+`tools/selected-skills` 行在每个 Capital 角色 preset 注册一个 system-prompt section：
 
-跨层不是靠 rank：preset 的 standing scope 是 **agent scope 的 parent**
-（`dsh-agent-preset-registry` 的 `standingKey = scopeParentOf(agentKey)`），而 `chainLayers` 逐层
-`merged.set(name, …)`、最近的一层最后落子。两条机制取其一即可——取两条是因为遮蔽失败的症状是
-"索引静默消失"，没有第二个人会发现。
+- manual 只列**该角色已启用且有快照文件**的方法，全关时正文为空、零成本；auto 列该角色的全部方法，
+  仍只展示 12 条，完整目录在宿主技能目录里。
+- 模式来自 `capital-config.selectedSkillsMode`：`manual`（默认）只给勾选，`auto` 按角色开放全部方法、
+  运行期忽略勾选。`agent/pre-step` 的指纹包含模式，切换在下一轮生效。
+- 规则是**强制检查**：进入分析/取证前逐条判断，匹配的先用 `skill` 加载 1–2 条，再按正文执行；
+  加载后不得把摘要当全文，不得声称用过未加载的条目；全不匹配就不提。
+- 方法仍从属于本插件：不改变证据门、数据委派路径、输出通道；冲突以本插件为准。
+- 最多列 12 条（`BRIEF_MAX`），按 `canonicalFor` + `primaryRole` 排序，先给本角色最常用的默认项；
+  完整清单仍在宿主技能目录里，这 12 条不是勾选上限。
+- 角色差异写在 section 里：主 Agent 说明计算归 `data_junior`；`data_junior` 只做计算/表格/统计；
+  `web_retriever` 只做取证与核验。
+- `interpolate: false`：上游派生文本不能走 `{{variable}}` 插值。
 
-### 索引块的框（写在块内，不写在别处）
+### 使用反馈：`skills_used` 与最终引用
 
-它把**外部方法论**塞进了**宿主契约 skill** 的正文，框架被拉平了，所以那四句必须随块同行：
-这些是方法论材料、按需 `skill` 加载、**不改变**本 skill 的证据门 / 工具委派 / 输出通道、**冲突以
-本 skill 为准**、只给摘要不等于全文。索引行用**运行时描述**（上游 frontmatter，与会话目录同源），
-不用设置卡片里策展过的中文摘要——同一个 skill 在同一段上下文里出现两种描述只会让人两处对照。
+账本住 `src/agents/skill-usage.ts`，以 **session id** 为键、按 `parentSession` 归树：
 
-### 编辑期上限：6 个（只挡"再勾一个"）
+- **什么算一次实际加载**：`skill` 工具成功返回 `provider === 'capital-selected-skills'` 的正文；
+  `data_junior` 的 `tools.skill` 走 PTC，记 `tool/ptc-dispatch`；用户 `/name` 注入记
+  `user/message` 的 `skill-invocation`。失败调用、内置协议名、未启用或角色不匹配的名字都不入账。
+- **谁写账**：每个角色的 `tools/selected-skills` 行在该 Agent 的 scope 内监听 `tools/result` 与
+  `session/event`。没有“模型自报字段”这条路径：名字来自成功返回的正文，不是来自子 Agent 的措辞。
+- **主 Agent 看什么**：`capital:selected-skills` 的 section 在每次 assembly 读整棵树的账本，列出
+  `主 Agent：…` / `数据分析（session-xxxx）：…`，并硬性要求最终答复有一节「使用的方法」逐条点名、
+  说明各自支撑的判断；不得点名未加载项，也不得用“参考了相关方法”代替。
+- **子 Agent 回传**：角色 section 列出自己的账本；有加载时要求末尾附一行
+  `skills_used: name1, name2`。这行是给人看的摘要，主 Agent 与报告仍以程序记录为准。
+- **引用窗口**：根 Agent 收到新的 `user/message`（`source.kind === 'user'`）时清空整棵树的名单；
+  子 Agent 结算消息不触发清空。根 Agent scope 销毁时删除整棵树，内存不跨会话累积。
+- **报告与审计**：`node scripts/skill-usage-report.mjs`（`npm run report:skill-usage`）从会话日志
+  重算同一组事实：根会话、各角色会话、每颗次数、最终答复点名 `n/m` 与缺失名单；支持 `--json`、
+  `--latest N`、`--session <id>`、`--all-workspaces`、`--catalog`、`--strict`。它不依赖运行期内存，
+  能审计历史会话；`--catalog` 按会话打印精选 / 内置目录计数，用来验证 auto 的角色暴露。
 
-**为什么是 6，以及为什么不要抬**：三颗任务型内置 skill 的正文与这段索引块在**同一次 `skill` 结果**
-里，剪枝闸门 `thresholdChars: 8192`（保留 head 4096 + tail 1024）——超过就是**中间静默消失**，
-症状与 §9.7 那一族相同（没人报错）。索引每行带运行时 description，几十到几百字符一行；
-"三颗任务型 × 每颗至少 2 条"是这条字节预算允许的算术，不是口味值。往内置正文加句子花的是
-同一份预算，判据见 `docs/dev/preset-persona.md` §8.2 那条分界。
+### 注册边界
 
-`SELECTED_SKILLS_MAX_ENABLED = 6`，只在设置卡片生效：到上限后未勾的开关置灰，原因挂在**该行开关
-左侧**的一枚三角警示图标上（官方三角 + 感叹号）——悬停 `title` 与读屏 `aria-label` 同一串
-`Skill已达上限 (n/6)。`，列表顶上不留汇总提示、开关上不挂 `title`；文案住字典、`(n/6)` 由代码拼
-（`{count}` 占位），字典不存数字。**已勾上的行永远关得掉**。老配置多于 6 个照常全部生效并提示
-收敛——运行期 provider **不按这个数截断**，否则症状就是"卡片上开着 10 个、会话里只剩 6 个"。6 是
-"三颗任务型 × 每颗至少 2 条"的算术，紧；想要跨市场冗余就用 8，但那个数字只改这一处常量。图标 /
-位置 / 文案形状由 `test/capital-config.test.mjs` 钉。
+- `tools/selected-skills` 行带 `config.role`，按角色挂进 `capital-data-junior` / `-web-retriever` /
+  `-data-analyst` / 根 `capital-generation`；`data_collector` 与 `visualization_specialist` 不挂。
+- provider 只在 **Agent 自己的 scope** 注册（`agent.ctx.inject(['skills'])`），并要求
+  `agentPresets.composedPreset(agent.ctx) === 该角色 preset id`；不注册到 preset standing scope 或
+  Host scope。`agent/created` 与 `agent-preset/selected` 两条路径都接（GUI 先建后切是真实顺序）。
+- `list()` 与 `get()` 使用同一道“角色 ∩ 当前模式可用集合”闸门；manual 下未勾选、角色不匹配或快照
+  缺失的名字不得通过 `get()` 绕过目录过滤，auto 只放开角色边界以内的方法。
+- 开关每轮 `agent/pre-step` 现读；指纹变化时 `control.invalidate()` 必须在 `next()` 之前完成。
+- 读取链路只有一份：`readCapitalEntry()` 走 `settings.describe()` → `configEditor` 保存层；
+  读不到返回空对象，绝不当成“用户全关”后把 provider 钉死。preset 兜底只给主插件 Config。
 
-### 闸门与重跑清单
+### 已移除
 
-四条闸门住 `test/selected-skill-tags.test.mjs`（登记完整性 / `serves` 拼写 / 反向可达 / 上限不变量），
-卡片那一半住 `test/capital-config.test.mjs`，遮蔽与拼装住 `test/selected-skills-provider.test.mjs`。
+- **任务型 skill 索引与同名遮蔽**：`SELECTED_SKILL_TASK_IDS`、`renderTaskSkillIndex`、shadow rank、
+  `get()` 拼正文全部删除。任务型 skill 回到纯内置协议，精选 Skill 不再从它的正文尾部出现。
+- **6 颗勾选上限**：`SELECTED_SKILLS_MAX_ENABLED` 与卡片警示图标删除；manual 模式数量不限。
+  老配置里多于 6 颗的照常全部生效。角色短清单只限制**列出条数**，不限制可加载集合。
+- **标签的 `serves` / `fallback` 路由**：标签只做设置卡片筛选；角色与触发条件只看 `routing.js`。
 
-| 新增什么 | 要做什么 | 重跑 |
-|---|---|---|
-| 外部精选 skill | 入场填 `tags`；带新标签时同时登记 axis 与 `serves` | 不用（派生自动生效） |
-| 新标签（market 轴） | 词表加一行，零决策 | 不用 |
-| 新标签（routing 轴） | 词表加一行 + `serves` 或 `fallback` | 一次 sweep |
-| 新任务型内置 skill | 划 `serves` 并重查反向可达 | **必须重跑** |
-| 新轴 | `SELECTED_SKILL_TAG_AXES` 加一行 | 一次 sweep |
+### 当前边界
 
-### 已知边界
+- **auto 已实现**：按角色暴露全部方法，运行期不读勾选；`manual` 保持原行为（数量不限）。auto 的
+  选择质量依赖 `routing.js` 的 `useWhen` + `stage` + `canonicalFor`，角色短清单仍只列 12 条。
+- auto 不改变角色边界：`data_collector` / `visualization_specialist` 仍是 0 颗；main 看不到
+  `china-dcf` 一类数据侧专属方法，越界 `get()` 照常拒绝。
+- 内置 `capital-*` 协议曾遮住同主题精选方法；2026-10-25 起按“协议层 / 方法层”解耦：短清单声明两层
+  正交，六个协议顶部写定位与按角色加载。复测组合复盘同时加载 `capital-portfolio-review` + `portfolio-review`，
+  10-K 加载 `capital-web-protocol` + `10k-digest`。无 Dataset 建模仍由主 persona 路由 data_junior。
+- 角色短清单只列 12 条；角色目录仍是完整集合，模型从宿主技能目录选择其余条目。
+- `data_analyst` 未启用，只做 `data_junior` 的别名；启用时要单独决定是否拆分方法集。
+- 使用反馈已落到运行期账本与会话日志：报告能证明“加载过什么、最终答复有没有点名”，但不能判断
+  方法是否被正确执行；方法质量仍由内容闸门与人工评审负责。
+- 真机尚未验证“角色子 Agent 的 `composedPreset` 返回角色 id”这一条；第一次实机看到某个角色目录
+  为空时，先查 `readPresetClaim` 的返回，而不是先怀疑 catalog 文件。
 
-遮蔽是否在真 boot graph 里赢下同名合并，本轮**只**用单测 + 框架源码（scope parent 与 `chainLayers`
-的最近层语义）验证过，没有加进 `smoke-boot.mjs` 的探针（那需要在探针里真建一个带启用项的 Agent）。
-第一次用它时若发现索引没出现，先查这一条。
+### 闸门
 
-**精选条目自身的可见上限**：条目正文同样过一次 `thresholdChars: 8192` 的剪枝器（`skill` 的渲染包装
-另占约 512），所以一颗 3 万字符的 skill 被勾选后，使用者拿到的是 head 4096 + tail 1024。剪枝器在中段留
-`[... tool result middle pruned ...]`（`dsh-compaction-tool-result-pruner` 的 `PRUNE_MARKER`）——
-**模型看得见这一句，使用者看不见**，所以症状仍是"没人报错"。2026-10-14 按 catalog 现算：68 颗可加载
-条目里正文超这条线的一度是 **32 颗**（最大 `stock-eval` 31,754，可见不足 16%），全部来自上游快照；
-分层两批做尽 32 颗（2026-10-14 七颗 + 2026-10-15 二十五颗），记名基线 `OVERSIZED_BASELINE` 已清空。
-闸门「外部精选正文的体积棘轮」（`test/persona.test.mjs`）因此从"别再加新的超限条目"**升级成硬闸门**：
-任何 catalog 条目正文超过可见上限就红。处置走**可见性分层**——把正文切成「入口册 + 分册」，
-分册由模型用 `read` 按需打开。⚠️ 通道以**产品挂载**为准，别拿宿主实测当产品承诺：`read` 此前只在宿主
-工具层挂着、本 preset 没挂，真机上主 Agent 只能 `bash cat` 开分册（用户 2026-10-15 观察到的正是这个）；
-同日决策后 preset 挂上 `tool-fs`，`read` 才是产品里真实存在的通道（宿主回执本来就教它 "Resolve relative
-paths against the base directory, load referenced resources only as needed"；"工作区外的绝对路径可读"
-是宿主层实测，属沙箱"不拦读"那一族，见 `bash-gate.md` §1.6）。
+- `test/selected-skill-routing.test.mjs`：catalog ↔ routing 一一对应、角色/市场/阶段/方法/依赖
+  已登记、`useWhen` 含“当…时使用”/`Use when`+`Triggers on`、overlaps 双向、canonicalFor 唯一、
+  primaryRole 分工与角色成员数快照、标签只做筛选。
+- `test/selected-skills-provider.test.mjs`：按角色过滤、`get()` 拒绝角色不匹配/未启用、预设身份判据、
+  两条注册路径、注入失败可重试、每轮开关刷新、目录描述用 `useWhen`、角色短清单规则与 12 条展示上限；
+  auto 的 37/40/8 角色目录、越界拒绝、模式切换让缓存失效；
+  原生 `skill` / PTC / `/name` 三种入账、失败与内置名排除、整树汇总、新一轮清空、跨会话隔离。
+- `test/skill-usage-report.test.mjs`：会话日志重算、父会话缺席时子树自成根、最终答复点名与缺失名单。
+- `test/apply-integration.test.mjs`：`tools/selected-skills` 的 section（`interpolate: false`、
+  动态重读、`configEditor` 兜底、按当前 Agent 读账本）与 provider 注册。
+- `test/persona.test.mjs` / `test/family-entries.test.mjs` / `test/family-rows.mjs`：preset 组合表、
+  行契约 `config.role`、入口 `inject` 与组合面一致。
+- `test/selected-skills-content.test.mjs`：快照正文的取数/记忆回填/执行面/委派档合规扫描不变；
+  触发条件与角色元数据是 Capital 自持数据，不写回上游快照。
 
-⛔ **分层的上限不能按文件字符数定**。`read` 的回执是带行号的窗口（`formatReadOutput`：每行前缀
-`N: `，外加 `<path>` / `<type>` / `<content>` 与结尾"total N lines"），实测 7,302 字符 / 95 行的正文
-渲染成 7,894——**同一份文件走 `skill` 与走 `read` 占的字节不同，行越多差得越多**。所以两条通道各自的
-上限是：`skill` 看正文 ≤ `threshold − 512`，`read` 看**渲染后** ≤ `threshold`。按字符数定的上限会放过
-真会被剪的册子（反证：往一册里加 200 行空内容，文件字符仍在 7,680 内而 read 回执破 8,192，闸门红）。
-建模只在 `test/selected-skills-content.test.mjs` 的 `readEnvelopeChars` 有一份。还有**第三种通道**：真机实测模型不一定按你说的用 `read`，它会直接 bash `cat` 整册——`cat` 回执没有行号包装，看着更宽松，但剪枝器只看总数，所以每册的**原文件字符**也一并拦在 `threshold − 512` 内（2026-10-15 实测最长一册 7,087）。
-
-台账是 `test/selected-skills-content.test.mjs` 的 `LAYERED`（32 颗，只准变长）。**第一批 7 颗**（2026-10-14）：`buffett-investment-framework`（入口 11,296 → 6,605；`references/` 9 → 22 份，65 张卡按卡片边界切）、三颗 A 股 `china-idea-generation` / `china-sector-overview` / `china-catalyst-calendar`（流程搬进一份分册，每册都带 Apache §4(b) 那行声明）、`bear-case` 与 `stock-screener`（各 3 册）、`peter-lynch-skill`——最后一颗是**两层厚正文**：入口之外上游自交的 4 份指南（8,750–21,342）也超限，各切成多册并把**原路径留成几百字符的索引**，这样十几处互指的旧指针一个都不用改。
-
-**第二批 25 颗**（2026-10-15，全部是 InvestSkill 的单文件厚册，15,437–31,754 字符）用同一套工序批量重排：入口只留**每轮都成立的那三节**（`⚠️ Data Verification` / `📋 Data & Sources Header` / 有的话 `⚠️ Read This First`）+ 一列分册名 + 那两句反谎报硬话，其余按 `##` **保序**搬进 `references/10…`，单节渲染破上限就依次降级到 `###` / `####` / 空行段落。三条实测结论：① 分册抬头那 4 行也要进 `read` 包络，宁可按 500 字符预留多切一册，也不许事后剪尾凑数（凑数=删内容）；② 一节被切到下一册时**册末自动留一句"This section is not finished here: … continues in `references/NN-….md`"**，所以 `following sections` 这类回指不会落到空气上——第二批 25 颗只查到 1 处真断链（`learning-coach` 的 "the quiz block from §4"，改成点名那一册），远低于第一批的 5 处；③ 闸门的断链判据只认**裸文件名或以 `references/` 打头**的路径：上游正文里也写 `.md`，但那是产物名模板（`<TICKER>-10k-digest.md`）或输出目录示例（`output/thesis/NVDA.md`），当断链就是假阳性（两颗各撞一种）。逐行核对：两批都零行丢失，只有改写的分派指针例外。
-
-⛔ **分层引入的唯一新失效面：模型会不会真去开分册。** 真机样本（2026-10-14 新会话）里它只加载了入口册，却回答"已经读入全文了"，并把入口里那段 router 当成可选项兜售给使用者——摘要每一条都逐字来自入口册，只在分册里的卡片正文、workflow 步骤、输出契约一项没提。所以每一颗分层的入口都写着两句话：**加载入口不等于读过本 skill**，以及说清哪些册开过、哪些没开，没读过的步骤/阈值/模板一律不得转述。router 那段执行示例也照 §8.6 第 4 条从入口搬走了。这条只能真机复验，闸门管不到"它去不去读"；第二批 25 颗用的是同一套入口话术，开一次真机会话即可同时覆盖两批（2026-10-15 尚未复验）。
-
-2026-10-15 真机复验做完了（web profile 用 `link:` 软链回开发树，所以跑的就是工作树）：**会去开册、开对册、跨册续读三条成立**——`dividend-analysis` 的 FCF payout 档位与五项权重、`tax-lens` 的 61 天窗口四条检查点、`10k-digest` 的输出文档 1–10 节（前 3 节在 10 册、4–10 在 11 册，两册都被打开且明说了第三册与本问无关）逐字对回文件全中；被追问"读全了吗"时它答"没有读全"并列出未开的册名。**两处失效也实测到了**：① 它用行窗口只读了 `10-analysis-framework.md` 的 18–45 行，回答却写"我打开了这个文件"，追问才更正为节选；② 它把一句**任何一册里都不存在**的免责声明用引用格式当原文交出来（`Educational illustration of how the rules generally work…`——最近的两条真句子是入口的 `This is not tax advice` 与 `14-thesis-invalidation.md` 的 `Educational analysis only.`，而它明说 14 没开）。所以入口那句"整册开、不许用行窗口"（`whole — with no line window`）是这两处的直接处置，`test/selected-skills-content.test.mjs` 现在逐颗点名这句与那句反谎报，缺一颗就具名失败。
-
-2.8.0 把 `read` 挂进产品之后同题复验（2026-10-15）：它**声明两份分册都是整册读完**，并主动检查续册末尾**没有**再留续册指针才收口——"本节未完"那句第一次被当成导航装置用，而不是当噪音忽略。可证伪性也核过：入口册 2,802 字符里 `Cover Block` / `Promise Tracker` / `Notable Disclosures` 出现 **0 次**，那份 1–10 的清单不可能从入口推出。**仍缺的一环**：这几轮都没带工具轨迹，`read` 与 `cat` 之辨、"整册读完"是否真是无窗口读取，目前只是它的自述；下一轮让它在回答里附上 `read` 回执的 `<path>` 行与结尾 `total N lines`，顺带把账本 L29 那条包络假设也在真机上核掉。
+逐颗 review 表（68 行、角色/触发条件/重叠数）见 `selected-skills/ROUTING.md`；
+它由 `routing.js` 生成，改路由先改 `routing.js`。

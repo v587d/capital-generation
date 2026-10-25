@@ -66,17 +66,17 @@
 | 挂载 | 随 preset 默认在，`skill` 加载即用 | **默认关闭**，使用者在「精选 Skills」勾选后只对之后的 Capital 会话可见（子 Agent 不继承） |
 | 放什么 | **换个流派也成立**的东西：与已有数据源和主子 Agent 编排相适配的口径、勾稽、覆盖边界、结构性偏差、呈现与交付契约，以及符合经济 / 金融规律的方法 | **一家之言**：分档、阈值、阶段划分、触发词、流派化检查表（例：某行业集中度到多少算拥挤、持仓超过 35% 触发分散） |
 | 允许不包对吗 | 不允许——它对所有会话生效，写进去就是本插件的说法 | 允许——不保证对，但开放给使用者试；代价是必须带 `tags` + `status` + `riskNote` 说明它是方法推演、本插件不据它执行（§8.6 第 7 条） |
-| 怎么被看见 | persona 的第一条 duty 点名加载 | 靠 §8.7 的索引拼进三颗任务型内置 skill 的正文 |
+| 怎么被看见 | persona 的第一条 duty 点名加载 | 靠 `routing.js` 的 `roles` + `useWhen` 进各角色目录与角色短清单（§8.7） |
 
+运行期两者是**两层**，不是附录：内置 `capital-*` 管流程 / 证据门 / 输出形状，精选管分析步骤与框架；
+任务同时命中就都加载，协议不替代方法、方法不改写协议（短清单与六个协议顶部都已声明）。
 - **一条内容两边都想要就拆开**：规律那半进内置，数字那半进精选。"周期股在盈利峰值会让 TTM PE
   创历史新低、看起来最便宜其实最贵"是规律；"位置 >0.8 且量比 >2 判定加速期"是一家之言。
-- ⛔ **共用一次加载的字节预算**：三颗任务型内置 skill 的正文与拼进去的索引块**在同一次 `skill`
-  结果里**，剪枝闸门是 `thresholdChars: 8192`（保留 `head 4096` + `tail 1024`，配在
-  `preset/capital-generation/agent.patch.yml` 的 `tool-result-pruner` 行），
-  超过就**中间静默消失**。索引每行带的是运行时 description（几十到几百字符），
-  所以 `SELECTED_SKILLS_MAX_ENABLED = 6` 是这个算术的结果而不好抬；往任务型内置加句子花的
-  是同一份预算。**动内置正文前先 `node -e` 数一遍该文件的字符数**，别用行数当预算（中文一行
-  抵得上英文三行的字符量）。
+- ⛔ **单次加载的字节预算**：任务型内置 skill 的正文仍受 `thresholdChars: 8192`（保留 `head 4096` +
+  `tail 1024`，配在 `preset/capital-generation/agent.patch.yml` 的 `tool-result-pruner` 行）约束，
+  超过就**中间静默消失**。精选方法不再拼进任务型正文，改为各自独立的角色目录项；精选条目自身也逐颗
+  受同一上限约束（`test/selected-skills-content.test.mjs` 的体积棘轮）。**动内置正文前先 `node -e`
+  数一遍该文件的字符数**，别用行数当预算（中文一行抵得上英文三行的字符量）。
 - ⛔ **协议正文按"册"分，不按"篇"写长**：`skill` 正文走的正是上面那个剪枝器——
   `@deepseek-ai/dsh-skill` 的 `renderSkillContent` 把正文塞进 `<skill_content>` / `<skill_instructions>`
   并挂一行 base directory，**渲染包装实测约 512 字符**，超阈值就被剪成 head 4096 + `[middle pruned]` +
@@ -93,7 +93,7 @@
 - 同一把尺子量到外部精选：catalog 条目正文同样受这条物理限制，**存量 32 颗**（最大 31,755 字符）
   曾只能拿到节选；2026-10-14 / 10-15 两轮按同一算法分层完毕（入口册 + `references/` 分册 + 运行时 `read`，
   一行规则不删），拦"新增超限条目"的棘轮因此升级成硬闸门——任何 catalog 条目正文超可见上限即红。
-  分层口径与实测记在 `docs/dev/selected-skill-index.md` 的「已知边界」与 §8.6。
+  分层口径与实测记在 `docs/dev/selected-skills.md` §8.6 与 `test/selected-skills-content.test.mjs`。
 
 ## 8.4 不许改（除非有明确设计决策，并同步测试）
 
@@ -101,7 +101,7 @@
   旧标题按 durable id 沿用）、同角色复用不新建、`description` = 角色标签、durable id、委派清单与
   `waiting_data`、路由表、质检 gate 不以用户提图为触发条件、禁主 Agent 直连数据工具与检索、子 Agent
   互通经主 Agent 中继、全部 continuable、安全合规底线、叶子边界与「第一步先加载协议」。长协议 / 示例 JSON / 重试表 / 清单格式一律进 `skills/`。
-- **插件代码默认不注册 skill provider**：preset 自带 skills 继续由 `skill-filesystem` / `tool-skill` 组合行承载。唯一例外是用户显式选择的 community `selected-skills`：只在 `agent/created` 中同时确认 Capital preset 与 root Agent 后，注册到该 Agent 自己的 scope（`agent/created` 等注入完成再放行，开关每轮 `agent/pre-step` 重读并按需失效目录缓存，切换不需要新建会话）；配置默认全关，provider 只扫描 `selected-skills/catalog.js` 批准的快照目录并按 catalog 过滤，catalog 条目可带 `experimental` / `watchlist` 状态和能力标签，随 Agent scope 注销并停止 watcher。冷启动阶段维护频率和评分是用户可见的风险信号，不是自动拒绝条件；未来可随 catalog 规模和评测成熟逐步收紧。不得注册到 preset standing scope 或 Host scope；子 Agent 侧不受影响（provider 注册在 agent scope，restriction 只过滤继承层）。同一个 provider 还给三颗任务型内置 skill 提供**同名遮蔽候选**（正文 + 外部精选索引，读取期拼装、不改磁盘），条件与失败姿态见 §8.7。回归 `test/selected-skills-provider.test.mjs`、`test/selected-skill-tags.test.mjs` 与 `test/persona.test.mjs`。
+- **插件代码默认不注册 skill provider**：preset 自带 skills 继续由 `skill-filesystem` / `tool-skill` 组合行承载。唯一例外是用户显式选择的 community `selected-skills`：由 `tools/selected-skills` 行按 `config.role` 挂进根 / `data_junior` / `web_retriever` / 保留的 `data_analyst`，在 `agent/created` 与 `agent-preset/selected` 两条路径确认 **Agent 自己的 composed preset 等于该角色 preset** 后，注册到该 Agent 的 scope；不注册到 preset standing scope 或 Host scope。`data_collector` / `visualization_specialist` 不挂（没有方法集）。配置默认全关、manual 数量不限；provider 只扫描 `catalog.js` 批准的快照目录，`routing.js` 决定角色与触发条件，`list()`/`get()` 用同一道“角色 ∩ 已启用”闸门。开关每轮 `agent/pre-step` 重读并按需失效目录缓存，切换不需要新建会话；随 Agent scope 注销并停止 watcher。catalog 条目的 `experimental` / `watchlist` 仍是用户可见的风险信号。回归 `test/selected-skills-provider.test.mjs`、`test/selected-skill-routing.test.mjs` 与 `test/persona.test.mjs`。
 - **子 Agent 读 skill 的开关**：由该角色 preset 自己挂的 `tool-skill` 行提供（D0 之后每颗角色
   都挂那一行，没有"仍挂单体"的例外了）。restriction 过滤继承层、只豁免本 scope 自注册工具；
   这条链上任一环改动（角色挂的行 / skill 名 / 文件名）都要同步测试。

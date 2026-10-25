@@ -4,54 +4,15 @@
  * read-only. Session files are appended frame by frame (one zstd frame per write), so each must be
  * decompressed frame by frame; the tree comes from `header.parentSession`.
  */
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { zstdDecompressSync } from 'node:zlib'
-
-const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
+import { latestSessionFile, workspaceSlug } from './lib/session-files.mjs'
+import { readSessionEvents } from './lib/session-events.mjs'
 
 function argValue(name, fallback) {
   const index = process.argv.indexOf(name)
   return index >= 0 && process.argv[index + 1] ? process.argv[index + 1] : fallback
-}
-
-/** Node's zstd decoder stops after the first frame; session files append one frame per write. */
-function decodeSession(file) {
-  const buffer = readFileSync(file)
-  const offsets = []
-  let cursor = 0
-  while ((cursor = buffer.indexOf(ZSTD_MAGIC, cursor)) >= 0) {
-    offsets.push(cursor)
-    cursor += ZSTD_MAGIC.length
-  }
-  offsets.push(buffer.length)
-  let text = ''
-  for (let index = 0; index < offsets.length - 1; index += 1) {
-    try {
-      text += zstdDecompressSync(buffer.subarray(offsets[index], offsets[index + 1])).toString('utf8')
-    } catch {
-      // A coincidental magic inside compressed data splits the frame wrong; skip it.
-    }
-  }
-  const events = []
-  for (const line of text.split('\n')) {
-    if (!line) continue
-    try {
-      events.push(JSON.parse(line))
-    } catch {
-      // Ignore the truncated tail line of a half-written record.
-    }
-  }
-  return events
-}
-
-/**
- * DSH encodes cwd into the session dir name: strip the leading `/`, replace `/` with `-`, wrap in `-`.
- * Paths are not reversible (dashes collide with separators), so compare only forward encodings.
- */
-function slugFor(cwd) {
-  return `--${cwd.replace(/^\//, '').replace(/\//g, '-')}--`
 }
 
 function sessionsRoot() {
@@ -59,7 +20,7 @@ function sessionsRoot() {
 }
 
 function loadSessions(cwd) {
-  const root = join(sessionsRoot(), slugFor(cwd))
+  const root = join(sessionsRoot(), workspaceSlug(cwd))
   let entries
   try {
     entries = readdirSync(root)
@@ -68,12 +29,14 @@ function loadSessions(cwd) {
   }
   const sessions = []
   for (const id of entries) {
-    const file = join(root, id, 'session.v3.jsonl.zstd')
+    // Version-agnostic: the host moved v3 → v4, so a literal name silently scans 0 sessions.
+    const found = latestSessionFile(join(root, id))
+    if (found === undefined) continue
     try {
-      const events = decodeSession(file)
+      const events = readSessionEvents(found.file)
       const header = events.find((event) => event.type === 'session')
       if (!header) continue
-      sessions.push({ id, file, header, events, mtime: statSync(file).mtimeMs })
+      sessions.push({ id, file: found.file, header, events, mtime: found.mtime })
     } catch {
       // Skip sessions that are still being written or are corrupt.
     }

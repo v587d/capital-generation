@@ -5,6 +5,7 @@ description: Use when aggregating a Dataset or computing a derived number — th
 
 # Capital 数据协议 · 第三册：受控查询与派生算术
 
+> **定位**：本册只定义受控查询与派生算术；DCF、三表、风险建模等方法在精选方法层，命中时按角色目录另行加载。
 本册是数据协议的第三册（§3.3 run_code 只做派生算术 / §4 受控查询）。时间轴与 `time_facts` 在第二册
 `capital-data-profile` §3.2，载荷契约与重试纪律在第一册 `capital-data-protocol`。
 
@@ -73,6 +74,24 @@ N 日均量必须写明。
 `profile_dataset` 的统计项：数值字段的 count 与 sum（合计多少、覆盖多少条）、字符串字段的
 `distinct_count` 与高频取值、字段类型（observed / contract）、缺失值与显式 null、类型冲突、
 重复主键、时间范围、最小/最大/均值/分位数——**只报告可计算的部分**，数据不足就如实说明。
+
+
+### 3.4 无 Dataset 的假设建模
+
+主 Agent 交来的假设建模请求没有 `DatasetRef`：营收、利润率、税率、WACC、永续增长、股本等都由
+prompt 给定。它仍然走 `run_code`，但**不是**取数，也不套数据 profile / 可视化 gate。
+
+- **只算假设，不补外部事实**：不得用记忆、网页或 `fetch` 填市场价格、财报、无风险利率；缺什么就
+  在回传里列什么。需要真实数据时回传 `model_input_gap`，由主 Agent 交 `data_collector` 取回后再算。
+- **缺关键输入**：`model_input_gap` 写明缺项、为什么影响结论，以及可选的 illustrative 默认值（必须
+  标成假设，不能与用户给定值混在一列）。不要直接问用户——你不在用户对话里。
+- **回传形状**：`type: "model_result"` + `task_id` + `assumptions`（逐项注明用户给定 / illustrative）
+  + `method`（公式或步骤）+ `results`（表格）+ `sensitivity`（若有）+ `caveats`（失效条件）。字段名与
+  数值照程序返回值写，不手抄。
+- **边界**：不做投资判断、不给买卖建议、不承诺收益；结论与建议由主 Agent 写。没有 Dataset 就没有
+  `chart_source_ref`，可视化 gate 默认 `not_needed`；只有委派明确给了可出图的数据时才考虑出图。
+- **方法**：需要估值/建模方法时，按角色目录加载精选方法（如 `china-dcf` / `three-statement-modeling`），
+  但方法只提供口径与步骤，不提供这家公司的真实数字。
 
 
 ## 4. 受控查询（主 Agent ↔ data_junior）

@@ -1,6 +1,6 @@
 {
   "name": "@v587d/capital-generation",
-  "version": "2.10.0",
+  "version": "2.10.1",
   "description": "Capital Generation：面向中国散户的 AI 投资助手插件（自动模式 Agent Preset）",
   "icon": "assets/cg-icon.png",
   "author": "v587d",
@@ -82,6 +82,11 @@
       "import": "./lib/root-extras-entry.js",
       "default": "./lib/root-extras-entry.js"
     },
+    "./tools/selected-skills": {
+      "types": "./lib/selected-skills-entry.d.ts",
+      "import": "./lib/selected-skills-entry.js",
+      "default": "./lib/selected-skills-entry.js"
+    },
     "./tools/time": {
       "types": "./lib/time-entry.d.ts",
       "import": "./lib/time-entry.js",
@@ -103,6 +108,8 @@
     "watchlist",
     "preset",
     "selected-skills/catalog.js",
+    "selected-skills/routing.js",
+    "selected-skills/ROUTING.md",
     "selected-skills/README.md",
     "selected-skills/investment-skills",
     "selected-skills/china-stock-research-skills",
@@ -146,7 +153,8 @@
     "docs:capabilities": "npm run build && node scripts/gen-capability-table.mjs",
     "verify:sessions": "node scripts/verify-sessions.mjs",
     "audit:tool-errors": "node scripts/audit-tool-errors.mjs",
-    "ptc:report": "node scripts/ptc-session-report.mjs"
+    "ptc:report": "node scripts/ptc-session-report.mjs",
+    "report:skill-usage": "node scripts/skill-usage-report.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",

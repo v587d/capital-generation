@@ -1,13 +1,10 @@
 /**
- * `tools/root-extras` row: root-only selected-skills provider and the `customPersona`
- * system-prompt section. This row registers no tools; both pieces re-read settings
- * every turn so saved changes apply on the next step.
+ * `tools/root-extras` row: the `customPersona` system-prompt section. Root-only; this row
+ * registers no tools. Selected skills moved to the role-scoped `tools/selected-skills` row.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 
-import { registerRootSelectedSkills, type SelectedSkillSelection } from './agents/selected-skills-provider.js'
-import type { PolicyContext } from './agents/root-tool-policy.js'
 import { userCustomizationSection } from './user-customization.js'
 import { readCapitalConfig } from './capital-settings.js'
 
@@ -16,18 +13,15 @@ export const inject = ['systemPrompt']
 
 interface RootExtrasConfig {
   customPersona?: string
-  selectedSkills?: SelectedSkillSelection
 }
 
 /** Re-read per turn so a settings save applies to the same session on the next step. */
 export function readRootExtrasConfig(ctx: Context): RootExtrasConfig {
   const config = readCapitalConfig(ctx)
-  return { customPersona: config.customPersona, selectedSkills: config.selectedSkills }
+  return { customPersona: config.customPersona }
 }
 
 export function apply(ctx: Context): void {
-  registerRootSelectedSkills(ctx as unknown as PolicyContext, () => readRootExtrasConfig(ctx).selectedSkills ?? {})
-
   let lastPersonaError: string | undefined
   const section = userCustomizationSection(
     () => readRootExtrasConfig(ctx).customPersona,

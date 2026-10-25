@@ -11,10 +11,10 @@ import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { zstdDecompressSync } from 'node:zlib'
 import { join } from 'node:path'
 import { locateDshPackage } from './lib/run-tool.mjs'
 import { findSessionRecords } from './lib/session-files.mjs'
+import { readSessionEvents } from './lib/session-events.mjs'
 
 function argValue(name, fallback) {
   const index = process.argv.indexOf(name)
@@ -47,23 +47,6 @@ const KNOWN = new Set(
     .match(/"[^"]+"/g).map((token) => token.slice(1, -1)),
 )
 
-const MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
-/** Multi-frame zstd: decode frame by frame (Node's decoder reads only the first). */
-function decode(file) {
-  const buffer = readFileSync(file)
-  const offsets = []
-  let cursor = 0
-  while ((cursor = buffer.indexOf(MAGIC, cursor)) >= 0) { offsets.push(cursor); cursor += MAGIC.length }
-  offsets.push(buffer.length)
-  let text = ''
-  for (let i = 0; i < offsets.length - 1; i += 1) {
-    try { text += zstdDecompressSync(buffer.subarray(offsets[i], offsets[i + 1])).toString('utf8') } catch { /* 巧合 magic */ }
-  }
-  const events = []
-  for (const line of text.split('\n')) { if (!line) continue; try { events.push(JSON.parse(line)) } catch { /* 截断残行 */ } }
-  return events
-}
-
 // Version-agnostic: pick the newest session.v<N> (see scripts/lib/session-files.mjs).
 const records = findSessionRecords(sessionsRoot, since)
 if (records.length === 0) {
@@ -74,7 +57,7 @@ if (records.length === 0) {
 }
 
 // Decode first to find the write watermark: the last session containing deliverables/presented.
-const decoded = records.map((record) => ({ ...record, events: decode(record.file) }))
+const decoded = records.map((record) => ({ ...record, events: readSessionEvents(record.file) }))
 const watermark = decoded
   .filter((record) => record.events.some((event) => event.type === 'deliverables/presented'))
   .reduce((max, record) => Math.max(max, record.mtime), 0)

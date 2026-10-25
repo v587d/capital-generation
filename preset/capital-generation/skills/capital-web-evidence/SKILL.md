@@ -5,6 +5,7 @@ description: Use when returning or labelling what was retrieved — the numbered
 
 # Capital 检索协议 · 第二册：回传格式、来源核验与文档解析
 
+> **定位**：本册只定义回传格式、来源核验与文档解析；具体分析与精读方法在精选方法层，命中时按角色目录另行加载。
 本册是检索协议的第二册（§5 回传格式 / §6 官方证券来源域名核验 / §7 抓取与失败处置 / §8 文档解析 `ocr`）。
 "去哪取、怎么调"在第一册 `capital-web-protocol` §1–§4；两册 §编号连续，跨册引用照原编号点名。
 

@@ -10,8 +10,7 @@ import { SOURCE_OUTPUT_BUDGET_CHARS } from '../lib/web-retriever/tools.js'
 import { PRESET_PATCH_TEXT, presetRows, presetDeclaration, allPresets, allRowsOf, capitalRowsOf, rolePersona, allPersonaTexts, delegationRow, loadBudget, ROOT_PRESET_ID } from './preset-rows.mjs'
 import { ROLE_PRESET_IDS, ROLE_TOOL_SURFACES, SIBLING_DENIED_TOOLS } from '../lib/agents/role-tool-policy.js'
 import { CAPITAL_ROW_TOOLS, faceOf } from './family-rows.mjs'
-import { SELECTED_SKILL_CATALOG, SELECTED_SKILL_SKILL_DIRS, SELECTED_SKILL_TASK_IDS, SELECTED_SKILLS_MAX_ENABLED, selectedSkillsForTask } from '../selected-skills/catalog.js'
-import { renderTaskSkillIndex } from '../lib/agents/selected-skills-provider.js'
+import { SELECTED_SKILL_CATALOG, SELECTED_SKILL_SKILL_DIRS } from '../selected-skills/catalog.js'
 
 // Preset row parsing lives only in test/preset-rows.mjs.
 const COMPOSITION_TEXT = PRESET_PATCH_TEXT
@@ -166,6 +165,7 @@ const dedent = (value) => value.split('\n').map((line) => line.trimStart()).join
 const SKILL_DIR = fileURLToPath(new URL('../preset/capital-generation/skills/', import.meta.url))
 const INDEX_SOURCE = readFileSync(fileURLToPath(new URL('../src/index.ts', import.meta.url)), 'utf8')
 const ROOT_EXTRAS_SOURCE = readFileSync(fileURLToPath(new URL('../src/root-extras-entry.ts', import.meta.url)), 'utf8')
+const SELECTED_SKILLS_ENTRY_SOURCE = readFileSync(fileURLToPath(new URL('../src/selected-skills-entry.ts', import.meta.url)), 'utf8')
 
 // Check a rule across the whole skill family; check its home per volume (docs/dev/preset-persona.md §8.2).
 const skillVolume = (name) => readFileSync(`${SKILL_DIR}${name}/SKILL.md`, 'utf8')
@@ -249,7 +249,7 @@ test('persona 里的 {{变量}} 必须是本机 dsh 真注册的那几颗（写�
   assert.ok(refs.length > 0, `闸门一个 {{变量}} 都没抓到：要么人设改写了，要么读取器又读错地方（本机注册的是 ${located.names.join(' / ')}）`)
 })
 
-test('skills：内置 skills 由组合行承载，selected skill 只注册到 Capital 主 Agent scope', () => {
+test('skills：内置 skills 由组合行承载，selected skill 按角色注册到各自的 Capital Agent scope', () => {
   const fsRow = rowById('skill-filesystem')
   assert.ok(fsRow, 'preset 必须有 skill-filesystem 行，否则 skills/ 不会被发现')
   assert.equal(fsRow.name, '@deepseek-ai/dsh-skill-filesystem')
@@ -269,10 +269,13 @@ test('skills：内置 skills 由组合行承载，selected skill 只注册到 Ca
   assert.equal(toolSkillRow.name, '@deepseek-ai/dsh-tool-skill')
 
   const selectedProvider = readFileSync(fileURLToPath(new URL('../src/agents/selected-skills-provider.ts', import.meta.url)), 'utf8')
-  assertMatches(ROOT_EXTRAS_SOURCE, /registerRootSelectedSkills\(ctx/, 'tools/root-extras 必须接入按设置选择的 provider')
+  assertNotMatches(ROOT_EXTRAS_SOURCE, /registerRootSelectedSkills|registerSelectedSkills/, 'tools/root-extras 只管 customPersona；精选 Skill 走角色行')
+  assertMatches(SELECTED_SKILLS_ENTRY_SOURCE, /registerSelectedSkills\(ctx[^\n]*, role/, 'tools/selected-skills 必须按角色接入 provider')
   assertMatches(selectedProvider, /agent\/created/, 'provider 必须在 Agent 建立后按需注册')
-  assertMatches(selectedProvider, /isRootAgent\(agent\)/, '子 Agent 不得注册 selected skills provider')
-  assertMatches(selectedProvider, /strictCapitalPreset\(ctx, agent\)/, '其他 preset 不得注册 selected skills provider')
+  assertMatches(selectedProvider, /readPresetClaim\(ctx, agent\)/, '必须按 composed preset 判身份，不能只看 parentSession')
+  assertMatches(selectedProvider, /claim\.claim !== presetId/, '其他角色 preset 不得注册本角色的 set')
+  assertMatches(selectedProvider, /selectedSkillNamesForRole/, '每个角色只列自己的方法集')
+  assertMatches(selectedProvider, /role === 'main' && !isRootAgent\(agent\)/, 'main 方法只留根 Agent；角色方法走 composed preset')
   assertMatches(selectedProvider, /inject\(\['skills'\][\s\S]*injectedCtx\.effect/, 'provider 生命周期必须绑定到 inject 后的 Agent context')
   assertMatches(selectedProvider, /await\s+agentCtx\.inject\(\['skills'\]/, 'agent/created 必须等待注入完成，否则首轮 catalog 与 provider 注册竞态')
   assertMatches(selectedProvider, /agent\/pre-step/, 'selected skills 必须每轮重读开关，已有会话才能跟随设置刷新目录')
@@ -419,6 +422,33 @@ test('capital-portfolio-review：用户持仓不等于自选股，快照不等�
   assertNoRule(text, /final_report|capital-final-report-protocol|prepareTurnComposition/, '组合 skill 不得依赖已删除的报告通道')
 })
 
+test('内置协议与精选方法分层：协议只定流程，方法层按角色目录另行加载', () => {
+  const positioned = [
+    ['capital-equity-research', /本协议只定义研究流程/],
+    ['capital-portfolio-review', /本协议只定义持仓读取/],
+    ['capital-event-impact', /本协议只定义事件核验/],
+    ['capital-web-protocol', /本协议只定义来源边界/],
+    ['capital-web-evidence', /本册只定义回传格式/],
+    ['capital-data-query', /本册只定义受控查询/],
+  ]
+  for (const [name, head] of positioned) {
+    const text = readFileSync(`${SKILL_DIR}${name}/SKILL.md`, 'utf8')
+    assertRule(text, head, `${name} 必须先声明自己的协议定位`)
+    assertRule(text, /精选方法层/, `${name} 必须把分析方法指向方法层`)
+  }
+  for (const name of ['capital-equity-research', 'capital-portfolio-review', 'capital-event-impact']) {
+    const text = readFileSync(`${SKILL_DIR}${name}/SKILL.md`, 'utf8')
+    assertRule(text, /协议与方法正交/, `${name} 必须写明协议与方法两层正交`)
+    assertRule(text, /不要用本协议替代方法/, `${name} 必须禁止用协议替代方法`)
+    assertRule(text, /不要用方法改写本协议/, `${name} 必须禁止方法改写协议`)
+  }
+  const equity = readFileSync(`${SKILL_DIR}capital-equity-research/SKILL.md`, 'utf8')
+  assertRule(equity, /data_junior 方法不在主目录里.*交给 data_junior/, '主 Agent 不得把数据侧方法当成自己可加载')
+  const web = readFileSync(`${SKILL_DIR}capital-web-protocol/SKILL.md`, 'utf8')
+  assertRule(web, /10k-digest/, '检索协议必须点名 10-K 方法层的落点')
+  assertRule(web, /fact-check/, '检索协议必须点名核验方法层的落点')
+})
+
 test('capital-web-evidence：WAF 挑战型站点如实报错并改走 Wind（2026-09 实测教训）', () => {
   const text = readFileSync(`${SKILL_DIR}capital-web-evidence/SKILL.md`, 'utf8')
   // WAF challenge signatures live in the skill, never in persona.
@@ -549,6 +579,7 @@ test('主 persona + 协议：最终答复自足，图表由主 Agent 在最终�
   assertRule(MAIN_PERSONA, /必须自足/, '主 persona 必须要求最终答复自足（折叠后仍可独立阅读）')
   assertRuleAny(MAIN_PERSONA, [/不输出可见正文/, /重发一份自足总结/], '被唤醒且无新信息时必须给出两种正确收尾')
   assertRule(MAIN_PERSONA, /前面轮次会被折叠/, '必须写明折叠机制，否则该规则会被当成风格建议')
+  assertRule(MAIN_PERSONA, /「无新增信息」「结论见上」/, '必须点名禁止可见的占位句，不能只写“指针句”')
 
   const vizProtocol = readFileSync(`${SKILL_DIR}capital-visualization-protocol/SKILL.md`, 'utf8')
   assertRule(vizProtocol, /呈现由主 Agent/, '可视化协议必须写明呈现由主 Agent 的最终答复承载')
@@ -973,6 +1004,12 @@ test('data_collector persona：覆盖 Phase 1 数据集协议全部必须要点'
   assertRule(COLLECTOR_PERSONA, /全部请求结束再发 data_collection_completed/, '必须有明确终结消息')
   assertNoRule(COLLECTOR_PERSONA, /多个能力全部完成后一次性回传/, '不得等全部取完才通知')
   assertRule(MAIN_PERSONA, /每收到一份 dataset_ready.*立即复用\/创建同一个 data_junior/, '主 Agent 应逐份转交同一个 junior')
+  // Assumption-only modeling is still data_junior's work: the missing DatasetRef must not send it back to the root.
+  assertRule(MAIN_PERSONA, /质检\/建模/, '主 persona 的路由表必须把建模归 data_junior')
+  assertRule(MAIN_PERSONA, /DCF、估值、三表、情景、敏感性/, '主 persona 必须点名会触发委派的建模类型')
+  assertRule(MAIN_PERSONA, /即使不取数、只有用户假设也交 data_junior/, '主 persona 必须写明没有 Dataset 也走 data_junior')
+  assertRule(MAIN_PERSONA, /不自己算/, '主 persona 必须禁止自己算假设模型')
+  assertRule(MAIN_PERSONA, /「使用的方法」节只在动态清单非空时写/, '主 persona 必须把动态方法的引用要求写成输出硬规则')
   assertRule(MAIN_PERSONA, /task_id \+ dataset_id 不重复派发/, '主 Agent 应按数据集去重')
   assertRule(MAIN_PERSONA, /data_collection_completed/, '主 Agent 应区分进度与终结')
   assertRule(JUNIOR_PERSONA, /已完成 profile 不重复做/, 'junior 收到新 Dataset 时复用旧 profile')
@@ -1028,10 +1065,14 @@ test('主 persona：子 Agent 中途请求按工单处理——取数后发回�
   assertRuleAny(MAIN_PERSONA, [/根本给不了/, /数据源没有该字段/], '主 persona 必须写明「能力给不了」也要回执并说明原因')
 })
 
-test('data_junior persona：只接收 DatasetRef，输出基础 profile 与质量统计，绝不回传 rows', () => {
+test('data_junior persona：接收 DatasetRef 或假设建模，输出 profile 与模型结果，绝不回传 rows', () => {
   for (const pattern of [
     /数据分析师（data_junior）/,
     /profile_request/,
+    /假设建模/,
+    /无数据建模/,
+    /model_input_gap/,
+    /不引入外部数据/,
     /profile_ref/,
     /profile_failed/,
     /DatasetRef/,
@@ -1154,20 +1195,22 @@ test('visualization_specialist 行：创建权只在 data_junior 手里，工具
 /** Composition table: which family rows each preset mounts — the whole answer to "who can use what". */
 const PRESET_ROW_COMPOSITION = {
   [ROLE_PRESET_IDS.collector]: ['@v587d/capital-generation/tools/collect', '@v587d/capital-generation/tools/time'],
-  [ROLE_PRESET_IDS.junior]: ['@v587d/capital-generation/tools/dataset-read', '@v587d/capital-generation/tools/chart-source', '@v587d/capital-generation/tools/time'],
+  [ROLE_PRESET_IDS.junior]: ['@v587d/capital-generation/tools/dataset-read', '@v587d/capital-generation/tools/chart-source', '@v587d/capital-generation/tools/time', '@v587d/capital-generation/tools/selected-skills'],
   [ROLE_PRESET_IDS.specialist]: ['@v587d/capital-generation/tools/chart-render', '@v587d/capital-generation/tools/time'],
   [ROLE_PRESET_IDS.retriever]: [
     '@v587d/capital-generation/tools/retrieve-search', '@v587d/capital-generation/tools/retrieve-sources',
     '@v587d/capital-generation/tools/ocr', '@v587d/capital-generation/tools/time',
+    '@v587d/capital-generation/tools/selected-skills',
   ],
   // A disabled role preset can still be opened by hand, so reserved roles go through family rows too.
-  [ROLE_PRESET_IDS.analyst]: ['@v587d/capital-generation/tools/dataset-read', '@v587d/capital-generation/tools/time'],
+  [ROLE_PRESET_IDS.analyst]: ['@v587d/capital-generation/tools/dataset-read', '@v587d/capital-generation/tools/time', '@v587d/capital-generation/tools/selected-skills'],
   // Root: time, local document parsing, watchlist, present (final-turn chart delivery),
   // orchestration (single-turn wait), and root-extras (which registers no tool itself).
   [ROOT_PRESET_ID]: [
     '@v587d/capital-generation/tools/time', '@v587d/capital-generation/tools/ocr',
     '@v587d/capital-generation/tools/watchlist', '@v587d/capital-generation/tools/present',
     '@v587d/capital-generation/tools/orchestration', '@v587d/capital-generation/tools/root-extras',
+    '@v587d/capital-generation/tools/selected-skills',
   ],
 }
 
@@ -1200,11 +1243,13 @@ test('data_junior preset：PTC presentation 与出图委派仍是 YAML 框架行
     'specialist 委派行仍由 YAML 提供')
 })
 
-test('族行不带任何行配置：没有"以为裁了、其实没人读"的开关', () => {
-  // Family rows have no switches: general capability is not trimmed per role.
+test('族行只带行契约声明的配置：没有"以为裁了、其实没人读"的开关', () => {
+  // Family rows have no tool switches; the selected-skill row declares its role placement.
   for (const preset of allPresets()) {
     for (const row of capitalRowsOf(preset.config.id)) {
-      assert.equal(row.config, undefined, `${preset.config.id} 的 ${row.id} 带了行配置：行契约里没有开关`)
+      const allowed = row.name === '@v587d/capital-generation/tools/selected-skills' ? ['role'] : []
+      assert.deepEqual(Object.keys(row.config ?? {}).sort(), allowed,
+        `${preset.config.id} 的 ${row.id} 带了行契约里没有的配置`)
     }
   }
 })
@@ -1350,27 +1395,9 @@ test('内置 skill 每一册加载后完整可见（正文 + 渲染包装 ≤ �
   }
 })
 
-test('三颗任务型内置 skill 还要给索引块留位置（勾选上限 6 的算术在此钉死）', () => {
-  // The index block shares the task skill's load budget, and must come from renderTaskSkillIndex (the only implementation).
-  const allNames = SELECTED_SKILL_CATALOG.map(({ name }) => name)
-  for (const taskId of SELECTED_SKILL_TASK_IDS) {
-    const routed = selectedSkillsForTask(taskId, allNames)
-    const worst = routed
-      .map((entry) => ({ name: entry.name, description: runtimeDescription(entry) }))
-      .sort((a, b) => (b.description.length + b.name.length) - (a.description.length + a.name.length))
-      .slice(0, SELECTED_SKILLS_MAX_ENABLED)
-    const index = renderTaskSkillIndex(taskId, worst) ?? ''
-    const chars = skillBody(taskId).length
-    assert.ok(chars + SKILL_RENDER_OVERHEAD + index.length <= PRUNER_THRESHOLD,
-      `${taskId} 正文 ${chars} + 包装 ${SKILL_RENDER_OVERHEAD} + 最坏索引块 ${index.length}`
-      + `（${routed.length} 条可路由里最长的 ${SELECTED_SKILLS_MAX_ENABLED} 行）= ${chars + SKILL_RENDER_OVERHEAD + index.length}`
-      + ` > 阈值 ${PRUNER_THRESHOLD}：加载这一刻尾部规则会被剪掉。要么给索引减行（勾选上限），要么给正文瘦身。`)
-  }
-})
-
 test('外部精选正文的体积棘轮：每一颗 catalog 条目都必须一次加载完整可见', () => {
   // Upstream bodies are not rewritten for size: any catalog entry over the visible cap fails here (ledger in
-  // test/selected-skills-content.test.mjs, handling in docs/dev/selected-skill-index.md).
+  // test/selected-skills-content.test.mjs, handling in docs/dev/preset-persona.md §8.2).
   const OVERSIZED_BASELINE = []
   const oversized = SELECTED_SKILL_CATALOG
     .filter((entry) => selectedSkillBody(entry).length > VISIBLE_CAP)
@@ -1436,6 +1463,10 @@ test('run_code 派生计算（2026-10-10 真机教训）：字段直接取、不
   assertRule(dataProtocol, /volume.*股/, 'capital-data-query 必须写清 A 股 history volume 的单位是股')
   assertRule(dataProtocol, /parent_holder_net_profit/, 'capital-data-query 必须区分归母与净利润字段')
   assertRule(dataProtocol, /扣非.*媒体/, 'capital-data-query 必须把媒体扣非标成媒体口径')
+  assertRule(dataProtocol, /无 Dataset 的假设建模/, 'capital-data-query 必须接住没有 Dataset 的建模请求')
+  assertRule(dataProtocol, /model_input_gap/, '缺输入必须回传 model_input_gap，不能编造')
+  assertRule(dataProtocol, /model_result/, '建模回传必须有 model_result 形状')
+  assertRuleAny(dataProtocol, [/不引入外部数据/, /只算假设，不补外部事实/], '假设建模不得用记忆或网页补真实数据')
   assertRuleAny(JUNIOR_PERSONA, [/字段直接取|不手抄/], 'data_junior persona PROGRAM DISCIPLINE 必须留“直接取字段”硬规则')
 })
 

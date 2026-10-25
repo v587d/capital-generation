@@ -24,14 +24,23 @@ export const CAPITAL_ROW_TOOLS = {
   '@v587d/capital-generation/tools/watchlist': ['get_watchlist'],
   // Root presence settings only; this row registers no tools.
   '@v587d/capital-generation/tools/root-extras': [],
+  // Role-scoped selected-skill catalog + prompt section; registers no model tools.
+  '@v587d/capital-generation/tools/selected-skills': [],
+}
+
+/** Rows that declare a non-tool placement config (the value is not a tool switch). */
+const ROW_CONFIG_KEYS = {
+  '@v587d/capital-generation/tools/selected-skills': ['role'],
 }
 
 /** A row owns its complete tool family; generic capabilities are not trimmed per role. */
 export function rowTools(rowName, config) {
   const names = CAPITAL_ROW_TOOLS[rowName]
   if (names === undefined) throw new Error(`未知的族行 ${rowName}：它没登记在 test/family-rows.mjs 的行契约里`)
-  if (config !== undefined && Object.keys(config).length > 0) {
-    throw new Error(`${rowName} 带了行配置 ${JSON.stringify(config)}，但行契约里没有开关：写一格没人读的 config 就是下一次"以为裁了、其实没裁"`)
+  const allowed = ROW_CONFIG_KEYS[rowName] ?? []
+  const extra = Object.keys(config ?? {}).filter((key) => !allowed.includes(key))
+  if (extra.length > 0) {
+    throw new Error(`${rowName} 带了行契约里没有的配置 ${extra.join(', ')}：写一格没人读的 config 就是下一次"以为裁了、其实没裁"`)
   }
   return [...names]
 }

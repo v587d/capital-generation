@@ -9,7 +9,7 @@ import { apply as hostApply, Config as CapitalConfig, SETTINGS_ENTRY_ID } from '
 import { fakeCtx as hostFakeCtx } from './cordis-fake.mjs'
 import { CAPITAL_CONFIG_ENTRY_ID, Config as MainConfig, LOCAL_FETCH_DEFAULTS, resolveLocalFetchConfig } from '../lib/index.js'
 import { LOCAL_FETCH_CLIENT_VERSION } from '../lib/web-retriever/local-fetch.js'
-import { SELECTED_SKILL_CATALOG, SELECTED_SKILL_TAG_LABELS, SELECTED_SKILLS_MAX_ENABLED } from '../selected-skills/catalog.js'
+import { SELECTED_SKILL_CATALOG, SELECTED_SKILL_TAG_LABELS } from '../selected-skills/catalog.js'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const CLIENT = join(ROOT, 'config', 'client.js')
@@ -374,9 +374,10 @@ test('capital-config Client：五个密钥按序渲染，本机回退与 selecte
     'capital-config-paddleocr-key',
   ], '五个密钥行的顺序与 CREDENTIAL_FIELDS 一致')
   const switches = collect(card, 'Switch')
-  assert.equal(switches.length, SELECTED_SKILL_CATALOG.length + 1, '本机回退一颗开关，catalog 每项各一颗')
+  assert.equal(switches.length, SELECTED_SKILL_CATALOG.length + 2, '本机回退 + 精选模式各一颗，catalog 每项各一颗')
   assert.equal(switches[0].props.checked, true, '段缺省 ⇒ 本机回退默认开')
-  assert.ok(switches.slice(1).every((node) => node.props.checked === false), 'selected skills 必须全部默认关闭')
+  assert.equal(switches[1].props.checked, false, '精选模式默认 manual')
+  assert.ok(switches.slice(2).every((node) => node.props.checked === false), 'selected skills 必须全部默认关闭')
   assert.equal(collect(card, 'button').filter((button) => button.props.className === 'capital-config-skill-action').length,
     SELECTED_SKILL_CATALOG.length,
     '全默认关闭 ⇒ 每行只有「详情」一颗按钮：复制技能名只给已开启的技能')
@@ -384,7 +385,11 @@ test('capital-config Client：五个密钥按序渲染，本机回退与 selecte
   const walk = (node) => {
     if (node?.type === 'SettingsSecretField') order.push(node.props.id)
     if (node?.type === 'SettingsFormFooter') order.push('save')
-    if (node?.type === 'Switch') order.push(node.props.label === 'localFetchLabel' ? 'local-fetch' : 'selected-skill')
+    if (node?.type === 'Switch') {
+      order.push(node.props.label === 'localFetchLabel'
+        ? 'local-fetch'
+        : node.props.label === 'selectedSkillsModeLabel' ? 'selected-skills-mode' : 'selected-skill')
+    }
     for (const child of node?.children ?? []) walk(child)
   }
   walk(card)
@@ -396,8 +401,9 @@ test('capital-config Client：五个密钥按序渲染，本机回退与 selecte
     'capital-config-paddleocr-key',
     'save',
     'local-fetch',
+    'selected-skills-mode',
     ...SELECTED_SKILL_CATALOG.map(() => 'selected-skill'),
-  ], '数据源格内：五个密钥 → 保存 → 回退开关；精选 Skills 的 35 行随后（hidden 也在树上）')
+  ], '数据源格内：五个密钥 → 保存 → 回退开关；精选 Skills 的模式开关与 68 行随后（hidden 也在树上）')
 })
 
 test('capital-config Client：catalog 用到的每个能力标签都有中英两套显示名', () => {
@@ -452,11 +458,11 @@ test('capital-config Client：精选 Skills 每行给复制技能名与仓库链
     [`selectedSkillsCopyName: ${SELECTED_SKILL_CATALOG[0].name}`], '悬停提示与无障碍名同一句')
   assert.equal(copyButtons[0].children[0], 'selectedSkillsCopyName', '按钮文案是「复制技能名」')
   await copyButtons[0].props.onClick()
-  assert.deepEqual(clipboardWrites, [SELECTED_SKILL_CATALOG[0].name], '走官方 writeClipboard 写入 skill 名')
+  assert.deepEqual(clipboardWrites, [`/${SELECTED_SKILL_CATALOG[0].name}`], '走官方 writeClipboard 写入 /name，粘贴即可强制加载')
   assert.equal(timers.length, 1, '「已复制」必须定时复位：一直亮着等于把一次性动作说成一个状态')
   assert.equal(timers[0].ms, 1600)
   assert.ok(collect(page, 'button').some((button) => button.props['aria-pressed'] === 'true'), '能力标签筛选有可见选中态')
-  assert.equal(collect(page, 'Switch').length, SELECTED_SKILL_CATALOG.length + 1)
+  assert.equal(collect(page, 'Switch').length, SELECTED_SKILL_CATALOG.length + 2)
   assert.deepEqual(collect(page, 'h5'), [], '精选 Skills 不再是数据源底下的 h5：它与数据源平级，如今各占一格')
   const [tabs] = collect(page, 'SegmentedControl')
   assert.equal(tabs.props.options[1].label, `selectedSkillsTitle 1/${SELECTED_SKILL_CATALOG.length}`,
@@ -465,6 +471,9 @@ test('capital-config Client：精选 Skills 每行给复制技能名与仓库链
   assert.equal(skillsPanel.props.hidden, true, '不在屏的那格 hidden 收起（仍在渲染树上，所以以上断言量的是真内容）')
   assert.equal(collect(page, 'p').filter((node) => node.props.className === 'capital-config-skill-description').length,
     SELECTED_SKILL_CATALOG.length, '只展示技能简述，不渲染额外风险提示')
+  assert.equal(collect(page, 'p').filter((node) => node.props.className === 'capital-config-skill-when').length,
+    SELECTED_SKILL_CATALOG.length, '每行展示路由触发句（useWhen），不只给一段主题摘要')
+  assert.ok(collect(page, 'span').some((node) => node.props.className === 'capital-config-skill-role'), '每行展示角色徽标，用户知道它归主 Agent 还是数据侧')
   assert.equal(collect(page, 'p').some((node) => /实验中|观察中|最近提交|下次复查/.test(JSON.stringify(node.children))), false)
 
   const dict = dictionaries.get('settings.capital')
@@ -542,92 +551,6 @@ test('capital-config Client：已开启的 Skill 置顶，但只在进入那一�
   assert.deepEqual(copyRows.map((button) => button.props['aria-label']),
     ordered.slice(0, 2).map((entry) => `selectedSkillsCopyName: ${entry.name}`),
     '「复制技能名」只给已开启的行 ⇒ 它们跟着聚在最上面')
-})
-
-// Edit-time cap: unchecked switches disable with the reason on the warning icon; over-cap legacy config keeps working.
-test('capital-config Client：精选 Skills 编辑期封顶，老配置照常生效只提示收敛', () => {
-  const keys = SELECTED_SKILL_CATALOG.map((entry) => entry.key)
-  const labelOf = new Map(SELECTED_SKILL_CATALOG.map((entry) => [entry.label.zh, entry]))
-  const renderWith = (selectedSkills) => {
-    const scope = readyScope({ selectedSkills })
-    const { mod } = loadClient({ scope })
-    const { ctx, registrations, dictionaries } = fakeCtx({ scope })
-    mod.apply(ctx)
-    const page = cardRenderer(registrations).render()
-    const rows = collect(page, 'div')
-      .filter((node) => node.props.className === 'capital-config-switch-row')
-      .filter((row) => collect(row, 'Switch').some((node) => node.props.label !== 'localFetchLabel'))
-    return {
-      rows,
-      switches: collect(page, 'Switch').filter((node) => node.props.label !== 'localFetchLabel'),
-      capPanels: collect(page, 'p').filter((node) => node.props['data-capital-config-cap'] !== undefined),
-      dict: dictionaries.get('settings.capital'),
-    }
-  }
-  const assertCapIcon = (row, blocked) => {
-    const iconIndex = row.children.findIndex((node) => node.props.className === 'capital-config-skill-cap-icon')
-    const switchIndex = row.children.findIndex((node) => node.type === 'Switch')
-    if (!blocked) {
-      assert.equal(iconIndex, -1, '没被挡住的行不放警示图标')
-      return
-    }
-    assert.ok(iconIndex >= 0, '被挡住的行左边要有三角警示图标')
-    assert.ok(iconIndex < switchIndex, '图标必须在开关左边')
-    const icon = row.children[iconIndex]
-    assert.equal(icon.children[0].type, 'warning-icon', '三角感叹号是官方那枚')
-    assert.equal(icon.props.title, 'selectedSkillsCapTooltip', '悬停文案挂 title')
-    assert.equal(icon.props['aria-label'], 'selectedSkillsCapTooltip', '读屏拿到同一串，不许另说一套')
-    assert.equal(icon.props.role, 'img', '这枚图标要能被读屏听到')
-  }
-
-  const atCap = Object.fromEntries(keys.slice(0, SELECTED_SKILLS_MAX_ENABLED).map((key) => [key, true]))
-  const { rows, switches, capPanels, dict } = renderWith(atCap)
-  assert.equal(switches.length, SELECTED_SKILL_CATALOG.length, '每颗精选 skill 一个开关')
-  for (const node of switches) {
-    const entry = labelOf.get(node.props.label)
-    assert.ok(entry, `认不出的开关：${node.props.label}`)
-    assert.equal(node.props.checked, atCap[entry.key] === true)
-    if (atCap[entry.key] === true) {
-      assert.notEqual(node.props.disabled, true, '已勾上的行永远关得掉')
-    } else {
-      assert.equal(node.props.disabled, true, '到上限后没勾的开关都点不动')
-      assert.equal(node.props.title, undefined, '开关上不挂 title：原因挪到左侧那枚警示图标上')
-    }
-  }
-  for (const row of rows) {
-    const entry = labelOf.get(collect(row, 'Switch')[0].props.label)
-    assertCapIcon(row, atCap[entry.key] !== true)
-  }
-  assert.deepEqual(capPanels, [], '列表顶上那行整行提示已删：原因只活在图标上')
-  assert.equal(
-    dict.zh.selectedSkillsCapTooltip.replace('{count}', `${SELECTED_SKILLS_MAX_ENABLED}/${SELECTED_SKILLS_MAX_ENABLED}`),
-    'Skill已达上限 (6/6)。', '悬停原句')
-  for (const locale of ['zh', 'en']) {
-    assert.match(dict[locale].selectedSkillsCapTooltip, /\{count\}/, `${locale} 必须带计数占位`)
-    assert.equal(dict[locale].selectedSkillsCapTooltip, dict[locale].selectedSkillsCapTooltip.trim(),
-      `${locale} 不许带首尾空格`)
-  }
-  for (const key of ['selectedSkillsCapReached', 'selectedSkillsCapReachedHint', 'selectedSkillsCapExceededHint']) {
-    assert.equal(dict.zh[key], undefined, `${key} 已随旧话术删掉`)
-  }
-
-  // Grandfathering: an existing over-cap selection must not silently lose features.
-  const overCap = Object.fromEntries(keys.slice(0, SELECTED_SKILLS_MAX_ENABLED + 2).map((key) => [key, true]))
-  const exceeded = renderWith(overCap)
-  for (const node of exceeded.switches) {
-    const entry = labelOf.get(node.props.label)
-    assert.equal(node.props.checked, overCap[entry.key] === true)
-    if (overCap[entry.key] === true) {
-      assert.notEqual(node.props.disabled, true, '老配置里已勾上的照常生效，也关得掉')
-    } else {
-      assert.equal(node.props.disabled, true, '超过上限时仍然不许再加')
-    }
-  }
-  assert.deepEqual(exceeded.capPanels, [], '超额态也没有汇总提示：原因同样只活在图标上')
-  for (const row of exceeded.rows) {
-    const entry = labelOf.get(collect(row, 'Switch')[0].props.label)
-    assertCapIcon(row, overCap[entry.key] !== true)
-  }
 })
 
 // Opening must be a click: HoverCard only times pointerenter and closes on anchor click.
@@ -934,8 +857,8 @@ test('capital-config Client：筛选器吸顶、三格首行等距，且不许�
   assert.match(rule('.capital-config-skill-doc'), /max-height:/, '封顶的是正文那一块，标题与关闭按钮因此留在原位')
   // Only reference tokens the theme defines; an undefined var() falls back to inherited color.
   assert.doesNotMatch(css, /--dsw-alias-label-error/, '主题里不存在的 token 不许引用')
-  assert.match(rule('.capital-config-skill-cap-icon'), /color:\s*var\(--dsw-alias-state-warn-primary\)/,
-    '警示图标用 DSH 的 warn 色（StateDot / Tag 的 warning 同款）')
+  assert.match(rule('.capital-config-skill-when'), /line-height:/, '触发句要有自己的行高，长句不挤在标题上')
+  assert.match(rule('.capital-config-skill-role'), /border:/, '角色徽标要有边框，和标签区分开')
   assert.match(rule('.capital-config-write-failed'), /color:\s*var\(--dsw-alias-state-error-primary\)/,
     '写失败红字用 error-primary：同一个坏 token 的另一处，一并钉住')
   for (const retired of ['capital-config-skill-slug', 'capital-config-skill-copy', 'capital-config-selected-filter-label', 'capital-config-cap-hint', 'capital-config-selected-cap-count']) {
@@ -1024,11 +947,52 @@ test('capital-config Client：selected skill 开关只写允许的 volatile 路�
   assert.equal(writes.length, 1, '只读设置不得发起写入')
 })
 
+test('capital-config Client：auto 模式标自动、勾选只读，切换只写 selectedSkillsMode', async () => {
+  const doc = { value: { selectedSkillsMode: 'auto', selectedSkills: { buffettFramework: false } } }
+  const writes = []
+  const scope = {
+    getSnapshot: () => ({ status: 'ready', writable: true, value: doc.value, user: {}, base: {}, revision: 0 }),
+    subscribe: () => () => {},
+    mutate: async (ops) => {
+      writes.push(ops)
+      doc.value = { ...doc.value, selectedSkillsMode: ops[0].value }
+      return true
+    },
+  }
+  const { mod } = loadClient({ scope })
+  const { ctx, registrations } = fakeCtx({ scope })
+  mod.apply(ctx)
+  const injected = registrationFor(registrations, 'plugins.bundle.config').declaration.inject()
+  const store = injected.hooks.capitalCard
+  assert.equal(store.getSnapshot().selectedSkillsMode.auto, true)
+
+  const { render } = cardRenderer(registrations)
+  const card = render()
+  const [tabs] = collect(card, 'SegmentedControl')
+  assert.equal(tabs.props.options[1].label, 'selectedSkillsTitle selectedSkillsModeShort',
+    'auto 模式不按「已开启/总数」报数：勾选在这一模式下不参与过滤')
+  const switches = collect(card, 'Switch')
+  assert.equal(switches[1].props.checked, true, '模式开关必须反映 auto')
+  assert.ok(switches.slice(2).every((node) => node.props.disabled === true),
+    'auto 下逐颗勾选只读：拨了也不会生效，不能让它看起来可操作')
+  assert.equal(collect(card, 'button')
+    .filter((button) => String(button.props['aria-label']).startsWith('selectedSkillsCopyName')).length,
+  SELECTED_SKILL_CATALOG.length, 'auto 下每个角色都能加载自己的方法，复制入口必须全开')
+
+  await injected.toggleSelectedSkillsMode(false)
+  assert.equal(JSON.stringify(writes), JSON.stringify([[{ op: 'set', path: ['selectedSkillsMode'], value: 'manual' }]]),
+    '模式写顶层 volatile 路径，不污染 selectedSkills 的目录键')
+  assert.equal(store.getSnapshot().selectedSkillsMode.auto, false)
+})
+
 test('capital-config Host：schema 默认值必须与主插件 Config 完全一致（两处 schema 不能漂移）', () => {
   assert.deepEqual(plainConfig(CapitalConfig({})), MainConfig({}))
   assert.deepEqual(MainConfig({}).selectedSkills, Object.fromEntries(SELECTED_SKILL_CATALOG.map(({ key }) => [key, false])), 'selected skill 默认必须全部关闭')
   assert.deepEqual(plainConfig(CapitalConfig({})).selectedSkills, MainConfig({}).selectedSkills,
     'Host 设置与主插件运行期的 selectedSkills 默认值必须一致')
+  assert.equal(MainConfig({}).selectedSkillsMode, 'manual', '精选模式默认 manual：老配置升级后不改变行为')
+  assert.equal(plainConfig(CapitalConfig({})).selectedSkillsMode, MainConfig({}).selectedSkillsMode,
+    'Host 设置与主插件运行期的模式默认值必须一致')
 })
 
 test('capital-config Host：localFetch 默认值两处一致且消费点独立生效', () => {

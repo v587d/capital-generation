@@ -11,7 +11,7 @@
   根据问题所需证据与实际来源选择，绝不为凑能力而全量遍历。叶子节点——不得创建或指挥下游子 Agent
   （回归 `test/persona.test.mjs`，下同「叶子边界」）。
 - **`data_junior`**（`subagent_data_junior`）：主 Agent 直接子 Agent，与 data_collector 是兄弟、
-  后者不得指挥它；只接收 `DatasetRef`。用法口径在工具 description、子 persona 与 skill
+  后者不得指挥它；接收 `DatasetRef`，也接没有 Dataset 的假设建模（估值 / 情景 / 敏感性）。用法口径在工具 description、子 persona 与 skill
   `capital-data-profile` / `capital-data-query`，本节只留维护者约束：
   - **⛔ 省往返靠 `isConcurrencySafe: () => true` + 框架并发池**：**不要**改成"一次调用合并返回
     多份 dataset"——会同时废掉体积闸门和 hint。宿主这一侧 **fail-closed**（不标就串行），2026-10-16

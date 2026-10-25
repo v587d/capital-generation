@@ -1,15 +1,16 @@
 import { Context } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
-import { type SelectedSkillSelection } from './agents/selected-skills-provider.js';
+import { type SelectedSkillSelection, type SelectedSkillsMode } from './agents/selected-skills-provider.js';
+import { CAPITAL_CONFIG_ENTRY_ID } from './capital-settings.js';
 import { type RetrieverConfig } from './retriever-config.js';
 export { LOCAL_FETCH_DEFAULTS, PADDLE_OCR_DEFAULTS, resolveLocalFetchConfig, type LocalFetchConfig, type PaddleOcrConfig, type RetrieverConfig, type WindDocsConfig, } from './retriever-config.js';
 export { resolveUserCustomizationSection } from './user-customization.js';
 export declare const name = "capital-generation";
-/** Entry id shared by `cordis.patch.yml`, `config/index.js` and `client.src.cjs`; drift hides the settings card. */
-export declare const CAPITAL_CONFIG_ENTRY_ID = "capital-config";
+export { CAPITAL_CONFIG_ENTRY_ID };
 export interface Config {
     customPersona?: string;
     selectedSkills?: SelectedSkillSelection;
+    selectedSkillsMode?: SelectedSkillsMode;
     fuyaoCredentialRef?: string;
     ftshareCredentialRef?: string;
     retriever?: RetrieverConfig;
@@ -21,6 +22,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     }>>, Schemastery.ObjectT<NoInfer<{
         [k: string]: z<boolean, boolean, "defined">;
     }>>, "defined">;
+    selectedSkillsMode: z<"manual" | "auto", "manual" | "auto", "defined">;
     fuyaoCredentialRef: z<string, string, "defined">;
     ftshareCredentialRef: z<string, string, "defined">;
     retriever: z<Schemastery.ObjectS<NoInfer<{
@@ -107,6 +109,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     }>>, Schemastery.ObjectT<NoInfer<{
         [k: string]: z<boolean, boolean, "defined">;
     }>>, "defined">;
+    selectedSkillsMode: z<"manual" | "auto", "manual" | "auto", "defined">;
     fuyaoCredentialRef: z<string, string, "defined">;
     ftshareCredentialRef: z<string, string, "defined">;
     retriever: z<Schemastery.ObjectS<NoInfer<{

@@ -11,10 +11,10 @@ description: Use when delegating in Capital mode — running the per-round list_
 ## 1. 每轮预检（不可跳过）
 
 - 触发点：**每次新的用户请求或新一轮任务**。在"本轮第一次调用任何创建工具"之前完成。
-- 创建工具指：`subagent_data_collector`、`subagent_data_junior`、`subagent_web_retriever`，以及今后新增的任何**专用**委派工具。
+- 创建工具：`subagent_data_collector` / `subagent_data_junior` / `subagent_web_retriever`。
 - 查询方式：`list_agents(scope="children")`，一次即可。
-- 不要把它当成"仅在会话恢复时才做的回忆步骤"：上一轮查到的空列表不能代替本轮查询。
-- 一次查询结果覆盖本轮所有角色，不要为每个角色重复查询；等待回传期间也不要轮询。
+- 上一轮的空列表不能代替本轮查询。
+- 一次查询覆盖全部角色；等待回传期间不要轮询。
 
 ## 1.1 Canonical task_id（不可分叉）
 
@@ -32,15 +32,13 @@ description: Use when delegating in Capital mode — running the per-round list_
    只要出现在列表里，就用该 id 调 `send_message` 派发本次任务。`running` 在其最近的 step 边界
    接收消息；`inactive` 带着自己的上下文开一个新回合。
    不得因为"空闲""上一任务已完成""任务标题变了""想并行"而创建第二个同角色 Agent。
-3. **诊断/暂时不可用**：已记录 id 但列表出现 diagnostic 或暂时不可用，先用该 id 尝试
-   `send_message`，或重新 `list_agents` 核验；不得直接创建第二个同角色 Agent。
+3. **诊断/暂时不可用**：先用已记录 id 尝试 `send_message` 或重新核验；不得创建第二个同角色 Agent。
 4. **确实不存在**：只有确认该 child 不存在且没有可用复用 id，才进入创建分支。
 
 ### 2.1 ID 纪律（防长上下文抄错 id）
 
-child id 是随机 UUID、无语义可校验，长会话里凭记忆/从历史轮次复述 id 极易抄错，甚至把
-A 角色的请求投给 B 角色。官方机制是 **`list_agents` 即权威 id 存储**——id 不需要被记住，
-只需要在用之前查一次：
+child id 是随机 UUID，长会话里凭记忆复述极易抄错，甚至把 A 角色的请求投给 B 角色。
+**`list_agents` 即权威 id 存储**：用之前查一次就够了：
 
 - `send_message` 的 `agent_id` 只从**最近一次 `list_agents` 的渲染输出**复制（每行就是
   `id [status] — label`）；不从早前轮次的上下文、委派清单或旧工具回执里复述 id。
@@ -83,7 +81,7 @@ A 角色的请求投给 B 角色。官方机制是 **`list_agents` 即权威 id 
 | 诉求 | 归属 |
 |------|------|
 | 行情、财务、历史、交易日历等结构化数据 | `data_collector` |
-| 数据集质量检查、缺失/重复/时间范围/基础统计 | `data_junior` |
+| 数据集质量检查、基础统计、无 Dataset 的假设建模/估值/情景/敏感性 | `data_junior`（给假设与口径，不自己算） |
 | 网页材料、公告、新闻、传闻原文、公司背景、需要最新信息的事实 | `web_retriever` |
 | 专业分析（Python、回测、统计检验） | 尚未启用——先由 `data_junior` 出基础 profile，并如实告知用户 |
 

@@ -1,11 +1,12 @@
 # Selected Skills
 
 This directory is the community-skill intake and provenance area for Capital Generation.
-Every entry is an experimental snapshot: it is off by default, is never loaded
-automatically, and is visible only to a newly created Capital root Agent after the
-user explicitly enables it in the plugin settings card.
+Every entry is an experimental snapshot: it is off by default, is never enabled
+automatically, and after the user explicitly enables it in the plugin settings card
+it is visible only to the Capital role(s) declared in `routing.js` (main Agent,
+data analysis, or retrieval/evidence).
 
-The runtime catalog and its capability tags live in [`catalog.js`](./catalog.js). The
+The runtime catalog, display tags and provenance live in [`catalog.js`](./catalog.js); role ownership and trigger text live in [`routing.js`](./routing.js). The human-readable 68-row review table is [`ROUTING.md`](./ROUTING.md). Actual loads are recorded programmatically by the role-scoped provider (`skills_used` in the role prompt, `npm run report:skill-usage` for the session-log audit). The
 catalog is intentionally broader than any default composition. A candidate may be
 selectable while still carrying a `watchlist` status; that status is a visible signal
 for the user to review the source and decide whether it fits the task.

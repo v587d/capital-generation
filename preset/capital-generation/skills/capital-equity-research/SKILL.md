@@ -5,6 +5,10 @@ description: Use when the user requests a complete research report or comprehens
 
 # 单一上市公司投研与风险审阅
 
+> **定位**：本协议只定义研究流程、证据门与报告形状；估值、财务质量、行业竞争等分析方法在精选方法层。
+> 主 Agent 能加载的方法（如 `china-initiating-coverage` / `buffett-investment-framework`）按主目录加载；
+> 估值、三表等 data_junior 方法不在主目录里，交给 data_junior 按它的目录加载。
+> 协议与方法正交：不要用本协议替代方法，也不要用方法改写本协议的证据门。
 本 skill 只供主 Agent 编排单一标的的完整研究报告；报告就是最终答复正文，不创建单独的报告产物。它不增加工具权限、不创建新角色、不要求每项都调用一个工具。普通的单点事实问题不必套用本流程；用户明确要求完整报告时，各维度必须有证据支持的结论或明确的未评估理由。
 
 ## 1. 边界与入口

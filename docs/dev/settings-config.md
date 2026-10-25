@@ -41,7 +41,7 @@
 - **密钥进 credentials 域，不进 settings 文档**：Key 经 `ctx.remote.credentials.set` 写入，
   settings 里只存 **ref 名**（`fuyaoCredentialRef` / `ftshareCredentialRef` / `retriever.*.credentialRef`）。卡片把五把
   密钥声明成 `SettingsFormModel` 的 write-only secrets：值从不随响应出网，控件只报"已配置/未配置"。
-- **即时写入的偏好**包括回退开关 `retriever.localFetch.enabled` 和 catalog 中每个选用 Skill 的开关（例如 `selectedSkills.buffettFramework`、`selectedSkills.financialHealth`）：都走 `scope.mutate([{ op: 'set', path, value }])`（`set(field)` 只支持顶层字段），并由条目快照渲染；写被拒时不翻转并显示提示。「精选 Skills」那一格是**左右两列**：左列按能力标签筛选——**没有**「按能力筛选」那句字面提示（名字只挂在 `role=group` 的 `aria-label` 上），标签**按条数从高到低**排，「全部」不参与排序恒在第一格，每个标签后面是"点它会显示几行"（按 catalog 现算，随滚动 `sticky` 钉在左边）；右列是清单，每行显示技能名、简述、上游仓库链接、能力标签与**详情**，**复制技能名**只给已开启的行（那串名字是给会话用的，没开的复制了也用不上；「详情」不留这道闸门——开之前正是要读原文的时候），**已开启的行排在清单最前面**、组内保持 catalog 顺序，但这份顺序**只在进入这一格的那一刻定一次**（存的是那一刻的 key 名单，不是开关的实时状态）：拨开关当场不挪行——把用户手底下那一行抽走比不置顶更糟，切走再切回来才置顶；tab 上那个 `已开启/总数` 仍然实时（数字当场不说谎，位置不必当场动）。不显示 slug `<code>`（名字靠复制按钮给，无障碍名与悬停提示必须带着它）、不显示状态、维护者、提交/复查日期或风险提示。开启后在**下一条指令**即生效（每轮 `agent/pre-step` 重读并刷新目录，无需新建会话）；selected skill provider 只注册到 Capital 根 Agent 自己的 scope，子 Agent 不继承。
+- **即时写入的偏好**包括回退开关 `retriever.localFetch.enabled`、精选模式 `selectedSkillsMode`（`manual` / `auto`）和 catalog 中每个选用 Skill 的开关（例如 `selectedSkills.buffettFramework`、`selectedSkills.financialHealth`）：都走 `scope.mutate([{ op: 'set', path, value }])`（`set(field)` 只支持顶层字段），并由条目快照渲染；写被拒时不翻转并显示提示。「精选 Skills」那一格是**左右两列**：左列按能力标签筛选——**没有**「按能力筛选」那句字面提示（名字只挂在 `role=group` 的 `aria-label` 上），标签**按条数从高到低**排，「全部」不参与排序恒在第一格，每个标签后面是"点它会显示几行"（按 catalog 现算，随滚动 `sticky` 钉在左边）；右列是清单，每行显示技能名、简述、上游仓库链接、能力标签与**详情**，**复制技能名**在 manual 只给已开启的行、auto 下全开（那串名字是给会话用的；「详情」不留这道闸门——开之前正是要读原文的时候），**已开启的行排在清单最前面**、组内保持 catalog 顺序，但这份顺序**只在进入这一格的那一刻定一次**（存的是那一刻的 key 名单，不是开关的实时状态）：拨开关当场不挪行——把用户手底下那一行抽走比不置顶更糟，切走再切回来才置顶；tab 上那个 `已开启/总数` 仍然实时（数字当场不说谎，位置不必当场动）；auto 时 tab 改标「自动」，逐颗勾选置灰——它们只在 manual 生效，不能看起来可拨。不显示 slug `<code>`（名字靠复制按钮给，无障碍名与悬停提示必须带着它）、不显示状态、维护者、提交/复查日期或风险提示。开启后在**下一条指令**即生效（每轮 `agent/pre-step` 重读并刷新目录，无需新建会话）；selected skill provider 只注册到 Capital 根 Agent 自己的 scope，子 Agent 不继承。
 - **主插件读回**：`src/index.ts` 的 `readCapitalSettings` 三级取数——`settings.describe()`（已应用视图）
   → `configEditor.entries()` 的条目保存层（describe() 在条目 fiber 未挂好的窗口会**整个跳过条目**，
   已保存的值仍在保存层）→ preset 兜底且**可辨认**（`source === 'preset'`，"读不到"不许伪装成"用户
@@ -52,7 +52,7 @@
   各不超过两句；文档链接只写"官方文档"＋右上角斜上箭头，落在标签右边同一行。**排布是三格 tab**
   （`数据源` / `精选 Skills` / `包含的组件`，默认落 `数据源`）：tab 条**取代**当年 `h4 数据源` +
   `h5 精选 Skills` 那两级标题（h5 挂在 h4 底下会把平级的两块说成父子），格内顺序仍照旧——五个密钥 →
-  保存 → 回退开关。标题体系之外的两枚**计数**：第二格 `已开启/总数`（分子来自条目快照，分母
+  保存 → 回退开关。标题体系之外的两枚**计数**：第二格 manual 是 `已开启/总数`、auto 是「自动」（分子来自条目快照，分母
   `SELECTED_SKILL_CATALOG.length`），第三格是行数（唯一来源 `remote.pluginManager.listBundles()`，
   **读不到就只写标题、绝不画 0**，失败不缓存、切格即重试——AGENTS.md §9.7 ⑤ 那条）。密钥草稿活在 DOM
   里而保存按钮可能在看不见的格子里，所以草稿在场时第一格改口「数据源 未保存」。

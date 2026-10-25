@@ -3,8 +3,15 @@ import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { registerRootSelectedSkills, SELECTED_SKILL_CATALOG } from '../lib/agents/selected-skills-provider.js'
-import { SELECTED_SKILL_SKILL_DIRS, SELECTED_SKILL_TASK_IDS } from '../selected-skills/catalog.js'
+import { registerSelectedSkills, renderSelectedSkillsBrief, SELECTED_SKILL_CATALOG } from '../lib/agents/selected-skills-provider.js'
+import {
+  clearAllSelectedSkillUsage,
+  clearSelectedSkillUsage,
+  skillUsageNamesForSession,
+  skillUsageRows,
+} from '../lib/agents/skill-usage.js'
+import { SELECTED_SKILL_SKILL_DIRS } from '../selected-skills/catalog.js'
+import { SELECTED_SKILL_ROUTING } from '../selected-skills/routing.js'
 
 // Kept in the snapshot but not selectable: aliases, orchestrators, report output, chart authoring.
 const INVESTSKILL_EXCLUDED = [
@@ -99,9 +106,15 @@ function candidate(name) {
   return { name, description: name, invocation: { modelInvocable: true, userInvocable: true }, source: 'custom', provider: 'source', rank: 1, locator: name }
 }
 
-// list() also returns shadow candidates for task skills; catalog assertions strip them.
-// The shadowing contract itself is pinned by the cases at the end of this file.
-const selectedOnly = (names) => names.filter((name) => !SELECTED_SKILL_TASK_IDS.includes(name))
+/** Auto-mode cases need the whole catalog on disk, not the five-candidate role fixture. */
+function fullCatalogProvider(_ctx, _control, config) {
+  return {
+    name: config.providerName,
+    async list() { return SELECTED_SKILL_CATALOG.map(({ name }) => candidate(name)) },
+    async get(value) { return { ...value, content: 'loaded' } },
+    async dispose() {},
+  }
+}
 
 function makeHarness() {
   const listeners = new Map()
@@ -130,9 +143,10 @@ function makeHarness() {
     effect(callback) { rootCleanup = callback() },
     logger: { warn(message) { warnings.push(message) } },
   }
-  function makeAgent({ preset = 'capital-generation', parentSession, lateSnapshot = false, injectFails = 0 } = {}) {
-    const agent = { session: { id: 'session', header: { parentSession } }, ctx: undefined }
+  function makeAgent({ preset = 'capital-generation', parentSession, sessionId = 'session', lateSnapshot = false, injectFails = 0 } = {}) {
+    const agent = { session: { id: sessionId, header: { parentSession } }, ctx: undefined }
     const preStepListeners = []
+    const eventListeners = new Map()
     let catalogSnapshot = []
     let remainingInjectFailures = injectFails
     // Mirrors SkillRegistry caching: list is cached until control.invalidate().
@@ -168,12 +182,17 @@ function makeHarness() {
         return Promise.resolve().then(() => callback(Object.create(agentCtx, { skills: { value: skills, enumerable: true } })))
       },
       on(event, listener) {
-        if (event !== 'agent/pre-step') return () => {}
-        preStepListeners.push(listener)
-        return () => {
-          const index = preStepListeners.indexOf(listener)
-          if (index >= 0) preStepListeners.splice(index, 1)
+        if (event === 'agent/pre-step') {
+          preStepListeners.push(listener)
+          return () => {
+            const index = preStepListeners.indexOf(listener)
+            if (index >= 0) preStepListeners.splice(index, 1)
+          }
         }
+        const listeners = eventListeners.get(event) ?? new Set()
+        listeners.add(listener)
+        eventListeners.set(event, listeners)
+        return () => { listeners.delete(listener) }
       },
     }
     agent.ctx = agentCtx
@@ -203,13 +222,18 @@ function makeHarness() {
       },
       get catalogSnapshot() { return catalogSnapshot },
       get preStepListenerCount() { return preStepListeners.length },
+      emit(event, ...args) {
+        for (const listener of [...(eventListeners.get(event) ?? [])]) listener(...args)
+      },
+      emitToolResult(exec, result) { this.emit('tools/result', exec, result) },
+      emitSession(session, event) { this.emit('session/event', session, event) },
     }
   }
   const createFilesystemProvider = (_ctx, _control, config) => {
     providerConfig = config
     return {
       name: config.providerName,
-      async list() { return [candidate('buffett-investment-framework'), candidate('financial-health'), candidate('fact-check')] },
+      async list() { return [candidate('buffett-investment-framework'), candidate('financial-health'), candidate('fact-check'), candidate('china-dcf'), candidate('10k-digest')] },
       async get(value) { return { ...value, content: 'loaded' } },
       async dispose() { providerDisposeCount += 1 },
     }
@@ -307,227 +331,333 @@ test('selected skill provider: disabled by default and limited to the approved c
       `${orchestrator} 不得被挪进 ${quantRoot}：一旦落进登记的 skills 根，provider 就会把它发现并暴露出去`)
   }
   assert.ok(SELECTED_SKILL_CATALOG.every(({ status, tags }) => ['experimental', 'watchlist'].includes(status) && tags.length > 0))
-  const harness = makeHarness()
-  registerRootSelectedSkills(harness.ctx, { buffettFramework: false }, harness.createFilesystemProvider)
-  assert.equal(harness.listeners.size, 0, 'all-false config must not attach an Agent listener')
 })
 
-test('selected skill provider: Capital root only, filtered catalog, scope cleanup', async () => {
+test('selected skill provider: 按角色过滤，主 Agent 看不到只属于数据侧的方法', async () => {
   const harness = makeHarness()
-  registerRootSelectedSkills(harness.ctx, { buffettFramework: true }, harness.createFilesystemProvider)
+  const selection = { buffettFramework: true, financialHealth: true, factCheck: true }
+  registerSelectedSkills(harness.ctx, 'main', selection, harness.createFilesystemProvider)
   const created = harness.listeners.get('agent/created')
   assert.equal(typeof created, 'function')
 
-  const child = harness.makeAgent({ parentSession: 'parent-session' })
-  await created({ agent: child.agent })
-  assert.equal(harness.providerRegistrationCount, 0, 'child Agent must not receive a provider')
-
-  const otherPreset = harness.makeAgent({ preset: 'other-preset' })
-  await created({ agent: otherPreset.agent })
-  assert.equal(harness.providerRegistrationCount, 0, 'other presets must not receive a provider')
-
   const root = harness.makeAgent()
-  const creation = created({ agent: root.agent })
-  assert.equal(harness.providerRegistrationCount, 0, 'provider 必须在 agent/created 的异步注入完成前保持未注册')
-  await creation
+  await created({ agent: root.agent })
   assert.equal(harness.providerRegistrationCount, 1)
-  assert.equal(root.preStepListenerCount, 2, 'pre-step 钩子必须在 agent/created settle 前落位（tool-skill 形状快照 + 本包刷新钩子）')
+  assert.equal(root.preStepListenerCount, 2, 'pre-step 钩子必须在 agent/created settle 前落位')
+  // fact-check is web_retriever + main; financial-health is data_junior only.
+  assert.deepEqual((await harness.provider.list({})).map(({ name }) => name), ['buffett-investment-framework', 'fact-check'])
+  assert.equal((await harness.provider.get(candidate('fact-check'), {})).content, 'loaded')
+  assert.throws(
+    () => harness.provider.get(candidate('financial-health'), {}),
+    /not enabled for main/,
+    '角色不匹配的 skill 不得通过 get 绕过目录过滤',
+  )
   assert.equal(harness.providerConfig.includeDefaultRoots, false)
-  // Skill roots are derived from the catalog; a hardcoded path silently hides enabled items.
-  assert.deepEqual(harness.providerConfig.customSkillDirs.length, Object.keys(SELECTED_SKILL_SKILL_DIRS).length)
-  for (const [repository, skillsDir] of Object.entries(SELECTED_SKILL_SKILL_DIRS)) {
-    const expected = join(repository, ...skillsDir.split('/'))
-    assert.ok(harness.providerConfig.customSkillDirs.some((dir) => dir.endsWith(expected)),
-      `provider 的 customSkillDirs 缺少 ${repository} 的 skills 根（应以 ${expected} 结尾）`)
-  }
   assert.equal(harness.providerConfig.providerName, 'capital-selected-skills')
-  assert.deepEqual(selectedOnly((await harness.provider.list({})).map(({ name }) => name)), ['buffett-investment-framework'])
-  assert.equal((await harness.provider.get(candidate('buffett-investment-framework'), {})).content, 'loaded')
-   assert.throws(
-     () => harness.provider.get(candidate('financial-health'), {}),
-     /not enabled/,
-     '未选中的 skill 不得通过 get 绕过 catalog 过滤',
-   )
+  assert.deepEqual(harness.providerConfig.customSkillDirs.length, Object.keys(SELECTED_SKILL_SKILL_DIRS).length)
 
   root.agentCtx.cleanup?.()
   assert.equal(harness.providerUnregisterCount, 1)
   assert.equal(harness.providerDisposeCount, 1, 'agent scope teardown must stop the filesystem watcher')
-  assert.equal(root.preStepListenerCount, 1, 'scope teardown 必须摘掉每轮刷新钩子，不许留悬挂监听')
   harness.disposeRoot()
   assert.equal(harness.listeners.size, 0, 'plugin teardown must detach the root Agent listener')
 })
 
-test('selected skill provider: 先建会话再切 preset（GUI 顺序）也必须注册 provider', async () => {
-  // GUI creates the Agent under the default preset, then selects Capital, so agent/created
-  // fires first; the agent-preset/selected listener is the only path that registers there.
+test('selected skill provider: 数据侧与检索侧各自拿到自己的方法，reserved analyst 走别名', async () => {
   const harness = makeHarness()
-  registerRootSelectedSkills(harness.ctx, { buffettFramework: true }, harness.createFilesystemProvider)
-  const selected = harness.listeners.get('agent-preset/selected')
-  assert.equal(typeof selected, 'function', '必须挂 agent-preset/selected：先建后切是 GUI 的真实顺序')
-
-  const root = harness.makeAgent()
-  harness.agents.set('session-root', root.agent)
-
-  await selected('session-root', 'cordis')
-  assert.equal(harness.providerRegistrationCount, 0, '别的 preset 的切换不许碰')
-  await selected('session-missing', 'capital-generation')
-  assert.equal(harness.providerRegistrationCount, 0, '活 Agent 表里没有的会话静默跳过（dispose 后仍可能收到事件）')
-
-  const child = harness.makeAgent({ parentSession: 'session-root' })
-  harness.agents.set('session-child', child.agent)
-  await selected('session-child', 'capital-generation')
-  assert.equal(harness.providerRegistrationCount, 0, '子 Agent 一律不注册')
-
-  await selected('session-root', 'capital-generation')
-  assert.equal(harness.providerRegistrationCount, 1, '切到 Capital 必须注册 provider')
-  assert.deepEqual(selectedOnly((await harness.provider.list({})).map(({ name }) => name)), ['buffett-investment-framework'])
-  assert.equal(root.preStepListenerCount, 2, '切换路径同样要落位每轮刷新钩子')
-
-  // Repeated events for one Agent must not register a second provider.
-  await selected('session-root', 'capital-generation')
-  await harness.listeners.get('agent/created')({ agent: root.agent })
-  assert.equal(harness.providerRegistrationCount, 1, '同一个 Agent 只许注册一次')
-
-  harness.disposeRoot()
-  assert.equal(harness.listeners.size, 0, 'plugin teardown 必须把两条监听都摘掉')
-})
-
-test('selected skill provider: 切换路径注入失败要留重试余地', async () => {
-  // A failed inject must stay retryable, not latch the Agent into permanent failure.
-  const harness = makeHarness()
-  registerRootSelectedSkills(harness.ctx, { buffettFramework: true }, harness.createFilesystemProvider)
-  const selected = harness.listeners.get('agent-preset/selected')
-  const root = harness.makeAgent({ injectFails: 1 })
-  harness.agents.set('session-root', root.agent)
-
-  await selected('session-root', 'capital-generation')
-  assert.equal(harness.providerRegistrationCount, 0)
-  assert.ok(harness.warnings.some((message) => message.includes('selected skills are unavailable')),
-    '注入失败只降级告警')
-
-  await selected('session-root', 'capital-generation')
-  assert.equal(harness.providerRegistrationCount, 1, '一次注入失败不许把该 Agent 钉成永久失败')
-})
-
-test('selected skill provider: 嵌套 skills 根里的名字走同一个 list/get 闸门', async () => {
-  // Nested skills root: its names must pass the same list filter and get check.
-  const harness = makeHarness()
-  registerRootSelectedSkills(harness.ctx, { factCheck: true }, harness.createFilesystemProvider)
-  await harness.listeners.get('agent/created')({ agent: harness.makeAgent().agent })
-  assert.deepEqual(selectedOnly((await harness.provider.list({})).map(({ name }) => name)), ['fact-check'])
-  assert.equal((await harness.provider.get(candidate('fact-check'), {})).content, 'loaded')
-  assert.throws(
-    () => harness.provider.get(candidate('buffett-investment-framework'), {}),
-    /not enabled/,
-    '未选中的 skill 不得通过 get 绕过 catalog 过滤',
-  )
-})
-
-test('selected skill provider: 开关每轮现读，已有 Agent 的 catalog 跟随设置刷新', async () => {
-  // Real order is create then toggle; the old code froze enabled state at agent/created.
-  const harness = makeHarness()
-  let selection = { buffettFramework: false }
-  registerRootSelectedSkills(harness.ctx, () => selection, harness.createFilesystemProvider)
+  const selection = { buffettFramework: true, financialHealth: true, factCheck: true, tenKDigest: true }
+  registerSelectedSkills(harness.ctx, 'data_junior', selection, harness.createFilesystemProvider)
   const created = harness.listeners.get('agent/created')
-  assert.equal(typeof created, 'function')
+  const junior = harness.makeAgent({ preset: 'capital-data-junior', parentSession: 'root' })
+  await created({ agent: junior.agent })
+  assert.deepEqual((await harness.provider.list({})).map(({ name }) => name), ['financial-health'])
 
-  const live = harness.makeAgent()
-  await created({ agent: live.agent })
-  assert.equal(harness.providerRegistrationCount, 1, '初始全关也必须注册 provider（空目录）')
-  assert.deepEqual((await harness.provider.list({})).map(({ name }) => name), [])
+  const retrieverHarness = makeHarness()
+  registerSelectedSkills(retrieverHarness.ctx, 'web_retriever', selection, retrieverHarness.createFilesystemProvider)
+  const retriever = retrieverHarness.makeAgent({ preset: 'capital-web-retriever', parentSession: 'root' })
+  await retrieverHarness.listeners.get('agent/created')({ agent: retriever.agent })
+  assert.deepEqual((await retrieverHarness.provider.list({})).map(({ name }) => name), ['fact-check', '10k-digest'])
+
+  const analystHarness = makeHarness()
+  registerSelectedSkills(analystHarness.ctx, 'data_analyst', selection, analystHarness.createFilesystemProvider)
+  const analyst = analystHarness.makeAgent({ preset: 'capital-data-analyst', parentSession: 'root' })
+  await analystHarness.listeners.get('agent/created')({ agent: analyst.agent })
+  assert.deepEqual((await analystHarness.provider.list({})).map(({ name }) => name), ['financial-health'],
+    'data_analyst 是保留角色，启用前与 data_junior 共用方法集')
+})
+
+test('selected skill provider: auto 模式按角色开放全部方法，勾选不参与过滤', async () => {
+  const cases = [
+    { role: 'main', preset: 'capital-generation', count: 37, included: 'buffett-investment-framework', excluded: 'china-dcf' },
+    { role: 'data_junior', preset: 'capital-data-junior', count: 40, included: 'china-dcf', excluded: 'buffett-investment-framework' },
+    { role: 'web_retriever', preset: 'capital-web-retriever', count: 8, included: 'fact-check', excluded: 'china-dcf' },
+  ]
+  for (const item of cases) {
+    const harness = makeHarness()
+    const access = { selection: { buffettFramework: false }, mode: 'auto' }
+    registerSelectedSkills(harness.ctx, item.role, access, fullCatalogProvider)
+    const agent = harness.makeAgent({
+      preset: item.preset,
+      ...(item.role === 'main' ? {} : { parentSession: 'root' }),
+    })
+    await harness.listeners.get('agent/created')({ agent: agent.agent })
+    const names = (await harness.provider.list({})).map(({ name }) => name)
+    assert.equal(names.length, item.count, `${item.role} 的 auto 目录必须是该角色全部方法`)
+    assert.ok(names.includes(item.included), `${item.role} auto 目录缺少 ${item.included}`)
+    assert.ok(!names.includes(item.excluded), `${item.role} auto 目录混入了别的角色：${item.excluded}`)
+    assert.equal((await harness.provider.get(candidate(item.included), {})).content, 'loaded',
+      'auto 模式下未勾选的方法也必须能加载')
+    assert.throws(() => harness.provider.get(candidate(item.excluded), {}), /not enabled for/,
+      'auto 只放开角色边界以内的方法')
+    harness.disposeRoot()
+  }
+})
+
+test('selected skill provider: auto 与 manual 的切换会让目录缓存失效', async () => {
+  const harness = makeHarness()
+  let mode = 'manual'
+  const access = { selection: { buffettFramework: true }, mode: () => mode }
+  registerSelectedSkills(harness.ctx, 'main', access, fullCatalogProvider)
+  const root = harness.makeAgent()
+  await harness.listeners.get('agent/created')({ agent: root.agent })
+  await root.preStep()
+  assert.deepEqual(root.catalogSnapshot, ['buffett-investment-framework'], 'manual 只给勾选项')
   assert.equal(harness.invalidateCount, 0)
 
-  selection = { buffettFramework: true }
-  await live.preStep()
-  assert.deepEqual(selectedOnly(live.catalogSnapshot), ['buffett-investment-framework'],
-    '下一轮 pre-step 的 catalog 快照必须看到新开关，不需要新建会话')
-  assert.equal(harness.invalidateCount, 1, '开关变化必须失效目录缓存，否则快照读到缓存里的旧目录')
+  mode = 'auto'
+  await root.preStep()
+  assert.equal(harness.invalidateCount, 1, '模式变化必须失效目录缓存')
+  assert.equal(root.catalogSnapshot.length, 37, 'auto 的下一轮目录快照必须包含整个角色方法集')
+  assert.ok(root.catalogSnapshot.includes('buffett-investment-framework'))
+  await root.preStep()
+  assert.equal(harness.invalidateCount, 1, '模式未变不重算目录')
 
-  await live.preStep()
-  assert.equal(harness.invalidateCount, 1, '开关未变不重算目录：每轮零成本')
-  assert.deepEqual(selectedOnly(live.catalogSnapshot), ['buffett-investment-framework'])
-
-  selection = { buffettFramework: false }
-  await live.preStep()
-  assert.deepEqual(live.catalogSnapshot, [], '关掉后下一轮目录立即消失')
+  mode = 'manual'
+  await root.preStep()
   assert.equal(harness.invalidateCount, 2)
-  assert.throws(
-    () => harness.provider.get(candidate('buffett-investment-framework'), {}),
-    /not enabled/,
-    '关掉后 get 也必须拒绝（目录过滤与正文读取同一道闸门）',
-  )
-
-  // With the snapshot listener mounted later, invalidation must still precede next().
-  selection = { factCheck: true }
-  const innerOrder = harness.makeAgent({ lateSnapshot: true })
-  await created({ agent: innerOrder.agent })
-  await innerOrder.preStep()
-  assert.deepEqual(selectedOnly(innerOrder.catalogSnapshot), ['fact-check'])
-  selection = { factCheck: false, buffettFramework: true }
-  await innerOrder.preStep()
-  assert.deepEqual(selectedOnly(innerOrder.catalogSnapshot), ['buffett-investment-framework'],
-    '快照监听先注册或后注册都要赶得上：钩子必须在 next() 之前失效缓存')
-  assert.equal(harness.invalidateCount, 3)
-
-  // New root Agents read the latest switches too, not a creation-time snapshot.
-  selection = { factCheck: true }
-  const late = harness.makeAgent()
-  await created({ agent: late.agent })
-  assert.equal(harness.providerRegistrationCount, 3)
-  assert.deepEqual(selectedOnly((await harness.provider.list({})).map(({ name }) => name)), ['fact-check'], '新 root Agent 必须读取最新开关')
+  assert.deepEqual(root.catalogSnapshot, ['buffett-investment-framework'], '切回 manual 恢复勾选过滤')
+  harness.disposeRoot()
 })
 
-// Task-skill index: get() returns disk body + index block, disk file unchanged.
-// Shadowing is additive: nothing enabled or no index means no shadow at all.
-test('任务型 skill 索引：只有"确实有索引可给"的那几颗才遮蔽，正文在读取期拼装', async () => {
+test('selected skill provider: 预设不匹配时一颗都不注册', async () => {
   const harness = makeHarness()
-  const skillsDir = fileURLToPath(new URL('../preset/capital-generation/skills', import.meta.url))
-  // Separate fixture roots so per-task index filtering is observable.
-  const createFilesystemProvider = (_ctx, _control, config) => ({
-    name: config.providerName,
-    async list() { return [candidate('china-comps-analysis'), candidate('tax-lens')] },
-    async get(value) { return { ...value, content: 'loaded' } },
-    async dispose() {},
-  })
-  // Selection is a function because settings are read per turn.
-  const selection = { chinaCompsAnalysis: false }
-  registerRootSelectedSkills(harness.ctx, () => selection, createFilesystemProvider)
+  registerSelectedSkills(harness.ctx, 'data_junior', { financialHealth: true }, harness.createFilesystemProvider)
   const created = harness.listeners.get('agent/created')
+  const mainAgent = harness.makeAgent({ preset: 'capital-generation' })
+  await created({ agent: mainAgent.agent })
+  assert.equal(harness.providerRegistrationCount, 0, 'junior 的行不许给主 Agent 注册')
+  const otherPreset = harness.makeAgent({ preset: 'standard' })
+  await created({ agent: otherPreset.agent })
+  assert.equal(harness.providerRegistrationCount, 0, '其他 preset 一律不碰')
+  const inheritedRoot = harness.makeAgent({ preset: 'capital-generation', parentSession: 'root' })
+  await created({ agent: inheritedRoot.agent })
+  assert.equal(harness.providerRegistrationCount, 0, 'main 方法只留根 Agent：继承 root preset 的 generic child 也不许注册')
+})
 
-  const off = harness.makeAgent()
-  await created({ agent: off.agent })
-  assert.deepEqual(await harness.provider.list({}), [], '一颗都没启用时不许遮蔽任何内置 skill')
+test('selected skill provider: 先建会话再切 preset（GUI 顺序）也必须注册', async () => {
+  const harness = makeHarness()
+  registerSelectedSkills(harness.ctx, 'data_junior', { financialHealth: true }, harness.createFilesystemProvider)
+  const selected = harness.listeners.get('agent-preset/selected')
+  assert.equal(typeof selected, 'function', '必须挂 agent-preset/selected：先建后切是 GUI 的真实顺序')
+  const child = harness.makeAgent({ preset: 'capital-data-junior', parentSession: 'root' })
+  harness.agents.set('session-child', child.agent)
 
-  selection.chinaCompsAnalysis = true
-  const live = harness.makeAgent()
-  await created({ agent: live.agent })
-  const shadows = (await harness.provider.list({})).filter(({ name }) => SELECTED_SKILL_TASK_IDS.includes(name))
-  assert.deepEqual(shadows.map(({ name }) => name), ['capital-equity-research', 'capital-event-impact'],
-    '索引为空的任务型 skill 不许遮蔽；有索引的才遮蔽')
-  assert.ok(shadows.every(({ rank }) => rank < 300),
-    '遮蔽候选的 rank 必须低于同层自定义根（CUSTOM_RANK = 300），否则同名时赢不了，索引永远看不见')
-  assert.ok(shadows.every(({ invocation }) => invocation.modelInvocable === true),
-    '遮蔽候选必须自带 invocation：isModelInvocable 直接读它，缺了会在 tool-skill 里抛错')
+  await selected('session-child', 'capital-generation')
+  assert.equal(harness.providerRegistrationCount, 0, '别的 preset 的切换不许碰')
+  await selected('session-missing', 'capital-data-junior')
+  assert.equal(harness.providerRegistrationCount, 0, '活 Agent 表里没有的会话静默跳过')
+  await selected('session-child', 'capital-data-junior')
+  assert.equal(harness.providerRegistrationCount, 1, '切到该角色 preset 必须注册 provider')
+  assert.deepEqual((await harness.provider.list({})).map(({ name }) => name), ['financial-health'])
 
-  const definition = await harness.provider.get(candidate('capital-equity-research'), {})
-  const raw = readFileSync(join(skillsDir, 'capital-equity-research', 'SKILL.md'), 'utf8')
-  // CR is optional: Windows checkouts return CRLF.
-  const body = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim()
-  assert.ok(definition.content.startsWith(body), '正文必须以磁盘原文开头，索引只往后接')
-  assert.match(definition.content, /## 附：本轮可用的外部精选 Skill（索引）/)
-  assert.match(definition.content, /以本 skill 为准/, '索引块必须自带冲突判据（协议优先）')
-  assert.match(definition.content, /`china-comps-analysis`: china-comps-analysis/, '索引行 = name + 运行时描述')
-  assert.equal(definition.content.includes('`tax-lens`'), false, '没启用的精选 skill 不许出现在索引里')
-  assert.equal(definition.resourceBase.kind, 'directory', '正文里的相对链接仍要能按目录解析')
-  assert.ok(definition.resourceBase.path.endsWith(join('skills', 'capital-equity-research')))
+  await selected('session-child', 'capital-data-junior')
+  await harness.listeners.get('agent/created')({ agent: child.agent })
+  assert.equal(harness.providerRegistrationCount, 1, '同一个 Agent 只许注册一次')
+  harness.disposeRoot()
+  assert.equal(harness.listeners.size, 0)
+})
 
-  // Switches take effect on the next pre-step, as in real use.
-  selection.chinaCompsAnalysis = false
-  selection.taxLens = true
-  await live.preStep()
-  assert.deepEqual((await harness.provider.list({}))
-    .filter(({ name }) => SELECTED_SKILL_TASK_IDS.includes(name)).map(({ name }) => name),
-  ['capital-portfolio-review'], '索引跟着启用集合走：谁有料谁才遮蔽')
-  const plain = await harness.provider.get(candidate('capital-equity-research'), {})
-  assert.equal(plain.content, body, '没有索引时正文必须与磁盘原文逐字相同（遮蔽在内容上不可见）')
+test('selected skill provider: 注入失败留重试余地，开关每轮现读并失效缓存', async () => {
+  const harness = makeHarness()
+  let selection = { buffettFramework: false }
+  registerSelectedSkills(harness.ctx, 'main', () => selection, harness.createFilesystemProvider)
+  const created = harness.listeners.get('agent/created')
+  const root = harness.makeAgent({ injectFails: 1 })
+  harness.agents.set('session-root', root.agent)
+  await created({ agent: root.agent })
+  assert.equal(harness.providerRegistrationCount, 0)
+  assert.ok(harness.warnings.some((message) => message.includes('selected skills are unavailable')))
+  await created({ agent: root.agent })
+  assert.equal(harness.providerRegistrationCount, 1, '一次注入失败不许把该 Agent 钉成永久失败')
+
+  assert.deepEqual((await harness.provider.list({})).map(({ name }) => name), [])
+  selection = { buffettFramework: true }
+  await root.preStep()
+  assert.deepEqual(root.catalogSnapshot, ['buffett-investment-framework'], '下一轮 pre-step 的目录快照必须看到新开关')
+  assert.equal(harness.invalidateCount, 1, '开关变化必须失效目录缓存')
+  await root.preStep()
+  assert.equal(harness.invalidateCount, 1, '开关未变不重算目录')
+  selection = { buffettFramework: false }
+  await root.preStep()
+  assert.deepEqual(root.catalogSnapshot, [])
+  assert.throws(() => harness.provider.get(candidate('buffett-investment-framework'), {}), /not enabled for main/)
+})
+
+test('selected skill provider: 建会话时全关也必须注册，之后切 auto 才能生效', async () => {
+  const harness = makeHarness()
+  let mode = 'manual'
+  const access = { selection: {}, mode: () => mode }
+  registerSelectedSkills(harness.ctx, 'main', access, fullCatalogProvider)
+  const root = harness.makeAgent()
+  await harness.listeners.get('agent/created')({ agent: root.agent })
+  assert.equal(harness.providerRegistrationCount, 1, '全关不是"永不注册"：设置是活偏好')
+  assert.deepEqual((await harness.provider.list({})), [])
+
+  mode = 'auto'
+  await root.preStep()
+  assert.equal(harness.invalidateCount, 1)
+  assert.equal((await harness.provider.list({})).length, 37, '切到 auto 后同一 Agent 必须看到全量目录')
+  harness.disposeRoot()
+})
+
+test('selected skill provider: 目录描述用 useWhen，不把上游 description 交给模型', async () => {
+  const harness = makeHarness()
+  registerSelectedSkills(harness.ctx, 'main', { buffettFramework: true }, harness.createFilesystemProvider)
+  await harness.listeners.get('agent/created')({ agent: harness.makeAgent().agent })
+  const [buffett] = await harness.provider.list({})
+  assert.equal(buffett.description, SELECTED_SKILL_ROUTING['buffett-investment-framework'].useWhen.zh)
+  assert.notEqual(buffett.description, 'buffett-investment-framework')
+})
+
+test('role prompt：只列当前角色已启用的方法，规则是强制加载而非附录', () => {
+  const main = renderSelectedSkillsBrief('main', { buffettFramework: true, financialHealth: true, factCheck: true })
+  assert.match(main, /^# 外部精选方法/)
+  assert.match(main, /先.*`skill`.*加载/)
+  assert.match(main, /1–2 条/)
+  assert.match(main, /方法层（金融分析框架）/, '精选方法是分析层，不是流程协议')
+  assert.match(main, /协议负责流程、证据门、工具委派与输出形状/, '内置协议的定位必须写清楚')
+  assert.match(main, /两者正交/, '协议与方法必须被写成互不替代的两层')
+  assert.match(main, /不得用协议替代方法/, '内置协议不得遮住分析方法')
+  assert.match(main, /不得用方法改写协议/, '分析方法不得改写流程与证据门')
+  assert.match(main, /`buffett-investment-framework`/)
+  assert.match(main, /`fact-check`/)
+  assert.doesNotMatch(main, /`financial-health`/, '数据侧专属方法不许出现在主 Agent 的短清单里')
+  assert.match(main, /data_junior/, '主 Agent 的短清单要说明计算归 data_junior')
+  assert.match(main, /你的目录只含主角色可用的方法/, '主 Agent 必须知道只属于自己的角色方法不在目录里')
+  assert.match(main, /只属于 data_junior \/ web_retriever 的方法/, '共享方法仍在主目录，不能把角色归属写成绝对排除')
+  assert.match(main, /不代表不存在/, '目录里没有不等于方法不存在：点名时要交给角色按名加载')
+  assert.match(main, /不要改用通用方法自己算/, '点名的角色方法不可见时，不得退化成主 Agent 自己算')
+
+  const junior = renderSelectedSkillsBrief('data_junior', { buffettFramework: true, financialHealth: true })
+  assert.match(junior, /`financial-health`/)
+  assert.doesNotMatch(junior, /`buffett-investment-framework`/)
+  assert.match(junior, /结论与最终写作留给主 Agent/)
+
+  assert.equal(renderSelectedSkillsBrief('main', {}), '', '一颗没启用时零成本')
+  const auto = renderSelectedSkillsBrief('main', { selection: {}, mode: 'auto' })
+  assert.match(auto, /自动模式/, 'auto 的短清单必须自报模式，不能再说"用户已启用"')
+  assert.doesNotMatch(auto, /用户已启用/)
+  assert.match(auto, /本角色共 37 颗可用/)
+  assert.ok((auto.match(/^- `/gm) ?? []).length <= 12, 'auto 仍只列 12 条，完整目录在宿主技能目录里')
+  assert.match(auto, /不要一次搬空目录/)
+  assert.match(auto, /两者正交/, 'auto 同样要说明协议与方法两层')
+  const all = Object.fromEntries(SELECTED_SKILL_CATALOG.map(({ key }) => [key, true]))
+  const capped = renderSelectedSkillsBrief('main', all)
+  assert.ok((capped.match(/^- `/gm) ?? []).length <= 12, '角色短清单最多列 12 条，完整目录仍在宿主技能目录里')
+  assert.match(capped, /另有 \d+ 颗已启用/)
+})
+
+
+test('selected skill usage：原生 skill / PTC / 用户 /name 都记账，失败与非精选不计', async () => {
+  clearAllSelectedSkillUsage()
+  try {
+    const mainHarness = makeHarness()
+    registerSelectedSkills(mainHarness.ctx, 'main', { buffettFramework: true, factCheck: true }, mainHarness.createFilesystemProvider)
+    const root = mainHarness.makeAgent({ sessionId: 'session-root' })
+    await mainHarness.listeners.get('agent/created')({ agent: root.agent })
+
+    root.emitToolResult({ name: 'skill' }, { isError: false, value: { name: 'buffett-investment-framework', provider: 'capital-selected-skills' } })
+    root.emitToolResult({ name: 'skill' }, { isError: true, value: { name: 'fact-check', provider: 'capital-selected-skills' } })
+    root.emitToolResult({ name: 'skill' }, { isError: false, value: { name: 'capital-data-protocol', provider: 'capital-filesystem' } })
+    root.emitToolResult({ name: 'other' }, { isError: false, value: { name: 'fact-check', provider: 'capital-selected-skills' } })
+    assert.deepEqual(skillUsageNamesForSession('session-root'), ['buffett-investment-framework'],
+      '只有成功返回精选 provider 正文的 skill 调用才算一次实际加载')
+
+    root.emitSession({ id: 'session-root' }, {
+      type: 'user/message',
+      data: { source: { kind: 'skill-invocation', name: 'fact-check' } },
+    })
+    assert.deepEqual(skillUsageNamesForSession('session-root'), ['buffett-investment-framework', 'fact-check'],
+      '/name 直接注入也算实际加载')
+
+    const juniorHarness = makeHarness()
+    registerSelectedSkills(juniorHarness.ctx, 'data_junior', { financialHealth: true }, juniorHarness.createFilesystemProvider)
+    const junior = juniorHarness.makeAgent({ preset: 'capital-data-junior', parentSession: 'session-root', sessionId: 'session-junior' })
+    await juniorHarness.listeners.get('agent/created')({ agent: junior.agent })
+    junior.emitSession({ id: 'session-junior' }, {
+      type: 'tool/ptc-dispatch',
+      data: { name: 'skill', arguments: { name: 'financial-health' }, isError: false },
+    })
+    assert.deepEqual(skillUsageNamesForSession('session-junior'), ['financial-health'],
+      'data_junior 的 tools.skill 走 PTC dispatch，同样必须入账')
+
+    assert.deepEqual(skillUsageRows('session-root').map((row) => [row.role, row.sessionId, row.names]), [
+      ['main', 'root', ['buffett-investment-framework', 'fact-check']],
+      ['data_junior', 'junior', ['financial-health']],
+    ])
+
+    const onlyChildUsage = renderSelectedSkillsBrief('main', {}, root.agent)
+    assert.match(onlyChildUsage, /## 本次已实际加载的精选方法（程序记录）/)
+    assert.match(onlyChildUsage, /`financial-health`/, '主 Agent 自己没启用任何方法时，子 Agent 的用量也必须送达并触发引用规则')
+
+    const mainBrief = renderSelectedSkillsBrief('main', { buffettFramework: true }, root.agent)
+    assert.match(mainBrief, /## 本次已实际加载的精选方法（程序记录）/)
+    assert.match(mainBrief, /`buffett-investment-framework`/)
+    assert.match(mainBrief, /`financial-health`/, '主 Agent 必须看到子 Agent 实际加载的方法')
+    assert.match(mainBrief, /最终答复必须有一节「使用的方法」/)
+    assert.match(mainBrief, /数据分析（junior）/, '子 Agent 的记账要标出角色与会话，不能混成主 Agent 自己加载的')
+
+    assert.equal(renderSelectedSkillsBrief('main', { buffettFramework: true }, junior.agent), '',
+    '继承 root preset 的 generic child 不得看到主 Agent 的方法清单或引用规则')
+
+  const juniorBrief = renderSelectedSkillsBrief('data_junior', { financialHealth: true }, junior.agent)
+    assert.match(juniorBrief, /本次你已实际加载：`financial-health`/)
+    assert.match(juniorBrief, /skills_used: financial-health/)
+
+    // New user turn clears names for the whole tree but keeps the child edge usable.
+    root.emitSession({ id: 'session-root' }, { type: 'user/message', data: { source: { kind: 'user' } } })
+    assert.deepEqual(skillUsageNamesForSession('session-root'), [])
+    assert.deepEqual(skillUsageNamesForSession('session-junior'), [], '新用户轮次清空整棵树的引用窗口')
+    junior.emitSession({ id: 'session-junior' }, {
+      type: 'tool/ptc-dispatch',
+      data: { name: 'skill', arguments: { name: 'financial-health' }, isError: false },
+    })
+    assert.deepEqual(skillUsageRows('session-root').map((row) => row.names), [['financial-health']])
+
+    root.agentCtx.cleanup?.()
+    assert.deepEqual(skillUsageRows('session-root'), [], '根 Agent 销毁后整棵树不再保留用量')
+    assert.deepEqual(skillUsageNamesForSession('session-junior'), [], '子会话的记录也必须一并删除，不能留下孤儿')
+  } finally {
+    clearAllSelectedSkillUsage()
+  }
+})
+
+test('selected skill usage：其他会话的记账不会串进当前根', async () => {
+  clearAllSelectedSkillUsage()
+  try {
+    const harness = makeHarness()
+    registerSelectedSkills(harness.ctx, 'main', { buffettFramework: true }, harness.createFilesystemProvider)
+    const created = harness.listeners.get('agent/created')
+    const first = harness.makeAgent({ sessionId: 'session-a' })
+    const second = harness.makeAgent({ sessionId: 'session-b' })
+    await created({ agent: first.agent })
+    await created({ agent: second.agent })
+    first.emitToolResult({ name: 'skill' }, { isError: false, value: { name: 'buffett-investment-framework', provider: 'capital-selected-skills' } })
+    assert.deepEqual(skillUsageRows('session-b'), [])
+    assert.deepEqual(skillUsageRows('session-a').map((row) => row.names), [['buffett-investment-framework']])
+    clearSelectedSkillUsage('session-a')
+    assert.deepEqual(skillUsageRows('session-a'), [])
+  } finally {
+    clearAllSelectedSkillUsage()
+  }
 })

@@ -3,8 +3,10 @@ import assert from 'node:assert/strict'
 import { apply, readCapitalSettings, LOCAL_FETCH_DEFAULTS } from '../lib/index.js'
 import { apply as applyPolicy } from '../lib/policy-entry.js'
 import { apply as applyRootExtras } from '../lib/root-extras-entry.js'
+import { apply as applySelectedSkills } from '../lib/selected-skills-entry.js'
 import { resetRootPolicyProbes } from '../lib/agents/root-tool-policy.js'
 import { SIBLING_DENIED_TOOLS, resetRolePolicyProbes } from '../lib/agents/role-tool-policy.js'
+import { clearAllSelectedSkillUsage, recordSelectedSkillUsage } from '../lib/agents/skill-usage.js'
 import { collectUndeclaredRequired } from './output-contract.mjs'
 
 // apply() integration coverage: fake ctx with production wiring; hand-built hubs would leave registration unproven.
@@ -249,14 +251,33 @@ test('readCapitalSettings：服务引用调用期现取，保存层兜底，pres
   assert.equal(readCapitalSettings(ctx, boot).source, 'preset')
 })
 
-test('tools/root-extras：settings 晚到也必须挂住精选 Skills 读取链路（保存后立刻建会话就得看得到）', async () => {
-  const { ctx, listeners, services, effectResults } = fakeCtx()
-  services.set('agentPresets', { composedPreset: () => 'capital-generation' })
-  // No settings service at apply time, the real boot race.
-  applyRootExtras(ctx)
+test('tools/selected-skills：角色节 + provider + configEditor 兜底（settings 晚到也生效）', async () => {
+  const { ctx, sections, services, listeners, effectResults } = fakeCtx()
+  services.set('agentPresets', { composedPreset: (agentCtx) => agentCtx?.preset })
+  // No settings service yet; the card's save layer is the documented fallback.
+  services.set('configEditor', {
+    entries: () => [{ options: { id: 'capital-config', config: { selectedSkills: { buffettFramework: true, financialHealth: true } } } }],
+  })
+  applySelectedSkills(ctx, { role: 'main' })
   await Promise.all(effectResults)
 
-  // A static all-off shortcut would skip the listener and lock selected skills for the process.
+  assert.equal(sections.length, 1, '角色行只注册一个精选方法节')
+  const [section] = sections
+  assert.equal(section.name, 'capital:selected-skills')
+  assert.equal(section.order, 60)
+  assert.equal(section.interpolate, false, '上游派生正文不能走 {{variable}} 插值')
+  assert.match(section.text(), /^# 外部精选方法/)
+  assert.match(section.text(), /`buffett-investment-framework`/, 'configEditor 兜底必须让开关可见')
+  assert.doesNotMatch(section.text(), /`financial-health`/, '主 Agent 看不到数据侧专属方法')
+  assert.match(section.text(), /data_junior/)
+
+  // Settings wins when it arrives; the section is a per-assembly reader, not a boot snapshot.
+  services.set('settings', {
+    describe: () => [{ ns: 'capital-config', value: { selectedSkills: { factCheck: true } } }],
+  })
+  assert.match(section.text(), /`fact-check`/)
+  assert.doesNotMatch(section.text(), /`buffett-investment-framework`/)
+
   let provider
   const cleanups = []
   const injectedCtx = {
@@ -272,24 +293,26 @@ test('tools/root-extras：settings 晚到也必须挂住精选 Skills 读取链�
   }
   const agent = {
     session: { id: 's-1', header: {} },
-    ctx: { inject(_deps, callback) { callback(injectedCtx) } },
+    ctx: {
+      preset: 'capital-generation',
+      inject(_deps, callback) { callback(injectedCtx) },
+    },
   }
   try {
     for (const { event, listener } of listeners) {
       if (event === 'agent/created') await listener({ agent })
     }
-    assert.ok(provider, 'settings 服务缺席时也必须注册 selected skills provider（默认全关只是空目录）')
-    assert.deepEqual((await provider.list({})).map(({ name }) => name), [], '默认全关：空目录')
+    assert.ok(provider, '角色行必须在 Agent 创建时注册 provider')
+    assert.deepEqual((await provider.list({})).map(({ name }) => name), ['fact-check'],
+      '目录与角色节使用同一份开关：fact-check 是主 Agent + 检索共用，buffett 已被 settings 替换')
 
-    services.set('settings', {
-      describe: () => [{ ns: 'capital-config', value: { selectedSkills: { buffettFramework: true } } }],
-    })
-    const names = (await provider.list({})).map(({ name }) => name)
-    assert.ok(names.includes('buffett-investment-framework'),
-      `晚到的 settings 必须立刻生效（首轮 catalog 就该看到），实际目录：${names.join(', ') || '(空)'}`)
-    assert.ok(!names.includes('financial-health'), '没开的仍然不进目录（默认全关不许破）')
+    // The section must read THIS Agent's ledger, not a process-global list.
+    recordSelectedSkillUsage(agent, 'main', 'fact-check')
+    assert.match(section.text({ agent }), /## 本次已实际加载的精选方法（程序记录）/)
+    assert.match(section.text({ agent }), /`fact-check`/)
+    assert.doesNotMatch(section.text(), /本次已实际加载/, '没有 Agent 上下文时不猜账本')
   } finally {
-    // Dispose always: the real provider owns process-pinning watchers.
+    clearAllSelectedSkillUsage()
     for (const dispose of cleanups) dispose?.()
   }
 })
@@ -419,8 +442,8 @@ test('capital-policy + tools/root-extras：注册根 Agent 工具收敛监听（
     await Promise.all(effectResults)
 
     const created = listeners.filter((entry) => entry.event === 'agent/created')
-    // Four distinct duties; assert behavior, not registration order.
-    assert.equal(created.length, 4, 'apply 必须注册四个 agent/created 监听：根收敛 + 角色收敛 + shell 闸门 + selected skills')
+    // Selected skills moved to its own role-scoped row; this composition has three duties.
+    assert.equal(created.length, 3, 'apply 必须注册三个 agent/created 监听：根收敛 + 角色收敛 + shell 闸门')
     const notifyCreated = (agent) => { for (const entry of created) entry.listener({ agent }) }
 
     const restricted = []

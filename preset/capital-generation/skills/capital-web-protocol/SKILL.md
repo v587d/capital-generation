@@ -5,6 +5,9 @@ description: Use in Capital mode when retrieving external material — the anyse
 
 # Capital 检索协议 · 第一册：来源边界与收敛
 
+> **定位**：本协议只定义来源边界、检索收敛与回传格式；10-K 精读、电话会纪要、逐条核验等方法在精选方法层。
+> 任务同时命中且该方法在本角色目录中可用时，按名加载对应 Skill（如 `10k-digest` / `earnings-call-analysis` / `fact-check`）；
+> 协议与方法正交：不要用本协议替代方法，也不要用方法改写本协议的来源纪律。
 `web_retriever` 子 Agent 的工作细则；主 Agent 呈现检索结论时同样按 `capital-web-evidence` §5 的回传格式保留来源标注。
 persona 只保留硬规则（先定来源再动手、只用这十四个工具、一次一个 URL、无来源不作证据）；
 本文件是其余细节。

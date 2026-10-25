@@ -6,11 +6,11 @@
  * PTC hides nested calls from `tool/call`: they are persisted as `tool/ptc-dispatch`.
  * Heuristic lead generator, not an assertion: exit code stays 0 even when suspects are found.
  */
-import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { zstdDecompressSync } from 'node:zlib'
+import { readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { latestSessionFile } from './lib/session-files.mjs'
+import { readSessionEvents } from './lib/session-events.mjs'
 
 function argValue(name, fallback) {
   const index = process.argv.indexOf(name)
@@ -21,29 +21,6 @@ const DSH_HOME = process.env.DSH_HOME ?? join(homedir(), '.dsh')
 const ROOT = argValue('--dir', join(DSH_HOME, 'sessions'))
 const ONLY_TOOL = argValue('--tool', undefined)
 const AS_JSON = process.argv.includes('--json')
-
-const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
-
-/** Node's zstd decoder stops after the first frame; session files append one frame per write. */
-function decodeSession(file) {
-  const buffer = readFileSync(file)
-  const offsets = []
-  let cursor = 0
-  while ((cursor = buffer.indexOf(ZSTD_MAGIC, cursor)) >= 0) {
-    offsets.push(cursor)
-    cursor += ZSTD_MAGIC.length
-  }
-  offsets.push(buffer.length)
-  let text = ''
-  for (let index = 0; index < offsets.length - 1; index += 1) {
-    try {
-      text += zstdDecompressSync(buffer.subarray(offsets[index], offsets[index + 1])).toString('utf8')
-    } catch {
-      // A coincidental magic inside compressed data splits the frame wrong; skip it.
-    }
-  }
-  return text
-}
 
 function looksLikeUnmarkedFailure(text) {
   const trimmed = text.trim()
@@ -88,12 +65,7 @@ for (const workspace of readdirSync(ROOT)) {
     scannedSessions += 1
     let events
     try {
-      const text = found.file.endsWith('.jsonl') ? readFileSync(found.file, 'utf8') : decodeSession(found.file)
-      events = text
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => { try { return JSON.parse(line) } catch { return null } })
-        .filter(Boolean)
+      events = readSessionEvents(found.file)
     } catch {
       continue
     }

@@ -5,6 +5,9 @@ description: Use for a focused impact analysis of a listed company's announcemen
 
 # 事件与公告影响分析
 
+> **定位**：本协议只定义事件核验、影响链与输出流程；财报前瞻、催化剂日历、事件研究等方法在精选方法层。
+> 任务同时命中且该方法在本角色目录中可用时，按名加载对应 Skill（如 `china-earnings-preview` / `earnings-preview` / `catalyst-*`）；
+> 协议与方法正交：不要用本协议替代方法，也不要用方法改写本协议的证据门。
 本 skill 只供主 Agent 处理聚焦某上市公司事件的影响问题；分析写在最终答复，不新增工具、角色或报告通道。用户只问“有没有公告/公告是什么”时核实事实并简答；明确要求完整单股研究时以 `capital-equity-research` 为主，本 skill 只补事件核验，不重复拉全套数据。
 
 ## 1. 定位与委派

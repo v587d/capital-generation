@@ -9,9 +9,9 @@ const {
   Modal,
   writeClipboard,
   IconRightUpOutlineRegular,
-  IconWarningTriangleOutlineRegular,
 } = require('@deepseek-ai/dsh-client-ui-primitives')
-const { SELECTED_SKILL_CATALOG, SELECTED_SKILL_TAG_LABELS, SELECTED_SKILLS_MAX_ENABLED } = require('../selected-skills/catalog.js')
+const { SELECTED_SKILL_CATALOG, SELECTED_SKILL_TAG_LABELS } = require('../selected-skills/catalog.js')
+const { SELECTED_SKILL_ROLES, SELECTED_SKILL_ROUTING } = require('../selected-skills/routing.js')
 
 /**
  * Two different strings: `ENTRY_ID` is the settings namespace (= profile entry
@@ -81,12 +81,14 @@ const zh = {
   paddleocrLabel: 'PaddleOCR 文档解析 Token',
   paddleocrHint: '配置 Token 后自动解析 PDF、图片。保存后新自动模式会话生效。',
   selectedSkillsTitle: '精选 Skills',
+  selectedSkillsModeLabel: '自动选择方法',
+  selectedSkillsModeHint: '开启后按角色开放该角色全部方法，由模型按触发条件选择；下方勾选只在手动模式生效。',
+  selectedSkillsModeShort: '自动',
   selectedSkillsFilterLabel: '按能力筛选',
   selectedSkillsEmpty: '没有匹配这个标签的 Skill。',
-  // Cap blocks adding only; existing selections keep working (runtime does not truncate).
-  // Reason lives on the warning icon's title / aria-label; {count} is appended in code.
-  selectedSkillsCapTooltip: 'Skill已达上限 ({count})。',
-  selectedSkillsCopyName: '复制技能名',
+  selectedSkillsRoles: '角色：',
+  selectedSkillsWhen: '何时使用：',
+  selectedSkillsCopyName: '复制 /技能名',
   selectedSkillsCopied: '已复制',
   selectedSkillsDetail: '详情',
   selectedSkillsDetailClose: '关闭',
@@ -125,10 +127,14 @@ const en = {
   paddleocrLabel: 'PaddleOCR document token',
   paddleocrHint: 'Configure the token to parse PDFs and images automatically. Takes effect in new Auto mode sessions.',
   selectedSkillsTitle: 'Selected Skills',
+  selectedSkillsModeLabel: 'Pick methods automatically',
+  selectedSkillsModeHint: 'When on, every method owned by a role is exposed and the model picks by trigger; the switches below apply to Manual mode only.',
+  selectedSkillsModeShort: 'Auto',
   selectedSkillsFilterLabel: 'Filter by capability',
   selectedSkillsEmpty: 'No skills match this tag.',
-  selectedSkillsCapTooltip: 'Skill limit reached ({count}).',
-  selectedSkillsCopyName: 'Copy skill name',
+  selectedSkillsRoles: 'Roles: ',
+  selectedSkillsWhen: 'Use when: ',
+  selectedSkillsCopyName: 'Copy /name',
   selectedSkillsCopied: 'Copied',
   selectedSkillsDetail: 'Details',
   selectedSkillsDetailClose: 'Close',
@@ -215,12 +221,14 @@ function installStyles() {
     .capital-config-doc-link { display: inline-flex; align-items: center; gap: 3px; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 20px; white-space: nowrap; text-decoration: none; }
     .capital-config-doc-link:hover { color: var(--dsw-alias-brand-primary); text-decoration: underline; }
     .capital-config-doc-link:focus-visible { border-radius: 3px; outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-brand-primary)); outline-offset: 2px; }
+    .capital-config-selected-mode { margin-bottom: 12px; }
     .capital-config-switch-row { align-items: center; gap: 12px; display: flex; }
     .capital-config-switch-text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
     .capital-config-switch-label { color: var(--dsw-alias-label-primary); font-size: 13px; font-weight: 500; line-height: 20px; }
     .capital-config-hint { margin: 0; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
-    /* --dsw-alias-label-error is undefined in the theme, so state tokens only. */
-    .capital-config-skill-cap-icon { display: inline-flex; align-items: center; flex: none; padding: 2px; margin: -2px; color: var(--dsw-alias-state-warn-primary); cursor: help; }
+    .capital-config-skill-roles { display: flex; flex-wrap: wrap; gap: 4px; }
+    .capital-config-skill-role { padding: 1px 5px; border-radius: 4px; border: 0.5px solid var(--dsw-alias-border-l1); color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 16px; }
+    .capital-config-skill-when { margin: 0; color: var(--dsw-alias-label-tertiary); font-size: 11.5px; line-height: 17px; }
     .capital-config-write-failed { margin: 0; color: var(--dsw-alias-state-error-primary); font-size: 12px; line-height: 18px; }
     /* Own inline-flex group so the host's wrapping never splits the two links. */
     .capital-config-plugin-links { flex: none; align-items: center; gap: 2px; display: inline-flex; }
@@ -241,6 +249,8 @@ class CapitalCardController {
     this.localFetchFailed = false
     this.selectedSkillWriting = new Set()
     this.selectedSkillFailed = new Set()
+    this.selectedSkillsModeWriting = false
+    this.selectedSkillsModeFailed = false
     // Row count is external: null = unknown, never 0; fetch only after the card is shown.
     this.bundleRows = null
     this.rowsRequested = false
@@ -285,6 +295,11 @@ class CapitalCardController {
         writing: this.selectedSkillWriting.has(field),
         failed: this.selectedSkillFailed.has(field),
       }])),
+      selectedSkillsMode: {
+        auto: snapshot.value?.selectedSkillsMode === 'auto',
+        writing: this.selectedSkillsModeWriting,
+        failed: this.selectedSkillsModeFailed,
+      },
       // `count === null` means unknown, not zero: the card decides whether to draw it.
       components: { count: this.bundleRows },
     }
@@ -362,6 +377,24 @@ class CapitalCardController {
     this.store.set(this.projection())
   }
 
+  async toggleSelectedSkillsMode(auto) {
+    if (this.selectedSkillsModeWriting) return
+    const snapshot = this.scope.getSnapshot()
+    if (snapshot.status !== 'ready' || !snapshot.writable) return
+    this.selectedSkillsModeWriting = true
+    this.selectedSkillsModeFailed = false
+    this.store.set(this.projection())
+    try {
+      await this.scope.mutate([{ op: 'set', path: ['selectedSkillsMode'], value: auto ? 'auto' : 'manual' }])
+    } catch {
+      // The landed check below reports the failure.
+    }
+    this.selectedSkillsModeWriting = false
+    const landed = (this.scope.getSnapshot().value?.selectedSkillsMode === 'auto') === auto
+    if (!landed) this.selectedSkillsModeFailed = true
+    this.store.set(this.projection())
+  }
+
   async toggleSelectedSkill(field, value) {
     if (!SELECTED_SKILL_FIELDS.includes(field) || this.selectedSkillWriting.has(field)) return
     const snapshot = this.scope.getSnapshot()
@@ -421,6 +454,7 @@ class CapitalCardController {
       ...this.model.actions(),
       toggleLocalFetch: (value) => this.toggleLocalFetch(value),
       toggleSelectedSkill: (field, value) => this.toggleSelectedSkill(field, value),
+      toggleSelectedSkillsMode: (auto) => this.toggleSelectedSkillsMode(auto),
       ensureBundleRows: () => this.ensureBundleRows(),
     }
   }
@@ -505,7 +539,7 @@ function loadSkillDoc(name) {
 
 const COPIED_FLASH_MS = 1600
 
-function SelectedSkillRow({ entry, state, disabled, capReached = false, capTooltip, onChange, t }) {
+function SelectedSkillRow({ entry, state, copyable, disabled, onChange, t }) {
   const locale = skillLocale()
   const label = entry.label[locale]
   const repositoryUrl = `https://github.com/${entry.owner}/${entry.repository}`
@@ -517,7 +551,7 @@ function SelectedSkillRow({ entry, state, disabled, capReached = false, capToolt
     if (copyTimer.current !== null) clearTimeout(copyTimer.current)
   }, [])
   const copyName = async () => {
-    const accepted = await writeClipboard(entry.name)
+    const accepted = await writeClipboard(`/${entry.name}`)
     // Do not flip the label if the clipboard rejected it.
     if (!accepted) return
     setCopied(true)
@@ -550,8 +584,8 @@ function SelectedSkillRow({ entry, state, disabled, capReached = false, capToolt
         h('div', { className: 'capital-config-skill-heading' },
           h('span', { className: 'capital-config-title' }, label),
           h('div', { className: 'capital-config-skill-actions' },
-            // Copy name only on enabled rows; details has no gate.
-            state?.on === true ? h('button', {
+            // Manual: only enabled rows. Auto: the role owns every method, so copying any name is meaningful.
+            copyable === true ? h('button', {
               type: 'button',
               className: 'capital-config-skill-action',
               title: `${t('selectedSkillsCopyName')}: ${entry.name}`,
@@ -583,6 +617,9 @@ function SelectedSkillRow({ entry, state, disabled, capReached = false, capToolt
           ),
         ),
         h('p', { className: 'capital-config-skill-description' }, entry.description[locale]),
+        h('p', { className: 'capital-config-skill-when' }, `${t('selectedSkillsWhen')}${SELECTED_SKILL_ROUTING[entry.name]?.useWhen?.[locale] ?? ''}`),
+        entry.roles?.length ? h('div', { className: 'capital-config-skill-roles' }, entry.roles.map((role) =>
+          h('span', { key: role, className: 'capital-config-skill-role' }, SELECTED_SKILL_ROLES[role]?.[locale] ?? role))) : null,
         h('a', {
           className: 'capital-config-skill-repo',
           href: repositoryUrl,
@@ -593,19 +630,10 @@ function SelectedSkillRow({ entry, state, disabled, capReached = false, capToolt
         h('div', { className: 'capital-config-skill-tags' }, entry.tags.map((tag) =>
           h('span', { key: tag, className: 'capital-config-skill-tag' }, SELECTED_SKILL_TAG_LABELS[locale][tag] ?? tag))),
       ),
-      // Capped rows: reason on the icon before the switch; the icon ignores custom
-      // props, so title / role sit on its wrapper.
-      capReached && state?.on !== true ? h('span', {
-        className: 'capital-config-skill-cap-icon',
-        title: capTooltip,
-        role: 'img',
-        'aria-label': capTooltip,
-      }, h(IconWarningTriangleOutlineRegular, { size: 14 })) : null,
       h(Switch, {
         label,
         checked: state?.on === true,
-        // Cap blocks adding only: an enabled row can always be turned off.
-        disabled: disabled || state?.writing === true || (capReached && state?.on !== true),
+        disabled: disabled || state?.writing === true,
         onChange,
       }),
     ),
@@ -623,6 +651,7 @@ function CapitalCard(props) {
   const t = props.t
   const state = props.useCapitalCard((snapshot) => snapshot)
   const disabled = !state.writable
+  const autoMode = state.selectedSkillsMode?.auto === true
   const locale = skillLocale()
   const [tab, setTab] = useState('sources')
   const [tagFilter, setTagFilter] = useState('all')
@@ -679,6 +708,21 @@ function CapitalCard(props) {
     ),
     state.localFetch?.failed ? h('p', { role: 'status', className: 'capital-config-write-failed' }, t('saveFailed')) : null,
   )
+  const modeSection = h('div', { className: 'capital-config-field capital-config-selected-mode' },
+    h('div', { className: 'capital-config-switch-row' },
+      h('div', { className: 'capital-config-switch-text' },
+        h('span', { className: 'capital-config-switch-label' }, t('selectedSkillsModeLabel')),
+        h('p', { className: 'capital-config-hint' }, t('selectedSkillsModeHint')),
+      ),
+      h(Switch, {
+        label: t('selectedSkillsModeLabel'),
+        checked: autoMode,
+        disabled: disabled || state.saving || state.selectedSkillsMode?.writing === true,
+        onChange: props.toggleSelectedSkillsMode,
+      }),
+    ),
+    state.selectedSkillsMode?.failed ? h('p', { role: 'status', className: 'capital-config-write-failed' }, t('saveFailed')) : null,
+  )
   const tagLabels = SELECTED_SKILL_TAG_LABELS[locale]
   const skillsFilter = h('div', { className: 'capital-config-selected-filter', role: 'group', 'aria-label': t('selectedSkillsFilterLabel') },
     ...tags.map((tag) => h('button', {
@@ -689,22 +733,17 @@ function CapitalCard(props) {
       onClick: () => setTagFilter(tag),
     }, tagLabels[tag] ?? tag, h('span', { className: 'capital-config-selected-filter-count' }, String(tagCounts.get(tag))))),
   )
-  // Live count for the tab and cap. The cap is edit-time only: existing selections keep working.
+  // No cap: the user builds the set; the role prompt caps only how many it lists.
   const enabledSkills = SELECTED_SKILL_CATALOG.filter(
     (entry) => state.selectedSkills?.[entry.key]?.on === true,
   ).length
-  const capReached = enabledSkills >= SELECTED_SKILLS_MAX_ENABLED
-  // Build the shared tooltip once; per-row drift would show different numbers.
-  const capTooltip = t('selectedSkillsCapTooltip')
-    .replace('{count}', `${enabledSkills}/${SELECTED_SKILLS_MAX_ENABLED}`)
   const skillRows = visibleSkills.length > 0
     ? visibleSkills.map((entry) => h(SelectedSkillRow, {
       key: entry.key,
-      entry,
+      entry: { ...entry, roles: SELECTED_SKILL_ROUTING[entry.name]?.roles ?? [] },
       state: state.selectedSkills?.[entry.key],
-      disabled: disabled || state.saving,
-      capReached,
-      capTooltip,
+      copyable: autoMode || state.selectedSkills?.[entry.key]?.on === true,
+      disabled: disabled || state.saving || autoMode,
       onChange: (value) => props.toggleSelectedSkill(entry.key, value),
       t,
     }))
@@ -714,7 +753,7 @@ function CapitalCard(props) {
   const options = [
     // A dirty draft while Save is off-screen must be announced on the tab.
     { value: 'sources', label: state.dirty ? t('titleUnsaved') : t('title') },
-    { value: 'skills', label: `${t('selectedSkillsTitle')} ${enabledSkills}/${SELECTED_SKILL_CATALOG.length}` },
+    { value: 'skills', label: `${t('selectedSkillsTitle')} ${autoMode ? t('selectedSkillsModeShort') : `${enabledSkills}/${SELECTED_SKILL_CATALOG.length}`}` },
     { value: 'components', label: withCount(t('componentsTitle'), state.components?.count) },
   ]
   const panel = (value, children) => h('section', {
@@ -742,6 +781,7 @@ function CapitalCard(props) {
     }),
     panel('sources', [form, localFetchSection]),
     panel('skills', [
+      modeSection,
       h('div', { className: 'capital-config-selected-layout' },
         skillsFilter,
         h('div', { className: 'capital-config-selected-list' }, ...skillRows),

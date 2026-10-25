@@ -12,7 +12,8 @@ import { registerWatchlistTool } from './watchlist/tools.js'
 import { registerChartTool } from './chart/tool.js'
 import { createChartEventPublisher } from './chart/events.js'
 import { chartEventContextOf } from './chart/event-context.js'
-import { SELECTED_SKILL_CATALOG, type SelectedSkillSelection } from './agents/selected-skills-provider.js'
+import { SELECTED_SKILL_CATALOG, type SelectedSkillSelection, type SelectedSkillsMode } from './agents/selected-skills-provider.js'
+import { CAPITAL_CONFIG_ENTRY_ID, readCapitalEntry } from './capital-settings.js'
 import { registerChartSourceTool } from './chart/source-token.js'
 import { registerSourceTools, registerWebRetrieverTools } from './web-retriever/tools.js'
 import {
@@ -37,9 +38,7 @@ export {
 export { resolveUserCustomizationSection } from './user-customization.js'
 
 export const name = 'capital-generation'
-
-/** Entry id shared by `cordis.patch.yml`, `config/index.js` and `client.src.cjs`; drift hides the settings card. */
-export const CAPITAL_CONFIG_ENTRY_ID = 'capital-config'
+export { CAPITAL_CONFIG_ENTRY_ID }
 
 const WindDocsSchema = z.object({
   endpoint: z.string().default('').description('可选：覆盖 Wind 文档检索端点'),
@@ -77,6 +76,7 @@ const RetrieverSchema = z.object({
 export interface Config {
   customPersona?: string
   selectedSkills?: SelectedSkillSelection
+  selectedSkillsMode?: SelectedSkillsMode
   fuyaoCredentialRef?: string
   ftshareCredentialRef?: string
   retriever?: RetrieverConfig
@@ -86,7 +86,7 @@ export interface Config {
 const SelectedSkillsSchema = z.object(
   Object.fromEntries(SELECTED_SKILL_CATALOG.map(({ key, name }) => [
     key,
-    z.boolean().default(false).description(`Enable the community experiment "${name}" for the Auto mode root Agent`),
+    z.boolean().default(false).description(`Enable the community method "${name}" for the Capital role(s) that own it`),
   ])),
 ).default(Object.fromEntries(SELECTED_SKILL_CATALOG.map(({ key }) => [key, false])))
 
@@ -94,7 +94,10 @@ export const Config = z.object({
   customPersona: z.string()
     .default('')
     .description('自动模式的附加人设文本（独立 section，非 deployment:persona）；核心安全约束始终保留'),
-  selectedSkills: SelectedSkillsSchema.description('Community selected-skill experiments; default off and visible only to the Auto mode root Agent'),
+  selectedSkills: SelectedSkillsSchema.description('Community selected methods; default off, each visible only to the Capital role(s) that own it'),
+  selectedSkillsMode: z.union(['manual', 'auto'])
+    .default('manual')
+    .description('精选 Skill 暴露方式：manual = 只用勾选；auto = 按角色开放全部方法，运行期忽略勾选'),
   fuyaoCredentialRef: z.string()
     .default('FUYAO_API_KEY')
     .description('Fuyao credentials 引用名，空 = FUYAO_API_KEY'),
@@ -106,24 +109,14 @@ export const Config = z.object({
 })
 
 export type CapitalSettingsSource = 'settings-describe' | 'config-editor' | 'preset'
-type SettingsDescribeService = { describe?: () => ReadonlyArray<{ ns: string; value: unknown }> }
-type ConfigEditorService = { entries?: () => ReadonlyArray<{ options?: { id?: string; config?: unknown } }> }
 
 /** Fallback order: settings.describe → configEditor.entries → boot preset, so unreadable never
  * reads as "all toggles off". Resolve services per call: boot fibers apply in parallel. */
 export function readCapitalSettings(ctx: Context, bootConfig: Config): { config: Config; source: CapitalSettingsSource } {
-  const settings = ctx.get('settings') as SettingsDescribeService | undefined
-  try {
-    const resolved = settings?.describe?.().find((entry) => entry.ns === CAPITAL_CONFIG_ENTRY_ID)?.value
+  const entry = readCapitalEntry(ctx)
+  if (entry.value !== undefined) {
     // Re-parse through this plugin's schema: fills defaults and surfaces schema drift.
-    if (resolved && typeof resolved === 'object') return { config: Config(resolved as Config), source: 'settings-describe' }
-  } catch {
-  }
-  const configEditor = ctx.get('configEditor') as ConfigEditorService | undefined
-  try {
-    const raw = configEditor?.entries?.().find((row) => row?.options?.id === CAPITAL_CONFIG_ENTRY_ID)?.options?.config
-    if (raw && typeof raw === 'object') return { config: Config(raw as Config), source: 'config-editor' }
-  } catch {
+    return { config: Config(entry.value as Config), source: entry.source ?? 'settings-describe' }
   }
   return { config: bootConfig, source: 'preset' }
 }

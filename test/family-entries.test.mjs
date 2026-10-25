@@ -15,6 +15,7 @@ import * as presentEntry from '../lib/present-entry.js'
 import * as timeEntry from '../lib/time-entry.js'
 import * as watchlistEntry from '../lib/watchlist-entry.js'
 import * as rootExtrasEntry from '../lib/root-extras-entry.js'
+import * as selectedSkillsEntry from '../lib/selected-skills-entry.js'
 import { CAPITAL_ROW_TOOLS, rowTools } from './family-rows.mjs'
 import { allPresets, capitalRowsOf } from './preset-rows.mjs'
 import { DATASET_READING_PRESET_IDS } from '../lib/preset-ids.js'
@@ -74,6 +75,7 @@ const ENTRIES = {
   '@v587d/capital-generation/tools/time': timeEntry,
   '@v587d/capital-generation/tools/watchlist': watchlistEntry,
   '@v587d/capital-generation/tools/root-extras': rootExtrasEntry,
+  '@v587d/capital-generation/tools/selected-skills': selectedSkillsEntry,
 }
 
 // Row name -> that row's entry apply(), i.e. the package export the YAML mounts.
@@ -171,7 +173,8 @@ test('tools/root-extras：不带任何工具（在场配置，不是工具面）
 
 test('族行入口声明自己读取的服务：工具行等 tools，root-extras 等 systemPrompt', () => {
   for (const [rowName, entry] of Object.entries(ENTRIES)) {
-    assert.deepEqual(entry.inject, rowName.endsWith('/root-extras') ? ['systemPrompt'] : ['tools'],
+    const wantsSystemPrompt = rowName.endsWith('/root-extras') || rowName.endsWith('/selected-skills')
+    assert.deepEqual(entry.inject, wantsSystemPrompt ? ['systemPrompt'] : ['tools'],
       `${rowName} 的 inject 与它读取的服务不一致`)
   }
 })

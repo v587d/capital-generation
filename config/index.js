@@ -59,15 +59,21 @@ const PaddleOcrSchema = z.object({
 
 const SelectedSkillsShape = Object.fromEntries(SELECTED_SKILL_CATALOG.map((entry) => [
   entry.key,
-  z.boolean().default(false).volatile().description(`Enable ${entry.name} for the Auto mode root Agent (experimental; default off)`),
+  z.boolean().default(false).volatile().description(`Enable ${entry.name} for the Capital role(s) that own it (experimental; default off)`),
 ]))
 const SelectedSkillsSchema = z.object(SelectedSkillsShape)
 
 const SELECTED_SKILL_DEFAULTS = Object.fromEntries(SELECTED_SKILL_CATALOG.map((entry) => [entry.key, false]))
 
+const SelectedSkillsModeSchema = z.union(['manual', 'auto'])
+  .default('manual')
+  .volatile()
+  .description('manual = 只用用户勾选；auto = 按角色开放全部方法，运行期忽略勾选')
+
 export const Config = z.object({
   customPersona: z.string().default('').volatile().description('自动模式附加人设文本'),
-  selectedSkills: SelectedSkillsSchema.default(SELECTED_SKILL_DEFAULTS).description('Explicitly selected community experiments; default off and visible only to the Auto mode root Agent'),
+  selectedSkillsMode: SelectedSkillsModeSchema,
+  selectedSkills: SelectedSkillsSchema.default(SELECTED_SKILL_DEFAULTS).description('Explicitly selected community methods; default off, each visible only to the Capital role(s) that own it'),
   fuyaoCredentialRef: z.string().default('FUYAO_API_KEY').volatile().description('Fuyao credentials 引用名'),
   ftshareCredentialRef: z.string().default('FTSHARE_API_KEY').volatile().description('FTShare（非凸科技）credentials 引用名'),
   retriever: z.object({

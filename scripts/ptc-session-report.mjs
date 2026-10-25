@@ -5,11 +5,10 @@
  * describe_dataset calls overlapped. Not an assertion: use it to decide what to fix, then roll back
  * or keep PTC per docs/design/data-junior-ptc.md §7 Phase 3.
  */
-import { readFileSync } from 'node:fs'
-import { zstdDecompressSync } from 'node:zlib'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { findSessionRecords } from './lib/session-files.mjs'
+import { readSessionEvents } from './lib/session-events.mjs'
 
 function argValue(name, fallback) {
   const index = process.argv.indexOf(name)
@@ -22,35 +21,10 @@ const SESSION_PREFIX = argValue('--session', undefined)
 const LATEST = Number(argValue('--latest', '5'))
 const AS_JSON = process.argv.includes('--json')
 
-const MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
-
-/** Multi-frame zstd: Node decodes only the first frame; sessions append one frame per write. */
-function decode(file) {
-  const buffer = readFileSync(file)
-  const offsets = []
-  let cursor = 0
-  while ((cursor = buffer.indexOf(MAGIC, cursor)) >= 0) {
-    offsets.push(cursor)
-    cursor += MAGIC.length
-  }
-  offsets.push(buffer.length)
-  let text = ''
-  for (let index = 0; index < offsets.length - 1; index += 1) {
-    try {
-      text += zstdDecompressSync(buffer.subarray(offsets[index], offsets[index + 1])).toString('utf8')
-    } catch {
-      // A coincidental magic inside compressed data splits the frame wrong; skip it.
-    }
-  }
-  return text.split('\n').filter(Boolean)
-    .map((line) => { try { return JSON.parse(line) } catch { return null } })
-    .filter(Boolean)
-}
-
 const textOf = (blocks) => (blocks ?? []).filter((part) => part.type === 'text').map((part) => part.text).join('\n')
 
 function report(record) {
-  const events = decode(record.file)
+  const events = readSessionEvents(record.file)
   const calls = new Map()
   for (const event of events) {
     if (event.type === 'tool/call') calls.set(event.data?.callId, event.data)
