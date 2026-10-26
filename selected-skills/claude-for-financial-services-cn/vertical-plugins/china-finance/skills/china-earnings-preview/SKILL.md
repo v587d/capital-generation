@@ -11,7 +11,7 @@ description: Pre-earnings analysis for A-share stocks. Builds scenario framework
 
 Build **A股季报/年报前瞻分析**, preparing for company earnings releases with scenario frameworks and key metrics to watch.
 
-## Data Sources
+## Evidence request
 
 This section is a **brief to hand to the host's retrieval path**, not a set of calls made from here. This plugin has exactly one way to obtain data — the main agent delegates it — and it holds no data-service key and calls no data interface from inside a preview.
 

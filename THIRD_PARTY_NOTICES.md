@@ -10,36 +10,38 @@
 | 组件 | 作者 | 许可证 | 原始仓库 | 许可文本 | 可选 Skill / 快照内共 | 用在哪里 |
 |---|---|---|---|---|---|---|
 | Lightweight Charts™ 5.2.1（standalone 构建） | TradingView | Apache-2.0 | <https://github.com/tradingview/lightweight-charts> | `lib/chart/vendor/LICENSE` | — | 插件内所有可交互图表的渲染层；`VERSION.json` 记有该构建的 sha256，归属标识（attribution logo）保持开启，出图产物页脚打印版本与许可。同一份副本又被 tree-shake 链接进图表卡片的客户端 bundle，那份里不再单独带许可文件——以 vendor 目录这份为准 |
-| Investment Skills Lexicon（`7235d34`，固定快照；仅改写路由段的一句前置条件与退路） | finterm.ai | MIT | <https://github.com/finterm-ai/investment-skills> | `selected-skills/investment-skills/LICENSE` | 1 / 1 | 「精选 Skills」中的 `buffett-investment-framework` |
-| China Stock Research Skills（`d49f1f3`，未修改的固定快照） | spikeHongg | MIT | <https://github.com/spikeHongg/china-stock-research-skills> | `selected-skills/china-stock-research-skills/LICENSE` | 6 / 7 | 「精选 Skills」中的六颗 A 股研究 Skill：`financial-health`、`risk-warning-catalysts`、`valuation-investment-strategy`、`strategy-business-transition`、`industry-competition-moat`、`business-decomposition-order-quality`；快照内的 orchestrator 不开放（与本插件的角色路由冲突） |
-| InvestSkill（`c3f2a17`，固定快照；补 `name` 字段 + 28 颗的取数口径改写，分析正文未改） | yennanliu | MIT | <https://github.com/yennanliu/InvestSkill> | `selected-skills/InvestSkill/LICENSE` | 28 / 34 | 「精选 Skills」中的 28 个美股 Skill（`fact-check`、`bear-case`、`10k-digest`、`stock-valuation`、`risk-stress-test`、`tax-lens` 等）；另六颗（编排、报告输出口、自带出图、三颗 alias 残片）留在快照里作为可审查材料 |
+| Investment Skills Lexicon（`7235d34`，固定快照；路由段改写为纯 Markdown 映射） | finterm.ai | MIT | <https://github.com/finterm-ai/investment-skills> | `selected-skills/investment-skills/LICENSE` | 1 / 1 | 「精选 Skills」中的 `buffett-investment-framework` |
+| China Stock Research Skills（`d49f1f3`，固定快照；共享的 source-registry 取数阶梯改写为证据类型口径） | spikeHongg | MIT | <https://github.com/spikeHongg/china-stock-research-skills> | `selected-skills/china-stock-research-skills/LICENSE` | 6 / 6 | 「精选 Skills」中的六颗 A 股研究 Skill：`financial-health`、`risk-warning-catalysts`、`valuation-investment-strategy`、`strategy-business-transition`、`industry-competition-moat`、`business-decomposition-order-quality`；上游的 orchestrator 不收录，已从本仓删除 |
+| InvestSkill（`c3f2a17`，固定快照；补 `name` 字段 + 28 颗的取数口径改写，分析正文未改） | yennanliu | MIT | <https://github.com/yennanliu/InvestSkill> | `selected-skills/InvestSkill/LICENSE` | 28 / 28 | 「精选 Skills」中的 28 个美股 Skill（`fact-check`、`bear-case`、`10k-digest`、`stock-valuation`、`risk-stress-test`、`tax-lens` 等）；另六颗（编排、报告输出口、自带出图、三颗 alias 残片）不收录，已从本仓删除 |
 | Peter Lynch Research（`e0eaf58`，固定快照；套一层 skills 目录 + 取数口径改写，方法论、预算与输出模板未改） | Szymon Nycz（仓库账号 `DjNero11`） | MIT | <https://github.com/DjNero11/peter-lynch-skill> | `selected-skills/peter-lynch-skill/LICENSE` | 1 / 1 | 「精选 Skills」中的 `peter-lynch-skill`（个股快筛与尽调工作流，美股与境外上市口径） |
-| Trading Skills（`f1ae7d4`，固定快照；平铺掉上游的主题分组 + 取数与计算口径改写，判定档位、阈值与分析结论未改） | marian2js | MIT | <https://github.com/marian2js/trading-skills> | `selected-skills/trading-skills/LICENSE` | 11 / 19 | 「精选 Skills」中的 11 颗交易过程 Skill（`catalyst-map`、`watchlist-review`、`evidence-gap-check`、`thesis-validation`、`risk-reward-sanity-check`、`execution-plan-check`、`portfolio-concentration`、`journal-pattern-analyzer`、`post-trade-review`、`position-sizing`、`position-management`）；券商执行面那颗不进发布包，其余排除项留在快照里作为材料 |
-| Claude for Financial Services CN（`d7585ca`，固定快照；改写 12 颗正文的取数层与出图口径，判定档位、报告骨架与分析结论未改） | jwangkun（`LICENSE` 的署名行还带着没去掉的方括号，六份 plugin manifest 另署 `Anthropic FSI China`；上游自称基于 Anthropic 官方仓库适配 A 股） | **Apache-2.0** | <https://github.com/jwangkun/claude-for-financial-services-cn> | `selected-skills/claude-for-financial-services-cn/LICENSE` | 12 / 63 | 「精选 Skills」中的 12 颗 A 股卖方研究 Skill（`china-earnings-analysis`、`china-earnings-preview`、`china-comps-analysis`、`china-dcf`、`china-sector-overview`、`china-catalyst-calendar`、`china-break-trace`、`china-variance-commentary`、`china-initiating-coverage`、`china-morning-note`、`china-thesis-tracker`、`china-idea-generation`）；正文本身就是取数目录的那颗、元技能与 alias 残片、按美股税制写的税损收割那颗、以及要求产出或读取工作簿与 deck 的十一颗都不开放；四份可运行的取数服务端不进发布包 |
-| FinanceSkills（`b0c6239`，固定快照；改写 8 颗正文里"自己跑脚本 / 用代码算"那 16 段与一句点名宿主检索工具的护栏，公式、阈值与分析结论未改） | Ayotunde Oso（仓库账号 `GAJETOso`；`LICENSE` 版权行、`marketplace.json` 的 publisher 与上游 `AGENTS.md` 另署 **KOMVIA**） | MIT | <https://github.com/GAJETOso/financeskills> | `selected-skills/financeskills/LICENSE` | 8 / 48 | 「精选 Skills」中的 8 颗估值建模与偿债 / 行业专用财务 Skill（`wacc-computation`、`company-valuation`、`three-statement-modeling`、`credit-analysis`、`ecl-computation`、`banking-compliance`、`insurance-reserving`、`forensic-accounting`）；其余 40 颗按**领域外**排除（编制视角的会计作业、内部审计与内控、个人理财与美国 / 英国税制、加密资产、私有公司语境），留在快照里作为可审查材料；上游自带的 43 份 python 计算脚本与它自己的评测夹具目录不进发布包，上游的 MCP 服务端与 Stripe / Plaid 等账户连接器连本仓都不进 |
+| Trading Skills（`f1ae7d4`，固定快照；平铺掉上游的主题分组 + 取数与计算口径改写，判定档位、阈值与分析结论未改） | marian2js | MIT | <https://github.com/marian2js/trading-skills> | `selected-skills/trading-skills/LICENSE` | 13 / 13 | 「精选 Skills」中的 13 颗交易过程 Skill（`catalyst-map`、`watchlist-review`、`evidence-gap-check`、`thesis-validation`、`risk-reward-sanity-check`、`execution-plan-check`、`portfolio-concentration`、`journal-pattern-analyzer`、`post-trade-review`、`position-sizing`、`position-management`、`macro-event-analysis`、`market-regime-analysis`）；券商执行面那颗与其余不收录项已从本仓删除 |
+| Claude for Financial Services CN（`d7585ca`，固定快照；改写 12 颗正文的取数层与出图口径，判定档位、报告骨架与分析结论未改） | jwangkun（`LICENSE` 的署名行还带着没去掉的方括号，六份 plugin manifest 另署 `Anthropic FSI China`；上游自称基于 Anthropic 官方仓库适配 A 股） | **Apache-2.0** | <https://github.com/jwangkun/claude-for-financial-services-cn> | `selected-skills/claude-for-financial-services-cn/LICENSE` | 12 / 12 | 「精选 Skills」中的 12 颗 A 股卖方研究 Skill（`china-earnings-analysis`、`china-earnings-preview`、`china-comps-analysis`、`china-dcf`、`china-sector-overview`、`china-catalyst-calendar`、`china-break-trace`、`china-variance-commentary`、`china-initiating-coverage`、`china-morning-note`、`china-thesis-tracker`、`china-idea-generation`）；正文本身就是取数目录的那颗、元技能与 alias 残片、按美股税制写的税损收割那颗、以及要求产出或读取工作簿与 deck 的十一颗都不收录，已从本仓删除；四份可运行的取数服务端连本仓都不进 |
+| FinanceSkills（`b0c6239`，固定快照；改写 8 颗正文里"自己跑脚本 / 用代码算"那 16 段与一句点名宿主检索工具的护栏，公式、阈值与分析结论未改） | Ayotunde Oso（仓库账号 `GAJETOso`；`LICENSE` 版权行、`marketplace.json` 的 publisher 与上游 `AGENTS.md` 另署 **KOMVIA**） | MIT | <https://github.com/GAJETOso/financeskills> | `selected-skills/financeskills/LICENSE` | 8 / 8 | 「精选 Skills」中的 8 颗估值建模与偿债 / 行业专用财务 Skill（`wacc-computation`、`company-valuation`、`three-statement-modeling`、`credit-analysis`、`ecl-computation`、`banking-compliance`、`insurance-reserving`、`forensic-accounting`）；其余 40 颗按**领域外**排除（编制视角的会计作业、内部审计与内控、个人理财与美国 / 英国税制、加密资产、私有公司语境），已从本仓删除；上游自带的 43 份 python 计算脚本移到 `selected-skills/reference-algorithms/`（git-only，不随包、不执行），评测夹具与 MCP 服务端 / Stripe / Plaid 等账户连接器连本仓都不进 |
 
-| Quant Agent Skills（`03677d2`，固定快照；上游三颗自述的编排器不进可选清单，只有两份跨市场选线口径按原文随包） | Jerry Wang（仓库账号 `Howard-Jerry`；上游 README 声明正文来自其个人量化系统，数据层尚未开源） | MIT | <https://github.com/Howard-Jerry/quant-agent-skills> | `selected-skills/quant-agent-skills/LICENSE` | 1 / 4 | 「精选 Skills」中的 `cross-market-listing-choice`（跨市场选线：A/H 与 ADR/HK）。**这颗的入口正文由本仓撰写**——上游那三颗都会接管会话路由并指挥公开版根本不附带的私有脚本，一颗都不能开放；随包的上游原文只有两份 overlay 口径文件（与所钉 commit 逐字节相同，核对方式与该快照的 `UPSTREAM.md` 里）；上游三颗与它的工程材料留在 git 里供复核，由快照自己的 `.npmignore` 挡在发布包之外 |
+| Quant Agent Skills（`03677d2`，固定快照；上游三颗自述的编排器不收录，只有两份跨市场选线口径按原文随包） | Jerry Wang（仓库账号 `Howard-Jerry`；上游 README 声明正文来自其个人量化系统，数据层尚未开源） | MIT | <https://github.com/Howard-Jerry/quant-agent-skills> | `selected-skills/quant-agent-skills/LICENSE` | 1 / 1 | 「精选 Skills」中的 `cross-market-listing-choice`（跨市场选线：A/H 与 ADR/HK）。**这颗的入口正文由本仓撰写**——上游那三颗都会接管会话路由并指挥公开版根本不附带的私有脚本，一颗都不能开放；随包的上游原文只有两份 overlay 口径文件（与所钉 commit 逐字节相同，核对方式与该快照的 `UPSTREAM.md` 里）；上游三颗与它的工程材料已从本仓删除 |
 
-八份快照合计 **68 个可选 Skill**（快照里共有 177 颗 skill，差额逐颗记在各自的 `UPSTREAM.md` 里）。
+八份快照合计 **70 个可选 Skill**，也是仓内与包内仅有的 Skill 正文：上游快照原有 177 颗，其余 107 颗不收录、
+已从本仓删除，差额与逐颗理由记在各自的 `UPSTREAM.md` 里。
 首页「精选 Skills」那句里的两个数字与此同源，由回归测试按 catalog 现算钉住。
 它们的收录方式、上游 commit、维护状态与逐颗排除理由记在各自的 `UPSTREAM.md` 里，并且**默认全部关闭**，
 只在使用者于配置页显式开启后才对新建的 Capital 会话可见。
-上游自带的编排、报告与出图 skill 不进入可选清单（InvestSkill 的六颗、Trading Skills 的七颗与这第六颗的 51 颗
-仍留在快照里作为可审查材料）：前者与本插件既有的角色路由冲突，后两者与已删除的报告交付链路、
-以及"出图只走 `render_chart`"的约定冲突。
+上游自带的编排、报告与出图 skill 不收录，已从本仓删除：前者与本插件既有的角色路由冲突，
+后两者与已删除的报告交付链路、以及"出图只走 `render_chart`"的约定冲突。
 第七份（FinanceSkills）排除的 40 颗走的是**另一条线**：不是执行面，也不是路由冲突，而是**领域外**——
 上游自述服务对象是会计与企业财务人员，正文的角色是总账会计、集团报告会计、内控经理、FP&A 经理与
 个人理财顾问，把账做对；本插件的使用者读别人披露的账。加密资产那颗（`crypto-accounting`）与本插件
 不涉及的资产类别有关，个人理财与美国 / 英国税制那六颗与本插件的服务范围无关，两者都按这一条排除，
 逐族理由记在该快照的 `UPSTREAM.md` 里。
-Trading Skills 另外排除的几类走的是同一批约定：券商 API 执行面（在对话里采集凭据、真实下单）不进可选清单、
-也不进发布包；接管会话路由的四颗编排 Skill 不收录；把取数写死成"向用户点选付费服务商再自己调接口"的三颗不收录，
-本插件没有那些服务商的凭据，密钥只进凭据域。给出仓位数字与持仓加减动作的那两颗**收录**：本插件不收的是执行面，
+Trading Skills 另外排除了几类：券商 API 执行面（在对话里采集凭据、真实下单）连本仓都不进；
+接管会话路由的编排 Skill、把取数写死成"向用户点选付费服务商再自己调接口"的那几颗也不收录，
+本插件没有那些服务商的凭据，密钥只进凭据域。给出仓位数字与持仓加减动作的几颗**收录**：本插件不收的是执行面，
 不是正文里的结论形状——它们只算出数字、给出建议，动手那一侧永远是使用者。
+`macro-event-analysis` 与 `market-regime-analysis` 原本不收录，2026-10 收敛为"只留 catalog"时先删掉
+服务商接口页与取数段，再作为方法收录：它们的正文是事件传导与市场结构，不是取数配方。
 第六颗排除得更多，因为它的取数层是**全量**的：63 份正文每一份都自带一节三档服务商阶梯
 （含密钥申请去处与一个用环境变量决定"用哪家"的开关）、一段看起来能跑的伪调用，以及把服务商名写死的引用格式。
 其中 `china-market-data` 整颗就是那份服务商工具目录，收录它等于在本插件既有的取数协议之外再造一条取数路由；
-四份配套的服务端脚本（万得 / 同花顺 / AkShare / 新闻）与本插件不发布券商执行面是同一条线，连发布包都不进。
+四份配套的服务端脚本（万得 / 同花顺 / AkShare / 新闻）与本插件不发布券商执行面是同一条线，连本仓都不进。
 第八颗（Quant Agent Skills）排除的理由与前面每一颗都不一样：**不是措辞问题，是它指挥的东西根本不在仓里。**
 上游三颗自述为编排器（接管会话路由、并行派生 5–6 个子代理再裁决），实测三颗入口点名的本地路径
 10 / 32 / 16 个，公开版**一个都不存在**——作者自己写明数据层要到 v1.1 才开源。这类正文发给使用者，
@@ -63,23 +65,22 @@ python 模块"；第六颗（本颗）把形态摊成全量：每份正文自带
 
 **本颗是八份里唯一的 Apache-2.0 快照**（其余七份为 MIT），许可义务也因此多一条：Apache-2.0 第 4 条 (b) 款要求
 "修改过的文件本身带上显著声明"，而不只是在他处说明。所以被改写的那 12 份正文在标题下各留了一句可见的改动声明，
-点名所钉 commit 并指回该快照的 `UPSTREAM.md`；与上游逐字节相同的 51 份不带这一行。上游没有 `NOTICE` 文件，
+点名所钉 commit 并指回该快照的 `UPSTREAM.md`；这颗快照在本仓只保留这 12 份，其余正文已删除。上游没有 `NOTICE` 文件，
 因此随包保留 `LICENSE` 原件与这份清单即可。
 
 ## 随包发布的是什么
 
-每份快照在 npm 包里只带**运行时正文与溯源**：那颗 skill 的 `SKILL.md` 与其附属文件、`LICENSE` 原件、
-以及本仓写的 `UPSTREAM.md`。上游仓库的其他材料（README 及其变体、它自己的 CI 与 workflow、静态站与成图、
-roadmap 与贡献指南、站点体检记录、给别的宿主用的接线配置）由该快照目录里的 `.npmignore` 挡在包外——
-那份文件是排除口径的唯一声明处，回归测试逐颗读它并拿发布清单反查（目录规则与文件规则两类都问）。
-全量快照完整住在 git，`github:` 安装与"当时是哪个 commit"的复核都不受影响。
+每份快照在 npm 包里只带**运行时正文与溯源**：catalog 登记的那几颗 skill 的 `SKILL.md`、它们引用的 references
+与 assets 附属 Markdown、`LICENSE` 原件，以及本仓写的 `UPSTREAM.md`；A 股那六颗还带它们逐条链接的 shared 目录。
+除此之外的文件一律不在仓里：非 catalog skill、上游脚本与取数服务端、评测夹具、
+CI 与静态站、给别的宿主用的接线配置都已删除，删除清单与理由记在各自的 `UPSTREAM.md`。
+打包闸门按这份白名单反查发布清单（出现任何白名单之外的文件就红），
+所以"运行时树里只有 Markdown"是断言，不是约定。
 
-上游自带的可执行面文件（`framework.py`、`install.sh`、`Makefile`、`openai.yaml`）**照旧随包保留作为可审查材料**：
-本插件的根角色没有 shell，provider 与工具面只读取文档、从不执行它们，正文里也不许出现"跑这个脚本"的指令
-（有方法论入口的那颗同时写明了没有 shell 时直接读哪份附属文件）。不进可选清单的 skill 同样随包保留，
-但运行时读不到：技能注册的名单与原文旁路的文件名都是按可选清单现算的闭集。
-第六颗有一个例外走的是执行面那条线：它自带的四份取数服务端（能连付费数据接口、带密钥配置形态）
-**不进发布包**，与本插件不发布券商下单接口同一口径；全量仍完整住在 git。
+纯公式的参考实现单独住在 `selected-skills/reference-algorithms/`：43 份 calculate 与 trading 的共享计算模块，
+git-only、不随包、任何角色都不执行，文件头写明来源与"不执行"，`README.md` 是按算法
+查原 skill 的索引。它们留在这里只为将来升级公式或移植到宿主的计算面；skill 正文只写"把算式写进答复、
+需要算力时委派 `data_junior`"，不指向这些文件。
 
 ## npm 运行时依赖
 

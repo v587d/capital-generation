@@ -5,6 +5,13 @@ description: Analyze the industry structure, competition, supply-demand balance,
 
 # Industry Competition Moat
 
+## Evidence request
+
+通过宿主数据契约请求：行业数据（产量、价格、政策，注明来源与日期）、披露文件（公告、年报或招股书，带回出处与文档日期）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 Place the company inside its real industry structure and test whether it has defensible economics.
 
 ## Non-Negotiable Rules

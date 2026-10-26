@@ -17,12 +17,14 @@ Use this overlay when the stock depends on brand strength, channel health, same-
 
 ## Main Sources
 
-| Source | What It Validates | URL |
-| --- | --- | --- |
-| Company annual and interim reports | Channel structure, product mix, inventory, receivables, store count | https://www.cninfo.com.cn/new/index |
-| National Bureau of Statistics | Retail sales and category-level consumption trends | https://www.stats.gov.cn/ |
-| Ministry of Commerce | Consumption policy and circulation data | http://www.mofcom.gov.cn/ |
-| Company official channels and regulated disclosures | New products, pricing changes, distributor or store updates | Use issuer official website or exchange disclosure |
+| Evidence | What It Validates |
+| --- | --- |
+| Company annual and interim reports | Channel structure, product mix, inventory, receivables, store count |
+| National Bureau of Statistics | Retail sales and category-level consumption trends |
+| Ministry of Commerce | Consumption policy and circulation data |
+| Company official channels and regulated disclosures | New products, pricing changes, distributor or store updates |
+
+Every item carries venue, document name, document date and the accession or link the retrieval returned; the retrieval role decides where it comes from.
 
 ## Output Reminder
 

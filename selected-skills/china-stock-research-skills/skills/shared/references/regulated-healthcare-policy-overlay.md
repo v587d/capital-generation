@@ -17,12 +17,14 @@ Use this overlay when reimbursement, centralized procurement, approvals, product
 
 ## Main Sources
 
-| Source | What It Validates | URL |
-| --- | --- | --- |
-| National Medical Products Administration | Product approvals, registrations, regulatory process | https://www.nmpa.gov.cn/ |
-| National Healthcare Security Administration | Reimbursement, procurement, policy changes | http://www.nhsa.gov.cn/ |
-| National Health Commission | Healthcare-system policy and institutional changes | http://www.nhc.gov.cn/ |
-| Company reports and announcements | Product revenue mix, pipeline, commercialization timing | https://www.cninfo.com.cn/new/index |
+| Evidence | What It Validates |
+| --- | --- |
+| National Medical Products Administration | Product approvals, registrations, regulatory process |
+| National Healthcare Security Administration | Reimbursement, procurement, policy changes |
+| National Health Commission | Healthcare-system policy and institutional changes |
+| Company reports and announcements | Product revenue mix, pipeline, commercialization timing |
+
+Every item carries venue, document name, document date and the accession or link the retrieval returned; the retrieval role decides where it comes from.
 
 ## Output Reminder
 

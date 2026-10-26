@@ -13,8 +13,8 @@ Use this card for every metric you explain. Beginner level fills every row; inte
   Why it matters  what decision it informs, and what happens to the thesis if it is wrong
   Good / bad      the general range, then the range for THIS sector or business model
   In this case    what the stated value says about this company, in one line
-  Learn it        <Lesson name> → https://yennanliu.github.io/InvestSkill/learning-<slug>.html
-                  Glossary → https://yennanliu.github.io/InvestSkill/glossary.html
+  Learn it        <Lesson name>
+                  Glossary        <term>
 ```
 
 Rules for the card:

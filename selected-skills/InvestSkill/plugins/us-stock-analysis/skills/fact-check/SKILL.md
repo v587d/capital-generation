@@ -1,16 +1,23 @@
 ---
 name: fact-check
-description: Claim-level verification of any report or data set — extract every figure and factual claim, check each against a primary source (SEC filing, company IR, FRED, exchange data, or the user's own document), recompute derived numbers, mark ✅ verified / ⚠️ mismatch / ❓ unverifiable, and re-issue the report with inline citations and a References section; Verification Score 0–10
+description: Claim-level verification of any report or data set — extract every figure and factual claim, check each against a primary source (a statutory filing, an official statistics release, exchange data, issuer material, or the user's own document), recompute derived numbers, mark ✅ verified / ⚠️ mismatch / ❓ unverifiable, and re-issue the report with inline citations and a References section; Verification Score 0–10
 ---
 
 # Fact Check — Verify the Numbers, Cite the Sources
+
+## Evidence request
+
+通过宿主数据契约请求：披露文件（公告、年报或招股书，带回出处与文档日期）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
 
 ## ⚠️ Data Verification — Do This Before Any Analysis
 
 Before verifying anything, establish what data each claim actually needs:
 
 1. **Fetch current price only where a claim needs it** — market claims (price, market cap, yield, multiples "today") are checked against a live quote for the report's as-of date and today's, obtained through the host's own data path (delegate it in a role-split host). Reported figures, historical comparisons, and `--recompute` runs need **no** live quote — do not request one, and do not let its absence block them. Never assume a price from training data.
-2. **Confirm key figures** — for this skill the "key figures" are the *sources themselves*: the filing (10-K / 10-Q / 8-K / proxy / Form 4 / 13F), the IR release, the FRED series, the exchange or issuer data, or the document the user pasted. Retrieve or request them before judging a single claim. A claim checked against memory is not checked.
+2. **Confirm key figures** — for this skill the "key figures" are the *sources themselves*: the filing (10-K / 10-Q / 8-K / proxy / Form 4 / 13F), the issuer release, the official statistics release, the exchange or issuer data, or the document the user pasted. Retrieve or request them before judging a single claim. A claim checked against memory is not checked.
 3. **State your data source** — fill in the `Data & Sources` header (next section) so the origin, as-of date, retrieval path, and confidence of every figure are explicit at the top of the output.
 4. **Flag stale data explicitly** — if a live quote is needed for a market claim and unavailable, display this warning before proceeding, and mark those claims `❓` or `🕒` rather than guessing:
 
@@ -22,12 +29,12 @@ The warning describes the *inputs actually used*: when every claim was checked a
 
 ## 📋 Data & Sources Header — Open Every Output With It
 
-The first thing in the output is this provenance block, filled in — never left as placeholders. It is the standard documented on the [Data & Accuracy](https://yennanliu.github.io/InvestSkill/data-and-accuracy.html) page and the first thing `result-validator` looks for:
+The first thing in the output is this provenance block, filled in — never left as placeholders. It is the standard `result-validator` looks for first:
 
 ```
 Data & Sources
   As of:      <date the figures represent, e.g. 2026-06-30>
-  Source:     <primary docs — SEC EDGAR 10-K/10-Q, company IR, FRED, exchange data …>
+  Source:     <venue, document, date — as returned by retrieval>
   Retrieval:  <delegated retrieval | web/tool retrieval | pasted by user>
   Confidence: <HIGH | MEDIUM | LOW>
 ```

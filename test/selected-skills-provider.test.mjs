@@ -13,93 +13,12 @@ import {
 import { SELECTED_SKILL_SKILL_DIRS } from '../selected-skills/catalog.js'
 import { SELECTED_SKILL_ROUTING } from '../selected-skills/routing.js'
 
-// Kept in the snapshot but not selectable: aliases, orchestrators, report output, chart authoring.
-const INVESTSKILL_EXCLUDED = [
-  'fundamental-analysis', 'dcf-valuation', 'research-bundle',
-  'full-report',
-  'report-generator',
-  'chart-master',
-]
-
-// Kept as review material; exclusions are execution surface (broker API, paid data, routing).
-const TRADING_SKILLS_EXCLUDED = [
-  '_lib',
-  'etoro',
-  'earnings-preview',
-  'macro-event-analysis',
-  'market-regime-analysis',
-  'pre-trade-check',
-  'earnings-trade-prep',
-  'portfolio-risk-review',
-  'post-trade-debrief',
-]
-
-// Only the canonical skills root is registered; data catalogs, meta skills, workbook/deck
-// outputs and accounting workflows are excluded.
-const CHINA_FINANCE_EXCLUDED = [
-  'china-market-data',
-  'china-skill-creator',
-  'china-dcf-model',
-  'china-comps',
-  'china-tax-loss-harvesting',
-  'china-3-statement-model',
-  'china-lbo-model',
-  'china-xlsx-author',
-  'china-pptx-author',
-  'china-ppt-template-creator',
-  'china-deck-refresh',
-  'china-audit-xls',
-  'china-ib-check-deck',
-  'china-clean-data-xls',
-  'china-model-update',
-  'china-roll-forward',
-  'china-gl-recon',
-  'china-accrual-schedule',
-  'china-deal-screening',
-]
-
-// Excluded as out of domain: accounting operations, personal finance, audit, private markets.
-const FINANCESKILLS_EXCLUDED = [
-  'financial-analysis',
-  'investment-analysis',
-  'risk-assessment',
-  'working-capital-analysis',
-  'crypto-accounting',
-  'personal-budgeting',
-  'net-worth-tracker',
-  'retirement-planning',
-  'debt-payoff',
-  'tax-planning',
-  'tax-efficient-investing',
-  'journal-entry',
-  'statement-preparation',
-  'intercompany-accounting',
-  'corporate-consolidation',
-  'close-management',
-  'automated-reconciliation',
-  'deferred-tax',
-  'revenue-recognition',
-  'lease-accounting',
-  'inventory-costing',
-  'fixed-asset-accounting',
-  'aro-computation',
-  'variance-analysis',
-  'audit-checklist',
-  'sox-compliance',
-  'esg-reporting',
-  'budget-forecast',
-  'predictive-burn-rate',
-  'product-profitability',
-  'cvp-breakeven',
-  'treasury-management',
-  'earned-value-mgmt',
-  'startup-valuation',
-  'lbo-modeling',
-  'venture-debt',
-  'debt-restructuring',
-  'oil-gas-valuation',
-  'ai-anomaly-detection',
-  'nlp-earnings-sentiment',
+// Removed from the repository in the 2026-10 convergence: execution surface, report output,
+// chart authoring, orchestrators and out-of-domain bodies. None may come back as a directory or
+// as a catalog entry (the structural gate checks the tree; this list names the compliance-critical few).
+const MUST_NOT_RETURN = [
+  'etoro', 'full-report', 'chart-master', 'report-generator', 'research-bundle',
+  'china-market-data', 'china-skill-creator', 'concept-research', 'industry-research', 'stock-research',
 ]
 
 function candidate(name) {
@@ -255,6 +174,7 @@ function makeHarness() {
   }
 }
 
+
 test('selected skill provider: disabled by default and limited to the approved catalog', () => {
   // Keys are already shipped; renaming one clears a user's toggle. Pin by repository.
   const pinnedRepositories = ['investment-skills', 'china-stock-research-skills']
@@ -267,68 +187,32 @@ test('selected skill provider: disabled by default and limited to the approved c
     'industry-competition-moat',
     'business-decomposition-order-quality',
   ])
-  // Large snapshot: catalog must equal snapshot dirs minus exclusions, and name any diff.
-  const investSkillCatalog = SELECTED_SKILL_CATALOG
-    .filter(({ repository }) => repository === 'InvestSkill')
-    .map(({ name }) => name)
-    .sort()
-  const investSkillDirs = readdirSync(fileURLToPath(new URL('../selected-skills/InvestSkill/plugins/us-stock-analysis/skills', import.meta.url)))
-    .filter((dir) => !INVESTSKILL_EXCLUDED.includes(dir))
-    .sort()
-  assert.deepEqual(investSkillCatalog, investSkillDirs,
-    `InvestSkill 的可选清单与快照目录不符：多出或缺少 ${investSkillCatalog.filter((n, i) => n !== investSkillDirs[i]).join('、')}`)
-  // Same dirs-minus-exclusions check; catches broker or orchestrator skills added back.
-  const tradingSkillsCatalog = SELECTED_SKILL_CATALOG
-    .filter(({ repository }) => repository === 'trading-skills')
-    .map(({ name }) => name)
-    .sort()
-  const tradingSkillDirs = readdirSync(fileURLToPath(new URL('../selected-skills/trading-skills/skills', import.meta.url)))
-    .filter((dir) => !TRADING_SKILLS_EXCLUDED.includes(dir))
-    .sort()
-  assert.deepEqual(tradingSkillsCatalog, tradingSkillDirs,
-    `trading-skills 的可选清单与快照目录不符：多出或缺少 ${tradingSkillsCatalog.filter((n, i) => n !== tradingSkillDirs[i]).join('、')}`)
-  // The skills root comes from the map, not a hardcoded dir, so mapping drift fails here.
-  const chinaFinanceCatalog = SELECTED_SKILL_CATALOG
-    .filter(({ repository }) => repository === 'claude-for-financial-services-cn')
-    .map(({ name }) => name)
-    .sort()
-  const chinaFinanceRoot = SELECTED_SKILL_SKILL_DIRS['claude-for-financial-services-cn']
-  const chinaFinanceDirs = readdirSync(fileURLToPath(new URL(`../selected-skills/claude-for-financial-services-cn/${chinaFinanceRoot}`, import.meta.url)))
-    .filter((dir) => !CHINA_FINANCE_EXCLUDED.includes(dir))
-    .sort()
-  assert.deepEqual(chinaFinanceCatalog, chinaFinanceDirs,
-    `claude-for-financial-services-cn 的可选清单与规范根（${chinaFinanceRoot}）不符：`
-    + `多出或缺少 ${chinaFinanceCatalog.filter((n, i) => n !== chinaFinanceDirs[i]).join('、')}`)
-  // Same derivation; catches out-of-domain skills (personal finance, crypto, accounting) added back.
-  const financeskillsCatalog = SELECTED_SKILL_CATALOG
-    .filter(({ repository }) => repository === 'financeskills')
-    .map(({ name }) => name)
-    .sort()
-  const financeskillsRoot = SELECTED_SKILL_SKILL_DIRS.financeskills
-  const financeskillDirs = readdirSync(fileURLToPath(new URL(`../selected-skills/financeskills/${financeskillsRoot}`, import.meta.url)))
-    .filter((dir) => !FINANCESKILLS_EXCLUDED.includes(dir))
-    .sort()
-  assert.deepEqual(financeskillsCatalog, financeskillDirs,
-    `financeskills 的可选清单与快照目录（${financeskillsRoot}）不符：`
-    + `多出或缺少 ${financeskillsCatalog.filter((n, i) => n !== financeskillDirs[i]).join('、')}`)
-  // Upstream orchestrators are not in the registered skills root; they must stay out of the
-  // catalog and never be moved into that root, where a one-line mapping change would expose them.
-  const quantCatalog = SELECTED_SKILL_CATALOG
-    .filter(({ repository }) => repository === 'quant-agent-skills')
-    .map(({ name }) => name)
-    .sort()
-  const quantRoot = SELECTED_SKILL_SKILL_DIRS['quant-agent-skills']
-  const quantDirs = readdirSync(fileURLToPath(new URL(`../selected-skills/quant-agent-skills/${quantRoot}`, import.meta.url)))
-    .sort()
-  assert.deepEqual(quantCatalog, quantDirs,
-    `quant-agent-skills 的可选清单与登记的 skills 根（${quantRoot}）不符：`
-    + `多出或缺少 ${quantCatalog.filter((n, i) => n !== quantDirs[i]).join('、')}`)
+  // Every registered skills root now holds exactly the catalog bodies: non-catalog skills were
+  // deleted in the 2026-10 convergence, so a diff in either direction is a real regression.
+  const rootOf = (repository) => SELECTED_SKILL_SKILL_DIRS[repository]
+  for (const repository of ['InvestSkill', 'trading-skills', 'claude-for-financial-services-cn', 'financeskills', 'quant-agent-skills']) {
+    const catalogNames = SELECTED_SKILL_CATALOG
+      .filter((entry) => entry.repository === repository)
+      .map(({ name }) => name)
+      .sort()
+    const root = rootOf(repository)
+    const dirs = readdirSync(fileURLToPath(new URL(`../selected-skills/${repository}/${root}`, import.meta.url)))
+      .filter((name) => !name.startsWith('.'))
+      .sort()
+    assert.deepEqual(catalogNames, dirs,
+      `${repository} 的可选清单与 skills 根（${root}）不符：多出或缺少 ${catalogNames.filter((n, i) => n !== dirs[i]).join('、')}`)
+  }
+  for (const removed of MUST_NOT_RETURN) {
+    assert.ok(!SELECTED_SKILL_CATALOG.some(({ name }) => name === removed),
+      `${removed} 已在 2026-10 收敛中删除（执行面 / 报告出图 / 编排 / 领域外），不得回到 catalog`)
+  }
+
   for (const orchestrator of ['concept-research', 'industry-research', 'stock-research']) {
     assert.ok(!SELECTED_SKILL_CATALOG.some(({ name }) => name === orchestrator),
       `${orchestrator} 是上游自述的编排器（接管会话路由、并行派生 5–6 个子代理，并指挥公开版不附带的`
       + `私有数据层），不得进入可选清单（docs/dev/selected-skills.md §8.6 第 1、4、5、6 条；逐条实测见该快照 UPSTREAM.md）`)
-    assert.ok(!quantDirs.includes(orchestrator),
-      `${orchestrator} 不得被挪进 ${quantRoot}：一旦落进登记的 skills 根，provider 就会把它发现并暴露出去`)
+    assert.ok(!readdirSync(fileURLToPath(new URL(`../selected-skills/quant-agent-skills/${SELECTED_SKILL_SKILL_DIRS['quant-agent-skills']}`, import.meta.url))).includes(orchestrator),
+      `${orchestrator} 不得被挪进登记的 skills 根：一旦落进去，provider 就会把它发现并暴露出去`)
   }
   assert.ok(SELECTED_SKILL_CATALOG.every(({ status, tags }) => ['experimental', 'watchlist'].includes(status) && tags.length > 0))
 })
@@ -388,7 +272,7 @@ test('selected skill provider: 数据侧与检索侧各自拿到自己的方法�
 
 test('selected skill provider: auto 模式按角色开放全部方法，勾选不参与过滤', async () => {
   const cases = [
-    { role: 'main', preset: 'capital-generation', count: 37, included: 'buffett-investment-framework', excluded: 'china-dcf' },
+    { role: 'main', preset: 'capital-generation', count: 39, included: 'buffett-investment-framework', excluded: 'china-dcf' },
     { role: 'data_junior', preset: 'capital-data-junior', count: 40, included: 'china-dcf', excluded: 'buffett-investment-framework' },
     { role: 'web_retriever', preset: 'capital-web-retriever', count: 8, included: 'fact-check', excluded: 'china-dcf' },
   ]
@@ -427,7 +311,7 @@ test('selected skill provider: auto 与 manual 的切换会让目录缓存失效
   mode = 'auto'
   await root.preStep()
   assert.equal(harness.invalidateCount, 1, '模式变化必须失效目录缓存')
-  assert.equal(root.catalogSnapshot.length, 37, 'auto 的下一轮目录快照必须包含整个角色方法集')
+  assert.equal(root.catalogSnapshot.length, 39, 'auto 的下一轮目录快照必须包含整个角色方法集')
   assert.ok(root.catalogSnapshot.includes('buffett-investment-framework'))
   await root.preStep()
   assert.equal(harness.invalidateCount, 1, '模式未变不重算目录')
@@ -516,7 +400,7 @@ test('selected skill provider: 建会话时全关也必须注册，之后切 aut
   mode = 'auto'
   await root.preStep()
   assert.equal(harness.invalidateCount, 1)
-  assert.equal((await harness.provider.list({})).length, 37, '切到 auto 后同一 Agent 必须看到全量目录')
+  assert.equal((await harness.provider.list({})).length, 39, '切到 auto 后同一 Agent 必须看到全量目录')
   harness.disposeRoot()
 })
 
@@ -557,7 +441,7 @@ test('role prompt：只列当前角色已启用的方法，规则是强制加载
   const auto = renderSelectedSkillsBrief('main', { selection: {}, mode: 'auto' })
   assert.match(auto, /自动模式/, 'auto 的短清单必须自报模式，不能再说"用户已启用"')
   assert.doesNotMatch(auto, /用户已启用/)
-  assert.match(auto, /本角色共 37 颗可用/)
+  assert.match(auto, /本角色共 39 颗可用/)
   assert.ok((auto.match(/^- `/gm) ?? []).length <= 12, 'auto 仍只列 12 条，完整目录在宿主技能目录里')
   assert.match(auto, /不要一次搬空目录/)
   assert.match(auto, /两者正交/, 'auto 同样要说明协议与方法两层')

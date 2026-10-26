@@ -2,14 +2,16 @@
 
 Use this guide when the company is building or buying heavy assets before full monetization.
 
-## Source Priority
+## Evidence to request
 
-| Source | What to Validate | URL |
-| --- | --- | --- |
-| Annual and interim reports | Fixed assets, CIP, debt, receivables, contract assets, guarantees | https://www.cninfo.com.cn/new/index |
-| Financing filings | Placement, convertible bond, bank loan, project-fund use | https://www.cninfo.com.cn/new/index |
-| Exchange inquiries and replies | Accounting quality, project economics, impairment rationale | https://www.cninfo.com.cn/new/index |
-| Official company disclosure portal | Supplemental investor materials | Use issuer official investor-relations page |
+| Evidence | What to Validate |
+| --- | --- |
+| Annual and interim reports | Fixed assets, CIP, debt, receivables, contract assets, guarantees |
+| Financing filings | Placement, convertible bond, bank loan, project-fund use |
+| Exchange inquiries and replies | Accounting quality, project economics, impairment rationale |
+| Official company disclosure portal | Supplemental investor materials |
+
+Every item carries venue, document name, document date and the accession or link the retrieval returned; the retrieval role decides where it comes from.
 
 ## Pressure Points
 

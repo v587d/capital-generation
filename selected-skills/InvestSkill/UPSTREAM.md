@@ -87,3 +87,11 @@
   取数仍受本插件的角色与工具边界约束（主 Agent 委派、原始 rows 不出工具层），skill 正文只是方法论材料。
 - Review status: 收录供使用者自行实验，不构成对任何金融方法的背书。复核前先读上面的 Catalog scope，
   确认排除项没有被人顺手加回。
+
+## 2026-10 收敛：仓内只保留 catalog 正文
+
+本仓不再保存上游全量快照。除 catalog 命中的 28 颗正文、LICENSE 与本文件之外，以下内容按 2026-10 政策**从仓里删除**（不是仅从包里排除）；重新按上面所钉 commit 覆盖快照时按本节过滤。
+
+- **非 catalog skill（6 颗）**：`chart-master`、`dcf-valuation`、`full-report`、`fundamental-analysis`、`report-generator`、`research-bundle`。
+- **上游仓库材料**：`.claude-plugin`、`.cursor`、`.github`、`.npmignore`、`ADDING-NEW-SKILLS.md`、`CHANGELOG.md`、`CI-CD-GUIDE.md`、`CLAUDE.md`、`CONTRIBUTING.md`、`DEPLOYMENTS.md`、`FAQ.md`、`GEMINI.md`、`PLATFORM-COMPATIBILITY.md`、`README-claude-code.md`、`README-cursor.md`、`README-gemini.md`、`README-ollama.md`、`README-zh-TW.md`、`README.md`、`RELEASE-QUICK-REFERENCE.md`、`RELEASE_NOTES.md`、`SECURITY.md`、`TODO.md`、`data`、`doc`、`install.sh`、`package-lock.json`、`package.json`、`plugins`、`prompts`、`qa`、`scripts`、`site`。
+- 许可与署名不受影响：`LICENSE` 原件、所钉 commit 与作者信息仍在上面各节；公开许可只要求保留版权与许可声明。

@@ -261,9 +261,21 @@ test('tools/selected-skills：角色节 + provider + configEditor 兜底（setti
   applySelectedSkills(ctx, { role: 'main' })
   await Promise.all(effectResults)
 
-  assert.equal(sections.length, 1, '角色行只注册一个精选方法节')
-  const [section] = sections
-  assert.equal(section.name, 'capital:selected-skills')
+  assert.equal(sections.length, 2, '角色行注册两节：数据边界 + 精选方法')
+  const contract = sections.find((item) => item.name === 'capital:data-contract')
+  assert.ok(contract, '缺少 capital:data-contract：skill 正文不再写取数方式，边界只在这一处')
+  assert.equal(contract.order, 59, '数据边界排在精选方法之前')
+  assert.equal(contract.interpolate, false, '边界正文是字面量')
+  const contractText = typeof contract.text === 'function' ? contract.text() : contract.text
+  assert.match(contractText, /data_collector/)
+  assert.match(contractText, /web_retriever/)
+  assert.match(contractText, /data_junior/)
+  assert.match(contractText, /pasted by user/)
+  assert.doesNotMatch(contractText, /https?:\/\//, '边界不写 URL：取数入口是委派，不是某个地址')
+  assert.doesNotMatch(contractText, /\bcurl\b|\bpython3?\b|API key/i, '边界不写取数命令或凭据名')
+
+  const section = sections.find((item) => item.name === 'capital:selected-skills')
+  assert.ok(section, '缺少 capital:selected-skills')
   assert.equal(section.order, 60)
   assert.equal(section.interpolate, false, '上游派生正文不能走 {{variable}} 插值')
   assert.match(section.text(), /^# 外部精选方法/)

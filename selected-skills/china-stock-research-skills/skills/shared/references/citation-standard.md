@@ -4,7 +4,7 @@ Every output must separate `Facts`, `Interpretation`, and `Open Questions`.
 
 ## Minimum Citation Unit
 
-- Every key sentence must carry at least one accessible source link.
+- Every key sentence must carry at least one source with provenance: venue, document name, date, and the section, page or accession the reader can re-find.
 - Every row in a critical table must carry a primary source.
 - Every numeric chart must list the source set below the chart.
 
@@ -13,13 +13,13 @@ Every output must separate `Facts`, `Interpretation`, and `Open Questions`.
 Use this format inline:
 
 ```text
-[来源: 机构或公司, 文档名, 日期, 链接, 页码/章节/公告编号]
+[来源: 机构或公司, 文档名, 日期, 页码/章节/公告编号, 链接（仅当检索返回了链接）]
 ```
 
 Example:
 
 ```text
-2025H1 IDC 业务收入占比达到 100%。[来源: 城地香江, 2025 年半年度报告, 2025-08-XX, https://www.cninfo.com.cn/, 第 X 节]
+2025H1 IDC 业务收入占比达到 100%。[来源: 城地香江, 2025 年半年度报告, 2025-08-XX, 第 X 节, 公告编号 XXXXXX]
 ```
 
 ## Evidence Tiers
@@ -41,8 +41,8 @@ Example:
 - Preserve the original unit, period, and accounting scope when quoting numbers.
 - Mark whether the figure is audited, reviewed, or unaudited when known.
 
-## Link Rules
+## Provenance rules
 
-- Use direct, accessible URLs whenever possible.
-- If a disclosure portal uses a searchable landing page instead of a stable document URL, cite both the portal and enough metadata to re-find the document.
-- Never cite a screenshot without the underlying public URL.
+- Cite what the retrieval returned. If it returned a document link, include it; if it returned a venue plus an accession number, that is enough to re-find the document and is preferred over a landing page.
+- A searchable portal landing page is not a citation on its own: pair it with the document name, date and accession or section.
+- Never cite a screenshot or an excerpt without the document it came from and enough metadata to re-find it.

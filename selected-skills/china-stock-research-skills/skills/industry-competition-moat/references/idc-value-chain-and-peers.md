@@ -4,13 +4,15 @@ Use this guide when the company claims to compete in IDC, AI-compute infrastruct
 
 ## Official Source Map
 
-| Source | What to Validate | URL |
-| --- | --- | --- |
-| MIIT | Policy on green data centers, digital infrastructure, industrial internet | https://www.miit.gov.cn/ |
-| NDRC | Computing-infrastructure and macro policy framework | https://www.ndrc.gov.cn/ |
-| National Bureau of Statistics | Macro and regional demand context | https://www.stats.gov.cn/ |
-| Operator procurement portals | External demand and package structure | https://b2b.10086.cn/ |
-| Exchange disclosures | Peer business model, capex, utilization disclosures | https://www.cninfo.com.cn/new/index |
+| Evidence | What to Validate |
+| --- | --- |
+| MIIT | Policy on green data centers, digital infrastructure, industrial internet |
+| NDRC | Computing-infrastructure and macro policy framework |
+| National Bureau of Statistics | Macro and regional demand context |
+| Operator procurement portals | External demand and package structure |
+| Exchange disclosures | Peer business model, capex, utilization disclosures |
+
+Every item carries venue, document name, document date and the accession or link the retrieval returned; the retrieval role decides where it comes from.
 
 ## Value Chain Buckets
 

@@ -8,13 +8,10 @@ Use annual-report discovery targets first — each line below is one thing to as
 the host's retrieval channel for, worked through in order and stopped once a
 complete, current annual report or equivalent full-year filing is in the ledger:
 
-* `"{company name}" investor relations annual report site:{company-domain}`
-* `"{company name}" annual report {current year OR prior year} investor relations`
-* `"{company name}" 10-K site:sec.gov`
-* `"{company name}" 20-F site:sec.gov`
-* `"{ticker}" SEC 10-K 20-F annual report`
-* `"{company name}" annual report PDF`
-* `"{company name}" integrated report`
+* the issuer's own annual report, current or prior fiscal year
+* the annual report filed with the regulator (10-K, or 20-F for a foreign private issuer)
+* the integrated report or equivalent full-year disclosure, when the issuer publishes one
+* the prior year's annual report, for period-over-period comparison
 
 Selection rules:
 

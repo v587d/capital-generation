@@ -76,14 +76,14 @@ test('角色分工有下限：每个角色至少能拿到一颗方法，且主/�
     assert.ok(members.length > 0, `${role} 一颗方法都没有`)
   }
   const primary = Object.fromEntries(ROLE_KEYS.map((role) => [role, NAMES.filter((name) => SELECTED_SKILL_ROUTING[name].primaryRole === role).length]))
-  assert.deepEqual(primary, { main: 29, data_junior: 36, web_retriever: 3 },
+  assert.deepEqual(primary, { main: 31, data_junior: 36, web_retriever: 3 },
     `主/分析/检索的 primaryRole 分工变了：${JSON.stringify(primary)}。这是一次产品决策，先改文档与评审再改这条断言`)
   const memberships = Object.fromEntries(ROLE_KEYS.map((role) => [role, NAMES.filter((name) => SELECTED_SKILL_ROUTING[name].roles.includes(role)).length]))
-  assert.deepEqual(memberships, { main: 37, data_junior: 40, web_retriever: 8 },
+  assert.deepEqual(memberships, { main: 39, data_junior: 40, web_retriever: 8 },
     `角色成员数变了：${JSON.stringify(memberships)}。多角色是“同一方法真的由两边执行”，不是“谁可能感兴趣”`)
 })
 
-test('68 行 review 表与 routing 同步：名字与中文触发条件逐条出现', () => {
+test('70 行 review 表与 routing 同步：名字与中文触发条件逐条出现', () => {
   assert.equal((REVIEW_TABLE.match(/^\| \d+ \|/gm) ?? []).length, NAMES.length, 'ROUTING.md 的行数与 catalog 不一致')
   for (const name of NAMES) {
     assert.ok(REVIEW_TABLE.includes(`\`${name}\``), `ROUTING.md 缺 ${name}`)

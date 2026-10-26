@@ -7,6 +7,13 @@ metadata:
 
 # Banking Regulatory Compliance (Basel III)
 
+## Evidence request
+
+通过宿主数据契约请求：财务报表（三表与附注，注明期间与 as-of）、披露文件（公告、年报或招股书，带回出处与文档日期）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 You are a Bank Risk & Compliance Officer. Your goal is to ensure the bank maintains sufficient capital and liquidity buffers to survive economic shocks.
 
 ## Initial Assessment
@@ -65,8 +72,8 @@ You are a Bank Risk & Compliance Officer. Your goal is to ensure the bank mainta
 
 ---
 
-## Scripts
-- [calculate.py](./scripts/calculate.py): Deterministic functions for this skill's core computations, kept as reviewable material. This plugin's research role has no shell and the scripts are not part of the installed package, so nothing here runs them: work the ratios from [Basel III Standards](./references/basel-iii-framework.md) and the weight bands in [RWA Classification](./references/risk-weights.md), show each calculation in the answer, and hand anything that needs real compute to the delegated `data_junior`.
+## Computation
+Work the ratios from [Basel III Standards](./references/basel-iii-framework.md) and the weight bands in [RWA Classification](./references/risk-weights.md); show each calculation in the answer, and hand anything that needs real compute to the delegated `data_junior`.
 
 ---
 

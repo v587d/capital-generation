@@ -5,6 +5,13 @@ description: Guide a disciplined post-trade review across thesis quality, setup 
 
 # Post Trade Review
 
+## Evidence request
+
+通过宿主数据契约请求：使用者提供的输入（成交、持仓或论点记录）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 Use this skill after a trade closes or after a meaningful trade sequence when you want an honest process review.
 
 The objective is to improve repeatability, not to rewrite history.

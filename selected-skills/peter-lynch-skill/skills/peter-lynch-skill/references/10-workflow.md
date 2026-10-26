@@ -64,7 +64,7 @@ Use the research brief as the only factual context for the report. Do not includ
 Every final report must cite sources with links:
 
 - Any company description, financial number, valuation metric, market data point, management claim, industry claim, competitor claim, ownership claim, or news/update claim needs a source.
-- Use source lines directly below the relevant bullet or paragraph: `source: [Source name](https://...)`.
+- Use source lines directly below the relevant bullet or paragraph: `source: [Source name as returned](link returned by retrieval)`.
 - Multiple sources may be separated with semicolons.
 - Do not cite a source that is not in the research brief Source Ledger.
 - Expand any internal source IDs from the brief into full linked `source:` lines in the final report.

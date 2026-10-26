@@ -109,3 +109,11 @@
   **从不执行、也从不被 provider 读取**（skills 根里没有它们）。
 - Review status: 2026-11-15 复查上游、许可证与维护状态。届时若上游 v1.1 真的放出数据层，
   重读上面"已知未收"那四条的可行性；不要在没有账本能力的前提下把它的 closeout 契约搬过来。
+
+## 2026-10 收敛：仓内只保留 catalog 正文
+
+本仓不再保存上游全量快照。除 catalog 命中的 1 颗正文、LICENSE 与本文件之外，以下内容按 2026-10 政策**从仓里删除**（不是仅从包里排除）；重新按上面所钉 commit 覆盖快照时按本节过滤。
+
+- **非 catalog skill（3 颗）**：`concept-research`、`industry-research`、`stock-research`。
+- **上游仓库材料**：`.npmignore`、`CHANGELOG.md`、`README.md`、`docs`、`examples`、`scripts`、`template`。
+- 许可与署名不受影响：`LICENSE` 原件、所钉 commit 与作者信息仍在上面各节；公开许可只要求保留版权与许可声明。

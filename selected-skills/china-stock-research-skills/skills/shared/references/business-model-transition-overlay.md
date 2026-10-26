@@ -17,11 +17,13 @@ Use this overlay when a listed company is shifting from an old business model to
 
 ## Main Sources
 
-| Source | What It Validates | URL |
-| --- | --- | --- |
-| Prospectus and annual reports | Historical model, original use of proceeds, risk factors | https://www.cninfo.com.cn/new/index |
-| Interim and quarterly reports | Pace of segment migration and balance-sheet change | https://www.cninfo.com.cn/new/index |
-| Financing filings and board resolutions | Capital allocation and strategic commitments | https://www.cninfo.com.cn/new/index |
+| Evidence | What It Validates |
+| --- | --- |
+| Prospectus and annual reports | Historical model, original use of proceeds, risk factors |
+| Interim and quarterly reports | Pace of segment migration and balance-sheet change |
+| Financing filings and board resolutions | Capital allocation and strategic commitments |
+
+Every item carries venue, document name, document date and the accession or link the retrieval returned; the retrieval role decides where it comes from.
 
 ## Output Reminder
 

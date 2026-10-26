@@ -17,12 +17,14 @@ Use this overlay when earnings are driven mainly by selling-price cycles, input-
 
 ## Main Sources
 
-| Source | What It Validates | URL |
-| --- | --- | --- |
-| National Bureau of Statistics | Output, industry production, fixed-asset investment, downstream demand | https://www.stats.gov.cn/ |
-| National Development and Reform Commission | Policy, capacity, macro and industrial guidance | https://www.ndrc.gov.cn/ |
-| Ministry of Industry and Information Technology | Industry policy, production restrictions, sector trends | https://www.miit.gov.cn/ |
-| Company reports and announcements | Capacity, utilization, expansion, cost sensitivity, inventories | https://www.cninfo.com.cn/new/index |
+| Evidence | What It Validates |
+| --- | --- |
+| National Bureau of Statistics | Output, industry production, fixed-asset investment, downstream demand |
+| National Development and Reform Commission | Policy, capacity, macro and industrial guidance |
+| Ministry of Industry and Information Technology | Industry policy, production restrictions, sector trends |
+| Company reports and announcements | Capacity, utilization, expansion, cost sensitivity, inventories |
+
+Every item carries venue, document name, document date and the accession or link the retrieval returned; the retrieval role decides where it comes from.
 
 ## Output Reminder
 

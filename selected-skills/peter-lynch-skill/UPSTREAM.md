@@ -71,3 +71,10 @@
 - Review status: 2026-11-06 复查上游、许可证与维护状态。正文是 Lynch 三部著作（*One Up on Wall Street*、
   *Beating the Street*、*Learn to Earn*）方法论的**二手转写**，与 Lynch 本人、Fidelity 或 Capital Generation
   均无关联，不构成背书；美股口径不得直接当作 A 股规则，所有金融主张须回到原始证据核验。
+
+## 2026-10 收敛：仓内只保留 catalog 正文
+
+本仓不再保存上游全量快照。除 catalog 命中的 1 颗正文、LICENSE 与本文件之外，以下内容按 2026-10 政策**从仓里删除**（不是仅从包里排除）；重新按上面所钉 commit 覆盖快照时按本节过滤。
+
+- **上游仓库材料**：`.npmignore`、`README.md`。
+- 许可与署名不受影响：`LICENSE` 原件、所钉 commit 与作者信息仍在上面各节；公开许可只要求保留版权与许可声明。

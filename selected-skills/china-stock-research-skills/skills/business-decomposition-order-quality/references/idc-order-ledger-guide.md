@@ -2,15 +2,17 @@
 
 Use this guide for IDC, AI-compute, operator, and heavy-project names.
 
-## Source Priority
+## Evidence to request
 
-| Source | What to Pull | URL |
-| --- | --- | --- |
-| Exchange announcement | Signed contract, project revision, related-party disclosure, risk note | https://www.cninfo.com.cn/new/index |
-| China Mobile procurement | Bid winner, project package, procurement timeline | https://b2b.10086.cn/ |
-| China Telecom procurement | Bid outcome, package scope, timeline | https://caigou.chinatelecom.com.cn/ |
-| China Unicom procurement | Bid outcome, package scope, timeline | http://www.chinaunicombidding.cn/ |
-| Local government / park site | Land, approval, power support, commencement, completion | Use project所在地 official website |
+| Evidence | What to Pull |
+| --- | --- |
+| Exchange announcement | Signed contract, project revision, related-party disclosure, risk note |
+| China Mobile procurement | Bid winner, project package, procurement timeline |
+| China Telecom procurement | Bid outcome, package scope, timeline |
+| China Unicom procurement | Bid outcome, package scope, timeline |
+| Local government / park site | Land, approval, power support, commencement, completion |
+
+Every item carries venue, document name, document date and the accession or link the retrieval returned; the retrieval role decides where it comes from.
 
 ## What to Record
 

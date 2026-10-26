@@ -4,13 +4,15 @@ Use this overlay when project execution, power access, and asset ramp-up drive t
 
 ## Source Map
 
-| Source | What to Track | URL |
-| --- | --- | --- |
-| Exchange disclosures | Project revision, financing, impairment, guarantees, shareholder actions | https://www.cninfo.com.cn/new/index |
-| Operator procurement portals | Bid wins, package changes, procurement pace | https://b2b.10086.cn/ |
-| MIIT | Policy support or tighter efficiency requirements | https://www.miit.gov.cn/ |
-| National Energy Administration | Power and energy-policy change | https://www.nea.gov.cn/ |
-| Local government websites | Project commencement, completion, park support, energy approval | Use project所在地 official website |
+| Evidence | What to Track |
+| --- | --- |
+| Exchange disclosures | Project revision, financing, impairment, guarantees, shareholder actions |
+| Operator procurement portals | Bid wins, package changes, procurement pace |
+| MIIT | Policy support or tighter efficiency requirements |
+| National Energy Administration | Power and energy-policy change |
+| Local government websites | Project commencement, completion, park support, energy approval |
+
+Every item carries venue, document name, document date and the accession or link the retrieval returned; the retrieval role decides where it comes from.
 
 ## High-Signal Indicators
 

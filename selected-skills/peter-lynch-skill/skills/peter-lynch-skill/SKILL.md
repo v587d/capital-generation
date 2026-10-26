@@ -14,12 +14,19 @@ metadata:
 
 # Peter Lynch Research
 
+## Evidence request
+
+通过宿主数据契约请求：财务报表（三表与附注，注明期间与 as-of）、行情序列（复权口径与 as-of）、披露文件（公告、年报或招股书，带回出处与文档日期）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 One skill, two workflows. Answers either:
 
 - **Quick:** Is this company worth 2–5 hours of deeper research? (~450 words, SKIP / WATCHLIST / DEEP RESEARCH)
 - **Deep:** Full due-diligence report (up to 3000 words, attractiveness score X / 10 — how consistent and well-supported the thesis reads, not a forecast of performance)
 
-All data comes from **the host's own retrieval path** — no API keys, no bundled scripts, no user-provided PDFs. In a host that splits roles, gathering it is not this skill's job: write the exact brief (ticker or company, the fields needed, the as-of date, the source tier) and hand it to the host's retrieval channel, then work only from what comes back. Time-sensitive market data must be freshly gathered and dated. Every retrieved claim in the final report must be cited with a link.
+All data comes from **the host's own retrieval path** — no credentials, no bundled scripts, no user-provided PDFs. In a host that splits roles, gathering it is not this skill's job: write the exact brief (ticker or company, the fields needed, the as-of date, the source tier) and hand it to the host's retrieval channel, then work only from what comes back. Time-sensitive market data must be freshly gathered and dated. Every retrieved claim in the final report must be cited with a link.
 
 Use different source depth by workflow:
 
@@ -49,7 +56,7 @@ If neither a company nor ticker can be inferred from the request, ask one concis
 
 The source tiers in `references/10-workflow.md` (aggregator profile pages, SEC / regulator filings, annual reports) are US and overseas-listing conventions. In an A-share session the same analysis must be asked for in A-share terms instead — disclosure platforms, no Form 4 / 13F, no wash-sale rules — and that is decided by the host's retrieval channel, not by this skill.
 
-Do **not** ask the user for an annual report PDF or API keys.
+Do **not** ask the user for an annual report PDF or for credentials.
 
 ## Read the Parts
 

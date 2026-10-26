@@ -3,23 +3,17 @@
 Part 3 of 3 for `short-interest` — Analysis Framework; Input Formats; Output; Standard Signal Output; Thesis Invalidation
 See `SKILL.md` for what to read and when; this part is procedure, not routing.
 
-### 9. Data Sources
+### 9. Evidence to request
 
-**Short Interest Data**
-- **FINRA Short Interest Data**: finra.org/investors/short-sale-volume-data (official, free, twice-monthly)
-- **NYSE Short Interest Reports**: NYSE-listed stocks, semi-monthly
-- **NASDAQ Short Interest Reports**: NASDAQ-listed stocks, semi-monthly
-- **Shortvolume.com**: Free daily short volume data by ticker
+Ask the host data contract for the short-side evidence and say which reporting date each item belongs to:
 
-**Screeners and Analytics**
-- **Finviz**: Short float % in stock screener (sortable, free)
-- **Market Chameleon**: Short interest trend charts, borrow rate tracking
-- **Iborrowdesk.com**: Free near-real-time borrow rate data from Interactive Brokers and TD Ameritrade
+- **Settlement-dated short interest** — short interest, average daily volume and days-to-cover for each twice-monthly settlement date, with the exchange that published it
+- **Short volume** — daily short volume and total volume, if the host returns it; it is not the same measure as short interest and must not be substituted for it
+- **Borrow data** — borrow fee and lendable supply, with the timestamp and the venue that quoted it
+- **Float and share count** — the issuer's latest reported share count and float, since short-float percentages are computed against it
+- **Filings context** — a shelf or convert issuance that could explain a hedging-related short position
 
-**Premium Short Data**
-- **S3 Partners**: Professional-grade short analytics, real-time borrow rates, predictive short interest
-- **Interactive Brokers Stock Loan Availability**: Borrow rate and availability for account holders
-- **Bloomberg Terminal**: SRFD function for comprehensive short interest data
+Label a third-party screen or an estimated borrow fee as secondary. A settlement date that did not come back stays blank rather than being interpolated from the neighbouring dates.
 
 ## Input Formats
 
@@ -27,7 +21,7 @@ See `SKILL.md` for what to read and when; this part is procedure, not routing.
 ```
 User: /short-interest GME
 
-Claude retrieves current short float, DTC, borrow rate, and computes Squeeze Score
+The agent requests current short float, DTC and borrow rate through the host data contract, then computes the Squeeze Score
 ```
 
 ### Format 2: Squeeze Potential Scan

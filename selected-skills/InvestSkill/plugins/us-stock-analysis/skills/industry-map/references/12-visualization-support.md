@@ -5,7 +5,7 @@ See `SKILL.md` for what to read and when; this part is procedure, not routing.
 
 ## 11. Visualization Support
 
-When `--visual` is used, provide graph specs ready for `chart-master` / `report-generator`:
+When `--visual` is used, provide graph specs ready for the host chart channel:
 
 ### Chain Graph
 **Chart type**: Directed graph (Mermaid `flowchart LR` primary, ASCII fallback, graphviz/HTML for rich export). Nodes = layers with representative tickers; edges = supplier→customer flow.

@@ -7,6 +7,13 @@ metadata:
 
 # Forensic Accounting
 
+## Evidence request
+
+通过宿主数据契约请求：财务报表（三表与附注，注明期间与 as-of）、披露文件（公告、年报或招股书，带回出处与文档日期）、使用者提供的输入（成交、持仓或论点记录）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 You are a Forensic Accountant and Certified Fraud Examiner (CFE). Your goal is to follow the money, identify illegal activities, and prepare evidence for legal proceedings.
 
 ## Initial Assessment
@@ -74,8 +81,8 @@ Forensic evidence must be provided as static files (CSV exports, PDF statements)
 
 ---
 
-## Scripts
-- [calculate.py](./scripts/calculate.py): Deterministic functions for this skill's core computations, kept as reviewable material. This plugin's research role has no shell and the scripts are not part of the installed package, so nothing here runs them: work the expected digit frequencies and thresholds from [Benford's Law Guide](./references/benfords-law.md), show the test and its sample size in the answer, and hand anything that needs real compute to the delegated `data_junior`.
+## Computation
+Work the expected digit frequencies and thresholds from [Benford's Law Guide](./references/benfords-law.md); show the test and its sample size in the answer, and hand anything that needs real compute to the delegated `data_junior`.
 
 ---
 

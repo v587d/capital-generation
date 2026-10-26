@@ -17,11 +17,13 @@ Use this overlay when fixed assets, construction in progress, utilization, and f
 
 ## Main Sources
 
-| Source | What It Validates | URL |
-| --- | --- | --- |
-| Annual and interim reports | Fixed assets, CIP, debt, capex, utilization-related disclosures | https://www.cninfo.com.cn/new/index |
-| Financing filings | Funding path, project economics, maturity schedule | https://www.cninfo.com.cn/new/index |
-| Industry and policy sources | Capacity logic, regulatory constraints, regional resource access | Use relevant ministry or local official website |
+| Evidence | What It Validates |
+| --- | --- |
+| Annual and interim reports | Fixed assets, CIP, debt, capex, utilization-related disclosures |
+| Financing filings | Funding path, project economics, maturity schedule |
+| Industry and policy sources | Capacity logic, regulatory constraints, regional resource access |
+
+Every item carries venue, document name, document date and the accession or link the retrieval returned; the retrieval role decides where it comes from.
 
 ## Output Reminder
 

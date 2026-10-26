@@ -17,11 +17,13 @@ Use this overlay when a company's earnings depend heavily on contract wins, back
 
 ## Main Sources
 
-| Source | What It Validates | URL |
-| --- | --- | --- |
-| Exchange announcements | Signed contracts, revisions, cancellations, risk disclosures | https://www.cninfo.com.cn/new/index |
-| Customer procurement portals | Bid wins, package scope, project timing | Use customer official procurement portal |
-| Local government or official project websites | Commencement, approvals, completion, local support | Use relevant official website |
+| Evidence | What It Validates |
+| --- | --- |
+| Exchange announcements | Signed contracts, revisions, cancellations, risk disclosures |
+| Customer procurement portals | Bid wins, package scope, project timing |
+| Local government or official project websites | Commencement, approvals, completion, local support |
+
+Every item carries venue, document name, document date and the accession or link the retrieval returned; the retrieval role decides where it comes from.
 
 ## Output Reminder
 

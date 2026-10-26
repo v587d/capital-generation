@@ -10,7 +10,7 @@ See `SKILL.md` for what to read and when; this part is procedure, not routing.
 - **Unverifiable is not false.** The corrected copy must never read as if a `❓` claim were refuted. The honest output for a claim without a source is the claim, unchanged, with `[?]`.
 - **Fiscal calendars cause most false mismatches.** Establish the fiscal year end and the period each table covers before comparing anything.
 - **Do not fabricate a reference to fill a gap.** No accession number, page, or URL that was not actually seen. If the environment cannot retrieve, report the claim as blocked — do not fall back to memory.
-- **Pairs with**: `result-validator` (consumes the score), `learning-coach` (explains the ledger to a beginner), `10k-digest` and `financial-report-analyst` (produce well-cited inputs in the first place), `full-report` (run this on the composite before shipping it), `thesis-tracker` (verify the KPI values before recording them at a check).
+- **Pairs with**: `result-validator` (consumes the score), `learning-coach` (explains the ledger to a beginner), `10k-digest` and `financial-report-analyst` (produce well-cited inputs in the first place), `thesis-tracker` (verify the KPI values before recording them at a check); re-run this ledger on the composite before it goes into the final answer.
 
 ## Thesis Invalidation
 

@@ -123,3 +123,13 @@
   美股时段与盘前盘后、FINRA／Fidelity／Schwab 口径的集中度阈值、EURUSD 与 CFD／杠杆工具），
   **不声称适用 A 股**，也不得直接当作 A 股规则；它提供的是过程纪律而不是信号或收益承诺，
   所有金融主张须回到原始证据核验。本文件与本仓的收录判断不构成对上游观点的背书。
+
+## 2026-10 收敛：仓内只保留 catalog 正文
+
+本仓不再保存上游全量快照。除 catalog 命中的 13 颗正文、LICENSE 与本文件之外，以下内容按 2026-10 政策**从仓里删除**（不是仅从包里排除）；重新按上面所钉 commit 覆盖快照时按本节过滤。
+
+- **非 catalog skill（6 颗）**：`earnings-preview`、`earnings-trade-prep`、`etoro`、`portfolio-risk-review`、`post-trade-debrief`、`pre-trade-check`。
+- **上游仓库材料**：`.npmignore`。
+- **catalog 目录内的附属材料**：`macro-event-analysis` 与 `market-regime-analysis` 的 7 份服务商接口页（`references/providers/` 与 `references/data-providers.md`），随两颗收录前先删掉；其余 `references/` 是运行时正文。
+- **纯公式脚本（1 份）**：移到 `selected-skills/reference-algorithms/trading-skills/`，git-only、不随包、不执行。
+- 许可与署名不受影响：`LICENSE` 原件、所钉 commit 与作者信息仍在上面各节；公开许可只要求保留版权与许可声明。

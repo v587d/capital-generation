@@ -7,13 +7,13 @@ See `SKILL.md` for what to read and when; this part is procedure, not routing.
 
 Every lesson on the Learning track says *"here is the idea."* Every skill in the catalog says *"here is the number."* Nothing sits between them. A beginner who runs `stock-eval` gets a Piotroski score, an ROIC, a moat rating, and a BULLISH box — and has no way to know which of those actually drove the call, which range counts as good for *this* sector, or what they should now be able to say about the company in their own words.
 
-**This skill is that bridge.** It takes any InvestSkill output — a single-skill run, a `full-report`, a `bear-case`, a `portfolio-review` — and explains it the way a patient mentor would: one metric at a time, in plain words, with the good/bad range, the reason it matters for the decision, and the lesson or glossary entry that teaches it properly. Then it turns the reader from passive to active with a short ladder of Socratic questions and the one question every investor should be able to answer: *what would change your mind?*
+**This skill is that bridge.** It takes any InvestSkill output — a single-skill run, a composite final answer, a `bear-case`, a `portfolio-review` — and explains it the way a patient mentor would: one metric at a time, in plain words, with the good/bad range, the reason it matters for the decision, and the lesson or glossary entry that teaches it properly. Then it turns the reader from passive to active with a short ladder of Socratic questions and the one question every investor should be able to answer: *what would change your mind?*
 
 It closes the loop the project was built for: **run a skill → run the coach → answer its questions → re-run the skill with better inputs.**
 
 **What it is not.** It does not re-analyze, re-score, or second-guess the pasted output. The signal stays exactly as the original skill produced it. If the analysis looks wrong or unsupported, the coach says *why that matters and how to check it* — and points to `result-validator`, which is the skill built to audit an analysis. The coach teaches; the validator judges.
 
-Pairs with: every analysis skill (as input), `result-validator` (when the reader wants a verdict rather than a lesson), and the whole [Learning track](https://yennanliu.github.io/InvestSkill/learning.html).
+Pairs with: every analysis skill (as input), `result-validator` (when the reader wants a verdict rather than a lesson), and the Learning track's lesson set.
 
 ---
 
@@ -26,8 +26,10 @@ Pairs with: every analysis skill (as input), `result-validator` (when the reader
 
 Flags:
 - `--level beginner` (default) — no term is used before it is defined in one sentence; analogies allowed; at most one formula per card.
-- `--level intermediate` — assumes the [Foundations](https://yennanliu.github.io/InvestSkill/learning-foundations.html) and [Statements](https://yennanliu.github.io/InvestSkill/learning-statements.html) lessons; skips definitions of revenue, margin, EPS, P/E, free cash flow; spends the words on *interpretation* and sector context instead.
+- `--level intermediate` — assumes the Foundations and Statements lessons; skips definitions of revenue, margin, EPS, P/E, free cash flow; spends the words on *interpretation* and sector context instead.
 - `--lang zh-TW` — the whole output in Traditional Chinese; keep every metric's English name in brackets after the Chinese term the first time it appears, e.g. 自由現金流（Free Cash Flow, FCF）, so the reader can match it to the English analysis and glossary.
+
+When a card points at a lesson, name the lesson title and the track it belongs to rather than pasting a course link: the reader is studying in their own copy of the material, and a bare URL to a site this plugin does not ship only sends them looking for a page that may not match.
 
 ---
 
@@ -47,7 +49,7 @@ If the user pastes a question about a metric *without* an analysis ("what is ROI
 
 ## 3. Framework — Explain Mode
 
-Work top to bottom through the pasted analysis. Keep the reader's attention on the **three or four metrics that actually moved the signal**; list the rest briefly. A 600-line `full-report` does not need 600 lines of explanation.
+Work top to bottom through the pasted analysis. Keep the reader's attention on the **three or four metrics that actually moved the signal**; list the rest briefly. A 600-line composite answer does not need 600 lines of explanation.
 
 ### Phase 1 — Read the contract first
 

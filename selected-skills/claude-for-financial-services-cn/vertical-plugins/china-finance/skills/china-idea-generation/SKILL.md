@@ -11,7 +11,7 @@ description: Systematic stock screening and investment idea sourcing for A-share
 
 Systematically surface new **A股投资机会** through quantitative screens, thematic analysis, and pattern recognition.
 
-## Data Sources
+## Evidence request
 
 A screen is a set of conditions applied to numbers somebody else handed back, and this step retrieves none of them: the plugin has one retrieval entry — the main agent delegating to the role that owns structured data or web and disclosure material — and it holds no data-service key and runs no query from here.
 

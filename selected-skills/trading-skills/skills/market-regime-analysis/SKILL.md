@@ -39,18 +39,15 @@ Ask for observations about:
 
 If the user is vague, ask for the minimum evidence needed instead of forcing a fake label.
 
-Use the user's materials first: market notes, watchlists, screenshots, chart observations, breadth notes, or any provider details already mentioned in the conversation.
+Use the user's materials first: market notes, watchlists, screenshots, chart observations, breadth notes, or any market data already mentioned in the conversation.
 
-## If critical data is missing
+## Evidence request
 
-If the user already supplied enough evidence to classify the environment, do not fetch anything.
+If the user already supplied enough evidence to classify the environment, do not request anything more.
 
-If trend, volatility, breadth, or event context is still too thin:
+If trend, volatility, breadth, or event context is still too thin, request an evidence pack through the host data contract: the market or index, the timeframe, and the observations needed — recent price history, realized range or volatility, breadth or participation measures, leadership concentration, and the macro / earnings calendar for the window. Do not ask for a data vendor or credentials: the host decides where evidence comes from and returns it with provenance.
 
-- check whether the user already named a supported provider or already shared usable access details
-- if they already indicated `FMP`, `TradingEconomics`, or `Polygon`, use [references/providers/fmp.md](references/providers/fmp.md), [references/providers/tradingeconomics.md](references/providers/tradingeconomics.md), or [references/providers/polygon.md](references/providers/polygon.md) directly
-- otherwise consult [references/data-providers.md](references/data-providers.md) and ask which supported provider they want to use
-- once the missing context is gathered, continue the regime analysis and disclose the source used
+Use the user's materials first: market notes, watchlists, screenshots, chart observations. If a required field does not come back, name it and classify conservatively on what is present instead of filling the gap from memory.
 
 ## Analysis process
 

@@ -30,18 +30,19 @@ Provide the report in one of these ways:
 /financial-report-analyst GOOGL --compare-prior
 ```
 
-### Retrieving the filing — the keyless EDGAR path
+### Evidence request — the filing
 
-When the user names a ticker instead of pasting text, this skill still fetches nothing by itself. Get the primary document from SEC EDGAR (free, no API key) **through the host's retrieval path — delegate it in a role-split host** — and mark `Retrieval: delegated retrieval`:
+When the user names a ticker instead of pasting text, this skill still fetches nothing by itself. Ask the host data contract for the primary document and mark `Retrieval: delegated retrieval`:
 
-1. **Ticker → CIK:** `https://www.sec.gov/files/company_tickers.json` — match `ticker` (`BRK-B` for `BRK.B`), zero-pad `cik_str` to 10 digits.
-2. **Filings index:** `https://data.sec.gov/submissions/CIK##########.json` — in `filings.recent`, the arrays `form` · `filingDate` · `reportDate` · `accessionNumber` · `primaryDocument` line up by index. Pick the newest row whose `form` is the one asked for: `10-K` (annual; `20-F` for foreign private issuers), `10-Q` (quarterly; `6-K` for foreign issuers), `8-K` (earnings release is usually Exhibit 99.1 in the filing folder), `DEF 14A` (proxy).
-3. **Document:** `https://www.sec.gov/Archives/edgar/data/<CIK without leading zeros>/<accessionNumber without dashes>/<primaryDocument>` — the full filing as HTML. The folder's `<accessionNumber>-index.htm` lists every exhibit.
-4. **Statement facts (to cross-check Item 8):** `https://data.sec.gov/api/xbrl/companyfacts/CIK##########.json`.
+- **What to ask for** — the filing the analysis is about: form (`10-K` annual, `10-Q` quarterly, `8-K` for the results release, `DEF 14A` proxy; `20-F` / `6-K` for foreign private issuers), the fiscal period, the filing date, the accession number, and the sections to read.
+- **What comes back** — the document, the exhibit list when the release is an exhibit, and provenance: venue, document, date, accession or the link the retrieval returned.
+- **Cross-checks** — when tagged statement facts come back with the filing, use them to confirm the figures read from Item 8 and say which you used.
 
-Identify yourself with a `User-Agent` header (`Name email`) and stay under 10 requests per second. For `--compare-prior`, take the second-newest row of the same form. Cite accession number and filing date in the `Data & Sources` header.
+For `--compare-prior`, ask for the prior-period filing of the same form in the same request. Cite the accession number and filing date in the `Data & Sources` header. The retrieval role owns identifier lookup and document access; this skill never searches or downloads by itself.
 
-Only where the host has no retrieval path at all, ask the user to paste the sections and mark `Retrieval: pasted by user` — the repository's helper scripts are not part of this plugin and are never run from here. If neither is available, the figures stay missing: report the gap under the ⚠️ warning instead of lowering confidence on an estimate.
+Only where the host has no retrieval path at all, ask the user to paste the sections and mark `Retrieval: pasted by user`. If neither is available, the figures stay missing: report the gap under the ⚠️ warning instead of lowering confidence on an estimate.
+
+When the results release arrives as an exhibit rather than the filing itself, say so and name the exhibit in the citation; an 8-K exhibit and the 10-Q that follows it are different documents with different review levels, and a figure lifted from one cannot be attributed to the other. Read the sections in the order the request returned them, and quote the page or Item you are reading — a section summary that cannot be traced back to a page is not usable evidence for the ratios that follow, and it cannot be re-checked by anyone reading the answer later.
 
 ---
 

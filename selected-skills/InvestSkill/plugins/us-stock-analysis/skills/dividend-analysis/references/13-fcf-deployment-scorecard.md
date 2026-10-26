@@ -85,27 +85,19 @@ Score    Interpretation
 
 ## Data Sources
 
-**Primary Financials**
-- SEC filings (10-K / 10-Q): FCF, net income, dividends paid (cash flow statement), share repurchase disclosures
-- Company investor relations pages: dividend history, buyback program announcements, earnings call transcripts
+## Evidence to request
 
-**Dividend Research Platforms**
-- **Simply Safe Dividends**: Dividend Safety Scores, comprehensive dividend data (premium)
-- **Dividend.com**: Dividend yield, history, DRIP calculators
-- **DRIP Investing Resource Center (dripinvesting.org)**: Aristocrats/Kings lists
-- **Seeking Alpha Dividends**: Analyst commentary on dividend sustainability
-- **S&P Global**: Official Dividend Aristocrats and Kings lists
+Ask the host data contract for the evidence behind the scorecard, not for a vendor list:
 
-**Capital Allocation Research**
-- **Compustat / FactSet**: Multi-year buyback and M&A data
-- **Bloomberg**: Credit ratings, bond spreads, covenant disclosures
-- **Morningstar**: Capital allocation ratings, M&A track record, stewardship grade
-- **GuruFocus**: FCF analysis, buyback history, insider ownership
+- **Financial statements** — free cash flow, net income, dividends paid, and share repurchases, each with the period and the accounting basis it uses
+- **Issuer disclosures** — dividend history, a buyback programme announcement, and the earnings-call material that explains a change in payout policy
+- **Payout classification** — whether the name appears on a published dividend-growth index, and which index and vintage that claim comes from
+- **Capital-allocation evidence** — credit ratings, bond spreads, covenant terms, and buyback / M&A history, each with its as-of date
+- **Screening thresholds** — dividend yield, payout ratio and buyback yield computed from the returned statements, not copied from a third-party screen
 
-**Screening Tools**
-- Finviz screener: Filter by dividend yield, payout ratio, buyback yield
-- Morningstar: Capital Allocation rating (Exemplary / Standard / Poor)
-- GuruFocus: Capital allocation and management quality scores
+If a figure exists only on an analyst commentary page, label it secondary and keep it out of the primary ratios.
+
+Two habits keep the scorecard honest. First, compute every ratio from the same statement set and the same period; a payout ratio built from one year's dividend and another year's FCF is not a ratio. Second, when the company funds the dividend with debt or asset sales, say so next to the coverage figure — the scorecard measures how the cash was deployed, not just whether the payment arrived.
 
 ## Input Formats
 

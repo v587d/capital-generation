@@ -5,6 +5,13 @@ description: Break down an A-share company's business model into segments, custo
 
 # Business Decomposition Order Quality
 
+## Evidence request
+
+通过宿主数据契约请求：财务报表（三表与附注，注明期间与 as-of）、披露文件（公告、年报或招股书，带回出处与文档日期）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 Dissect the company's growth engine and test the quality of its orders.
 
 ## Non-Negotiable Rules

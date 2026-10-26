@@ -37,11 +37,11 @@ Your report MUST be clean and consistent for **GitHub-Flavored Markdown (GFM)** 
 - Every company description, financial number, valuation metric, market data point, management claim, industry claim, competitor claim, ownership claim, or news/update claim must include a linked source.
 
     - Source format:
-        - **Annual report / filing:** `source: [Annual Report (FY2024), section](https://investor.example.com/annual-report-2024)`
+        - **Annual report / filing:** `source: [Annual Report (FY2024), section](link returned by retrieval)`
 
-        - **Regulatory filing:** `source: [SEC 10-K (FY2024)](https://www.sec.gov/...)`
+        - **Regulatory filing:** `source: [Annual report 10-K (FY2024), Item 8](link returned by retrieval)`
 
-        - **Market data / web:** `source: [London Stock Exchange quote page](https://www.londonstockexchange.com/stock/...)`
+        - **Market data / web:** `source: [Exchange quote page, 2026-06-30](link returned by retrieval)`
 
     - If multiple sources are used, list multiple linked sources separated by `;`.
     - Sources MUST be placed on a new line directly below the bullet or paragraph. Do NOT place sources inline at the end of a sentence.
@@ -93,10 +93,10 @@ For standard metrics (EPS, revenue, P/E, debt ratios): read and use directly whe
 
 ### subsection name
 - Text of bulletpoint 1
-  source: [Annual Report (FY2024), Financial Statements](https://investor.example.com/ar2024); [SEC filing](https://www.sec.gov/...)
+  source: [Annual Report (FY2024), Financial Statements](link returned by retrieval)
 
 - Text of bulletpoint 2
-  source: [Financial data page](https://example.com/financial-data)
+  source: [Financial data page, 2026-06-30](link returned by retrieval)
 ...
 
 </example_output>

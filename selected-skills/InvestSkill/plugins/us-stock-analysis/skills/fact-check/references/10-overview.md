@@ -53,7 +53,7 @@ Read the report once and list **every** checkable statement — not just the hea
 | 4 | "CFO bought $1.2M of stock in May" | $1.2M · 2026-05 | fact (Form 4) | — | §5 Insider |
 | 5 | "top customer is 18% of revenue" | 18% · FY2026 | reported (10-K risk factors) | — | §1 |
 
-**Claim types** decide which source can verify them: *reported* (a figure stated in a filing or release), *derived* (computed from reported figures — must be recomputed, not just matched), *market* (price, market cap, yield — needs an as-of date), *estimate* (consensus, guidance — needs the source and date of the estimate), *macro* (rates, CPI — FRED / BLS series and vintage), *fact* (an event: a filing, a transaction, an appointment), *qualitative* (a characterization — "dominant", "improving" — checked for whether the cited evidence supports it, never marked verified on its own).
+**Claim types** decide which source can verify them: *reported* (a figure stated in a filing or release), *derived* (computed from reported figures — must be recomputed, not just matched), *market* (price, market cap, yield — needs an as-of date), *estimate* (consensus, guidance — needs the source and date of the estimate), *macro* (rates, CPI — official statistics series and their vintage), *fact* (an event: a filing, a transaction, an appointment), *qualitative* (a characterization — "dominant", "improving" — checked for whether the cited evidence supports it, never marked verified on its own).
 
 Mark the **signal-driving** claims. They carry more weight in the score and a mismatch on one of them changes the report's standing.
 

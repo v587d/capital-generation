@@ -5,6 +5,13 @@ description: Convert a source-backed A-share research view into valuation scenar
 
 # Valuation Investment Strategy
 
+## Evidence request
+
+通过宿主数据契约请求：财务报表（三表与附注，注明期间与 as-of）、行情序列（复权口径与 as-of）、同业可比数据（口径与期间一致）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 Build scenario-based valuation only after the factual base is complete.
 
 ## Non-Negotiable Rules

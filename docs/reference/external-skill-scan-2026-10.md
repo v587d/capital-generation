@@ -1,5 +1,11 @@
 # 社区金融 Skill 候选扫描（2026-10）
 
+> **2026-10 政策更新：** 本文记录的是接入当轮的判断，不是现行仓内形态。此后仓内收敛为
+> "只留 catalog 正文 + `LICENSE` + `UPSTREAM.md`"：被排除的非 catalog skill、脚本、取数服务端与仓库材料
+> 已从仓里删除（逐份清单见各快照的 `UPSTREAM.md`），纯公式脚本移到 `selected-skills/reference-algorithms/`
+> （git-only、不执行）。本文里"仍留在快照""不进发布包"一类措辞按此理解；取数一律走角色系统提示里的
+> `capital:data-contract`，skill 只声明 `## Evidence request`。
+
 **扫描日期：**2026-10-08  
 **目的：**寻找可适配 Capital Generation 的外部能力，不代表采用、背书或运行这些项目。  
 **审查范围：**公开仓库 README、代表性 `SKILL.md`、引用/方法文件、许可证和 GitHub API 元数据。没有 clone 或执行任何外部脚本，也没有核实其实际金融结论。

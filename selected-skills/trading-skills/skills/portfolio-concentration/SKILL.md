@@ -5,6 +5,13 @@ description: Evaluate whether a portfolio, account, or planned position is too d
 
 # Portfolio Concentration
 
+## Evidence request
+
+通过宿主数据契约请求：持仓与成本（使用者提供）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 Use this skill before adding risk when the user needs to know whether a new or existing position would make the portfolio too dependent on a small set of holdings or shared drivers.
 
 This skill will not:

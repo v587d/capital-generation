@@ -5,6 +5,13 @@ description: Use when the user needs a conservative position size from account e
 
 # Position Sizing
 
+## Evidence request
+
+通过宿主数据契约请求：持仓与成本（使用者提供）、行情序列（复权口径与 as-of）、使用者提供的输入（成交、持仓或论点记录）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 Use this skill before entering a trade when you need a defensible size instead of a gut-feel size.
 
 This skill will not:

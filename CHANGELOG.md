@@ -7,6 +7,37 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**、2.9.0 的选择器收敛与质检前置——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [2.11.0] - 2026-10-26
+
+精选 Skills 收敛为「运行时只带 Markdown」：取数方式从 70 颗正文里移出，改由角色系统提示的
+`capital:data-contract` 一处说明；非 catalog skill、脚本、取数服务端与上游仓库材料从仓库删除，
+纯公式脚本移到 `selected-skills/reference-algorithms/`（git-only、不随包、不执行）。
+
+### Changed
+
+- **新增角色系统提示 `capital:data-contract`**：需要数据时向宿主的委派通道提请求（结构化数据 →
+  `data_collector`，网页与披露文件 → `web_retriever`，已有 Dataset 的计算 → `data_junior`），
+  请求写清标的、证据类型、字段或章节、期间与 as-of；返回必须带出处与缺口，缺字段就点名并停止。
+- **70 颗精选 Skill 只声明 `## Evidence request`**：正文不再写服务商、URL、密钥、下载步骤或脚本命令。
+  `macro-event-analysis` 与 `market-regime-analysis` 清掉服务商接口页后进入可选清单（68 → 70）。
+- **参考实现单独存放**：43 份 `calculate.py` 与 trading 的共享计算模块移到
+  `selected-skills/reference-algorithms/`，文件头标明来源与"不执行"，并新增静态闸门禁止 I/O 与网络。
+
+### Removed
+
+- **非 catalog skill**：注册根下的未收录条目与 claude 快照的未登记条线（含四份 agent 角色副本）全部出仓，
+  发布包里不再出现"能勾但没用"的正文。
+- **执行面与仓库材料**：MCP 取数服务端、fetch 脚本、PPT 生成器、`install.sh`、CI/站点、评测夹具、
+  `buffett` 的 `framework.py` 与 `openai.yaml`，以及各快照的 README/CHANGELOG 等上游文档。
+- **`.npmignore` 机制**：非运行内容不再是"挡在包外"，而是从仓里删除；`test/packaging.test.mjs`
+  改为发布清单白名单，出现白名单之外的文件即红。
+
+### Migration
+
+- 升级后请新开会话：角色系统提示多了一节 `capital:data-contract`，旧会话不会重读。
+- 已勾选的技能若属于被删除的非 catalog 项，设置里会自然消失；catalog 只列 70 颗可选方法，
+  原有 68 颗的勾选状态不受影响。
+
 ## [2.10.2] - 2026-10-25
 
 精选 Skills 设置卡片完成一轮样式与交互改版；README 补充独立 `capital` profile 的安装与启动建议。

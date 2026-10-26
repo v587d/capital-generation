@@ -5,6 +5,13 @@ description: US tax mechanics for a position or portfolio — short- vs. long-te
 
 # Tax Lens — What You Actually Keep
 
+## Evidence request
+
+通过宿主数据契约请求：持仓与成本（使用者提供）、使用者提供的输入（成交、持仓或论点记录）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 > ⚠️ **This is not tax advice.** Tax law changes, thresholds are indexed, and the right answer depends on facts this skill cannot see (filing status, state, residency, other income, treaty position). Every output of this skill must open **and** close with: *"Educational illustration of how the rules generally work — confirm with a qualified tax professional before acting."* If the user asks for a filing position, a specific dollar liability to rely on, or anything about a jurisdiction outside the US mechanics described here, say so and stop.
 
 ## ⚠️ Data Verification — Do This Before Any Analysis
@@ -24,12 +31,12 @@ Never substitute a remembered value for a retrieved one. Getting the number is t
 
 ## 📋 Data & Sources Header — Open Every Output With It
 
-Immediately after the not-tax-advice banner (which is always line one), the output carries this provenance block, filled in — never left as placeholders. It is the standard documented on the [Data & Accuracy](https://yennanliu.github.io/InvestSkill/data-and-accuracy.html) page and the first thing `result-validator` looks for:
+Immediately after the not-tax-advice banner (which is always line one), the output carries this provenance block, filled in — never left as placeholders. It is the standard `result-validator` looks for first:
 
 ```
 Data & Sources
   As of:      <date the figures represent, e.g. 2026-06-30>
-  Source:     <primary docs — SEC EDGAR 10-K/10-Q, company IR, FRED, exchange data …>
+  Source:     <venue, document, date — as returned by retrieval>
   Retrieval:  <delegated retrieval | web/tool retrieval | pasted by user>
   Confidence: <HIGH | MEDIUM | LOW>
 ```

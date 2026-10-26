@@ -35,8 +35,8 @@ and appends the log row "2026-08-29 · hold, no add · $131 · margin breach und
 - **Never write the thesis for the user.** Sharpen, question, and structure — but the conviction has to be theirs or the file will not be believed when it says BROKEN.
 - **Hold the KPI count at five.** More KPIs means more noise and a guaranteed breach every quarter; the thesis becomes permanently WEAKENED and the status stops carrying information.
 - **A WEAKENED status blocks adding, not holding.** Pair with `position-ladder`, whose thesis-break gate is meant to read this status.
-- **Closed files are inputs to `trade-postmortem`.** Do not delete them.
-- File paths and the `output/` convention follow `full-report`. Where the environment cannot write, print the file.
+- **Closed files are inputs to `post-trade-review`.** Do not delete them.
+- Keep the `output/` convention described above. Where the environment cannot write, print the file.
 
 ## Thesis Invalidation
 

@@ -11,7 +11,7 @@ description: Institutional-quality equity research initiation reports for A-shar
 
 Create institutional-quality **A股首次覆盖研究报告**, following Chinese sell-side research standards.
 
-## Data Sources
+## Evidence request
 
 An initiation report is assembled from material this step does not fetch. The plugin has one retrieval entry — the main agent delegating to the role that owns structured data or disclosure and web material — and it holds no data-service key and issues no query from here.
 
@@ -91,7 +91,7 @@ Build a financial model (refer to `china-3-statement-model` skill):
    - CNY denominated
 
 2. **Comparable companies** (refer to `china-comps` skill)
-   - Peer set from same 东方财富 industry
+   - Peer set from the industry classification the host returned
    - PE, PB, PS, EV/EBITDA multiples
    - Regression analysis if >5 peers
 

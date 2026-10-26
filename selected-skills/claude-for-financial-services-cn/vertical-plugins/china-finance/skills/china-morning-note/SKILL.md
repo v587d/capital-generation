@@ -11,7 +11,7 @@ description: Daily morning research note for A-share markets. Summarizes overnig
 
 Draft concise **A股晨会纪要/每日策略**, summarizing overnight developments and pre-market sentiment for the Chinese equity market. Designed for the typical Chinese sell-side 晨会 format (typically 7:00-8:30 AM before market open).
 
-## Data Sources
+## Evidence request
 
 A morning note is assembled before the open from material this step does not fetch: the plugin has one retrieval entry — the main agent delegating it to the role that owns market data or web and disclosure material — and this note holds no data-service key and issues no query of its own.
 

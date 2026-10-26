@@ -30,7 +30,7 @@ On every update:
 An INSUFFICIENT EVIDENCE status does not change the file's last confirmed status line; it is recorded in the decision log (`checked — insufficient evidence — <KPIs missing>`) and the next-check date is moved to when the data will exist (usually the next filing).
 
 5. Name **the specific line that changed** — the KPI, its old value, its new value, and the threshold. A status without a line is an opinion.
-6. Append a **decision log** row. The log records what the user *did* and *why*, priced and dated, and names the skill that informed it. It is the raw material for `trade-postmortem`.
+6. Append a **decision log** row. The log records what the user *did* and *why*, priced and dated, and names the skill that informed it. It is the raw material for `post-trade-review`.
 
 **Status is not a signal.** WEAKENED does not mean sell; it means the next check moves up and the position should not be added to. BROKEN means the reason for owning it is gone — what to do about that is a `position-ladder` / tax question, but *adding* is off the table. INSUFFICIENT EVIDENCE means the honest answer is "I don't know yet" — treat it like WEAKENED for position management (no adding) until the data arrives.
 

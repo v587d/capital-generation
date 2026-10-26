@@ -41,18 +41,15 @@ Helpful but optional:
 - specific holdings or watchlist names
 - events the user already knows are important
 
-Use the user's materials first: pasted event lists, screenshots, platform notes, transcripts, watchlists, or provider details already mentioned in the conversation.
+Use the user's materials first: pasted event lists, screenshots, platform notes, transcripts, watchlists, or calendar details already mentioned in the conversation.
 
-## If critical data is missing
+## Evidence request
 
-If the user already gave enough event information to analyze, do not fetch anything.
+If the user already gave enough event information to analyze, do not request anything more.
 
-If the timing or event slate is still incomplete:
+If the timing or event slate is still incomplete, request an evidence pack through the host data contract: the market or exposure, the requested window, the countries / central banks / releases that matter, and the fields needed — event name, scheduled time in the user's timezone, prior and consensus values where published, and the source venue recorded on each row. Do not ask for a data vendor or credentials: the host decides where evidence comes from and returns it with provenance.
 
-- check whether the conversation already points to a supported provider or includes usable access details
-- if the user already indicated `FMP` or `TradingEconomics`, use [references/providers/fmp.md](references/providers/fmp.md) or [references/providers/tradingeconomics.md](references/providers/tradingeconomics.md) directly
-- otherwise consult [references/data-providers.md](references/data-providers.md) and ask which supported provider they want to use
-- once the missing event details are gathered, continue the analysis and disclose the source used
+When the missing event details arrive, continue the analysis and disclose the source recorded on each row. If a required field does not come back, name it and leave that part of the slate empty instead of estimating it.
 
 ## Analysis process
 
@@ -107,7 +104,7 @@ Always return:
 - the main transmission channels to watch
 - timing notes, including clustered or overnight risk
 - a short preparation brief: what to monitor, what to avoid assuming, and where caution is warranted
-- explicit source, freshness, and caveats when provider-based data is used
+- explicit source, freshness, and caveats when retrieved data is used
 
 ## Best practices
 

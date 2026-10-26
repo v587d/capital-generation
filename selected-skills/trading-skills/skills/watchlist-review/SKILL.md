@@ -5,6 +5,13 @@ description: Review a watchlist and rank which names deserve active attention, b
 
 # Watchlist Review
 
+## Evidence request
+
+通过宿主数据契约请求：持仓与成本（使用者提供）、行情序列（复权口径与 as-of）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 Use this skill when the user already has a list of names, sectors, or themes and needs to narrow it into a smaller set of names worth preparing for, not just collecting.
 
 This skill will not:

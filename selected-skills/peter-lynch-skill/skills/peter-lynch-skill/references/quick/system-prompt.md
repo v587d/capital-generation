@@ -31,7 +31,7 @@ Your report MUST be clean and consistent for **GitHub-Flavored Markdown (GFM)** 
 
 - Every company description, financial number, valuation metric, market data point, management claim, industry claim, competitor claim, ownership claim, or news/update claim must include a linked source.
 - Place source lines directly below the bullet or paragraph they support.
-- Use this exact format: `source: [Source name](https://...)`
+- Use this exact format: `source: [Source name as returned](link returned by retrieval)`
 - If one bullet uses multiple sources, list them on the same source line separated by semicolons.
 - Do not cite sources inline at the end of sentences.
 - Do not create a detached source list as a substitute for claim-level source lines.

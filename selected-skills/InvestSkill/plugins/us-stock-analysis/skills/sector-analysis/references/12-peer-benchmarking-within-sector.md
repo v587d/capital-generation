@@ -12,7 +12,7 @@ When analyzing a specific stock, compare it against its sector median to identif
 ```
 Stock: [TICKER] — [Company Name]
 Sector: [GICS Sector]
-Comparison Date: [Date] | Source: [FactSet / Bloomberg / Company Filings]
+Comparison Date: [Date] | Source: [venue and document as returned by retrieval]
 
 DIMENSION              STOCK VALUE    SECTOR MEDIAN    PREMIUM / DISCOUNT    SCORE (1-5)
 ─────────────────────────────────────────────────────────────────────────────────────────

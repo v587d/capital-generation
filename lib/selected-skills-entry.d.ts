@@ -1,7 +1,7 @@
 /**
- * `tools/selected-skills` row: role-scoped selected-skill catalog plus its role prompt section.
- * The row is mounted once per Capital preset (`config.role`) and registers into that Agent's
- * own scope only; it never writes to the preset standing scope or the host scope.
+ * `tools/selected-skills` row: role-scoped selected-skill catalog, the `capital:data-contract`
+ * section every skill-loading role needs, and the selected-skill brief. Mounted once per Capital
+ * preset (`config.role`) and registers into that Agent's own scope only.
  */
 import type { Context } from '@deepseek-ai/cordis';
 import { type SelectedSkillRole } from './agents/selected-skills-provider.js';

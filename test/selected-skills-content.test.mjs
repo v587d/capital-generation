@@ -48,12 +48,19 @@ const FORBIDDEN = [
   [/\b(?:use|run)\s+`?scripts\//i, '把取数或计算交给 `scripts/` 里的脚本（第八颗的主措辞是 `Use \`scripts/stock_tools.py\` via \`StockTools\``）：本插件的分析角色没有 shell（docs/dev/bash-gate.md §1.6），根角色也没有。第 10 条只认 `node|bash scripts/`，这一形从来没进过表。改成点名要哪个字段、交给谁算'],
   [/\bcollect-data\b/, '指向上游的自建采集层（那句"所有 DB 和 API 数据采集必须通过 collect-data 完成，禁止绕过"）：本插件的取数入口只有委派 data_collector / web_retriever 一个，自建的第二条通道与"原始 rows 永不出工具层"直接冲突（§1.1、§8.6 第 1 条）'],
   [/五文件|三地沉淀/, '把结论落成一包文件（上游的 `README.md / 深度研究.md / 财务数据.md / 研报索引.md / 跟踪框架.md` 五文件包，以及"三地沉淀"里往个人知识库同步那一地）：报告交付链路 2026-09-17 已整条删除且禁止恢复（AGENTS.md §7），结论、证据、来源与局限一律写在最终答复里'],
+  // Ninth snapshot (2026-10 policy): the runtime tree carries no acquisition recipe at all.
+  // These shapes survived the first eight passes as "provenance", "bibliography" or "examples";
+  // the data contract now lives in the role prompt, so no skill body needs a host, a header or a script.
+  [/\bUser-Agent\b/, '正文交代请求头（`User-Agent` 一类）：那是检索角色的实现细节，skill 只写要哪些字段、as-of 哪天（契约见 `capital:data-contract`）'],
+  [/\brequests? per second\b/i, '正文写速率限制：限流是取数通道自己的事，skill 不承担也不复述'],
+  [/\bpython3?\s+(?:-m\b|(?:\S*\/)?\S+\.py\b)/, '正文给出可执行的 python 命令（`python3 scripts/x.py` 一类）：运行时树里没有脚本，角色也没有 shell；公式写进 references，算力交给 `data_junior`'],
+  [/\b(?:node|bash|sh)\s+(?:\S*\/)?\S+\.(?:js|mjs|cjs|sh)\b/, '正文给出可执行的脚本命令：脚本已从仓里删除，取数一律委派（docs/dev/selected-skills.md §8.6）'],
+  [/https?:\/\/(?:www\.)?(?:sec\.gov|data\.sec\.gov|cninfo\.com\.cn|b2b\.10086\.cn|caigou\.chinatelecom\.com\.cn|miit\.gov\.cn|stats\.gov\.cn|financialmodelingprep\.com|polygon\.io|tradingeconomics\.com|eastmoney\.com|10jqka\.com\.cn)\b/i, '正文写死取数地址：披露场所可以写在出处行里，取数地址不进正文——那是检索角色的事'],
+  [/\b(?:Bloomberg|FactSet|Seeking Alpha|AlphaSense|Yahoo Finance|MarketWatch|Macrotrends|StockAnalysis|GuruFocus|CompaniesMarketCap|TradingEconomics|Polygon|OpenInsider|Finviz|WhaleWisdom|Dataroma|S3 Partners)\b/, '正文点名外部数据服务商：本插件不选服务商，skill 只声明要什么证据；缺字段就点名并停止该字段（§8.6 第 1、2 条）'],
 ]
 
 // A trigger that also requires a fallback sentence in the same file.
-const NEEDS_FALLBACK = [
-  [/python3 scripts\//, /skip the router/, '脚本路由器指令必须配一句"没有 shell 时直接读 references/ 对应文件"，否则根角色会撞死在一条跑不通的指令上'],
-]
+// (The router fallback was retired with the router itself: file-level command shapes are now banned outright.)
 
 const skillDocs = (dir) => readdirSync(dir, { withFileTypes: true })
   .flatMap((item) => item.isDirectory() ? skillDocs(join(dir, item.name)) : [join(dir, item.name)])
@@ -222,10 +229,29 @@ test('内容闸门：正文不许要求 Agent 自行取数、回填记忆或指�
           `${where(skill, file)} 里还有「${[...new Set(hits)].join('、')}」——${why}。`
           + `（快照正文可以改，但必须逐条记进该快照的 UPSTREAM.md，见 docs/dev/selected-skills.md §8.6）`)
       }
-      for (const [trigger, fallback, why] of NEEDS_FALLBACK) {
-        if (trigger.test(text)) {
-          assert.ok(fallback.test(text), `${where(skill, file)}：${why}`)
-        }
+    }
+  }
+})
+
+test('内容闸门：每颗 catalog skill 都声明证据请求，取数方式不在正文里', () => {
+  for (const { entry, path } of skills) {
+    const text = readFileSync(path, 'utf8')
+    const match = text.match(/^## Evidence request\s*\n+([^\n]+)/m)
+    assert.ok(match,
+      `${entry.name}/SKILL.md 缺 ## Evidence request：skill 只声明要什么证据，取数方式住系统提示的 capital:data-contract`)
+    assert.ok(match[1].trim().length >= 8, `${entry.name} 的 Evidence request 是空的`)
+  }
+})
+
+test('内容闸门：已删除的 skill 名字不许再被正文指挥', () => {
+  const REMOVED = ['full-report', 'chart-master', 'report-generator', 'trade-postmortem', 'research-bundle', 'china-market-data', 'china-skill-creator']
+  for (const skill of skills) {
+    for (const file of skill.files) {
+      const text = readFileSync(file, 'utf8')
+      for (const name of REMOVED) {
+        const hit = text.match(new RegExp('(?:`|/)' + name + '\\b'))
+        assert.equal(hit, null,
+          `${where(skill, file)} 还点名了已删除的 ${name}：改成宿主交付通道或 catalog 里已有的方法（docs/dev/selected-skills.md §8.6）`)
       }
     }
   }
@@ -254,5 +280,46 @@ test('内容闸门：第六颗快照里被改写的正文必须各带一行 Apac
       assert.match(readFileSync(file, 'utf8'), /^> 本文件相对上游 `d7585ca` 快照做过合规改写/m,
         `${where(skill, file)} 缺 §4(b) 的改动声明行（一级标题前那一句可见声明，指回快照根的 UPSTREAM.md）`)
     }
+  }
+})
+
+test('内容闸门：A 股共享正文同样受约束（六颗 catalog 正文直接链接它）', () => {
+  // `skills/shared/` is not a skill directory, so the catalog-derived scan above never reaches it;
+  // the 2026-10 source registry lived there with a Tier 1/2/3 URL ladder until this gate existed.
+  const sharedDir = join(ROOT, 'selected-skills/china-stock-research-skills/skills/shared')
+  const files = skillDocs(sharedDir)
+  assert.ok(files.length >= 10, `shared 只有 ${files.length} 份正文，这道闸门接近空断言`)
+  for (const file of files) {
+    const text = readFileSync(file, 'utf8')
+    for (const [pattern, why] of FORBIDDEN) {
+      const hits = [...text.matchAll(new RegExp(pattern.source, 'gi'))].map((m) => m[0])
+      assert.deepEqual(hits, [],
+        `china-stock-research-skills/skills/shared/${basename(file)} 里还有「${[...new Set(hits)].join('、')}」——${why}`)
+    }
+  }
+})
+
+test('内容闸门：URL 只住在 Sources / References 里，不回到取数指令', () => {
+  // Provenance and bibliography links are legitimate; a URL on an instruction line is the old
+  // "go fetch this" shape. Track the enclosing heading so the distinction is structural.
+  const check = (label, text) => {
+    let heading = ''
+    const lines = text.split('\n')
+    for (const [index, line] of lines.entries()) {
+      const matched = line.match(/^#{1,6}\s+(.*)/)
+      if (matched) heading = matched[1]
+      if (!/https?:\/\//.test(line)) continue
+      const inReferences = /source|reference|来源|参考/i.test(heading)
+      const attribution = line.trim().startsWith('> [')
+      assert.ok(inReferences || attribution,
+        `${label}:${index + 1} 的 URL 不在 Sources / References 段里（当前段「${heading || '（无标题）'}」）：`
+        + '正文只声明要什么证据，取数地址不进指令行（docs/dev/selected-skills.md §8.6 第 1 条）')
+    }
+  }
+  for (const skill of skills) {
+    for (const file of skill.files) check(where(skill, file), readFileSync(file, 'utf8'))
+  }
+  for (const file of skillDocs(join(ROOT, 'selected-skills/china-stock-research-skills/skills/shared'))) {
+    check(`china-stock-research-skills/skills/shared/${basename(file)}`, readFileSync(file, 'utf8'))
   }
 })

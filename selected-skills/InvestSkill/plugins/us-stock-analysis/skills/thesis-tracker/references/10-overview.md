@@ -22,7 +22,7 @@ It fills the gap between Playbook steps 1 (write the thesis), 9 (monitor), and 1
 | **Open** | `thesis-tracker NVDA` (+ pasted analyses, or none) | Interview the user, draft the thesis file, save it to `output/thesis/NVDA.md` |
 | **Update** | `thesis-tracker NVDA --update` (+ current data or a fresh analysis) | Re-read the saved file, refresh every KPI, re-test every trigger, return INTACT / WEAKENED / BROKEN (or INSUFFICIENT EVIDENCE), append to the decision log |
 | **Review** | `thesis-tracker --review` (no ticker) | Read every file in `output/thesis/`, list status and next-check date per ticker, flag anything overdue or sitting at INSUFFICIENT EVIDENCE |
-| **Close** | `thesis-tracker NVDA --close "sold — trigger 2 fired"` | Mark the thesis closed with the exit reason and final P&L; keep the file for `trade-postmortem` |
+| **Close** | `thesis-tracker NVDA --close "sold — trigger 2 fired"` | Mark the thesis closed with the exit reason and final P&L; keep the file for `post-trade-review` |
 
 If the environment cannot write files, output the complete thesis file as a fenced block and tell the user to save it at the stated path — the *contract* matters, not the storage.
 

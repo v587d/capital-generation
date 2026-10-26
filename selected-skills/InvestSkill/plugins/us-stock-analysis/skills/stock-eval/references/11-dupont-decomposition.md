@@ -54,7 +54,7 @@ ROE = Tax Burden × Interest Burden × EBIT Margin × Asset Turnover × Equity M
 
 ### Visualization Data Tables
 
-When a visual or report output is needed, populate these tables for chart generation (compatible with `/us-stock-analysis:report-generator`):
+When a visual output is needed, populate these tables for chart generation (the host chart channel renders them; this plugin exports no report):
 
 **Revenue & Earnings Growth**
 ```

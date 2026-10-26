@@ -11,7 +11,7 @@ description: Post-earnings quarterly update reports for A-share companies under 
 
 Create professional **A股季度/年度业绩点评报告**, analyzing results for companies already under coverage. Follow Chinese sell-side research standards (中金、中信、华泰 format).
 
-## Data Sources
+## Evidence request
 
 Everything listed below is a **brief to hand to the host's retrieval path**, not a step this report performs. This plugin has exactly one way to obtain data — the main agent delegates it — and from here it calls no data interface and holds no key.
 

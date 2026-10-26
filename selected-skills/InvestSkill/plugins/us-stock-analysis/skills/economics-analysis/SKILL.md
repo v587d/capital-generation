@@ -5,11 +5,18 @@ description: Analyze US economic indicators and their impact on markets
 
 # US Economics Analysis
 
+## Evidence request
+
+通过宿主数据契约请求：宏观序列（数值、期间与发布日期）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 ## ⚠️ Data Verification — Do This Before Any Analysis
 
 Before running any analysis, retrieve the latest release of every indicator you use:
 
-1. **Fetch current readings** — get the latest value and release date of each indicator (FRED, BLS, BEA, ISM, the Fed) through the host's own data path; delegate the request in a role-split host. Never assume a reading from training data; indicators are revised and re-released on a schedule.
+1. **Fetch current readings** — get the latest value and release date of each indicator (policy rate, inflation, employment, activity and sentiment releases) through the host's own data path; delegate the request in a role-split host. Never assume a reading from training data; indicators are revised and re-released on a schedule.
 2. **Confirm key figures** — the policy rate, the 2s10s spread, the latest CPI/PCE, payrolls and unemployment, and PMI, each with its release date.
 3. **State your data source** — fill in the `Data & Sources` header (next section) so the origin, as-of date, retrieval path, and confidence of every figure are explicit at the top of the output.
 4. **Stop on missing data** — if a figure cannot be retrieved through the host's data path, name what is missing and stop; the analysis does not run on remembered values:
@@ -22,12 +29,12 @@ Never substitute a remembered value for a retrieved one. Getting the print is th
 
 ## 📋 Data & Sources Header — Open Every Output With It
 
-The first thing in the output is this provenance block, filled in — never left as placeholders. It is the standard documented on the [Data & Accuracy](https://yennanliu.github.io/InvestSkill/data-and-accuracy.html) page and the first thing `result-validator` looks for:
+The first thing in the output is this provenance block, filled in — never left as placeholders. It is the standard `result-validator` looks for first:
 
 ```
 Data & Sources
   As of:      <date the figures represent, e.g. 2026-06-30>
-  Source:     <primary docs — SEC EDGAR 10-K/10-Q, company IR, FRED, exchange data …>
+  Source:     <venue, document, date — as returned by retrieval>
   Retrieval:  <delegated retrieval | web/tool retrieval | pasted by user>
   Confidence: <HIGH | MEDIUM | LOW>
 ```

@@ -62,7 +62,7 @@ calculation worked out. Re-read: Valuation → "price vs. value", Glossary → F
 - **Sector ranges are the hardest part and the most valuable.** Always state which sector's norms you are using and why; when the pasted analysis names peers, use them.
 - **Quote the analysis, cite the lesson.** Every card should point at where in the pasted text the number came from and where on the site the concept is taught — the reader should be able to check both.
 - **Traditional Chinese output** follows the Learning track's own zh-TW pages (`learning-zh-tw.html`, `glossary-zh-tw.html`); link those instead of the English pages when `--lang zh-TW` is set.
-- Long inputs: a `full-report` may contain fifteen modules. Explain the composite and the three modules with the largest weight fully; summarize the rest in the compact table and offer to expand any one on request.
+- Long inputs: a composite answer may contain fifteen modules. Explain the composite and the three modules with the largest weight fully; summarize the rest in the compact table and offer to expand any one on request.
 
 ## Thesis Invalidation
 

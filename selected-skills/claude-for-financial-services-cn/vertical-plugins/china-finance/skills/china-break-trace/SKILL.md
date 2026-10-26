@@ -11,7 +11,7 @@ description: Forensic financial analysis for A-share companies. Identifies discr
 
 Conduct **A股财务核查** — forensic analysis to identify potential issues in Chinese financial statements.
 
-## Data Sources
+## Evidence request
 
 Forensic work is only as good as the records behind it, and this step retrieves nothing itself: the plugin has one entry for data — the main agent delegating to the role that owns structured data or disclosure and web material — and it holds no data-service key here.
 

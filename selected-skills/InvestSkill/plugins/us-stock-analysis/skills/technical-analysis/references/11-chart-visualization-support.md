@@ -156,7 +156,7 @@ Signals:
 
 ### Integration with Report Generator
 
-When `--chart` flag is used, output is optimized for `/report-generator`:
+When `--chart` flag is used, output is optimized for the host chart channel:
 - All chart data tables formatted for Chart.js/Plotly
 - Color schemes specified for consistent visualization
 - Annotations and overlays clearly defined

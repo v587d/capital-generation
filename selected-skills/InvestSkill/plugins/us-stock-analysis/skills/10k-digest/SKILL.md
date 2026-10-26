@@ -5,11 +5,18 @@ description: Deep-read a 10-K annual report and output a structured markdown dig
 
 # 10-K Report Digest
 
+## Evidence request
+
+通过宿主数据契约请求：披露文件（公告、年报或招股书，带回出处与文档日期）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 ## ⚠️ Data Verification — Do This Before Any Analysis
 
 Before running the digest, confirm the filing details:
 
-1. **Identify the filing** — confirm ticker, fiscal year-end, and exact 10-K filing date from SEC EDGAR.
+1. **Identify the filing** — confirm ticker, fiscal year-end and exact 10-K filing date from the retrieved filing's provenance (`Source` line), not from memory.
 2. **State your source** — note where the document came from (e.g., "SEC EDGAR, FY2024 10-K filed 2025-02-05") at the top of the output.
 3. **Flag incomplete data** — if only partial sections are available, list what is missing before proceeding.
 
@@ -19,12 +26,12 @@ Before running the digest, confirm the filing details:
 
 ## 📋 Data & Sources Header — Open Every Output With It
 
-The first thing in the output is this provenance block, filled in — never left as placeholders. It is the standard documented on the [Data & Accuracy](https://yennanliu.github.io/InvestSkill/data-and-accuracy.html) page and the first thing `result-validator` looks for:
+The first thing in the output is this provenance block, filled in — never left as placeholders. It is the standard `result-validator` looks for first:
 
 ```
 Data & Sources
   As of:      <date the figures represent, e.g. 2026-06-30>
-  Source:     <primary docs — SEC EDGAR 10-K/10-Q, company IR, FRED, exchange data …>
+  Source:     <venue, document, date — as returned by retrieval>
   Retrieval:  <delegated retrieval | web/tool retrieval | pasted by user>
   Confidence: <HIGH | MEDIUM | LOW>
 ```
@@ -43,7 +50,7 @@ Everything below the surface of this file lives in `references/`. **whole, with 
 file gets reported as read when it was only skimmed. The file names below are the only
 addressing this entry has.
 
-- `references/10-retrieving-the-filing.md` — 🔎 Retrieving the Filing — the Keyless EDGAR Path; How to Use; Output Document Structure
+- `references/10-retrieving-the-filing.md` — 🔎 Evidence Request and the Filing; How to Use; Output Document Structure
 - `references/11-key-metrics-table.md` — (continued) Output Document Structure; References
 - `references/12-language-mode.md` — Language Mode; File Output; Thesis Invalidation
 

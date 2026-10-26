@@ -11,7 +11,7 @@ description: Comparable company analysis for A-share equities. Adapts the origin
 
 Build **A股可比公司分析** — peer group multiples comparison adapted for the Chinese equity market.
 
-## Data Sources
+## Evidence request
 
 This section says **what to ask the host's retrieval path for**. It is not a set of calls made from here: this plugin obtains data through exactly one entry — the main agent delegating it — and a comps sheet carries no data-service key and issues no interface call.
 
@@ -19,7 +19,7 @@ Hand over a brief naming the peer tickers, the fields, and one shared as-of date
 
 - Trading multiples inputs per name: 最新价, PE / PB / PS, 市值, 股本
 - Financials per name: revenue and 归母净利润 for the LTM window, 资产负债表 for book value and 有息负债, plus the 折旧摊销 needed for EBITDA
-- Peer universe: the industry constituents for the 东方财富 category being used
+- Peer universe: the industry constituents for the classification the host returns
 - Filings: the 定期报告 behind any figure that has to be checked against the disclosure rather than a screen
 
 In a host that splits roles, delegate that brief rather than searching from this step, then build the table from what comes back. A peer whose figures did not come back stays out of the median — it is not filled in with a remembered multiple.
@@ -32,7 +32,7 @@ In a host that splits roles, delegate that brief rather than searching from this
 
 | Criterion | China Context |
 |-----------|---------------|
-| Industry | Same 东方财富 industry category |
+| Industry | Same industry classification the host returned |
 | Market cap | ±3x of subject company |
 | Revenue | ±2x of subject company |
 | Growth | Similar revenue growth profile |

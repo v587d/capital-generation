@@ -4,12 +4,14 @@ Use this guide when a company claims to be moving from legacy engineering or man
 
 ## Source Map
 
-| Source | What to Validate | URL |
-| --- | --- | --- |
-| Prospectus and annual report | Original business model, raised funds, asset base, risk factors | https://www.cninfo.com.cn/new/index |
-| Interim and quarterly reports | Whether segment mix and asset mix are actually changing | https://www.cninfo.com.cn/new/index |
-| Board resolutions and financing filings | Capital allocation and project commitment | https://www.cninfo.com.cn/new/index |
-| SSE / SZSE company disclosure portals | Official exchange-side retrieval path | https://www.sse.com.cn/assortment/stock/list/info/company/index.shtml |
+| Evidence | What to Validate |
+| --- | --- |
+| Prospectus and annual report | Original business model, raised funds, asset base, risk factors |
+| Interim and quarterly reports | Whether segment mix and asset mix are actually changing |
+| Board resolutions and financing filings | Capital allocation and project commitment |
+| SSE / SZSE company disclosure portals | Official exchange-side retrieval path |
+
+Every item carries venue, document name, document date and the accession or link the retrieval returned; the retrieval role decides where it comes from.
 
 ## Transition Markers
 

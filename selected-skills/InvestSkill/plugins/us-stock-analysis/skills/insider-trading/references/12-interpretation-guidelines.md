@@ -71,7 +71,7 @@ with the filing dates that support each.
 
 - Combine with /stock-eval for complete due diligence
 - Use /institutional-ownership for full insider + institutional picture
-- Feed analysis to /report-generator for visual charts of insider activity
+- Leave chart-ready tables in the answer; the host chart channel renders them (this plugin has no report export)
 - Best used monthly or after significant insider filing activity
 - Particularly valuable when analyzing small-mid cap stocks (insiders have more edge)
 

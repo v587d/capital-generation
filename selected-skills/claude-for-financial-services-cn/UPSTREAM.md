@@ -184,3 +184,12 @@
   五档评级、目标价与仓位写法作为卖方流程的一部分原样收录，逐条标注为推演练习：收录它们只为让使用者看见
   卖方流程长什么样，**不构成投资建议**，也不得反向当作监管或会计规则。
   本文件与本仓的收录判断不构成对上游观点、也不构成对 `anthropics/claude-for-financial-services` 观点的背书。
+
+## 2026-10 收敛：仓内只保留 catalog 正文
+
+本仓不再保存上游全量快照。除 catalog 命中的 12 颗正文、LICENSE 与本文件之外，以下内容按 2026-10 政策**从仓里删除**（不是仅从包里排除）；重新按上面所钉 commit 覆盖快照时按本节过滤。
+
+- **非 catalog skill（176 颗）**：`agent-plugins/china-earnings-reviewer/skills/` 31 颗；`agent-plugins/china-market-researcher/skills/` 31 颗；`agent-plugins/china-model-builder/skills/` 31 颗；`agent-plugins/china-pitch-agent/skills/` 31 颗；`mcp-servers/` 1 颗；`vertical-plugins/china-finance/skills/` 19 颗；`vertical-plugins/fund-admin/skills/` 6 颗；`vertical-plugins/investment-banking/skills/` 10 颗；`vertical-plugins/operations/skills/` 2 颗；`vertical-plugins/private-equity/skills/` 9 颗；`vertical-plugins/wealth-management/skills/` 5 颗。逐颗名单可从所钉 commit 与该目录的差异还原。
+- **上游仓库材料**：`.claude-plugin`、`.codebuddy`、`.npmignore`、`CLAUDE.md`、`IFIND-INTEGRATION-PLAN.md`、`README.md`、`agent-plugins/china-earnings-reviewer`、`agent-plugins/china-market-researcher`、`agent-plugins/china-model-builder`、`agent-plugins/china-pitch-agent`、`managed-agent-cookbooks`、`mcp-servers`、`scripts`、`vertical-plugins/china-finance`、`vertical-plugins/fund-admin`、`vertical-plugins/investment-banking`、`vertical-plugins/operations`、`vertical-plugins/private-equity`、`vertical-plugins/wealth-management`。
+- **上游脚本与取数服务端（8 个文件）**：删除，连 git 都不留（执行面）。
+- 许可与署名不受影响：`LICENSE` 原件、所钉 commit 与作者信息仍在上面各节；公开许可只要求保留版权与许可声明。

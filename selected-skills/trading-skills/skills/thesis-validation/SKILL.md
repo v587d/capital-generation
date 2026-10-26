@@ -5,6 +5,13 @@ description: Pressure-test a trade or investment thesis by clarifying the core c
 
 # Thesis Validation
 
+## Evidence request
+
+通过宿主数据契约请求：使用者提供的输入（成交、持仓或论点记录）、披露文件（公告、年报或招股书，带回出处与文档日期）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 Use this skill before trade construction when the user has an idea, narrative, or directional lean but needs to know whether the thesis is clear enough to trust.
 
 This skill will not:

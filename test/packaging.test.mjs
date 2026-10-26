@@ -121,34 +121,31 @@ test('打包闸门：selected-skills 的运行时半边逐条落在发布清单�
     }
   }
 
-  // Ship runtime bodies and provenance, not whole upstream repos. Each snapshot declares exclusions in its own
-  // `.npmignore` (the single source here), and both directory and file rules must be checked.
-  const globToRegExp = (rule) => new RegExp(`^${rule
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*/g, '.*')
-    .replace(/\?/g, '.')}$`)
-  for (const repository of repositories) {
-    const ignorePath = join(ROOT, 'selected-skills', repository, '.npmignore')
-    if (!existsSync(ignorePath)) continue
-    const rules = readFileSync(ignorePath, 'utf8').split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith('#') && !line.startsWith('!') && line.startsWith('/') === false)
-    const excludedDirs = rules.filter((line) => line.endsWith('/')).map((line) => line.slice(0, -1))
-    const excludedFiles = rules.filter((line) => !line.endsWith('/') && !line.includes('/'))
-    assert.ok(excludedDirs.length + excludedFiles.length > 0,
-      `${repository}/.npmignore 一条规则都没有（目录或文件名），反向断言会退化成空断言`)
-    const prefix = `selected-skills/${repository}/`
-    for (const path of paths) {
-      if (!path.startsWith(prefix)) continue
-      const relative = path.slice(prefix.length)
-      const hit = relative.split('/').slice(0, -1).find((segment) => excludedDirs.includes(segment))
-      assert.equal(hit, undefined,
-        `${repository} 的 .npmignore 排除了 ${hit}/，但它又出现在发布包里：${path}（全量快照本该住在 git 里）`)
-      const fileNameHit = excludedFiles.find((rule) => globToRegExp(rule).test(relative.split('/').pop()))
-      assert.equal(fileNameHit, undefined,
-        `${repository} 的 .npmignore 排除了 ${fileNameHit}，但它又出现在发布包里：${path}（全量快照本该住在 git 里）`)
+  // Runtime tree allowlist: the package carries provenance plus the Markdown a role can actually
+  // load — catalog skill bodies and the `shared/` reference bodies those bodies link to. Scripts,
+  // evaluation fixtures, upstream docs and non-catalog skills all fail here, not just "most" of them.
+  const rootFiles = new Set([
+    'selected-skills/catalog.js',
+    'selected-skills/filter.js',
+    'selected-skills/routing.js',
+    'selected-skills/README.md',
+    'selected-skills/ROUTING.md',
+  ])
+  const allowedRuntime = (path) => {
+    if (!path.startsWith('selected-skills/')) return true
+    if (rootFiles.has(path)) return true
+    if (path.startsWith('selected-skills/china-stock-research-skills/skills/shared/')) return path.endsWith('.md')
+    if (/^selected-skills\/[^/]+\/(?:LICENSE|UPSTREAM\.md)$/.test(path)) return true
+    for (const entry of SELECTED_SKILL_CATALOG) {
+      const prefix = `selected-skills/${entry.repository}/${SELECTED_SKILL_SKILL_DIRS[entry.repository]}/${entry.name}/`
+      if (path.startsWith(prefix)) return path.endsWith('.md')
     }
+    return false
   }
+  const strays = [...paths].filter((path) => !allowedRuntime(path)).sort()
+  assert.deepEqual(strays, [],
+    '发布包里出现运行时树之外的文件（脚本、评测夹具、非 catalog skill、reference-algorithms 都算）：\n'
+    + strays.join('\n'))
 })
 
 test('打包闸门：声明 dsh.client 的包，其客户端 bundle 必须真的在包里', () => {
@@ -222,6 +219,9 @@ test('打包闸门：第三方清单点名的文件必须真的随包发布', ()
   )]
   assert.ok(named.length >= 3, `第三方清单只点名了 ${named.length} 个仓内路径，多半是格式被改坏了`)
   const paths = packedFilePaths()
-  const missing = named.filter((value) => !paths.has(value))
+  // The notices also documents the one git-only area (reference implementations): it names it on
+  // purpose, so exempt exactly that path and keep every other named path verified against the packer.
+  const GIT_ONLY = ['selected-skills/reference-algorithms/']
+  const missing = named.filter((value) => !GIT_ONLY.includes(value) && !paths.has(value))
   assert.deepEqual(missing, [], `第三方清单点名了不随包发布的路径：${missing.join(', ')}`)
 })

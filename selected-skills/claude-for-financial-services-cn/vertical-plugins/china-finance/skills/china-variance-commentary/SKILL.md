@@ -11,7 +11,7 @@ description: Write variance commentary for A-share financial results. Adapts the
 
 Write professional **A股业绩点评** — structured variance commentary on Chinese company financial results.
 
-## Data Sources
+## Evidence request
 
 Commentary explains numbers; it does not obtain them. This plugin retrieves through exactly one entry — the main agent delegating to the role that owns structured data or disclosure material — and no data-service key is held or requested here.
 

@@ -11,9 +11,7 @@
 
 ### 协议层与方法层
 
-内置 `capital-*` 是**流程协议**（工具委派、证据门、回传格式、输出形状），精选 Skill 是
-**分析方法层**（估值步骤、财务勾稽、组合归因、事件研究）。两者正交：同时命中就都加载，先协议定
-流程、再方法定分析；⛔ 不得用协议替代同主题方法，也不得让方法改写协议的工具边界与证据门。
+内置 `capital-*` 是**流程协议**（工具委派、证据门、回传格式），精选 Skill 是**分析方法层**（估值步骤、财务勾稽、组合归因）。两者正交：同时命中就都加载，先协议定流程、再方法定分析；⛔ 不得用协议替代同主题方法，也不得让方法改写协议的工具边界与证据门。
 
 ### 角色表
 
@@ -26,10 +24,10 @@
 | `data_collector` | `capital-data-collector` | 无 | 只取结构化数据，不套方法 |
 | `visualization_specialist` | `capital-visualization-specialist` | 无 | 只出图，不套方法 |
 
-`roles` 是**执行角色**，不是“谁可能感兴趣”。主 Agent 需要数字时交给 `data_junior`，不要为了同一个
-方法再加载一遍；`data_junior` 也不写最终结论。多角色的判据只有一条：这个方法的两部分确实由两个角色
-分别执行（例如 `fact-check` 由检索侧取证、主 Agent 判定；`china-break-trace` 由分析侧勾稽、检索侧
-取公告）。
+`roles` 是**执行角色**，不是“谁可能感兴趣”。主 Agent 需要数字时交给 `data_junior`，不要为了同一个方法再加载一遍；`data_junior` 也不写最终结论。多角色只给两部分确实由不同角色执行的条目（如 `fact-check` 检索侧取证、主 Agent 判定）。
+
+### 数据契约：一处说清取数
+“数据从哪来”只写在角色系统提示 `capital:data-contract`（`src/data-contract.ts`，随 `tools/selected-skills` 挂到四个能加载 skill 的角色）；Skill 只在 `## Evidence request` 里声明标的、证据类型、字段、期间与 as-of，换数据源只改契约一处（`test/selected-skills-content.test.mjs` 逐颗断言）。
 
 ### 元数据：`selected-skills/routing.js`
 
@@ -145,5 +143,5 @@ frontmatter 的 `description` 只作溯源，不再直接进模型目录（provi
 - `test/selected-skills-content.test.mjs`：快照正文的取数/记忆回填/执行面/委派档合规扫描不变；
   触发条件与角色元数据是 Capital 自持数据，不写回上游快照。
 
-逐颗 review 表（68 行、角色/触发条件/重叠数）见 `selected-skills/ROUTING.md`；
+逐颗 review 表（70 行、角色/触发条件/重叠数）见 `selected-skills/ROUTING.md`；
 它由 `routing.js` 生成，改路由先改 `routing.js`。

@@ -109,8 +109,9 @@ List all sources cited in this digest. Format:
 ```
 ## References
 
-1. **SEC EDGAR Filing** — [Company] 10-K, FY[XXXX]
-   URL: https://www.sec.gov/cgi-bin/browse-edgar?...
+1. **Annual report** — [Company] 10-K, FY[XXXX]
+   Source: [venue and document name as returned by retrieval]
+   Link: [link returned by retrieval, or "not returned"]
    Filed: [Date] | Accession No.: [XXXXXXXXXX-XX-XXXXXX]
 
 2. **Item 1 — Business** (pp. X–X of filing)

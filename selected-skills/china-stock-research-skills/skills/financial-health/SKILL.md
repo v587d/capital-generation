@@ -5,6 +5,13 @@ description: Evaluate the financial health of an A-share company through earning
 
 # Financial Health
 
+## Evidence request
+
+通过宿主数据契约请求：财务报表（三表与附注，注明期间与 as-of）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 Diagnose whether the company's accounting profit is supported by real cash and a resilient balance sheet.
 
 ## Non-Negotiable Rules

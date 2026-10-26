@@ -200,3 +200,13 @@
   这 8 颗算出的 WACC、估值区间、偿债结论、减值覆盖、准备金与资本比率都是方法推演的产物，
   既不是订单，也不是授信意见、审计意见或法律意见——`forensic-accounting` 那颗给出的"疑似"清单尤其
   不构成舞弊认定。本文件与本仓的收录判断不构成对上游观点的背书。
+
+## 2026-10 收敛：仓内只保留 catalog 正文
+
+本仓不再保存上游全量快照。除 catalog 命中的 8 颗正文、LICENSE 与本文件之外，以下内容按 2026-10 政策**从仓里删除**（不是仅从包里排除）；重新按上面所钉 commit 覆盖快照时按本节过滤。
+
+- **非 catalog skill（40 颗）**：`ai-anomaly-detection`、`aro-computation`、`audit-checklist`、`automated-reconciliation`、`budget-forecast`、`close-management`、`corporate-consolidation`、`crypto-accounting`、`cvp-breakeven`、`debt-payoff`、`debt-restructuring`、`deferred-tax`、`earned-value-mgmt`、`esg-reporting`、`financial-analysis`、`fixed-asset-accounting`、`intercompany-accounting`、`inventory-costing`、`investment-analysis`、`journal-entry`、`lbo-modeling`、`lease-accounting`、`net-worth-tracker`、`nlp-earnings-sentiment`、`oil-gas-valuation`、`personal-budgeting`、`predictive-burn-rate`、`product-profitability`、`retirement-planning`、`revenue-recognition`、`risk-assessment`、`sox-compliance`、`startup-valuation`、`statement-preparation`、`tax-efficient-investing`、`tax-planning`、`treasury-management`、`variance-analysis`、`venture-debt`、`working-capital-analysis`。
+- **上游仓库材料**：`.npmignore`。
+- **catalog 目录内的附属材料**：`evals/` 17 个文件。
+- **纯公式脚本（8 份）**：移到 `selected-skills/reference-algorithms/financeskills/`，git-only、不随包、不执行。
+- 许可与署名不受影响：`LICENSE` 原件、所钉 commit 与作者信息仍在上面各节；公开许可只要求保留版权与许可声明。

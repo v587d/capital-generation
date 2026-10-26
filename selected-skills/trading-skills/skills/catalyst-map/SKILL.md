@@ -5,6 +5,13 @@ description: Build a ranked map of the catalysts that could move a watchlist, th
 
 # Catalyst Map
 
+## Evidence request
+
+通过宿主数据契约请求：披露文件（公告、年报或招股书，带回出处与文档日期）、宏观序列（数值、期间与发布日期）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 Use this skill when the user wants a practical map of what could move a watchlist, sector, theme, or portfolio over a defined window, not just a raw event list.
 
 This skill will not:

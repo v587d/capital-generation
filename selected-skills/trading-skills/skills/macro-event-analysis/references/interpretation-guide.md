@@ -12,7 +12,7 @@ Focus on event risk, not prediction.
 ## What not to claim
 
 - that an event will move markets in a specific direction
-- that the provider has full global coverage
+- that the returned calendar has full global coverage
 - that stale timestamps are harmless
 
 ## Reporting guidance

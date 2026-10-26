@@ -129,7 +129,7 @@ Reference the following sources for institutional ownership data:
 - **What**: Quarterly holdings reports required of institutional investment managers exercising investment discretion over **≥ $100 million in Section 13(f) securities** (the test is 13(f) securities under management, not the firm's total AUM)
 - **Who**: Institutional investment managers
 - **When**: Filed within 45 days of quarter-end
-- **Where**: https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&type=13F
+- **Where**: the manager's own filing, as returned by the host retrieval channel
 
 **13F Filing Calendar**
 - Q1 (Mar 31) → Filed by May 15
@@ -152,15 +152,12 @@ Reference the following sources for institutional ownership data:
 
 - **13G**: Passive investors, no control intent
   - Deadlines depend on filer type (revised schedule in force since 2024-09-30): qualified institutional investors — 45 days after the quarter-end in which they cross 5%, or 5 business days after month-end once above 10%; passive investors — 5 business days after crossing 5%; exempt investors — 45 days after quarter-end
-  - Verify the current deadline on sec.gov before dating a filing as late
+  - Check the deadline in force on the filing date before dating a filing as late; deadlines have changed twice since 2024
   - Simplified reporting for passive positions
 
-**Aggregator Services**
-- **WhaleWisdom.com**: Free 13F database with analytics
-- **Dataroma**: Tracks super investor portfolios
-- **GuruFocus**: Premium institutional tracking
-- **Whalewisdom**: Advanced screening and alerts
-- **Bloomberg/FactSet**: Comprehensive institutional data (paid)
+**What to request, and what it can support**
+
+Ask by manager and by issuer: the 13F-HR information table for a given quarter-end, the 13D/G filing with its amendment history, and the issuer's own share count for the same date. An aggregated "institutional ownership %" is a secondary figure — it mixes managers, quarter-ends and filing lags — so label it as such and never let it stand in for a manager-level position.
 
 
 This section is not finished here: `Analysis Framework` continues in `references/12-red-flags-warning-signs.md`.

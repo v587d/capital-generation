@@ -17,12 +17,14 @@ Use this overlay when overseas demand, customer concentration, tariff exposure, 
 
 ## Main Sources
 
-| Source | What It Validates | URL |
-| --- | --- | --- |
-| General Administration of Customs | Export and import data, destination trends | http://www.customs.gov.cn/ |
-| Ministry of Commerce | Trade policy, export conditions, tariff-related policy | http://www.mofcom.gov.cn/ |
-| State Administration of Foreign Exchange | FX context and policy | https://www.safe.gov.cn/ |
-| Company reports and announcements | Region mix, customer concentration, inventory, receivables, capacity | https://www.cninfo.com.cn/new/index |
+| Evidence | What It Validates |
+| --- | --- |
+| General Administration of Customs | Export and import data, destination trends |
+| Ministry of Commerce | Trade policy, export conditions, tariff-related policy |
+| State Administration of Foreign Exchange | FX context and policy |
+| Company reports and announcements | Region mix, customer concentration, inventory, receivables, capacity |
+
+Every item carries venue, document name, document date and the accession or link the retrieval returned; the retrieval role decides where it comes from.
 
 ## Output Reminder
 

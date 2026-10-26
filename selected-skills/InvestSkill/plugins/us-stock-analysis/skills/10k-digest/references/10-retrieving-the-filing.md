@@ -1,32 +1,41 @@
-# 🔎 Retrieving the Filing — the Keyless EDGAR Path
+# 🔎 Evidence Request and the Filing
 
-Part 1 of 3 for `10k-digest` — 🔎 Retrieving the Filing — the Keyless EDGAR Path; How to Use; Output Document Structure
+Part 1 of 3 for `10k-digest` — 🔎 Evidence Request and the Filing; How to Use; Output Document Structure
 See `SKILL.md` for what to read and when; this part is procedure, not routing.
 
-## 🔎 Retrieving the Filing — the Keyless EDGAR Path
+## 🔎 Evidence request
 
-This skill fetches nothing by itself. When the user gives only a ticker, obtain the 10-K in one of three ways and record which one in the `Data & Sources` header:
+This skill fetches nothing by itself. When the user gives only a ticker, request the filing through the host data contract and record what came back in the `Data & Sources` header:
 
-**A. Retrieval through the host (the normal path)** → `Retrieval: delegated retrieval`. In a role-split host, delegate the fetch to the agent that owns web retrieval — this step never searches from the analysis role itself. Every step is free and needs no API key:
+- **What to ask for** — the latest annual report for the ticker (10-K; a foreign private issuer files 20-F; a 10-K/A is an amendment), the fiscal year it covers, the filing date, the accession number, and the document itself: Item 1, 1A, 7, 7A, 8, 9A, 3, and Items 10–13 when incorporated by reference.
+- **What the request must carry** — ticker, fiscal year or "latest", the sections needed, and the as-of date. Ask once; do not send the retrieval role after one section at a time.
+- **What comes back** — the document plus provenance: venue, document name, filing date, accession or the link the retrieval returned. Put those in the cover block and in References. A link is evidence only when the retrieval actually returned it.
+- **Structured statement data** — when the retrieval also returns tagged statement facts, cite them as the confirmation of the figures read from Item 8, and keep the filing itself as the primary source.
 
-1. **Ticker → CIK** — `https://www.sec.gov/files/company_tickers.json`: find the entry whose `ticker` matches (write `BRK-B` for `BRK.B`) and zero-pad its `cik_str` to 10 digits.
-2. **Filings index** — `https://data.sec.gov/submissions/CIK##########.json`: inside `filings.recent` the arrays `form`, `filingDate`, `reportDate`, `accessionNumber` and `primaryDocument` are aligned by index. Take the newest row whose `form` is `10-K` (foreign private issuers file `20-F` instead; a `10-K/A` is an amendment). The top-level `fiscalYearEnd` is `MMDD`.
-3. **The document** — `https://www.sec.gov/Archives/edgar/data/<CIK without leading zeros>/<accessionNumber without dashes>/<primaryDocument>`: the complete filing as HTML (inline XBRL). The filing's index page is the same folder plus `<accessionNumber>-index.htm`; cite that URL and the accession number in the References.
-4. **Structured statement data (optional)** — `https://data.sec.gov/api/xbrl/companyfacts/CIK##########.json`: every US-GAAP fact the company has tagged, by concept and period. Use it to confirm the figures read from Item 8.
-5. **Full-text search (optional)** — `https://www.sec.gov/edgar/search/#/q=%22<phrase>%22&forms=10-K` when a filing has to be located by phrase rather than ticker.
+The retrieval role owns the mechanics (identifier lookup, filing index, document fetch, structured statement data, full-text search). This skill does not repeat them, and the analysis role never searches or downloads by itself.
 
-Send a `User-Agent` header that identifies the requester (the SEC requires it, e.g. `Name email@example.com`) and stay under 10 requests per second. Never substitute a summary site for the filing itself.
+A request brief that works:
 
-**B. Only if the host has no retrieval path at all** → `Retrieval: pasted by user`. Ask the user for the sections needed. The repository's own fetch helpers are optional, keyless, and live outside this plugin — they are never run from here.
+```
+Ticker: AAPL
+Evidence: latest annual report (10-K), fiscal year 2024
+Sections: Item 1, 1A, 7, 7A, 8, 9A, 3, Items 10–13 if incorporated
+Return: document text, venue, filing date, accession, link
+As-of: 2025-02-05
+```
 
-**C. Neither** → show the ⚠️ *Source unavailable* warning and digest only what the user provided. What is absent stays absent: no accession number, figure or date is filled in from memory.
+Substitute the ticker, fiscal year and section list; leave the return fields unchanged. If the issuer files 20-F, write "20-F" instead of "10-K" and the same fields apply. Ask for the whole filing once rather than one Item at a time: the digest compares sections against each other, and a section-by-section fetch loses the cross-references the filing relies on.
+
+**If the host has no retrieval path at all** → `Retrieval: pasted by user`. Ask for the sections needed and say which ones are missing.
+
+**If nothing comes back** → show the ⚠️ *Source unavailable* warning and digest only what the user provided. What is absent stays absent: no accession number, figure or date is filled in from memory. A summary site is never a substitute for the filing itself.
 
 ---
 
 ## How to Use
 
 ```
-# Analyze by ticker (retrieves the latest 10-K via the EDGAR path above, or asks you to paste it)
+# Analyze by ticker (requests the latest 10-K through the host data contract, or asks you to paste it)
 /10k-digest AAPL
 
 # Paste 10-K text directly
@@ -56,7 +65,7 @@ The skill produces a single markdown document with the following sections in ord
 # [Company Name] ([TICKER]) — 10-K Digest
 **Fiscal Year:** [FY20XX ending MM/DD/YYYY]
 **Filed:** [Filing date]
-**Source:** SEC EDGAR — [Direct URL to filing]
+**Source:** [venue, document, filing date, accession or link returned by retrieval]
 **Prepared:** [Today's date]
 **Language:** English | 繁體中文
 ```

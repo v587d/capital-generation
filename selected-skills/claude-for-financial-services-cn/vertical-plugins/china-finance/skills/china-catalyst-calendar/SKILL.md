@@ -11,7 +11,7 @@ description: Track upcoming catalysts for A-share coverage universe — earnings
 
 Build and maintain a **A股催化剂日历** tracking upcoming events that could materially impact stock prices within a coverage universe.
 
-## Data Sources
+## Evidence request
 
 A calendar is a list of dates and documents, and this plugin obtains none of them from inside this step: retrieval has exactly one entry — the main agent delegating it to the role that owns market data or web and disclosure material — and a calendar holds no data-service key and issues no query of its own.
 

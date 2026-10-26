@@ -56,7 +56,7 @@ value, currency/units, source ID(s), and label: `Reported`, `Calculated`, or
 
 Final report citations must use Source Ledger URLs and this format:
 
-`source: [Source name](https://...)`
+`source: [Source name as returned](link returned by retrieval)`
 
 ## Budget
 

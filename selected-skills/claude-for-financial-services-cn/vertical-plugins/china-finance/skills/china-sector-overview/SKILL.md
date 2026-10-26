@@ -11,7 +11,7 @@ description: Comprehensive A-share sector and industry landscape reports — mar
 
 Create comprehensive **A股行业/板块深度报告** covering market dynamics, competitive positioning, regulatory environment, key players, trading multiples, and thematic trends.
 
-## Data Sources
+## Evidence request
 
 A sector report needs a lot of numbers, and none of them is fetched from here. This plugin routes every retrieval through one entry — the main agent delegates it to the role that owns structured data or web and disclosure material — and holds no data-service key inside a report.
 
@@ -29,7 +29,7 @@ Hand the retrieval roles one brief per family of material:
 | 行业协会 | sector-specific volumes and prices |
 | 巨潮资讯 | company filings for competitive analysis |
 | 券商研报 | analyst frameworks and forecast ranges — treat as one house's view, not as consensus |
-| 东方财富行业板块 | industry classification and sector index constituents |
+| 行业分类口径 | industry classification and sector index constituents, as returned by the host |
 
 In a role-split host, delegate with those briefs rather than reaching for a feed from here. What does not come back is written up as a gap in that section; a sector size or growth rate is never rounded off from memory.
 

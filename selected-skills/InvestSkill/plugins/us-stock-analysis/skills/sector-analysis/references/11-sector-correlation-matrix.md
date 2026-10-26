@@ -51,10 +51,10 @@ Rank all 11 sectors on a 1–11 scale (1 = strongest, 11 = weakest) across four 
 
 | Dimension | How to Score | Data Source |
 |---|---|---|
-| **3M Price Return** | Rank sectors by 3-month total return vs. each other | Bloomberg, ETF returns (XLK, XLV, etc.) |
-| **Earnings Revision Trend** | % of analysts raising forward EPS estimates (breadth) | FactSet, Bloomberg consensus |
-| **Forward P/E vs. 10Y Historical Average** | Discount = high score; premium = low score | FactSet, LSEG |
-| **Analyst Sentiment** | Net buy ratings minus sell ratings as % of total | Bloomberg, Refinitiv |
+| **3M Price Return** | Rank sectors by 3-month total return vs. each other | Sector price history, or the sector ETF series |
+| **Earnings Revision Trend** | % of analysts raising forward EPS estimates (breadth) | Consensus revision history |
+| **Forward P/E vs. 10Y Historical Average** | Discount = high score; premium = low score | Valuation history for the sector |
+| **Analyst Sentiment** | Net buy ratings minus sell ratings as % of total | Ratings and target-price changes, with their dates |
 
 ### Momentum Scorecard Template
 

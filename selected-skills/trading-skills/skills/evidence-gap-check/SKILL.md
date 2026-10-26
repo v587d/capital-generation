@@ -5,6 +5,13 @@ description: Identify the most important missing facts, assumptions, and unresol
 
 # Evidence Gap Check
 
+## Evidence request
+
+通过宿主数据契约请求：使用者提供的输入（成交、持仓或论点记录）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 Use this skill when the user has an idea, thesis, or watchlist candidate but does not yet know whether the available evidence is sufficient to justify acting.
 
 This skill will not:

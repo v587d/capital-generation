@@ -13,7 +13,7 @@ A value chain is a **directed graph**: nodes are the layers of production (raw m
 2. **Chokepoints** — the layer(s) with the fewest credible suppliers capture disproportionate value. Following the chain reveals bottleneck monopolies (e.g. EUV lithography, leading-edge foundry) that are the real toll-collectors of a theme.
 3. **Value migration** — the profit pool is not fixed. It shifts down (or up) the chain over time as scarcity moves. Mapping the chain lets you form a thesis about *where the money goes next* — the "picks-and-shovels" and second-order plays.
 
-This complements — and does not duplicate — the existing skills. `competitor-analysis` studies one company's moat *horizontally* against its direct peers; `sector-analysis` ranks the 11 GICS sectors for rotation. This skill maps a theme or product *vertically*, cutting **across** sectors, to show the whole flow. Output feeds naturally into `competitor-analysis` (pick a node, study its moat), `stock-screener` (rank the tickers at one layer), and `chart-master` / `report-generator` (render the graph).
+This complements — and does not duplicate — the existing skills. `competitor-analysis` studies one company's moat *horizontally* against its direct peers; `sector-analysis` ranks the 11 GICS sectors for rotation. This skill maps a theme or product *vertically*, cutting **across** sectors, to show the whole flow. Output feeds naturally into `competitor-analysis` (pick a node, study its moat), `stock-screener` (rank the tickers at one layer), and, when a chart is wanted, the host chart channel (the graph spec stays in the answer; this plugin renders through `render_chart` only in its drawing role).
 
 ---
 
@@ -65,7 +65,7 @@ Confirm the boundaries: where does the chain start (how far upstream — mined o
 
 ## 3. Step 2 — Build the Chain Map (the graph)
 
-Produce the directed graph. **Default to a Mermaid `flowchart`** (renders in Claude, Cursor, Gemini, GitHub, and the site); fall back to ASCII when Mermaid is unavailable. Hand off to `chart-master` for a richer HTML render or for a `report-generator` export.
+Produce the directed graph. **Default to a Mermaid `flowchart`** (renders in Claude, Cursor, Gemini, GitHub, and the site); fall back to ASCII when Mermaid is unavailable. Keep this Mermaid block as the primary output; when a richer render is wanted, leave the graph spec in the answer for the host chart channel — this plugin exports no HTML.
 
 **Mermaid flowchart (primary output):**
 

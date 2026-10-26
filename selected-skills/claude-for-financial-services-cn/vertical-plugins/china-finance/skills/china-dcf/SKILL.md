@@ -7,7 +7,7 @@ description: DCF valuation model for A-share stocks on Chinese financial stateme
 
 > 本文件相对上游 `d7585ca` 快照做过合规改写（取数与凭据口径），逐条记在快照根目录的 UPSTREAM.md；方法论、阈值与输出模板未改。
 
-## Data Sources
+## Evidence request
 
 A DCF is only as honest as the numbers handed to it, and this plugin has exactly one way to obtain numbers: the main agent delegates retrieval to the role that owns it. Nothing here calls a data interface, holds a key, or runs code.
 

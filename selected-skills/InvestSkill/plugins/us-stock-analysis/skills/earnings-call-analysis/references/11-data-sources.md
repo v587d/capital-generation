@@ -3,64 +3,37 @@
 Part 2 of 3 for `earnings-call-analysis` — Data Sources; Input Formats; Output; Analysis Guidelines; Usage Examples; Integration Notes; Standard Signal Output
 See `SKILL.md` for what to read and when; this part is procedure, not routing.
 
-## Data Sources
+## Evidence request
 
-Reference the following sources when analyzing earnings calls:
+Ask for the evidence this analysis needs through the host data contract, in one request:
 
-### Primary Sources
-- **SEC EDGAR 8-K Filings**: Official transcripts filed within 4 days of call
-  - Search: https://www.sec.gov/edgar/searchedgar/companysearch.html
-  - Look for: Item 2.02 (Results of Operations and Financial Condition)
+- the latest call: transcript with prepared remarks and Q&A, call date, fiscal quarter, and the venue or document that carries it
+- the filing that accompanies it: the results release (8-K / 6-K items) or the 10-Q / 10-K the call refers to
+- the materials distributed with the call: press release, investor presentation, supplemental schedules
+- the prior-quarter call, for comparison
+- a consensus or guidance baseline only if the host actually returned one, labelled as such
 
-- **Company Investor Relations**: Live webcasts and archived recordings
-  - Typically at: [company-website.com]/investors/earnings
-  - May include slides and supplemental materials
+Do not ask the user to pick a data vendor and do not request credentials: the host decides where the evidence comes from and returns each item with provenance (venue, document, date, accession or link). State the as-of date on every figure the analysis leans on, and keep the period labels (fiscal quarter, trailing twelve months) exactly as the evidence source defines them. If the transcript cannot be retrieved, say so and stop the transcript-dependent parts — never reconstruct quotes, tone or Q&A from memory.
 
-### Transcript Services
-- **Seeking Alpha**: Free transcript archive with searchable database
-  - Format: https://seekingalpha.com/symbol/[TICKER]/earnings/transcripts
+## Input formats
 
-- **AlphaSense**: Premium transcript service with AI search (paid)
-- **Bloomberg Terminal**: Real-time transcripts and historical archive (paid)
-- **FactSet**: Transcript archive with analytics (paid)
+### Format 1: Transcript text
 
-### Supplementary Information
-- **Earnings Press Release**: Published before call, contains prepared financial results
-- **Investor Presentation Slides**: Visual aids referenced during call
-- **10-Q/10-K Filings**: Detailed financials for context
-- **Prior Quarter Calls**: For comparison and trend analysis
+Paste the transcript as returned by retrieval, including the corporate participants section, prepared remarks, the Q&A and any forward-looking disclaimer. Treat it as `pasted by user`.
 
-## Input Formats
+### Format 2: Call details only
 
-Accept earnings call data in the following formats:
-
-### Format 1: Transcript Text
-```
-Paste the full transcript text from the earnings call, including:
-- Corporate Participants section
-- Prepared Remarks
-- Q&A Session
-- Forward-Looking Statements disclaimer (if present)
-```
-
-### Format 2: Transcript URL
-```
-Provide URL to transcript:
-- Seeking Alpha URL
-- Company IR page URL
-- SEC EDGAR filing link
-```
-
-### Format 3: Call Details for Manual Analysis
 ```
 Company: [Name]
 Ticker: [SYMBOL]
 Quarter: Q[1-4] [YEAR]
-Call Date: [MM/DD/YYYY]
+Call date: [MM/DD/YYYY]
 
-Key Questions to Focus On:
-- [Specific aspects to analyze]
+Key questions to focus on:
+- [specific aspects to analyze]
 ```
+
+With only call details, request the transcript and the accompanying filing through the host channel first. If neither comes back, deliver the framework, name the missing fields, and stop short of writing a transcript analysis; a press release alone supports the guidance section but not the tone or Q&A reads, so say which sections the evidence actually covers.
 
 ## Output
 
@@ -184,7 +157,7 @@ Claude compares with prior quarter (Q3 2024) to highlight changes and trends
 ## Integration Notes
 
 - Can be used standalone or in conjunction with /stock-eval
-- Output can be fed to /report-generator for HTML/PDF export
+- Chart-ready tables stay in the answer; the host chart channel renders them (this plugin exports no HTML/PDF)
 - Particularly valuable around earnings season (Jan, Apr, Jul, Oct)
 - Best used within 1-2 days of earnings release while market is digesting information
 

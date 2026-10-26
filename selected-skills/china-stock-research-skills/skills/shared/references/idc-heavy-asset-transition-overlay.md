@@ -6,20 +6,22 @@ This overlay does not replace the 6 core skills. It only adds sector-specific ch
 
 ## Source Map
 
-| Source | What It Validates | URL |
-| --- | --- | --- |
-| CNInfo | Annual reports, interim reports, order announcements, financing, impairment, guarantees | https://www.cninfo.com.cn/new/index |
-| SSE listed company portal | Shanghai-listed company disclosures and company profile | https://www.sse.com.cn/assortment/stock/list/info/company/index.shtml |
-| SZSE disclosure portal | Shenzhen-listed company disclosures | https://www.szse.cn/disclosure/listed/fixed/index.html |
-| MIIT | Data-center, industrial internet, green data-center, energy-efficiency policy | https://www.miit.gov.cn/ |
-| NDRC | Macro and computing-infrastructure policy, including East Data West Compute policy context | https://www.ndrc.gov.cn/ |
-| National Energy Administration | Power-supply, energy, and grid-related policy context | https://www.nea.gov.cn/ |
-| National Bureau of Statistics | Regional demand, macro fixed-asset investment, digital-economy context | https://www.stats.gov.cn/ |
-| China Mobile procurement portal | Operator bidding, procurement, and project execution clues | https://b2b.10086.cn/ |
-| China Telecom procurement portal | Operator bidding and contract clues | https://caigou.chinatelecom.com.cn/ |
-| China Unicom procurement portal | Operator bidding and award clues | http://www.chinaunicombidding.cn/ |
-| Local development and reform commissions | Local approvals, land, energy quota, project progress | Use relevant provincial or city DRC website |
-| Local data-bureau or big-data authority sites | Project filings, local data-center policy, park-level support | Use relevant local authority website |
+| Evidence | What It Validates |
+| --- | --- |
+| CNInfo | Annual reports, interim reports, order announcements, financing, impairment, guarantees |
+| SSE listed company portal | Shanghai-listed company disclosures and company profile |
+| SZSE disclosure portal | Shenzhen-listed company disclosures |
+| MIIT | Data-center, industrial internet, green data-center, energy-efficiency policy |
+| NDRC | Macro and computing-infrastructure policy, including East Data West Compute policy context |
+| National Energy Administration | Power-supply, energy, and grid-related policy context |
+| National Bureau of Statistics | Regional demand, macro fixed-asset investment, digital-economy context |
+| China Mobile procurement portal | Operator bidding, procurement, and project execution clues |
+| China Telecom procurement portal | Operator bidding and contract clues |
+| China Unicom procurement portal | Operator bidding and award clues |
+| Local development and reform commissions | Local approvals, land, energy quota, project progress |
+| Local data-bureau or big-data authority sites | Project filings, local data-center policy, park-level support |
+
+Every item carries venue, document name, document date and the accession or link the retrieval returned; the retrieval role decides where it comes from.
 
 ## When to Load
 

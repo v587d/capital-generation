@@ -416,7 +416,7 @@ test('capital-config Client：五个密钥按序渲染，本机回退与 selecte
     'local-fetch',
     'selected-skills-mode',
     ...SELECTED_SKILL_CATALOG.map(() => 'selected-skill'),
-  ], '数据源格内：五个密钥 → 保存 → 回退开关；精选 Skills 的模式开关与 68 行随后（hidden 也在树上）')
+  ], '数据源格内：五个密钥 → 保存 → 回退开关；精选 Skills 的模式开关与 70 行随后（hidden 也在树上）')
 })
 
 test('capital-config Client：catalog 用到的每个能力标签都有中英两套显示名', () => {

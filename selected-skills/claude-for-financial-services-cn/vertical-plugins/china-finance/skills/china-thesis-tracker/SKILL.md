@@ -11,7 +11,7 @@ description: Maintain and update investment theses for A-share portfolio positio
 
 Track and maintain **A股投资逻辑/thesis** for portfolio positions and watchlist names, ensuring thesis validity is continuously monitored.
 
-## Data Sources
+## Evidence request
 
 A thesis review is only as good as what came back since the last one, and this step fetches none of it: the plugin has one retrieval entry — the main agent delegating to the role that owns structured data or disclosure and web material — and it holds no data-service key here.
 

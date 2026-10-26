@@ -5,6 +5,13 @@ description: Analyze an A-share company's strategy, business evolution, and tran
 
 # Strategy Business Transition
 
+## Evidence request
+
+通过宿主数据契约请求：披露文件（公告、年报或招股书，带回出处与文档日期）、行业数据（产量、价格、政策，注明来源与日期）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 Analyze how an A-share company moved from its old business model to its current one.
 
 ## Non-Negotiable Rules

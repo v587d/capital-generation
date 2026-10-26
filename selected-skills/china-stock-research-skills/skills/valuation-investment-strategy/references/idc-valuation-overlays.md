@@ -4,12 +4,14 @@ Use this guide when valuing an IDC or AI-compute transition story.
 
 ## Source Map
 
-| Source | What It Supports | URL |
-| --- | --- | --- |
-| Company annual and interim reports | Asset base, capex, debt, segment mix, disclosed utilization | https://www.cninfo.com.cn/new/index |
-| Financing filings | Funding assumptions, project economics, dilution path | https://www.cninfo.com.cn/new/index |
-| Exchange disclosures of peers | Peer multiple context and business-model comparability | https://www.cninfo.com.cn/new/index |
-| MIIT / NDRC | Policy support that affects industry narrative and regional node logic | https://www.miit.gov.cn/ |
+| Evidence | What It Supports |
+| --- | --- |
+| Company annual and interim reports | Asset base, capex, debt, segment mix, disclosed utilization |
+| Financing filings | Funding assumptions, project economics, dilution path |
+| Exchange disclosures of peers | Peer multiple context and business-model comparability |
+| MIIT / NDRC | Policy support that affects industry narrative and regional node logic |
+
+Every item carries venue, document name, document date and the accession or link the retrieval returned; the retrieval role decides where it comes from.
 
 ## Method Hints
 

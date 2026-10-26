@@ -597,7 +597,7 @@ export const SELECTED_SKILL_ROUTING = Object.freeze({
       en: "Use when the task matches this method: ranks upcoming events by what they move, when, and how they transmit across related names, and flags positions hanging on the same event chain. US and overseas calendar conventions. Triggers on Catalyst Map, Trade discipline, Macro & industry, Monitoring, US equity.",
     }),
     requires: Object.freeze(["filings","macro"]),
-    overlaps: Object.freeze(["catalyst-calendar","china-catalyst-calendar","risk-warning-catalysts","thesis-tracker","china-thesis-tracker"]),
+    overlaps: Object.freeze(["catalyst-calendar","china-catalyst-calendar","risk-warning-catalysts","thesis-tracker","china-thesis-tracker","macro-event-analysis"]),
     canonicalFor: Object.freeze([]),
   }),
   "watchlist-review": Object.freeze({
@@ -739,6 +739,34 @@ export const SELECTED_SKILL_ROUTING = Object.freeze({
     requires: Object.freeze(["portfolio","filings","price_history"]),
     overlaps: Object.freeze(["portfolio-review","portfolio-concentration","risk-stress-test","position-sizing","position-ladder","watchlist-review","execution-plan-check","risk-reward-sanity-check","post-trade-review","journal-pattern-analyzer"]),
     canonicalFor: Object.freeze([]),
+  }),
+  "macro-event-analysis": Object.freeze({
+    market: Object.freeze(["us-stock"]),
+    stage: "pre-event",
+    methods: Object.freeze(["macro","risk"]),
+    roles: Object.freeze(["main"]),
+    primaryRole: "main",
+    useWhen: Object.freeze({
+      zh: "当用户要在未来一到两周的宏观事件里挑出真正影响决策的几项，并看清它们通过利率、汇率、商品与风险偏好传导到持仓时使用；关键词：宏观事件、事件风险、传导、时间窗。",
+      en: "Use when the task matches this method: filters the next one to two weeks of macro events down to the decision-relevant few and maps their transmission through rates, FX, commodities and risk appetite. Triggers on Macro Event Analysis, Trade discipline, Macro & industry, Monitoring, US equity.",
+    }),
+    requires: Object.freeze(["macro"]),
+    overlaps: Object.freeze(["catalyst-map","market-regime-analysis"]),
+    canonicalFor: Object.freeze(["global/pre-event/macro"]),
+  }),
+  "market-regime-analysis": Object.freeze({
+    market: Object.freeze(["us-stock"]),
+    stage: "monitoring",
+    methods: Object.freeze(["technical","risk"]),
+    roles: Object.freeze(["main"]),
+    primaryRole: "main",
+    useWhen: Object.freeze({
+      zh: "当用户要按趋势、波动率、广度与事件背景判定当前市场环境，并据此选择趋势跟随、均值回归还是防御时使用；关键词：市场环境、趋势、波动率、广度。",
+      en: "Use when the task matches this method: classifies the environment across trend, volatility, breadth and event backdrop, then argues whether trend-following, mean reversion or caution is the better default. Triggers on Market Regime Analysis, Trade discipline, Technicals, Risk, US equity.",
+    }),
+    requires: Object.freeze(["price_history","macro"]),
+    overlaps: Object.freeze(["macro-event-analysis"]),
+    canonicalFor: Object.freeze(["global/monitoring/regime"]),
   }),
   "china-earnings-analysis": Object.freeze({
     market: Object.freeze(["a-share"]),

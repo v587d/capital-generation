@@ -18,7 +18,7 @@ See `SKILL.md` for what to read and when; this part is procedure, not routing.
 # Moat analysis only (faster, focused output)
 /competitor-analysis GOOGL --moat-only
 
-# Full analysis with visual output for /report-generator
+# Full analysis with chart-ready tables for the host chart channel
 /competitor-analysis AMZN --visual
 ```
 
@@ -83,7 +83,7 @@ Provide a comprehensive competitive analysis report with:
 - Porter's Five Forces radar chart data
 - Competitive benchmarking grouped bar chart data
 - Moat score components horizontal bar chart data
-- Chart specifications for HTML report generation via `/report-generator`
+- Chart specifications the host chart channel can render (this plugin exports no HTML)
 
 ## Standard Signal Output
 

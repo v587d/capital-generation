@@ -53,32 +53,17 @@ Identify concerning patterns:
 - Look at historical patterns for that individual
 - Assess whether selling is proportional to holdings
 
-### 10. Data Sources & Research Tools
+### 10. Evidence to request
 
-Reference the following sources for insider trading data:
+Ask the host data contract for insider filings and their fields:
 
-**Primary Source - SEC EDGAR**
-- Form 4 filings: https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&type=4&company=[TICKER]
-- Form 3 filings: Initial beneficial ownership
-- Form 5 filings: Annual statements
-- File within 2 business days of transaction (Form 4)
+- **Filings** — Forms 3, 4 and 5 for the issuer and for the insiders named in the claim; a Form 4 is due within two business days of the transaction
+- **Return fields** — insider name and title, transaction date, filing date, shares bought or sold, price per share, shares owned after the transaction, transaction code (P, S, M, …), and any 10b5-1 plan footnote
+- **Aggregates** — an insider-sentiment or cluster score is a secondary figure unless it names the filings it was computed from; label it as such
 
-**Aggregator Websites**
-- **OpenInsider.com**: Free, comprehensive database with filters
-  - Cluster analysis tools
-  - Screeners for significant transactions
-  - Historical data back 10+ years
+Request by issuer and by insider, not by vendor. A filing that cannot be retrieved stays missing; do not fill the row from a summary site or from memory. When only an aggregate is available, show the filings it claims to summarise next to it — if the aggregate cannot name them, it cannot support a conviction call.
 
-- **SEC Form 4 Tracker**: Real-time Form 4 monitoring
-- **Finviz Insider**: Basic insider data with visualizations
-- **GuruFocus Insider**: Premium insider analysis
-
-**Premium Tools**
-- **Bloomberg Terminal**: Comprehensive insider data and analytics
-- **FactSet**: Insider transaction database
-- **S&P Capital IQ**: Detailed ownership and transaction data
-
-**Key Data Points to Extract**
+**Fields the analysis needs**
 - Insider name and title
 - Transaction date and filing date
 - Shares bought/sold
@@ -93,7 +78,7 @@ Reference the following sources for insider trading data:
 ```
 User: /insider-trading AAPL
 
-Claude retrieves recent Form 4 data from SEC EDGAR and analyzes
+The agent requests recent Form 4 data through the host data contract and analyzes it
 ```
 
 ### Format 2: Specific Time Period
@@ -107,7 +92,7 @@ Claude focuses on Q4 2024 insider transactions
 ```
 User: /insider-trading --data
 
-[Paste Form 4 data table or CSV from OpenInsider/SEC]
+[Paste the Form 4 data table or export you have]
 
 Claude analyzes provided data
 ```

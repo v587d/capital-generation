@@ -47,7 +47,7 @@ Claude focuses on specific institutional holders' activity
 ```
 User: /institutional-ownership --data
 
-[Paste 13F data table from WhaleWisdom or SEC]
+[Paste the 13F data table or export you have]
 
 Claude analyzes provided institutional holdings data
 ```
@@ -179,7 +179,7 @@ and ranks them by net institutional accumulation.
 
 - Combine with /insider-trading for complete ownership analysis
 - Use with /stock-eval for comprehensive due diligence
-- Feed to /report-generator for visual ownership trend charts
+- Leave chart-ready tables in the answer; the host chart channel renders them (this plugin has no report export)
 - Best used quarterly after 13F filing deadlines (May, Aug, Nov, Feb)
 - Particularly valuable for small-mid cap stocks where institutional buying can be catalyst
 - Less meaningful for mega-caps where ownership changes are primarily index-driven

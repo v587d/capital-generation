@@ -5,6 +5,13 @@ description: Build a source-backed monitoring system for risk signals and cataly
 
 # Risk Warning Catalysts
 
+## Evidence request
+
+通过宿主数据契约请求：财务报表（三表与附注，注明期间与 as-of）、披露文件（公告、年报或招股书，带回出处与文档日期）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 Convert research into a live monitoring framework.
 
 ## Non-Negotiable Rules

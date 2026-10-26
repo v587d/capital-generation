@@ -1,7 +1,7 @@
 /**
- * `tools/selected-skills` row: role-scoped selected-skill catalog plus its role prompt section.
- * The row is mounted once per Capital preset (`config.role`) and registers into that Agent's
- * own scope only; it never writes to the preset standing scope or the host scope.
+ * `tools/selected-skills` row: role-scoped selected-skill catalog, the `capital:data-contract`
+ * section every skill-loading role needs, and the selected-skill brief. Mounted once per Capital
+ * preset (`config.role`) and registers into that Agent's own scope only.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-system-prompt'
@@ -13,6 +13,7 @@ import {
   type SelectedSkillRole,
 } from './agents/selected-skills-provider.js'
 import { readCapitalConfig } from './capital-settings.js'
+import { dataContractSection } from './data-contract.js'
 import type { AgentLike, PolicyContext } from './agents/root-tool-policy.js'
 
 export const name = 'capital-selected-skills'
@@ -41,6 +42,8 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   let lastRenderError: string | undefined
   ctx.effect(() => {
+    // Every role that can load a skill also needs the boundary that says where its data comes from.
+    const disposeContract = ctx.systemPrompt.section(dataContractSection())
     const dispose = ctx.systemPrompt.section({
       name: SECTION_NAME,
       order: SECTION_ORDER,
@@ -61,6 +64,9 @@ export function apply(ctx: Context, config: Config = {}): void {
         }
       },
     })
-    return typeof dispose === 'function' ? dispose as () => void : () => {}
+    return () => {
+      if (typeof dispose === 'function') dispose()
+      if (typeof disposeContract === 'function') disposeContract()
+    }
   }, 'capital-generation.selected-skills()')
 }

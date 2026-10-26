@@ -5,6 +5,13 @@ description: Use when the user has a trade journal or trade log and wants repeat
 
 # Journal Pattern Analyzer
 
+## Evidence request
+
+通过宿主数据契约请求：持仓与成本（使用者提供）、使用者提供的输入（成交、持仓或论点记录）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 Use this skill when the user has a set of trades, journal notes, or review entries and wants to know what patterns are repeating across them.
 
 This skill will not:

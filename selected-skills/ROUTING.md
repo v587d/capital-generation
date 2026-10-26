@@ -1,4 +1,4 @@
-# 精选 Skill 路由规划表（68 颗，review 用）
+# 精选 Skill 路由规划表（70 颗，review 用）
 
 > 本表由 `selected-skills/routing.js` 生成，不是第二份真相；角色/触发条件改动以 `routing.js` 为准。
 > 生成规则：`market` 取 catalog 的 A 股/美股标签（都没有则为 global）；`stage`、`methods`、`requires`、
@@ -10,11 +10,11 @@
 
 | 角色 | primaryRole | roles 成员（含多角色） |
 |---|---:|---:|
-| 主 Agent | 29 | 37 |
+| 主 Agent | 31 | 39 |
 | 数据分析 | 36 | 40 |
 | 检索与取证 | 3 | 8 |
 
-## 68 颗
+## 70 颗
 
 | # | name | 中文名 | 角色（primary 在前） | primaryRole | stage | methods | market | 触发条件（zh） | canonicalFor | overlaps 数 |
 |---:|---|---|---|---|---|---|---|---|---|---:|
@@ -86,3 +86,5 @@
 | 66 | `banking-compliance` | 银行资本与流动性指标 | 数据分析 | 数据分析 | research | risk / financial-health | global | 当用户要看银行资本与流动性指标：CET1、RWA、杠杆率、LCR / NSFR 与压力形状时使用；关键词：银行资本、CET1、RWA、LCR、NSFR。 | — | 0 |
 | 67 | `forensic-accounting` | 账务异常与数字分布排查 | 数据分析 | 数据分析 | review | accounting / evidence | global | 当用户要用 Benford、整数重复金额、资金循环与供应商关联方重合作取证式排查时使用；关键词：取证会计、Benford、资金循环、关联方。 | — | 6 |
 | 68 | `cross-market-listing-choice` | 跨市场选线（A/H · ADR/HK） | 主 Agent / 数据分析 | 主 Agent | review | portfolio / tax / risk | a-share / us-stock | 当同一家公司有 A/H、ADR/港股多条上市线，用户要选一条持有、加仓或观察时使用；关键词：A/H 溢价、ADR、选线、汇率、股息税。 | — | 0 |
+| 69 | `macro-event-analysis` | 宏观事件梳理 | 主 Agent | 主 Agent | pre-event | macro / risk | us-stock | 当用户要在未来一到两周的宏观事件里挑出真正影响决策的几项，并看清它们通过利率、汇率、商品与风险偏好传导到持仓时使用；关键词：宏观事件、事件风险、传导、时间窗。 | global/pre-event/macro | 2 |
+| 70 | `market-regime-analysis` | 市场环境判定 | 主 Agent | 主 Agent | monitoring | technical / risk | us-stock | 当用户要按趋势、波动率、广度与事件背景判定当前市场环境，并据此选择趋势跟随、均值回归还是防御时使用；关键词：市场环境、趋势、波动率、广度。 | global/monitoring/regime | 1 |

@@ -5,6 +5,13 @@ description: Explains any InvestSkill output like a mentor — every metric in p
 
 # Learning Coach — Understand the Analysis You Just Got
 
+## Evidence request
+
+通过宿主数据契约请求：使用者提供的输入（成交、持仓或论点记录）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 ## ⚠️ Data Verification — Do This Before Any Analysis
 
 Before explaining anything, check the material you were handed:
@@ -24,12 +31,12 @@ Never substitute a remembered value for a retrieved one. Getting the number is t
 
 ## 📋 Data & Sources Header — Open Every Output With It
 
-The first thing in the output is this provenance block, filled in — never left as placeholders. It is the standard documented on the [Data & Accuracy](https://yennanliu.github.io/InvestSkill/data-and-accuracy.html) page and the first thing `result-validator` looks for:
+The first thing in the output is this provenance block, filled in — never left as placeholders. It is the standard `result-validator` looks for first:
 
 ```
 Data & Sources
   As of:      <date the figures represent, e.g. 2026-06-30>
-  Source:     <primary docs — SEC EDGAR 10-K/10-Q, company IR, FRED, exchange data …>
+  Source:     <venue, document, date — as returned by retrieval>
   Retrieval:  <delegated retrieval | web/tool retrieval | pasted by user>
   Confidence: <HIGH | MEDIUM | LOW>
 ```

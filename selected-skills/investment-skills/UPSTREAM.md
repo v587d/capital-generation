@@ -12,3 +12,12 @@
 - Maintenance snapshot (checked 2026-10-08): latest commit 2026-07-22; no later commits observed through the review date (78 days). See [GitHub commit history](https://github.com/finterm-ai/investment-skills/commits/main/).
 - Runtime status: `experimental` / explicit experiment. The skill remains disabled until explicitly selected in Capital settings and is registered only in a Capital root Agent's own scope. Its capability tags and warning are maintained in `selected-skills/catalog.js`.
 - Review status: imported for user-directed evaluation; not endorsed by Warren Buffett, Berkshire Hathaway, or Capital Generation. Its US-centric framework must not be treated as A-share rules. Validate all financial claims against primary evidence.
+
+## 2026-10 收敛：仓内只保留 catalog 正文
+
+本仓不再保存上游全量快照。除 catalog 命中的 1 颗正文、LICENSE 与本文件之外，以下内容按 2026-10 政策**从仓里删除**（不是仅从包里排除）；重新按上面所钉 commit 覆盖快照时按本节过滤。
+
+- **上游仓库材料**：`.github`、`.npmignore`、`.tbd`、`Makefile`、`README.md`、`docs`、`images`、`viz`。
+- **catalog 目录内的附属材料**：`agents/` 1 个文件。
+- **上游脚本与取数服务端（1 个文件）**：删除，连 git 都不留（执行面）。
+- 许可与署名不受影响：`LICENSE` 原件、所钉 commit 与作者信息仍在上面各节；公开许可只要求保留版权与许可声明。

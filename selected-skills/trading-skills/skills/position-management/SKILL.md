@@ -5,6 +5,13 @@ description: Review an open position and decide whether to hold, trim, tighten r
 
 # Position Management
 
+## Evidence request
+
+通过宿主数据契约请求：持仓与成本（使用者提供）、披露文件（公告、年报或招股书，带回出处与文档日期）、行情序列（复权口径与 as-of）。
+
+缺哪个字段就点名并停止该字段下的分析；用户粘贴的材料标 `pasted by user`。
+
+
 Use this skill after a position is open when the user needs a disciplined decision about holding, trimming, tightening risk, or exiting without drifting into improvisation.
 
 This skill will not:
