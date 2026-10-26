@@ -4,7 +4,7 @@
 > （§8.3）与新增角色流程（§8.5）留在 `AGENTS.md`，因为它们是每次动手都要过的闸门。
 > §编号沿用 `AGENTS.md` 的全局命名空间。
 
-## 8.1 现状（实测于 dsh 0.2.1-rc.2）
+## 8.1 现状（实测于 dsh 0.2.1-rc.3）
 
 - 装配整体住 **`preset/capital-generation/agent.patch.yml`**：**六颗**
   `@deepseek-ai/dsh-agent-preset` insert 行——根 `capital-generation` 加五颗角色 preset，每颗

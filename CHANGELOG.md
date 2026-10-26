@@ -7,6 +7,27 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**、2.9.0 的选择器收敛与质检前置——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [2.12.0] - 2026-10-26
+
+宿主基线从 `0.2.1-rc.2` 抬到 `0.2.1-rc.3`。rc.3 只改客户端界面与 DeepSeek 模型列表，本插件消费的
+扩展面（配置卡片、自选股弹窗、图表卡片、交付事件）逐条核对后没有形状变化，工具与数据契约不变。
+
+### Changed
+
+- **`peerDependencies` 的 `dsh-skill` / `dsh-skill-filesystem` 改成精确 pin `0.2.1-rc.3`**：
+  这两颗是运行时导入（`FileSystemSkillProvider`），与宿主同版才不会有"插件带 rc.3 的 provider
+  接 rc.2 的 skill 服务"这种跨版本组合。`devDependencies` 与 lockfile 同步到 rc.3。
+- README 基线徽章、CONTRIBUTING、CI 安装版本、preset 维护文档同步到 rc.3。
+
+### Migration
+
+- **本次必须换宿主版本**：先 `dsh --version` 确认为 `0.2.1-rc.3`，再安装或更新本插件。在 rc.2 上
+  安装本版会被宿主的插件兼容预检直接拒绝；反过来，若先升宿主而插件仍是 2.11.1，启动时该插件行
+  会被禁用（stderr 一行 `disabling profile plugin ...`，界面上模式与工具整体消失），执行
+  `dsh plugin --profile <profile> update @v587d/capital-generation` 后重启即可恢复。
+- rc.3 的 New Session 会复用 Workspace 里的空白会话：**更新插件后先重启宿主再新建会话**，
+  否则复用到的空白会话仍保留创建时的 preset 组合。
+
 ## [2.11.1] - 2026-10-26
 
 ### Fixed
