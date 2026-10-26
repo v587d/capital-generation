@@ -30,6 +30,10 @@ export declare class SourceError extends Error {
     readonly code: string;
     constructor(source: SourceId, code: string, message: string);
 }
+/** Named sources return API payloads, not web pages: the 100k-char HTML cap cuts a 50-item
+ * CLS telegraph body (measured 106,106 chars) into invalid JSON. Size for JSON, not HTML. */
+export declare const SOURCE_MAX_BYTES = 1048576;
+export declare const SOURCE_MAX_CHARS = 262144;
 type Requester = ReturnType<typeof createHttpRequester>;
 /** Built per source-tool call; lazy transport, configured timeout. */
 export declare function createSourceTransport(options: LocalFetchOptions): Requester;

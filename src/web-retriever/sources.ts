@@ -47,6 +47,11 @@ export class SourceError extends Error {
 
 const REQUEST_TIMEOUT_MS = 20_000
 
+/** Named sources return API payloads, not web pages: the 100k-char HTML cap cuts a 50-item
+ * CLS telegraph body (measured 106,106 chars) into invalid JSON. Size for JSON, not HTML. */
+export const SOURCE_MAX_BYTES = 1_048_576
+export const SOURCE_MAX_CHARS = 262_144
+
 type Requester = ReturnType<typeof createHttpRequester>
 
 /** No `@types/node` here, so hash via runtime `process.getBuiltinModule`. */
@@ -64,7 +69,13 @@ function createHash(algorithm: string): HashLike | undefined {
 
 /** Built per source-tool call; lazy transport, configured timeout. */
 export function createSourceTransport(options: LocalFetchOptions): Requester {
-  return createHttpRequester({ ...options, timeoutMs: options.timeoutMs || REQUEST_TIMEOUT_MS })
+  return createHttpRequester({
+    ...options,
+    timeoutMs: options.timeoutMs || REQUEST_TIMEOUT_MS,
+    // Never lower the JSON ceiling to the HTML setting: a truncated body cannot be parsed.
+    maxBytes: Math.max(options.maxBytes, SOURCE_MAX_BYTES),
+    maxContentChars: Math.max(options.maxContentChars, SOURCE_MAX_CHARS),
+  })
 }
 
 /**
@@ -135,7 +146,11 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined
 }
 
-function parseJson(text: string, source: SourceId, what: string): unknown {
+function parseJson(text: string, source: SourceId, what: string, truncated = false): unknown {
+  // A truncated body always fails JSON.parse with a syntax error; name the real cause instead.
+  if (truncated) {
+    throw new SourceError(source, 'INVALID_RESPONSE', `${what} 超过本机响应体上限被截断，无法解析；请降低 limit 或缩小查询范围`)
+  }
   try {
     return JSON.parse(text)
   } catch (error) {
@@ -191,7 +206,7 @@ export async function clsTelegraph(
     { url: `${CLS_URL}?${query}&sign=${clsSign(params)}`, headers: { referer: CLS_REFERER } },
     input.signal,
   )
-  const body = asRecord(parseJson(outcome.text, 'cls', '财联社响应'))
+  const body = asRecord(parseJson(outcome.text, 'cls', '财联社响应', outcome.truncated))
   if (!body) throw new SourceError('cls', 'INVALID_RESPONSE', '财联社响应不是对象')
   if (body.errno !== 0) {
     throw new SourceError('cls', 'UPSTREAM', `财联社返回 errno=${String(body.errno)}（上游口径变更或风控）`)
@@ -236,7 +251,7 @@ export async function wscnLives(
     { url: `${WSCN_URL}?${params.toString()}` },
     input.signal,
   )
-  const body = asRecord(parseJson(outcome.text, 'wscn', '华尔街见闻响应'))
+  const body = asRecord(parseJson(outcome.text, 'wscn', '华尔街见闻响应', outcome.truncated))
   if (!body) throw new SourceError('wscn', 'INVALID_RESPONSE', '华尔街见闻响应不是对象')
   if (body.code !== 20000) {
     throw new SourceError('wscn', 'UPSTREAM', `华尔街见闻返回 code=${String(body.code)}`)
@@ -289,7 +304,7 @@ export async function cninfoIrm(
     { url: IRM_KEYWORD_URL, method: 'POST', body: formBody({ keyWord: input.code }) },
     input.signal,
   )
-  const keywordBody = asRecord(parseJson(keyword.text, 'cninfo_irm', '互动易代码查询响应'))
+  const keywordBody = asRecord(parseJson(keyword.text, 'cninfo_irm', '互动易代码查询响应', keyword.truncated))
   const matches = Array.isArray(keywordBody?.data) ? keywordBody.data : []
   const first = asRecord(matches[0])
   const orgId = typeof first?.secid === 'string' ? first.secid : undefined
@@ -310,7 +325,7 @@ export async function cninfoIrm(
     { url: `${IRM_QUESTION_URL}?${params.toString()}`, method: 'POST', body: '' },
     input.signal,
   )
-  const pageBody = asRecord(parseJson(page.text, 'cninfo_irm', '互动易问答响应'))
+  const pageBody = asRecord(parseJson(page.text, 'cninfo_irm', '互动易问答响应', page.truncated))
   const rows = requireRows(pageBody?.rows, 'cninfo_irm', '互动易 rows')
   const total = typeof pageBody?.total === 'number' ? pageBody.total : undefined
   const items: SourceItem[] = []
@@ -383,7 +398,7 @@ async function sseCompanyPage(transport: Requester, page: number, signal?: Abort
     { url: `${SSE_BASE}/allcompany.do`, method: 'POST', body: formBody({ code: '0', order: '2', areaId: '0', page: String(page) }), headers: { referer: SSE_REFERER } },
     signal,
   )
-  const body = asRecord(parseJson(outcome.text, 'sseinfo', '上证e互动公司列表响应'))
+  const body = asRecord(parseJson(outcome.text, 'sseinfo', '上证e互动公司列表响应', outcome.truncated))
   const content = typeof body?.content === 'string' ? body.content : undefined
   if (content === undefined) {
     throw new SourceError('sseinfo', 'INVALID_RESPONSE', `上证e互动公司列表第 ${page} 页没有 content 字符串（页面结构可能已变）`)

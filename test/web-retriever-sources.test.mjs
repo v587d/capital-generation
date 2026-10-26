@@ -188,6 +188,51 @@ test('cls_telegraph：errno 非 0 必须失败而不是返回空表', async () =
   }
 })
 
+test('cls_telegraph：50 条正文超过 10 万字符仍能完整解析（HTML 档体积不得切 JSON）', async () => {
+  const rows = Array.from({ length: 50 }, (_, index) => ({
+    id: 2500000 + index,
+    ctime: 1790224318 - index,
+    title: `快讯 ${index}`,
+    content: 'x'.repeat(2_400),
+    brief: '',
+    shareurl: `https://api3.cls.cn/share/article/${2500000 + index}`,
+    in_roll: true,
+    is_ad: false,
+  }))
+  const body = JSON.stringify({ errno: 0, data: { roll_data: rows } })
+  assert.ok(body.length > 100_000, `夹具必须超过旧 HTML 上限，实际 ${body.length}`)
+  const restore = installFetch(async () => json({ errno: 0, data: { roll_data: rows } }))
+  try {
+    const outcome = await clsTelegraph(makeTransport(), { limit: 50 })
+    assert.equal(outcome.items.length, 50, '整段 JSON 必须解析成功，不能按 10 万字符截断')
+  } finally {
+    restore.restore()
+  }
+})
+
+test('cls_telegraph：超过具名来源上限时点名截断，不把 JSON 语法错误当成上游改版', async () => {
+  const rows = Array.from({ length: 50 }, (_, index) => ({
+    id: 2600000 + index,
+    ctime: 1790224318 - index,
+    title: `快讯 ${index}`,
+    content: 'x'.repeat(6_000),
+    brief: '',
+    shareurl: `https://api3.cls.cn/share/article/${2600000 + index}`,
+    in_roll: true,
+    is_ad: false,
+  }))
+  const restore = installFetch(async () => json({ errno: 0, data: { roll_data: rows } }))
+  try {
+    await assert.rejects(clsTelegraph(makeTransport(), { limit: 50 }), (error) => {
+      assert.match(error.message, /超过本机响应体上限被截断/)
+      assert.doesNotMatch(error.message, /Unterminated string/)
+      return true
+    })
+  } finally {
+    restore.restore()
+  }
+})
+
 test('wscn_lives：透出 next_cursor，score 进 importance，翻页把 cursor 传回上游', async () => {
   const restore = installFetch(async () => json(WSCN_PAGE))
   try {

@@ -40,6 +40,10 @@
   条目才装进 `items`，`count` 只说真放下的条数、省略写进 `note`——**声明与正文不一致比报错
   危险**。阈值真值在 preset `compaction` 组 `tool-result-pruner` 子行，`test/persona.test.mjs`
   钉住两处不得背离。
+- **具名来源的响应体上限单独一档**（`SOURCE_MAX_CHARS` 262144 / `SOURCE_MAX_BYTES` 1 MiB）：100k
+  是给 HTML 回退的体积；九个来源的响应要整段解析（JSON 或 HTML 片段），财联社 50 条实测
+  106,106 字符，按 HTML 档截断会把 JSON 切成非法串。解析前 `truncated` 为真一律响亮失败
+  （点名截断与降低 limit），**不许**把 JSON 语法错误当成上游改版。
 - **不可见字符一律剥**（`stripInvisibleText`）：零宽 / 双向覆盖 / C0-C1 / BOM 删除保序——
   Trojan Source 字符会改变行的显示顺序，让关键词检查认不出被伪装的指令。顺序固定"先解码实体、
   后剥不可见字符与标签"；`\n` `\r` `\t` 保留。
