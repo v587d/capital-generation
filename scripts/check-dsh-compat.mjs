@@ -1168,6 +1168,49 @@ const probes = [
         : { status: FAIL, detail: `子 Agent 等待面变了：${missing.join(' / ')}（见账本 L36；先改 wait_for_agents，不要改探针）` }
     },
   },
+  {
+    id: 'L37',
+    title: 'cap-automation 执行面：profileContext / sessionController.create·resolveAgent·prompt·rename / workspaceRegistry / subagents.drainDescendants / agents.list',
+    why: '投研自动化每次运行新建 session、按 profile 派生数据归属、按用户选择加入 workspace、取消整棵运行子树；这些服务改名会让任务静默不跑或取消后遗留子 Agent。',
+    run() {
+      const profileFile = join(PKG('dsh-app-boot'), 'lib/types/profile-context.d.ts')
+      const sessionFile = join(PKG('dsh-api-session-controller'), 'lib/types/index.d.ts')
+      const sessionTypesFile = join(PKG('dsh-api-session-controller'), 'lib/types/types.d.ts')
+      const workspaceFile = join(PKG('dsh-workspace'), 'lib/types/index.d.ts')
+      const workspaceEntityFile = join(PKG('dsh-workspace'), 'lib/types/entity.d.ts')
+      const subFile = join(PKG('dsh-subagent'), 'lib/types/index.d.ts')
+      const agentFile = join(PKG('dsh-agent'), 'lib/types/index.d.ts')
+      const profile = readIfPresent(profileFile) ?? ''
+      const session = readIfPresent(sessionFile) ?? ''
+      const sessionTypes = readIfPresent(sessionTypesFile) ?? ''
+      const workspace = readIfPresent(workspaceFile) ?? ''
+      const workspaceEntity = readIfPresent(workspaceEntityFile) ?? ''
+      const sub = readIfPresent(subFile) ?? ''
+      const agent = readIfPresent(agentFile) ?? ''
+      const checks = [
+        ['ProfileContext.name', /readonly name: string;/, profile, profileFile],
+        ['ProfileContext.dir', /readonly dir: string;/, profile, profileFile],
+        ['ProfileContext.home', /readonly home: string;/, profile, profileFile],
+        ['SessionCreateRequest.workspaceId', /readonly workspaceId\?: WorkspaceId;/, sessionTypes, sessionTypesFile],
+        ['SessionController.create', /create\(request: SessionCreateRequest\): Promise<SessionCreateValue>/, session, sessionFile],
+        ['SessionController.resolveAgent', /resolveAgent\(sessionId: SessionId\): Promise<ApiSessionAgentResult>/, session, sessionFile],
+        ['SessionController.prompt', /prompt\(request: SessionPromptRequest, signal: AbortSignal\): Promise<SessionPromptValue>/, session, sessionFile],
+        ['SessionController.rename', /rename\(request: SessionRenameRequest\): Promise<SessionRenameValue>/, session, sessionFile],
+        ['WorkspaceRegistry.create', /create\(path: string, title\?: string\): Promise<Workspace>;/, workspace, workspaceFile],
+        ['WorkspaceRegistry.get', /get\(id: WorkspaceId\): Workspace \| undefined;/, workspace, workspaceFile],
+        ['WorkspaceRegistry.list', /list\(\): Workspace\[\];/, workspace, workspaceFile],
+        ['Workspace.attachSession', /attachSession\(sessionId: SessionId\): Promise<void>;/, workspaceEntity, workspaceEntityFile],
+        ['Workspace.status', /status\(\): Promise<'ok' \| 'missing-dir'>;/, workspaceEntity, workspaceEntityFile],
+        ['SubagentRuntime.drainDescendants', /drainDescendants\(parents: readonly Agent\[\]\): Promise<void>/, sub, subFile],
+        ['AgentRegistry.list', /list\(\): Agent\[\];/, agent, agentFile],
+      ]
+      const missing = checks.filter(([, pattern, source]) => !pattern.test(source))
+        .map(([label, , , source]) => `${label}（${source}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: 'profileContext 三字段、sessionController 四方法、workspaceRegistry 选择面、drainDescendants 与 agents.list 都仍在' }
+        : { status: FAIL, detail: `投研自动化执行面变了：${missing.join(' / ')}（见账本 L37；先改 automation/，不要改探针）` }
+    },
+  },
 ]
 
 const results = []

@@ -69,7 +69,7 @@ const walk = (dir) => {
     }
   }
 }
-for (const dir of ['src', 'test', 'scripts', 'chart-ui', 'config', 'watchlist', 'preset', 'docs']) walk(dir)
+for (const dir of ['src', 'test', 'scripts', 'chart-ui', 'config', 'watchlist', 'automation', 'preset', 'docs']) walk(dir)
 
 const scanTexts = new Map(filesToScan.map((rel) => [rel, read(rel)]))
 

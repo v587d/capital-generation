@@ -13,6 +13,14 @@ export interface Config {
     selectedSkillsMode?: SelectedSkillsMode;
     fuyaoCredentialRef?: string;
     ftshareCredentialRef?: string;
+    automation?: {
+        tickMs?: number;
+        runTimeoutMinutes?: number;
+        idleTimeoutMinutes?: number;
+        maxSteps?: number;
+        maxToolCalls?: number;
+        inAppNotifications?: boolean;
+    };
     retriever?: RetrieverConfig;
 }
 export declare const Config: z<Schemastery.ObjectS<NoInfer<{
@@ -25,6 +33,21 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     selectedSkillsMode: z<"manual" | "auto", "manual" | "auto", "defined">;
     fuyaoCredentialRef: z<string, string, "defined">;
     ftshareCredentialRef: z<string, string, "defined">;
+    automation: z<Schemastery.ObjectS<NoInfer<{
+        tickMs: z<number, number, "defined">;
+        runTimeoutMinutes: z<number, number, "defined">;
+        idleTimeoutMinutes: z<number, number, "defined">;
+        maxSteps: z<number, number, "defined">;
+        maxToolCalls: z<number, number, "defined">;
+        inAppNotifications: z<boolean, boolean, "defined">;
+    }>>, Schemastery.ObjectT<NoInfer<{
+        tickMs: z<number, number, "defined">;
+        runTimeoutMinutes: z<number, number, "defined">;
+        idleTimeoutMinutes: z<number, number, "defined">;
+        maxSteps: z<number, number, "defined">;
+        maxToolCalls: z<number, number, "defined">;
+        inAppNotifications: z<boolean, boolean, "defined">;
+    }>>, "defined">;
     retriever: z<Schemastery.ObjectS<NoInfer<{
         baseURL: z<string, string, "defined">;
         credentialRef: z<string, string, "defined">;
@@ -112,6 +135,21 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     selectedSkillsMode: z<"manual" | "auto", "manual" | "auto", "defined">;
     fuyaoCredentialRef: z<string, string, "defined">;
     ftshareCredentialRef: z<string, string, "defined">;
+    automation: z<Schemastery.ObjectS<NoInfer<{
+        tickMs: z<number, number, "defined">;
+        runTimeoutMinutes: z<number, number, "defined">;
+        idleTimeoutMinutes: z<number, number, "defined">;
+        maxSteps: z<number, number, "defined">;
+        maxToolCalls: z<number, number, "defined">;
+        inAppNotifications: z<boolean, boolean, "defined">;
+    }>>, Schemastery.ObjectT<NoInfer<{
+        tickMs: z<number, number, "defined">;
+        runTimeoutMinutes: z<number, number, "defined">;
+        idleTimeoutMinutes: z<number, number, "defined">;
+        maxSteps: z<number, number, "defined">;
+        maxToolCalls: z<number, number, "defined">;
+        inAppNotifications: z<boolean, boolean, "defined">;
+    }>>, "defined">;
     retriever: z<Schemastery.ObjectS<NoInfer<{
         baseURL: z<string, string, "defined">;
         credentialRef: z<string, string, "defined">;

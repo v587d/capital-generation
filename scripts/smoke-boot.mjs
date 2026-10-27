@@ -51,6 +51,7 @@ const CLIENT_BUNDLES = [
   { dir: 'chart-ui', label: '图表客户端 bundle' },
   { dir: 'config', label: 'settings 卡片 bundle' },
   { dir: 'watchlist', label: '自选股客户端 bundle' },
+  { dir: 'automation', label: '投研自动化客户端 bundle' },
 ].map((entry) => ({ ...entry, id: JSON.parse(readFileSync(join(ROOT, entry.dir, 'package.json'), 'utf8')).name }))
 
 /** Probe marker line; the parent process keys off it. */
@@ -119,6 +120,44 @@ async function watchlistFenceProbe(url, cookie) {
     cause = '回包不是 JSON'
   }
   return { anonymousStatus: anonymous.status, status: authed.status, items, cause, cacheControl: authed.headers.get('cache-control') }
+}
+
+/**
+ * Live proof that the automation host row mounted: the route is fenced and `/meta` reports the
+ * current profile, the fixed preset and the unattended policy. Storage/scheduler failures are
+ * surfaced in the same payload instead of a fake success.
+ */
+async function automationMetaProbe(url, cookie) {
+  const signal = AbortSignal.timeout(15_000)
+  const origin = new URL(url).origin
+  const target = `${origin}/capital-automation/meta`
+  const anonymous = await fetch(target, { signal })
+  const headers = cookie.length > 0 ? { cookie } : {}
+  const authed = await fetch(target, { headers, signal })
+  let payload
+  try {
+    payload = JSON.parse(await authed.text())
+  } catch {
+    payload = undefined
+  }
+  const tasksResponse = await fetch(`${origin}/capital-automation/tasks`, { headers, signal })
+  let tasks
+  try {
+    tasks = JSON.parse(await tasksResponse.text())
+  } catch {
+    tasks = undefined
+  }
+  return {
+    anonymousStatus: anonymous.status,
+    status: authed.status,
+    cacheControl: authed.headers.get('cache-control'),
+    profile: payload?.profile?.name ?? null,
+    policy: payload?.execution?.policy ?? null,
+    scheduler: payload?.scheduler?.state ?? null,
+    storage: payload?.storage?.state ?? null,
+    tasksStatus: tasksResponse.status,
+    tasks: Array.isArray(tasks?.tasks) ? tasks.tasks : null,
+  }
 }
 
 /**
@@ -437,6 +476,7 @@ const tail = result.output.split('\n').filter(Boolean).slice(-15).join('\n')
 let bundles
 let fence
 let skillFence
+let automationFence
 try {
   if (result.ok) {
     console.log(`smoke-boot: ✅ ${result.reason}`)
@@ -462,6 +502,26 @@ try {
       } catch (error) {
         fence = { ok: false, error: String(error?.message ?? error) }
         console.log(`smoke-boot: ❌ 自选股路由探针失败：${fence.error}`)
+      }
+      // The automation page's API is only real in a host row: the route + fixed domain + profile
+      // filter are exercised together here.
+      try {
+        automationFence = await automationMetaProbe(url, bundles.cookie ?? '')
+        const ok = bundles.cookie.length === 0
+          ? automationFence.status === 200
+          : automationFence.anonymousStatus === 401
+            && automationFence.status === 200
+            && automationFence.profile !== null
+            && automationFence.policy === 'automation-v1'
+            && automationFence.storage === 'ready'
+            && automationFence.tasksStatus === 200
+            && automationFence.tasks?.length === 3
+            && automationFence.tasks.every((task) => task.origin === 'builtin' && task.state === 'dormant')
+        automationFence.ok = ok && automationFence.cacheControl === 'no-store'
+        console.log(`smoke-boot: ${automationFence.ok ? '✅' : '❌'} /capital-automation/meta：匿名 HTTP ${automationFence.anonymousStatus}（应 401）、带 cookie HTTP ${automationFence.status}，profile=${automationFence.profile}，policy=${automationFence.policy}，scheduler=${automationFence.scheduler}，storage=${automationFence.storage}，tasks=${automationFence.tasks?.length ?? '?'}`)
+      } catch (error) {
+        automationFence = { ok: false, error: String(error?.message ?? error) }
+        console.log(`smoke-boot: ❌ 投研自动化路由探针失败：${automationFence.error}`)
       }
       // The skill-doc route is only real in a host; test both catalog ends (own path layout each).
       try {
@@ -556,5 +616,6 @@ const positiveOk = result.ok
   && (bundles?.fetched !== true || fence?.ok === true)
   // ⛔ The skill-doc route: anonymous rejected, closed set 404, disk read only on a hit.
   && (bundles?.fetched !== true || skillFence?.ok === true)
+  && (bundles?.fetched !== true || automationFence?.ok === true)
 // The negative control is expected to fail: only ask whether the signature fired.
 process.exit(positiveOk && gateFired !== undefined ? 0 : 1)

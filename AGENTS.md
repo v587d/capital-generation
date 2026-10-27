@@ -11,7 +11,6 @@
 >   `test/readme-prose.test.mjs`；说不清的用户影响就别写，只写读者看得见和要做的动作。
 
 ## 0. 阅读路径
-
 | 你要动什么 | 详情在 |
 |---|---|
 | 角色边界、Dataset 消息 / 返回边界、capability 目录预算 | `docs/dev/data-roles.md`（§1.1 §1.2 §1.4 §1.5 §1.7）|
@@ -25,6 +24,7 @@
 | 外部 Skills 接入 | `docs/dev/selected-skills.md`（§8.6）|
 | 精选 Skill 角色路由、触发条件、注册边界与使用反馈 | `docs/dev/selected-skill-index.md`（§8.7）|
 | 工具 schema 全表、数据源验收全表 | `docs/dev/tool-schema.md`（§9.1–§9.6 §10.1–§10.9）|
+| 投研自动化任务（host bundle / 固定域 / 调度 / 运行） | `docs/dev/automation.md`（§12.1–§12.5）|
 
 ### ⛔ 硬约束一览
 
@@ -40,9 +40,7 @@
 - **§8.6** 接入必查清单先过：取数一律委派、不许用记忆回填、不带执行面；frontmatter/目录须可发现；catalog 与打包约束见详情。
 - **§9.5 / §9.6** 工具返回值必须无损 JSON（`undefined` / `NaN` / 空洞不许带出），且必须满足自己
   声明的 `output.schema`——多返回一个未声明字段同样致命。
-
 ## 1. 角色边界与数据调度纪律
-
 ```text
 main Agent
   +-- data_collector   外部取数，立即持久化，只回传 DatasetRef
@@ -52,11 +50,10 @@ main Agent
   +-- web_retriever    网页材料获取（一次一个）
 ```
 
-一句话版：**原始 rows 永不出工具层**，Agent 间只传 `DatasetRef` / profile 引用 / 聚合结果；主 Agent
-一律委派（工具层拒绝它直连 Dataset 系列）、自己不出图；专用角色是叶子、互通须经主 Agent 中继；data_junior 的唯一执行面是 PTC `run_code`（不挂 shell），程序只调度工具与算术、不读落盘文件。主 Agent 委派后调 `wait_for_agents` 等子树收敛，不以等待行结束回合。
-
+一句话版：**原始 rows 永不出工具层**，Agent 间只传引用与聚合；主 Agent 一律委派、自己不出图；
+角色是叶子，互通经主 Agent；data_junior 只跑 PTC `run_code`，程序只调度工具与算术；委派后
+`wait_for_agents` 等子树收敛，不以等待行结束回合。
 ## 2. 项目结构
-
 ```text
 capital-generation/
 ├── preset/capital-generation/    # 装配（agent.patch.yml = 一颗 @deepseek-ai/dsh-agent-preset
@@ -77,7 +74,6 @@ capital-generation/
 ├── docs/                         # dev/ = 本文详情层；reference/dsh-surface-ledger.md = 扩展面账本
 └── lib/ test/ scripts/ assets/   # 构建产物 / *.test.mjs / session-trace 等 / README 素材
 ```
-
 ## 3. 数据布局（`{{cwd}}/` 下，服从当前 session 权限）
 
 ```text
@@ -119,7 +115,8 @@ capital-analysis/runs/<analysis_id>/          # 预留（data_analyst）
 ### 8.3 改完后必须验证（缺一不可）
 
 1. **挂载验证**（`agentPresets.resolve(id)` 无 `broken`，`compositionInventory()` 新增行 active；失败信息点名问题行）
-2. **`npm test` 全绿**（会先 build）。测试断言实测教训，不准删断言变绿；规则迁移须同步断言。persona / `agent.patch.yml` 体积与文档行数闸门见相应测试。改过运行时路径、换行或子进程形状，勿放宽 `test/cross-platform.test.mjs`。
+2. **`npm test` 全绿**。测试断言实测教训，不准删断言变绿；规则迁移须同步断言。persona / patch
+   体积与文档行数闸门见相应测试；改过运行时路径、换行或子进程形状，勿放宽 `test/cross-platform.test.mjs`。
 3. **测试跟随本机 dsh 版本**：`dsh-persona` 字段是 `prefix` 不是 `text`（`test/persona.test.mjs` 有核对用例）；字段变化须只在**一条**用例里失败并点名文件。
 4. 动过 preset 行 / host 平面 / 交付事件，再跑 `npm run check:dsh`（扩展面账本逐条探测）。
 
@@ -132,10 +129,9 @@ capital-analysis/runs/<analysis_id>/          # 预留（data_analyst）
 
 ### 9.7 同一能力接多个入口：共用一份实现、逐入口验证
 
-两次事故同一族（§1.3 日期归一漏接、session 读取漏接框架形状）：**本地测试只覆盖了接好的入口**。
-自检：① 实现是否只有一份（`query-time.ts` / `tool-exec.ts`）？② 所有入口都接上了吗（`grep` 调用点）？
-③ 每个入口有对等断言吗？④ 测试用**框架真实 exec 形状**（`exec.agent.session`）吗？⑤ 注册是否押在装配期读一次的外部状态上？
-外部时刻留到调用期，注册只看结构；失败也不要 memoize，否则一次装配期抢跑会钉到进程结束（自选股 `domain()` 的永久 `store_unavailable`）。
+两次事故同一族（§1.3、session 读取漏接框架形状）：**本地测试只覆盖了接好的入口**。自检：实现只有
+一份（`query-time.ts` / `tool-exec.ts`）？入口都接上（`grep`）？有对等断言？测试用真实
+`exec.agent.session` 形状？注册押在装配期外部状态上？外部时刻留到调用期，失败不 memoize。
 
 ## 10. 数据源验收纪律（改 `src/sources/*.ts` 之后）
 
@@ -148,3 +144,7 @@ capital-analysis/runs/<analysis_id>/          # 预留（data_analyst）
 删历史复盘（日期、会话 id、事故经过）、代码复述、分段横幅、注释掉的代码，以及只重复类型的
 `@param` / `@returns`。文件头 ≤5 行，单点一行；优先英文（中文只用于原文报错、用户文案或中文术语更准处）。
 细节住 `docs/dev/`，只留指针；生成物（`lib/`、生成的 `client.js`）不手改；指令注释不删。
+## 12. 投研自动化
+`capital-automation` 独立 host bundle，官方 `ui-schedule` 不变；固定域 `capital_automation` + 服务端
+`profileKey` 过滤 + 单 scheduler lease + 每次运行新 session + 无人值守闸门；细节见 `docs/dev/automation.md`
+§12.1–§12.5。延期：条件触发器、跨运行上下文、watchdog、preset/projectRoot。

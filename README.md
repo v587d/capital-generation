@@ -18,7 +18,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.12.0-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.13.0-9cf" alt="Version"></a>
   <a href="https://www.npmjs.com/package/@v587d/capital-generation"><img src="https://img.shields.io/npm/v/%40v587d%2Fcapital-generation" alt="npm version"></a>
   <a href="https://github.com/deepseek-ai/deepseek-harness"><img src="https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white" alt="powered-by-dsh"></a>
 </p>
@@ -38,6 +38,15 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 
 > [!NOTE]
 > 适配 DSH`@0.2.1-rc.3`。已在 Linux 的 Web profile 和 Windows 桌面端验证；其他环境尚未充分测试。建议使用 `Deepseek/deepseek-flash` ，思考推理能力为 High ；GPT / Claude 尚未充分测试。
+
+> [!TIP]
+> **建议用独立 profile 启动。** 安装到 `capital` 后，用下面的命令打开一个全新的 profile：
+
+> ```bash
+> dsh --profile capital --port 8888
+> ```
+>
+> 然后访问 `http://localhost:8888`。本插件、密钥和默认模式都只属于这个 profile，不会和 DSH web profile 的默认设置冲突。
 
 1. **安装插件。** 
 
@@ -67,15 +76,6 @@ https://github.com/v587d/capital-generation
 
 > [!NOTE]
 > 本插件所有自带密钥均可免费申请、免费日常使用。 哪怕所有密钥留空也不影响插件核心功能，即缺哪个密钥，仅表示对应能力就不可用，其他功能照常。
-
-> [!TIP]
-> **建议用独立 profile 启动。** 安装到 `capital` 后，用下面的命令打开一个全新的 profile：
->
-> ```bash
-> dsh --profile capital --port 8888
-> ```
->
-> 然后访问 `http://localhost:8888`。本插件、密钥和默认模式都只属于这个 profile，不会和 DSH web profile 的默认设置冲突；如果已经装在 `web`，也可以继续用 `dsh --profile web` 启动，下面的配置步骤相同。
 
 2. **选填密钥。** 打开 DSH 「插件」 → **Capital Generation** →「数据源」（进页面就停在这一格）。
 
@@ -202,7 +202,7 @@ https://github.com/v587d/capital-generation
 - **安装后找不到模式？** 确认插件出现在「插件」→ 已安装列表；Web / CLI profile 安装后要重启该 profile，并在新会话选择模式。选择器里应看到自动模式、行情专家、资讯专员；分析师和绘图专员是自动模式的内部角色，不会出现在这里。
 - **配置在哪？** 打开「插件」→ 已安装的 **Capital Generation**，页面顶部就是「数据源 / 精选 Skills / 包含的组件」三格，五把密钥都在第一格；不在 DSH 的普通「设置」页面，也不用点进任何一行组件。保存密钥后新建会话再试。
 - **升级到 2.9.0 后，分析师和绘图专员去哪了？** 这一版把它们收进自动模式内部，不再出现在选择器与预设管理里，避免误开一个没有取数入口的空会话。旧会话仍能按原身份恢复；新任务直接用自动模式提出即可。
-- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.12.0` 或 `@2.12.0`。
+- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.13.0` 或 `@2.13.0`。
 - **刚发布的新版本装不到？** 桌面端取包时会跳过**刚发布不久**的版本（宿主侧包管理器的发布冷却策略，实测会静默装成上一个版本），国内镜像的同步也可能滞后一段时间。急着用最新代码，改用仓库地址安装最直接。
 - **网页抓取失败？** 配置卡片中的「允许启动本地提取网页内容」默认开启：AnySearch 提取失败时可尝试本机直连。关闭后，本机直连的具名来源查询也不可用；请检查该开关和网络连接。
 - **Wind 那部分会消耗积分？** 会。公告与新闻检索、宏观 / 行业 / 汇率指标、按日期区间取的历史 K 线都按次消耗你在 Wind 侧的额度；额度与条款以 Wind 为准，插件不做用量封顶。没配 `WIND_API_KEY` 时这几类不可用，其余功能照常。

@@ -63,6 +63,15 @@ const DOC_URLS = {
 
 /** Render order = array order; one list drives status, refs, drafts and event refresh. */
 const CREDENTIAL_FIELDS = ['fuyao', 'ftshare', 'anysearch', 'wind', 'paddleocr']
+const AUTOMATION_FIELDS = ['tickMs', 'runTimeoutMinutes', 'idleTimeoutMinutes', 'maxSteps', 'maxToolCalls', 'inAppNotifications']
+const AUTOMATION_DEFAULTS = {
+  tickMs: 60_000,
+  runTimeoutMinutes: 30,
+  idleTimeoutMinutes: 5,
+  maxSteps: 300,
+  maxToolCalls: 1_200,
+  inAppNotifications: true,
+}
 const SELECTED_SKILL_FIELDS = SELECTED_SKILL_CATALOG.map(({ key }) => key)
 // Stable orders: facet counts change with the other dimension, but chips must not jump under the cursor.
 const SELECTED_SKILL_TRAITS = selectedSkillTraitOrder()
@@ -92,6 +101,14 @@ const zh = {
   anysearchHint: 'AnySearch 网页搜索 / 提取接口。保存后新自动模式会话生效。',
   localFetchLabel: '允许启动本地提取网页内容',
   localFetchHint: '开启后本地抓取兜底（回执来源 local-http）。保存后新自动模式会话生效。',
+  automationTitle: '投研自动化',
+  automationHint: '调度器与无人值守运行的默认上限；任务详情里的设置优先。改动在下一个 tick 生效。',
+  automationTick: '调度间隔（毫秒）',
+  automationRunTimeout: 'wall-clock 上限（分钟）',
+  automationIdleTimeout: '空闲超时（分钟）',
+  automationMaxSteps: '最大步骤',
+  automationMaxToolCalls: '最大工具调用',
+  automationInApp: '写入应用内通知',
   windLabel: 'Wind Alice API Key',
   windHint: 'Wind 金融信披类文档检索接口。保存后新自动模式会话生效。',
   paddleocrLabel: 'PaddleOCR 文档解析 Token',
@@ -139,6 +156,14 @@ const en = {
   anysearchHint: 'AnySearch web search / extract interface. Takes effect in new Auto mode sessions.',
   localFetchLabel: 'Allow local web page extraction',
   localFetchHint: 'When on, a failed fetch falls back to local direct fetching (receipt via: local-http). Takes effect in new Auto mode sessions.',
+  automationTitle: 'Research automation',
+  automationHint: 'Scheduler and unattended-run defaults; per-task limits win. Changes apply on the next tick.',
+  automationTick: 'Tick interval (ms)',
+  automationRunTimeout: 'Wall-clock limit (minutes)',
+  automationIdleTimeout: 'Idle timeout (minutes)',
+  automationMaxSteps: 'Max steps',
+  automationMaxToolCalls: 'Max tool calls',
+  automationInApp: 'Write in-app notifications',
   windLabel: 'Wind Alice API Key',
   windHint: 'Wind financial disclosure document retrieval interface. Takes effect in new Auto mode sessions.',
   paddleocrLabel: 'PaddleOCR document token',
@@ -205,6 +230,8 @@ function installStyles() {
     .capital-config-secret-row label { flex: 0 1 auto; }
     .capital-config-secret-row label ~ span { order: 1; margin-left: auto; }
     .capital-config-field { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; border-top: 0.5px solid var(--dsw-alias-border-l2); }
+    .capital-config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+    .capital-config-field input[type="number"] { width: 100%; box-sizing: border-box; padding: 6px 8px; border: .5px solid var(--dsw-alias-border-l1); border-radius: 8px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font: inherit; font-size: 12px; }
     .capital-config-selected-mode { padding: 12px 14px; border: 0.5px solid var(--dsw-alias-border-l1); border-radius: 10px; background: var(--dsw-alias-bg-layer-2); }
     .capital-config-switch-row { align-items: center; gap: 12px; display: flex; }
     .capital-config-switch-text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
@@ -274,6 +301,8 @@ class CapitalCardController {
     this.selectedSkillFailed = new Set()
     this.selectedSkillsModeWriting = false
     this.selectedSkillsModeFailed = false
+    this.automationWriting = new Set()
+    this.automationFailed = new Set()
     // Row count is external: null = unknown, never 0; fetch only after the card is shown.
     this.bundleRows = null
     this.rowsRequested = false
@@ -323,6 +352,12 @@ class CapitalCardController {
         writing: this.selectedSkillsModeWriting,
         failed: this.selectedSkillsModeFailed,
       },
+      automation: Object.fromEntries(AUTOMATION_FIELDS.map((field) => [field, {
+        value: snapshot.value?.automation?.[field] ?? AUTOMATION_DEFAULTS[field],
+        on: snapshot.value?.automation?.[field] !== false,
+        writing: this.automationWriting.has(field),
+        failed: this.automationFailed.has(field),
+      }])),
       // `count === null` means unknown, not zero: the card decides whether to draw it.
       components: { count: this.bundleRows },
     }
@@ -436,6 +471,27 @@ class CapitalCardController {
     this.store.set(this.projection())
   }
 
+  async writeAutomation(field, value) {
+    if (!AUTOMATION_FIELDS.includes(field) || this.automationWriting.has(field)) return
+    const snapshot = this.scope.getSnapshot()
+    if (snapshot.status !== 'ready' || !snapshot.writable) return
+    const next = field === 'inAppNotifications' ? value === true : Number(value)
+    if (field !== 'inAppNotifications' && !Number.isFinite(next)) return
+    this.automationWriting.add(field)
+    this.automationFailed.delete(field)
+    this.store.set(this.projection())
+    try {
+      const current = this.scope.getSnapshot().value?.automation ?? { ...AUTOMATION_DEFAULTS }
+      await this.scope.mutate([{ op: 'set', path: ['automation'], value: { ...AUTOMATION_DEFAULTS, ...current, [field]: next } }])
+    } catch {
+      // The landed check below reports the failure.
+    }
+    this.automationWriting.delete(field)
+    const landed = this.scope.getSnapshot().value?.automation?.[field] ?? AUTOMATION_DEFAULTS[field]
+    if (landed !== next) this.automationFailed.add(field)
+    this.store.set(this.projection())
+  }
+
   /**
    * Count comes only from `pluginManager.listBundles()`. Merge in-flight reads;
    * failures are not cached (the next tab switch retries); push only on change.
@@ -476,6 +532,7 @@ class CapitalCardController {
       },
       ...this.model.actions(),
       toggleLocalFetch: (value) => this.toggleLocalFetch(value),
+      writeAutomation: (field, value) => this.writeAutomation(field, value),
       toggleSelectedSkill: (field, value) => this.toggleSelectedSkill(field, value),
       toggleSelectedSkillsMode: (auto) => this.toggleSelectedSkillsMode(auto),
       ensureBundleRows: () => this.ensureBundleRows(),
@@ -732,6 +789,38 @@ function CapitalCard(props) {
     ),
     state.localFetch?.failed ? h('p', { role: 'status', className: 'capital-config-write-failed' }, t('saveFailed')) : null,
   )
+  const automationNumber = (field, label, min, max) => h('label', { className: 'capital-config-field' },
+    h('span', { className: 'capital-config-switch-label' }, t(label)),
+    h('input', {
+      type: 'number',
+      min,
+      max,
+      defaultValue: state.automation?.[field]?.value,
+      disabled: disabled || state.saving,
+      onBlur: (event) => props.writeAutomation(field, event.target.value),
+    }),
+    state.automation?.[field]?.failed ? h('p', { role: 'status', className: 'capital-config-write-failed' }, t('saveFailed')) : null,
+  )
+  const automationSection = h('div', { className: 'capital-config-field' },
+    h('span', { className: 'capital-config-switch-label' }, t('automationTitle')),
+    h('p', { className: 'capital-config-hint' }, t('automationHint')),
+    h('div', { className: 'capital-config-grid' },
+      automationNumber('tickMs', 'automationTick', 30000, 3600000),
+      automationNumber('runTimeoutMinutes', 'automationRunTimeout', 5, 120),
+      automationNumber('idleTimeoutMinutes', 'automationIdleTimeout', 1, 30),
+      automationNumber('maxSteps', 'automationMaxSteps', 10, 2000),
+      automationNumber('maxToolCalls', 'automationMaxToolCalls', 10, 6000),
+    ),
+    h('label', { className: 'capital-config-switch-row' },
+      h('span', { className: 'capital-config-switch-label' }, t('automationInApp')),
+      h('input', {
+        type: 'checkbox',
+        checked: state.automation?.inAppNotifications?.on !== false,
+        disabled: disabled || state.saving,
+        onChange: (event) => props.writeAutomation('inAppNotifications', event.target.checked),
+      }),
+    ),
+  )
   const modeSection = h('div', { className: 'capital-config-selected-mode' },
     h('div', { className: 'capital-config-switch-row' },
       h('div', { className: 'capital-config-switch-text' },
@@ -826,7 +915,7 @@ function CapitalCard(props) {
         if (next === 'skills') setPinnedSkills(enabledKeys())
       },
     }),
-    panel('sources', [form, localFetchSection]),
+    panel('sources', [form, localFetchSection, automationSection]),
     panel('skills', autoMode
       ? [modeSection]
       : [modeSection, h('div', { className: 'capital-config-skills-browser' },

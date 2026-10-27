@@ -1,6 +1,6 @@
 {
   "name": "@v587d/capital-generation",
-  "version": "2.12.0",
+  "version": "2.13.0",
   "description": "Capital Generation：面向中国散户的 AI 投资助手插件（自动模式 Agent Preset）",
   "icon": "assets/cg-icon.png",
   "author": "v587d",
@@ -106,6 +106,7 @@
     "chart-ui",
     "config",
     "watchlist",
+    "automation",
     "preset",
     "selected-skills/catalog.js",
     "selected-skills/filter.js",
@@ -136,10 +137,11 @@
   },
   "scripts": {
     "clean": "node -e \"import('node:fs').then(({ rmSync }) => rmSync('lib', { recursive: true, force: true }))\"",
-    "build": "npm run clean && tsc && node scripts/copy-assets.mjs && npm run build:client && npm run build:config-client && npm run build:watchlist-client",
+    "build": "npm run clean && tsc && node scripts/copy-assets.mjs && npm run build:client && npm run build:config-client && npm run build:watchlist-client && npm run build:automation-client",
     "build:client": "node scripts/build-client.mjs",
     "build:config-client": "node scripts/build-config-client.mjs",
     "build:watchlist-client": "node scripts/build-watchlist-client.mjs",
+    "build:automation-client": "node scripts/build-automation-client.mjs",
     "dev": "tsc -w",
     "vendor:charts": "node scripts/vendor-lightweight-charts.mjs",
     "check:dsh": "node scripts/check-dsh-compat.mjs",

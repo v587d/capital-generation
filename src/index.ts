@@ -73,12 +73,29 @@ const RetrieverSchema = z.object({
     .description('PaddleOCR 文档解析（ocr 工具）配置；Token 走 credentials 引用 PADDLE_OCR_TOKEN'),
 })
 
+const AutomationSchema = z.object({
+  tickMs: z.number().default(60_000).description('投研自动化调度间隔毫秒（30000–3600000）'),
+  runTimeoutMinutes: z.number().default(30).description('单次运行 wall-clock 上限分钟（5–120）'),
+  idleTimeoutMinutes: z.number().default(5).description('单次运行空闲超时分钟（1–30）'),
+  maxSteps: z.number().default(300).description('单次运行最大步骤数（10–2000）'),
+  maxToolCalls: z.number().default(1_200).description('单次运行最大工具调用数（10–6000）'),
+  inAppNotifications: z.boolean().default(true).description('是否写入应用内通知'),
+})
+
 export interface Config {
   customPersona?: string
   selectedSkills?: SelectedSkillSelection
   selectedSkillsMode?: SelectedSkillsMode
   fuyaoCredentialRef?: string
   ftshareCredentialRef?: string
+  automation?: {
+    tickMs?: number
+    runTimeoutMinutes?: number
+    idleTimeoutMinutes?: number
+    maxSteps?: number
+    maxToolCalls?: number
+    inAppNotifications?: boolean
+  }
   retriever?: RetrieverConfig
 }
 
@@ -104,6 +121,14 @@ export const Config = z.object({
   ftshareCredentialRef: z.string()
     .default('FTSHARE_API_KEY')
     .description('FTShare（非凸科技）credentials 引用名，空 = FTSHARE_API_KEY'),
+  automation: AutomationSchema.default({
+    tickMs: 60_000,
+    runTimeoutMinutes: 30,
+    idleTimeoutMinutes: 5,
+    maxSteps: 300,
+    maxToolCalls: 1_200,
+    inAppNotifications: true,
+  }).description('投研自动化默认值；任务级覆盖优先'),
   retriever: RetrieverSchema.default({ baseURL: '', credentialRef: 'ANYSEARCH_API_KEY', windDocs: { endpoint: '', credentialRef: 'WIND_API_KEY', timeoutMs: 60000 }, localFetch: { ...LOCAL_FETCH_DEFAULTS }, paddleOcr: { ...PADDLE_OCR_DEFAULTS } })
     .description('web_retriever 配置（可选；缺省使用 AnySearch 默认地址与凭据名）'),
 })

@@ -55,6 +55,13 @@ test('打包闸门：vendored 图表库与构建产物都在发布清单里', (t
     'watchlist/client.js',
     // A listed LICENSE that is not shipped loses the attribution duty.
     'THIRD_PARTY_NOTICES.md',
+    // Automation host bundle: a missing client half is fatal to the web profile, and a missing
+    // host half silently removes the page and its scheduler.
+    'automation/package.json',
+    'automation/index.js',
+    'automation/client.js',
+    'automation/defaults.js',
+    'automation/workspaces.js',
     'preset/capital-generation/agent.patch.yml',
     'preset/capital-generation/skills/capital-chart-protocol/SKILL.md',
     // Persona duty lines load skills by name, so every protocol book is named individually here.

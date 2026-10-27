@@ -54,6 +54,14 @@
     - id: capital-watchlist
       name: './watchlist/index.js'
 
+# ── CapGen 投研自动化 (host plane) ─────────────────────────────────────────────
+# Independent from the official `ui-schedule` row: no `schedules` main/sidebar id, no
+# turnTail, no right-sidebar kind. The page is host-plane for the same injection reason
+# as chart-ui; `name` stays a literal path-like relative path (see the three pitfalls above).
+- insert:
+    - id: capital-automation
+      name: './automation/index.js'
+
 # ── Cross-preset runtime / policy (0.2.1) ─────────────────────────────────────
 # Root and role presets mount separately, so apply() runs several times per process. Shared state
 # (chart source tokens, chart artifacts) and the agent/created listeners (root convergence, shell
