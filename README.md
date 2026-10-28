@@ -75,20 +75,22 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
     **本仓库已包含构建产物，普通用户不需要克隆仓库或运行构建命令。**
 
 2. **选填密钥** （打开 DSH 「插件」 → **Capital Generation** →「数据源」）
-  > [!NOTE]
-  > 本插件所有自带密钥均可免费申请、免费日常使用。
-  > 哪怕所有密钥留空也不影响插件核心功能，即缺哪个密钥，仅表示对应能力就不可用，其他功能照常。
   
-   | 密钥 | 用途 |
-   | --- | --- |
-   | [同花顺 Fuyao](https://fuyao.aicubes.cn/docs/) | 行情、财务数据和自选股报价 |
-   | [AnySearch](https://www.anysearch.com/docs) | 网页搜索和正文提取 |
-   | [Wind Alice](https://market.windalice.com/#/home) | 公告与新闻检索，以及宏观/行业/汇率指标与按日期区间取的历史 K 线 |
-   | [PaddleOCR AIStudio](https://aistudio.baidu.com/paddleocr) | 解析 PDF 和图片中的文字 |
-   | [FTShare（非凸科技）](https://market.ft.tech/gateway/doc/p/pb8eizu3) | A 股行情与日 K 截面、主力资金流、涨跌停、龙虎榜席位、股东人数、指数权重、可转债行情、宏观利率，以及期货合约与贵金属行情等第二家上游口径 |
+    本插件所有自带密钥均可免费申请、免费日常使用。哪怕所有密钥留空也不影响插件核心功能，即缺哪个密钥，仅表示对应能力就不可用，其他功能照常。
+  
+     | 密钥 | 用途 |
+     | --- | --- |
+     | [同花顺 Fuyao](https://fuyao.aicubes.cn/docs/) | 行情、财务数据和自选股报价 |
+     | [AnySearch](https://www.anysearch.com/docs) | 网页搜索和正文提取 |
+     | [Wind Alice](https://market.windalice.com/#/home) | 公告与新闻检索，以及宏观/行业/汇率指标与按日期区间取的历史 K 线 |
+     | [PaddleOCR AIStudio](https://aistudio.baidu.com/paddleocr) | 解析 PDF 和图片中的文字 |
+     | [FTShare（非凸科技）](https://market.ft.tech/gateway/doc/p/pb8eizu3) | A 股行情与日 K 截面、主力资金流、涨跌停、龙虎榜席位、股东人数、指数权重、可转债行情、宏观利率，以及期货合约与贵金属行情等第二家上游口径 |
 
-  第三方服务的密钥，需分别向服务方申请；额度和条款以各服务方为准。保存后 **新建会话** 即可生效，无需重启。也可以直接把密钥写入
-  `~/.dsh/.credentials.yaml`，名称依次为 `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`、`PADDLE_OCR_TOKEN`、`FTSHARE_API_KEY`。密钥由 DSH 凭据服务保存。
+    第三方服务的密钥，需分别向服务方申请；额度和条款以各服务方为准。保存后 **新建会话** 即可生效，无需重启。
+
+    也可以直接把密钥写入`~/.dsh/.credentials.yaml`，名称依次为 `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`、`PADDLE_OCR_TOKEN`、`FTSHARE_API_KEY`。
+
+    密钥由 DSH 凭据服务保存。
 
 3. **新建会话。** 新会话的模式选择器里会看到三个自定义模式。日常研究选 **自动模式**，然后直接描述研究问题；也可以到「设置」→「Agent 预设」把它设为默认模式。
 
