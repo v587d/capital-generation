@@ -31,7 +31,7 @@ test('automation/package.json 声明 web client、immediately、产物在 files 
     '@deepseek-ai/dsh-client-ui-primitives',
     '@deepseek-ai/dsh-client-ui-workspace',
   ])
-  for (const file of ['client.js', 'index.js', 'store.js', 'scheduler.js', 'workspaces.js']) {
+  for (const file of ['client.js', 'index.js', 'store.js', 'scheduler.js', 'workspaces.js', 'calendar-source.js']) {
     assert.ok(manifest.files.includes(file), `files 必须包含 ${file}`)
   }
   assert.ok(manifest.exports['./client'])

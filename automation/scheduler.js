@@ -140,7 +140,7 @@ export function createScheduler(options) {
       recovered = true
       try {
         state.recoveredRuns = await store.recoverNonTerminalRuns()
-        if (state.recoveredRuns > 0) logger?.warn?.(`capital-automation: ${state.recoveredRuns} 个上次进程的运行已标记 unknown_after_restart`)
+        if (state.recoveredRuns > 0) logger?.warn?.(`capital-automation: ${state.recoveredRuns} 个上次进程的运行已恢复收口；无回合边界的记 unknown_after_restart`)
       } catch (error) {
         state.lastError = String(error)
       }
@@ -168,7 +168,7 @@ export function createScheduler(options) {
       await store.addNotification({
         kind: 'calendar_unavailable',
         title: `交易日历不可用：${task.title}`.slice(0, 120),
-        message: '任务已按 fail-closed 跳过；请更新交易日历表后再启用。',
+        message: '任务已按 fail-closed 跳过；日历更新后会自动恢复，持续出现请检查网络或交易所公告。',
         runId: run.id,
         taskId: task.id,
       }).catch(() => {})
@@ -181,6 +181,9 @@ export function createScheduler(options) {
     const latest = previousOccurrenceAtOrBefore(task.trigger, now(), { calendar })
     if (latest.kind === 'none') return
     if (latest.kind === 'calendar_unavailable') {
+      // A refresh already in flight can still answer today; burning the occurrence on a
+      // transient unknown would turn a slow fetch into a skipped run.
+      if (calendar?.pendingRefresh?.() === true) return
       const key = `${store.profileKey}:calendar:${latest.localDate}`
       if (task.lastHandledOccurrenceKey === key) return
       await createSkipped(task, key, 'skipped_calendar_unavailable', undefined, {
@@ -292,6 +295,13 @@ export function createScheduler(options) {
     tickInFlight = (async () => {
       try {
         if (!(await tryAcquire())) return
+        // Calendar refresh rides the tick but never blocks it; occurrence math reads the
+        // last good snapshot and keeps failing closed while a fetch is in flight.
+        try {
+          calendar?.refreshIfStale?.()
+        } catch (error) {
+          state.lastError = String(error)
+        }
         if (timer !== undefined && currentTickMs !== Math.max(30_000, settings().tickMs)) armTick()
         state.lastTickAt = iso(now())
         const tasks = await store.listTasks()
@@ -318,6 +328,14 @@ export function createScheduler(options) {
   }
 
   async function start() {
+    if (stopped) return
+    if (typeof calendar?.ready === 'function') {
+      // Never start the first tick on a calendar that cannot answer today: a network fetch
+      // gets one bounded chance before fail-closed would claim the day's occurrence.
+      await calendar.ready().catch((error) => {
+        logger?.warn?.(`capital-automation: 交易日历初始化失败：${sanitizeMessage(String(error))}`)
+      })
+    }
     if (stopped) return
     await tick()
     if (stopped) return

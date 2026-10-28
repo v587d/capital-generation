@@ -18,7 +18,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.13.0-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.13.1-9cf" alt="Version"></a>
   <a href="https://www.npmjs.com/package/@v587d/capital-generation"><img src="https://img.shields.io/npm/v/%40v587d%2Fcapital-generation" alt="npm version"></a>
   <a href="https://github.com/deepseek-ai/deepseek-harness"><img src="https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white" alt="powered-by-dsh"></a>
 </p>
@@ -34,50 +34,53 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 > [!IMPORTANT]
 > 本项目仍在探索中，不提供代交易服务，不保证数据完整、及时或准确，也不承诺投资回报。请自行核对来源并承担投资风险。
 
+## 「🎉 CapGen 投研自动化」 已上线，欢迎试用并提 issue 💕 [快速了解](#capgen-automation)
+
 ## 快速上手
 
 > [!NOTE]
-> 适配 DSH`@0.2.1-rc.3`。已在 Linux 的 Web profile 和 Windows 桌面端验证；其他环境尚未充分测试。建议使用 `Deepseek/deepseek-flash` ，思考推理能力为 High ；GPT / Claude 尚未充分测试。
+> 适配 DSH`@0.2.1-rc.3`。已在 Linux 的 Web profile 和 Windows 桌面端验证。
 
-> [!TIP]
-> **建议用独立 profile 启动。** 安装到 `capital` 后，用下面的命令打开一个全新的 profile：
 
-> ```bash
-> dsh --profile capital --port 8888
-> ```
->
-> 然后访问 `http://localhost:8888`。本插件、密钥和默认模式都只属于这个 profile，不会和 DSH web profile 的默认设置冲突。
+0. **建议前置**
 
-1. **安装插件。** 
+   > [!TIP]
+   > **建议用独立 profile 启动。** 比如：
+   >
+   > ```bash
+   > dsh --profile capital --port 8888
+   > ```
+   >
+   > 然后访问 `http://localhost:8888`。这样，本插件只属于 capital 这个 profile，避免和其他 profile 冲突。
 
-Linux / macOS 的 Web 或 CLI profile 在终端执行，下面两条 **任选一条**。建议装进独立 profile（例如 `capital`），避免和默认 `web` profile 里的插件、密钥与预设互相影响：
+1. **安装插件**
 
-```bash
-dsh plugin --profile capital add @v587d/capital-generation
-```
-或
-```bash
-dsh plugin --profile capital add github:v587d/capital-generation
-```
+    Linux / macOS ：
 
-两条装完的功能一样：前者取 npm 上已发布的版本，后者取本仓库当前的代码。`capital` 会在第一次执行命令时自动初始化；装好后按下一步启动。
+    ```bash
+    dsh plugin --profile capital add @v587d/capital-generation
+    ```
+    或
+    ```bash
+    dsh plugin --profile capital add github:v587d/capital-generation
+    ```
 
-DSH 桌面端在 「添加插件」 中输入，下面两条 **任选一条**：
+    DSH 桌面端在 「添加插件」 中输入：
 
-```input
-https://github.com/v587d/capital-generation
-```
-或
-```input
-@v587d/capital-generation
-``` 
-桌面端自带 DSH 宿主，不需要单独用 npm 安装宿主。本仓库已包含构建产物，普通用户不需要克隆仓库或运行构建命令。
+    ```input
+    https://github.com/v587d/capital-generation
+    ```
+    或
+    ```input
+    @v587d/capital-generation
+    ```
+    **本仓库已包含构建产物，普通用户不需要克隆仓库或运行构建命令。**
 
 
 > [!NOTE]
 > 本插件所有自带密钥均可免费申请、免费日常使用。 哪怕所有密钥留空也不影响插件核心功能，即缺哪个密钥，仅表示对应能力就不可用，其他功能照常。
 
-2. **选填密钥。** 打开 DSH 「插件」 → **Capital Generation** →「数据源」（进页面就停在这一格）。
+2. **选填密钥** （打开 DSH 「插件」 → **Capital Generation** →「数据源」）
 
    | 密钥 | 用途 |
    | --- | --- |
@@ -87,44 +90,22 @@ https://github.com/v587d/capital-generation
    | [PaddleOCR AIStudio](https://aistudio.baidu.com/paddleocr) | 解析 PDF 和图片中的文字 |
    | [FTShare（非凸科技）](https://market.ft.tech/gateway/doc/p/pb8eizu3) | A 股行情与日 K 截面、主力资金流、涨跌停、龙虎榜席位、股东人数、指数权重、可转债行情、宏观利率，以及期货合约与贵金属行情等第二家上游口径 |
 
-    这些都是第三方服务的密钥，需分别向服务方申请；额度和条款以各服务方为准。
-    保存后**新建会话**即可生效，无需重启。
-    也可以不走卡片，直接把密钥写入 `~/.dsh/.credentials.yaml`，名称依次为 `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`、`PADDLE_OCR_TOKEN`、`FTSHARE_API_KEY`。
-    密钥由 DSH 凭据服务保存，不会显示在会话配置中。
-
-   <p align="center">
-     <a href="assets/数据源配置.png">
-       <img src="assets/数据源配置.png" alt="数据源配置" width="800">
-     </a>
-   </p>
+    第三方服务的密钥，需分别向服务方申请；额度和条款以各服务方为准。保存后 **新建会话** 即可生效，无需重启。也可以直接把密钥写入
+    `~/.dsh/.credentials.yaml`，名称依次为 `FUYAO_API_KEY`、`ANYSEARCH_API_KEY`、`WIND_API_KEY`、`PADDLE_OCR_TOKEN`、`FTSHARE_API_KEY`。密钥由 DSH 凭据服务保存。
 
 3. **新建会话。** 新会话的模式选择器里会看到三个自定义模式。日常研究选 **自动模式**，然后直接描述研究问题；也可以到「设置」→「Agent 预设」把它设为默认模式。
 
-   <p align="center">
-     <a href="assets/session-preset-selector.png">
-       <img src="assets/session-preset-selector.png" alt="新会话选择自动模式" width="800">
-     </a>
-   </p>
+    | 模式 | 适合什么 | 会做什么 | 边界 |
+    | --- | --- | --- | --- |
+    | **自动模式**（推荐） | 投研报告、事件影响、持仓复盘，以及需要同时查数、查资料和出图的综合问题 | 统一调度取数、数据质检、资料检索与绘图，汇总证据后直接答复 | 自动模式不直接取数，也不直接画图；每个数字都要有来源与截止时间 |
+    | **行情专家** | 只想拿一份结构化行情、财务或宏观数据 | 查询并保存到当前会话，返回数据引用、来源与截止时间 | 只负责取数，不读取数据内容、不做判断；数据只在当前会话可用 |
+    | **资讯专员** | 只要公告、新闻或互动平台材料 | 检索公告与新闻，逐条标注来源与核验状态 | 不做投资分析，也不给买卖建议 |
 
-## 三个模式怎么选
+    **分析师**与**绘图专员**是自动模式的内部角色，不出现在选择器里。自动模式会在需要时创建并调度它们；它们没有独立的取数入口，单独打开也读不到本次研究的数据。
 
-<p align="center">
-  <a href="assets/settings-perset-selector.png">
-    <img src="assets/settings-perset-selector.png" alt="「Agent 预设」里的三个自定义模式" width="760">
-  </a>
-</p>
+    **每份结构化数据都会先做质检。** 无论你有没有提图表，自动模式收到行情或财务数据后都会先交给分析师检查结构、时间轴、缺失与基础统计；要不要图是检查之后的一个判断。明确说“不要图”时，质检照做，只是停在出图之前。
 
-| 模式 | 适合什么 | 会做什么 | 边界 |
-| --- | --- | --- | --- |
-| **自动模式**（推荐） | 投研报告、事件影响、持仓复盘，以及需要同时查数、查资料和出图的综合问题 | 统一调度取数、数据质检、资料检索与绘图，汇总证据后直接答复 | 自动模式不直接取数，也不直接画图；每个数字都要有来源与截止时间 |
-| **行情专家** | 只想拿一份结构化行情、财务或宏观数据 | 查询并保存到当前会话，返回数据引用、来源与截止时间 | 只负责取数，不读取数据内容、不做判断；数据只在当前会话可用 |
-| **资讯专员** | 只要公告、新闻或互动平台材料 | 检索公告与新闻，逐条标注来源与核验状态 | 不做投资分析，也不给买卖建议 |
-
-**分析师**与**绘图专员**是自动模式的内部角色，不出现在选择器里。自动模式会在需要时创建并调度它们；它们没有独立的取数入口，单独打开也读不到本次研究的数据。
-
-**每份结构化数据都会先做质检。** 无论你有没有提图表，自动模式收到行情或财务数据后都会先交给分析师检查结构、时间轴、缺失与基础统计；要不要图是检查之后的一个判断。明确说“不要图”时，质检照做，只是停在出图之前。
-
-自动模式会把子角色工作期间的中间回执留在同一轮里处理，等材料收齐后再给出完整结论，而不是每条中间进展都单独回一段。
+    自动模式会把子角色工作期间的中间回执留在同一轮里处理，等材料收齐后再给出完整结论，而不是每条中间进展都单独回一段。
 
 ## 试试这么用
 
@@ -132,9 +113,12 @@ https://github.com/v587d/capital-generation
 
 [样例：指南针、同花顺复盘分析报告（20261023）](docs/sample/指南针-同花顺-复盘分析报告.md)
 
+<details>
+<summary>展开示例指令</summary>
+
 **完整投资研究报告**
 
-```text
+```instruction
 请对[公司名称、俗称]([证券代码])做一份完整投资研究报告。
 以你实际取得的最新可用数据为截止，覆盖业务、财务、估值、价格走势、近期重要事件以及风险与反方观点。
 先给核心判断和最大风险；关键数字注明报告期或交易日、来源和采集时间。
@@ -143,7 +127,7 @@ https://github.com/v587d/capital-generation
 
 **事件与公告影响分析**
 
-```text
+```instruction
 请核查[公司名称]([完整证券代码])的[公告标题及披露日期，或“最近一次业绩公告”]，
 分析它对经营、现金流和投资风险可能产生的影响。
 先核对公告原文、披露时间和事项进展，区分已实施事实与尚待批准的方案；
@@ -153,7 +137,7 @@ https://github.com/v587d/capital-generation
 
 **持仓与组合复盘**
 
-```text
+```instruction
 请复盘我的持仓[其他资产如有，请补充]。
 请先核对这些比例是否覆盖全部资产，再分析单只标的、行业与市场的集中风险，
 以及哪些风险会同时影响多个持仓。
@@ -161,6 +145,8 @@ https://github.com/v587d/capital-generation
 我只在自选股里标过持仓的那几只才算仓位，没标的只是关注。
 给出最需要核实的信息和可观察的防守选项。
 ```
+
+</details>
 
 ## 还能做什么
 
@@ -180,6 +166,12 @@ https://github.com/v587d/capital-generation
 
 - **精选 Skills：** 当前收录 8 个开源项目、共 70 个 Skill。默认不开启「智能装载 Skills」，逐项清单和勾选都在；打开后清单收起，按角色开放该角色全部方法，由模型按任务挑 1–2 条，运行期不再看勾选。两种状态都按角色分发：研究/组合方法归自动模式，估值/财务/风险/筛选归分析师，文档深读与核验归资讯专员；无需新建会话，下一轮就生效。
 
+<p align="center">
+  <a href="assets/selected-skills配置.png">
+    <img src="assets/selected-skills配置.png" alt="精选 Skills 配置：按 Skill 特点与适用预设筛选" width="800">
+  </a>
+</p>
+
 | 项目名称 | 收录边界 |
 | :---: | :---: |
 | [The Investment Skills Lexicon](https://github.com/finterm-ai/investment-skills) | Buffett Investment Framework |
@@ -191,9 +183,17 @@ https://github.com/v587d/capital-generation
 | [FinanceSkills](https://github.com/GAJETOso/financeskills) | 8 个估值与财务方法 Skill：折现率（WACC）估算、三表勾稽建模、企业估值与股权价值桥、偿债能力与债务容量、预期信用损失三阶段、银行资本与流动性、保险准备金与综合成本率、账务异常排查；按 IFRS / 美股与国际准则口径写，境内监管阈值与科目名需自行对照 |
 | [Quant Agent Skills](https://github.com/Howard-Jerry/quant-agent-skills) | 1 个跨市场选线 Skill：同一家公司在 A 股与港股、或美股 ADR 与港股各有一条线时该走哪一条——价差、币种与股息税、流动性与通道、披露文件路径各不相同。公司本身只研究一次，便宜的那条线不构成"这家公司更值得买"；A/H 溢价与 ADR 平价没有现成条目，须按两条线同一天的收盘价与当日汇率现算，缺任一项就只报缺的那一项 |
 
+<a id="capgen-automation" name="capgen-automation"></a>
+- **CapGen 投研自动化：** 内置早间资讯、盘后公告与每日复盘三个模板，也可新建自己的任务；到点自动新建 session 执行，也能手动运行。任务、运行历史与失败通知在同一页，支持运行预算、通知和仅交易日触发。
+
 <p align="center">
-  <a href="assets/selected-skills配置.png">
-    <img src="assets/selected-skills配置.png" alt="精选 Skills 配置：按 Skill 特点与适用预设筛选" width="800">
+  <a href="assets/capgen-automation-tasks.png">
+    <img src="assets/capgen-automation-tasks.png" alt="投研自动化：任务、日程与运行概览" width="800">
+  </a>
+</p>
+<p align="center">
+  <a href="assets/capgen-automation-runs.png">
+    <img src="assets/capgen-automation-runs.png" alt="投研自动化：运行历史与错误详情" width="800">
   </a>
 </p>
 
@@ -202,7 +202,7 @@ https://github.com/v587d/capital-generation
 - **安装后找不到模式？** 确认插件出现在「插件」→ 已安装列表；Web / CLI profile 安装后要重启该 profile，并在新会话选择模式。选择器里应看到自动模式、行情专家、资讯专员；分析师和绘图专员是自动模式的内部角色，不会出现在这里。
 - **配置在哪？** 打开「插件」→ 已安装的 **Capital Generation**，页面顶部就是「数据源 / 精选 Skills / 包含的组件」三格，五把密钥都在第一格；不在 DSH 的普通「设置」页面，也不用点进任何一行组件。保存密钥后新建会话再试。
 - **升级到 2.9.0 后，分析师和绘图专员去哪了？** 这一版把它们收进自动模式内部，不再出现在选择器与预设管理里，避免误开一个没有取数入口的空会话。旧会话仍能按原身份恢复；新任务直接用自动模式提出即可。
-- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.13.0` 或 `@2.13.0`。
+- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.13.1` 或 `@2.13.1`。
 - **刚发布的新版本装不到？** 桌面端取包时会跳过**刚发布不久**的版本（宿主侧包管理器的发布冷却策略，实测会静默装成上一个版本），国内镜像的同步也可能滞后一段时间。急着用最新代码，改用仓库地址安装最直接。
 - **网页抓取失败？** 配置卡片中的「允许启动本地提取网页内容」默认开启：AnySearch 提取失败时可尝试本机直连。关闭后，本机直连的具名来源查询也不可用；请检查该开关和网络连接。
 - **Wind 那部分会消耗积分？** 会。公告与新闻检索、宏观 / 行业 / 汇率指标、按日期区间取的历史 K 线都按次消耗你在 Wind 侧的额度；额度与条款以 Wind 为准，插件不做用量封顶。没配 `WIND_API_KEY` 时这几类不可用，其余功能照常。

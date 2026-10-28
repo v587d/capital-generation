@@ -483,9 +483,9 @@ function createWindSource(options: {
   }
 }
 
-const EDB_SEARCH_DESCRIPTION = 'Wind EDB（经济数据库）指标**检索**：只找指标不取数，一行一个候选指标（code/name/unit/freq/source + 该序列的起止与更新日期）。这是 fuyao 与东财都没有的面：宏观、行业、汇率、全球序列。⛔ question 走后端 NER，字面请求不等于字面结果——实测「人民币兑美元汇率 指标」回的是**美元兑人民币**（source 为 美联储 / 台湾统计局），先核对 name 与 source 再取数。键集随指标族变化：实测汇率类没有 unit/magnitude/currency 三个键，缺的一律 null，不猜单位。取数走 wind_edb_query：确定性靠"先 search 拿 code、再按 code 取数"这两步拿到，不是靠 NL 稳定。没有匹配时返回 0 行，是合法空结果不是失败。'
+const EDB_SEARCH_DESCRIPTION = 'Wind EDB（经济数据库）指标**检索**：只找指标不取数，一行一个候选指标（code/name/unit/freq/source + 该序列的起止与更新日期）。这是 fuyao 与东财都没有的面：宏观、行业、汇率、全球序列。⛔ question 走后端 NER，字面请求不等于字面结果——实测「人民币兑美元汇率 指标」回的是**美元兑人民币**（source 为 美联储 / 台湾统计局），先核对 name 与 source 再取数。键集随指标族变化：实测汇率类没有 unit/magnitude/currency 三个键，缺的一律 null，不猜单位。⛔ 只在不确定指标叫什么、或需要候选清单时用：已知指标（美元指数、WTI 原油价格…）直接走 wind_edb_query 的中文问句，取数结果每行本来就带 code/name/source，不必先检索——两个能力都按次消耗上游积分，为已知指标多打一次 search 是纯浪费。没有匹配时返回 0 行，是合法空结果不是失败。'
 
-const EDB_QUERY_DESCRIPTION = 'Wind EDB 时间序列**取数**：上游回 {meta, date[], value[]} 并行数组，本能力转置成**一行一个观测期**（meta 逐行拼接，多指标可分次取后按 code 拼对比）。⛔ indicator 一次只填**一个**指标代码或一条中文问句：2026-10-06 实测逗号分隔的多码挂满 60 秒无应答，上游"多个代码用英文逗号分隔"的说法不成立，要多个就分次调用。start_date/end_date 必填——上游在日期区间与 observation 之间二选一，而 observation 实测"给 3 期只回 2 期"、期数不可信，本能力直接拒绝它。report_date 由上游紧凑串 20260731 归一而来，report_date_ms 按 Asia/Shanghai 零点（EDB 的日期本身没有时区）。unit 是上游单位原文；后端 INVALID 一律 null，**不得当 0 参与计算**。已实测指标代码直接当 indicator 与同义中文问句回同一份序列（M0000612 = 中国 CPI 当月同比）：先 wind_edb_search 拿码再回来，确定性就在这两步。'
+const EDB_QUERY_DESCRIPTION = 'Wind EDB 时间序列**取数**：上游回 {meta, date[], value[]} 并行数组，本能力转置成**一行一个观测期**（meta 逐行拼接，多指标可分次取后按 code 拼对比）。⛔ indicator 一次只填**一个**指标代码或一条中文问句：2026-10-06 实测逗号分隔的多码挂满 60 秒无应答，上游"多个代码用英文逗号分隔"的说法不成立，要多个就分次调用。start_date/end_date 必填——上游在日期区间与 observation 之间二选一，而 observation 实测"给 3 期只回 2 期"、期数不可信，本能力直接拒绝它。report_date 由上游紧凑串 20260731 归一而来，report_date_ms 按 Asia/Shanghai 零点（EDB 的日期本身没有时区）。unit 是上游单位原文；后端 INVALID 一律 null，**不得当 0 参与计算**。已实测指标代码与同义中文问句回同一份序列（M0000612 = 中国 CPI 当月同比）：indicator 直接填中文问句即可（官方口径就是自然语言取数），本能力按次消耗上游积分，已知指标不要先检索。中文问句可能命中同族多个指标（实测「黄金价格」回伦敦定盘 / COMEX / SGE 等 7 条），返回行自带 code/name/unit/source，按 name 与 source 取舍后再引用；只有不知道指标叫什么、需要候选清单时才用 wind_edb_search。'
 
 const KLINE_DESCRIPTION = 'Wind K 线：单只标的按**日期区间**取 日/周/月 与 1/5/15/30 分钟。相对腾讯的增量（§6.6.1）：按日期区间取 640 根之前的历史、每根带成交额/成交量/换手/均价的美股 K 线、以及分钟档；⚠️ **分钟档只有 A 股取到过行**，港股与美股的分钟到 2026-10-06 为止四次全挂、仍未证实，要港美股分时先小范围试一次。港美股日线与快照请走 tencent_*。⛔ code 必须自带交易所后缀（600519.SH / 00700.HK / AAPL.O），本能力不猜后缀——实测 AAPL.O 与 AAPL.N 回完全相同的行（后缀不参与解析），所以 BRK.B 一类双市场代码有认错标的的风险；每行的 code 只是请求写法回显，上游 K 线表里没有代码列。⛔ period 只放逐档打过真报文的七档，60 分钟实测两次都挂满超时、不提供。adjust 只有 none 与 qfq：后复权以 afdate 为锚向未来放大，锚默认成今天会得到一个逐位等于不复权却叫 hfq 的序列，所以宁可不给；qfq 的 afdate 由本能力锁成当日，因此 end_date 不得晚于当日；分钟档只允许 none。close 来自上游 MATCH 列（Wind 没有 CLOSE 列）；上游多给的列不收录，行里以 output_fields 为准。数值列上游全是字符串（columns[].type 却一律写 string），解析不了即失败。time_ms 按**该行自带偏移**换算（A股/港股 +08:00、美股 -04:00 是交易所当地时间），整段按北京时间处理会让美股错位 12 小时。⚠️ volume 实测 A 股是**股**（腾讯 A 股 K 线是手，跨源先换）；turnover_rate_pct 是百分数原值（0.2892 = 0.2892%），上游不给它的单位与分母口径。非交易日快回 0 行、是合法成功（实测 A 股国庆休市日 653ms 回空表）；而"该日该市场分钟尚未落地"与上游故障都表现为挂到 12 秒超时（wind_upstream_timeout）——不要盲目重试同一区间，改更早日期或改走日线。积分计费：AUTH/RATE_LIMIT/后端错误一律不自动重试。'
 
@@ -521,7 +521,7 @@ export function createWindSources(resolveApiKey: WindApiKeyResolver): DataSource
       inputSchema: {
         type: 'object',
         properties: {
-          indicator: { type: 'string', maxLength: 200, description: '一个 EDB 指标代码（如 M0000612，先走 wind_edb_search 拿码）或一条中文指标问句；不接受逗号分隔的多个' },
+          indicator: { type: 'string', maxLength: 200, description: '一条中文指标问句（推荐，写清实体与口径，如「美元指数」「WTI 原油价格」），或一个已知的 EDB 指标代码（如 M0000612）；一次只填一个，不接受逗号分隔的多个' },
           start_date: { type: 'string', description: '起始日期 YYYY-MM-DD（含）' },
           end_date: { type: 'string', description: '结束日期 YYYY-MM-DD（含）' },
         },

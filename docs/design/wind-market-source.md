@@ -232,7 +232,9 @@ node scripts/spike-wind.mjs --call stock_data::get_stock_kline --args '{...}' --
 **推翻 §1.3 的第一处**：EDB 两个工具都以 `question` 打头，`beginDate/endDate/observation` 只是修饰，
 不存在"按指标码取数"的独立参数。但实测**指标代码可以直接当 `question`**：
 `question:"M0000612"` 与 `question:"中国 CPI 当月同比"` 回**同一份序列**（同 meta、同 date[]、同 value[]）——
-所以确定性靠"先 search 拿 code，再按 code 取数"两步拿到，不是靠 NL 稳定。
+所以取数主路径是**自然语言问句**，指标代码只是可选写法。**2026-10-28 修正**：原结论"先 search 拿
+code 再取数"作废——search 与 query 都按次消耗积分，而 `data_collector` 只拿得到 DatasetRef、读不到
+search 的行，已知指标先搜一遍既拿不到码又多花一次积分；search 只用于不确定指标名或需要候选清单。
 
 **第二处**：线上 `query_economic_indicator_data` 的 schema 还有 `targetMagnitude` / `targetCurrency` /
 `targetFrequency`（枚举含 十万分之一…年度），而蓝本 `call-rules.json`（schema_version 18）的 `allowed`

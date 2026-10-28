@@ -23,9 +23,11 @@ import {
   DEFAULT_MAX_STEPS,
   DEFAULT_MAX_TOOL_CALLS,
   DEFAULT_RUN_TIMEOUT_MINUTES,
+  MAX_ERRORS_PER_RUN,
   MAX_NOTIFICATIONS_PER_PROFILE,
   MAX_RUNS_PER_PROFILE,
   MAX_RUNS_PER_TASK,
+  SETTLED_RUN_STATUSES,
 } from './defaults.js'
 import { canonicalTrigger, formatInZone, nextOccurrence } from './time.js'
 
@@ -591,33 +593,56 @@ export function createAutomationStore(options) {
     return record?.profileKey === profileKey ? record : undefined
   }
 
-  /** Startup recovery: no live Agent owns a previous-process run, so never retry it silently. */
+  /**
+   * Startup recovery: a durable turn boundary proves how the run ended. Only runs with no
+   * finished turn are left unknown (and never retried silently).
+   */
   async function recoverNonTerminalRuns() {
     const tables = await ensure()
     const at = iso(now())
+    const outcomes = new Map()
     let recovered = 0
     for (const [id, run] of [...tables.runs.entries()]) {
       if (!ownRun(run) || !isActiveRun(run.status)) continue
+      const turn = run.turnState
+      const settled = turn?.phase === 'ended' && SETTLED_RUN_STATUSES.includes(turn.status) ? turn.status : undefined
+      const status = settled ?? 'unknown_after_restart'
+      const finishedAt = settled === undefined ? at : turn.at
+      const errors = settled === undefined
+        ? [...run.errors, {
+            at: finishedAt,
+            phase: 'session',
+            severity: 'warning',
+            code: 'unknown_after_restart',
+            message: '进程重启时无法证明本轮运行已经结束，结果未知；为避免重复执行，未自动重试。',
+          }].slice(-MAX_ERRORS_PER_RUN)
+        : status === 'succeeded'
+          ? run.errors
+          : [...run.errors, {
+              at: finishedAt,
+              phase: 'session',
+              severity: 'warning',
+              code: 'recovered_after_restart',
+              message: `进程重启前回合已结束（${status}）；按该终态收口。`,
+            }].slice(-MAX_ERRORS_PER_RUN)
       const next = parseStrict(RunRecordSchema, {
         ...run,
-        status: 'unknown_after_restart',
-        finishedAt: at,
-        durationMs: Math.max(0, Date.parse(at) - Date.parse(run.queuedAt)),
-        errors: [...run.errors, {
-          at,
-          phase: 'session',
-          severity: 'warning',
-          code: 'unknown_after_restart',
-          message: '进程重启时无法证明本轮运行已经结束；未自动重试。',
-        }].slice(-20),
+        status,
+        finishedAt,
+        durationMs: Math.max(0, Date.parse(finishedAt) - Date.parse(run.startedAt ?? run.queuedAt)),
+        ...(status === 'blocked_requires_user' ? { blockedRequiresUser: true } : {}),
+        errors,
       }, 'run')
       await tables.runs.put(id, next)
+      if (settled !== undefined) outcomes.set(id, status)
       recovered += 1
     }
     for (const [id, attempt] of [...tables.attempts.entries()]) {
       if (attempt.profileKey !== profileKey) continue
       if (!['claimed', 'session_created', 'prompt_submitted'].includes(attempt.state)) continue
-      const next = parseStrict(AttemptRecordSchema, { ...attempt, state: 'unknown', updatedAt: at }, 'attempt')
+      const status = outcomes.get(attempt.runId)
+      const state = status === undefined ? 'unknown' : status === 'failed' ? 'failed' : 'accepted'
+      const next = parseStrict(AttemptRecordSchema, { ...attempt, state, updatedAt: at }, 'attempt')
       await tables.attempts.put(id, next)
     }
     return recovered

@@ -149,6 +149,15 @@ test('createWindSources：三条能力注册齐全，data_key 与来源标注都
   assert.equal(sources.length, 3)
 })
 
+test('EDB 取数说明：中文问句是主路径，不得再要求先 search 拿码（两个能力都按次计费）', () => {
+  const [search, query] = createWindSources(async () => undefined)
+  assert.match(query.schema.description, /按次消耗上游积分/)
+  assert.doesNotMatch(query.schema.description, /先 wind_edb_search 拿码/)
+  assert.match(search.schema.description, /只在不确定指标叫什么/)
+  assert.doesNotMatch(search.schema.description, /先 search 拿 code/)
+  assert.match(query.schema.input_schema.properties.indicator.description, /^一条中文指标问句/)
+})
+
 test('时间契约：EDB 不设 maxDays（宏观要能翻到几十年前），K 线分钟档靠 warning 说清楚', () => {
   assert.deepEqual(getDataTimeContract('wind_edb_query'), { kind: 'date_range', fields: ['start_date', 'end_date'] })
   assert.equal(getDataTimeContract('wind_stock_kline').maxDays, 3660)

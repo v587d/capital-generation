@@ -153,6 +153,38 @@ test('启动恢复：非终态运行与投递尝试都进入 unknown，终态不
   assert.equal((await store.listAttemptsForRun(running.id))[0].state, 'unknown')
 })
 
+test('启动恢复：已落盘 turnState 的运行按回合成败收口，只有无回合边界的才 unknown', async () => {
+  const { store, setNow } = make()
+  const created = await store.createTask(createInput)
+  const task = await store.getTask(created.id)
+  const finished = await store.createRun({
+    taskId: task.id,
+    taskTitle: task.title,
+    trigger: 'manual',
+    occurrenceKey: 'k3',
+    status: 'running',
+  })
+  await store.claimOccurrence({ taskId: task.id, runId: finished.id, occurrenceKey: 'k3' })
+  const turnEnd = '2026-10-27T00:05:00.000Z'
+  await store.updateRun(finished.id, {
+    turnState: { phase: 'ended', turn: 1, status: 'succeeded', at: turnEnd },
+    steps: 4,
+    toolCalls: 7,
+    summary: '最终答复',
+  })
+  setNow(Date.parse('2026-10-27T00:10:00.000Z'))
+  assert.equal(await store.recoverNonTerminalRuns(), 1)
+  const recovered = await store.getRun(finished.id)
+  assert.equal(recovered.status, 'succeeded')
+  assert.equal(recovered.finishedAt, turnEnd)
+  assert.equal(recovered.durationMs, Date.parse(turnEnd) - Date.parse(recovered.queuedAt))
+  assert.equal(recovered.steps, 4)
+  assert.equal(recovered.toolCalls, 7)
+  assert.equal(recovered.summary, '最终答复')
+  assert.equal(recovered.errors.length, 0)
+  assert.equal((await store.listAttemptsForRun(finished.id))[0].state, 'accepted')
+})
+
 test('通知按 profile 隔离、未读计数与批量已读', async () => {
   const fake = createFakeDomain()
   const a = make('web', fake)

@@ -4,7 +4,7 @@
  * Dataset. Session creation failing still leaves a visible synthetic failed run.
  */
 import { mkdir } from 'node:fs/promises'
-import { CANCEL_GRACE_MS, MAX_ERRORS_PER_RUN, QUIET_SETTLE_MS } from './defaults.js'
+import { CANCEL_GRACE_MS, MAX_ERRORS_PER_RUN, QUIET_SETTLE_MS, SETTLED_RUN_STATUSES } from './defaults.js'
 import { sanitizeMessage } from './redact.js'
 
 const PRESET_ID = 'capital-generation'
@@ -210,6 +210,38 @@ export function createRunRunner(options) {
     return updated
   }
 
+  // The 750ms settle window is not durable. Persist the turn boundary before waiting so a
+  // restart cannot turn a finished turn into unknown_after_restart.
+  function checkpointTurn(entry, phase, turn, at) {
+    const turnState = {
+      phase,
+      turn: Number.isSafeInteger(turn) ? turn : 0,
+      at: iso(Number.isFinite(at) ? at : now()),
+    }
+    const patch = { turnState }
+    if (phase === 'ended') {
+      turnState.status = outcomeOf(entry)
+      patch.steps = entry.steps
+      patch.toolCalls = entry.toolCalls
+      patch.blockedRequiresUser = entry.blocked === true
+      if (entry.summary !== undefined) patch.summary = entry.summary
+    }
+    void store.updateRun(entry.run.id, patch)
+      .then((updated) => { if (updated !== undefined) entry.run = updated })
+      .catch((error) => logger?.warn?.(`capital-automation: turn checkpoint failed: ${String(error)}`))
+  }
+
+  function settledStatusOf(entry) {
+    if (entry.turnActive === true) return undefined
+    if (entry.lastTurnEnd !== undefined) {
+      const status = outcomeOf(entry)
+      if (status !== 'unknown_after_restart') return status
+    }
+    const turn = entry.run.turnState
+    if (turn?.phase === 'ended' && SETTLED_RUN_STATUSES.includes(turn.status)) return turn.status
+    return undefined
+  }
+
   async function flushSessionBounded(agent) {
     const sessions = service(ctx, 'sessions')
     const flush = sessions?.flush
@@ -401,12 +433,13 @@ export function createRunRunner(options) {
 
   function countedEventKey(session, event) {
     const sessionId = typeof session?.id === 'string' ? session.id : ''
+    const data = event.data ?? event
     if (Number.isSafeInteger(event.seq)) return `${sessionId}:seq:${event.seq}`
-    if ((event.type === 'tool/call' || event.type === 'tool/ptc-dispatch') && typeof event.callId === 'string') {
-      return `${sessionId}:${event.type}:${event.callId}`
+    if ((event.type === 'tool/call' || event.type === 'tool/ptc-dispatch') && typeof data.callId === 'string') {
+      return `${sessionId}:${event.type}:${data.callId}`
     }
-    if (event.type === 'step/start' && Number.isSafeInteger(event.turn) && Number.isSafeInteger(event.step)) {
-      return `${sessionId}:step:${event.turn}:${event.step}`
+    if (event.type === 'step/start' && Number.isSafeInteger(data.turn) && Number.isSafeInteger(data.step)) {
+      return `${sessionId}:step:${data.turn}:${data.step}`
     }
     return undefined
   }
@@ -426,7 +459,16 @@ export function createRunRunner(options) {
     if (event === undefined || typeof event.type !== 'string') return
     const entry = entryForSession(session)
     if (entry === undefined || entry.finished) return
+    const data = event.data ?? event
     const rootEvent = session?.id === entry.sessionId
+    if (event.type === 'turn/start') {
+      armIdle(entry)
+      if (!rootEvent) return
+      entry.lastTurnEnd = undefined
+      entry.turnActive = true
+      checkpointTurn(entry, 'running', data.turn, event.time)
+      return
+    }
     if (event.type === 'step/start') {
       if (!countEventOnce(entry, session, event)) return
       armIdle(entry)
@@ -444,7 +486,7 @@ export function createRunRunner(options) {
       if (!countEventOnce(entry, session, event)) return
       armIdle(entry)
       entry.toolCalls += 1
-      if (typeof event.callId === 'string' && typeof event.name === 'string') entry.toolNames.set(event.callId, event.name)
+      if (typeof data.callId === 'string' && typeof data.name === 'string') entry.toolNames.set(data.callId, data.name)
       if (entry.toolCalls > entry.task.limits.maxToolCalls) {
         void cancelEntry(entry, 'automation_tool_limit', 'failed', {
           phase: 'timeout',
@@ -456,28 +498,30 @@ export function createRunRunner(options) {
     }
     if (event.type === 'tool/result') {
       armIdle(entry)
-      if (event.message?.isError !== true) return
-      const tool = entry.toolNames.get(event.callId)
+      if (data.message?.isError !== true) return
+      const tool = entry.toolNames.get(data.callId)
       pushError(entry, {
         phase: 'tool',
-        code: event.error?.code ?? 'tool_error',
-        message: event.error?.reason ?? '工具调用失败。',
+        code: data.error?.code ?? 'tool_error',
+        message: textOfMessage(data.message) || '工具调用失败。',
         ...(tool === undefined ? {} : { tool }),
-        ...(typeof event.callId === 'string' ? { callId: event.callId } : {}),
+        ...(typeof data.callId === 'string' ? { callId: data.callId } : {}),
       })
       return
     }
     if (event.type === 'assistant/message') {
       armIdle(entry)
       if (!rootEvent) return
-      const text = textOfMessage(event.message)
+      const text = textOfMessage(data.message)
       if (text.length > 0) entry.summary = sanitizeMessage(text).slice(0, MAX_SUMMARY_CHARS)
       return
     }
     if (event.type === 'turn/end') {
       armIdle(entry)
       if (!rootEvent) return
-      entry.lastTurnEnd = { turn: event.turn, reason: event.reason }
+      entry.lastTurnEnd = { turn: data.turn, reason: data.reason }
+      entry.turnActive = false
+      checkpointTurn(entry, 'ended', data.turn, event.time)
       void maybeComplete(entry)
     }
   }
@@ -584,6 +628,15 @@ export function createRunRunner(options) {
 
   async function abandonEntry(entry, controller) {
     if (entry.abandonPromise !== undefined) return entry.abandonPromise
+    const settled = entry.finished ? undefined : settledStatusOf(entry)
+    if (settled !== undefined) {
+      entry.abandoned = true
+      entry.abandonPromise = (async () => {
+        await finalize(entry, settled)
+        await stopEntryAgent(entry, controller)
+      })()
+      return entry.abandonPromise
+    }
     entry.abandoned = true
     entry.finished = true
     clearTimers(entry)
@@ -603,7 +656,7 @@ export function createRunRunner(options) {
             phase: 'session',
             severity: 'warning',
             code: 'unknown_after_restart',
-            message: '自动化 runtime 结束时无法证明本轮运行已经结束；未自动重试。',
+            message: '自动化 runtime 结束时无法证明本轮运行已经结束，结果未知；为避免重复执行，未自动重试。',
           }].slice(-MAX_ERRORS_PER_RUN),
         }).catch(() => {})
       }
@@ -662,6 +715,7 @@ export function createRunRunner(options) {
       promptController: undefined,
       summary: undefined,
       lastTurnEnd: undefined,
+      turnActive: false,
       promptAccepted: false,
       finished: false,
       completing: false,

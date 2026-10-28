@@ -13,14 +13,14 @@ const BASE_INPUT = {
   mode: 'news',
 }
 
-function harness({ owner, now = Date.parse('2026-10-27T00:31:00Z'), runner: runnerOption } = {}) {
+function harness({ owner, calendar = tradingCalendar, now = Date.parse('2026-10-27T00:31:00Z'), runner: runnerOption } = {}) {
   const fake = createFakeDomain()
   const clock = { value: now }
   const store = createAutomationStore({
     openDomain: async () => fake.domain,
     profile: { name: 'web' },
     now: () => clock.value,
-    calendar: tradingCalendar,
+    calendar,
   })
   const dispatches = []
   const runner = runnerOption ?? {
@@ -40,7 +40,7 @@ function harness({ owner, now = Date.parse('2026-10-27T00:31:00Z'), runner: runn
     store,
     runner,
     owner: { ownerId: fakeOwner.ownerId ?? 'test-owner', lease: fakeOwner },
-    calendar: tradingCalendar,
+    calendar,
     profile: { ownerDir: '/tmp/fake-owner' },
     getSettings: () => ({ tickMs: 60_000, catchUpMs: 10 * 60_000, inAppNotifications: true }),
     now: () => clock.value,
@@ -139,6 +139,24 @@ test('交易日历窗口外 fail-closed：skipped_calendar_unavailable，不按�
   await scheduler.tick()
   assert.equal(dispatches.length, 0)
   const runs = (await store.listRunsPage({ limit: 10 })).runs
+  assert.equal(runs[0].status, 'skipped_calendar_unavailable')
+})
+
+test('日历刷新在途时不提前烧掉 occurrence；刷新结束仍未知才 fail-closed', async () => {
+  let refreshing = true
+  const calendar = {
+    isTradingDay: () => undefined,
+    status: () => ({ available: false, source: 'none' }),
+    pendingRefresh: () => refreshing,
+  }
+  const { store, scheduler } = harness({ calendar, now: Date.parse('2026-10-27T01:05:00Z') })
+  await store.createTask(BASE_INPUT)
+  await scheduler.tick()
+  assert.equal((await store.listRunsPage({ limit: 10 })).runs.length, 0, '刷新在途时应下一 tick 重试')
+  refreshing = false
+  await scheduler.tick()
+  const runs = (await store.listRunsPage({ limit: 10 })).runs
+  assert.equal(runs.length, 1)
   assert.equal(runs[0].status, 'skipped_calendar_unavailable')
 })
 

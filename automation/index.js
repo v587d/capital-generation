@@ -13,7 +13,7 @@ import { createAutomationStore, domainSpec, ROUTE_PATH } from './store.js'
 import { createAutomationRouteHandler } from './route.js'
 import { resolveAutomationSettings } from './settings.js'
 import { installAutomationPolicy } from './policy.js'
-import { createTradingCalendar } from './calendar.js'
+import { createCalendarSource } from './calendar-source.js'
 import { createWorkspaceCatalog } from './workspaces.js'
 import { sanitizeMessage } from './redact.js'
 
@@ -38,13 +38,17 @@ function safeSegment(value) {
  */
 export function createAutomationRuntime(options) {
   const { ctx, profile, storageDomain, settings, now = () => Date.now(), logger, version = versionOf() } = options
-  const calendar = options.calendar ?? createTradingCalendar()
   const getSettings = typeof settings === 'function' ? settings : () => resolveAutomationSettings(ctx, settings)
   const rawProfileName = String(profile.name)
   const displayName = rawProfileName.slice(0, 200)
   const home = profile.home ?? profile.dir ?? process.cwd()
   const runDir = profile.runDir ?? join(home, 'automation-workspace', safeSegment(displayName))
   const ownerDir = profile.ownerDir ?? join(home, 'storages', 'capital-automation-locks')
+  const calendar = options.calendar ?? createCalendarSource({
+    cacheDir: join(home, 'storages', 'capital-automation-calendar'),
+    logger,
+    now,
+  })
   const policyContext = options.policyContext ?? ctx
   const workspaces = createWorkspaceCatalog({ ctx, displayName, runDir, logger })
   const store = createAutomationStore({
@@ -156,6 +160,7 @@ export function apply(ctx) {
           activeService = undefined
         }
         await created.scheduler.stop().catch(() => {})
+        created.calendar.dispose?.()
         await created.runner.dispose?.()
         await created.store.close().catch(() => {})
       }, 'capital-automation: runtime')

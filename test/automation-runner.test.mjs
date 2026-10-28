@@ -7,6 +7,11 @@ import { tradingCalendar } from '../automation/calendar.js'
 
 const NOW = Date.parse('2026-10-27T00:31:00Z')
 
+/** Host sessions publish `{type, seq, time, data}`; flat synthetic events hid a payload bug. */
+function sessionEvent(type, data, seq = 1) {
+  return { type, seq, time: NOW, data }
+}
+
 function taskInput() {
   return {
     title: '早间资讯',
@@ -92,14 +97,47 @@ test('正常运行：创建新 session、接受 prompt、turn/end completed 后�
   const running = await store.getRun(run.id)
   assert.equal(running.status, 'running')
   assert.equal(running.sessionId, 'session-run')
-  ctx.emit('session/event', agent.session, { type: 'turn/end', turn: 1, reason: { kind: 'completed' } })
+  ctx.emit('session/event', agent.session, sessionEvent('step/start', { turn: 1, step: 1 }, 1))
+  ctx.emit('session/event', agent.session, sessionEvent('assistant/message', {
+    turn: 1,
+    step: 1,
+    message: { role: 'assistant', content: [{ type: 'text', text: '最终答复' }] },
+  }, 2))
+  ctx.emit('session/event', agent.session, sessionEvent('turn/end', { turn: 1, reason: { kind: 'completed' } }, 3))
   agent.status = 'idle'
   ctx.emit('agent/status', { agent, status: 'idle' })
   await new Promise((resolve) => setTimeout(resolve, 1100))
   const done = await store.getRun(run.id)
   assert.equal(done.status, 'succeeded')
-  assert.equal(done.steps, 0)
+  assert.equal(done.steps, 1)
+  assert.equal(done.summary, '最终答复')
+  assert.deepEqual(done.turnState, {
+    phase: 'ended',
+    turn: 1,
+    status: 'succeeded',
+    at: new Date(NOW).toISOString(),
+  })
   runner.dispose()
+})
+
+test('turn/end 已结束时 dispose 按完成收口，而不是 unknown_after_restart', async () => {
+  const { store, task, agent, run, runner, ctx } = await harness()
+  await runner.dispatch(run, task, 'manual')
+  ctx.emit('session/event', agent.session, sessionEvent('turn/end', { turn: 1, reason: { kind: 'completed' } }, 1))
+  await runner.dispose()
+  const done = await store.getRun(run.id)
+  assert.equal(done.status, 'succeeded')
+  assert.equal(done.turnState.status, 'succeeded')
+})
+
+test('同一运行的新回合开始后 dispose 仍记 unknown，不用上一回合的完成态', async () => {
+  const { store, task, agent, run, runner, ctx } = await harness()
+  await runner.dispatch(run, task, 'manual')
+  ctx.emit('session/event', agent.session, sessionEvent('turn/end', { turn: 1, reason: { kind: 'completed' } }, 1))
+  ctx.emit('session/event', agent.session, sessionEvent('turn/start', { turn: 2 }, 2))
+  await runner.dispose()
+  const done = await store.getRun(run.id)
+  assert.equal(done.status, 'unknown_after_restart')
 })
 
 test('runtime dispose 会把仍活动的运行收口为 unknown_after_restart', async () => {
@@ -173,12 +211,12 @@ test('工具预算按整棵运行子树计数：tool/call 与 PTC 派发各算�
   const { store, task, agent, run, runner, ctx } = await harness()
   await runner.dispatch(run, task, 'manual')
   for (let index = 0; index < 3; index += 1) {
-    ctx.emit('session/event', agent.session, { type: 'tool/call', callId: `call-${index}`, name: 'read' })
+    ctx.emit('session/event', agent.session, sessionEvent('tool/call', { turn: 1, step: index + 1, callId: `call-${index}`, name: 'read' }, index + 1))
   }
   for (let index = 0; index < 2; index += 1) {
-    ctx.emit('session/event', agent.session, { type: 'tool/ptc-dispatch', callId: `ptc-${index}`, name: 'describe_dataset' })
+    ctx.emit('session/event', agent.session, sessionEvent('tool/ptc-dispatch', { turn: 1, step: 4 + index, callId: `ptc-${index}`, name: 'describe_dataset' }, 4 + index))
   }
-  ctx.emit('session/event', agent.session, { type: 'turn/end', turn: 1, reason: { kind: 'completed' } })
+  ctx.emit('session/event', agent.session, sessionEvent('turn/end', { turn: 1, reason: { kind: 'completed' } }, 10))
   agent.status = 'idle'
   ctx.emit('agent/status', { agent, status: 'idle' })
   await new Promise((resolve) => setTimeout(resolve, 1100))
@@ -221,9 +259,9 @@ test('descendant session 走 parent lineage 归属运行并记录 policy 拒绝'
   sessions.set(child.id, child)
   assert.equal(runner.hasAutomationSession(child.id), true)
   runner.noteGuardDenied(child.id, 'write', '无人值守运行不能写文件。')
-  ctx.emit('session/event', child, { type: 'tool/call', callId: 'child-call', name: 'read' })
-  ctx.emit('session/event', child, { type: 'tool/call', callId: 'child-call', name: 'read' })
-  ctx.emit('session/event', agent.session, { type: 'turn/end', turn: 1, reason: { kind: 'completed' } })
+  ctx.emit('session/event', child, sessionEvent('tool/call', { turn: 1, step: 1, callId: 'child-call', name: 'read' }, 7))
+  ctx.emit('session/event', child, sessionEvent('tool/call', { turn: 1, step: 1, callId: 'child-call', name: 'read' }, 7))
+  ctx.emit('session/event', agent.session, sessionEvent('turn/end', { turn: 1, reason: { kind: 'completed' } }, 20))
   agent.status = 'idle'
   ctx.emit('agent/status', { agent, status: 'idle' })
   await new Promise((resolve) => setTimeout(resolve, 1100))
@@ -239,10 +277,10 @@ test('重复 tool event 不绕过预算，超限只发起一次取消', async ()
   const limited = { ...task, limits: { ...task.limits, maxToolCalls: 10 } }
   await runner.dispatch(run, limited, 'manual')
   for (let index = 0; index < 10; index += 1) {
-    ctx.emit('session/event', agent.session, { type: 'tool/call', callId: `call-${index}`, name: 'read' })
+    ctx.emit('session/event', agent.session, sessionEvent('tool/call', { turn: 1, step: index + 1, callId: `call-${index}`, name: 'read' }, 100 + index))
   }
-  ctx.emit('session/event', agent.session, { type: 'tool/call', callId: 'call-9', name: 'read' })
-  ctx.emit('session/event', agent.session, { type: 'tool/call', callId: 'call-10', name: 'read' })
+  ctx.emit('session/event', agent.session, sessionEvent('tool/call', { turn: 1, step: 10, callId: 'call-9', name: 'read' }, 109))
+  ctx.emit('session/event', agent.session, sessionEvent('tool/call', { turn: 1, step: 11, callId: 'call-10', name: 'read' }, 110))
   assert.equal(agent.canceled.length, 1)
   agent.status = 'idle'
   ctx.emit('agent/status', { agent, status: 'idle' })

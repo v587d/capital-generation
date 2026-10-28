@@ -23,12 +23,15 @@
   当前代码定义版本。运行保留每任务 200 条、每 profile 2000 条；通知每 profile 200 条。
 - 所有表严格 schema；写入前 `assertCleanJson` 拒绝 `undefined`、`NaN`、空洞数组和非 plain object。
   损坏记录由域写入口拒绝；域 open 失败时页面显示不可用，调度器不启动。
-- 启动扫描只做恢复标记：`queued` / `starting` / `running` 没有本进程 owner 时进入
-  `unknown_after_restart`，不自动重试。
+- 启动扫描只做恢复标记：`queued` / `starting` / `running` 没有本进程 owner 时，优先按记录里的
+  `turnState` 收口——`phase: 'ended'` 的 `succeeded` / `failed` / `canceled` / `timed_out` /
+  `blocked_requires_user` 按原终态恢复，`finishedAt` 取回合结束时刻；只有没有回合边界（或边界仍是
+  `running`）的运行才进入 `unknown_after_restart`，不自动重试。
 
 ## 12.3 调度与 occurrence
 
-- Capital 自有 60 秒 tick（设置范围 30 秒–60 分钟），不在 tick 中等待模型运行。
+- Capital 自有 60 秒 tick（设置范围 30 秒–60 分钟）：tick 只做租约校验、读任务、算最近到期
+  occurrence、投递与日历刷新，不在 tick 中等待模型运行；任务频率与 tick 无关。
 - 单 scheduler owner：`~/.dsh/storages/capital-automation-locks/` 下的目录锁用 `mkdir` 原子创建；
   过期租约由 `rename` 移走后重新竞争，owner 记录含 `ownerId`、`fencingToken`、`leaseExpiresAt`。
   每个 lease 使用独立 child 目录，旧 owner 不能写入接任者的 root；`renew`/`isCurrent` 每次同时校验
@@ -41,8 +44,13 @@
   `scheduleAnchorAt`，避免用旧版本补跑。
 - 同任务串行：存在 `queued/starting/running` 运行时，下一次计划记 `skipped_overlap`。
   超过 10 分钟 catch-up 窗口的 occurrence 记 `missed`，不补跑多天缺口。
-- `tradingDaysOnly` 使用内置交易所假期表（当前覆盖 2026）；窗口外返回
-  `calendar_unavailable`，任务记 `skipped_calendar_unavailable`，**不**按 Mon–Fri 猜测。
+- `tradingDaysOnly` 的日历以深交所官方休市日历（`monthList` 月 JSON，无需 key）为准：按月拉取
+  “今天 −62 天 … 今天 +400 天”，已拉取月份覆盖内置表，未公布月份回退内置表，两者都没有的日期
+  fail-closed（`calendar_unavailable` → `skipped_calendar_unavailable`），**不**按 Mon–Fri 猜测。
+  缓存 `<dsh home>/storages/capital-automation-calendar/szse.json`，每天刷新；启动先等一次就绪，
+  刷新在途时 `pendingRefresh` 让调度顺延到下一 tick 再判定，不提前烧掉 occurrence。
+- 覆盖不足 30 天时页面提前告警；`/meta.calendar` 暴露 `source / through / coverageDays /
+  fetchedAt / stale / lastError`。交易所公布新一年安排后自动接上，不再靠改代码补表。
 - 时区/DST：本地墙钟转 UTC，春季不存在的分钟跳过，秋季重叠取第一个；存储只用规范化 UTC ISO。
 
 ## 12.4 运行与无人值守边界
@@ -59,12 +67,16 @@
 - 首条 prompt 含任务指令、触发原因、run/task/occurrence、当前时间与时区、输出要求和
   `automation-v1` 无人值守标识。prompt 未被明确接受时进入 `unknown_after_restart`，不自动重试；
   session 创建失败留下合成 `failed` run。
+- 根回合边界即落盘：`turn/start` 写 `turnState{phase:'running'}`，`turn/end` 写
+  `turnState{phase:'ended', status}` 并顺带持久化当时的 `steps` / `toolCalls` / `summary`；不依赖
+  750ms settle 之后的 finalize。恢复与 dispose 都以该字段为准，因此已完成回合不会被重启改写成
+  `unknown_after_restart`。
 - 预算（任务级覆盖）：wall-clock 5–120 分钟、idle 1–30 分钟、最大步骤 10–2000（默认 300）、
   最大工具调用 10–6000（默认 1200）。wall-clock 从 admission 开始，覆盖 workspace/session 创建、resolve、rename
   与首条 prompt；工具调用计数覆盖整棵运行子树：`tool/call` 与 PTC 的 `tool/ptc-dispatch` 都算一次，子 Agent 的调用也计入。
   取消用 `agent.cancel({kind:'hook', reason})` + `subagents.drainDescendants()`；drain 与 session flush 都有有限时，
-  宽限期后仍未收敛则按 `timed_out` / 取消终态收口，不假定底层工具已停止。runtime/profile 卸载时先等待 scheduler admission 和活动 runner drain；runner dispose 最多等待 20 秒，超时后仍活动的运行
-  显式记为 `unknown_after_restart`，不自动重试。
+  宽限期后仍未收敛则按 `timed_out` / 取消终态收口，不假定底层工具已停止。runtime/profile 卸载时先等待 scheduler admission 和活动 runner drain；runner dispose 最多等待 20 秒；
+  已结束回合按 `turnState` 收口，仍在中途的运行显式记为 `unknown_after_restart`，不自动重试。
 - 工具调用期身份是 run 注册的 session id：全局 `tools.guard` 拒绝 `ask_user_question`、`write`、
   `edit` 与 shell 提权请求；被拒的提问把运行标成 `blocked_requires_user`。角色工具面仍由
   preset 的族行封闭；不得用 persona 文案替代这些闸门。
@@ -76,13 +88,33 @@
 - 路由前缀 `/capital-automation`；所有 handler 第一步 `connection.requestRejection(req)`，
   被拒时不读 body、不碰 storage。提供 `/meta`、`/tasks`（CRUD + activate/pause/hibernate/copy/run）、
   `/runs`（列表/详情/cancel）、`/notifications`（列表/已读）。不提供 `/legacy`、`/catalog` 或条件接口。
-- 页面顶部永久显示当前 profile、scheduler 状态、日历状态；任务按运行中/资讯/行情/复盘/我的任务
-  分组，详情含概览、配置、运行记录、只读执行策略与通知。配置里的「工作区」从 `/meta` 的
-  `workspaces` 选择，空值 = 默认专属工作区；「输出侧重」只是 `news/market/review/research`
-  的提示词模板，不是 agent preset，页面同时显示固定的 `capital-generation（自动模式）`。
-  运行中只显示取消；终态后才开放 session 入口。
+- 页面顶部只保留品牌与居中的「任务 / 运行」页签，右上角是 profile 级通知中心与「新建任务」；
+  profile / scheduler / 日历等诊断信息不再常驻，只在 scheduler standby、存储或交易日历不可用
+  时以 banner 提示，版本号收进任务详情「技术信息」。明暗主题跟随 `body[data-ds-dark-theme]`；
+  浅色模式的灰阶、表格分隔线、标签/状态文字色单独覆盖，页签选中态用高对比实心胶囊。任务页由
+  最近 30 天运行历史、运行中条、任务表（分类/我的任务筛选、搜索、行内操作菜单）和内置模板区组成：
+  `dormant` 的内置任务以模板卡展示，添加后进入任务表；`active` / `paused` 任务与自定义任务留在任务表。
+  分类/来源标签与任务标题同排（模板卡标题只带分类标签），超过 12 个字截断，窄屏换到标题下一行；
+  模板卡的添加按钮是品牌色实心主按钮，不靠 hover 才可见；筛选计数是圆圈数字，模板区标题只留「模板」。
+  首屏在 `/meta` 与 `/tasks` 一起返回前只渲染与最终布局同轮廓的骨架屏（官方
+  `--dsw-alias-bg-skeleton` token + 呼吸动画，`prefers-reduced-motion` 下停用），不得先显示
+  「还没有任务」；首次请求失败则落在错误 banner + 重试，不留在骨架屏。
+- 任务详情是独立焦点页，不重复全局页头，顶部只留「所有任务」返回条；含概览、配置、运行记录、
+  通知四个页签。概览同时展示只读执行策略与固定
+  preset。配置里的「工作区」从 `/meta` 的 `workspaces` 选择，空值 = 默认专属工作区；
+  「输出侧重」只是 `news/market/review/research` 的提示词模板，不是 agent preset，页面同时
+  显示固定的 `capital-generation（自动模式）`。保存有取消与脏状态提示；删除自定义任务、休眠
+  内置模板都要二次确认，取消活动运行同样需要确认。任务详情运行中只显示取消；未添加的模板用「添加」、
+  已暂停任务用「启用」，二者是主按钮；已启用后「立即运行」是主按钮；终态后才开放 session 入口。
+- 运行页复用同一张 30 天历史卡，按全部/进行中/成功/失败筛选 profile 级运行记录；每行标题
+  在前、状态在后，时间、耗时与步骤等元数据在第二行左对齐，错误条数与操作靠右。点击错误条数
+  在行内展开具体错误（消息 + code），摘要不展开——结果与过程以 session 为准。可取消活动运行
+  或在终态后打开 session。
+  通知中心展示全部 profile 级通知（包括没有 taskId 的 `scheduler_standby` /
+  `calendar_unavailable`），可定位到任务。上述均为页面组织与呈现，API、状态机和存储契约不变。
 - 设置默认值集中在 `automation/defaults.js`；用户级字段走现有 `capital-config` 条目的
   `automation.*` volatile 字段，优先级固定为代码默认 → 部署行 → 当前 profile → 任务级覆盖。
 - 回归：`test/automation-*.test.mjs`（schema/时区/DST/owner/store/route/scheduler/policy/runner/
-  组合）+ `test/packaging.test.mjs`。改 `automation/` 后跑 `npm test`；改 host 行或客户端产物后
-  再跑 `npm run check:dsh` 与 `npm pack --dry-run`，并重启 dsh 进程、刷新浏览器。
+  calendar-source/组合）+ `test/packaging.test.mjs`。日历上游形状用 `npm run smoke:calendar` 实测，
+  不进 `npm test`（测试全部注入假 fetch，不打外网）。改 `automation/` 后跑 `npm test`；改 host 行或
+  客户端产物后再跑 `npm run check:dsh` 与 `npm pack --dry-run`，并重启 dsh 进程、刷新浏览器。

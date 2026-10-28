@@ -167,6 +167,21 @@ export const RunErrorSchema = z.strictObject({
   callId: z.string().max(120).optional(),
 })
 
+/** Durable turn boundary: recovery must distinguish an interrupted turn from a finished one. */
+export const TurnStateSchema = z.strictObject({
+  phase: z.enum(['running', 'ended']),
+  turn: z.number().int().min(0),
+  status: z.enum(RUN_STATUSES).optional(),
+  at: isoInstant,
+}).superRefine((state, ctx) => {
+  if (state.phase === 'ended' && state.status === undefined) {
+    ctx.addIssue({ code: 'custom', message: 'ended turn state requires status' })
+  }
+  if (state.phase === 'running' && state.status !== undefined) {
+    ctx.addIssue({ code: 'custom', message: 'running turn state must not carry status' })
+  }
+})
+
 export const RunRecordSchema = z.strictObject({
   schemaVersion: z.literal(1),
   id: z.string().min(1).max(80),
@@ -180,6 +195,7 @@ export const RunRecordSchema = z.strictObject({
   status: z.enum(RUN_STATUSES),
   sessionId: z.string().min(1).max(120).optional(),
   sessionTitle: z.string().min(1).max(200).optional(),
+  turnState: TurnStateSchema.optional(),
   queuedAt: isoInstant,
   startedAt: isoInstant.optional(),
   finishedAt: isoInstant.optional(),

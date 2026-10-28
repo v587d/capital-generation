@@ -69,3 +69,7 @@ export const RUN_STATUSES = [
 
 export const ACTIVE_RUN_STATUSES = ['queued', 'starting', 'running']
 export const TERMINAL_RUN_STATUSES = RUN_STATUSES.filter((status) => !ACTIVE_RUN_STATUSES.includes(status))
+
+// A finished turn can be settled from its durable checkpoint; `unknown_after_restart`
+// stays the fallback for runs with no provable turn boundary.
+export const SETTLED_RUN_STATUSES = ['succeeded', 'failed', 'canceled', 'timed_out', 'blocked_requires_user']
