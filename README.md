@@ -39,19 +39,17 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 ## 快速上手
 
 > [!NOTE]
-> 适配 DSH`@0.2.1-rc.3`。已在 Linux 的 Web profile 和 Windows 桌面端验证。
+> 最新版本已适配 DSH`@0.2.1-rc.3`。
 
 
-0. **建议前置**
+0. **前置**
 
-   > [!TIP]
-   > **建议用独立 profile 启动。** 比如：
-   >
-   > ```bash
-   > dsh --profile capital --port 8888
-   > ```
-   >
-   > 然后访问 `http://localhost:8888`。这样，本插件只属于 capital 这个 profile，避免和其他 profile 冲突。
+    **建议用独立 profile 启动。** 比如：
+       
+    ```bash
+      dsh --profile capital --port 8888
+    ```
+    然后访问 `http://localhost:8888`。这样，本插件只属于 capital 这个 profile，避免和其他 profile 冲突。
 
 1. **安装插件**
 
@@ -76,12 +74,11 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
     ```
     **本仓库已包含构建产物，普通用户不需要克隆仓库或运行构建命令。**
 
-
-> [!NOTE]
-> 本插件所有自带密钥均可免费申请、免费日常使用。 哪怕所有密钥留空也不影响插件核心功能，即缺哪个密钥，仅表示对应能力就不可用，其他功能照常。
-
 2. **选填密钥** （打开 DSH 「插件」 → **Capital Generation** →「数据源」）
-
+  > [!NOTE]
+  > 本插件所有自带密钥均可免费申请、免费日常使用。
+  > 哪怕所有密钥留空也不影响插件核心功能，即缺哪个密钥，仅表示对应能力就不可用，其他功能照常。
+  
    | 密钥 | 用途 |
    | --- | --- |
    | [同花顺 Fuyao](https://fuyao.aicubes.cn/docs/) | 行情、财务数据和自选股报价 |
