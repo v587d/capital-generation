@@ -1,6 +1,6 @@
 {
   "name": "@v587d/capital-automation",
-  "version": "2.13.1",
+  "version": "2.13.2",
   "description": "CapGen 投研自动化：独立 host bundle（固定 capital_automation 域、单 scheduler owner、/capital-automation 路由与浏览器页面）。",
   "license": "MIT",
   "type": "module",
