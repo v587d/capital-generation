@@ -4,6 +4,7 @@
  * else. The client never supplies a profile, owner, session, preset or cwd.
  */
 import { createHash, randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import {
   AttemptRecordSchema,
   AutomationTaskSchema,
@@ -59,6 +60,51 @@ function builtinRecordId(profileKey, builtinId) {
 
 function iso(now) {
   return new Date(now).toISOString()
+}
+
+function stripLegacyMode(value) {
+  if (value === undefined || value.mode === undefined) return value
+  const { mode: _legacyMode, ...rest } = value
+  return rest
+}
+
+function stripRecordLegacyMode(record) {
+  if (record.origin === 'custom') {
+    const custom = stripLegacyMode(record.custom)
+    return custom === record.custom ? record : { ...record, custom }
+  }
+  const overrides = stripLegacyMode(record.overrides)
+  if (overrides === record.overrides) return record
+  const next = { ...record }
+  if (overrides === undefined || Object.keys(overrides).length === 0) delete next.overrides
+  else next.overrides = overrides
+  return next
+}
+
+const LEGACY_MORNING_DESCRIPTION = '交易日开盘前汇总隔夜外盘、重要公告与政策信息，给出当日需要盯住的线索。'
+
+/** Pre-v3 builtins embedded both blocks; only those old template snapshots are refreshed. */
+function isLegacyBuiltinInstruction(value) {
+  return typeof value === 'string'
+    && value.includes('数据与来源纪律：')
+    && value.includes('无人值守执行策略（automation-v1）：')
+}
+
+function migrateBuiltinRecord(record, definition) {
+  let next = stripRecordLegacyMode(record)
+  if (next.definitionVersion >= definition.version) return next
+  const overrides = { ...(next.overrides ?? {}) }
+  if (isLegacyBuiltinInstruction(overrides.instruction)) delete overrides.instruction
+  if (definition.id === 'morning-brief' && overrides.description === LEGACY_MORNING_DESCRIPTION) delete overrides.description
+  for (const key of Object.keys(overrides)) {
+    // A workspace choice is real even when it equals the default; everything else can fall back.
+    if (key === 'workspaceId') continue
+    if (isDeepStrictEqual(overrides[key], definition.defaults[key])) delete overrides[key]
+  }
+  next = { ...next }
+  if (Object.keys(overrides).length === 0) delete next.overrides
+  else next.overrides = overrides
+  return next
 }
 
 export class StorageUnavailableError extends Error {
@@ -143,9 +189,10 @@ export function createAutomationStore(options) {
         await tables.tasks.put(id, record)
         continue
       }
-      if (existing.definitionVersion !== definition.version || existing.profileName !== profileName) {
+      const migrated = migrateBuiltinRecord(existing, definition)
+      if (!isDeepStrictEqual(migrated, existing) || migrated.definitionVersion !== definition.version || migrated.profileName !== profileName) {
         const next = parseStrict(TaskRecordSchema, {
-          ...existing,
+          ...migrated,
           profileName,
           definitionVersion: definition.version,
           updatedAt: at,
@@ -202,7 +249,7 @@ export function createAutomationStore(options) {
 
   async function putTaskRecord(record) {
     const tables = await ensure()
-    const clean = parseStrict(TaskRecordSchema, record, 'task record')
+    const clean = parseStrict(TaskRecordSchema, stripRecordLegacyMode(record), 'task record')
     await tables.tasks.put(clean.id, clean)
     return clean
   }
@@ -220,7 +267,6 @@ export function createAutomationStore(options) {
         timezone: 'Asia/Shanghai',
         tradingDaysOnly: true,
       },
-      mode: 'research',
       cwdKind: 'profile',
       limits: {
         runTimeoutMinutes: DEFAULT_RUN_TIMEOUT_MINUTES,
@@ -262,7 +308,14 @@ export function createAutomationStore(options) {
     const triggerChanged = patch.trigger !== undefined && canonicalTrigger(patch.trigger) !== canonicalTrigger(resolve(record).trigger)
     const next = { ...record, updatedAt: at }
     if (record.origin === 'builtin') {
-      const merged = TaskOverridesSchema.parse({ ...(record.overrides ?? {}), ...patch })
+      // Persist only fields the user actually changed; a full snapshot would pin every future
+      // builtin default and make a shipped template fix unreachable.
+      const current = resolve(record)
+      const changed = {}
+      for (const [key, value] of Object.entries(patch)) {
+        if (!isDeepStrictEqual(value, current[key])) changed[key] = value
+      }
+      const merged = TaskOverridesSchema.parse({ ...(record.overrides ?? {}), ...changed })
       next.overrides = merged
     } else {
       const merged = TaskConfigSchema.parse({ ...record.custom, ...patch, cwdKind: 'profile' })
@@ -328,7 +381,6 @@ export function createAutomationStore(options) {
       description: task.description,
       trigger: task.trigger,
       instruction: task.instruction,
-      mode: task.mode,
       cwdKind: 'profile',
       ...(task.workspaceId === undefined ? {} : { workspaceId: task.workspaceId }),
       limits: task.limits,

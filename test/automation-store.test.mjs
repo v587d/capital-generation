@@ -1,6 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { createAutomationStore, profileKeyOf } from '../automation/store.js'
+import { BUILTIN_BY_ID } from '../automation/builtins.js'
 import { createFakeDomain } from './automation-harness.mjs'
 import { tradingCalendar } from '../automation/calendar.js'
 import { TaskConfigSchema } from '../automation/schema.js'
@@ -25,7 +27,6 @@ const createInput = {
   instruction: '给出结论',
   category: 'research',
   trigger: { kind: 'schedule', cadence: 'daily', time: '09:00', timezone: 'Asia/Shanghai', tradingDaysOnly: true },
-  mode: 'research',
 }
 
 test('活动 owner token 阻止旧 scheduler 覆盖元数据，过期后允许新 token 接管', async () => {
@@ -58,6 +59,60 @@ test('内置任务按 profile 播种；不同 profile 的记录互相不可见',
   assert.equal((await b.store.listTasks()).length, 3, '另一个 profile 不能看到这条自定义任务')
   assert.equal(await b.store.getTask(created.id), undefined)
   assert.equal(await b.store.getRun('run_x'), undefined)
+})
+
+test('旧内置覆盖层升级：刷新旧指令、丢掉 mode，保留真实 workspace 选择', async () => {
+  const fake = createFakeDomain()
+  const profileKey = profileKeyOf('web')
+  const id = `bt_${createHash('sha256').update(`${profileKey}:morning-brief`).digest('hex').slice(0, 24)}`
+  const oldInstruction = '旧指令\n\n数据与来源纪律：\n- 旧内容\n\n无人值守执行策略（automation-v1）：\n- 旧内容'
+  const oldDescription = '交易日开盘前汇总隔夜外盘、重要公告与政策信息，给出当日需要盯住的线索。'
+  fake.tables.get('tasks').set(id, {
+    schemaVersion: 1,
+    id,
+    origin: 'builtin',
+    sourceBuiltinId: 'morning-brief',
+    profileKey,
+    profileName: 'web',
+    state: 'active',
+    definitionVersion: 1,
+    overrides: {
+      title: '早间资讯',
+      description: oldDescription,
+      instruction: oldInstruction,
+      category: 'news',
+      mode: 'news',
+      workspaceId: 'ws_keep',
+    },
+    scheduleAnchorAt: '2026-10-27T00:00:00.000Z',
+    createdAt: '2026-10-27T00:00:00.000Z',
+    updatedAt: '2026-10-27T00:00:00.000Z',
+  })
+  const { store } = make('web', fake)
+  const task = await store.getTask(id)
+  assert.equal(task.instruction, BUILTIN_BY_ID.get('morning-brief').defaults.instruction)
+  assert.equal(task.description, BUILTIN_BY_ID.get('morning-brief').defaults.description)
+  assert.equal(task.workspaceId, 'ws_keep')
+  assert.equal('mode' in task, false)
+  const persisted = fake.tables.get('tasks').get(id)
+  assert.equal(persisted.definitionVersion, 3)
+  assert.equal(persisted.overrides.instruction, undefined)
+  assert.equal(persisted.overrides.description, undefined)
+  assert.equal(persisted.overrides.mode, undefined)
+  assert.equal(persisted.overrides.workspaceId, 'ws_keep')
+})
+
+test('内置任务只保存真正改动的字段，不把整份默认值钉进覆盖层', async () => {
+  const { store, fake } = make()
+  const morning = (await store.listTasks()).find((task) => task.sourceBuiltinId === 'morning-brief')
+  await store.patchTask(morning.id, {
+    title: '我的早报',
+    instruction: morning.instruction,
+    description: morning.description,
+  })
+  const record = fake.tables.get('tasks').get(morning.id)
+  assert.deepEqual(Object.keys(record.overrides).sort(), ['title'])
+  assert.equal((await store.getTask(morning.id)).title, '我的早报')
 })
 
 test('长 profile 名称不能因显示截断而发生 profileKey 碰撞', async () => {

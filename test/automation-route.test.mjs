@@ -86,7 +86,6 @@ test('CRUD：创建、列表、详情、补丁、删除；所有响应 no-store'
       instruction: '给出结论',
       category: 'research',
       trigger: { kind: 'schedule', cadence: 'daily', time: '09:00', timezone: 'Asia/Shanghai', tradingDaysOnly: true },
-      mode: 'research',
     },
   })
   assert.equal(created.statusCode, 201)
@@ -119,7 +118,6 @@ test('任务详情按 taskId 先过滤再分页，不被全局最新运行记录
     instruction: '旧指令',
     category: 'research',
     trigger: { kind: 'schedule', cadence: 'daily', time: '09:00', timezone: 'Asia/Shanghai', tradingDaysOnly: false },
-    mode: 'research',
   })
   const first = await store.getTask(firstRecord.id)
   const secondRecord = await store.createTask({
@@ -127,7 +125,6 @@ test('任务详情按 taskId 先过滤再分页，不被全局最新运行记录
     instruction: '新指令',
     category: 'research',
     trigger: { kind: 'schedule', cadence: 'daily', time: '09:00', timezone: 'Asia/Shanghai', tradingDaysOnly: false },
-    mode: 'research',
   })
   const second = await store.getTask(secondRecord.id)
   await store.createRun({ id: 'run_a_old', taskId: first.id, taskTitle: first.title, trigger: 'manual', occurrenceKey: 'old', status: 'succeeded' })
@@ -178,7 +175,6 @@ test('流式 body 支持字符串 chunk，并在 content-length 超限时提前�
     instruction: '给出结论',
     category: 'research',
     trigger: { kind: 'schedule', cadence: 'daily', time: '09:00', timezone: 'Asia/Shanghai', tradingDaysOnly: false },
-    mode: 'research',
   })
   streamed.req[Symbol.asyncIterator] = async function* () {
     yield body.slice(0, 12)
@@ -207,7 +203,6 @@ test('请求体不能伪造 profile / owner / session / preset / cwd / origin / 
         instruction: 'y',
         category: 'news',
         trigger: { kind: 'schedule', cadence: 'daily', time: '09:00', timezone: 'Asia/Shanghai', tradingDaysOnly: false },
-        mode: 'news',
         [field]: 'forged',
       },
     })
@@ -227,7 +222,7 @@ test('内置任务不可删除；运行中不可删除/休眠；已结束运行�
   const created = await call(handler, {
     method: 'POST',
     url: '/capital-automation/tasks',
-    body: { title: 't', instruction: 'i', category: 'news', trigger: { kind: 'schedule', cadence: 'daily', time: '09:00', timezone: 'Asia/Shanghai', tradingDaysOnly: false }, mode: 'news' },
+    body: { title: 't', instruction: 'i', category: 'news', trigger: { kind: 'schedule', cadence: 'daily', time: '09:00', timezone: 'Asia/Shanghai', tradingDaysOnly: false } },
   })
   const id = created.json().task.id
   const run = await store.createRun({ taskId: id, taskTitle: 't', trigger: 'manual', occurrenceKey: 'm1', status: 'running' })
@@ -281,6 +276,7 @@ test('meta 暴露当前 profile、scheduler、工作区列表与 execution polic
   assert.equal(meta.execution.preset, 'capital-generation')
   assert.equal(meta.execution.cwdKind, 'profile')
   assert.equal(meta.execution.policy, 'automation-v1')
+  assert.deepEqual(meta.execution.cadences, ['daily', 'weekly', 'monthly', 'once'])
   assert.equal(JSON.stringify(meta).includes('/home/'), false)
 })
 
@@ -301,7 +297,6 @@ test('保存任务时工作区 id 走服务端 allowlist；未知 id 拒绝，�
     instruction: '给出结论',
     category: 'research',
     trigger: { kind: 'schedule', cadence: 'daily', time: '09:00', timezone: 'Asia/Shanghai', tradingDaysOnly: true },
-    mode: 'research',
   }
   const created = await call(handler, { method: 'POST', url: '/capital-automation/tasks', body: { ...base, workspaceId: 'ws_1' } })
   assert.equal(created.statusCode, 201)

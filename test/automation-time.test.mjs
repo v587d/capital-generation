@@ -25,13 +25,30 @@ test('daily：本地 08:30 对应 UTC 00:30，跨午夜取最近的过去/将来
   assert.equal(midnight.localDate, '2026-10-28')
 })
 
-test('weekly 只落在指定 ISO 星期；monthly 使用 1–28 的固定日', () => {
+test('weekly 只落在指定 ISO 星期；monthly 支持固定日、29–31 与月末', () => {
   const weekly = { kind: 'schedule', cadence: 'weekly', time: '09:00', timezone: 'Asia/Shanghai', weekdays: [1, 3], tradingDaysOnly: false }
   const next = nextOccurrence(weekly, at('2026-10-27T01:00:00Z')) // Tuesday local
   assert.equal(next.localDate, '2026-10-28')
   const monthly = { kind: 'schedule', cadence: 'monthly', time: '09:00', timezone: 'Asia/Shanghai', dayOfMonth: 1, tradingDaysOnly: false }
   const first = nextOccurrence(monthly, at('2026-10-27T01:00:00Z'))
   assert.equal(first.localDate, '2026-11-01')
+  const last = { ...monthly, dayOfMonth: 'last' }
+  assert.equal(nextOccurrence(last, at('2026-10-27T01:00:00Z')).localDate, '2026-10-31')
+  assert.equal(nextOccurrence(last, at('2026-02-01T01:00:00Z')).localDate, '2026-02-28')
+  const day31 = { ...monthly, dayOfMonth: 31 }
+  assert.equal(nextOccurrence(day31, at('2027-02-01T01:00:00Z')).localDate, '2027-03-31', '没有 31 日的月份必须跳过，不能挪到 30 日')
+})
+
+test('once 只命中指定日期一次，且不受 400 天扫描窗口限制', () => {
+  const once = { kind: 'schedule', cadence: 'once', time: '09:00', timezone: 'Asia/Shanghai', date: '2028-06-30', tradingDaysOnly: false }
+  const next = nextOccurrence(once, at('2026-10-27T01:00:00Z'))
+  assert.equal(next.kind, 'occurrence')
+  assert.equal(next.localDate, '2028-06-30')
+  assert.equal(next.scheduledFor, '2028-06-30T01:00:00.000Z')
+  assert.equal(nextOccurrence(once, at('2028-06-30T01:00:00Z')).kind, 'none', '同一分钟之后不能再返回同一 occurrence')
+  assert.equal(previousOccurrenceAtOrBefore(once, at('2028-06-30T01:00:00Z')).kind, 'occurrence')
+  assert.equal(previousOccurrenceAtOrBefore(once, at('2028-06-30T00:59:00Z')).kind, 'none')
+  assert.equal(previousOccurrenceAtOrBefore(once, at('2028-07-01T00:00:00Z')).scheduledFor, '2028-06-30T01:00:00.000Z')
 })
 
 test('DST 春季缺口跳过不存在的那一分钟，秋季重叠取第一个', () => {
@@ -66,4 +83,6 @@ test('occurrenceKey 含 profile、task、schedule 版本与规范化 UTC 时刻'
   assert.equal(key, `p_x:task_1:${version}:2026-10-27T00:30:00.000Z`)
   assert.notEqual(scheduleVersionOf({ ...trigger, time: '08:31' }), version)
   assert.equal(scheduleVersionOf({ ...trigger, weekdays: undefined }), version, '未使用的字段不改变版本')
+  const once = { ...trigger, cadence: 'once', date: '2027-06-30' }
+  assert.notEqual(scheduleVersionOf({ ...once, date: '2027-07-01' }), scheduleVersionOf(once), '单次日期必须改变 scheduleVersion')
 })

@@ -28,6 +28,19 @@ export const isoInstant = z.string().refine((value) => ISO_UTC.test(value) && ne
 })
 
 const TIME_OF_DAY = /^(?:[01]\d|2[0-3]):[0-5]\d$/
+const CALENDAR_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
+
+export function isCalendarDate(value) {
+  if (typeof value !== 'string') return false
+  const match = CALENDAR_DATE.exec(value)
+  if (match === null) return false
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  if (year < 1970 || month < 1 || month > 12 || day < 1 || day > 31) return false
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+}
 
 export function isValidTimeZone(value) {
   if (typeof value !== 'string' || value.length === 0 || value.length > 64) return false
@@ -46,25 +59,36 @@ export const workspaceId = z.string().max(120)
 
 export const TriggerSchema = z.strictObject({
   kind: z.literal('schedule'),
-  cadence: z.enum(['daily', 'weekly', 'monthly']),
+  cadence: z.enum(['daily', 'weekly', 'monthly', 'once']),
   time: z.string().regex(TIME_OF_DAY, { message: 'must be HH:mm' }),
   timezone: timeZone,
   weekdays: z.array(z.number().int().min(1).max(7)).min(1).max(7).optional(),
-  dayOfMonth: z.number().int().min(1).max(28).optional(),
+  // `last` is the only value that cannot be expressed as a fixed day; 29–31 simply skip
+  // months that do not have that day.
+  dayOfMonth: z.union([z.number().int().min(1).max(31), z.literal('last')]).optional(),
+  date: z.string().refine(isCalendarDate, { message: 'must be a valid YYYY-MM-DD date' }).optional(),
   tradingDaysOnly: z.boolean(),
 }).superRefine((trigger, ctx) => {
   if (trigger.cadence === 'weekly') {
     if (trigger.weekdays === undefined) ctx.addIssue({ code: 'custom', path: ['weekdays'], message: 'weekly requires weekdays' })
     else if (new Set(trigger.weekdays).size !== trigger.weekdays.length) ctx.addIssue({ code: 'custom', path: ['weekdays'], message: 'weekdays must be unique' })
     if (trigger.dayOfMonth !== undefined) ctx.addIssue({ code: 'custom', path: ['dayOfMonth'], message: 'weekly must not carry dayOfMonth' })
+    if (trigger.date !== undefined) ctx.addIssue({ code: 'custom', path: ['date'], message: 'weekly must not carry date' })
   }
   if (trigger.cadence === 'monthly') {
     if (trigger.dayOfMonth === undefined) ctx.addIssue({ code: 'custom', path: ['dayOfMonth'], message: 'monthly requires dayOfMonth' })
     if (trigger.weekdays !== undefined) ctx.addIssue({ code: 'custom', path: ['weekdays'], message: 'monthly must not carry weekdays' })
+    if (trigger.date !== undefined) ctx.addIssue({ code: 'custom', path: ['date'], message: 'monthly must not carry date' })
+  }
+  if (trigger.cadence === 'once') {
+    if (trigger.date === undefined) ctx.addIssue({ code: 'custom', path: ['date'], message: 'once requires date' })
+    if (trigger.weekdays !== undefined) ctx.addIssue({ code: 'custom', path: ['weekdays'], message: 'once must not carry weekdays' })
+    if (trigger.dayOfMonth !== undefined) ctx.addIssue({ code: 'custom', path: ['dayOfMonth'], message: 'once must not carry dayOfMonth' })
   }
   if (trigger.cadence === 'daily') {
     if (trigger.weekdays !== undefined) ctx.addIssue({ code: 'custom', path: ['weekdays'], message: 'daily must not carry weekdays' })
     if (trigger.dayOfMonth !== undefined) ctx.addIssue({ code: 'custom', path: ['dayOfMonth'], message: 'daily must not carry dayOfMonth' })
+    if (trigger.date !== undefined) ctx.addIssue({ code: 'custom', path: ['date'], message: 'daily must not carry date' })
   }
 })
 
@@ -81,16 +105,17 @@ export const NotificationsSchema = z.strictObject({
   onSuccess: z.boolean(),
 })
 
-export const ExecutionModeSchema = z.enum(['news', 'market', 'review', 'research'])
+export const TaskCategorySchema = z.enum(['news', 'market', 'review', 'research'])
 
 /** User-writable configuration. Server-owned fields are deliberately absent. */
 export const TaskConfigSchema = z.strictObject({
-  category: z.enum(['news', 'market', 'review', 'research']),
+  category: TaskCategorySchema,
   title: z.string().min(1).max(MAX_TITLE_CHARS),
   description: z.string().max(MAX_DESCRIPTION_CHARS),
   trigger: TriggerSchema,
   instruction: z.string().min(1).max(MAX_INSTRUCTION_CHARS),
-  mode: ExecutionModeSchema,
+  // Legacy pre-v3 duplicate of `category`; accepted only so old records still open.
+  mode: TaskCategorySchema.optional(),
   cwdKind: z.literal('profile'),
   workspaceId: workspaceId.optional(),
   limits: LimitsSchema,
@@ -98,12 +123,13 @@ export const TaskConfigSchema = z.strictObject({
 })
 
 export const TaskOverridesSchema = z.strictObject({
-  category: z.enum(['news', 'market', 'review', 'research']).optional(),
+  category: TaskCategorySchema.optional(),
   title: z.string().min(1).max(MAX_TITLE_CHARS).optional(),
   description: z.string().max(MAX_DESCRIPTION_CHARS).optional(),
   trigger: TriggerSchema.optional(),
   instruction: z.string().min(1).max(MAX_INSTRUCTION_CHARS).optional(),
-  mode: ExecutionModeSchema.optional(),
+  // Legacy pre-v3 duplicate of `category`; never written by current code.
+  mode: TaskCategorySchema.optional(),
   workspaceId: workspaceId.optional(),
   limits: LimitsSchema.optional(),
   notifications: NotificationsSchema.optional(),
@@ -120,12 +146,11 @@ export const AutomationTaskSchema = z.strictObject({
   profileKey: z.string().min(1).max(80),
   profileName: z.string().min(1).max(200),
   state: TaskStateSchema,
-  category: z.enum(['news', 'market', 'review', 'research']),
+  category: TaskCategorySchema,
   title: z.string().min(1).max(MAX_TITLE_CHARS),
   description: z.string().max(MAX_DESCRIPTION_CHARS),
   trigger: TriggerSchema,
   instruction: z.string().min(1).max(MAX_INSTRUCTION_CHARS),
-  mode: ExecutionModeSchema,
   cwdKind: z.literal('profile'),
   workspaceId: workspaceId.optional(),
   limits: LimitsSchema,
@@ -248,9 +273,8 @@ export const TaskCreateSchema = z.strictObject({
   title: z.string().min(1).max(MAX_TITLE_CHARS),
   description: z.string().max(MAX_DESCRIPTION_CHARS).optional(),
   instruction: z.string().min(1).max(MAX_INSTRUCTION_CHARS),
-  category: z.enum(['news', 'market', 'review', 'research']),
+  category: TaskCategorySchema,
   trigger: TriggerSchema,
-  mode: ExecutionModeSchema,
   workspaceId: workspaceId.optional(),
   limits: LimitsSchema.optional(),
   notifications: NotificationsSchema.optional(),
@@ -260,9 +284,8 @@ export const TaskPatchSchema = z.strictObject({
   title: z.string().min(1).max(MAX_TITLE_CHARS).optional(),
   description: z.string().max(MAX_DESCRIPTION_CHARS).optional(),
   instruction: z.string().min(1).max(MAX_INSTRUCTION_CHARS).optional(),
-  category: z.enum(['news', 'market', 'review', 'research']).optional(),
+  category: TaskCategorySchema.optional(),
   trigger: TriggerSchema.optional(),
-  mode: ExecutionModeSchema.optional(),
   workspaceId: workspaceId.optional(),
   limits: LimitsSchema.optional(),
   notifications: NotificationsSchema.optional(),
@@ -277,12 +300,11 @@ export const NotificationsReadSchema = z.strictObject({
 
 export const BuiltinDefaultsSchema = z.strictObject({
   state: z.literal('dormant'),
-  category: z.enum(['news', 'market', 'review', 'research']),
+  category: TaskCategorySchema,
   title: z.string().min(1).max(MAX_TITLE_CHARS),
   description: z.string().max(MAX_DESCRIPTION_CHARS),
   trigger: TriggerSchema,
   instruction: z.string().min(1).max(MAX_INSTRUCTION_CHARS),
-  mode: ExecutionModeSchema,
   cwdKind: z.literal('profile'),
   limits: LimitsSchema,
   notifications: NotificationsSchema,
@@ -291,7 +313,7 @@ export const BuiltinDefaultsSchema = z.strictObject({
 export const BuiltinDefinitionSchema = z.strictObject({
   id: z.string().min(1).max(80),
   version: z.number().int().min(1),
-  category: z.enum(['news', 'market', 'review', 'research']),
+  category: TaskCategorySchema,
   defaults: BuiltinDefaultsSchema,
 })
 
@@ -343,18 +365,25 @@ export function isActiveRun(status) {
   return ACTIVE_RUN_STATUSES.includes(status)
 }
 
+function withoutLegacyMode(value) {
+  if (value === undefined || value.mode === undefined) return value
+  const { mode: _legacyMode, ...rest } = value
+  return rest
+}
+
 /** Merge order: code definition -> legal user override -> server runtime fields. */
 export function resolveTaskRecord(record, definition) {
   const base = record.origin === 'builtin'
     ? definition?.defaults
     : record.custom
   if (base === undefined) throw new SchemaError('invalid_record', `task ${record.id} has no resolvable base configuration`)
-  const overrides = record.overrides ?? {}
+  const overrides = withoutLegacyMode(record.overrides)
   const merged = {
-    ...base,
-    ...overrides,
+    ...withoutLegacyMode(base),
+    ...(overrides ?? {}),
     state: record.state,
   }
+  const cleanOverrides = overrides === undefined || Object.keys(overrides).length === 0 ? undefined : overrides
   const task = {
     id: record.id,
     schemaVersion: 1,
@@ -364,7 +393,7 @@ export function resolveTaskRecord(record, definition) {
     profileKey: record.profileKey,
     profileName: record.profileName,
     ...merged,
-    ...(record.overrides === undefined ? {} : { overrides: record.overrides }),
+    ...(cleanOverrides === undefined ? {} : { overrides: cleanOverrides }),
     scheduleAnchorAt: record.scheduleAnchorAt,
     ...(record.lastHandledOccurrenceKey === undefined ? {} : { lastHandledOccurrenceKey: record.lastHandledOccurrenceKey }),
     ...(record.lastScheduledFor === undefined ? {} : { lastScheduledFor: record.lastScheduledFor }),

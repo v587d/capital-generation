@@ -10,7 +10,6 @@ const BASE_INPUT = {
   instruction: '给出结论',
   category: 'news',
   trigger: { kind: 'schedule', cadence: 'daily', time: '09:00', timezone: 'Asia/Shanghai', tradingDaysOnly: true },
-  mode: 'news',
 }
 
 function harness({ owner, calendar = tradingCalendar, now = Date.parse('2026-10-27T00:31:00Z'), runner: runnerOption } = {}) {

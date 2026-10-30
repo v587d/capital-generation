@@ -52,9 +52,28 @@ const WEEKDAYS = [
   { value: 6, label: '六' },
   { value: 7, label: '日' },
 ]
-const TIMEZONES = ['Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Singapore', 'Asia/Tokyo', 'UTC', 'Europe/London', 'America/New_York', 'America/Los_Angeles']
+const TIMEZONES = [
+  'Asia/Shanghai',
+  'Asia/Hong_Kong',
+  'Asia/Taipei',
+  'Asia/Singapore',
+  'Asia/Tokyo',
+  'Asia/Seoul',
+  'UTC',
+  'Europe/London',
+  'Europe/Paris',
+  'Europe/Berlin',
+  'America/New_York',
+  'America/Chicago',
+  'America/Los_Angeles',
+  'America/Toronto',
+  'America/Sao_Paulo',
+  'Australia/Sydney',
+]
 const HISTORY_DAYS = 30
 const DETAIL_RECENT_RUN_LIMIT = 3
+const TITLE_MAX_LENGTH = 12
+const DESCRIPTION_MAX_LENGTH = 100
 
 const zh = {
   panel: 'CapGen 投研自动化',
@@ -106,11 +125,8 @@ const zh = {
   filterLabel: '筛选任务',
   category: { news: '资讯', market: '行情', review: '复盘', research: '研究' },
   categoryField: '任务分类',
-  categoryFixed: '内置模板的分类固定；复制为我的任务后可以调整。',
-  modeField: '输出侧重',
-  modeHint: '只影响输出结构；所有运行固定使用自动模式。',
-  mode: { news: '资讯', market: '行情', review: '复盘', research: '研究' },
-  cadence: { daily: '每天', weekly: '每周', monthly: '每月' },
+  categoryFixed: `'复制为我的任务'后，可调整任务分类。`,
+  cadence: { daily: '每天', weekly: '每周', monthly: '每月', once: '单次' },
   stateLabel: '状态',
   state: { dormant: '未添加', active: '已启用', paused: '已暂停' },
   origin: { builtin: '内置模板', custom: '我的任务' },
@@ -137,7 +153,9 @@ const zh = {
   cancel: '取消',
   create: '创建任务',
   creating: '创建中…',
-  required: '标题和任务指令不能为空。',
+  titleRequired: '标题不能为空。',
+  instructionRequired: '任务指令不能为空。',
+  invalidLimit: '请输入有效数字。',
   dirty: '有未保存的修改',
   noDirty: '配置已同步',
   nextRun: '下次运行',
@@ -153,25 +171,47 @@ const zh = {
   config: '配置',
   runs: '运行记录',
   notifications: '通知',
-  descriptionField: '说明',
-  titleField: '标题',
+  descriptionField: '任务说明',
+  titleField: '任务标题',
   instructionField: '任务指令',
   instructionPlaceholder: '例如：读取今日自选股行情、公告与相关新闻，按「结论—证据—风险」整理成一份可复核的盘后复盘。',
   titlePlaceholder: '给这个任务起个名字',
+  charCount: '{n}/{max}',
   descriptionPlaceholder: '一句话说明任务目标（可选）',
   triggerField: '触发器',
-  triggerHint: '按本地墙钟时间计算；仅交易日任务由交易日历判断周末与节假日。',
-  triggerHintNatural: '按本地墙钟时间计算：每天都触发，周末与节假日也运行。',
+  cadenceField: '频率',
+  triggerHint: '按设定时区的本地墙钟时间计算；仅交易日任务由交易日历判断周末与节假日。',
+  triggerHintNatural: '按设定时区的本地墙钟时间计算：每天都触发，周末与节假日也运行。',
+  triggerHintOnce: '单次任务只在指定日期运行一次；该日期不是交易日时，仅交易日设置会跳过本次运行。',
   timeField: '时间',
   timezoneField: '时区',
   weekdayField: '星期',
   dayField: '日期',
+  monthlyField: '每月日期',
+  monthlyFirst: '1 号',
+  monthlyMid: '月中',
+  monthlyLast: '月末',
+  monthlyCustom: '自定义',
+  customDayLabel: '第 {n} 日',
+  dailyNatural: '每个自然日运行',
+  dailyTrading: '每个交易日运行',
+  onceHint: '只在这天运行一次',
+  onceEnded: '单次任务已结束',
+  onceEndedHint: '指定日期已过；修改日期或改成重复计划后可再次运行。',
+  onceSkipped: '单次任务不会运行',
+  onceSkippedHint: '指定日期不是交易日；关闭仅交易日或改选日期后再启用。',
+  weekdayWorkdayQuick: '工作日',
+  weekdayWeekendQuick: '周末',
+  weekdayNone: '未选择',
+  weekdayEvery: '每天',
+  done: '完成',
   tradingDaysField: '仅交易日',
   weekdayRequired: '每周至少选择一天。',
+  dateRequired: '请选择运行日期。',
+  invalidDate: '请选择有效的日期。',
   invalidTime: '运行时间格式不正确，请选择 HH:mm。',
   invalidTimezone: '时区不能为空，请填写 IANA 时区。',
   invalidTimezoneValue: '时区不被识别，请填写有效的 IANA 时区。',
-  invalidLimits: '运行上限必须是有效数字。',
   filterNoRuns: '没有符合筛选条件的运行记录。',
   schedulePrefix: '下次',
   workspaceField: '工作区',
@@ -192,6 +232,7 @@ const zh = {
   notifyHint: '通知只记录在当前 profile；不会发送邮件或外部消息。',
   presetLabel: '运行模式',
   presetValue: '自动模式',
+  presetHint: '所有运行固定使用自动模式。',
   budgetHint: '工具调用与步骤预算覆盖整棵运行子树：子 Agent 与 PTC 派发都计入。',
   environment: '执行环境',
   policyField: '无人值守策略',
@@ -262,7 +303,6 @@ const zh = {
   schedulerBlocked: '调度器未取得运行权，暂时不能手动运行。',
   runBlocked: '任务正在运行，结束或取消后才能再次运行。',
   configWhileRunning: '任务正在运行；修改会在下一次运行时生效。',
-  configBuiltinHint: '这是内置模板；修改只覆盖当前 profile，休眠后会恢复默认。',
   detailRecentRuns: '最近 {n} 次运行',
   detailNoRuns: '还没有运行记录。',
   detailAllRuns: '完整记录',
@@ -281,7 +321,6 @@ const zh = {
   lastRun: '上次运行',
   neverRun: '尚未运行',
   relativeNow: '刚刚',
-  timezoneHint: 'IANA 时区，例如 Asia/Shanghai。',
   nextRunUnavailable: '交易日历不可用，无法计算下一次运行。',
   copyHint: '复制后会生成一个暂停状态的自定义任务。',
   notificationTaskGone: '任务已不存在',
@@ -293,7 +332,9 @@ const zh = {
   everyPrefix: '每',
   weeklyPrefix: '每周',
   monthlyPrefix: '每月',
+  monthlyLastDay: '最后一天',
   dailyPrefix: '每天',
+  oncePrefix: '单次',
   tradingSuffix: '（仅交易日）',
   sessionMissing: '没有可打开的 session',
 }
@@ -510,17 +551,31 @@ function installStyles() {
     .capital-automation-error { margin: 0; color: var(--ca-error-text); font-size: 12px; line-height: 18px; }
     .capital-automation-toast { position: fixed; bottom: 26px; left: 50%; z-index: 1300; max-width: min(520px, calc(100vw - 40px)); transform: translateX(-50%); padding: 8px 15px; border: .5px solid var(--ca-line-soft); border-radius: 999px; background: var(--dsw-alias-label-primary); color: var(--dsw-alias-bg-base); box-shadow: 0 8px 26px rgba(0,0,0,.22); font-size: 12px; line-height: 18px; }
     .capital-automation-form { display: flex; flex-direction: column; gap: 16px; }
-    .capital-automation-formnote { display: flex; align-items: flex-start; gap: 7px; padding: 9px 11px; border: .5px solid var(--ca-line); border-radius: 10px; background: var(--ca-field); color: var(--ca-muted); font-size: 11.5px; line-height: 18px; }
-    .capital-automation-formnote svg { flex: none; margin-top: 2px; }
+    .capital-automation-instructionrow { display: grid; grid-template-columns: minmax(320px, 1fr) minmax(420px, 520px); align-items: stretch; gap: 16px; }
+    .capital-automation-instructionside { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
     .capital-automation-formgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+    .capital-automation-titlerow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, 210px); align-items: start; gap: 12px; }
     .capital-automation-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-    .capital-automation-field > span { color: var(--ca-muted); font-size: 11.5px; line-height: 17px; }
-    .capital-automation-field input, .capital-automation-field textarea { box-sizing: border-box; width: 100%; padding: 0 10px; border: .5px solid var(--ca-line-soft); border-radius: 10px; background: var(--ca-field); color: var(--dsw-alias-label-primary); font: inherit; font-size: 12.5px; line-height: 32px; }
+    .capital-automation-fieldhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
+    .capital-automation-fieldlabel { color: var(--ca-muted); font-size: 11.5px; line-height: 17px; }
+    .capital-automation-fieldhint { color: var(--ca-caption); font-size: 11px; line-height: 16px; font-variant-numeric: tabular-nums; }
+    .capital-automation-field input { box-sizing: border-box; width: 100%; padding: 0 10px; border: .5px solid var(--ca-line-soft); border-radius: 10px; background: var(--ca-field); color: var(--dsw-alias-label-primary); font: inherit; font-size: 12.5px; line-height: 32px; }
     .capital-automation-field input { height: 34px; }
-    .capital-automation-field textarea { min-height: 110px; padding: 9px 10px; line-height: 19px; resize: vertical; }
-    .capital-automation-field input:hover, .capital-automation-field textarea:hover { border-color: var(--ca-line); }
-    .capital-automation-field input:focus-visible, .capital-automation-field textarea:focus-visible { border-color: var(--ca-business); outline: 2px solid color-mix(in srgb, var(--ca-business) 22%, transparent); outline-offset: 0; }
-    .capital-automation-field input:disabled, .capital-automation-field textarea:disabled { color: var(--ca-muted); opacity: .8; }
+    .capital-automation-texteditor { color: var(--dsw-alias-label-primary); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; outline: 0; cursor: text; }
+    .capital-automation-field .capital-automation-texteditor { box-sizing: border-box; flex: 1 1 auto; min-height: 110px; padding: 9px 10px; border: .5px solid var(--ca-line-soft); border-radius: 10px; background: var(--ca-field); color: var(--dsw-alias-label-primary); font: inherit; font-size: 12.5px; line-height: 19px; white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; outline: 0; cursor: text; }
+    .capital-automation-field .capital-automation-texteditor.capital-automation-descriptioninput { flex: none; height: 58px; min-height: 58px; }
+    .capital-automation-texteditor:empty:before { content: attr(data-placeholder); color: var(--ca-caption); pointer-events: none; }
+    .capital-automation-field .capital-automation-texteditor:hover { border-color: var(--ca-line); }
+    .capital-automation-field .capital-automation-texteditor:focus-visible { border-color: var(--ca-business); outline: 2px solid color-mix(in srgb, var(--ca-business) 22%, transparent); outline-offset: 0; }
+    .capital-automation-field[data-invalid="true"] .capital-automation-texteditor { border-color: color-mix(in srgb, var(--ca-error) 58%, var(--ca-line-soft)); }
+    .capital-automation-field[data-invalid="true"] .capital-automation-texteditor:focus-visible { border-color: var(--ca-error); outline-color: color-mix(in srgb, var(--ca-error) 22%, transparent); }
+    .capital-automation-field .capital-automation-texteditor[contenteditable="false"] { color: var(--ca-muted); opacity: .8; cursor: not-allowed; }
+    .capital-automation-field input:hover { border-color: var(--ca-line); }
+    .capital-automation-field input:focus-visible { border-color: var(--ca-business); outline: 2px solid color-mix(in srgb, var(--ca-business) 22%, transparent); outline-offset: 0; }
+    .capital-automation-field[data-invalid="true"] input { border-color: color-mix(in srgb, var(--ca-error) 58%, var(--ca-line-soft)); }
+    .capital-automation-field[data-invalid="true"] input:focus-visible { border-color: var(--ca-error); outline-color: color-mix(in srgb, var(--ca-error) 22%, transparent); }
+    .capital-automation-field input:disabled { color: var(--ca-muted); opacity: .8; }
+    .capital-automation-fielderror { color: var(--ca-error-text); font-size: 11px; line-height: 16px; }
     .capital-automation-select { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; height: 34px; padding: 0 10px 0 12px; border: 0; border-radius: 10px; background: var(--ca-field); color: var(--dsw-alias-label-primary); font: inherit; font-size: 12.5px; line-height: 20px; text-align: left; cursor: pointer; transition: background .15s, opacity .15s; }
     .capital-automation-select:hover:not(:disabled) { background: var(--ca-hover); }
     .capital-automation-select[data-block="true"] { width: 100%; }
@@ -532,20 +587,37 @@ function installStyles() {
     .capital-automation-formactions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 14px; border-top: .5px solid var(--ca-line); }
     .capital-automation-formactions[data-sticky="true"] { position: sticky; bottom: -1px; z-index: 2; margin-top: 2px; padding: 12px 0 4px; background: var(--dsw-alias-bg-base); }
     .capital-automation-formstatus { margin-right: auto; color: var(--ca-caption); font-size: 11.5px; line-height: 18px; }
-    .capital-automation-triggerbox { display: flex; flex-direction: column; gap: 12px; padding: 13px 14px; border: .5px solid var(--ca-line); border-radius: 14px; background: var(--ca-field); }
-    .capital-automation-triggerrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-    .capital-automation-triggerclock { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: linear-gradient(135deg, #5b9dff, #2563eb); color: #fff; flex: none; }
-    .capital-automation-triggerrow label, .capital-automation-triggerfield { display: inline-flex; align-items: center; gap: 6px; color: var(--ca-muted); font-size: 12px; }
-    .capital-automation-triggerrow input { box-sizing: border-box; height: 32px; padding: 0 9px; border: .5px solid var(--ca-line-soft); border-radius: 9px; background: var(--ca-card); color: var(--dsw-alias-label-primary); font: inherit; font-size: 12px; }
-    .capital-automation-triggerrow input[type="time"] { width: 112px; }
-    .capital-automation-triggerrow .capital-automation-select { max-width: 190px; height: 32px; background: var(--ca-card); }
-    .capital-automation-weekdays { display: flex; flex-wrap: wrap; gap: 4px; }
-    .capital-automation-weekday { width: 30px; height: 30px; padding: 0; border: .5px solid var(--ca-line-soft); border-radius: 999px; background: transparent; color: var(--ca-muted); font: inherit; font-size: 11.5px; cursor: pointer; }
-    .capital-automation-weekday:hover:not(:disabled) { border-color: var(--ca-line); color: var(--dsw-alias-label-primary); }
-    .capital-automation-weekday[aria-pressed="true"] { border-color: transparent; background: var(--dsw-alias-label-primary); color: var(--dsw-alias-bg-base); }
-    .capital-automation-weekday:disabled { opacity: .45; cursor: not-allowed; }
+    .capital-automation-triggerbox { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; border: .5px solid var(--ca-line); border-radius: 14px; background: var(--ca-field); }
+    .capital-automation-triggerbox[data-invalid="true"] { border-color: color-mix(in srgb, var(--ca-error) 52%, var(--ca-line)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ca-error) 9%, transparent); }
+    .capital-automation-triggerhead { display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+    .capital-automation-triggerhead > .capital-automation-triggerfield:first-child { flex: 1 1 auto; min-width: 0; }
+    .capital-automation-triggerhead > .capital-automation-triggerfield:last-child { flex: none; }
+    .capital-automation-triggerfield { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+    .capital-automation-triggerfield .capital-automation-select { flex: none; width: 96px; height: 32px; padding: 0 8px 0 10px; border: .5px solid var(--ca-line-soft); border-radius: 9px; background: var(--ca-card); font-size: 12.5px; }
+    .capital-automation-triggerfield .capital-automation-select:hover:not(:disabled) { border-color: var(--ca-line); background: var(--ca-card); }
+    .capital-automation-triggerlabel { color: var(--ca-muted); font-size: 11.5px; line-height: 16px; white-space: nowrap; }
+    .capital-automation-triggerbox input.capital-automation-triggertime, .capital-automation-triggerbox input.capital-automation-triggerdate { box-sizing: border-box; flex: none; width: 112px; height: 32px; padding: 0 8px; border: .5px solid var(--ca-line-soft); border-radius: 10px; background: var(--ca-card); color: var(--dsw-alias-label-primary); font: inherit; font-size: 12.5px; font-variant-numeric: tabular-nums; line-height: normal; transition: border-color .15s, box-shadow .15s; }
+    .capital-automation-triggerbox input.capital-automation-triggerdate { flex: 0 1 146px; width: 146px; min-width: 120px; }
+    .capital-automation-triggerbox input.capital-automation-triggertime:hover:not(:disabled), .capital-automation-triggerbox input.capital-automation-triggerdate:hover:not(:disabled) { border-color: var(--ca-line); }
+    .capital-automation-triggerbox input.capital-automation-triggertime:focus-visible, .capital-automation-triggerbox input.capital-automation-triggerdate:focus-visible { border-color: var(--ca-business); outline: 2px solid color-mix(in srgb, var(--ca-business) 22%, transparent); outline-offset: 0; }
+    .capital-automation-triggerbox input.capital-automation-triggertime[data-invalid="true"], .capital-automation-triggerbox input.capital-automation-triggerdate[data-invalid="true"] { border-color: color-mix(in srgb, var(--ca-error) 58%, var(--ca-line-soft)); }
+    .capital-automation-triggerbox input.capital-automation-triggertime[data-invalid="true"]:focus-visible, .capital-automation-triggerbox input.capital-automation-triggerdate[data-invalid="true"]:focus-visible { border-color: var(--ca-error); outline-color: color-mix(in srgb, var(--ca-error) 22%, transparent); }
+    .capital-automation-triggerbox input.capital-automation-triggertime:disabled, .capital-automation-triggerbox input.capital-automation-triggerdate:disabled { opacity: .5; cursor: not-allowed; }
+    body[data-ds-dark-theme] .capital-automation-triggertime, body[data-ds-dark-theme] .capital-automation-triggerdate { color-scheme: dark; }
+    body:not([data-ds-dark-theme]) .capital-automation-triggertime, body:not([data-ds-dark-theme]) .capital-automation-triggerdate { color-scheme: light; }
+    .capital-automation-triggerdetail { display: flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; min-height: 32px; }
+    .capital-automation-triggerdetail > .capital-automation-triggerfield { flex: 1 1 auto; min-width: 0; }
+    .capital-automation-triggerdetail .capital-automation-triggerpick { flex: 1 1 auto; width: auto; min-width: 0; max-width: 190px; height: 32px; padding: 0 8px 0 10px; border: .5px solid var(--ca-line-soft); border-radius: 9px; background: var(--ca-card); font-size: 12px; }
+    .capital-automation-triggerdetail .capital-automation-triggerpick:hover:not(:disabled) { border-color: var(--ca-line); background: var(--ca-card); }
+    .capital-automation-monthpick [role="menu"] [role="menu"] { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; width: 196px; min-width: 0; max-height: 252px; overflow-y: auto; padding: 6px; }
+    .capital-automation-monthpick [role="menu"] [role="menu"] button { justify-content: center; min-width: 0; min-height: 26px; padding: 3px 4px; font-size: 12px; line-height: 18px; }
+    .capital-automation-triggersettings { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding-top: 12px; border-top: .5px solid var(--ca-line); }
+    .capital-automation-triggerzone { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+    .capital-automation-triggersettings .capital-automation-select { max-width: 190px; height: 28px; padding: 0 8px 0 10px; border: .5px solid var(--ca-line-soft); border-radius: 9px; background: var(--ca-card); font-size: 11.5px; }
+    .capital-automation-triggersettings .capital-automation-select:hover:not(:disabled) { border-color: var(--ca-line); background: var(--ca-card); }
+    .capital-automation-triggerswitch { display: inline-flex; flex: none; align-items: center; gap: 7px; color: var(--dsw-alias-label-secondary); font-size: 12px; cursor: pointer; user-select: none; }
+    .capital-automation-triggererrors { display: flex; flex-direction: column; gap: 4px; }
     .capital-automation-switch { display: inline-flex; align-items: center; gap: 7px; color: var(--ca-muted); font-size: 12px; }
-    .capital-automation-triggersummary { margin: 0; color: var(--ca-caption); font-size: 11.5px; line-height: 18px; }
     .capital-automation-advanced { border-top: .5px solid var(--ca-line); padding-top: 12px; }
     .capital-automation-advanced summary { color: var(--ca-muted); font-size: 12px; line-height: 18px; cursor: pointer; user-select: none; }
     .capital-automation-advanced summary:hover { color: var(--dsw-alias-label-primary); }
@@ -604,10 +676,13 @@ function installStyles() {
     .capital-automation-modalheadline { display: flex; align-items: center; gap: 10px; }
     .capital-automation-modaltitleinput { flex: 1 1 auto; min-width: 0; height: 42px; padding: 0 12px; border: .5px solid var(--ca-line-soft); border-radius: 12px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font: inherit; font-size: 15px; font-weight: 500; }
     .capital-automation-modaltitleinput:focus-visible { border-color: var(--ca-business); outline: 2px solid color-mix(in srgb, var(--ca-business) 22%, transparent); outline-offset: 0; }
+    .capital-automation-modalheadline[data-invalid="true"] .capital-automation-modaltitleinput { border-color: color-mix(in srgb, var(--ca-error) 58%, var(--ca-line-soft)); }
     .capital-automation-formlabel { display: block; margin-bottom: 6px; color: var(--ca-muted); font-size: 11.5px; line-height: 17px; }
+    .capital-automation-promptfield { display: flex; flex-direction: column; gap: 5px; }
+    .capital-automation-promptfield[data-invalid="true"] .capital-automation-promptbox { border-color: color-mix(in srgb, var(--ca-error) 58%, var(--ca-line)); }
     .capital-automation-promptbox { overflow: hidden; border: .5px solid var(--ca-line); border-radius: 16px; background: var(--dsw-alias-bg-module-platform); }
-    .capital-automation-promptbox textarea { box-sizing: border-box; width: 100%; min-height: 120px; max-height: 320px; padding: 13px 14px; border: 0; outline: 0; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 13px; line-height: 21px; resize: vertical; }
-    .capital-automation-promptbox textarea::placeholder { color: var(--ca-caption); }
+    .capital-automation-promptbox .capital-automation-texteditor { box-sizing: border-box; width: 100%; height: 120px; min-height: 120px; padding: 13px 14px; border: 0; border-radius: 0; background: transparent; font-size: 13px; line-height: 21px; }
+    .capital-automation-promptbox .capital-automation-texteditor:focus-visible { outline: 0; }
     .capital-automation-prompttoolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border-top: .5px solid var(--ca-line); }
     .capital-automation-prompttoolbar label, .capital-automation-toolbarfield { display: inline-flex; align-items: center; gap: 5px; color: var(--ca-muted); font-size: 11.5px; }
     .capital-automation-prompttoolbar .capital-automation-select { max-width: 168px; background: var(--ca-card); }
@@ -626,6 +701,9 @@ function installStyles() {
       .capital-automation-theadmain > :nth-child(3), .capital-automation-cell[data-cell="next"] { display: none; }
       .capital-automation-statgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
+    @media (max-width: 960px) {
+      .capital-automation-instructionrow { grid-template-columns: minmax(0, 1fr); }
+    }
     @media (max-width: 760px) {
       .capital-automation-head { padding-top: 14px; }
       .capital-automation-topbar { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -643,8 +721,16 @@ function installStyles() {
       .capital-automation-templates { grid-template-columns: 1fr; }
       .capital-automation-sectiontools { width: 100%; margin-left: 0; }
     }
+    @media (max-width: 560px) {
+      .capital-automation-triggerhead { flex-wrap: wrap; gap: 10px 12px; }
+      .capital-automation-triggerhead > .capital-automation-triggerfield:first-child { flex: 1 1 100%; flex-wrap: wrap; }
+      .capital-automation-triggerdetail { flex: 1 1 100%; }
+      .capital-automation-triggerhead > .capital-automation-triggerfield:last-child { flex: 1 1 100%; justify-content: flex-start; }
+      .capital-automation-monthpick [role="menu"] [role="menu"] { right: auto; left: 0; }
+    }
     @media (max-width: 520px) {
       .capital-automation-brand h1 { font-size: 16px; }
+      .capital-automation-titlerow { grid-template-columns: minmax(0, 1fr); }
       .capital-automation-topactions .capital-automation-btn:not([data-variant="contrast"]) { width: auto; min-width: 32px; padding: 0 8px; }
       .capital-automation-topactions .capital-automation-btn[data-variant="contrast"] { width: 32px; padding: 0; }
       .capital-automation-topactions .capital-automation-btn .capital-automation-btnlabel { display: none; }
@@ -732,10 +818,6 @@ function clipTagLabel(label, limit = 12) {
   const text = String(label ?? '')
   const chars = Array.from(text)
   return chars.length > limit ? `${chars.slice(0, limit).join('')}…` : text
-}
-
-function modeLabel(mode) {
-  return zh.mode[mode] ?? mode
 }
 
 function calendarLabel(calendar) {
@@ -839,26 +921,31 @@ function formatRangeLabel(date) {
   return new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric' }).format(date)
 }
 
+function weekdayText(trigger) {
+  return (trigger.weekdays ?? []).slice().sort((left, right) => left - right)
+    .map((day) => WEEKDAYS.find((item) => item.value === day)?.label ?? '')
+    .join('、')
+}
+
+function monthlySummary(trigger) {
+  if (trigger.dayOfMonth === 'last') return '每月最后一天'
+  return `每月 ${trigger.dayOfMonth ?? 1} 日`
+}
+
 function scheduleSummary(trigger) {
   if (trigger === null || trigger === undefined) return zh.never
   const suffix = trigger.tradingDaysOnly === true ? zh.tradingSuffix : ''
-  if (trigger.cadence === 'weekly') {
-    const days = (trigger.weekdays ?? []).slice().sort((left, right) => left - right).map((day) => WEEKDAYS.find((item) => item.value === day)?.label ?? '').join('、')
-    return `${zh.weeklyPrefix}${days} ${trigger.time}${suffix}`
-  }
-  if (trigger.cadence === 'monthly') {
-    return `${zh.monthlyPrefix} ${trigger.dayOfMonth ?? 1} 日 ${trigger.time}${suffix}`
-  }
+  if (trigger.cadence === 'weekly') return `${zh.weeklyPrefix}${weekdayText(trigger)} ${trigger.time}${suffix}`
+  if (trigger.cadence === 'monthly') return `${monthlySummary(trigger)} ${trigger.time}${suffix}`
+  if (trigger.cadence === 'once') return `${formatDateLabel(trigger.date)} ${trigger.time}${suffix}`
   return `${zh.dailyPrefix} ${trigger.time}${suffix}`
 }
 
 function scheduleRangeSummary(trigger) {
-  if (trigger?.cadence === 'weekly') {
-    const days = (trigger.weekdays ?? []).slice().sort((left, right) => left - right).map((day) => WEEKDAYS.find((item) => item.value === day)?.label ?? '').join('、')
-    return `每周 ${days}`
-  }
-  if (trigger?.cadence === 'monthly') return `每月 ${trigger.dayOfMonth ?? 1} 日`
-  return '每天'
+  if (trigger?.cadence === 'weekly') return `${zh.weeklyPrefix}${weekdayText(trigger)}`
+  if (trigger?.cadence === 'monthly') return monthlySummary(trigger)
+  if (trigger?.cadence === 'once') return formatDateLabel(trigger.date)
+  return zh.dailyPrefix
 }
 
 // Dormant/paused tasks still carry a computed nextRunLocal, but that instant will not fire until
@@ -866,6 +953,11 @@ function scheduleRangeSummary(trigger) {
 function nextRunView(task) {
   if (task?.state === 'dormant') return { value: zh.nextRunDormant, sub: zh.notScheduled }
   if (task?.state === 'paused') return { value: zh.nextRunPaused, sub: zh.notScheduled }
+  if (task?.trigger?.cadence === 'once' && !task.nextRunAt && task.nextRunUnavailable !== true) {
+    return onceHasPassed(task.trigger)
+      ? { value: zh.onceEnded, sub: zh.onceEndedHint }
+      : { value: zh.onceSkipped, sub: zh.onceSkippedHint }
+  }
   const value = task?.nextRunLocal ?? (task?.nextRunUnavailable ? zh.calendarUnavailable : zh.never)
   const sub = task?.nextRunAt ? formatRelative(task.nextRunAt) : (task?.nextRunUnavailable ? zh.nextRunUnavailable : zh.never)
   return { value, sub }
@@ -904,16 +996,120 @@ function workspaceTitle(meta, id) {
   return workspaceOptions(meta, id).find((item) => item.id === id)?.title ?? zh.workspaceMissing
 }
 
+function timezoneOptions(current) {
+  const zone = String(current ?? '').trim()
+  const zones = zone.length > 0 && !TIMEZONES.includes(zone) ? [zone, ...TIMEZONES] : TIMEZONES
+  return zones.map((value) => ({ value, label: value }))
+}
+
+function dateStringFromParts(year, month, day) {
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return date.toISOString().slice(0, 10)
+}
+
+function zonedToday(timeZone) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date())
+    const read = (type) => Number(parts.find((part) => part.type === type)?.value)
+    return dateStringFromParts(read('year'), read('month'), read('day'))
+  } catch {
+    return new Date().toISOString().slice(0, 10)
+  }
+}
+
+function tomorrowInZone(timeZone) {
+  const [year, month, day] = zonedToday(timeZone).split('-').map(Number)
+  return dateStringFromParts(year, month, day + 1)
+}
+
+function nextWeekdayOnOrAfter(value) {
+  let current = value
+  for (let attempt = 0; attempt < 7; attempt += 1) {
+    const weekday = new Date(`${current}T00:00:00Z`).getUTCDay()
+    if (weekday !== 0 && weekday !== 6) return current
+    const [year, month, day] = current.split('-').map(Number)
+    current = dateStringFromParts(year, month, day + 1)
+  }
+  return current
+}
+
+/** A default single-run date must not land on a weekend while trading-only is on. */
+function defaultOnceDate(timeZone, tradingDaysOnly) {
+  const tomorrow = tomorrowInZone(timeZone)
+  return tradingDaysOnly === true ? nextWeekdayOnOrAfter(tomorrow) : tomorrow
+}
+
+function zonedNowParts(timeZone) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(new Date())
+    const read = (type) => Number(parts.find((part) => part.type === type)?.value)
+    return {
+      date: dateStringFromParts(read('year'), read('month'), read('day')),
+      minutes: read('hour') * 60 + read('minute'),
+    }
+  } catch {
+    const now = new Date()
+    return { date: now.toISOString().slice(0, 10), minutes: now.getUTCHours() * 60 + now.getUTCMinutes() }
+  }
+}
+
+/** Distinguishes an expired single run from a future date that the calendar will skip. */
+function onceHasPassed(trigger) {
+  if (trigger?.cadence !== 'once' || !isValidDateInput(trigger.date)) return false
+  const now = zonedNowParts(trigger.timezone)
+  if (trigger.date !== now.date) return trigger.date < now.date
+  const [hour, minute] = String(trigger.time ?? '').split(':').map(Number)
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return false
+  return now.minutes >= hour * 60 + minute
+}
+
+function isValidDateInput(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? ''))
+  if (match === null) return false
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  if (year < 1970 || month < 1 || month > 12 || day < 1 || day > 31) return false
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+}
+
+function formatDateLabel(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? ''))
+  if (match === null) return String(value ?? '')
+  return `${Number(match[1])} 年 ${Number(match[2])} 月 ${Number(match[3])} 日`
+}
+
 function normalizeTrigger(trigger) {
+  const cadence = Object.prototype.hasOwnProperty.call(zh.cadence, trigger?.cadence) ? trigger.cadence : 'daily'
   const next = {
     kind: 'schedule',
-    cadence: trigger?.cadence ?? 'daily',
+    cadence,
     time: trigger?.time ?? '09:00',
     timezone: trigger?.timezone ?? 'Asia/Shanghai',
     tradingDaysOnly: trigger?.tradingDaysOnly === true,
   }
   if (next.cadence === 'weekly') next.weekdays = (trigger?.weekdays ?? [1, 3, 5]).slice().sort((left, right) => left - right)
-  if (next.cadence === 'monthly') next.dayOfMonth = trigger?.dayOfMonth ?? 1
+  if (next.cadence === 'monthly') {
+    const day = trigger?.dayOfMonth
+    next.dayOfMonth = day === 'last' || (Number.isInteger(day) && day >= 1 && day <= 31) ? day : 1
+  }
+  if (next.cadence === 'once') {
+    next.date = typeof trigger?.date === 'string' ? trigger.date : defaultOnceDate(next.timezone, next.tradingDaysOnly)
+  }
   return next
 }
 
@@ -930,7 +1126,6 @@ function defaultDraft() {
     instruction: '',
     category: 'research',
     trigger: { kind: 'schedule', cadence: 'daily', time: '09:00', timezone: 'Asia/Shanghai', tradingDaysOnly: true },
-    mode: 'research',
     workspaceId: '',
     limits: { ...DEFAULT_LIMITS },
     notifications: { inApp: true, onFailure: true, onSuccess: false },
@@ -944,7 +1139,6 @@ function draftPayload(task) {
     instruction: task.instruction ?? '',
     category: task.category,
     trigger: normalizeTrigger(task.trigger),
-    mode: task.mode,
     workspaceId: task.workspaceId ?? '',
     limits: task.limits,
     notifications: task.notifications,
@@ -1014,19 +1208,50 @@ function draftChanged(draft, task) {
   return !samePayload(draft, task)
 }
 
-function validateDraft(task) {
-  if (String(task.title ?? '').trim().length === 0 || String(task.instruction ?? '').trim().length === 0) return zh.required
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(task.trigger?.time ?? '')) return zh.invalidTime
-  if (String(task.trigger?.timezone ?? '').trim().length === 0) return zh.invalidTimezone
-  try {
-    new Intl.DateTimeFormat('zh-CN', { timeZone: task.trigger.timezone })
-  } catch {
-    return zh.invalidTimezoneValue
+function draftIssues(task) {
+  const issues = {}
+  if (String(task.title ?? '').trim().length === 0) issues.title = zh.titleRequired
+  if (String(task.instruction ?? '').trim().length === 0) issues.instruction = zh.instructionRequired
+  const trigger = task.trigger ?? {}
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(trigger.time ?? '')) issues.time = zh.invalidTime
+  const timezone = String(trigger.timezone ?? '').trim()
+  if (timezone.length === 0) issues.timezone = zh.invalidTimezone
+  else {
+    try {
+      new Intl.DateTimeFormat('zh-CN', { timeZone: timezone })
+    } catch {
+      issues.timezone = zh.invalidTimezoneValue
+    }
   }
-  if (task.trigger?.cadence === 'weekly' && (task.trigger.weekdays ?? []).length === 0) return zh.weekdayRequired
+  if (trigger.cadence === 'weekly' && (trigger.weekdays ?? []).length === 0) issues.weekdays = zh.weekdayRequired
+  if (trigger.cadence === 'once') {
+    if (typeof trigger.date !== 'string' || trigger.date.length === 0) issues.date = zh.dateRequired
+    else if (!isValidDateInput(trigger.date)) issues.date = zh.invalidDate
+  }
   const limits = task.limits ?? {}
-  if (![limits.runTimeoutMinutes, limits.idleTimeoutMinutes, limits.maxSteps, limits.maxToolCalls].every((value) => Number.isFinite(value))) return zh.invalidLimits
-  return ''
+  for (const key of ['runTimeoutMinutes', 'idleTimeoutMinutes', 'maxSteps', 'maxToolCalls']) {
+    if (!Number.isFinite(limits[key])) issues[key] = zh.invalidLimit
+  }
+  return issues
+}
+
+/**
+ * Tracks which fields the user has left so errors appear on blur, then update live.
+ * `resetKey` clears that state when the edited task or modal session changes.
+ */
+function useDraftIssues(task, resetKey) {
+  const [touched, setTouched] = useState({})
+  const issues = draftIssues(task)
+  useEffect(() => { setTouched({}) }, [resetKey])
+  const errorFor = (field) => (touched[field] === true ? issues[field] : undefined)
+  const touch = (field) => setTouched((current) => (current[field] === true ? current : { ...current, [field]: true }))
+  const touchAll = () => setTouched((current) => {
+    const next = { ...current }
+    for (const field of Object.keys(issues)) next[field] = true
+    return next
+  })
+  const clear = () => setTouched({})
+  return { issues, errorFor, touch, touchAll, clear }
 }
 
 function limitValue(meta, key, fallback) {
@@ -1642,85 +1867,233 @@ function TaskDashboard(props) {
       : null)
 }
 
-function TriggerFields(props) {
-  const { trigger, onChange, disabled, meta } = props
-  const update = (patch) => onChange(normalizeTrigger({ ...trigger, ...patch }))
-  const setCadence = (cadence) => {
-    const next = triggerChanged(cadence, trigger)
-    onChange(next)
+function WeekdaySelect(props) {
+  const { value, onChange, disabled } = props
+  const [open, setOpen] = useState(false)
+  const selected = Array.isArray(value) ? value : []
+  const has = (day) => selected.includes(day)
+  const exact = (days) => selected.length === days.length && days.every(has)
+  const workday = exact([1, 2, 3, 4, 5])
+  const weekend = exact([6, 7])
+  const everyDay = exact(WEEKDAYS.map((day) => day.value))
+  const summary = selected.length === 0
+    ? zh.weekdayNone
+    : everyDay
+      ? zh.weekdayEvery
+      : workday
+        ? zh.weekdayWorkdayQuick
+        : weekend
+          ? zh.weekdayWeekendQuick
+          : WEEKDAYS.filter((day) => has(day.value)).map((day) => day.label).join('、')
+  useEffect(() => {
+    if (disabled === true && open) setOpen(false)
+  }, [disabled, open])
+  const items = [
+    { id: 'workday', label: zh.weekdayWorkdayQuick },
+    { id: 'weekend', label: zh.weekdayWeekendQuick },
+    { type: 'separator', id: 'weekday-separator' },
+    ...WEEKDAYS.map((day) => ({ id: `weekday-${day.value}`, label: `周${day.label}` })),
+  ]
+  const selectedIds = [
+    ...selected.map((day) => `weekday-${day}`),
+    ...(workday ? ['workday'] : []),
+    ...(weekend ? ['weekend'] : []),
+  ]
+  const pick = (id) => {
+    if (id === 'weekday-done') { setOpen(false); return }
+    if (id === 'workday') { onChange([1, 2, 3, 4, 5]); return }
+    if (id === 'weekend') { onChange([6, 7]); return }
+    const day = Number(id.slice('weekday-'.length))
+    if (!WEEKDAYS.some((item) => item.value === day)) return
+    const next = has(day) ? selected.filter((item) => item !== day) : [...selected, day].sort((left, right) => left - right)
+    if (next.length > 0) onChange(next)
   }
-  const toggleWeekday = (day) => {
-    const selected = new Set(trigger.weekdays ?? [])
-    if (selected.has(day)) {
-      if (selected.size <= 1) return
-      selected.delete(day)
-    } else {
-      selected.add(day)
+  return h(Menu, {
+    open,
+    anchor: h('button', {
+      type: 'button',
+      className: 'capital-automation-select capital-automation-triggerpick',
+      disabled,
+      'aria-label': `${zh.weekdayField}：${summary}`,
+      'aria-haspopup': 'menu',
+      'aria-expanded': open ? 'true' : 'false',
+      title: `${zh.weekdayField}：${summary}`,
+      onClick: () => setOpen((current) => !current),
+    },
+    h('span', { className: 'capital-automation-selectvalue' }, summary),
+    h(IconChevronDownOutlineRegular, { size: 14 })),
+    items,
+    selectedIds,
+    onSelect: pick,
+    onClose: () => setOpen(false),
+    footer: [{ id: 'weekday-done', label: zh.done }],
+    align: 'start',
+    portal: true,
+  })
+}
+
+function MonthlySelect(props) {
+  const { value, onChange, disabled } = props
+  const [open, setOpen] = useState(false)
+  const day = value === 'last' ? 'last' : Number(value ?? 1)
+  const summary = day === 'last'
+    ? zh.monthlyLast
+    : day === 1
+      ? zh.monthlyFirst
+      : day === 15
+        ? zh.monthlyMid
+        : zh.dayOfMonth.replace('{n}', String(day))
+  const selectedId = day === 'last' ? 'last' : day === 1 ? 'first' : day === 15 ? 'mid' : 'custom'
+  useEffect(() => {
+    if (disabled === true && open) setOpen(false)
+  }, [disabled, open])
+  const items = [
+    { id: 'first', label: zh.monthlyFirst },
+    { id: 'mid', label: zh.monthlyMid },
+    { id: 'last', label: zh.monthlyLast },
+    {
+      id: 'custom',
+      label: zh.monthlyCustom,
+      submenu: Array.from({ length: 31 }, (_, index) => ({
+        id: `monthly-day-${index + 1}`,
+        label: zh.dayOfMonth.replace('{n}', String(index + 1)),
+      })),
+    },
+  ]
+  const pick = (id) => {
+    if (id === 'first') { onChange(1); setOpen(false); return }
+    if (id === 'mid') { onChange(15); setOpen(false); return }
+    if (id === 'last') { onChange('last'); setOpen(false); return }
+    if (id.startsWith('monthly-day-')) {
+      onChange(Number(id.slice('monthly-day-'.length)))
+      setOpen(false)
     }
-    update({ weekdays: [...selected].sort((left, right) => left - right) })
   }
-  return h('div', { className: 'capital-automation-triggerbox' },
-    h('div', { className: 'capital-automation-triggerrow' },
-      h('span', { className: 'capital-automation-triggerclock', 'aria-hidden': 'true' }, h(IconAlarmClockOutlineRegular, { size: 16 })),
-      h('div', { className: 'capital-automation-triggerfield' },
-        h('span', null, '重复'),
-        h(Select, {
-          value: trigger.cadence,
-          options: Object.entries(zh.cadence).map(([value, label]) => ({ value, label })),
-          onChange: setCadence,
-          disabled,
-          label: '重复',
-        })),
-      h('label', { className: 'capital-automation-triggerfield' },
-        h('span', null, zh.timeField),
-        h('input', { type: 'time', value: trigger.time, disabled, onChange: (event) => update({ time: event.target.value }) })),
-      h('label', { className: 'capital-automation-triggerfield' },
-        h('span', null, zh.timezoneField),
-        h('input', {
-          type: 'text',
-          list: 'capital-automation-timezones',
-          value: trigger.timezone,
-          disabled,
-          onChange: (event) => update({ timezone: event.target.value }),
-          title: zh.timezoneHint,
-        }))),
-    h('div', { className: 'capital-automation-triggerrow' },
-      trigger.cadence === 'weekly'
-        ? h('div', { className: 'capital-automation-weekdays', role: 'group', 'aria-label': zh.weekdayField },
-          WEEKDAYS.map((day) => h('button', {
-            key: day.value,
-            type: 'button',
-            className: 'capital-automation-weekday',
-            'aria-pressed': (trigger.weekdays ?? []).includes(day.value) ? 'true' : 'false',
-            disabled,
-            onClick: () => toggleWeekday(day.value),
-          }, day.label)))
-        : null,
-      trigger.cadence === 'monthly'
-        ? h('div', { className: 'capital-automation-triggerfield' },
-          h('span', null, zh.dayField),
-          h(Select, {
-            value: String(trigger.dayOfMonth ?? 1),
-            options: Array.from({ length: 28 }, (_, index) => {
-              const day = index + 1
-              return { value: String(day), label: zh.dayOfMonth.replace('{n}', String(day)) }
-            }),
-            onChange: (day) => update({ dayOfMonth: Number(day) }),
-            disabled,
-            label: zh.dayField,
-          }))
-        : null,
-      trigger.cadence === 'daily' ? h('span', { className: 'capital-automation-hint' }, trigger.tradingDaysOnly === true ? zh.triggerHint : zh.triggerHintNatural) : null,
-      h('label', { className: 'capital-automation-switch', style: { marginLeft: 'auto' } },
-        h(Switch, {
-          checked: trigger.tradingDaysOnly === true,
-          onChange: (value) => update({ tradingDaysOnly: value }),
-          label: zh.tradingDaysField,
-          disabled,
-        }),
-        h('span', null, zh.tradingDaysField))),
-    h('p', { className: 'capital-automation-triggersummary' }, `${scheduleSummary(trigger)} · ${trigger.timezone}`),
-    meta?.calendar?.available === false ? h('p', { className: 'capital-automation-hint' }, zh.nextRunUnavailable) : null)
+  return h(Menu, {
+    open,
+    className: 'capital-automation-monthpick',
+    anchor: h('button', {
+      type: 'button',
+      className: 'capital-automation-select capital-automation-triggerpick',
+      disabled,
+      'aria-label': `${zh.monthlyField}：${summary}`,
+      'aria-haspopup': 'menu',
+      'aria-expanded': open ? 'true' : 'false',
+      title: `${zh.monthlyField}：${summary}`,
+      onClick: () => setOpen((current) => !current),
+    },
+    h('span', { className: 'capital-automation-selectvalue' }, summary),
+    h(IconChevronDownOutlineRegular, { size: 14 })),
+    items,
+    selectedId,
+    onSelect: pick,
+    onClose: () => setOpen(false),
+    align: 'start',
+    portal: false,
+  })
+}
+
+function TriggerFields(props) {
+  const { trigger, onChange, disabled, meta, errorFor, touch } = props
+  const update = (patch) => onChange(normalizeTrigger({ ...trigger, ...patch }))
+  const setCadence = (cadence) => onChange(triggerChanged(cadence, trigger))
+
+  const issue = (field) => (typeof errorFor === 'function' ? errorFor(field) : undefined)
+  const touchField = (field) => { if (typeof touch === 'function') touch(field) }
+  const timeError = issue('time')
+  const timezoneError = issue('timezone')
+  const weekdayError = issue('weekdays')
+  const dateError = issue('date')
+  const errors = [timeError, timezoneError, weekdayError, dateError]
+    .filter((message) => typeof message === 'string' && message.length > 0)
+  const cadenceOptions = Object.entries(zh.cadence).map(([value, label]) => ({ value, label }))
+
+  return h('div', {
+    className: 'capital-automation-triggerbox',
+    'data-cadence': trigger.cadence,
+    'data-invalid': errors.length > 0 ? 'true' : undefined,
+  },
+  h('div', { className: 'capital-automation-triggerhead' },
+    h('div', { className: 'capital-automation-triggerfield' },
+      h('span', { className: 'capital-automation-triggerlabel' }, zh.cadenceField),
+      h(Select, {
+        value: trigger.cadence,
+        options: cadenceOptions,
+        onChange: setCadence,
+        disabled,
+        label: zh.cadenceField,
+      }),
+      h('div', { className: 'capital-automation-triggerdetail', 'data-cadence': trigger.cadence },
+        trigger.cadence === 'weekly'
+          ? h('div', { className: 'capital-automation-triggerfield' },
+            h('span', { className: 'capital-automation-triggerlabel' }, zh.weekdayField),
+            h(WeekdaySelect, {
+              value: trigger.weekdays ?? [],
+              onChange: (weekdays) => update({ weekdays }),
+              disabled,
+            }))
+          : trigger.cadence === 'monthly'
+            ? h('div', { className: 'capital-automation-triggerfield' },
+              h('span', { className: 'capital-automation-triggerlabel' }, zh.dayField),
+              h(MonthlySelect, {
+                value: trigger.dayOfMonth ?? 1,
+                onChange: (dayOfMonth) => update({ dayOfMonth }),
+                disabled,
+              }))
+            : trigger.cadence === 'once'
+              ? h('div', { className: 'capital-automation-triggerfield' },
+                h('span', { className: 'capital-automation-triggerlabel' }, zh.dayField),
+                h('input', {
+                  type: 'date',
+                  className: 'capital-automation-triggerdate',
+                  value: trigger.date ?? '',
+                  disabled,
+                  title: zh.onceHint,
+                  'aria-label': zh.dayField,
+                  'aria-invalid': dateError ? 'true' : undefined,
+                  'data-invalid': dateError ? 'true' : undefined,
+                  onChange: (event) => update({ date: event.target.value }),
+                  onBlur: () => touchField('date'),
+                }))
+              : null)),
+    h('div', { className: 'capital-automation-triggerfield' },
+      h('span', { className: 'capital-automation-triggerlabel' }, zh.timeField),
+      h('input', {
+        type: 'time',
+        className: 'capital-automation-triggertime',
+        value: trigger.time,
+        disabled,
+        'aria-label': zh.timeField,
+        'aria-invalid': timeError ? 'true' : undefined,
+        'data-invalid': timeError ? 'true' : undefined,
+        onChange: (event) => update({ time: event.target.value }),
+        onBlur: () => touchField('time'),
+      }))),
+  h('div', { className: 'capital-automation-triggersettings' },
+    h('span', { className: 'capital-automation-triggerzone' },
+      h('span', { className: 'capital-automation-triggerlabel' }, zh.timezoneField),
+      h(Select, {
+        value: trigger.timezone,
+        options: timezoneOptions(trigger.timezone),
+        onChange: (timezone) => update({ timezone }),
+        disabled,
+        label: zh.timezoneField,
+        size: 'sm',
+        align: 'end',
+      })),
+    h('label', { className: 'capital-automation-triggerswitch' },
+      h(Switch, {
+        checked: trigger.tradingDaysOnly === true,
+        onChange: (value) => update({ tradingDaysOnly: value }),
+        label: zh.tradingDaysField,
+        disabled,
+      }),
+      h('span', null, zh.tradingDaysField))),
+  errors.length > 0
+    ? h('div', { className: 'capital-automation-triggererrors' },
+      errors.map((message) => h('span', { key: message, className: 'capital-automation-fielderror', role: 'alert' }, message)))
+    : null,
+  meta?.calendar?.available === false ? h('p', { className: 'capital-automation-hint' }, zh.nextRunUnavailable) : null)
 }
 
 function SwitchRow(props) {
@@ -1732,10 +2105,84 @@ function SwitchRow(props) {
     h(Switch, { checked: checked === true, onChange, label, disabled }))
 }
 
+function FieldHead(props) {
+  const { label, note, error } = props
+  const invalid = typeof error === 'string' && error.length > 0
+  return h('span', { className: 'capital-automation-fieldhead' },
+    h('span', { className: 'capital-automation-fieldlabel' }, label),
+    invalid
+      ? h('span', { className: 'capital-automation-fielderror', role: 'alert' }, error)
+      : note ? h('span', { className: 'capital-automation-fieldhint' }, note) : null)
+}
+
+/**
+ * Fixed-height plain-text box. A native textarea brings a resize handle and browser chrome that
+ * break the two-column height contract, so the editable surface is a contenteditable div; paste is
+ * forced to plain text and maxLength is applied on input.
+ */
+function PlainTextEditor(props) {
+  const { value, onChange, onBlur, placeholder, disabled, ariaLabel, invalid, className, maxLength } = props
+  const ref = useRef(null)
+  const limit = typeof maxLength === 'number' ? maxLength : undefined
+  useEffect(() => {
+    const node = ref.current
+    if (node === null || node === undefined) return
+    const next = value ?? ''
+    if (document.activeElement !== node && node.innerText !== next) node.innerText = next
+  }, [value])
+  const read = (node) => (node.innerText ?? '').replace(/\r\n?/g, '\n')
+  const commit = (node) => {
+    let text = read(node)
+    if (limit !== undefined && Array.from(text).length > limit) {
+      text = Array.from(text).slice(0, limit).join('')
+      node.innerText = text
+      const range = document.createRange()
+      range.selectNodeContents(node)
+      range.collapse(false)
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+    }
+    if (text.length === 0 && node.innerHTML !== '') node.innerHTML = ''
+    onChange(text)
+  }
+  return h('div', {
+    ref,
+    className,
+    contentEditable: disabled === true ? 'false' : 'true',
+    role: 'textbox',
+    'aria-multiline': 'true',
+    'aria-label': ariaLabel,
+    'aria-invalid': invalid ? 'true' : undefined,
+    'data-placeholder': placeholder,
+    spellCheck: false,
+    suppressContentEditableWarning: true,
+    onInput: (event) => commit(event.currentTarget),
+    onBlur: (event) => { commit(event.currentTarget); if (typeof onBlur === 'function') onBlur() },
+    onPaste: (event) => {
+      const text = event.clipboardData?.getData('text/plain')
+      if (typeof text !== 'string') return
+      event.preventDefault()
+      const selection = window.getSelection()
+      if (selection === null || selection.rangeCount === 0) return
+      selection.deleteFromDocument()
+      const range = selection.getRangeAt(0)
+      const node = document.createTextNode(text)
+      range.insertNode(node)
+      range.setStartAfter(node)
+      range.collapse(true)
+      selection.removeAllRanges()
+      selection.addRange(range)
+      commit(event.currentTarget)
+    },
+  })
+}
+
 function Field(props) {
-  const { label, hint, children } = props
-  return h('label', { className: 'capital-automation-field' },
-    h('span', null, label),
+  const { label, hint, note, error, children } = props
+  const invalid = typeof error === 'string' && error.length > 0
+  return h('label', { className: 'capital-automation-field', 'data-invalid': invalid ? 'true' : undefined },
+    h(FieldHead, { label, note, error }),
     children,
     hint ? h('span', { className: 'capital-automation-hint' }, hint) : null)
 }
@@ -1745,7 +2192,7 @@ function Field(props) {
  * Native <select> is intentionally avoided so light/dark themes follow host tokens.
  */
 function Select(props) {
-  const { value, options, onChange, disabled, label, block, size, align = 'start' } = props
+  const { value, options, onChange, disabled, label, block, size, align = 'start', title } = props
   const [open, setOpen] = useState(false)
   const triggerRef = useRef(null)
   const items = options.map((option) => ({
@@ -1774,11 +2221,12 @@ function Select(props) {
     'aria-label': current?.label ? `${label}：${current.label}` : label,
     'aria-haspopup': 'menu',
     'aria-expanded': open ? 'true' : 'false',
+    title: title ?? current?.label,
     onClick: () => setOpen((currentOpen) => !currentOpen),
   },
   h('span', {
     className: 'capital-automation-selectvalue',
-    title: current?.label,
+    title: title ?? current?.label,
   }, current?.label ?? ''),
   h(IconChevronDownOutlineRegular, { size: size === 'sm' ? 12 : 14 }))
   return h(Menu, {
@@ -1794,23 +2242,26 @@ function Select(props) {
 }
 
 function SelectField(props) {
-  const { label, hint, ariaLabel, block = true, ...rest } = props
-  return h('div', { className: 'capital-automation-field' },
-    h('span', null, label),
-    h(Select, { ...rest, label: ariaLabel ?? label, block }),
+  const { label, hint, note, error, ariaLabel, block = true, title, ...rest } = props
+  const invalid = typeof error === 'string' && error.length > 0
+  return h('div', { className: 'capital-automation-field', title, 'data-invalid': invalid ? 'true' : undefined },
+    h(FieldHead, { label, note, error }),
+    h(Select, { ...rest, label: ariaLabel ?? label, block, title }),
     hint ? h('span', { className: 'capital-automation-hint' }, hint) : null)
 }
 
 function NumberField(props) {
-  const { label, value, min, max, disabled, onChange } = props
-  return h(Field, { label },
+  const { label, value, min, max, disabled, onChange, error, onBlur } = props
+  return h(Field, { label, error },
     h('input', {
       type: 'number',
       min,
       max,
       value,
       disabled,
+      'aria-invalid': error ? 'true' : undefined,
       onChange: (event) => onChange(Number(event.target.value)),
+      onBlur,
     }))
 }
 
@@ -1879,13 +2330,15 @@ function OverviewTab(props) {
   const stateText = anyRunning ? zh.status.running : stateLabel(detail.task.state)
   const originLabel = detail.task.origin === 'builtin' ? zh.origin.builtin : zh.origin.custom
   const scheduleText = `${scheduleRangeSummary(detail.task.trigger)}${detail.task.trigger.tradingDaysOnly === true ? ` · ${zh.tradingDaysField}` : ''}`
-  const scheduleHint = detail.task.trigger.tradingDaysOnly === true ? zh.triggerHint : zh.triggerHintNatural
+  const scheduleHint = detail.task.trigger.cadence === 'once'
+    ? zh.triggerHintOnce
+    : detail.task.trigger.tradingDaysOnly === true ? zh.triggerHint : zh.triggerHintNatural
   return h('div', { className: 'capital-automation-overview' },
     h('div', { className: 'capital-automation-statgrid' },
       h('div', { className: 'capital-automation-stat' },
         h('span', { className: 'capital-automation-statlabel' }, zh.stateLabel),
         h('span', { className: 'capital-automation-statvalue', 'data-tone': anyRunning ? 'running' : undefined }, stateText),
-        h('span', { className: 'capital-automation-statsub', title: detail.task.origin === 'builtin' ? zh.configBuiltinHint : undefined }, originLabel)),
+        h('span', { className: 'capital-automation-statsub' }, originLabel)),
       h('div', { className: 'capital-automation-stat' },
         h('span', { className: 'capital-automation-statlabel' }, zh.nextRun),
         h('span', { className: 'capital-automation-statvalue' }, next.value),
@@ -1923,10 +2376,7 @@ function OverviewTab(props) {
           h('span', { className: 'capital-automation-kvvalue' }, workspaceTitle(meta, detail.task.workspaceId))),
         h('div', { className: 'capital-automation-kvitem' },
           h('span', { className: 'capital-automation-kvlabel' }, zh.categoryField),
-          h('span', { className: 'capital-automation-kvvalue' }, categoryLabel(detail.task.category))),
-        h('div', { className: 'capital-automation-kvitem' },
-          h('span', { className: 'capital-automation-kvlabel' }, zh.modeField),
-          h('span', { className: 'capital-automation-kvvalue' }, modeLabel(detail.task.mode)))),
+          h('span', { className: 'capital-automation-kvvalue' }, categoryLabel(detail.task.category)))),
       h('section', { className: 'capital-automation-technical' },
         h('h4', { className: 'capital-automation-technicaltitle' }, zh.techInfo),
         h('dl', null,
@@ -1947,40 +2397,61 @@ function OverviewTab(props) {
 function ConfigTab(props) {
   const { draft, setDraft, meta, busy, dirty, save, reset, disabled } = props
   const task = draft
+  const { issues, errorFor, touch, touchAll, clear } = useDraftIssues(task, task.id)
+  const formRef = useRef(null)
+  const titleError = errorFor('title')
+  const instructionError = errorFor('instruction')
   const set = (patch) => setDraft((current) => ({
     ...current,
     ...(typeof patch === 'function' ? patch(current) : patch),
   }))
+  const submit = () => {
+    if (Object.keys(issues).length > 0) {
+      touchAll()
+      setTimeout(() => {
+        const target = formRef.current?.querySelector('[data-invalid="true"] input, [data-invalid="true"] .capital-automation-texteditor')
+        target?.focus?.()
+      }, 0)
+      return
+    }
+    void save()
+  }
   const timeoutRange = limitValue(meta, 'runTimeoutMinutes', [5, 120])
   const idleRange = limitValue(meta, 'idleTimeoutMinutes', [1, 30])
   const stepsRange = limitValue(meta, 'maxSteps', [10, 2000])
   const toolsRange = limitValue(meta, 'maxToolCalls', [10, 6000])
+  const instructionEditor = h(Field, { label: zh.instructionField, error: instructionError },
+    h(PlainTextEditor, {
+      className: 'capital-automation-texteditor',
+      value: task.instruction,
+      disabled: busy || disabled,
+      placeholder: zh.instructionPlaceholder,
+      ariaLabel: zh.instructionField,
+      invalid: instructionError ? true : undefined,
+      onChange: (instruction) => set({ instruction }),
+      onBlur: () => touch('instruction'),
+    }))
+  const instructionSide = h('div', { className: 'capital-automation-instructionside' },
+    h(SelectField, {
+      label: zh.workspaceField,
+      value: task.workspaceId ?? '',
+      options: workspaceOptions(meta, task.workspaceId).map((option) => ({ value: option.id, label: option.title })),
+      disabled: busy || disabled,
+      onChange: (workspaceId) => set({ workspaceId }),
+    }),
+    meta?.workspaceError ? h('p', { className: 'capital-automation-hint', 'data-tone': 'error' }, zh.workspaceUnavailable) : null,
+    h('div', null,
+      h('span', { className: 'capital-automation-formlabel' }, zh.triggerField),
+      h(TriggerFields, { trigger: task.trigger, disabled: busy || disabled, onChange: (trigger) => set({ trigger }), meta, errorFor, touch })))
   const advanced = h('details', { className: 'capital-automation-advanced' },
     h('summary', null, zh.advanced),
     h('div', { className: 'capital-automation-advancedbody' },
       h('div', { className: 'capital-automation-formgrid' },
-        h(SelectField, {
-          label: zh.workspaceField,
-          value: task.workspaceId ?? '',
-          options: workspaceOptions(meta, task.workspaceId).map((option) => ({ value: option.id, label: option.title })),
-          disabled: busy || disabled,
-          onChange: (workspaceId) => set({ workspaceId }),
-        }),
-        h(SelectField, {
-          label: zh.modeField,
-          hint: zh.modeHint,
-          value: task.mode,
-          options: Object.entries(zh.mode).map(([value, label]) => ({ value, label })),
-          disabled: busy || disabled,
-          onChange: (mode) => set({ mode }),
-        })),
-      h('div', { className: 'capital-automation-formgrid' },
-        h(NumberField, { label: zh.runTimeout, value: task.limits.runTimeoutMinutes, min: timeoutRange[0], max: timeoutRange[1], disabled: busy || disabled, onChange: (value) => set((current) => ({ limits: { ...current.limits, runTimeoutMinutes: value } })) }),
-        h(NumberField, { label: zh.idleTimeout, value: task.limits.idleTimeoutMinutes, min: idleRange[0], max: idleRange[1], disabled: busy || disabled, onChange: (value) => set((current) => ({ limits: { ...current.limits, idleTimeoutMinutes: value } })) }),
-        h(NumberField, { label: zh.maxSteps, value: task.limits.maxSteps, min: stepsRange[0], max: stepsRange[1], disabled: busy || disabled, onChange: (value) => set((current) => ({ limits: { ...current.limits, maxSteps: value } })) }),
-        h(NumberField, { label: zh.maxToolCalls, value: task.limits.maxToolCalls, min: toolsRange[0], max: toolsRange[1], disabled: busy || disabled, onChange: (value) => set((current) => ({ limits: { ...current.limits, maxToolCalls: value } })) })),
-      h('p', { className: 'capital-automation-hint' }, zh.budgetHint),
-      meta?.workspaceError ? h('p', { className: 'capital-automation-hint', 'data-tone': 'error' }, zh.workspaceUnavailable) : null))
+        h(NumberField, { label: zh.runTimeout, value: task.limits.runTimeoutMinutes, min: timeoutRange[0], max: timeoutRange[1], disabled: busy || disabled, error: errorFor('runTimeoutMinutes'), onBlur: () => touch('runTimeoutMinutes'), onChange: (value) => set((current) => ({ limits: { ...current.limits, runTimeoutMinutes: value } })) }),
+        h(NumberField, { label: zh.idleTimeout, value: task.limits.idleTimeoutMinutes, min: idleRange[0], max: idleRange[1], disabled: busy || disabled, error: errorFor('idleTimeoutMinutes'), onBlur: () => touch('idleTimeoutMinutes'), onChange: (value) => set((current) => ({ limits: { ...current.limits, idleTimeoutMinutes: value } })) }),
+        h(NumberField, { label: zh.maxSteps, value: task.limits.maxSteps, min: stepsRange[0], max: stepsRange[1], disabled: busy || disabled, error: errorFor('maxSteps'), onBlur: () => touch('maxSteps'), onChange: (value) => set((current) => ({ limits: { ...current.limits, maxSteps: value } })) }),
+        h(NumberField, { label: zh.maxToolCalls, value: task.limits.maxToolCalls, min: toolsRange[0], max: toolsRange[1], disabled: busy || disabled, error: errorFor('maxToolCalls'), onBlur: () => touch('maxToolCalls'), onChange: (value) => set((current) => ({ limits: { ...current.limits, maxToolCalls: value } })) })),
+      h('p', { className: 'capital-automation-hint' }, zh.budgetHint)))
   const notificationRows = h('div', null,
     h('span', { className: 'capital-automation-formlabel' }, zh.notifyField),
     h('div', { className: 'capital-automation-switchlist' },
@@ -1988,41 +2459,52 @@ function ConfigTab(props) {
       h(SwitchRow, { label: zh.notifyFailure, checked: task.notifications.onFailure, disabled: busy || disabled, onChange: (value) => set((current) => ({ notifications: { ...current.notifications, onFailure: value } })) }),
       h(SwitchRow, { label: zh.notifySuccess, checked: task.notifications.onSuccess, disabled: busy || disabled, onChange: (value) => set((current) => ({ notifications: { ...current.notifications, onSuccess: value } })) })),
     h('p', { className: 'capital-automation-hint' }, zh.notifyHint))
-  return h('div', { className: 'capital-automation-form' },
-    task.origin === 'builtin'
-      ? h('div', { className: 'capital-automation-formnote' },
-        h(IconInfoOutlineRegular, { size: 13 }),
-        h('span', null, zh.configBuiltinHint))
-      : null,
-    h(Field, { label: zh.titleField },
-      h('input', { value: task.title, disabled: busy || disabled, onChange: (event) => set({ title: event.target.value }) })),
-    h(Field, { label: zh.descriptionField },
-      h('textarea', { value: task.description ?? '', disabled: busy || disabled, rows: 3, onChange: (event) => set({ description: event.target.value }) })),
-    h(SelectField, {
-      label: zh.categoryField,
-      hint: task.origin === 'builtin' ? zh.categoryFixed : undefined,
-      value: task.category,
-      options: Object.entries(zh.category).map(([value, label]) => ({ value, label })),
-      disabled: busy || disabled || task.origin === 'builtin',
-      onChange: (category) => set({ category }),
-    }),
-    h(Field, { label: zh.instructionField },
-      h('textarea', {
-        value: task.instruction,
+  return h('div', { className: 'capital-automation-form', ref: formRef },
+    h('div', { className: 'capital-automation-titlerow' },
+      h(Field, {
+        label: zh.titleField,
+        error: titleError,
+        note: zh.charCount.replace('{n}', String(Array.from(task.title ?? '').length)).replace('{max}', String(TITLE_MAX_LENGTH)),
+      },
+      h('input', {
+        value: task.title,
+        maxLength: TITLE_MAX_LENGTH,
         disabled: busy || disabled,
-        rows: 14,
-        onChange: (event) => set({ instruction: event.target.value }),
+        'aria-invalid': titleError ? 'true' : undefined,
+        onChange: (event) => set({ title: event.target.value }),
+        onBlur: () => touch('title'),
       })),
-    h('div', null,
-      h('span', { className: 'capital-automation-formlabel' }, zh.triggerField),
-      h(TriggerFields, { trigger: task.trigger, disabled: busy || disabled, onChange: (trigger) => set({ trigger }), meta })),
+      h(SelectField, {
+        label: zh.categoryField,
+        title: task.origin === 'builtin' ? zh.categoryFixed : undefined,
+        value: task.category,
+        options: Object.entries(zh.category).map(([value, label]) => ({ value, label })),
+        disabled: busy || disabled || task.origin === 'builtin',
+        onChange: (category) => set({ category }),
+      })),
+    h(Field, {
+      label: zh.descriptionField,
+      note: zh.charCount.replace('{n}', String(Array.from(task.description ?? '').length)).replace('{max}', String(DESCRIPTION_MAX_LENGTH)),
+    },
+    h(PlainTextEditor, {
+      className: 'capital-automation-texteditor capital-automation-descriptioninput',
+      value: task.description ?? '',
+      maxLength: DESCRIPTION_MAX_LENGTH,
+      disabled: busy || disabled,
+      placeholder: zh.descriptionPlaceholder,
+      ariaLabel: zh.descriptionField,
+      onChange: (description) => set({ description }),
+    })),
+    h('div', { className: 'capital-automation-instructionrow' },
+      instructionEditor,
+      instructionSide),
     advanced,
     notificationRows,
     h('div', { className: 'capital-automation-formactions', 'data-sticky': 'true' },
       h('span', { className: 'capital-automation-formstatus' },
         disabled ? zh.storageUnavailable : dirty ? zh.dirty : zh.noDirty),
-      h('button', { type: 'button', className: 'capital-automation-btn', disabled: busy || !dirty, onClick: reset }, zh.cancel),
-      h('button', { type: 'button', className: 'capital-automation-btn', 'data-variant': 'primary', disabled: busy || !dirty || disabled, onClick: save }, busy === 'save' ? zh.saving : zh.save)))
+      h('button', { type: 'button', className: 'capital-automation-btn', disabled: busy || !dirty, onClick: () => { clear(); reset() } }, zh.cancel),
+      h('button', { type: 'button', className: 'capital-automation-btn', 'data-variant': 'primary', disabled: busy || !dirty || disabled, onClick: submit }, busy === 'save' ? zh.saving : zh.save)))
 }
 
 function NotificationsTab(props) {
@@ -2125,11 +2607,6 @@ function TaskDetailPage(props) {
   }
 
   async function save() {
-    const invalid = validateDraft(task)
-    if (invalid.length > 0) {
-      setError(invalid)
-      return
-    }
     await act('save', async () => {
       await api.patch(detail.task.id, draftPayload(task))
     }, zh.saved)
@@ -2284,6 +2761,9 @@ function NewTaskModal(props) {
   const [draft, setDraft] = useState(defaultDraft)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const { issues, errorFor, touch, touchAll } = useDraftIssues(draft, open)
+  const titleError = errorFor('title')
+  const instructionError = errorFor('instruction')
   useEffect(() => {
     if (!open) return
     setDraft(defaultDraft())
@@ -2299,9 +2779,8 @@ function NewTaskModal(props) {
   const stepsRange = limitValue(meta, 'maxSteps', [10, 2000])
   const toolsRange = limitValue(meta, 'maxToolCalls', [10, 6000])
   async function create() {
-    const invalid = validateDraft(draft)
-    if (invalid.length > 0) {
-      setError(invalid)
+    if (Object.keys(issues).length > 0) {
+      touchAll()
       return
     }
     setBusy(true)
@@ -2328,79 +2807,81 @@ function NewTaskModal(props) {
       h('button', { type: 'button', className: 'capital-automation-btn', 'data-variant': 'primary', disabled: busy || meta?.storage?.state === 'unavailable', onClick: create }, busy ? zh.creating : zh.create)),
   },
   h('div', { className: 'capital-automation-wizard' },
-    h('div', { className: 'capital-automation-modalheadline' },
+    h('div', { className: 'capital-automation-modalheadline', 'data-invalid': titleError ? 'true' : undefined },
       h(Glyph, { task: draft, size: 42 }),
       h('input', {
         className: 'capital-automation-modaltitleinput',
         value: draft.title,
+        maxLength: TITLE_MAX_LENGTH,
         placeholder: zh.titlePlaceholder,
         'aria-label': zh.titleField,
+        'aria-invalid': titleError ? 'true' : undefined,
         onChange: (event) => set({ title: event.target.value }),
+        onBlur: () => touch('title'),
       })),
+    titleError ? h('span', { className: 'capital-automation-fielderror', role: 'alert' }, titleError) : null,
     h('p', { className: 'capital-automation-hint' }, zh.newTaskHint),
-    h(Field, { label: zh.descriptionField },
-      h('input', {
-        value: draft.description,
-        placeholder: zh.descriptionPlaceholder,
-        onChange: (event) => set({ description: event.target.value }),
-      })),
+    h(Field, {
+      label: zh.descriptionField,
+      note: zh.charCount.replace('{n}', String(Array.from(draft.description ?? '').length)).replace('{max}', String(DESCRIPTION_MAX_LENGTH)),
+    },
+    h('input', {
+      value: draft.description,
+      maxLength: DESCRIPTION_MAX_LENGTH,
+      placeholder: zh.descriptionPlaceholder,
+      onChange: (event) => set({ description: event.target.value }),
+    })),
     h('div', null,
       h('span', { className: 'capital-automation-formlabel' }, zh.triggerField),
-      h(TriggerFields, { trigger: draft.trigger, onChange: (trigger) => set({ trigger }), meta })),
+      h(TriggerFields, { trigger: draft.trigger, onChange: (trigger) => set({ trigger }), meta, errorFor, touch })),
     h('div', null,
       h('span', { className: 'capital-automation-formlabel' }, zh.instructionField),
-      h('div', { className: 'capital-automation-promptbox' },
-        h('textarea', {
-          value: draft.instruction,
-          placeholder: zh.instructionPlaceholder,
-          'aria-label': zh.instructionField,
-          onChange: (event) => set({ instruction: event.target.value }),
-        }),
-        h('div', { className: 'capital-automation-prompttoolbar' },
-          h('div', { className: 'capital-automation-toolbarfield' },
-            h(IconFolderOpenOutlineRegular, { size: 13 }),
-            h('span', null, zh.workspaceField),
-            h(Select, {
-              value: draft.workspaceId ?? '',
-              options: workspaceOptions(meta, draft.workspaceId).map((option) => ({ value: option.id, label: option.title })),
-              onChange: (workspaceId) => set({ workspaceId }),
-              label: zh.workspaceField,
-              size: 'sm',
-              align: 'end',
-            })),
-          h('div', { className: 'capital-automation-toolbarfield' },
-            h('span', null, zh.categoryField),
-            h(Select, {
-              value: draft.category,
-              options: Object.entries(zh.category).map(([value, label]) => ({ value, label })),
-              onChange: (category) => set({ category }),
-              label: zh.categoryField,
-              size: 'sm',
-              align: 'end',
-            })),
-          h('div', { className: 'capital-automation-toolbarfield' },
-            h('span', null, zh.modeField),
-            h(Select, {
-              value: draft.mode,
-              options: Object.entries(zh.mode).map(([value, label]) => ({ value, label })),
-              onChange: (mode) => set({ mode }),
-              label: zh.modeField,
-              size: 'sm',
-              align: 'end',
-            })),
-          h('span', { className: 'capital-automation-presetchip', title: zh.modeHint },
-            h(IconSparkleRegular, { size: 12 }),
-            zh.presetValue)))),
-    h('p', { className: 'capital-automation-hint' }, zh.modeHint),
+      h('div', { className: 'capital-automation-promptfield', 'data-invalid': instructionError ? 'true' : undefined },
+        h('div', { className: 'capital-automation-promptbox' },
+          h(PlainTextEditor, {
+            className: 'capital-automation-texteditor',
+            value: draft.instruction,
+            placeholder: zh.instructionPlaceholder,
+            ariaLabel: zh.instructionField,
+            invalid: instructionError ? true : undefined,
+            onChange: (instruction) => set({ instruction }),
+            onBlur: () => touch('instruction'),
+          }),
+          h('div', { className: 'capital-automation-prompttoolbar' },
+            h('div', { className: 'capital-automation-toolbarfield' },
+              h(IconFolderOpenOutlineRegular, { size: 13 }),
+              h('span', null, zh.workspaceField),
+              h(Select, {
+                value: draft.workspaceId ?? '',
+                options: workspaceOptions(meta, draft.workspaceId).map((option) => ({ value: option.id, label: option.title })),
+                onChange: (workspaceId) => set({ workspaceId }),
+                label: zh.workspaceField,
+                size: 'sm',
+                align: 'end',
+              })),
+            h('div', { className: 'capital-automation-toolbarfield' },
+              h('span', null, zh.categoryField),
+              h(Select, {
+                value: draft.category,
+                options: Object.entries(zh.category).map(([value, label]) => ({ value, label })),
+                onChange: (category) => set({ category }),
+                label: zh.categoryField,
+                size: 'sm',
+                align: 'end',
+              })),
+            h('span', { className: 'capital-automation-presetchip', title: zh.presetHint },
+              h(IconSparkleRegular, { size: 12 }),
+              zh.presetValue))),
+        instructionError ? h('span', { className: 'capital-automation-fielderror', role: 'alert' }, instructionError) : null)),
     meta?.workspaceError ? h('p', { className: 'capital-automation-hint', 'data-tone': 'error' }, zh.workspaceUnavailable) : null,
     h('details', { className: 'capital-automation-advanced' },
       h('summary', null, zh.advanced),
       h('div', { className: 'capital-automation-advancedbody' },
         h('div', { className: 'capital-automation-formgrid' },
-          h(NumberField, { label: zh.runTimeout, value: draft.limits.runTimeoutMinutes, min: timeoutRange[0], max: timeoutRange[1], onChange: (value) => set((current) => ({ limits: { ...current.limits, runTimeoutMinutes: value } })) }),
-          h(NumberField, { label: zh.idleTimeout, value: draft.limits.idleTimeoutMinutes, min: idleRange[0], max: idleRange[1], onChange: (value) => set((current) => ({ limits: { ...current.limits, idleTimeoutMinutes: value } })) }),
-          h(NumberField, { label: zh.maxSteps, value: draft.limits.maxSteps, min: stepsRange[0], max: stepsRange[1], onChange: (value) => set((current) => ({ limits: { ...current.limits, maxSteps: value } })) }),
-          h(NumberField, { label: zh.maxToolCalls, value: draft.limits.maxToolCalls, min: toolsRange[0], max: toolsRange[1], onChange: (value) => set((current) => ({ limits: { ...current.limits, maxToolCalls: value } })) })),
+          h(NumberField, { label: zh.runTimeout, value: draft.limits.runTimeoutMinutes, min: timeoutRange[0], max: timeoutRange[1], error: errorFor('runTimeoutMinutes'), onBlur: () => touch('runTimeoutMinutes'), onChange: (value) => set((current) => ({ limits: { ...current.limits, runTimeoutMinutes: value } })) }),
+          h(NumberField, { label: zh.idleTimeout, value: draft.limits.idleTimeoutMinutes, min: idleRange[0], max: idleRange[1], error: errorFor('idleTimeoutMinutes'), onBlur: () => touch('idleTimeoutMinutes'), onChange: (value) => set((current) => ({ limits: { ...current.limits, idleTimeoutMinutes: value } })) }),
+          h(NumberField, { label: zh.maxSteps, value: draft.limits.maxSteps, min: stepsRange[0], max: stepsRange[1], error: errorFor('maxSteps'), onBlur: () => touch('maxSteps'), onChange: (value) => set((current) => ({ limits: { ...current.limits, maxSteps: value } })) }),
+          h(NumberField, { label: zh.maxToolCalls, value: draft.limits.maxToolCalls, min: toolsRange[0], max: toolsRange[1], error: errorFor('maxToolCalls'), onBlur: () => touch('maxToolCalls'), onChange: (value) => set((current) => ({ limits: { ...current.limits, maxToolCalls: value } })) })),
         h('p', { className: 'capital-automation-hint' }, zh.advancedHint))),
     h('div', null,
       h('span', { className: 'capital-automation-formlabel' }, zh.notifyField),
@@ -2729,8 +3210,6 @@ function AutomationPage(props) {
   const initialLoading = meta === null && loadError.length === 0
 
   return h('div', { className: 'capital-automation-page' },
-    h('datalist', { id: 'capital-automation-timezones' },
-      TIMEZONES.map((zone) => h('option', { key: zone, value: zone }))),
     detailOpen ? null : h(Header, {
       tab,
       onTab: switchTab,

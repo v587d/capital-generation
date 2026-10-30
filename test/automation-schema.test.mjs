@@ -43,8 +43,21 @@ test('三个内置模板全部 dormant，默认触发直接落在交易日', () 
     assert.equal(definition.defaults.trigger.timezone, 'Asia/Shanghai')
     assert.equal(definition.defaults.trigger.tradingDaysOnly, true)
     assert.equal(definition.defaults.cwdKind, 'profile')
-    assert.ok(definition.defaults.instruction.includes('无人值守执行策略'))
+    assert.equal('mode' in definition.defaults, false, '输出侧重已并入任务分类，内置定义不能保留 mode')
+    assert.ok(definition.defaults.instruction.length <= 120, `${definition.id} 的指令只应是启动句`)
+    assert.doesNotMatch(definition.defaults.instruction, /数据与来源纪律/, `${definition.id} 不应再复制自动模式的数据纪律`)
+    assert.doesNotMatch(definition.defaults.instruction, /无人值守执行策略/, `${definition.id} 不应再复制运行策略`)
   }
+})
+
+test('早间资讯的启动句仍覆盖自选股，空清单与读取失败分开说', () => {
+  const morning = BUILTIN_BY_ID.get('morning-brief')
+  assert.ok(morning)
+  assert.match(morning.defaults.description, /自选股/, '模板说明必须点名自选股')
+  assert.match(morning.defaults.instruction, /自选股/, '启动句必须点名自选股')
+  assert.match(morning.defaults.instruction, /get_watchlist/, '自选股必须经只读工具读取，不能凭记忆列标的')
+  assert.match(morning.defaults.instruction, /清单为空/, '清单为空要说明')
+  assert.match(morning.defaults.instruction, /读取失败/, '读取失败不得被说成没有自选股')
 })
 
 test('wire create schema 不接受 profile / owner / session / preset / cwd / state 这类服务端字段', () => {
@@ -53,23 +66,38 @@ test('wire create schema 不接受 profile / owner / session / preset / cwd / st
     instruction: '做一件事',
     category: 'news',
     trigger: { kind: 'schedule', cadence: 'daily', time: '09:00', timezone: 'Asia/Shanghai', tradingDaysOnly: true },
-    mode: 'news',
   }
   const parsed = TaskCreateSchema.parse(base)
   assert.equal(parsed.title, '测试任务')
   assert.equal(TaskCreateSchema.parse({ ...base, workspaceId: 'ws_1' }).workspaceId, 'ws_1')
   assert.equal(TaskCreateSchema.parse({ ...base, workspaceId: '' }).workspaceId, '', '空值表示默认工作区')
-  for (const forbidden of ['profileKey', 'profileName', 'ownerId', 'sessionId', 'agentPreset', 'presetId', 'cwd', 'state', 'origin']) {
+  for (const forbidden of ['profileKey', 'profileName', 'ownerId', 'sessionId', 'agentPreset', 'presetId', 'cwd', 'state', 'origin', 'mode']) {
     assert.throws(() => TaskCreateSchema.parse({ ...base, [forbidden]: 'x' }), `\`${forbidden}\` 必须被 strict schema 拒绝`)
   }
 })
 
-test('触发闭集：无效时区、weekly 缺 weekdays、monthly day 29、daily 带 weekdays 全部拒绝', () => {
+test('触发闭集：月内日期支持 1–31 与月末，单次必须有合法日期，跨频率字段互斥', () => {
   const base = { kind: 'schedule', cadence: 'daily', time: '09:00', timezone: 'Asia/Shanghai', tradingDaysOnly: true }
-  assert.throws(() => TaskCreateSchema.parse({ title: 't', instruction: 'i', category: 'news', mode: 'news', trigger: { ...base, timezone: 'Mars/Olympus' } }))
-  assert.throws(() => TaskCreateSchema.parse({ title: 't', instruction: 'i', category: 'news', mode: 'news', trigger: { ...base, cadence: 'weekly' } }))
-  assert.throws(() => TaskCreateSchema.parse({ title: 't', instruction: 'i', category: 'news', mode: 'news', trigger: { ...base, cadence: 'monthly', dayOfMonth: 29 } }))
-  assert.throws(() => TaskCreateSchema.parse({ title: 't', instruction: 'i', category: 'news', mode: 'news', trigger: { ...base, weekdays: [1] } }))
+  const task = (trigger) => ({ title: 't', instruction: 'i', category: 'news', trigger })
+  assert.throws(() => TaskCreateSchema.parse(task({ ...base, timezone: 'Mars/Olympus' })))
+  assert.throws(() => TaskCreateSchema.parse(task({ ...base, cadence: 'weekly' })))
+  assert.throws(() => TaskCreateSchema.parse(task({ ...base, cadence: 'monthly', dayOfMonth: 32 })))
+  assert.throws(() => TaskCreateSchema.parse(task({ ...base, cadence: 'monthly', dayOfMonth: 0 })))
+  assert.equal(TaskCreateSchema.parse(task({ ...base, cadence: 'monthly', dayOfMonth: 29 })).trigger.dayOfMonth, 29)
+  assert.equal(TaskCreateSchema.parse(task({ ...base, cadence: 'monthly', dayOfMonth: 'last' })).trigger.dayOfMonth, 'last')
+  assert.throws(() => TaskCreateSchema.parse(task({ ...base, cadence: 'once' })))
+  assert.throws(() => TaskCreateSchema.parse(task({ ...base, cadence: 'once', date: '2027-02-30' })))
+  assert.throws(() => TaskCreateSchema.parse(task({ ...base, cadence: 'once', date: '2027-06-30', dayOfMonth: 1 })))
+  assert.equal(TaskCreateSchema.parse(task({ ...base, cadence: 'once', date: '2027-06-30' })).trigger.date, '2027-06-30')
+  assert.throws(() => TaskCreateSchema.parse(task({ ...base, weekdays: [1] })))
+  assert.throws(() => TaskCreateSchema.parse(task({ ...base, date: '2027-06-30' })))
+})
+
+test('旧 mode 字段只为读取兼容，解析后的任务不再暴露输出侧重', () => {
+  const parsed = resolveTaskRecord({ ...record, overrides: { title: '我的早报', mode: 'market' } }, BUILTIN_BY_ID.get('morning-brief'))
+  assert.equal(parsed.title, '我的早报')
+  assert.equal('mode' in parsed, false)
+  assert.equal(parsed.overrides.mode, undefined)
 })
 
 test('严格 JSON：undefined、NaN、空洞数组都不是可存储值', () => {

@@ -145,8 +145,8 @@ export function createAutomationService(options) {
         preset: 'capital-generation',
         cwdKind: 'profile',
         policy: 'automation-v1',
-        modes: ['news', 'market', 'review', 'research'],
-        cadences: ['daily', 'weekly', 'monthly'],
+        categories: ['news', 'market', 'review', 'research'],
+        cadences: ['daily', 'weekly', 'monthly', 'once'],
         limits: {
           runTimeoutMinutes: [MIN_RUN_TIMEOUT_MINUTES, MAX_RUN_TIMEOUT_MINUTES],
           idleTimeoutMinutes: [MIN_IDLE_TIMEOUT_MINUTES, MAX_IDLE_TIMEOUT_MINUTES],

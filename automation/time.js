@@ -114,10 +114,16 @@ export function parseClock(time) {
   return { hour, minute }
 }
 
+function daysInMonth(year, month) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate()
+}
+
 function matchesCadence(trigger, date) {
   if (trigger.cadence === 'daily') return true
   if (trigger.cadence === 'weekly') return trigger.weekdays.includes(weekdayOf(date))
+  if (trigger.cadence === 'once') return (typeof date === 'string' ? date : date.date) === trigger.date
   const parsed = typeof date === 'string' ? parseDateString(date) : date
+  if (trigger.dayOfMonth === 'last') return parsed.day === daysInMonth(parsed.year, parsed.month)
   return parsed.day === trigger.dayOfMonth
 }
 
@@ -137,6 +143,15 @@ const DATE_LIMIT = 400
 export function previousOccurrenceAtOrBefore(trigger, atMs, options = {}) {
   const { hour, minute } = parseClock(trigger.time)
   const start = localPartsAt(atMs, trigger.timezone)
+  if (trigger.cadence === 'once') {
+    if (trigger.date > start.date) return { kind: 'none' }
+    const verdict = calendarVerdict(trigger, trigger.date, options.calendar)
+    if (verdict === undefined) return { kind: 'calendar_unavailable', localDate: trigger.date }
+    if (!verdict) return { kind: 'none' }
+    const instant = zonedWallToInstant(trigger.date, hour, minute, trigger.timezone)
+    if (instant === undefined || instant > atMs) return { kind: 'none' }
+    return occurrenceOf(trigger, instant, trigger.date)
+  }
   for (let delta = 0; delta <= DATE_LIMIT; delta += 1) {
     const date = addDays(start.date, -delta)
     if (!matchesCadence(trigger, date)) continue
@@ -156,6 +171,15 @@ export function previousOccurrenceAtOrBefore(trigger, atMs, options = {}) {
 export function nextOccurrence(trigger, afterMs, options = {}) {
   const { hour, minute } = parseClock(trigger.time)
   const start = localPartsAt(afterMs, trigger.timezone)
+  if (trigger.cadence === 'once') {
+    if (trigger.date < start.date) return { kind: 'none' }
+    const instant = zonedWallToInstant(trigger.date, hour, minute, trigger.timezone)
+    if (instant === undefined || instant <= afterMs) return { kind: 'none' }
+    const verdict = calendarVerdict(trigger, trigger.date, options.calendar)
+    if (verdict === undefined) return { kind: 'calendar_unavailable', localDate: trigger.date }
+    if (!verdict) return { kind: 'none' }
+    return occurrenceOf(trigger, instant, trigger.date)
+  }
   for (let delta = 0; delta <= DATE_LIMIT; delta += 1) {
     const date = addDays(start.date, delta)
     if (!matchesCadence(trigger, date)) continue
@@ -180,7 +204,7 @@ function occurrenceOf(trigger, instant, localDate) {
 }
 
 export function canonicalTrigger(trigger) {
-  return JSON.stringify({
+  const canonical = {
     kind: trigger.kind,
     cadence: trigger.cadence,
     time: trigger.time,
@@ -188,7 +212,11 @@ export function canonicalTrigger(trigger) {
     weekdays: trigger.weekdays === undefined ? null : [...trigger.weekdays].sort((a, b) => a - b),
     dayOfMonth: trigger.dayOfMonth ?? null,
     tradingDaysOnly: trigger.tradingDaysOnly === true,
-  })
+  }
+  // Keep versions of existing daily/weekly/monthly records stable; only single-date triggers
+  // need the extra key.
+  if (trigger.date !== undefined) canonical.date = trigger.date
+  return JSON.stringify(canonical)
 }
 
 /** Stable across process restarts and object-key order; a trigger edit changes the version. */

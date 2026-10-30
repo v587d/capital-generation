@@ -41,7 +41,7 @@ export interface WindCallResult {
 }
 
 /** Must match `package.json` version; a test pins the two together. */
-export const WIND_CLIENT_VERSION = '2.13.2'
+export const WIND_CLIENT_VERSION = '2.14.0'
 
 export interface WindClient {
   callTool(toolName: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<WindCallResult>
