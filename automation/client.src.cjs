@@ -204,7 +204,6 @@ const zh = {
   weekdayWeekendQuick: '周末',
   weekdayNone: '未选择',
   weekdayEvery: '每天',
-  done: '完成',
   tradingDaysField: '仅交易日',
   weekdayRequired: '每周至少选择一天。',
   dateRequired: '请选择运行日期。',
@@ -670,6 +669,7 @@ function installStyles() {
     .capital-automation-notificationmessage { display: -webkit-box; overflow: hidden; margin-top: 2px; color: var(--ca-muted); font-size: 11.5px; line-height: 18px; overflow-wrap: anywhere; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
     .capital-automation-notificationtime { display: block; margin-top: 3px; color: var(--ca-caption); font-size: 11px; line-height: 16px; }
     .capital-automation-modal { width: min(720px, calc(100vw - 32px)); max-width: min(720px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); }
+    .capital-automation-modal-wizard { width: min(600px, calc(100vw - 32px)); max-width: min(600px, calc(100vw - 32px)); }
     .capital-automation-modal-content { max-height: calc(100dvh - 128px); overflow: auto; }
     .capital-automation-modal-narrow { width: min(480px, calc(100vw - 32px)); max-width: min(480px, calc(100vw - 32px)); }
     .capital-automation-wizard { display: flex; flex-direction: column; gap: 14px; }
@@ -1900,7 +1900,6 @@ function WeekdaySelect(props) {
     ...(weekend ? ['weekend'] : []),
   ]
   const pick = (id) => {
-    if (id === 'weekday-done') { setOpen(false); return }
     if (id === 'workday') { onChange([1, 2, 3, 4, 5]); return }
     if (id === 'weekend') { onChange([6, 7]); return }
     const day = Number(id.slice('weekday-'.length))
@@ -1926,7 +1925,6 @@ function WeekdaySelect(props) {
     selectedIds,
     onSelect: pick,
     onClose: () => setOpen(false),
-    footer: [{ id: 'weekday-done', label: zh.done }],
     align: 'start',
     portal: true,
   })
@@ -2800,7 +2798,7 @@ function NewTaskModal(props) {
     onClose: () => { if (!busy) onClose() },
     title: zh.newTaskTitle,
     closeLabel: zh.close,
-    className: 'capital-automation-modal',
+    className: 'capital-automation-modal capital-automation-modal-wizard',
     contentClassName: 'capital-automation-modal-content',
     footer: h('div', { className: 'capital-automation-formactions', style: { borderTop: 0, paddingTop: 0 } },
       h('button', { type: 'button', className: 'capital-automation-btn', disabled: busy, onClick: onClose }, zh.cancel),

@@ -403,7 +403,6 @@ test('触发器组件：规则选项嵌在频率与时间之间，按单选/多�
       weekdayWeekendQuick: '周末',
       weekdayNone: '未选择',
       weekdayEvery: '每天',
-      done: '完成',
     },
     [{ value: 1, label: '一' }, { value: 2, label: '二' }, { value: 3, label: '三' }, { value: 4, label: '四' }, { value: 5, label: '五' }, { value: 6, label: '六' }, { value: 7, label: '日' }],
     (trigger) => trigger,
@@ -450,6 +449,7 @@ test('触发器组件：规则选项嵌在频率与时间之间，按单选/多�
   assert.ok(weeklyMenu, '星期选择器必须复用宿主 Menu')
   assert.equal(weeklyMenu.props.items.filter((item) => item.type !== 'separator').length, 9, '每周菜单必须包含 7 天和工作日/周末快捷项')
   assert.deepEqual(weeklyMenu.props.selectedIds, ['weekday-1', 'weekday-3', 'weekday-5'], '星期必须是可多选的勾选集合')
+  assert.equal(weeklyMenu.props.footer, undefined, '多选菜单靠失焦 / Esc 关闭，不需要「完成」项')
   assert.equal(classes(weekly, 'capital-automation-triggerfield').length, 3, '每周是频率、星期、时间三个字段')
 
   const monthly = flatten(render({ ...base, cadence: 'monthly', dayOfMonth: 29 }))
@@ -476,6 +476,12 @@ test('触发器组件：规则选项嵌在频率与时间之间，按单选/多�
   assert.equal(dateInput.props.title, '只在这天运行一次', '单次日期必须带一次性说明')
   assert.equal(classes(once, 'capital-automation-triggerfield').length, 3, '单次是频率、日期、时间三个字段')
   assert.equal(classes(once, 'capital-automation-weekday').length + classes(once, 'capital-automation-monthlychip').length, 0, '规则不能再展开成整行按钮')
+})
+
+test('新建任务弹窗收窄到 600px，且每周菜单不再有「完成」项', () => {
+  assert.match(clientSource, /\.capital-automation-modal-wizard \{ width: min\(600px, calc\(100vw - 32px\)\); max-width: min\(600px, calc\(100vw - 32px\)\); \}/, '新建任务弹窗宽度必须是 600px')
+  assert.match(clientSource, /className: 'capital-automation-modal capital-automation-modal-wizard'/, '只有新建任务弹窗使用 600px 宽度')
+  assert.doesNotMatch(clientSource, /weekday-done/, '每周多选菜单不能再渲染「完成」兜底项')
 })
 
 test('单次触发器的默认日期避开周末，仅交易日开关才有意义', () => {
