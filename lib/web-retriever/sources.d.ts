@@ -87,8 +87,10 @@ export declare function resolveSseCompanyUid(transport: Requester, code: string,
 /** Split Q/A on the reply block class; per-item id markers differ between the two list kinds. */
 export declare function parseSseFeed(text: string): SourceItem[];
 /**
- * Normalize to Beijing "YYYY-MM-DD HH:MM" (never host local time). All three observed
- * forms (X分钟前 / 昨天 HH:MM / absolute) must parse or one row fails the page.
+ * Normalize a feed label to Beijing "YYYY-MM-DD HH:MM"; unknown shapes return undefined so
+ * the caller fails the page instead of carrying a blank column. The site mixes absolute
+ * question times with relative reply times ("昨天 18:22"): every form must parse or one row
+ * fails the page. Relative forms use Beijing wall clock, never host local time.
  */
 export declare function sseTime(text: string, now?: Date): string | undefined;
 export declare function sseinfoQa(transport: Requester, input: {

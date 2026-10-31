@@ -295,20 +295,35 @@ test('cninfo_irm：代码查不到时明确报 NOT_FOUND，而不是静默返回
   }
 })
 
-test('sseTime：三类写法都要认（少认一类就会让整个列表失败）', () => {
+test('sseTime：站点全部时间写法都要认（少认一类整页就失败）', () => {
   const now = new Date('2026-09-24T04:00:00Z') // 2026-09-24 12:00 Beijing time
   assert.equal(sseTime('2026年09月18日 10:05', now), '2026-09-18 10:05')
+  assert.equal(sseTime('2026-09-18 10:05', now), '2026-09-18 10:05')
+  assert.equal(sseTime('2026/09/18 10:05', now), '2026-09-18 10:05')
   assert.equal(sseTime('昨天 18:16', now), '2026-09-23 18:16')
   assert.equal(sseTime('今天 09:30', now), '2026-09-24 09:30')
-  // Minute/hour forms dominate the live sample.
+  assert.equal(sseTime('前天 23:59', now), '2026-09-22 23:59')
+  // Minute/hour forms dominate the live sample; seconds and days are the same shape.
   assert.equal(sseTime('2分钟前', now), '2026-09-24 11:58')
   assert.equal(sseTime('57分钟前', now), '2026-09-24 11:03')
   assert.equal(sseTime('1小时前', now), '2026-09-24 11:00')
   assert.equal(sseTime('2小时前', now), '2026-09-24 10:00')
   assert.equal(sseTime('90分钟前', new Date('2026-09-24T00:30:00Z')), '2026-09-24 07:00')
+  assert.equal(sseTime('30秒前', now), '2026-09-24 11:59')
+  assert.equal(sseTime('2天前', now), '2026-09-22 12:00')
   assert.equal(sseTime('刚刚', now), '2026-09-24 12:00')
-  // Unknown forms return undefined so the caller fails instead of guessing.
-  assert.equal(sseTime('前天 09:00', now), undefined)
+  assert.equal(sseTime('刚才', now), '2026-09-24 12:00')
+  // Month-day without a year, and clock-only (= today in Beijing).
+  assert.equal(sseTime('09-20 08:30', now), '2026-09-20 08:30')
+  assert.equal(sseTime('12-31 18:00', new Date('2026-01-05T01:00:00Z')), '2025-12-31 18:00')
+  assert.equal(sseTime('09:31', now), '2026-09-24 09:31')
+  // Unknown or impossible labels return undefined so the caller fails (no guessing).
+  assert.equal(sseTime('昨天 25:00', now), undefined)
+  assert.equal(sseTime('09:99', now), undefined)
+  assert.equal(sseTime('2026年02月30日 10:00', now), undefined)
+  assert.equal(sseTime('999999999天前', now), undefined)
+  assert.equal(sseTime('02-29 10:00', new Date('2024-01-05T01:00:00Z')), undefined)
+  assert.equal(sseTime('时间待定', now), undefined)
   assert.equal(sseTime('很久以前', now), undefined)
 })
 
@@ -342,6 +357,11 @@ test('parseSseFeed：以回复块为界切问答，未回复条目 answer 为空
   assert.match(String(answered.question), /低成本债务融资/)
   assert.match(String(answered.answer), /公司结合市场情况开展债务融资/)
   assert.equal(answered.status, 'answered')
+  // Relative labels are the live reply format: a page-level throw here means the whole list dies.
+  assert.match(String(answered.time), /^\d{4}-\d{2}-\d{2} 18:16$/)
+  assert.match(String(answered.answer_time), /^\d{4}-\d{2}-\d{2} 09:30$/)
+  const older = parseSseFeed(SSE_FEED.replace('今天 09:30', '前天 08:15'))
+  assert.match(String(older[0].answer_time), /^\d{4}-\d{2}-\d{2} 08:15$/)
   assert.equal(unanswered.status, 'unanswered')
   assert.equal(unanswered.answer, '')
   assert.equal(unanswered.time, '2026-09-24 10:05')

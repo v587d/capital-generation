@@ -3,7 +3,7 @@
  * Known limit: DNS resolves per request but the IP is not pinned to the connection,
  * so a rebinding window remains (same trade-off as dsh-search-first).
  */
-export declare const LOCAL_FETCH_CLIENT_VERSION = "2.14.1";
+export declare const LOCAL_FETCH_CLIENT_VERSION = "2.15.0";
 export declare const LOCAL_FETCH_MAX_URL_LENGTH = 2048;
 export type LocalFetchErrorCode = 'ABORTED' | 'TIMEOUT' | 'INVALID_URL' | 'BLOCKED_URL' | 'DNS' | 'REDIRECT' | 'HTTP' | 'TOO_LARGE' | 'UNSUPPORTED_CONTENT_TYPE';
 export declare class LocalFetchError extends Error {

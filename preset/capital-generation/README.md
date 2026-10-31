@@ -23,7 +23,7 @@
 
 ## 2. 人设（persona）承载与官方语义
 
-实测 `dsh 0.2.1-rc.3`（`test/persona.test.mjs` 对着本机 dsh 核对字段名），两层载体注册的是
+实测 `dsh 0.2.1-rc.5`（`test/persona.test.mjs` 对着本机 dsh 核对字段名），两层载体注册的是
 **同一个 system-prompt 节名**：
 
 | 载体 | 位置 | 字段 | 生效范围 |

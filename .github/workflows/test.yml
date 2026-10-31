@@ -56,7 +56,7 @@ jobs:
       # skipped rather than pass — a visible "not tested".
       - name: 装 dsh（只为接口账本）
         if: matrix.os == 'ubuntu-latest'
-        run: npm install -g @deepseek-ai/dsh@0.2.1-rc.3   # same version as the README baseline badge; bump them together
+        run: npm install -g @deepseek-ai/dsh@0.2.1-rc.5   # same version as the README baseline badge; bump them together
 
       - name: DSH 扩展面账本
         if: matrix.os == 'ubuntu-latest'

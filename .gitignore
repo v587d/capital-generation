@@ -55,6 +55,7 @@ docs/reference/*
 !docs/reference/external-skill-scan-2026-10.md
 # 宿主升级分析是每次抬基线的判据（兼容闸门的触发机制、用户升级顺序、实测数据），发版说明会引用它，随仓库入库。
 !docs/reference/host-upgrade-analysis-0.2.1-rc.2-to-rc.3.md
+!docs/reference/host-upgrade-analysis-0.2.1-rc.3-to-rc.5.md
 # docs/dev/ = AGENTS.md 的详情层，整目录都是研发文档（同样要先放行目录再挑文件）。
 !docs/dev/
 docs/dev/*

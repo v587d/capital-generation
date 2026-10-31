@@ -1,6 +1,6 @@
 {
   "name": "@v587d/capital-generation",
-  "version": "2.14.1",
+  "version": "2.15.0",
   "description": "Capital Generation：面向中国散户的 AI 投资助手插件（自动模式 Agent Preset）",
   "icon": "assets/cg-icon.png",
   "author": "v587d",
@@ -162,14 +162,14 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-skill": "0.2.1-rc.3",
-    "@deepseek-ai/dsh-skill-filesystem": "0.2.1-rc.3"
+    "@deepseek-ai/dsh-skill": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-skill-filesystem": "0.2.1-rc.5"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-skill": "^0.2.1-rc.3",
-    "@deepseek-ai/dsh-skill-filesystem": "^0.2.1-rc.3",
-    "@deepseek-ai/dsh-system-prompt": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-skill": "^0.2.1-rc.5",
+    "@deepseek-ai/dsh-skill-filesystem": "^0.2.1-rc.5",
+    "@deepseek-ai/dsh-system-prompt": "^0.2.1-rc.5",
     "@deepseek-ai/schemastery": "^3.18.4",
     "esbuild": "^0.28.2",
     "js-yaml": "^5.4.1",
