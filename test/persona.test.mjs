@@ -1273,6 +1273,8 @@ test('data_junior persona：profile 后负责可视化 gate、签发 token、等
   assertRule(vizProtocol, /Promise\.allSettled/, '协议必须要求 allSettled，避免一个 limit 错误吞掉整批')
   assertRule(vizProtocol, /chart_ref.*不得重发/, '协议必须禁止重发已成功的 specialist')
   assertRule(vizProtocol, /不要直调/, '协议必须禁止直调 specialist 工具')
+  assertRule(vizProtocol, /没有 `sort` \/ `limit`/, '协议必须写明排名图无 sort/limit 时先预检，不能派 specialist 空转')
+  assertRule(vizProtocol, /不要创建 specialist/, '协议必须写明来源未排序时不要创建 specialist')
 })
 
 test('capital-generation preset：组合面只有时间 / 本地文档 / 自选股 / 最终交付 / 单轮等待，tool-fs 行级只读', () => {

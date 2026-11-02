@@ -83,13 +83,14 @@ description: Use before calling render_chart — the full chart spec vocabulary 
 
 | 取值 | 解释 |
 |---|---|
-| `2025-01-02` | 业务日；轴上原样显示，不做时区换算 |
-| `2025-01-02 08:00:00`（无时区） | 按 **UTC** 解释 |
+| `2025-01-02` | 业务日；全为 date-only 时轴上原样显示；与 epoch 混用时按 **Asia/Shanghai 当日 00:00** 解释 |
+| `2025-01-02 08:00:00`（无时区） | 按 **Asia/Shanghai 墙钟**解释（08:00 = 00:00Z） |
 | `2025-01-02T08:00:00+08:00` | 按给出偏移解释 |
 | 数字 / 纯数字字符串，≥ 1e11 | epoch **毫秒** |
 | 数字 / 纯数字字符串，< 1e11 | epoch **秒** |
 
-无法解析的行会被丢弃并计入 `warnings.skipped_rows`；时间列**必须**有值。
+时间轴的 epoch 刻度与十字线统一按 **Asia/Shanghai** 格式化（日 K 显示 `MM-dd`，分钟线显示 `HH:mm`），
+不会因为库默认按 UTC 而把日期显示早一天。无法解析的行会被丢弃并计入 `warnings.skipped_rows`；时间列**必须**有值。
 时间轴会被强制升序去重（库的要求），发生重排/去重时 `warnings` 会如实披露。
 
 ## 4. 有界化语义（必须会读 warnings）
@@ -99,6 +100,8 @@ description: Use before calling render_chart — the full chart spec vocabulary 
 - **标记点会吸附到最近的保留时间点**，不会因为下采样而消失。
 - 数值口径与 Dataset 一致：数字，或 Dataset schema 允许的数字字符串；空值/非数值被丢弃并计入 `warnings`。
 - **分类轴不接受 `range`**：`range` 只用于真实时间轴；分类数据应先在来源侧裁剪，或改用可解析的时间字段。
+- **date-only 的 `range.from/to` 按 Asia/Shanghai 日历日解释，`to` 含当日 23:59:59**；不要把 UTC 零点
+  当成本地日的边界，否则首日会被裁掉。`from/to` 是 datetime 时按给出的时刻精确过滤。
 - 分类轴 marker 可以用 `index`，也可以把 `time` 写成与 `x` 完全一致的原始分类标签；时间轴 marker 才使用日期/epoch。
 
 ## 5. 错误码与一次改对

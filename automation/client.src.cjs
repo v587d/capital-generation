@@ -15,11 +15,7 @@ const {
   IconEditOutlineRegular,
   IconEllipsisOutlineRegular,
   IconFolderOpenOutlineRegular,
-  IconGaugeOutlineRegular,
-  IconGlobeOutlineRegular,
   IconInfoOutlineRegular,
-  IconLightOutlineMedium,
-  IconListPenOutlineRegular,
   IconPauseOutlineRegular,
   IconPlayOutlineRegular,
   IconPlusOutlineRegular,
@@ -34,6 +30,12 @@ const {
   Modal,
   Switch,
 } = require('@deepseek-ai/dsh-client-ui-primitives')
+const {
+  TASK_ICON_CATALOG,
+  TASK_ICON_IDS,
+  DEFAULT_CUSTOM_ICON,
+  builtinTaskIcon,
+} = require('./task-icons.js')
 
 const ENTRY_NAME = 'capital-automation'
 const ROUTE = '/capital-automation'
@@ -42,7 +44,7 @@ const STYLE_TAG = 'capital-automation-css'
 const ACTIVE_RUN_STATUSES = ['queued', 'starting', 'running']
 const FAILURE_RUN_STATUSES = ['failed', 'timed_out', 'blocked_requires_user', 'unknown_after_restart']
 const SKIPPED_RUN_STATUSES = ['skipped_overlap', 'skipped_calendar_unavailable', 'missed']
-const DEFAULT_LIMITS = { runTimeoutMinutes: 30, idleTimeoutMinutes: 5, maxSteps: 300, maxToolCalls: 1200 }
+const DEFAULT_LIMITS = { runTimeoutMinutes: 60, idleTimeoutMinutes: 5, maxSteps: 300, maxToolCalls: 1200 }
 const WEEKDAYS = [
   { value: 1, label: '一' },
   { value: 2, label: '二' },
@@ -74,6 +76,8 @@ const HISTORY_DAYS = 30
 const DETAIL_RECENT_RUN_LIMIT = 3
 const TITLE_MAX_LENGTH = 12
 const DESCRIPTION_MAX_LENGTH = 100
+const INSTRUCTION_MAX_LENGTH = 12_000
+const AUTOSAVE_DELAY_MS = 600
 
 const zh = {
   panel: 'CapGen 投研自动化',
@@ -81,10 +85,10 @@ const zh = {
   subtitle: '定时投研，自动执行，结果可追溯',
   tabs: { tasks: '任务', runs: '运行' },
   storageUnavailable: '存储不可用，页面只读',
-  standbyBanner: '调度器未取得运行权：定时触发与手动运行已暂停，任务配置仍可查看和编辑。',
+  standbyBanner: '本窗口的定时任务已暂停：定时触发与手动运行不可用；若另一个 CapGen 窗口在运行，定时任务仍会由它执行。',
   storageBanner: '投研自动化存储暂时不可用：页面只读，调度器不会启动。',
   calendarBanner: '交易日历暂时不可用：仅交易日的任务会跳过，其他任务仍按设定时间运行。',
-  calendarCoverageBanner: '交易日历只覆盖到 {through}：之后仅交易日的任务会按 fail-closed 跳过；交易所公布新一年安排后会自动接上。',
+  calendarCoverageBanner: '交易日历只覆盖到 {through}：之后仅交易日的任务会跳过；交易所公布新一年安排后会自动接上。',
   calendarField: '交易日历',
   calendarSourceSzse: '深交所官方日历',
   calendarSourceBundled: '内置表',
@@ -102,7 +106,6 @@ const zh = {
   clearFilter: '清除筛选',
   newTask: '新建任务',
   newTaskTitle: '新建投研任务',
-  newTaskHint: '任务会在后台新建一个 session 执行，不需要你守在页面上。',
   editTask: '编辑任务',
   allTasks: '全部任务',
   backToTasks: '所有任务',
@@ -123,7 +126,7 @@ const zh = {
   filterReview: '复盘',
   filterResearch: '研究',
   filterLabel: '筛选任务',
-  category: { news: '资讯', market: '行情', review: '复盘', research: '研究' },
+  category: { news: '资讯', market: '行情', review: '复盘', research: '研究', portfolio: '组合', monitor: '监控' },
   categoryField: '任务分类',
   categoryFixed: `'复制为我的任务'后，可调整任务分类。`,
   cadence: { daily: '每天', weekly: '每周', monthly: '每月', once: '单次' },
@@ -146,17 +149,21 @@ const zh = {
   remove: '删除任务',
   edit: '编辑',
   more: '更多操作',
-  save: '保存',
   saving: '保存中…',
   processing: '处理中…',
-  saved: '已保存',
   cancel: '取消',
   create: '创建任务',
   creating: '创建中…',
   titleRequired: '标题不能为空。',
   instructionRequired: '任务指令不能为空。',
   invalidLimit: '请输入有效数字。',
-  dirty: '有未保存的修改',
+  invalidLimitRange: '请输入 {min}–{max} 的整数。',
+  autosaveHint: '修改会自动保存',
+  autosavePending: '等待保存…',
+  autosaveSaved: '已自动保存',
+  autosaveFailed: '保存失败',
+  autosaveRetry: '重试',
+  autosaveInvalid: '填写完整后自动保存',
   noDirty: '配置已同步',
   nextRun: '下次运行',
   nextRunDormant: '添加后开始调度',
@@ -173,6 +180,9 @@ const zh = {
   notifications: '通知',
   descriptionField: '任务说明',
   titleField: '任务标题',
+  iconField: '任务图标',
+  iconPickHint: '点击图标更换',
+  iconBuiltinHint: '内置模板的图标固定；复制为我的任务后可更换。',
   instructionField: '任务指令',
   instructionPlaceholder: '例如：读取今日自选股行情、公告与相关新闻，按「结论—证据—风险」整理成一份可复核的盘后复盘。',
   titlePlaceholder: '给这个任务起个名字',
@@ -225,10 +235,10 @@ const zh = {
   maxSteps: '最大步骤',
   maxToolCalls: '最大工具调用',
   notifyField: '通知',
-  notifyInApp: '应用内通知',
-  notifyFailure: '失败时通知',
+  notifyInApp: '写入任务通知',
+  notifyFailure: '失败、超时或需人工处理时',
   notifySuccess: '成功时通知',
-  notifyHint: '通知只记录在当前 profile；不会发送邮件或外部消息。',
+  notifyHint: '只写入当前 profile 的任务通知中心；不会发送邮件或外部消息。',
   presetLabel: '运行模式',
   presetValue: '自动模式',
   presetHint: '所有运行固定使用自动模式。',
@@ -270,15 +280,32 @@ const zh = {
   triggerScheduled: '定时',
   openSession: '打开 session',
   runSummaryFallback: '运行结束但没有摘要。',
-  notificationsEmpty: '没有通知。',
+  notificationsEmpty: '没有任务通知。',
   markRead: '全部标为已读',
   markTaskRead: '本任务标为已读',
-  notificationsTitle: '通知',
-  notificationsHint: '运行失败、超时、调度器待命与交易日历问题会出现在这里。',
+  notificationsTitle: '任务通知',
+  notificationsEntry: '任务通知',
+  notificationsHint: '运行失败、超时、成功与交易日历问题会出现在这里。',
   notificationsUnread: '{n} 条未读',
   allRead: '全部已读',
-  noNotifications: '没有未读或历史通知。',
+  noNotifications: '没有未读或历史任务通知。',
   notificationOpenTask: '查看任务',
+  systemStatus: '系统状态',
+  systemActive: '定时调度正常',
+  systemStandby: '本窗口待命，不启动新的定时运行',
+  systemStarting: '定时调度启动中',
+  systemStopped: '定时调度未运行',
+  systemUnavailable: '定时调度不可用',
+  systemCalendarOk: '交易日历正常',
+  systemCalendarUnavailable: '交易日历不可用',
+  systemDetails: '详情',
+  systemHideDetails: '收起',
+  systemLastStandby: '上次中断',
+  systemNoStandby: '没有调度中断记录。',
+  systemReasonLeaseHeld: '另一个 CapGen 窗口正在负责定时任务。',
+  systemReasonLeaseLost: '本窗口的调度权已失效，可能已由另一个窗口接管。',
+  systemReasonUnverified: '本窗口的调度权校验未通过。',
+  systemTechnical: '技术信息',
   close: '关闭',
   confirmDeleteTitle: '删除这个任务？',
   confirmDeleteBody: '任务配置、运行记录与相关通知会一起删除，无法恢复。',
@@ -299,7 +326,7 @@ const zh = {
   markReadDone: '已标为已读',
   errorGeneric: '操作失败，请稍后重试。',
   needConfirm: '需要用户确认',
-  schedulerBlocked: '调度器未取得运行权，暂时不能手动运行。',
+  schedulerBlocked: '本窗口的定时任务已暂停，暂时不能手动运行。',
   runBlocked: '任务正在运行，结束或取消后才能再次运行。',
   configWhileRunning: '任务正在运行；修改会在下一次运行时生效。',
   detailRecentRuns: '最近 {n} 次运行',
@@ -312,8 +339,8 @@ const zh = {
   notificationFallbackFailed: '运行失败；打开对应任务或 session 查看详情。',
   notificationFallbackTimeout: '运行超时；打开对应任务或 session 查看详情。',
   notificationFallbackSuccess: '运行完成。',
-  notificationFallbackStandby: '调度器未取得运行权，定时触发暂停。',
-  notificationFallbackCalendar: '交易日历不可用，交易日任务已跳过。',
+  notificationFallbackStandby: '定时触发已暂停。',
+  notificationFallbackCalendar: '暂时无法确认交易日，相关任务已跳过。',
   notificationFallbackSkipped: '本次计划已跳过。',
   statusLabel: '状态',
   triggerSummary: '日程',
@@ -344,7 +371,7 @@ function installStyles() {
   style.setAttribute(`data-${STYLE_TAG}`, 'true')
   style.textContent = `
     .capital-automation-page, .capital-automation-modal { --ca-card: var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-layer-1)); --ca-line: var(--dsw-alias-border-l3, var(--dsw-alias-border-l1)); --ca-line-soft: var(--dsw-alias-border-l2, var(--dsw-alias-border-l1)); --ca-table-line: var(--ca-line); --ca-muted: var(--dsw-alias-label-tertiary); --ca-caption: var(--dsw-alias-label-caption, var(--dsw-alias-label-tertiary)); --ca-hover: var(--dsw-alias-interactive-bg-hover); --ca-field: var(--dsw-alias-bg-module-platform); --ca-business: var(--dsw-alias-state-business-primary, var(--dsw-alias-brand-primary)); --ca-success: var(--dsw-alias-state-success-primary); --ca-error: var(--dsw-alias-state-error-primary); --ca-warn: var(--dsw-alias-state-warn-label); --ca-business-text: var(--ca-business); --ca-success-text: var(--ca-success); --ca-error-text: var(--ca-error); --ca-warn-text: var(--ca-warn); }
-    body:not([data-ds-dark-theme]) .capital-automation-page, body:not([data-ds-dark-theme]) .capital-automation-modal { --ca-line: #0000001f; --ca-line-soft: #0000001a; --ca-table-line: #00000026; --ca-muted: #5d626a; --ca-caption: #6a6f77; --ca-hover: #eef1f5; --ca-field: #f7f8fa; --ca-business: #2f63d6; --ca-success: #16a34a; --ca-error: #dc2626; --ca-warn: #d97706; --ca-business-text: #2f63d6; --ca-success-text: #15803d; --ca-error-text: #c81e1e; --ca-warn-text: #b45309; --ca-tag-news: #2f6fd0; --ca-tag-market: #a85a08; --ca-tag-review: #6d4ac4; --ca-tag-research: #0f766e; --ca-tag-custom: #b3246d; }
+    body:not([data-ds-dark-theme]) .capital-automation-page, body:not([data-ds-dark-theme]) .capital-automation-modal { --ca-line: #0000001f; --ca-line-soft: #0000001a; --ca-table-line: #00000026; --ca-muted: #5d626a; --ca-caption: #6a6f77; --ca-hover: #eef1f5; --ca-field: #f7f8fa; --ca-business: #2f63d6; --ca-success: #16a34a; --ca-error: #dc2626; --ca-warn: #d97706; --ca-business-text: #2f63d6; --ca-success-text: #15803d; --ca-error-text: #c81e1e; --ca-warn-text: #b45309; --ca-tag-news: #2f6fd0; --ca-tag-market: #a85a08; --ca-tag-review: #6d4ac4; --ca-tag-research: #0f766e; --ca-tag-portfolio: #4d7c0f; --ca-tag-monitor: #0e7490; --ca-tag-custom: #b3246d; }
     .capital-automation-page { display: flex; flex-direction: column; min-height: 0; height: 100%; color: var(--dsw-alias-label-primary); }
     .capital-automation-head { flex: none; padding: 18px 0 0; }
     .capital-automation-headinner { box-sizing: border-box; width: min(1080px, 100%); margin: 0 auto; padding: 0 clamp(20px, 3vw, 36px); }
@@ -444,6 +471,8 @@ function installStyles() {
     .capital-automation-glyph[data-tone="market"] { background: linear-gradient(135deg, #ffbd4a, #f97316); }
     .capital-automation-glyph[data-tone="review"] { background: linear-gradient(135deg, #b18cff, #7c3aed); }
     .capital-automation-glyph[data-tone="research"] { background: linear-gradient(135deg, #39d7a8, #0d9488); }
+    .capital-automation-glyph[data-tone="portfolio"] { background: linear-gradient(135deg, #84cc16, #4d7c0f); }
+    .capital-automation-glyph[data-tone="monitor"] { background: linear-gradient(135deg, #06b6d4, #0e7490); }
     .capital-automation-glyph[data-tone="custom"] { background: linear-gradient(135deg, #f472b6, #db2777); }
     .capital-automation-identitytext { min-width: 0; }
     .capital-automation-tasktitlerow { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; }
@@ -456,12 +485,16 @@ function installStyles() {
     .capital-automation-tag[data-tone="market"] { color: #ffb45c; }
     .capital-automation-tag[data-tone="review"] { color: #b79aff; }
     .capital-automation-tag[data-tone="research"] { color: #56d9b4; }
+    .capital-automation-tag[data-tone="portfolio"] { color: #a3e635; }
+    .capital-automation-tag[data-tone="monitor"] { color: #22d3ee; }
     .capital-automation-tag[data-tone="custom"] { color: #f79bc3; }
     body:not([data-ds-dark-theme]) .capital-automation-tag { background: color-mix(in srgb, currentColor 9%, var(--ca-card)); }
     body:not([data-ds-dark-theme]) .capital-automation-tag[data-tone="news"] { color: var(--ca-tag-news); }
     body:not([data-ds-dark-theme]) .capital-automation-tag[data-tone="market"] { color: var(--ca-tag-market); }
     body:not([data-ds-dark-theme]) .capital-automation-tag[data-tone="review"] { color: var(--ca-tag-review); }
     body:not([data-ds-dark-theme]) .capital-automation-tag[data-tone="research"] { color: var(--ca-tag-research); }
+    body:not([data-ds-dark-theme]) .capital-automation-tag[data-tone="portfolio"] { color: var(--ca-tag-portfolio); }
+    body:not([data-ds-dark-theme]) .capital-automation-tag[data-tone="monitor"] { color: var(--ca-tag-monitor); }
     body:not([data-ds-dark-theme]) .capital-automation-tag[data-tone="custom"] { color: var(--ca-tag-custom); }
     .capital-automation-schedule { display: block; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
     .capital-automation-schedulesub { display: block; margin-top: 1px; color: var(--ca-caption); font-size: 11px; line-height: 16px; }
@@ -558,6 +591,22 @@ function installStyles() {
     .capital-automation-fieldhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
     .capital-automation-fieldlabel { color: var(--ca-muted); font-size: 11.5px; line-height: 17px; }
     .capital-automation-fieldhint { color: var(--ca-caption); font-size: 11px; line-height: 16px; font-variant-numeric: tabular-nums; }
+    .capital-automation-glyphbtn { display: inline-flex; flex: none; align-items: center; gap: 4px; padding: 0; border: 0; border-radius: 14px; background: transparent; cursor: pointer; }
+    .capital-automation-glyphbtn:hover:not(:disabled) .capital-automation-glyph { box-shadow: inset 0 1px 0 rgba(255,255,255,.22), 0 0 0 2px color-mix(in srgb, var(--ca-business) 52%, transparent); }
+    .capital-automation-glyphbtn:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: 2px; }
+    .capital-automation-glyphbtn:disabled { cursor: not-allowed; opacity: .55; }
+    .capital-automation-glyphbtnchevron { display: grid; flex: none; place-items: center; width: 12px; color: var(--ca-muted); }
+    .capital-automation-glyphbtn:hover:not(:disabled) .capital-automation-glyphbtnchevron { color: var(--ca-business-text); }
+    .capital-automation-iconrow { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .capital-automation-iconrowbody { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    /* The menu is portaled to body, outside the page's --ca-* scope; use host tokens. */
+    .capital-automation-iconmenu { box-sizing: border-box; width: 400px; max-width: calc(100vw - 24px); padding: 10px; }
+    .capital-automation-iconmenu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(32px, 1fr)); gap: 6px; }
+    button.capital-automation-iconmenu-item { box-sizing: border-box; display: inline-grid; place-items: center; width: 100%; max-width: 34px; aspect-ratio: 1; justify-self: center; padding: 0; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--dsw-alias-label-tertiary); cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+    button.capital-automation-iconmenu-item:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+    button.capital-automation-iconmenu-item[data-selected="true"] { border-color: var(--dsw-alias-brand-primary); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent); color: var(--dsw-alias-brand-primary); }
+    button.capital-automation-iconmenu-item:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--dsw-alias-brand-primary)); outline-offset: 2px; }
+    button.capital-automation-iconmenu-item:disabled { opacity: .4; cursor: not-allowed; }
     .capital-automation-field input { box-sizing: border-box; width: 100%; padding: 0 10px; border: .5px solid var(--ca-line-soft); border-radius: 10px; background: var(--ca-field); color: var(--dsw-alias-label-primary); font: inherit; font-size: 12.5px; line-height: 32px; }
     .capital-automation-field input { height: 34px; }
     .capital-automation-texteditor { color: var(--dsw-alias-label-primary); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto; outline: 0; cursor: text; }
@@ -586,6 +635,9 @@ function installStyles() {
     .capital-automation-formactions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 14px; border-top: .5px solid var(--ca-line); }
     .capital-automation-formactions[data-sticky="true"] { position: sticky; bottom: -1px; z-index: 2; margin-top: 2px; padding: 12px 0 4px; background: var(--dsw-alias-bg-base); }
     .capital-automation-formstatus { margin-right: auto; color: var(--ca-caption); font-size: 11.5px; line-height: 18px; }
+    .capital-automation-autosavestate { min-width: 0; max-width: min(520px, 70%); overflow: hidden; color: var(--ca-caption); font-size: 11.5px; line-height: 18px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+    .capital-automation-autosavestate[data-tone="ok"] { color: var(--ca-success-text); }
+    .capital-automation-autosavestate[data-tone="error"] { color: var(--ca-error-text); }
     .capital-automation-triggerbox { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; border: .5px solid var(--ca-line); border-radius: 14px; background: var(--ca-field); }
     .capital-automation-triggerbox[data-invalid="true"] { border-color: color-mix(in srgb, var(--ca-error) 52%, var(--ca-line)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ca-error) 9%, transparent); }
     .capital-automation-triggerhead { display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
@@ -668,6 +720,13 @@ function installStyles() {
     .capital-automation-notificationtitle { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--dsw-alias-label-primary); font-size: 12.5px; line-height: 19px; font-weight: 500; }
     .capital-automation-notificationmessage { display: -webkit-box; overflow: hidden; margin-top: 2px; color: var(--ca-muted); font-size: 11.5px; line-height: 18px; overflow-wrap: anywhere; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
     .capital-automation-notificationtime { display: block; margin-top: 3px; color: var(--ca-caption); font-size: 11px; line-height: 16px; }
+    .capital-automation-systemstatus { margin-top: 22px; padding: 12px 0 4px; border-top: .5px solid var(--ca-line); color: var(--ca-caption); font-size: 11px; line-height: 17px; }
+    .capital-automation-systemline { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .capital-automation-systemtoggle { border: 0; padding: 0; background: transparent; color: var(--ca-muted); font: inherit; cursor: pointer; }
+    .capital-automation-systemtoggle:hover { color: var(--dsw-alias-label-primary); text-decoration: underline; }
+    .capital-automation-systemdetail { margin-top: 6px; color: var(--ca-muted); }
+    .capital-automation-systemdetail p { margin: 2px 0; }
+    .capital-automation-systemdetail summary { color: var(--ca-caption); cursor: pointer; }
     .capital-automation-modal { width: min(720px, calc(100vw - 32px)); max-width: min(720px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); }
     .capital-automation-modal-wizard { width: min(600px, calc(100vw - 32px)); max-width: min(600px, calc(100vw - 32px)); }
     .capital-automation-modal-content { max-height: calc(100dvh - 128px); overflow: auto; }
@@ -755,6 +814,7 @@ function createApi() {
         credentials: 'same-origin',
         headers: options.body === undefined ? {} : { 'content-type': 'application/json' },
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
+        ...(options.keepalive === true ? { keepalive: true } : {}),
         ...(controller === undefined ? {} : { signal: controller.signal }),
       })
       try {
@@ -777,7 +837,7 @@ function createApi() {
     tasks: () => request('/tasks'),
     detail: (id) => request(`/tasks/${encodeURIComponent(id)}`),
     create: (body) => request('/tasks', { method: 'POST', body }),
-    patch: (id, body) => request(`/tasks/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
+    patch: (id, body) => request(`/tasks/${encodeURIComponent(id)}`, { method: 'PATCH', body, keepalive: true }),
     remove: (id) => request(`/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     action: (id, action) => request(`/tasks/${encodeURIComponent(id)}/${action}`, { method: 'POST' }),
     run: (id) => request(`/tasks/${encodeURIComponent(id)}/run`, { method: 'POST' }),
@@ -841,24 +901,124 @@ function toneOf(task) {
   return task?.origin === 'custom' ? 'custom' : (task?.category ?? 'news')
 }
 
-function taskGlyph(task) {
-  if (task?.origin === 'custom') return IconSparkleRegular
-  if (task?.sourceBuiltinId === 'morning-brief') return IconLightOutlineMedium
-  if (task?.category === 'market') return IconGaugeOutlineRegular
-  if (task?.category === 'review') return IconListPenOutlineRegular
-  if (task?.category === 'research') return IconSearchOutlineRegular
-  return IconGlobeOutlineRegular
+// Twelve templates cannot stay in record-id order: read them daily → weekly → monthly, then by
+// day and wall-clock time, so the card grid matches how the user plans the week.
+const CADENCE_RANK = { daily: 0, weekly: 1, monthly: 2, once: 3 }
+function firstWeekday(trigger) {
+  const days = Array.isArray(trigger?.weekdays) ? trigger.weekdays : []
+  return days.length === 0 ? 0 : Math.min(...days)
+}
+function compareTemplates(left, right) {
+  const rank = (CADENCE_RANK[left.trigger?.cadence] ?? 9) - (CADENCE_RANK[right.trigger?.cadence] ?? 9)
+  if (rank !== 0) return rank
+  const day = firstWeekday(left.trigger) - firstWeekday(right.trigger)
+  if (day !== 0) return day
+  return String(left.trigger?.time ?? '').localeCompare(String(right.trigger?.time ?? ''))
+    || String(left.title).localeCompare(String(right.title))
+}
+
+function iconDefinition(id) {
+  return typeof id === 'string' && Object.prototype.hasOwnProperty.call(TASK_ICON_CATALOG, id)
+    ? TASK_ICON_CATALOG[id]
+    : undefined
+}
+
+function taskIconId(task) {
+  if (iconDefinition(task?.icon) !== undefined) return task.icon
+  if (task?.origin === 'custom') return DEFAULT_CUSTOM_ICON
+  return builtinTaskIcon(task?.sourceBuiltinId)
+}
+
+function taskIcon(task) {
+  return iconDefinition(taskIconId(task)) ?? TASK_ICON_CATALOG[DEFAULT_CUSTOM_ICON]
+}
+
+// Tabler glyphs are a 24 grid with 2px strokes; the tile supplies size and color so one drawing
+// works on every category tone.
+function TaskGlyph(props) {
+  const { task, size } = props
+  const icon = taskIcon(task)
+  return h('svg', {
+    viewBox: '0 0 24 24',
+    width: size,
+    height: size,
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 2,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    'aria-hidden': 'true',
+    focusable: 'false',
+  }, h('path', { d: icon.d }))
 }
 
 function Glyph(props) {
   const { task, size = 34, large = false } = props
-  const GlyphIcon = taskGlyph(task)
   const edge = large ? 44 : size
   return h('span', {
     className: 'capital-automation-glyph',
     'data-tone': toneOf(task),
     style: { width: edge, height: edge, borderRadius: large ? 13 : 10 },
-  }, h(GlyphIcon, { size: large ? 22 : 17 }))
+  }, h(TaskGlyph, { task, size: large ? 22 : 17 }))
+}
+
+function IconPickerTrigger(props) {
+  const { task, size = 38, large = false, onChange, disabled } = props
+  const [open, setOpen] = useState(false)
+  const selectedId = taskIconId(task)
+  const selected = iconDefinition(selectedId) ?? TASK_ICON_CATALOG[DEFAULT_CUSTOM_ICON]
+  useEffect(() => {
+    if (disabled === true && open) setOpen(false)
+  }, [disabled, open])
+  // The host Menu owns the portal, outside-click, Escape and button walk; the grid is only content.
+  return h(Menu, {
+    open,
+    anchor: h('button', {
+      type: 'button',
+      className: 'capital-automation-glyphbtn',
+      disabled,
+      'aria-label': `${zh.iconField}：${selected.label}，点击更换`,
+      'aria-haspopup': 'menu',
+      'aria-expanded': open ? 'true' : 'false',
+      title: zh.iconPickHint,
+      onClick: () => setOpen((current) => !current),
+    },
+    h(Glyph, { task, size, large }),
+    h('span', { className: 'capital-automation-glyphbtnchevron', 'aria-hidden': 'true' },
+      h(IconChevronDownOutlineRegular, { size: 12 }))),
+    items: [],
+    onClose: () => setOpen(false),
+    align: 'start',
+    side: 'bottom',
+    portal: true,
+    listClassName: 'capital-automation-iconmenu',
+  }, h('div', { className: 'capital-automation-iconmenu-grid' },
+    TASK_ICON_IDS.map((id) => {
+      const icon = TASK_ICON_CATALOG[id]
+      const active = id === selectedId
+      return h('button', {
+        key: id,
+        type: 'button',
+        role: 'menuitemradio',
+        'aria-checked': active ? 'true' : 'false',
+        'aria-label': icon.label,
+        title: icon.label,
+        className: 'capital-automation-iconmenu-item',
+        'data-selected': active ? 'true' : undefined,
+        onClick: () => { onChange(id); setOpen(false) },
+      }, h('svg', {
+        viewBox: '0 0 24 24',
+        width: 18,
+        height: 18,
+        fill: 'none',
+        stroke: 'currentColor',
+        strokeWidth: 2,
+        strokeLinecap: 'round',
+        strokeLinejoin: 'round',
+        'aria-hidden': 'true',
+        focusable: 'false',
+      }, h('path', { d: icon.d })))
+    })))
 }
 
 function StateBadge(props) {
@@ -1119,16 +1279,28 @@ function triggerChanged(cadence, trigger) {
   return next
 }
 
-function defaultDraft() {
+/** New-task limits start from the settings card; leaving them untouched keeps the task inherited. */
+function defaultLimits(meta) {
+  const settings = meta?.execution?.settings
+  return {
+    runTimeoutMinutes: settings?.runTimeoutMinutes ?? DEFAULT_LIMITS.runTimeoutMinutes,
+    idleTimeoutMinutes: settings?.idleTimeoutMinutes ?? DEFAULT_LIMITS.idleTimeoutMinutes,
+    maxSteps: settings?.maxSteps ?? DEFAULT_LIMITS.maxSteps,
+    maxToolCalls: settings?.maxToolCalls ?? DEFAULT_LIMITS.maxToolCalls,
+  }
+}
+
+function defaultDraft(meta) {
   return {
     title: '我的投研任务',
     description: '',
     instruction: '',
     category: 'research',
+    icon: DEFAULT_CUSTOM_ICON,
     trigger: { kind: 'schedule', cadence: 'daily', time: '09:00', timezone: 'Asia/Shanghai', tradingDaysOnly: true },
     workspaceId: '',
-    limits: { ...DEFAULT_LIMITS },
-    notifications: { inApp: true, onFailure: true, onSuccess: false },
+    limits: defaultLimits(meta),
+    notifications: { inApp: meta?.execution?.settings?.inAppNotifications !== false, onFailure: true, onSuccess: false },
   }
 }
 
@@ -1138,6 +1310,7 @@ function draftPayload(task) {
     description: task.description ?? '',
     instruction: task.instruction ?? '',
     category: task.category,
+    ...(task.origin === 'builtin' ? {} : { icon: task.icon ?? DEFAULT_CUSTOM_ICON }),
     trigger: normalizeTrigger(task.trigger),
     workspaceId: task.workspaceId ?? '',
     limits: task.limits,
@@ -1145,8 +1318,21 @@ function draftPayload(task) {
   }
 }
 
+function payloadKey(task) {
+  return JSON.stringify(draftPayload(task))
+}
+
 function samePayload(left, right) {
-  return JSON.stringify(draftPayload(left)) === JSON.stringify(draftPayload(right))
+  return payloadKey(left) === payloadKey(right)
+}
+
+function cloneTask(task) {
+  return {
+    ...task,
+    trigger: normalizeTrigger(task.trigger),
+    limits: { ...task.limits },
+    notifications: { ...task.notifications },
+  }
 }
 
 function groupRunCounts(runs) {
@@ -1204,11 +1390,7 @@ function notificationMessage(item) {
   return ''
 }
 
-function draftChanged(draft, task) {
-  return !samePayload(draft, task)
-}
-
-function draftIssues(task) {
+function draftIssues(task, meta) {
   const issues = {}
   if (String(task.title ?? '').trim().length === 0) issues.title = zh.titleRequired
   if (String(task.instruction ?? '').trim().length === 0) issues.instruction = zh.instructionRequired
@@ -1230,7 +1412,15 @@ function draftIssues(task) {
   }
   const limits = task.limits ?? {}
   for (const key of ['runTimeoutMinutes', 'idleTimeoutMinutes', 'maxSteps', 'maxToolCalls']) {
-    if (!Number.isFinite(limits[key])) issues[key] = zh.invalidLimit
+    const value = limits[key]
+    if (!Number.isFinite(value) || !Number.isInteger(value)) {
+      issues[key] = zh.invalidLimit
+      continue
+    }
+    const range = meta?.execution?.limits?.[key]
+    if (Array.isArray(range) && range.length === 2 && (value < range[0] || value > range[1])) {
+      issues[key] = zh.invalidLimitRange.replace('{min}', String(range[0])).replace('{max}', String(range[1]))
+    }
   }
   return issues
 }
@@ -1239,9 +1429,9 @@ function draftIssues(task) {
  * Tracks which fields the user has left so errors appear on blur, then update live.
  * `resetKey` clears that state when the edited task or modal session changes.
  */
-function useDraftIssues(task, resetKey) {
+function useDraftIssues(task, resetKey, meta) {
   const [touched, setTouched] = useState({})
-  const issues = draftIssues(task)
+  const issues = draftIssues(task, meta)
   useEffect(() => { setTouched({}) }, [resetKey])
   const errorFor = (field) => (touched[field] === true ? issues[field] : undefined)
   const touch = (field) => setTouched((current) => (current[field] === true ? current : { ...current, [field]: true }))
@@ -1250,8 +1440,7 @@ function useDraftIssues(task, resetKey) {
     for (const field of Object.keys(issues)) next[field] = true
     return next
   })
-  const clear = () => setTouched({})
-  return { issues, errorFor, touch, touchAll, clear }
+  return { issues, errorFor, touch, touchAll }
 }
 
 function limitValue(meta, key, fallback) {
@@ -1378,12 +1567,58 @@ function NotificationsButton(props) {
     className: 'capital-automation-btn',
     'data-variant': 'ghost',
     onClick,
-    title: zh.notificationsTitle,
-    'aria-label': zh.notificationsTitle,
+    title: zh.notificationsEntry,
+    'aria-label': zh.notificationsEntry,
   },
   h(IconAlarmClockOutlineRegular, { size: 14 }),
-  h('span', { className: 'capital-automation-btnlabel' }, zh.notifications),
+  h('span', { className: 'capital-automation-btnlabel' }, zh.notificationsEntry),
   unread > 0 ? h('span', { className: 'capital-automation-count' }, String(unread > 99 ? '99+' : unread)) : null)
+}
+
+function systemStatusReason(code) {
+  if (code === 'lease_held') return zh.systemReasonLeaseHeld
+  if (code === 'owner_unverified') return zh.systemReasonUnverified
+  return zh.systemReasonLeaseLost
+}
+
+/** Profile-level scheduling state lives here, not in the task inbox. */
+function SystemStatus(props) {
+  const { meta } = props
+  const [open, setOpen] = useState(false)
+  if (meta === null || meta === undefined) return null
+  const scheduler = meta.scheduler ?? {}
+  const state = scheduler.state
+  const summary = state === 'active'
+    ? zh.systemActive
+    : state === 'standby'
+      ? zh.systemStandby
+      : state === 'starting'
+        ? zh.systemStarting
+        : state === 'stopped'
+          ? zh.systemStopped
+          : zh.systemUnavailable
+  const calendarSummary = meta.calendar?.available === false ? zh.systemCalendarUnavailable : zh.systemCalendarOk
+  const lastStandbyAt = scheduler.lastStandbyAt
+  return h('section', { className: 'capital-automation-systemstatus', 'aria-label': zh.systemStatus },
+    h('div', { className: 'capital-automation-systemline' },
+      h('span', null, `${zh.systemStatus}：${summary} · ${calendarSummary}`),
+      h('button', {
+        type: 'button',
+        className: 'capital-automation-systemtoggle',
+        'aria-expanded': open ? 'true' : 'false',
+        onClick: () => setOpen((value) => !value),
+      }, open ? zh.systemHideDetails : zh.systemDetails)),
+    open
+      ? h('div', { className: 'capital-automation-systemdetail' },
+        lastStandbyAt
+          ? h('p', null, `${zh.systemLastStandby}：${formatShortTime(lastStandbyAt)} · ${systemStatusReason(scheduler.lastStandbyCode)}`)
+          : h('p', null, zh.systemNoStandby),
+        lastStandbyAt && scheduler.lastStandbyReason
+          ? h('details', null,
+            h('summary', null, zh.systemTechnical),
+            h('p', null, scheduler.lastStandbyReason))
+          : null)
+      : null)
 }
 
 function Header(props) {
@@ -1786,8 +2021,10 @@ function TaskDashboard(props) {
     market: roster.filter((task) => task.category === 'market').length,
     review: roster.filter((task) => task.category === 'review').length,
     research: roster.filter((task) => task.category === 'research').length,
+    portfolio: roster.filter((task) => task.category === 'portfolio').length,
+    monitor: roster.filter((task) => task.category === 'monitor').length,
   }
-  const filters = ['all', 'custom', 'news', 'market', 'review', 'research']
+  const filters = ['all', 'custom', 'news', 'market', 'review', 'research', 'portfolio', 'monitor']
   return h('div', null,
     h(RunHistoryCard, { runs, onViewAll: onGoRuns }),
     h('section', { className: 'capital-automation-section' },
@@ -1992,12 +2229,13 @@ function MonthlySelect(props) {
 }
 
 function TriggerFields(props) {
-  const { trigger, onChange, disabled, meta, errorFor, touch } = props
+  const { trigger, onChange, disabled, meta, errorFor, touch, onFlush } = props
   const update = (patch) => onChange(normalizeTrigger({ ...trigger, ...patch }))
   const setCadence = (cadence) => onChange(triggerChanged(cadence, trigger))
 
   const issue = (field) => (typeof errorFor === 'function' ? errorFor(field) : undefined)
   const touchField = (field) => { if (typeof touch === 'function') touch(field) }
+  const commit = () => { if (typeof onFlush === 'function') onFlush() }
   const timeError = issue('time')
   const timezoneError = issue('timezone')
   const weekdayError = issue('weekdays')
@@ -2051,7 +2289,7 @@ function TriggerFields(props) {
                   'aria-invalid': dateError ? 'true' : undefined,
                   'data-invalid': dateError ? 'true' : undefined,
                   onChange: (event) => update({ date: event.target.value }),
-                  onBlur: () => touchField('date'),
+                  onBlur: () => { touchField('date'); commit() },
                 }))
               : null)),
     h('div', { className: 'capital-automation-triggerfield' },
@@ -2065,7 +2303,7 @@ function TriggerFields(props) {
         'aria-invalid': timeError ? 'true' : undefined,
         'data-invalid': timeError ? 'true' : undefined,
         onChange: (event) => update({ time: event.target.value }),
-        onBlur: () => touchField('time'),
+        onBlur: () => { touchField('time'); commit() },
       }))),
   h('div', { className: 'capital-automation-triggersettings' },
     h('span', { className: 'capital-automation-triggerzone' },
@@ -2393,41 +2631,31 @@ function OverviewTab(props) {
 }
 
 function ConfigTab(props) {
-  const { draft, setDraft, meta, busy, dirty, save, reset, disabled } = props
+  const { draft, setDraft, meta, busy, dirty, saveState, saveError, retry, onFlush, disabled } = props
   const task = draft
-  const { issues, errorFor, touch, touchAll, clear } = useDraftIssues(task, task.id)
-  const formRef = useRef(null)
+  const { errorFor, touch } = useDraftIssues(task, task.id, meta)
   const titleError = errorFor('title')
   const instructionError = errorFor('instruction')
   const set = (patch) => setDraft((current) => ({
     ...current,
     ...(typeof patch === 'function' ? patch(current) : patch),
   }))
-  const submit = () => {
-    if (Object.keys(issues).length > 0) {
-      touchAll()
-      setTimeout(() => {
-        const target = formRef.current?.querySelector('[data-invalid="true"] input, [data-invalid="true"] .capital-automation-texteditor')
-        target?.focus?.()
-      }, 0)
-      return
-    }
-    void save()
-  }
+  const flush = () => { if (typeof onFlush === 'function') onFlush() }
   const timeoutRange = limitValue(meta, 'runTimeoutMinutes', [5, 120])
   const idleRange = limitValue(meta, 'idleTimeoutMinutes', [1, 30])
-  const stepsRange = limitValue(meta, 'maxSteps', [10, 2000])
-  const toolsRange = limitValue(meta, 'maxToolCalls', [10, 6000])
+  const stepsRange = limitValue(meta, 'maxSteps', [100, 2000])
+  const toolsRange = limitValue(meta, 'maxToolCalls', [100, 5000])
   const instructionEditor = h(Field, { label: zh.instructionField, error: instructionError },
     h(PlainTextEditor, {
       className: 'capital-automation-texteditor',
       value: task.instruction,
+      maxLength: INSTRUCTION_MAX_LENGTH,
       disabled: busy || disabled,
       placeholder: zh.instructionPlaceholder,
       ariaLabel: zh.instructionField,
       invalid: instructionError ? true : undefined,
       onChange: (instruction) => set({ instruction }),
-      onBlur: () => touch('instruction'),
+      onBlur: () => { touch('instruction'); flush() },
     }))
   const instructionSide = h('div', { className: 'capital-automation-instructionside' },
     h(SelectField, {
@@ -2440,24 +2668,43 @@ function ConfigTab(props) {
     meta?.workspaceError ? h('p', { className: 'capital-automation-hint', 'data-tone': 'error' }, zh.workspaceUnavailable) : null,
     h('div', null,
       h('span', { className: 'capital-automation-formlabel' }, zh.triggerField),
-      h(TriggerFields, { trigger: task.trigger, disabled: busy || disabled, onChange: (trigger) => set({ trigger }), meta, errorFor, touch })))
+      h(TriggerFields, { trigger: task.trigger, disabled: busy || disabled, onChange: (trigger) => set({ trigger }), meta, errorFor, touch, onFlush: flush })))
   const advanced = h('details', { className: 'capital-automation-advanced' },
     h('summary', null, zh.advanced),
     h('div', { className: 'capital-automation-advancedbody' },
       h('div', { className: 'capital-automation-formgrid' },
-        h(NumberField, { label: zh.runTimeout, value: task.limits.runTimeoutMinutes, min: timeoutRange[0], max: timeoutRange[1], disabled: busy || disabled, error: errorFor('runTimeoutMinutes'), onBlur: () => touch('runTimeoutMinutes'), onChange: (value) => set((current) => ({ limits: { ...current.limits, runTimeoutMinutes: value } })) }),
-        h(NumberField, { label: zh.idleTimeout, value: task.limits.idleTimeoutMinutes, min: idleRange[0], max: idleRange[1], disabled: busy || disabled, error: errorFor('idleTimeoutMinutes'), onBlur: () => touch('idleTimeoutMinutes'), onChange: (value) => set((current) => ({ limits: { ...current.limits, idleTimeoutMinutes: value } })) }),
-        h(NumberField, { label: zh.maxSteps, value: task.limits.maxSteps, min: stepsRange[0], max: stepsRange[1], disabled: busy || disabled, error: errorFor('maxSteps'), onBlur: () => touch('maxSteps'), onChange: (value) => set((current) => ({ limits: { ...current.limits, maxSteps: value } })) }),
-        h(NumberField, { label: zh.maxToolCalls, value: task.limits.maxToolCalls, min: toolsRange[0], max: toolsRange[1], disabled: busy || disabled, error: errorFor('maxToolCalls'), onBlur: () => touch('maxToolCalls'), onChange: (value) => set((current) => ({ limits: { ...current.limits, maxToolCalls: value } })) })),
+        h(NumberField, { label: zh.runTimeout, value: task.limits.runTimeoutMinutes, min: timeoutRange[0], max: timeoutRange[1], disabled: busy || disabled, error: errorFor('runTimeoutMinutes'), onBlur: () => { touch('runTimeoutMinutes'); flush() }, onChange: (value) => set((current) => ({ limits: { ...current.limits, runTimeoutMinutes: value } })) }),
+        h(NumberField, { label: zh.idleTimeout, value: task.limits.idleTimeoutMinutes, min: idleRange[0], max: idleRange[1], disabled: busy || disabled, error: errorFor('idleTimeoutMinutes'), onBlur: () => { touch('idleTimeoutMinutes'); flush() }, onChange: (value) => set((current) => ({ limits: { ...current.limits, idleTimeoutMinutes: value } })) }),
+        h(NumberField, { label: zh.maxSteps, value: task.limits.maxSteps, min: stepsRange[0], max: stepsRange[1], disabled: busy || disabled, error: errorFor('maxSteps'), onBlur: () => { touch('maxSteps'); flush() }, onChange: (value) => set((current) => ({ limits: { ...current.limits, maxSteps: value } })) }),
+        h(NumberField, { label: zh.maxToolCalls, value: task.limits.maxToolCalls, min: toolsRange[0], max: toolsRange[1], disabled: busy || disabled, error: errorFor('maxToolCalls'), onBlur: () => { touch('maxToolCalls'); flush() }, onChange: (value) => set((current) => ({ limits: { ...current.limits, maxToolCalls: value } })) })),
       h('p', { className: 'capital-automation-hint' }, zh.budgetHint)))
   const notificationRows = h('div', null,
     h('span', { className: 'capital-automation-formlabel' }, zh.notifyField),
     h('div', { className: 'capital-automation-switchlist' },
       h(SwitchRow, { label: zh.notifyInApp, checked: task.notifications.inApp, disabled: busy || disabled, onChange: (value) => set((current) => ({ notifications: { ...current.notifications, inApp: value } })) }),
-      h(SwitchRow, { label: zh.notifyFailure, checked: task.notifications.onFailure, disabled: busy || disabled, onChange: (value) => set((current) => ({ notifications: { ...current.notifications, onFailure: value } })) }),
-      h(SwitchRow, { label: zh.notifySuccess, checked: task.notifications.onSuccess, disabled: busy || disabled, onChange: (value) => set((current) => ({ notifications: { ...current.notifications, onSuccess: value } })) })),
+      h(SwitchRow, { label: zh.notifyFailure, checked: task.notifications.onFailure, disabled: busy || disabled || task.notifications.inApp !== true, onChange: (value) => set((current) => ({ notifications: { ...current.notifications, onFailure: value } })) }),
+      h(SwitchRow, { label: zh.notifySuccess, checked: task.notifications.onSuccess, disabled: busy || disabled || task.notifications.inApp !== true, onChange: (value) => set((current) => ({ notifications: { ...current.notifications, onSuccess: value } })) })),
     h('p', { className: 'capital-automation-hint' }, zh.notifyHint))
-  return h('div', { className: 'capital-automation-form', ref: formRef },
+  const state = disabled
+    ? 'disabled'
+    : dirty && (saveState === 'idle' || saveState === 'saved')
+      ? 'pending'
+      : !dirty && saveState === 'pending'
+        ? 'idle'
+        : saveState
+  const statusText = state === 'saving'
+    ? zh.saving
+    : state === 'error'
+      ? `${zh.autosaveFailed}：${saveError || zh.errorGeneric}`
+      : state === 'invalid'
+        ? zh.autosaveInvalid
+        : state === 'pending'
+          ? zh.autosavePending
+          : state === 'saved'
+            ? zh.autosaveSaved
+            : zh.noDirty
+  const statusTone = state === 'error' ? 'error' : state === 'saved' ? 'ok' : undefined
+  return h('div', { className: 'capital-automation-form' },
     h('div', { className: 'capital-automation-titlerow' },
       h(Field, {
         label: zh.titleField,
@@ -2470,7 +2717,7 @@ function ConfigTab(props) {
         disabled: busy || disabled,
         'aria-invalid': titleError ? 'true' : undefined,
         onChange: (event) => set({ title: event.target.value }),
-        onBlur: () => touch('title'),
+        onBlur: () => { touch('title'); flush() },
       })),
       h(SelectField, {
         label: zh.categoryField,
@@ -2480,6 +2727,18 @@ function ConfigTab(props) {
         disabled: busy || disabled || task.origin === 'builtin',
         onChange: (category) => set({ category }),
       })),
+    task.origin === 'custom'
+      ? h('div', { className: 'capital-automation-iconrow' },
+        h(IconPickerTrigger, {
+          task,
+          size: 38,
+          disabled: busy || disabled,
+          onChange: (icon) => set({ icon }),
+        }),
+        h('div', { className: 'capital-automation-iconrowbody' },
+          h('span', { className: 'capital-automation-formlabel' }, zh.iconField),
+          h('span', { className: 'capital-automation-hint' }, `${taskIcon(task).label} · ${zh.iconPickHint}`)))
+      : h('p', { className: 'capital-automation-hint' }, zh.iconBuiltinHint),
     h(Field, {
       label: zh.descriptionField,
       note: zh.charCount.replace('{n}', String(Array.from(task.description ?? '').length)).replace('{max}', String(DESCRIPTION_MAX_LENGTH)),
@@ -2492,6 +2751,7 @@ function ConfigTab(props) {
       placeholder: zh.descriptionPlaceholder,
       ariaLabel: zh.descriptionField,
       onChange: (description) => set({ description }),
+      onBlur: flush,
     })),
     h('div', { className: 'capital-automation-instructionrow' },
       instructionEditor,
@@ -2499,10 +2759,18 @@ function ConfigTab(props) {
     advanced,
     notificationRows,
     h('div', { className: 'capital-automation-formactions', 'data-sticky': 'true' },
-      h('span', { className: 'capital-automation-formstatus' },
-        disabled ? zh.storageUnavailable : dirty ? zh.dirty : zh.noDirty),
-      h('button', { type: 'button', className: 'capital-automation-btn', disabled: busy || !dirty, onClick: () => { clear(); reset() } }, zh.cancel),
-      h('button', { type: 'button', className: 'capital-automation-btn', 'data-variant': 'primary', disabled: busy || !dirty || disabled, onClick: submit }, busy === 'save' ? zh.saving : zh.save)))
+      h('span', { className: 'capital-automation-formstatus' }, disabled ? zh.storageUnavailable : zh.autosaveHint),
+      state === 'disabled'
+        ? null
+        : h('span', {
+          className: 'capital-automation-autosavestate',
+          role: 'status',
+          'data-tone': statusTone,
+          title: state === 'error' ? saveError : undefined,
+        }, statusText),
+      state === 'error'
+        ? h('button', { type: 'button', className: 'capital-automation-btn', 'data-size': 'sm', disabled: busy || disabled, onClick: retry }, zh.autosaveRetry)
+        : null))
 }
 
 function NotificationsTab(props) {
@@ -2553,19 +2821,72 @@ function DetailBar(props) {
 function TaskDetailPage(props) {
   const { detail, meta, api, onChanged, openSession, tab, onTab, onRequestConfirm, onRequestCancelRun, schedulerActive, storageReady } = props
   const [draft, setDraft] = useState(null)
+  const [savedTask, setSavedTask] = useState(null)
   const [busy, setBusy] = useState('')
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
+  const [saveState, setSaveState] = useState('idle')
+  const [saveError, setSaveError] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
   const lastTaskIdRef = useRef(null)
+  const activeTaskIdRef = useRef(null)
+  const draftRef = useRef(null)
+  const savedTaskRef = useRef(null)
+  const ackedPayloadRef = useRef(null)
+  const failedPayloadRef = useRef(null)
+  const saveTimerRef = useRef(null)
+  const saveInFlightRef = useRef(false)
+  const saveQueuedRef = useRef(false)
+  const savePromiseRef = useRef(null)
+  const flushRef = useRef(null)
+  const storageReadyNow = storageReady !== false
+  activeTaskIdRef.current = detail.task?.id ?? null
+
+  const updateDraft = (patch) => {
+    const current = draftRef.current
+    if (current === null) return
+    const next = {
+      ...current,
+      ...(typeof patch === 'function' ? patch(current) : patch),
+    }
+    draftRef.current = next
+    setDraft(next)
+  }
 
   useEffect(() => {
-    setDraft(detail.task ? {
-      ...detail.task,
-      trigger: normalizeTrigger(detail.task.trigger),
-      limits: { ...detail.task.limits },
-      notifications: { ...detail.task.notifications },
-    } : null)
+    const server = detail.task
+    if (!server) {
+      savedTaskRef.current = null
+      ackedPayloadRef.current = null
+      setSavedTask(null)
+      setDraft(null)
+      draftRef.current = null
+      return
+    }
+    const nextSaved = cloneTask(server)
+    const previousAcked = ackedPayloadRef.current
+    savedTaskRef.current = nextSaved
+    ackedPayloadRef.current = payloadKey(nextSaved)
+    setSavedTask(nextSaved)
+    const current = draftRef.current
+    if (current === null || current.id !== nextSaved.id) {
+      draftRef.current = nextSaved
+      setDraft(nextSaved)
+      return
+    }
+    if (samePayload(current, nextSaved)) return
+    // Hibernate clears overrides on the server; discard a local draft that a failed save
+    // could otherwise resurrect after the task returns to its template defaults.
+    if (nextSaved.state === 'dormant' && current.state !== 'dormant') {
+      draftRef.current = nextSaved
+      setDraft(nextSaved)
+      return
+    }
+    // A poll or another action must not clobber edits the user has not saved yet.
+    if (previousAcked !== null && payloadKey(current) === previousAcked) {
+      draftRef.current = nextSaved
+      setDraft(nextSaved)
+    }
   }, [detail])
 
   useEffect(() => {
@@ -2574,20 +2895,57 @@ function TaskDetailPage(props) {
     lastTaskIdRef.current = id
     setNotice('')
     setError('')
+    setSaveState('idle')
+    setSaveError('')
+    failedPayloadRef.current = null
   }, [detail])
+
+  useEffect(() => {
+    if (draft === null || savedTask === null || storageReadyNow === false) return undefined
+    if (samePayload(draft, savedTask)) {
+      setSaveState((state) => (state === 'pending' || state === 'invalid' || state === 'error' ? 'idle' : state))
+      return undefined
+    }
+    if (busy) return undefined
+    if (Object.keys(draftIssues(draft, meta)).length > 0) {
+      setSaveState('invalid')
+      return undefined
+    }
+    if (failedPayloadRef.current !== null && payloadKey(draft) === failedPayloadRef.current) {
+      setSaveState('error')
+      return undefined
+    }
+    setSaveState((state) => (state === 'saving' ? state : 'pending'))
+    saveTimerRef.current = setTimeout(() => { void flushRef.current?.() }, AUTOSAVE_DELAY_MS)
+    return () => {
+      if (saveTimerRef.current !== null) {
+        clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = null
+      }
+    }
+  }, [draft, savedTask, busy, storageReadyNow, meta])
+
+  useEffect(() => {
+    if (tab === 'config') return
+    void flushRef.current?.()
+  }, [tab])
+
+  useEffect(() => () => { void flushRef.current?.() }, [])
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined
+    const onHide = () => { if (document.visibilityState === 'hidden') void flushRef.current?.() }
+    document.addEventListener?.('visibilitychange', onHide)
+    return () => document.removeEventListener?.('visibilitychange', onHide)
+  }, [])
 
   if (draft === null) return h('p', { className: 'capital-automation-empty' }, zh.loading)
   const task = draft
-  const storageReadyNow = storageReady !== false
   const running = detail.runs.some((run) => isActiveRun(run))
   const activeRun = detail.runs.find((run) => isActiveRun(run))
   const unread = detail.notifications.filter((item) => item.readAt === undefined).length
-  const dirty = draftChanged(draft, detail.task)
+  const dirty = savedTask === null ? false : !samePayload(draft, savedTask)
   const canRun = storageReadyNow && schedulerActive === true && !running
-  const set = (patch) => setDraft((current) => ({
-    ...current,
-    ...(typeof patch === 'function' ? patch(current) : patch),
-  }))
 
   async function act(name, action, success) {
     if (busy) return
@@ -2604,10 +2962,90 @@ function TaskDetailPage(props) {
     }
   }
 
-  async function save() {
-    await act('save', async () => {
-      await api.patch(detail.task.id, draftPayload(task))
-    }, zh.saved)
+  async function flush() {
+    if (saveTimerRef.current !== null) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    if (saveInFlightRef.current) {
+      saveQueuedRef.current = true
+      return savePromiseRef.current ?? undefined
+    }
+    const current = draftRef.current
+    const base = savedTaskRef.current
+    if (current === null || base === null || storageReadyNow === false) return
+    if (samePayload(current, base)) {
+      setSaveState((state) => (state === 'saving' ? state : 'idle'))
+      return
+    }
+    if (Object.keys(draftIssues(current, meta)).length > 0) {
+      setSaveState('invalid')
+      return
+    }
+    const payload = draftPayload(current)
+    const taskId = current.id
+    saveInFlightRef.current = true
+    saveQueuedRef.current = false
+    setSaveState('saving')
+    setSaveError('')
+    const savePromise = (async () => {
+      try {
+        const result = await api.patch(taskId, payload)
+        if (activeTaskIdRef.current !== taskId) {
+          void onChanged?.(taskId)
+          return
+        }
+        const serverTask = result?.task
+        const nextSaved = serverTask === undefined ? cloneTask({ ...base, ...payload }) : cloneTask(serverTask)
+        savedTaskRef.current = nextSaved
+        ackedPayloadRef.current = payloadKey(nextSaved)
+        failedPayloadRef.current = null
+        setSavedTask(nextSaved)
+        setSaveState('saved')
+        void onChanged?.(taskId)
+      } catch (failure) {
+        if (activeTaskIdRef.current === taskId) {
+          failedPayloadRef.current = payloadKey(current)
+          setSaveState('error')
+          setSaveError(failure?.message ?? zh.errorGeneric)
+        }
+      } finally {
+        saveInFlightRef.current = false
+        const latest = draftRef.current
+        const baseNow = savedTaskRef.current
+        const queued = saveQueuedRef.current
+        saveQueuedRef.current = false
+        if (queued || (latest !== null && baseNow !== null && latest.id === baseNow.id && !samePayload(latest, baseNow) && failedPayloadRef.current === null)) {
+          saveTimerRef.current = setTimeout(() => { void flushRef.current?.() }, 0)
+        }
+      }
+    })()
+    savePromiseRef.current = savePromise
+    try {
+      await savePromise
+    } finally {
+      if (savePromiseRef.current === savePromise) savePromiseRef.current = null
+    }
+  }
+  flushRef.current = flush
+
+  function retrySave() {
+    failedPayloadRef.current = null
+    setSaveError('')
+    void flushRef.current?.()
+  }
+
+  async function flushBeforeAction() {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await flushRef.current?.()
+      const current = draftRef.current
+      const base = savedTaskRef.current
+      if (current === null || base === null) return true
+      if (samePayload(current, base)) return true
+      if (Object.keys(draftIssues(current, meta)).length > 0) return false
+      if (failedPayloadRef.current !== null) return false
+    }
+    return false
   }
 
   async function toggleState() {
@@ -2618,6 +3056,11 @@ function TaskDetailPage(props) {
   }
 
   async function runNow() {
+    if (!(await flushBeforeAction())) {
+      const current = draftRef.current
+      setError(current !== null && Object.keys(draftIssues(current, meta)).length > 0 ? zh.autosaveInvalid : zh.autosaveFailed)
+      return
+    }
     await act('run', async () => {
       await api.run(detail.task.id)
     }, zh.runSubmitted.replace('{title}', detail.task.title))
@@ -2632,6 +3075,11 @@ function TaskDetailPage(props) {
   }
 
   async function copyTask() {
+    if (!(await flushBeforeAction())) {
+      const current = draftRef.current
+      setError(current !== null && Object.keys(draftIssues(current, meta)).length > 0 ? zh.autosaveInvalid : zh.autosaveFailed)
+      return
+    }
     await act('copy', async () => {
       await api.action(detail.task.id, 'copy')
     }, zh.copied.replace('{title}', detail.task.title))
@@ -2653,17 +3101,6 @@ function TaskDetailPage(props) {
       title: schedulerActive === false ? zh.schedulerBlocked : running ? zh.runBlocked : undefined,
       onClick: () => { void runNow() },
     }, h(IconPlayOutlineRegular, { size: 14 }), zh.runNow)
-
-  const resetDraft = () => {
-    setDraft({
-      ...detail.task,
-      trigger: normalizeTrigger(detail.task.trigger),
-      limits: { ...detail.task.limits },
-      notifications: { ...detail.task.notifications },
-    })
-    setError('')
-    setNotice('')
-  }
 
   return h('div', null,
     h('div', { className: 'capital-automation-hero' },
@@ -2696,7 +3133,18 @@ function TaskDetailPage(props) {
             else if (id === 'copy') void copyTask()
             else if (id === 'activate' || id === 'pause') void toggleState()
           },
-          onRequestConfirm: (kind, target) => { setMenuOpen(false); onRequestConfirm(kind, target) },
+          onRequestConfirm: (kind, target) => {
+            setMenuOpen(false)
+            // A pending autosave must not land after hibernate clears the overrides.
+            if (kind === 'hibernate' || kind === 'delete') {
+              void (async () => {
+                await flushBeforeAction()
+                onRequestConfirm(kind, target)
+              })()
+              return
+            }
+            onRequestConfirm(kind, target)
+          },
           canRun,
           running,
           busy: busy.length > 0,
@@ -2728,12 +3176,14 @@ function TaskDetailPage(props) {
       }) : null,
       tab === 'config' ? h(ConfigTab, {
         draft,
-        setDraft,
+        setDraft: updateDraft,
         meta,
         busy,
         dirty,
-        save,
-        reset: resetDraft,
+        saveState,
+        saveError,
+        retry: retrySave,
+        onFlush: () => { void flushRef.current?.() },
         disabled: !storageReadyNow,
       }) : null,
       tab === 'runs' ? h('section', { className: 'capital-automation-card capital-automation-panel' },
@@ -2756,15 +3206,15 @@ function TaskDetailPage(props) {
 
 function NewTaskModal(props) {
   const { open, onClose, api, onCreated, meta } = props
-  const [draft, setDraft] = useState(defaultDraft)
+  const [draft, setDraft] = useState(() => defaultDraft(meta))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const { issues, errorFor, touch, touchAll } = useDraftIssues(draft, open)
+  const { issues, errorFor, touch, touchAll } = useDraftIssues(draft, open, meta)
   const titleError = errorFor('title')
   const instructionError = errorFor('instruction')
   useEffect(() => {
     if (!open) return
-    setDraft(defaultDraft())
+    setDraft(defaultDraft(meta))
     setBusy(false)
     setError('')
   }, [open])
@@ -2774,8 +3224,8 @@ function NewTaskModal(props) {
   }))
   const timeoutRange = limitValue(meta, 'runTimeoutMinutes', [5, 120])
   const idleRange = limitValue(meta, 'idleTimeoutMinutes', [1, 30])
-  const stepsRange = limitValue(meta, 'maxSteps', [10, 2000])
-  const toolsRange = limitValue(meta, 'maxToolCalls', [10, 6000])
+  const stepsRange = limitValue(meta, 'maxSteps', [100, 2000])
+  const toolsRange = limitValue(meta, 'maxToolCalls', [100, 5000])
   async function create() {
     if (Object.keys(issues).length > 0) {
       touchAll()
@@ -2806,7 +3256,7 @@ function NewTaskModal(props) {
   },
   h('div', { className: 'capital-automation-wizard' },
     h('div', { className: 'capital-automation-modalheadline', 'data-invalid': titleError ? 'true' : undefined },
-      h(Glyph, { task: draft, size: 42 }),
+      h(IconPickerTrigger, { task: draft, size: 42, onChange: (icon) => set({ icon }) }),
       h('input', {
         className: 'capital-automation-modaltitleinput',
         value: draft.title,
@@ -2818,7 +3268,6 @@ function NewTaskModal(props) {
         onBlur: () => touch('title'),
       })),
     titleError ? h('span', { className: 'capital-automation-fielderror', role: 'alert' }, titleError) : null,
-    h('p', { className: 'capital-automation-hint' }, zh.newTaskHint),
     h(Field, {
       label: zh.descriptionField,
       note: zh.charCount.replace('{n}', String(Array.from(draft.description ?? '').length)).replace('{max}', String(DESCRIPTION_MAX_LENGTH)),
@@ -2839,6 +3288,7 @@ function NewTaskModal(props) {
           h(PlainTextEditor, {
             className: 'capital-automation-texteditor',
             value: draft.instruction,
+            maxLength: INSTRUCTION_MAX_LENGTH,
             placeholder: zh.instructionPlaceholder,
             ariaLabel: zh.instructionField,
             invalid: instructionError ? true : undefined,
@@ -2885,8 +3335,8 @@ function NewTaskModal(props) {
       h('span', { className: 'capital-automation-formlabel' }, zh.notifyField),
       h('div', { className: 'capital-automation-switchlist' },
         h(SwitchRow, { label: zh.notifyInApp, checked: draft.notifications.inApp, onChange: (value) => set((current) => ({ notifications: { ...current.notifications, inApp: value } })) }),
-        h(SwitchRow, { label: zh.notifyFailure, checked: draft.notifications.onFailure, onChange: (value) => set((current) => ({ notifications: { ...current.notifications, onFailure: value } })) }),
-        h(SwitchRow, { label: zh.notifySuccess, checked: draft.notifications.onSuccess, onChange: (value) => set((current) => ({ notifications: { ...current.notifications, onSuccess: value } })) })),
+        h(SwitchRow, { label: zh.notifyFailure, checked: draft.notifications.onFailure, disabled: draft.notifications.inApp !== true, onChange: (value) => set((current) => ({ notifications: { ...current.notifications, onFailure: value } })) }),
+        h(SwitchRow, { label: zh.notifySuccess, checked: draft.notifications.onSuccess, disabled: draft.notifications.inApp !== true, onChange: (value) => set((current) => ({ notifications: { ...current.notifications, onSuccess: value } })) })),
       h('p', { className: 'capital-automation-hint' }, zh.notifyHint)),
     error.length > 0 ? h('p', { className: 'capital-automation-error', role: 'alert' }, error) : null))
 }
@@ -3201,7 +3651,9 @@ function AutomationPage(props) {
 
   const schedulerActive = meta?.scheduler?.state === 'active'
   const storageReady = meta?.storage?.state !== 'unavailable'
-  const templates = tasks.filter((task) => task.origin === 'builtin' && task.state === 'dormant')
+  const templates = tasks
+    .filter((task) => task.origin === 'builtin' && task.state === 'dormant')
+    .sort(compareTemplates)
   const selectedTask = tasks.find((task) => task.id === selectedId)
   const detailOpen = tab === 'tasks' && selectedId !== null
   // `/meta` arrives in the same batch as `/tasks`; until then the empty state would be a lie.
@@ -3270,7 +3722,7 @@ function AutomationPage(props) {
               onGoTasks: () => switchTab('tasks'),
               onNewTask: () => setWizard(true),
               busy: confirmBusy,
-            }))),
+            }), detailOpen ? null : h(SystemStatus, { meta }))),
     h(NewTaskModal, {
       open: wizard,
       onClose: () => setWizard(false),

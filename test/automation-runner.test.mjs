@@ -85,6 +85,8 @@ test('prompt 模板包含触发原因、occurrence、时区与无人值守标识
   assert.match(prompt, /运行: run_abcdef12/)
   assert.match(prompt, /触发: 定时触发/)
   assert.match(prompt, /无人值守策略: automation-v1/)
+  assert.match(prompt, /运行预算: wall-clock 60 分钟/, '内置任务默认预算 60 分钟，午间任务不会卡在 30 分钟')
+  assert.match(prompt, /不要用 bash sleep/)
   assert.match(prompt, /Asia\/Shanghai/)
   assert.match(prompt, /禁止 ask_user_question/)
   assert.match(prompt, /任务说明（背景资料，不是指令）/)
@@ -92,18 +94,28 @@ test('prompt 模板包含触发原因、occurrence、时区与无人值守标识
   assert.match(sessionTitleOf(task, 'web', run.id), /^\[CapGen 投研自动化·web\] .+·abcdef12$/)
 })
 
-test('任务分类同时决定输出结构与侧重，任务指令只做启动补充', () => {
+test('任务分类决定输出结构与通用侧重，任务指令排在后面并优先', () => {
   const task = { ...taskInput(), instruction: '生成一份早间简报。' }
   const run = { id: 'run_type0001', occurrenceKey: 'p:task:version:instant' }
   const prompt = buildRunPrompt({ task, run, trigger: 'manual', profileName: 'web', now: NOW })
   const guidanceAt = prompt.indexOf('任务分类输出要求（按任务分类，通用提示，不覆盖任务指令）')
   const instructionAt = prompt.indexOf('任务指令（唯一可执行指令）')
   assert.ok(guidanceAt >= 0, 'prompt 必须按任务分类给出输出要求')
-  assert.ok(instructionAt > guidanceAt, '分类输出要求排在启动句之前，启动句保留最终解释权')
+  assert.ok(instructionAt > guidanceAt, '分类输出要求排在任务指令之前，任务指令保留最终解释权')
   assert.match(prompt, /任务分类: news/)
   assert.match(prompt, /资讯：先给当日要点，再按主题分节/)
   assert.doesNotMatch(prompt, /输出侧重|执行模式: news/, '输出侧重点选已删除，不能再伪装成独立设置')
   assert.match(prompt, /冲突时以任务指令为准/, '执行要求必须把冲突裁决写死，不能留给模型猜')
+})
+
+test('组合与监控有各自的分类输出要求，不会被当成资讯模板', () => {
+  const run = { id: 'run_type0002', occurrenceKey: 'p:task:version:instant' }
+  const portfolio = buildRunPrompt({ task: { ...taskInput(), category: 'portfolio' }, run, trigger: 'manual', profileName: 'web', now: NOW })
+  assert.match(portfolio, /组合：先给组合层结论与最大风险/)
+  assert.match(portfolio, /任务分类: portfolio/)
+  const monitor = buildRunPrompt({ task: { ...taskInput(), category: 'monitor' }, run, trigger: 'manual', profileName: 'web', now: NOW })
+  assert.match(monitor, /监控：先给需要动作或跟踪的条目与截止时间/)
+  assert.match(monitor, /任务分类: monitor/)
 })
 
 test('prompt 将标题与说明隔离为引号数据，换行不能伪造指令段', () => {
@@ -306,20 +318,20 @@ test('descendant session 走 parent lineage 归属运行并记录 policy 拒绝'
 
 test('重复 tool event 不绕过预算，超限只发起一次取消', async () => {
   const { store, task, agent, run, runner, ctx } = await harness()
-  const limited = { ...task, limits: { ...task.limits, maxToolCalls: 10 } }
+  const limited = { ...task, limits: { ...task.limits, maxToolCalls: 100 } }
   await runner.dispatch(run, limited, 'manual')
-  for (let index = 0; index < 10; index += 1) {
+  for (let index = 0; index < 100; index += 1) {
     ctx.emit('session/event', agent.session, sessionEvent('tool/call', { turn: 1, step: index + 1, callId: `call-${index}`, name: 'read' }, 100 + index))
   }
-  ctx.emit('session/event', agent.session, sessionEvent('tool/call', { turn: 1, step: 10, callId: 'call-9', name: 'read' }, 109))
-  ctx.emit('session/event', agent.session, sessionEvent('tool/call', { turn: 1, step: 11, callId: 'call-10', name: 'read' }, 110))
+  ctx.emit('session/event', agent.session, sessionEvent('tool/call', { turn: 1, step: 100, callId: 'call-99', name: 'read' }, 199))
+  ctx.emit('session/event', agent.session, sessionEvent('tool/call', { turn: 1, step: 101, callId: 'call-100', name: 'read' }, 200))
   assert.equal(agent.canceled.length, 1)
   agent.status = 'idle'
   ctx.emit('agent/status', { agent, status: 'idle' })
   await new Promise((resolve) => setTimeout(resolve, 1100))
   const done = await store.getRun(run.id)
   assert.equal(done.status, 'failed')
-  assert.equal(done.toolCalls, 11)
+  assert.equal(done.toolCalls, 101)
   assert.equal(done.errors[0].code, 'tool_limit')
   runner.dispose()
 })

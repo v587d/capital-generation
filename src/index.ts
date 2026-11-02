@@ -74,11 +74,11 @@ const RetrieverSchema = z.object({
 })
 
 const AutomationSchema = z.object({
-  tickMs: z.number().default(60_000).description('投研自动化调度间隔毫秒（30000–3600000）'),
-  runTimeoutMinutes: z.number().default(30).description('单次运行 wall-clock 上限分钟（5–120）'),
+  tickMs: z.number().default(60_000).description('投研自动化自动检查间隔（毫秒，30000–3600000）'),
+  runTimeoutMinutes: z.number().default(60).description('单次运行最长运行时间（分钟，5–120）'),
   idleTimeoutMinutes: z.number().default(5).description('单次运行空闲超时分钟（1–30）'),
-  maxSteps: z.number().default(300).description('单次运行最大步骤数（10–2000）'),
-  maxToolCalls: z.number().default(1_200).description('单次运行最大工具调用数（10–6000）'),
+  maxSteps: z.number().default(300).description('单次运行最大步骤数（100–2000）'),
+  maxToolCalls: z.number().default(1_200).description('单次运行最大工具调用数（100–5000）'),
   inAppNotifications: z.boolean().default(true).description('是否写入应用内通知'),
 })
 
@@ -123,7 +123,7 @@ export const Config = z.object({
     .description('FTShare（非凸科技）credentials 引用名，空 = FTSHARE_API_KEY'),
   automation: AutomationSchema.default({
     tickMs: 60_000,
-    runTimeoutMinutes: 30,
+    runTimeoutMinutes: 60,
     idleTimeoutMinutes: 5,
     maxSteps: 300,
     maxToolCalls: 1_200,

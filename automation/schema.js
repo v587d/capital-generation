@@ -6,6 +6,7 @@
 import { z } from 'zod'
 import {
   ACTIVE_RUN_STATUSES,
+  DEFAULT_AUTOMATION_SETTINGS,
   MAX_DESCRIPTION_CHARS,
   MAX_ERROR_MESSAGE_CHARS,
   MAX_ERRORS_PER_RUN,
@@ -19,6 +20,7 @@ import {
   MIN_RUN_TIMEOUT_MINUTES,
   RUN_STATUSES,
 } from './defaults.js'
+import { TASK_ICON_IDS } from './task-icons.js'
 
 const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 
@@ -99,17 +101,32 @@ export const LimitsSchema = z.strictObject({
   maxToolCalls: z.number().int().min(MIN_MAX_TOOL_CALLS).max(MAX_MAX_TOOL_CALLS),
 })
 
+/**
+ * Stored records were written under older bounds. Clamp on read instead of rejecting the record:
+ * the domain validates every row on load, so one out-of-range task would otherwise take the whole
+ * table down. Writes still go through the strict `LimitsSchema`.
+ */
+const clampedInt = (min, max) => z.number().int().transform((value) => Math.min(max, Math.max(min, value)))
+const StoredLimitsSchema = z.strictObject({
+  runTimeoutMinutes: clampedInt(MIN_RUN_TIMEOUT_MINUTES, MAX_RUN_TIMEOUT_MINUTES),
+  idleTimeoutMinutes: clampedInt(1, 30),
+  maxSteps: clampedInt(MIN_MAX_STEPS, MAX_MAX_STEPS),
+  maxToolCalls: clampedInt(MIN_MAX_TOOL_CALLS, MAX_MAX_TOOL_CALLS),
+})
+
 export const NotificationsSchema = z.strictObject({
   inApp: z.boolean(),
   onFailure: z.boolean(),
   onSuccess: z.boolean(),
 })
 
-export const TaskCategorySchema = z.enum(['news', 'market', 'review', 'research'])
+export const TaskCategorySchema = z.enum(['news', 'market', 'review', 'research', 'portfolio', 'monitor'])
+export const TaskIconIdSchema = z.enum(TASK_ICON_IDS)
 
 /** User-writable configuration. Server-owned fields are deliberately absent. */
 export const TaskConfigSchema = z.strictObject({
   category: TaskCategorySchema,
+  icon: TaskIconIdSchema.optional(),
   title: z.string().min(1).max(MAX_TITLE_CHARS),
   description: z.string().max(MAX_DESCRIPTION_CHARS),
   trigger: TriggerSchema,
@@ -118,7 +135,7 @@ export const TaskConfigSchema = z.strictObject({
   mode: TaskCategorySchema.optional(),
   cwdKind: z.literal('profile'),
   workspaceId: workspaceId.optional(),
-  limits: LimitsSchema,
+  limits: LimitsSchema.optional(),
   notifications: NotificationsSchema,
 })
 
@@ -143,6 +160,7 @@ export const AutomationTaskSchema = z.strictObject({
   definitionVersion: z.number().int().min(0),
   origin: z.enum(['builtin', 'custom']),
   sourceBuiltinId: z.string().min(1).max(80).optional(),
+  icon: TaskIconIdSchema.optional(),
   profileKey: z.string().min(1).max(80),
   profileName: z.string().min(1).max(200),
   state: TaskStateSchema,
@@ -163,6 +181,9 @@ export const AutomationTaskSchema = z.strictObject({
   updatedAt: isoInstant,
 })
 
+const StoredTaskConfigSchema = TaskConfigSchema.extend({ limits: StoredLimitsSchema.optional() })
+const StoredTaskOverridesSchema = TaskOverridesSchema.extend({ limits: StoredLimitsSchema.optional() })
+
 /** Durable builtin override row. Runtime fields (state, anchors) always sit on the record. */
 export const TaskRecordSchema = z.strictObject({
   schemaVersion: z.literal(1),
@@ -173,8 +194,8 @@ export const TaskRecordSchema = z.strictObject({
   profileName: z.string().min(1).max(200),
   state: TaskStateSchema,
   definitionVersion: z.number().int().min(0),
-  custom: TaskConfigSchema.optional(),
-  overrides: TaskOverridesSchema.optional(),
+  custom: StoredTaskConfigSchema.optional(),
+  overrides: StoredTaskOverridesSchema.optional(),
   scheduleAnchorAt: isoInstant,
   lastHandledOccurrenceKey: z.string().max(300).optional(),
   lastScheduledFor: isoInstant.optional(),
@@ -271,6 +292,7 @@ export const OwnerRecordSchema = z.strictObject({
 /** Create/patch wire schemas: no profile, owner, session, preset or cwd field exists at all. */
 export const TaskCreateSchema = z.strictObject({
   title: z.string().min(1).max(MAX_TITLE_CHARS),
+  icon: TaskIconIdSchema.optional(),
   description: z.string().max(MAX_DESCRIPTION_CHARS).optional(),
   instruction: z.string().min(1).max(MAX_INSTRUCTION_CHARS),
   category: TaskCategorySchema,
@@ -282,6 +304,7 @@ export const TaskCreateSchema = z.strictObject({
 
 export const TaskPatchSchema = z.strictObject({
   title: z.string().min(1).max(MAX_TITLE_CHARS).optional(),
+  icon: TaskIconIdSchema.optional(),
   description: z.string().max(MAX_DESCRIPTION_CHARS).optional(),
   instruction: z.string().min(1).max(MAX_INSTRUCTION_CHARS).optional(),
   category: TaskCategorySchema.optional(),
@@ -294,6 +317,7 @@ export const TaskPatchSchema = z.strictObject({
 export const NotificationsReadSchema = z.strictObject({
   ids: z.array(z.string().min(1).max(80)).max(200).optional(),
   all: z.boolean().optional(),
+  scope: z.enum(['task', 'system', 'all']).optional(),
 }).refine((value) => value.all === true || (value.ids !== undefined && value.ids.length > 0), {
   message: 'either all=true or a non-empty ids array is required',
 })
@@ -372,16 +396,26 @@ function withoutLegacyMode(value) {
 }
 
 /** Merge order: code definition -> legal user override -> server runtime fields. */
-export function resolveTaskRecord(record, definition) {
+export function resolveTaskRecord(record, definition, defaultLimits) {
   const base = record.origin === 'builtin'
     ? definition?.defaults
     : record.custom
   if (base === undefined) throw new SchemaError('invalid_record', `task ${record.id} has no resolvable base configuration`)
   const overrides = withoutLegacyMode(record.overrides)
+  // Task limits are an override layer: only an explicitly saved object wins. Otherwise the
+  // profile-level defaults (the settings card) are used, then the code defaults.
+  const explicitLimits = record.origin === 'builtin' ? overrides?.limits : record.custom?.limits
+  const fallbackLimits = defaultLimits ?? base.limits ?? {
+    runTimeoutMinutes: DEFAULT_AUTOMATION_SETTINGS.runTimeoutMinutes,
+    idleTimeoutMinutes: DEFAULT_AUTOMATION_SETTINGS.idleTimeoutMinutes,
+    maxSteps: DEFAULT_AUTOMATION_SETTINGS.maxSteps,
+    maxToolCalls: DEFAULT_AUTOMATION_SETTINGS.maxToolCalls,
+  }
   const merged = {
     ...withoutLegacyMode(base),
     ...(overrides ?? {}),
     state: record.state,
+    limits: explicitLimits ?? fallbackLimits,
   }
   const cleanOverrides = overrides === undefined || Object.keys(overrides).length === 0 ? undefined : overrides
   const task = {

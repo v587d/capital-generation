@@ -6,7 +6,7 @@ export const DEFAULT_TICK_MS = 60_000
 export const MIN_TICK_MS = 30_000
 export const MAX_TICK_MS = 3_600_000
 
-export const DEFAULT_RUN_TIMEOUT_MINUTES = 30
+export const DEFAULT_RUN_TIMEOUT_MINUTES = 60
 export const MIN_RUN_TIMEOUT_MINUTES = 5
 export const MAX_RUN_TIMEOUT_MINUTES = 120
 
@@ -17,12 +17,12 @@ export const MAX_IDLE_TIMEOUT_MINUTES = 30
 // Real multi-agent research runs use hundreds of tool calls (subagent calls included). These
 // limits bound runaway loops, not normal work; wall-clock and idle remain the primary guards.
 export const DEFAULT_MAX_STEPS = 300
-export const MIN_MAX_STEPS = 10
+export const MIN_MAX_STEPS = 100
 export const MAX_MAX_STEPS = 2_000
 
 export const DEFAULT_MAX_TOOL_CALLS = 1_200
-export const MIN_MAX_TOOL_CALLS = 10
-export const MAX_MAX_TOOL_CALLS = 6_000
+export const MIN_MAX_TOOL_CALLS = 100
+export const MAX_MAX_TOOL_CALLS = 5_000
 
 export const DEFAULT_OWNER_LEASE_MS = 90_000
 export const MIN_OWNER_LEASE_MS = 30_000

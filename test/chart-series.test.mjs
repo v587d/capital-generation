@@ -15,15 +15,16 @@ function build(rows, rawSpec) {
   return buildChartPayload({ chart_id: 'ch_test', spec: normalizeChartSpec(rawSpec), rows, meta })
 }
 
-test('parseTimeValue：口径确定（业务日字符串 / epoch 秒 / epoch 毫秒 / 无时区按 UTC）', () => {
-  assert.deepEqual(parseTimeValue('2025-01-02'), { display: '2025-01-02', seconds: 1735776000, dateOnly: true })
+test('parseTimeValue：口径确定（业务日 / epoch 秒 / epoch 毫秒 / 无时区按 Asia/Shanghai）', () => {
+  assert.deepEqual(parseTimeValue('2025-01-02'), { display: '2025-01-02', seconds: 1735747200, dateOnly: true })
   assert.equal(parseTimeValue(1735776000).seconds, 1735776000)
   assert.equal(parseTimeValue(1735776000000).seconds, 1735776000)
   assert.equal(parseTimeValue('1735776000000').seconds, 1735776000)
   assert.equal(parseTimeValue('2025-01-02T08:00:00Z').seconds, 1735804800)
-  // A timezone-less datetime is read as UTC so the same data yields the same axis on every machine.
-  assert.equal(parseTimeValue('2025-01-02 08:00:00').seconds, 1735804800)
+  // A timezone-less datetime is Asia/Shanghai wall clock (the chart convention), so 08:00 = 00:00Z.
+  assert.equal(parseTimeValue('2025-01-02 08:00:00').seconds, 1735776000)
   assert.equal(parseTimeValue('2025-02-30'), undefined, '不存在的日历日必须被拒绝')
+  assert.equal(parseTimeValue('2025-02-30 08:00:00'), undefined, '无时区的非法日历日同样拒绝')
   assert.equal(parseTimeValue('not a date'), undefined)
   assert.equal(parseTimeValue(null), undefined)
 })
@@ -161,6 +162,22 @@ test('buildChartPayload：range 过滤与空区间披露', () => {
   const payload = build(rows, { kind: 'line', x: 'date', series: ['close'], range: { from: '2025-05-01', to: '2025-07-01' } })
   assert.deepEqual(payload.series[0].data.map((point) => point.value), [2])
   assert.throws(() => build(rows, { kind: 'line', x: 'date', series: ['close'], range: { from: '2030-01-01' } }), /excludes every row/)
+})
+
+test('buildChartPayload：Asia/Shanghai 零点 epoch 的 range 含首尾日历日', () => {
+  const shanghaiMidnight = (month, day) => Date.UTC(2026, month - 1, day) - 8 * 3_600_000
+  const rows = [
+    { ts: shanghaiMidnight(10, 19), close: 1 },
+    { ts: shanghaiMidnight(10, 20), close: 2 },
+    { ts: shanghaiMidnight(10, 21), close: 3 },
+  ]
+  const payload = build(rows, {
+    kind: 'line',
+    x: 'ts',
+    series: ['close'],
+    range: { from: '2026-10-19', to: '2026-10-20' },
+  })
+  assert.deepEqual(payload.series[0].data.map((point) => point.value), [1, 2], 'from/to 都是本地日历日，to 必须含当日')
 })
 
 test('buildChartPayload：成交量按 A 股习惯标注涨跌方向', () => {

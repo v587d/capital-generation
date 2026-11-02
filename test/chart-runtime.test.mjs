@@ -148,6 +148,57 @@ test('runtime：分类轴的刻度与十字线文案都用原始标签替换', (
   assert.equal(applied.localization.timeFormatter(946684800), '白酒')
 })
 
+test('runtime：时间轴的 epoch 按 Asia/Shanghai 格式化，日 K 不再早一天', () => {
+  const meta = { points: 2, original_points: 2, downsampled: false, axis: 'time', source_kind: 'dataset', skipped_rows: 0, warnings: [] }
+  const { calls } = render({
+    chart_id: 'ch_day',
+    title: '日K',
+    kind: 'candlestick',
+    axis: 'time',
+    series: [],
+    ohlc: {
+      label: 'OHLC',
+      data: [
+        { time: 1792339200, open: 1, high: 2, low: 1, close: 2 }, // 2026-10-19 00:00 +08:00
+        { time: 1792425600, open: 2, high: 3, low: 2, close: 3 }, // 2026-10-20 00:00 +08:00
+      ],
+    },
+    markers: [],
+    meta,
+  })
+
+  const applied = calls.applied.find((options) => options.timeScale && options.timeScale.tickMarkFormatter)
+  assert.ok(applied, '时间轴必须替换 tickMarkFormatter，否则 lightweight-charts 按 UTC 显示')
+  assert.equal(applied.timeScale.tickMarkFormatter(1792339200), '10-19')
+  assert.equal(applied.timeScale.tickMarkFormatter(1792425600), '10-20')
+  assert.equal(applied.localization.timeFormatter(1792339200), '2026-10-19')
+})
+
+test('runtime：分钟线时间轴的 epoch 显示北京时间 HH:mm', () => {
+  const meta = { points: 2, original_points: 2, downsampled: false, axis: 'time', source_kind: 'dataset', skipped_rows: 0, warnings: [] }
+  const { calls } = render({
+    chart_id: 'ch_m5',
+    title: '5分钟',
+    kind: 'candlestick',
+    axis: 'time',
+    series: [],
+    ohlc: {
+      label: 'OHLC',
+      data: [
+        { time: 1793583300, open: 1, high: 2, low: 1, close: 2 }, // 2026-11-02 09:35 +08:00
+        { time: 1793583600, open: 2, high: 3, low: 2, close: 3 }, // 2026-11-02 09:40 +08:00
+      ],
+    },
+    markers: [],
+    meta,
+  })
+
+  const applied = calls.applied.find((options) => options.timeScale && options.timeScale.tickMarkFormatter)
+  assert.ok(applied)
+  assert.equal(applied.timeScale.tickMarkFormatter(1793583300), '09:35')
+  assert.equal(applied.localization.timeFormatter(1793583300), '2026-11-02 09:35')
+})
+
 test('runtime：kind=bar 用 BarSeries，kind=candlestick 用 CandlestickSeries（数据同形、样式不同）', () => {
   const ohlc = { label: 'OHLC', data: [{ time: '2025-01-01', open: 10, high: 12, low: 9, close: 11 }] }
   const meta = { points: 1, original_points: 1, downsampled: false, axis: 'time', source_kind: 'dataset', skipped_rows: 0, warnings: [] }

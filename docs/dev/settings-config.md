@@ -34,14 +34,14 @@
 - **「包含的组件」是宿主的格子，我们没有能替换它的座位**：包页在 `div.detailSections` 里连着画
   两格——`section[data-plugin-config]`（我们的卡片）与 `section[data-plugin-rows]`（宿主的行清单，
   行开关 / 状态点 / 「共 N 个 · 运行 N」都在它那里，`plugins.detail.section` 只能在它**之后**追加）。
-  卡片顶上的第三格 tab 不重画那份清单，只切它的可见性：见 §5.3 的两条 `:has()` 与方向性纪律。
+  卡片顶上的第四格 tab 不重画那份清单，只切它的可见性：见 §5.3 的三条 `:has()` 与方向性纪律。
 
 ## 5.2 存储边界：密钥、选用开关、两处 schema 一致
 
 - **密钥进 credentials 域，不进 settings 文档**：Key 经 `ctx.remote.credentials.set` 写入，
   settings 里只存 **ref 名**（`fuyaoCredentialRef` / `ftshareCredentialRef` / `retriever.*.credentialRef`）。卡片把五把
   密钥声明成 `SettingsFormModel` 的 write-only secrets：值从不随响应出网，控件只报"已配置/未配置"。
-- **即时写入的偏好**包括回退开关 `retriever.localFetch.enabled`、精选模式 `selectedSkillsMode`（`manual` / `auto`）和 catalog 中每个选用 Skill 的开关（例如 `selectedSkills.buffettFramework`、`selectedSkills.financialHealth`）：都走 `scope.mutate([{ op: 'set', path, value }])`（`set(field)` 只支持顶层字段），并由条目快照渲染；写被拒时不翻转并显示提示。「精选 Skills」那一格先是一颗**智能装载 Skills** 开关（默认关）：关着时下方才显示筛选条与清单，打开后两者一起隐藏，由模型按提问挑选。「Skill 特点」与「适用预设」**两行筛选条都在清单上方**，各带「全部」；两个维度同时选中取交集，计数按另一维度的当前选择现算（点它会显示几行），特点顺序按全量条数固定、不随筛选跳位。预设名用选择器里的五个：自动模式 / 行情专家 / 资讯专员 / 分析师 / 绘图专员；行情专家与绘图专员不加载精选 Skills，仍列出但置灰。清单每行以**技能名本身**作打开原文的按钮（不再有「复制技能名」与「详情」按钮），名字右侧依次是 Skill 特点标签（中性色）与适用预设标签（信息色），不再单独占一行；简述、触发句与关键词共用一套字号/行高（`dl` 两列：何时使用 / 关键词）。**已开启的行排在清单最前面**、组内保持 catalog 顺序，但这份顺序**只在进入这一格的那一刻定一次**（存的是那一刻的 key 名单，不是开关的实时状态）：拨开关当场不挪行——把用户手底下那一行抽走比不置顶更糟，切走再切回来才置顶。不显示 slug `<code>`、状态、维护者、提交/复查日期或风险提示。开启后在**下一条指令**即生效（每轮 `agent/pre-step` 重读并刷新目录，无需新建会话）；selected skill provider 只注册到 Capital 根 Agent 自己的 scope，子 Agent 不继承。
+- **即时写入的偏好**包括回退开关 `retriever.localFetch.enabled`、精选模式 `selectedSkillsMode`（`manual` / `auto`）和 catalog 中每个选用 Skill 的开关（例如 `selectedSkills.buffettFramework`、`selectedSkills.financialHealth`）：都走 `scope.mutate([{ op: 'set', path, value }])`（`set(field)` 只支持顶层字段；**路径必须是叶子**——容器节点本身不是 volatile，整块写 `automation` 会被设置服务以 `Config field "automation" is not volatile` 拒绝，2.15.1 修过一次），并由条目快照渲染；写被拒时不翻转并显示提示。「精选 Skills」那一格先是一颗**智能装载 Skills** 开关（默认关）：关着时下方才显示筛选条与清单，打开后两者一起隐藏，由模型按提问挑选。「Skill 特点」与「适用预设」**两行筛选条都在清单上方**，各带「全部」；两个维度同时选中取交集，计数按另一维度的当前选择现算（点它会显示几行），特点顺序按全量条数固定、不随筛选跳位。预设名用选择器里的五个：自动模式 / 行情专家 / 资讯专员 / 分析师 / 绘图专员；行情专家与绘图专员不加载精选 Skills，仍列出但置灰。清单每行以**技能名本身**作打开原文的按钮（不再有「复制技能名」与「详情」按钮），名字右侧依次是 Skill 特点标签（中性色）与适用预设标签（信息色），不再单独占一行；简述、触发句与关键词共用一套字号/行高（`dl` 两列：何时使用 / 关键词）。**已开启的行排在清单最前面**、组内保持 catalog 顺序，但这份顺序**只在进入这一格的那一刻定一次**（存的是那一刻的 key 名单，不是开关的实时状态）：拨开关当场不挪行——把用户手底下那一行抽走比不置顶更糟，切走再切回来才置顶。不显示 slug `<code>`、状态、维护者、提交/复查日期或风险提示。开启后在**下一条指令**即生效（每轮 `agent/pre-step` 重读并刷新目录，无需新建会话）；selected skill provider 只注册到 Capital 根 Agent 自己的 scope，子 Agent 不继承。
 - **主插件读回**：`src/index.ts` 的 `readCapitalSettings` 三级取数——`settings.describe()`（已应用视图）
   → `configEditor.entries()` 的条目保存层（describe() 在条目 fiber 未挂好的窗口会**整个跳过条目**，
   已保存的值仍在保存层）→ preset 兜底且**可辨认**（`source === 'preset'`，"读不到"不许伪装成"用户
@@ -49,17 +49,18 @@
   取到值再用自己的 `Config(...)` 过一遍——**两处 schema 默认值必须逐字一致**。回归：`test/capital-config.test.mjs`（deepEqual + 按上游 `plainConfig` 摊平取值单元）与 `test/apply-integration.test.mjs`（三级读取、服务晚到、条目值真的驱动装配）。
 - **文案与排布口径**（改动要有对应用户诉求，别顺手加回）：五个 Key **一律不写"必填 / 选填"**——本项目
   不依赖任何单一数据源；每条 Key 提示都点名"新自动模式会话生效"；本机直连与 PaddleOCR 的说明
-  各不超过两句；文档链接只写"官方文档"＋右上角斜上箭头，落在标签右边同一行。**排布是三格 tab**
-  （`数据源` / `精选 Skills` / `包含的组件`，默认落 `数据源`）：tab 条**取代**当年 `h4 数据源` +
-  `h5 精选 Skills` 那两级标题（h5 挂在 h4 底下会把平级的两块说成父子），格内顺序仍照旧——五个密钥 →
-  保存 → 回退开关。标题体系之外只有**一个计数**：第三格是行数（唯一来源 `remote.pluginManager.listBundles()`，
-  **读不到就只写标题、绝不画 0**，失败不缓存、切格即重试——AGENTS.md §9.7 ⑤ 那条）。第二格 tab **只写「精选 Skills」**，不再拼已开启数或「自动」；数量改由上方筛选条逐格给出（按另一维度的当前选择现算）。密钥草稿活在 DOM
+  各不超过两句；文档链接只写"官方文档"＋右上角斜上箭头，落在标签右边同一行。**排布是四格 tab**
+  （`数据源` / `投研自动化` / `精选 Skills` / `包含的组件`，默认落 `数据源`）：tab 条**取代**当年
+  `h4 数据源` + `h5 精选 Skills` 那两级标题（h5 挂在 h4 底下会把平级的两块说成父子），格内顺序仍照旧——
+  五个密钥 → 保存 → 回退开关；调度器与无人值守运行的六个默认值（自动检查间隔、最长运行时间、空闲、
+  步骤、工具调用、通知）整组搬进第二格的「调度 / 单次运行上限 / 通知」三组，数字框只收整数，清空或
+  越界在标题右侧红字点名允许范围、失焦回填已保存值且不写回（重新聚焦收起），格内不再重复 tab 承担的标题。标题体系之外只有**一个计数**：第四格是行数（唯一来源 `remote.pluginManager.listBundles()`，
+  **读不到就只写标题、绝不画 0**，失败不缓存、切格即重试——AGENTS.md §9.7 ⑤ 那条）。第三格 tab **只写「精选 Skills」**，不再拼已开启数或「自动」；数量改由上方筛选条逐格给出（按另一维度的当前选择现算）。密钥草稿活在 DOM
   里而保存按钮可能在看不见的格子里，所以草稿在场时第一格改口「数据源 未保存」。
-  ⛔ **三格的「tab 条 → 首行文字」必须等距**（2026-10-10 实测那一档是 24px；第三格靠一条负 margin 顶到
-  同一档）：不等距就是每切一格跳一次；**面板只有一个子元素时 flex `gap` 不发生作用**，那 24px 得自己补。
-  第三格画面上不写「组件清单在下方」那句（点这一格看到的就是清单），句子改挂 `.capital-config-sr-only`——
-  `aria-controls` 指的这块面板不许是空的。回归 `test/capital-config.test.mjs` 的文案、两维筛选与计数、渲染顺序、
-  tab/计数、上方筛选布局与样式表形状断言；等距那个数只能在浏览器里量（见账本当日行）。
+  ⛔ **四格的「tab 条 → 首行文字」必须等距**（2026-10-10 实测那一档是 24px；第二格靠 `.capital-config-automation`
+  的 12px padding-top 补足面板 gap，第四格靠一条负 margin 顶到同一档）：不等距就是每切一格跳一次；**面板只有一个子元素时 flex `gap` 不发生作用**，那 24px 得自己补。
+  第四格画面上不写「组件清单在下方」那句（点这一格看到的就是清单），句子改挂 `.capital-config-sr-only`——
+  `aria-controls` 指的这块面板不许是空的。回归 `test/capital-config.test.mjs` 的文案、两维筛选与计数、渲染顺序、tab/计数、上方筛选布局与样式表形状断言；等距那个数只能在浏览器里量（见账本当日行）。
 
 ## 5.3 改完之后
 
@@ -67,7 +68,7 @@
   `Modal` / `writeClipboard` / `IconRightUpOutlineRegular`（`@deepseek-ai/dsh-client-ui-primitives`），
   服务面是 `ctx.configForms` 的 `get(条目 id)` + `whileServed([条目 id], register)`。`SettingsForm` 在卸载时自行丢弃草稿（没有
   discard 控件）。
-- **⛔ 三块面板全部挂载，不在屏的用 `hidden` 收起，不是不渲染**：`SettingsForm` 卸载即丢草稿
+- **⛔ 四块面板全部挂载，不在屏的用 `hidden` 收起，不是不渲染**：`SettingsForm` 卸载即丢草稿
   （`dsh-client-ui-primitives/lib/index.js` 里那个 unmount `discard.current()`），只渲染活动格的话
   用户填了密钥瞄一眼另一格回来就没了。面板类**不许声明裸 `display`**——作者 `display` 会盖掉 UA 的
   `[hidden]{display:none}`，等于 hidden 失效：35 颗开关与密钥输入框看不见却仍在 Tab 序里，控件对
@@ -75,7 +76,7 @@
 - **tab 条不自造**：`SegmentedControl` 是**完全受控**件，自带 `role=tablist`/`role=tab`、roving
   `tabIndex`、←→↑↓/Home/End 走位与焦点跟随，卡片一律不补 `onKeyDown`（补了就是双重选择）。它按
   `` `${id}-${option.value}-panel` `` 发 `aria-controls`（写在它的 `.d.ts` 注释里，是文档化契约），
-  所以三块面板的 `id` 必须逐字跟着这两个模板长——**包括第三块**：第三块的内容是宿主那段清单（在下方
+  所以四块面板的 `id` 必须逐字跟着这两个模板长——**包括第四块**：第四块的内容是宿主那段清单（在下方
   显形），面板本身只留一句读屏侧的话（`.capital-config-sr-only`，`position: absolute` ⇒ 零布局贡献），
   `aria-controls` 指的正是这块。悬空 id 与空面板都不报错，只有读屏用户付账。入账本 **L28**。
 - **点技能名打开的是官方 `Modal`（非 headless），原文走一条自注册的本机路由**：header、标题、关闭按钮、Esc、
@@ -99,13 +100,13 @@
   上游更新，缓存住就是拿旧原文说"这是原文"。路由经 `ctx.inject(['webServer'], …)` 挂（探测式写法会把
   正确性押在装配顺序上，2026-09-30 桌面端就是这么炸的两颗行）。**不新增 bundle 行**：它挂在已有的
   `capital-config` host 行上，所以「包含的组件」那个数字不变。
-- **⛔ 第二格的筛选条与清单不许冒出第二个滚动容器**：筛选条属于页面流，`.capital-config-filters` /
+- **⛔ 第三格的筛选条与清单不许冒出第二个滚动容器**：筛选条属于页面流，`.capital-config-filters` /
   `.capital-config-selected-list` 只要有一条 `overflow` 非 visible，就会多出一个滚动面，长清单里
-  筛选条再也回不到视线；样式表形状闸钉着这一条（连同两行群组名、22px chip、第三格那条负 margin
+  筛选条再也回不到视线；样式表形状闸钉着这一条（连同两行群组名、22px chip、第四格那条负 margin
   的写法）。
-- **⛔ 收起宿主「包含的组件」的两条规则只许写正面式**：`installStyles` 里
+- **⛔ 收起宿主「包含的组件」的三条规则只许写正面式**：`installStyles` 里
   `[data-plugin-detail="<包名>"]:has(.capital-config-card[data-capital-config-tab="sources"]) section[data-plugin-rows] { display: none }`
-  与 `…"skills"…` 那一条，**各自成规则**（CSS 整条作废，逗号并条会被无关失败连坐），并且不许出现
+  与 `…"automation"…`、`…"skills"…` 那两条，**各自成规则**（CSS 整条作废，逗号并条会被无关失败连坐），并且不许出现
   `:not([data-capital-config-tab="components"])` 这种否定式判据——那等于"一个拼错的属性值就把用户的
   行清单藏了起来"。于是所有失配方向（无 `:has()` 的引擎、宿主改名、老宿主没这段、卡片没被 `whileServed`
   放行、条目还在 `loading`、属性值意外）都落在**宿主段落照常可见**那一侧：宁可短暂重复，不能丢数据。
@@ -126,22 +127,22 @@
 0.1.7 把第三方插件的可编辑面从「设置」页**整体搬到了「插件」页**（`settings.plugin.item` 已被上游
 删除，设置页那一栏现在只剩官方的 `settings.plugins.tab`）。点击路径只有两跳：
 
-**侧栏「插件」→「已安装」里点开 `@v587d/capital-generation`（卡片显示的是 `locale/zh.json` 的
-`meta.title`，不是 npm 包名，见账本 L25）→ 描述与「包含的组件」之间的「配置」段**，进去就停在
-第一格 **数据源**（五把 Key + 本机直连回退）；第二格 **精选 Skills**——顶部一颗「智能装载 Skills」
-开关（默认关），关着时下面才是两行筛选条（Skill 特点 / 适用预设，各带「全部」与"点它会显示几行"）
-加清单；打开后筛选条与清单一起收起。点**技能名**打开 `SKILL.md` 原文，名字右边是特点标签与适用预设
-标签，已开启的行排在清单最前；第三格 **包含的组件**（带行数）——那一格的内容就是页面下方宿主自己画的
-行清单，切过去它才显形（§5.1 / §5.3）。
+**侧栏「插件」→「已安装」里点开 `@v587d/capital-generation`（卡片显示 `locale/zh.json` 的 `meta.title`，
+不是 npm 包名，见账本 L25）→ 描述与「包含的组件」之间的「配置」段**，进去就停在第一格 **数据源**（五把
+Key + 本机直连回退）；第二格 **投研自动化**——调度器与无人值守运行的默认上限，分「调度 / 单次运行上限 /
+通知」三组，单个任务里的设置优先；第三格 **精选 Skills**——顶部一颗「智能装载 Skills」开关（默认关），
+关着时下面才是两行筛选条（Skill 特点 / 适用预设，各带「全部」与"点它会显示几行"）加清单；打开后筛选条与
+清单一起收起。点**技能名**打开 `SKILL.md` 原文，名字右边是特点标签与适用预设标签，已开启的行排在清单最前；
+第四格 **包含的组件**（带行数）——那一格的内容就是页面下方宿主自己画的行清单，切过去它才显形（§5.1 / §5.3）。
 
-「包含的组件」里的四行（`capital-config` / `capital-charts` / `capital-watchlist` /
-`preset-capital-generation`）本身**没有**行级配置控件——可编辑面只有卡片这一份，不在行详情页里，
-这是设计而非故障。`capital-config` 那一行仍在：它是 settings 命名空间的来源（§5.1），只是不再充当座位。
-它同时是第三格那个数字的来路（`pluginManager.listBundles()` 里我们这个包的 `rows.length`），
-也是 `/capital-skills` 那条原文旁路的宿主（§5.3）。
+「包含的组件」里的五行（`capital-config` / `capital-charts` / `capital-watchlist` /
+`capital-automation` / `preset-capital-generation`）本身**没有**行级配置控件——可编辑面只有卡片这一份，
+不在行详情页里，这是设计而非故障。`capital-config` 那一行仍在：它是 settings 命名空间的来源（§5.1），
+只是不再充当座位；它同时是第四格那个数字的来路（`pluginManager.listBundles()` 里我们这个包的
+`rows.length`），也是 `/capital-skills` 那条原文旁路的宿主（§5.3）。
 
 排查顺序也据此改：① 条目在不在 `settings.describe()`（§5.1 的 volatile 投影，不在就整张卡片读不到）；
-② 冒烟里行清单有没有 `capital-config`（`pluginManager.listBundles()`，取数通道）且**行数与第三格那个
+② 冒烟里行清单有没有 `capital-config`（`pluginManager.listBundles()`，取数通道）且**行数与第四格那个
 数字对不对得上**（数字缺席 = 那次读没成，不是"没有组件"）；③ 浏览器有没有
 **刷新**（bundle 在页面加载时确定，宿主重启不换已打开页面的那份）；④ 技能名点开说"原文读不到"就先看
 `/capital-skills/<名>.md` 的回包：404 `skill_not_catalogued` = catalog 与快照目录对不上（§8.6 的

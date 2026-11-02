@@ -54,6 +54,8 @@ failed
 
 推荐不是“看到时间字段就必画”。需要同时考虑点数、字段质量、缺失值和用户问题。
 
+**排名视图的硬前置**：`render_chart` 的 spec **没有 `sort` / `limit`**，类别排名图只能画“来源已经按目标数值排序好”的行。若来源未排序，即使 `recommended` 也要在 gate 记为 `skipped` + `limitation`，用表格承载排名，**不要创建 specialist**——它只能空转数分钟后返回 skipped。确需出图时，先让 collector 产出“已按目标字段排序并裁剪成前 N 行 + 已并入名称”的 Dataset，再重新签发 `chart_source_ref`。
+
 ### 1.3 `blocked`
 
 以下情况不得强行出图：

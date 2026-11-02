@@ -85,6 +85,7 @@ test('CRUD：创建、列表、详情、补丁、删除；所有响应 no-store'
       title: '测试任务',
       instruction: '给出结论',
       category: 'research',
+      icon: 'bell',
       trigger: { kind: 'schedule', cadence: 'daily', time: '09:00', timezone: 'Asia/Shanghai', tradingDaysOnly: true },
     },
   })
@@ -94,13 +95,15 @@ test('CRUD：创建、列表、详情、补丁、删除；所有响应 no-store'
   const id = task.id
   assert.equal(task.origin, 'custom')
   assert.equal(task.state, 'active')
+  assert.equal(task.icon, 'bell')
 
   const listed = await call(handler, { method: 'GET', url: '/capital-automation/tasks' })
   assert.ok(listed.json().tasks.some((item) => item.id === id))
 
-  const patched = await call(handler, { method: 'PATCH', url: `/capital-automation/tasks/${id}`, body: { title: '改名' } })
+  const patched = await call(handler, { method: 'PATCH', url: `/capital-automation/tasks/${id}`, body: { title: '改名', icon: 'target' } })
   assert.equal(patched.statusCode, 200)
   assert.equal(patched.json().task.title, '改名')
+  assert.equal(patched.json().task.icon, 'target')
 
   const detail = await call(handler, { method: 'GET', url: `/capital-automation/tasks/${id}` })
   assert.equal(detail.statusCode, 200)
@@ -109,6 +112,22 @@ test('CRUD：创建、列表、详情、补丁、删除；所有响应 no-store'
   const removed = await call(handler, { method: 'DELETE', url: `/capital-automation/tasks/${id}` })
   assert.equal(removed.statusCode, 200)
   assert.equal(removed.json().deleted, true)
+})
+
+test('图标闭集：未知 icon 在进入 storage 前被 schema 拒绝', async () => {
+  const { handler } = harness()
+  const res = await call(handler, {
+    method: 'POST',
+    url: '/capital-automation/tasks',
+    body: {
+      title: '测试任务',
+      instruction: '给出结论',
+      category: 'research',
+      icon: 'not-in-catalog',
+      trigger: { kind: 'schedule', cadence: 'daily', time: '09:00', timezone: 'Asia/Shanghai', tradingDaysOnly: true },
+    },
+  })
+  assert.equal(res.statusCode, 400)
 })
 
 test('任务详情按 taskId 先过滤再分页，不被全局最新运行记录遮蔽', async () => {
@@ -152,12 +171,31 @@ test('query 参数拒绝未知键、重复键、超长值和非法分页值', as
     `/capital-automation/runs?before=${'x'.repeat(513)}`,
     '/capital-automation/runs?limit=0',
     '/capital-automation/notifications?unread=maybe',
+    '/capital-automation/notifications?scope=bad',
   ]) {
     const response = await call(handler, { method: 'GET', url })
     assert.equal(response.statusCode, 400, url)
     assert.equal(response.json().code === 'invalid_query' || response.json().code === 'invalid_cursor', true)
   }
 })
+
+test('通知接口默认只返回任务事件，系统状态用 scope=system 取', async () => {
+  const { handler, store } = harness()
+  await store.addNotification({ kind: 'run_failed', title: '失败', message: 'x' })
+  await store.addNotification({ kind: 'scheduler_standby', title: '待命', message: 'y' })
+  const taskOnly = await call(handler, { method: 'GET', url: '/capital-automation/notifications' })
+  assert.equal(taskOnly.statusCode, 200)
+  assert.deepEqual(taskOnly.json().notifications.map((item) => item.kind), ['run_failed'])
+  assert.equal(taskOnly.json().unread, 1)
+  const system = await call(handler, { method: 'GET', url: '/capital-automation/notifications?scope=system' })
+  assert.deepEqual(system.json().notifications.map((item) => item.kind), ['scheduler_standby'])
+  assert.equal(system.json().unread, 1)
+  const read = await call(handler, { method: 'POST', url: '/capital-automation/notifications/read', body: { all: true } })
+  assert.equal(read.json().changed, 1, '全部已读默认只处理任务通知')
+  const remaining = await call(handler, { method: 'GET', url: '/capital-automation/notifications?scope=all' })
+  assert.equal(remaining.json().unread, 1, '系统事件应保持未读')
+})
+
 test('超长 URL 在解析 query 前返回 414', async () => {
   const { handler } = harness()
   const response = await call(handler, {

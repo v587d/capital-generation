@@ -230,7 +230,7 @@ async function dispatch({ req, method, suffix, url, service, requestId }) {
     return { body: await service.listRuns(queryOf(url, new Set(['limit', 'before']))) }
   }
   if (suffix === '/notifications' && method === 'GET') {
-    return { body: await service.listNotifications(queryOf(url, new Set(['unread']))) }
+    return { body: await service.listNotifications(queryOf(url, new Set(['unread', 'scope']))) }
   }
   if (suffix === '/notifications/read' && method === 'POST') return { body: await service.markNotificationsRead(await readBody(req)) }
   const runAction = /^\/runs\/([^/]+)\/cancel$/.exec(suffix)

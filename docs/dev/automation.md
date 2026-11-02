@@ -36,9 +36,10 @@
   过期租约由 `rename` 移走后重新竞争，owner 记录含 `ownerId`、`fencingToken`、`leaseExpiresAt`。
   每个 lease 使用独立 child 目录，旧 owner 不能写入接任者的 root；`renew`/`isCurrent` 每次同时校验
   child 与当前 root。拿不到租约时进入 `standby`，页面只读；手动运行同样先要 owner，standby 返回
-  `scheduler_unavailable`。
+  `scheduler_unavailable`。standby 是系统状态，不写通知记录；`status()` 暴露
+  `lastStandbyAt / lastStandbyCode / lastStandbyReason`，由页面底部「系统状态」展示，技术原因默认折叠。
 - profile 同时最多 admission 两个活动 run；超出部分记 `skipped_overlap`，手动运行返回
-  `run_capacity`，不改变任务级 300 steps / 1200 tool calls / 30 分钟默认预算。
+  `run_capacity`，不改变任务级 300 steps / 1200 tool calls / 60 分钟默认预算。
 - occurrence 键：`profileKey + ':' + taskId + ':' + scheduleVersion + ':' + scheduledInstantUtc`；
   手动运行使用 `profileKey:manual:<runId>`。触发配置变化会改变 `scheduleVersion` 并重置
   `scheduleAnchorAt`，避免用旧版本补跑。
@@ -66,15 +67,17 @@
   cwd 相同的历史 session 重新 attach，避免旧运行继续留在未分组。注册失败不阻断运行，只退回受控目录。
 - 首条 prompt 含任务指令、任务分类、触发原因、run/task/occurrence、当前时间与时区、
   `automation-v1` 无人值守标识。任务分类同时决定输出结构与通用侧重，这段分类要求排在任务
-  指令之前且不覆盖启动句；标题与说明用 JSON 引号串作为背景数据嵌入，并明确以「任务指令」
-  为任务目标，背景资料里的指令性文字按数据忽略；prompt 未被明确接受时进入
-  `unknown_after_restart`，不自动重试；session 创建失败留下合成 `failed` run。
+  指令之前且不覆盖任务指令。内置模板的指令只写覆盖范围与交付口径（逐档覆盖、按什么分级、
+  什么算做完），不点名工具，也不复制分类结构、数据纪律与无人值守策略；标题与说明用 JSON
+  引号串作为背景数据嵌入，并明确以「任务指令」为任务目标，背景资料里的指令性文字按数据
+  忽略；prompt 未被明确接受时进入 `unknown_after_restart`，不自动重试；session 创建失败
+  留下合成 `failed` run。
 - 根回合边界即落盘：`turn/start` 写 `turnState{phase:'running'}`，`turn/end` 写
   `turnState{phase:'ended', status}` 并顺带持久化当时的 `steps` / `toolCalls` / `summary`；不依赖
   750ms settle 之后的 finalize。恢复与 dispose 都以该字段为准，因此已完成回合不会被重启改写成
   `unknown_after_restart`。
-- 预算（任务级覆盖）：wall-clock 5–120 分钟、idle 1–30 分钟、最大步骤 10–2000（默认 300）、
-  最大工具调用 10–6000（默认 1200）。wall-clock 从 admission 开始，覆盖 workspace/session 创建、resolve、rename
+- 预算（任务级覆盖）：wall-clock 5–120 分钟、idle 1–30 分钟、最大步骤 100–2000（默认 300）、
+  最大工具调用 100–5000（默认 1200）。wall-clock 从 admission 开始，覆盖 workspace/session 创建、resolve、rename
   与首条 prompt；工具调用计数覆盖整棵运行子树：`tool/call` 与 PTC 的 `tool/ptc-dispatch` 都算一次，子 Agent 的调用也计入。
   取消用 `agent.cancel({kind:'hook', reason})` + `subagents.drainDescendants()`；drain 与 session flush 都有有限时，
   宽限期后仍未收敛则按 `timed_out` / 取消终态收口，不假定底层工具已停止。runtime/profile 卸载时先等待 scheduler admission 和活动 runner drain；runner dispose 最多等待 20 秒；
@@ -83,16 +86,18 @@
   `edit` 与 shell 提权请求；被拒的提问把运行标成 `blocked_requires_user`。角色工具面仍由
   preset 的族行封闭；不得用 persona 文案替代这些闸门。
 - 运行错误最多 20 条、按 code+message+phase 去重，进入存储前脱敏（token、路径、控制字符）。
-  通知默认失败/超时/standby/日历不可用开启，成功默认关闭。
+  通知只记录任务级事件：失败 / 超时 / 需人工处理（默认开启）、成功（默认关闭）与交易日历不可用；
+  调度器 standby 不写通知，只进系统状态。
 
 ## 12.5 API、页面与验收
 
 - 路由前缀 `/capital-automation`；所有 handler 第一步 `connection.requestRejection(req)`，
   被拒时不读 body、不碰 storage。提供 `/meta`、`/tasks`（CRUD + activate/pause/hibernate/copy/run）、
   `/runs`（列表/详情/cancel）、`/notifications`（列表/已读）。不提供 `/legacy`、`/catalog` 或条件接口。
-- 页面顶部只保留品牌与居中的「任务 / 运行」页签，右上角是 profile 级通知中心与「新建任务」；
-  profile / scheduler / 日历等诊断信息不再常驻，只在 scheduler standby、存储或交易日历不可用
-  时以 banner 提示，版本号不在页面展示。明暗主题跟随 `body[data-ds-dark-theme]`；
+- 页面顶部只保留品牌与居中的「任务 / 运行」页签，右上角是任务通知中心与「新建任务」；
+  profile / scheduler / 日历等诊断信息不常驻，只在 scheduler standby、存储或交易日历不可用
+  时以 banner 提示；调度/日历的当前状态与最近一次中断放在页面底部「系统状态」，技术原因折叠，
+  版本号不在页面展示。明暗主题跟随 `body[data-ds-dark-theme]`；
   浅色模式的灰阶、表格分隔线、标签/状态文字色单独覆盖，页签选中态用高对比实心胶囊。任务页由
   最近 30 天运行历史、运行中条、任务表（分类/我的任务筛选、搜索、行内操作菜单）和内置模板区组成：
   `dormant` 的内置任务以模板卡展示，添加后进入任务表；`active` / `paused` 任务与自定义任务留在任务表。
@@ -120,19 +125,25 @@
   运行记录页签；每条运行行的错误条数跟在「工具调用」之后，右侧只留取消运行或打开 session
   （打开 session 用主按钮）。配置里的「工作区」从 `/meta` 的 `workspaces` 选择，空值 = 默认专属
   工作区；任务分类同时决定输出结构与通用侧重，不再有独立「输出侧重」；页面只标明运行模式固定为
-  「自动模式」。内置模板的指令只保留启动句；旧覆盖层升级时会清理旧指令与遗留 mode，但保留
-  用户真实改过的标题、触发与工作区。保存有取消与脏状态提示；
-  删除自定义任务、休眠内置模板都要二次确认，取消活动运行同样需要确认。任务详情运行中只显示取消；
+  「自动模式」。内置模板的指令写覆盖范围与交付口径（不点名工具，也不复制分类输出要求、
+  数据纪律与无人值守策略）；旧覆盖层升级时会清理旧指令与遗留 mode，但保留用户真实改过的
+  标题、触发与工作区。配置修改即保存：客户端 600ms 防抖后串行 `PATCH /tasks/:id`，字段失焦、
+  切换页签、页面隐藏与组件卸载都会冲刷待保存修改；页脚只保留自动保存状态与失败重试，不再有
+  保存 / 取消按钮。校验未通过时不提交并提示补全，保存失败保留草稿与错误、可重试；详情刷新或
+  其他操作触发的重新读取不得覆盖本地未保存的编辑。服务端接口与校验语义不变，多窗口同时编辑
+  仍是最后写入生效。删除自定义任务、休眠内置模板都要二次确认，取消活动运行同样需要确认。任务详情运行中只显示取消；
   未添加的模板用「添加」、已暂停任务用「启用」，二者是主按钮；已启用后「立即运行」是主按钮；
   终态后才开放 session 入口。
 - 运行页复用同一张 30 天历史卡，按全部/进行中/成功/失败筛选 profile 级运行记录；每行标题
   在前、状态在后，时间、耗时与步骤等元数据在第二行左对齐，错误条数紧跟「工具调用」，
   取消 / session 操作靠右。点击错误条数在行内展开具体错误（消息 + code），摘要不展开——
   结果与过程以 session 为准。可取消活动运行或在终态后打开 session。
-  通知中心展示全部 profile 级通知（包括没有 taskId 的 `scheduler_standby` /
-  `calendar_unavailable`），可定位到任务。上述均为页面组织与呈现，API、状态机和存储契约不变。
+  任务通知中心只展示任务级通知（`run_failed` / `run_timeout` / `run_succeeded` /
+  `calendar_unavailable`），默认按 `scope=task` 过滤并只统计这些未读；`/notifications?scope=system`
+  仅供诊断查看旧的 `scheduler_standby` 记录。API 的 `scope` 默认 `task`，全部已读也默认只处理任务事件。
 - 设置默认值集中在 `automation/defaults.js`；用户级字段走现有 `capital-config` 条目的
-  `automation.*` volatile 字段，优先级固定为代码默认 → 部署行 → 当前 profile → 任务级覆盖。
+  `automation.*` volatile 字段，在插件设置卡片的「投研自动化」格集中编辑（与「数据源」平级），
+  优先级固定为代码默认 → 部署行 → 当前 profile → 任务级覆盖：任务记录里的 `limits` 是可选覆盖层，省略即跟随 profile（改通用设置会跟着变），只有显式保存过的值才盖过它；新建任务表单也以 profile 值为初始值。
 - 回归：`test/automation-*.test.mjs`（schema/时区/DST/owner/store/route/scheduler/policy/runner/
   calendar-source/组合）+ `test/packaging.test.mjs`。日历上游形状用 `npm run smoke:calendar` 实测，
   不进 `npm test`（测试全部注入假 fetch，不打外网）。改 `automation/` 后跑 `npm test`；改 host 行或

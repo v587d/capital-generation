@@ -863,14 +863,14 @@ const probes = [
   {
     id: 'L28',
     title: '官方 SegmentedControl：props 面（id / value / options / onChange / label / disabled / className）、它自己发 tablist+tab 与 `<id>-<value>-panel` 的 aria-controls、roving tabIndex 与 ←→/Home/End 走位',
-    why: 'settings 卡片顶上的三格（数据源 / 精选 Skills / 包含的组件）就是它。四种漂移都不报错：'
-      + '① `aria-controls` 的 id 方案一改（换分隔符、换顺序、改成内部生成），我们三块面板的 `id` 与 '
-      + '`aria-labelledby` 全部对不上——**第三块面板指的就是宿主那段清单**，读屏用户点「跳到面板」落到空处；'
-      + '② roving tabIndex 没了 ⇒ 每格都进 Tab 序，一条 tablist 六个停靠点；③ 键盘走位改语义或不再跳过 '
+    why: 'settings 卡片顶上的四格（数据源 / 投研自动化 / 精选 Skills / 包含的组件）就是它。四种漂移都不报错：'
+      + '① `aria-controls` 的 id 方案一改（换分隔符、换顺序、改成内部生成），我们四块面板的 `id` 与 '
+      + '`aria-labelledby` 全部对不上——**第四块面板指的就是宿主那段清单**，读屏用户点「跳到面板」落到空处；'
+      + '② roving tabIndex 没了 ⇒ 每格都进 Tab 序，一条 tablist 七个停靠点；③ 键盘走位改语义或不再跳过 '
       + 'disabled 项 ⇒ 方向键与卡片行为分叉（我们自己不补 onKeyDown，补了就是双重选择）；④ 视觉选中态或'
       + '焦点环换载体（不再读 `aria-selected`）⇒ 屏上与读屏各说一套。另外它是**完全受控**件（value 由我们'
       + '持有），改成自持状态就会与卡片根的 `data-capital-config-tab` 两套真相——那属性正驱动着收起宿主'
-      + '「包含的组件」那两条 `:has()` 规则（见 L15）。',
+      + '「包含的组件」那三条 `:has()` 规则（见 L15）。',
     run() {
       const file = join(PKG('dsh-client-ui-primitives'), 'lib/index.js')
       const text = readIfPresent(file)

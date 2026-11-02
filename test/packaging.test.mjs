@@ -61,6 +61,8 @@ test('打包闸门：vendored 图表库与构建产物都在发布清单里', (t
     'automation/index.js',
     'automation/client.js',
     'automation/defaults.js',
+    'automation/task-icons.js',
+    'automation/TABLER-ICONS-LICENSE',
     'automation/workspaces.js',
     'preset/capital-generation/agent.patch.yml',
     'preset/capital-generation/skills/capital-chart-protocol/SKILL.md',
@@ -157,7 +159,7 @@ test('打包闸门：selected-skills 的运行时半边逐条落在发布清单�
 
 test('打包闸门：声明 dsh.client 的包，其客户端 bundle 必须真的在包里', () => {
   // Check the main package and every nested package: a missing client bundle stops the web profile.
-  const manifests = ['package.json', 'chart-ui/package.json', 'config/package.json', 'watchlist/package.json']
+  const manifests = ['package.json', 'chart-ui/package.json', 'config/package.json', 'watchlist/package.json', 'automation/package.json']
   const paths = packedFilePaths()
   let checked = 0
 

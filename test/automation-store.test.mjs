@@ -2,10 +2,11 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createAutomationStore, profileKeyOf } from '../automation/store.js'
-import { BUILTIN_BY_ID } from '../automation/builtins.js'
+import { BUILTIN_BY_ID, BUILTIN_DEFINITIONS } from '../automation/builtins.js'
 import { createFakeDomain } from './automation-harness.mjs'
 import { tradingCalendar } from '../automation/calendar.js'
 import { TaskConfigSchema } from '../automation/schema.js'
+import { BUILTIN_TASK_ICONS, TASK_ICON_CATALOG } from '../automation/task-icons.js'
 
 const START = Date.parse('2026-10-27T00:00:00Z')
 
@@ -52,11 +53,12 @@ test('内置任务按 profile 播种；不同 profile 的记录互相不可见',
   const fake = createFakeDomain()
   const a = make('web', fake)
   const b = make('capital', fake)
-  assert.equal((await a.store.listTasks()).length, 3)
-  assert.equal((await b.store.listTasks()).length, 3)
+  const builtinCount = BUILTIN_DEFINITIONS.length
+  assert.equal((await a.store.listTasks()).length, builtinCount)
+  assert.equal((await b.store.listTasks()).length, builtinCount)
   const created = await a.store.createTask(createInput)
-  assert.equal((await a.store.listTasks()).length, 4)
-  assert.equal((await b.store.listTasks()).length, 3, '另一个 profile 不能看到这条自定义任务')
+  assert.equal((await a.store.listTasks()).length, builtinCount + 1)
+  assert.equal((await b.store.listTasks()).length, builtinCount, '另一个 profile 不能看到这条自定义任务')
   assert.equal(await b.store.getTask(created.id), undefined)
   assert.equal(await b.store.getRun('run_x'), undefined)
 })
@@ -95,7 +97,7 @@ test('旧内置覆盖层升级：刷新旧指令、丢掉 mode，保留真实 wo
   assert.equal(task.workspaceId, 'ws_keep')
   assert.equal('mode' in task, false)
   const persisted = fake.tables.get('tasks').get(id)
-  assert.equal(persisted.definitionVersion, 3)
+  assert.equal(persisted.definitionVersion, BUILTIN_BY_ID.get('morning-brief').version)
   assert.equal(persisted.overrides.instruction, undefined)
   assert.equal(persisted.overrides.description, undefined)
   assert.equal(persisted.overrides.mode, undefined)
@@ -179,6 +181,19 @@ test('custom 只能删除；builtin 不能删除，但可以复制为 paused 的
   assert.equal(await store.deleteTask(copied.id), true)
 })
 
+test('自定义任务图标：创建与修改都落库，复制内置模板继承模板图标', async () => {
+  const { store } = make()
+  const created = await store.createTask({ ...createInput, icon: 'bell' })
+  assert.equal((await store.getTask(created.id)).icon, 'bell')
+  await store.patchTask(created.id, { icon: 'target' })
+  assert.equal((await store.getTask(created.id)).icon, 'target')
+  const builtin = (await store.listTasks()).find((task) => task.origin === 'builtin')
+  const copy = await store.copyBuiltin(builtin.id)
+  const copied = await store.getTask(copy.id)
+  assert.equal(copied.icon, BUILTIN_TASK_ICONS[builtin.sourceBuiltinId], '复制后应保留模板图标，用户再改')
+  assert.ok(TASK_ICON_CATALOG[copied.icon], '复制出的图标必须仍在目录里')
+})
+
 test('运行保留：每任务 200 条，超出按 queuedAt 淘汰最旧', async () => {
   const { store } = make()
   const created = await store.createTask(createInput)
@@ -253,6 +268,22 @@ test('通知按 profile 隔离、未读计数与批量已读', async () => {
   assert.equal(await b.store.unreadNotificationCount(), 1)
 })
 
+test('任务通知与调度状态分开：默认列表与未读只算任务事件', async () => {
+  const { store } = make()
+  await store.addNotification({ kind: 'run_failed', title: '失败', message: 'x' })
+  await store.addNotification({ kind: 'scheduler_standby', title: '待命', message: 'y' })
+  assert.deepEqual((await store.listNotifications()).map((item) => item.kind), ['run_failed'])
+  assert.equal(await store.unreadNotificationCount(), 1)
+  assert.deepEqual((await store.listNotifications({ scope: 'system' })).map((item) => item.kind), ['scheduler_standby'])
+  assert.equal(await store.unreadNotificationCount('system'), 1)
+  assert.equal(await store.markNotificationsRead({ all: true }), 1, '任务全部已读不能顺手吞掉系统事件')
+  assert.equal(await store.unreadNotificationCount('system'), 1)
+  assert.equal(await store.unreadNotificationCount('all'), 1)
+  assert.equal(await store.markNotificationsRead({ all: true, scope: 'system' }), 1)
+  assert.equal(await store.unreadNotificationCount('all'), 0)
+  assert.equal((await store.listNotifications({ scope: 'all' })).length, 2)
+})
+
 test('nextRun 展示使用任务时区，且把交易日历不可用显式暴露', async () => {
   const { store } = make()
   const created = await store.createTask(createInput)
@@ -271,4 +302,36 @@ test('strict schema：任务记录写坏字段会在域写入口就失败', asyn
   const created = await store.createTask(createInput)
   const record = await store.taskRecordById(created.id)
   assert.throws(() => TaskConfigSchema.parse({ ...record.custom, cwd: '/tmp' }), /Unrecognized key|unrecognized/i)
+})
+
+test('运行上限继承通用设置；任务单独改过才覆盖，改回通用值后重新跟随', async () => {
+  const fake = createFakeDomain()
+  const settings = { runTimeoutMinutes: 60, idleTimeoutMinutes: 5, maxSteps: 300, maxToolCalls: 1_200 }
+  const store = createAutomationStore({
+    openDomain: async () => fake.domain,
+    profile: { name: 'web' },
+    now: () => START,
+    calendar: tradingCalendar,
+    settings: () => ({ ...settings }),
+  })
+  const builtin = (await store.listTasks()).find((task) => task.sourceBuiltinId === 'morning-brief')
+  assert.equal(builtin.limits.runTimeoutMinutes, 60, '没单独改过的内置任务用通用设置的默认值')
+  settings.runTimeoutMinutes = 90
+  assert.equal((await store.getTask(builtin.id)).limits.runTimeoutMinutes, 90, '改了通用设置，没覆盖的任务跟着变')
+
+  const inherited = await store.createTask({ ...createInput, title: '跟随通用' })
+  assert.equal((await store.getTask(inherited.id)).limits.runTimeoutMinutes, 90, '新建任务没给上限时继承通用设置')
+
+  const pinned = await store.createTask({
+    ...createInput,
+    title: '单独上限',
+    limits: { runTimeoutMinutes: 45, idleTimeoutMinutes: 5, maxSteps: 300, maxToolCalls: 1_200 },
+  })
+  settings.runTimeoutMinutes = 120
+  assert.equal((await store.getTask(pinned.id)).limits.runTimeoutMinutes, 45, '任务单独改过的上限不被通用设置覆盖')
+
+  await store.patchTask(pinned.id, { limits: { runTimeoutMinutes: 120, idleTimeoutMinutes: 5, maxSteps: 300, maxToolCalls: 1_200 } })
+  assert.equal((await store.getTask(pinned.id)).limits.runTimeoutMinutes, 120, '把上限改成通用值即回到继承')
+  settings.runTimeoutMinutes = 30
+  assert.equal((await store.getTask(pinned.id)).limits.runTimeoutMinutes, 30, '之后继续跟随通用设置')
 })

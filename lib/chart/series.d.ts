@@ -68,16 +68,16 @@ export declare function extractRows(value: unknown): {
     shape: string;
 };
 interface ParsedTime {
-    /** Value handed to the library: 'YYYY-MM-DD' business day, or UTC seconds. */
+    /** Value handed to the library: 'YYYY-MM-DD' business day, or epoch seconds. */
     display: string | number;
-    /** Comparison key (UTC seconds) for sort/filter/alignment. */
+    /** Comparison key (epoch seconds); date-only and naive datetime values use Asia/Shanghai. */
     seconds: number;
     /** True when the value came from a date-only string; decides business-day rendering. */
     dateOnly: boolean;
 }
 /**
- * Deterministic across machines: date-only stays a business-day string (no TZ shift), naive
- * datetime is UTC, numbers >= 1e11 are epoch ms, unparseable means the row has no time.
+ * Deterministic across machines: date-only is an Asia/Shanghai calendar day, naive datetime is
+ * Asia/Shanghai wall clock, numbers >= 1e11 are epoch ms, unparseable means the row has no time.
  */
 export declare function parseTimeValue(value: unknown): ParsedTime | undefined;
 export interface BuildChartPayloadInput {

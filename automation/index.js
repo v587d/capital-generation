@@ -56,6 +56,7 @@ export function createAutomationRuntime(options) {
     profile: { name: rawProfileName },
     now,
     calendar,
+    settings: getSettings,
   })
   const runner = createRunRunner({
     ctx,

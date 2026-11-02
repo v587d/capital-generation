@@ -16,6 +16,7 @@ import {
 } from './defaults.js'
 import {
   NotificationsReadSchema,
+  TaskCategorySchema,
   TaskCreateSchema,
   TaskPatchSchema,
   parseStrict,
@@ -27,6 +28,12 @@ const RUN_CURSOR_PATTERN = /^[A-Za-z0-9_-]{1,120}$/
 
 function invalidQuery(message) {
   return new AutomationError('invalid_query', message, 400)
+}
+
+function notificationScopeOf(value) {
+  if (value === undefined) return 'task'
+  if (value === 'task' || value === 'system' || value === 'all') return value
+  throw invalidQuery('通知 scope 参数无效。')
 }
 
 function runLimitOf(value) {
@@ -145,7 +152,7 @@ export function createAutomationService(options) {
         preset: 'capital-generation',
         cwdKind: 'profile',
         policy: 'automation-v1',
-        categories: ['news', 'market', 'review', 'research'],
+        categories: [...TaskCategorySchema.options],
         cadences: ['daily', 'weekly', 'monthly', 'once'],
         limits: {
           runTimeoutMinutes: [MIN_RUN_TIMEOUT_MINUTES, MAX_RUN_TIMEOUT_MINUTES],
@@ -161,14 +168,9 @@ export function createAutomationService(options) {
   async function createTask(input) {
     const parsed = parseStrict(TaskCreateSchema, input, 'task')
     const defaults = { ...DEFAULT_AUTOMATION_SETTINGS, ...settings() }
+    // No limits here: an omitted (or unchanged) block stays inherited from the settings card.
     const resolved = {
       ...parsed,
-      limits: parsed.limits ?? {
-        runTimeoutMinutes: defaults.runTimeoutMinutes,
-        idleTimeoutMinutes: defaults.idleTimeoutMinutes,
-        maxSteps: defaults.maxSteps,
-        maxToolCalls: defaults.maxToolCalls,
-      },
       notifications: parsed.notifications ?? {
         inApp: defaults.inAppNotifications !== false,
         onFailure: true,
@@ -291,15 +293,16 @@ export function createAutomationService(options) {
         throw invalidQuery('通知 unread 参数无效。')
       }
     }
+    const scope = notificationScopeOf(query.scope)
     return {
-      notifications: await store.listNotifications({ unreadOnly, limit: 200 }),
-      unread: await store.unreadNotificationCount(),
+      notifications: await store.listNotifications({ unreadOnly, limit: 200, scope }),
+      unread: await store.unreadNotificationCount(scope),
     }
   }
 
   async function markNotificationsRead(input) {
     const parsed = parseStrict(NotificationsReadSchema, input, 'notifications/read')
-    return { changed: await store.markNotificationsRead(parsed) }
+    return { changed: await store.markNotificationsRead({ ...parsed, scope: parsed.scope ?? 'task' }) }
   }
 
   async function taskDetail(id) {

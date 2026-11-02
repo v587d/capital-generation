@@ -43,6 +43,9 @@ export function createScheduler(options) {
     recoveredRuns: 0,
     lastTickAt: null,
     lastError: null,
+    lastStandbyAt: null,
+    lastStandbyCode: null,
+    lastStandbyReason: null,
   }
   let timer
   let heartbeatTimer
@@ -52,7 +55,6 @@ export function createScheduler(options) {
   let stopPromise
   let manualAdmission = Promise.resolve()
   let recovered = false
-  let lastStandbyNoticeAt = 0
 
   function settings() {
     return getSettings()
@@ -72,7 +74,7 @@ export function createScheduler(options) {
 
   async function requireCurrentOwner() {
     if (await ownerIsCurrent()) return true
-    await standby('调度租约已失效：本进程不再投递新运行。')
+    await standby('调度租约已失效：本进程不再投递新运行。', 'lease_lost')
     return false
   }
 
@@ -96,44 +98,44 @@ export function createScheduler(options) {
     })
   }
 
-  async function standby(message) {
-    if (state.state !== 'standby') logger?.warn?.(`capital-automation: ${message}`)
+  // Standby is current state, not a task outcome: surface it through `status()` and the page's
+  // system-status line, never as an inbox record (the old append-only records spammed the task
+  // inbox and evicted real run failures at the 200-record cap).
+  async function standby(message, code = 'lease_lost') {
+    const entering = state.state !== 'standby'
+    if (entering) logger?.warn?.(`capital-automation: ${message}`)
     state.state = 'standby'
     state.leaseExpiresAt = null
-    const at = now()
-    if (at - lastStandbyNoticeAt < 10 * 60_000) return
-    lastStandbyNoticeAt = at
-    if (settings().inAppNotifications !== true) return
-    await store.addNotification({
-      kind: 'scheduler_standby',
-      title: '调度器未取得运行权',
-      message: message.slice(0, 500),
-    }).catch(() => {})
+    if (entering) {
+      state.lastStandbyAt = iso(now())
+      state.lastStandbyCode = code
+      state.lastStandbyReason = sanitizeMessage(message).slice(0, 500)
+    }
   }
 
   async function tryAcquire() {
     if (lease.held) {
       const renewed = await lease.renew()
       if (!renewed) {
-        await standby('调度租约已失效：本进程不再投递新运行。')
+        await standby('调度租约已失效：本进程不再投递新运行。', 'lease_lost')
         return false
       }
     } else {
       const acquired = await lease.acquire()
       if (!acquired) {
-        await standby('另一个进程持有当前 profile 的调度租约；本页面只读，不投递运行。')
+        await standby('另一个进程持有当前 profile 的调度租约；本页面只读，不投递运行。', 'lease_held')
         return false
       }
     }
     if (!(await ownerIsCurrent())) {
-      await standby('调度租约未通过当前 owner/token 校验，本进程不再投递新运行。')
+      await standby('调度租约未通过当前 owner/token 校验，本进程不再投递新运行。', 'owner_unverified')
       return false
     }
     state.state = 'active'
     startHeartbeat()
     await publishOwner()
     if (!(await ownerIsCurrent())) {
-      await standby('调度租约在状态发布期间已被接管，本进程不再投递新运行。')
+      await standby('调度租约在状态发布期间已被接管，本进程不再投递新运行。', 'lease_lost')
       return false
     }
     if (!recovered) {
@@ -167,8 +169,8 @@ export function createScheduler(options) {
     if (status === 'skipped_calendar_unavailable' && settings().inAppNotifications === true && task.notifications.inApp === true) {
       await store.addNotification({
         kind: 'calendar_unavailable',
-        title: `交易日历不可用：${task.title}`.slice(0, 120),
-        message: '任务已按 fail-closed 跳过；日历更新后会自动恢复，持续出现请检查网络或交易所公告。',
+        title: `无法确认交易日：${task.title}`.slice(0, 120),
+        message: '本次计划不会自动运行；日历恢复后会自动接上。持续出现请检查网络或交易所公告。',
         runId: run.id,
         taskId: task.id,
       }).catch(() => {})
@@ -191,7 +193,7 @@ export function createScheduler(options) {
         phase: 'schedule',
         severity: 'warning',
         code: 'calendar_unavailable',
-        message: `交易日历不可用（${latest.localDate}）：按 fail-closed 跳过，不按周一至周五猜测运行。`,
+        message: `无法确认交易日（${latest.localDate}）：为避免误跑，本次计划已跳过。`,
       })
       return
     }
@@ -246,7 +248,7 @@ export function createScheduler(options) {
           phase: 'schedule',
           severity: 'warning',
           code: 'owner_lost_before_dispatch',
-          message: '调度租约在投递前失效；本次运行未自动重试。',
+          message: '定时调度权在启动前失效；本次运行未自动重试，可在页面手动重跑。',
         }],
       }).catch(() => {})
       await store.setLastHandled(task.id, key, latest.scheduledFor).catch(() => {})
@@ -269,7 +271,7 @@ export function createScheduler(options) {
           phase: 'schedule',
           severity: 'warning',
           code: 'owner_lost_before_dispatch',
-          message: '调度租约在投递前失效；本次运行未自动重试。',
+          message: '定时调度权在启动前失效；本次运行未自动重试，可在页面手动重跑。',
         }],
       }).catch(() => {})
       return
@@ -357,7 +359,7 @@ export function createScheduler(options) {
           await publishOwner()
           return
         }
-        await standby('调度租约已失效：本进程不再投递新运行。')
+        await standby('调度租约已失效：本进程不再投递新运行。', 'lease_lost')
       }).catch(() => {})
     }, heartbeatMs)
     heartbeatTimer.unref?.()
@@ -400,11 +402,11 @@ export function createScheduler(options) {
     if (state.state !== 'active') {
       const acquired = await tryAcquire()
       if (!acquired || state.state !== 'active') {
-        return { ok: false, code: 'scheduler_unavailable', message: '调度器未取得运行权，无法手动运行。' }
+        return { ok: false, code: 'scheduler_unavailable', message: '当前窗口没有定时调度权，暂时不能手动运行。' }
       }
     }
     if (!(await requireCurrentOwner())) {
-      return { ok: false, code: 'scheduler_unavailable', message: '调度器未取得当前运行权，无法手动运行。' }
+      return { ok: false, code: 'scheduler_unavailable', message: '定时调度权刚刚失效，暂时不能手动运行。' }
     }
     const active = await store.activeRunForTask(task.id)
     if (active !== undefined) {
@@ -432,10 +434,10 @@ export function createScheduler(options) {
           phase: 'schedule',
           severity: 'warning',
           code: 'owner_lost_before_dispatch',
-          message: '调度租约在投递前失效；本次运行未自动重试。',
+          message: '定时调度权在启动前失效；本次运行未自动重试，可在页面手动重跑。',
         }],
       }).catch(() => {})
-      return { ok: false, code: 'scheduler_unavailable', message: '调度器未取得当前运行权，无法手动运行。', runId: run.id }
+      return { ok: false, code: 'scheduler_unavailable', message: '定时调度权刚刚失效，暂时不能手动运行。', runId: run.id }
     }
     const claimed = await store.claimOccurrence({ taskId: task.id, runId: run.id, occurrenceKey: run.occurrenceKey })
     if (!claimed) {
@@ -453,10 +455,10 @@ export function createScheduler(options) {
           phase: 'schedule',
           severity: 'warning',
           code: 'owner_lost_before_dispatch',
-          message: '调度租约在投递前失效；本次运行未自动重试。',
+          message: '定时调度权在启动前失效；本次运行未自动重试，可在页面手动重跑。',
         }],
       }).catch(() => {})
-      return { ok: false, code: 'scheduler_unavailable', message: '调度器未取得当前运行权，无法手动运行。', runId: run.id }
+      return { ok: false, code: 'scheduler_unavailable', message: '定时调度权刚刚失效，暂时不能手动运行。', runId: run.id }
     }
     if (runner.canDispatch?.() === false) {
       await store.setAttemptState(run.occurrenceKey, 'unknown').catch(() => {})
@@ -489,6 +491,9 @@ export function createScheduler(options) {
       tickMs: settings().tickMs,
       recoveredRuns: state.recoveredRuns,
       lastTickAt: state.lastTickAt,
+      lastStandbyAt: state.lastStandbyAt,
+      lastStandbyCode: state.lastStandbyCode,
+      lastStandbyReason: state.lastStandbyReason,
       storageError: state.storageError === null ? null : sanitizeMessage(state.storageError),
       lastError: state.lastError === null ? null : sanitizeMessage(state.lastError),
       calendar: calendar?.status?.(new Date(now())) ?? { available: false, source: 'none' },

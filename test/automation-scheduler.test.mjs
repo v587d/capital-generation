@@ -205,3 +205,27 @@ test('standby 时手动运行返回 scheduler_unavailable；取得 owner 后才�
   assert.equal(accepted.run.trigger, 'manual')
   assert.equal(free.dispatches.length, 1)
 })
+
+test('standby 只更新系统状态，不写任务通知，也不每次 tick 刷新时间', async () => {
+  const owner = {
+    ownerId: 'test-owner',
+    held: true,
+    fencingToken: 'foreign',
+    lockDir: '/tmp/fake-owner',
+    async acquire() { return false },
+    async renew() { return false },
+    async release() { this.held = false },
+  }
+  const { store, scheduler } = harness({ owner })
+  await scheduler.tick()
+  assert.equal((await store.listNotifications()).length, 0, 'standby 不得进入任务通知收件箱')
+  assert.equal((await store.listNotifications({ scope: 'system' })).length, 0, 'standby 也不再落通知记录')
+  const status = scheduler.status()
+  assert.equal(status.state, 'standby')
+  assert.equal(status.lastStandbyCode, 'lease_lost')
+  assert.ok(status.lastStandbyAt)
+  assert.match(status.lastStandbyReason, /调度租约已失效/)
+  const firstAt = status.lastStandbyAt
+  await scheduler.tick()
+  assert.equal(scheduler.status().lastStandbyAt, firstAt, '持续待命不应反复刷新中断时间')
+})

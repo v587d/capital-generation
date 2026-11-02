@@ -5,6 +5,13 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runInNewContext } from 'node:vm'
 import { DEFAULT_MAX_STEPS, DEFAULT_MAX_TOOL_CALLS } from '../automation/defaults.js'
+import { BUILTIN_DEFINITIONS } from '../automation/builtins.js'
+import {
+  BUILTIN_TASK_ICONS,
+  DEFAULT_CUSTOM_ICON,
+  TASK_ICON_CATALOG,
+  TASK_ICON_IDS,
+} from '../automation/task-icons.js'
 
 /**
  * Executes the built automation client bundle in a minimal DOM sandbox. The browser-only apply
@@ -63,8 +70,8 @@ function factoryRequire(name, createElement) {
       'IconAlarmClockOutlineRegular', 'IconChecklistOutlineRegular', 'IconChevronDownOutlineRegular',
       'IconChevronLeftOutlineRegular', 'IconChevronRightOutlineRegular', 'IconClockOutlineRegular', 'IconCopyOutlineRegular',
       'IconEditOutlineRegular', 'IconEllipsisOutlineRegular', 'IconFolderOpenOutlineRegular',
-      'IconGaugeOutlineRegular', 'IconGlobeOutlineRegular', 'IconInfoOutlineRegular',
-      'IconLightOutlineMedium', 'IconListPenOutlineRegular', 'IconPauseOutlineRegular', 'IconPlayOutlineRegular',
+      'IconInfoOutlineRegular',
+      'IconPauseOutlineRegular', 'IconPlayOutlineRegular',
       'IconPlusOutlineRegular', 'IconRefreshOutlineRegular', 'IconRightUpOutlineRegular', 'IconSearchOutlineRegular',
       'IconSparkleRegular', 'IconTrashOutlineRegular', 'IconWarningOutlineRegular',
       'Menu', 'MenuItemButton', 'Modal', 'Switch',
@@ -73,6 +80,28 @@ function factoryRequire(name, createElement) {
   }
   throw new Error(`客户端 bundle 不应在运行期 require("${name}")`)
 }
+
+test('任务图标：内置模板一一对应，目录图标互不重复且都能渲染', () => {
+  const ids = BUILTIN_DEFINITIONS.map((definition) => definition.id)
+  assert.ok(ids.length >= 16, '内置模板少于 16 个，图标覆盖断言会变得过松')
+  assert.deepEqual(ids.filter((id) => BUILTIN_TASK_ICONS[id] === undefined), [], '新增内置模板时必须同步 automation/task-icons.js')
+  assert.deepEqual(Object.keys(BUILTIN_TASK_ICONS).filter((id) => !ids.includes(id)), [], 'task-icons.js 里出现了已经不存在的内置模板')
+  for (const [builtinId, iconId] of Object.entries(BUILTIN_TASK_ICONS)) {
+    assert.ok(TASK_ICON_CATALOG[iconId] !== undefined, `${builtinId} 指向了目录里不存在的图标 ${iconId}`)
+  }
+  assert.ok(TASK_ICON_IDS.length >= 16, '用户可选图标少于内置模板数，选择面过窄')
+  assert.ok(TASK_ICON_IDS.includes(DEFAULT_CUSTOM_ICON), '自定义任务默认图标必须在目录里')
+  const sources = Object.values(TASK_ICON_CATALOG).map((icon) => icon.source)
+  assert.equal(new Set(sources).size, sources.length, '目录里不能出现重复的上游图标')
+  const paths = Object.values(TASK_ICON_CATALOG).map((icon) => icon.d)
+  assert.equal(new Set(paths).size, paths.length, '目录里不能出现重复的路径')
+  for (const [id, icon] of Object.entries(TASK_ICON_CATALOG)) {
+    assert.ok(icon.label.length > 0, `${id} 缺少选择器里的中文标签`)
+    assert.match(icon.d, /^M/, `${id} 的路径必须以 M 开头`)
+    assert.doesNotMatch(icon.d, /[<>]/, `${id} 的路径里不能夹带标签`)
+  }
+  assert.match(source, /viewBox:"0 0 24 24"/, '客户端 bundle 必须已编译进图标渲染器；改完源码要重跑 build:automation-client')
+})
 
 test('客户端 bundle：apply 在真实 DOM 形状下不抛错，注册 main 与 sidebar.panellist', () => {
   const mod = loadBundle().factory(factoryRequire)
@@ -133,7 +162,13 @@ test('客户端 bundle：apply 在真实 DOM 形状下不抛错，注册 main �
   }
   assert.match(clientSource, /setErrorsOpen/, '错误条数徽标必须可点击展开错误详情')
   assert.match(clientSource, /capital-automation-runerrors/, '展开的错误详情必须有独立的行内容器')
-  assert.match(clientSource, /api\.notifications\(\)/, '页面必须读取 profile 级通知，standby 通知才可见')
+  assert.match(clientSource, /api\.notifications\(\)/, '页面必须读取任务级通知，任务失败与超时才可见')
+  assert.match(clientSource, /notificationsEntry: '任务通知'/, '顶部入口必须叫任务通知，不能把调度状态也叫通知')
+  assert.match(clientSource, /function SystemStatus\(/, '调度状态必须有独立的低调系统状态区')
+  assert.match(clientSource, /lastStandbyCode/, '系统状态必须读取最近一次调度中断的用户可读原因')
+  assert.doesNotMatch(clientSource, /调度器待命与交易日历问题会出现在这里/, '任务通知说明不能把调度待命混进来')
+  assert.match(clientSource, /disabled: busy \|\| disabled \|\| task\.notifications\.inApp !== true/, '关闭写入任务通知后，失败/成功开关必须置灰')
+  assert.match(clientSource, /disabled: draft\.notifications\.inApp !== true/, '新建任务里的失败/成功开关也必须跟随总开关置灰')
   assert.match(clientSource, /task\.origin === 'builtin' && task\.state === 'dormant'/, '休眠的内置任务必须进入模板区')
   assert.match(clientSource, /capital-automation-template/, '模板区必须有可添加卡片')
   {
@@ -147,7 +182,34 @@ test('客户端 bundle：apply 在真实 DOM 形状下不抛错，注册 main �
   assert.match(clientSource, /function activationLabel\(task\)/, '模板添加与暂停恢复必须共用一处动作文案')
   assert.match(clientSource, /task\?\.state === 'dormant' \? zh\.add : zh\.activate/, '模板的激活动作叫「添加」，暂停任务仍叫「启用」')
   assert.match(clientSource, /task\?\.state === 'dormant' \? IconPlusOutlineRegular : IconPlayOutlineRegular/, '「添加」用加号图标，和「立即运行」的播放图标区分')
-  assert.match(clientSource, /task\?\.sourceBuiltinId === 'morning-brief'\) return IconLightOutlineMedium/, '早间资讯必须用 Light 图标，不能和盘后公告共用地球图标')
+  assert.match(clientSource, /function TaskGlyph/, '任务必须走独立的 TaskGlyph 渲染器')
+  assert.match(clientSource, /builtinTaskIcon\(task\?\.sourceBuiltinId\)/, '内置任务图标必须按 sourceBuiltinId 一一映射')
+  assert.match(clientSource, /task\?\.origin === 'custom'/, '自定义任务必须读自己保存的 icon')
+  assert.match(clientSource, /iconDefinition\(task\?\.icon\) !== undefined\) return task\.icon/, '新建草稿也要用已选图标，不能只看 origin')
+  assert.match(clientSource, /function IconPickerTrigger/, '任务图标必须是点击后弹出的选择器')
+  assert.match(clientSource, /h\(Menu, \{[\s\S]*?anchor: h\('button'/, '图标选择器必须复用宿主 Menu 的锚点与收起行为')
+  assert.match(clientSource, /listClassName: 'capital-automation-iconmenu'/, '图标菜单必须能单独定宽（portal 出去后作用域选择器够不到）')
+  assert.match(clientSource, /portal: true/, '图标菜单必须 portal，避免被弹窗内容裁切')
+  assert.match(clientSource, /role: 'menuitemradio'/, '菜单里的每个图标必须是 menuitemradio')
+  assert.match(clientSource, /'aria-checked': active \? 'true' : 'false'/, '每个图标必须暴露选中态')
+  assert.match(clientSource, /onClick: \(\) => \{ onChange\(id\); setOpen\(false\) \}/, '选中图标后必须收起菜单')
+  assert.match(clientSource, /h\(IconPickerTrigger, \{ task: draft, size: 42/, '新建任务弹窗必须用图标瓦片作为弹出触发器')
+  assert.match(clientSource, /task\.origin === 'custom'[\s\S]{0,120}?h\(IconPickerTrigger, \{/, '自定义任务的配置页必须能改图标')
+  assert.match(clientSource, /iconPickHint: '点击图标更换'/, '触发器必须说明点击图标可更换')
+  assert.match(clientSource, /capital-automation-glyphbtnchevron/, '下拉箭头必须挂在图标右侧')
+  assert.doesNotMatch(clientSource, /glyphbtnbadge/, '下拉箭头不能再压在图标右下角')
+  assert.doesNotMatch(clientSource, /任务会在后台新建一个 session 执行/, '新建弹窗不再保留这句运行说明')
+  assert.doesNotMatch(clientSource, /IconPickerField|capital-automation-iconpicker|role: 'radiogroup'/, '图标备选不能再常驻页面')
+  assert.match(clientSource, /icon: DEFAULT_CUSTOM_ICON/, '新建任务的草稿必须带默认图标')
+  assert.match(clientSource, /task\.origin === 'builtin' \? \{\} : \{ icon:/, '内置任务 PATCH 不能携带 icon，否则会被 overrides strict schema 拒绝')
+  assert.match(clientSource, /strokeWidth: 2/, 'Tabler 图标沿用 2px 描边，缩到 17px 仍可辨认')
+  assert.doesNotMatch(clientSource, /category === 'market'\) return IconGaugeOutlineRegular/, '图标不能继续按分类共用一个 DSH 图标')
+  assert.doesNotMatch(clientSource, /IconLightOutlineMedium/, '早间资讯的 Light 特判已由目录图标取代')
+  assert.doesNotMatch(clientSource, /function taskGlyph/, '旧的分类图标映射已删除')
+  assert.match(clientSource, /\['all', 'custom', 'news', 'market', 'review', 'research', 'portfolio', 'monitor'\]/, '任务筛选必须覆盖新增的组合与监控分类')
+  assert.match(clientSource, /portfolio: '组合', monitor: '监控'/, '分类标签必须有组合与监控')
+  assert.match(clientSource, /data-tone="portfolio"[\s\S]*data-tone="monitor"/, '新增分类必须有配色，不能落到默认地球色')
+  assert.match(clientSource, /\.sort\(compareTemplates\)/, '模板卡必须按频率与时间排序，12 个模板不能按 id 散落')
   assert.match(clientSource, /zh\.templateAdding : zh\.templateAdd/, '模板卡按钮文案是「添加 / 添加中」')
   assert.match(clientSource, /state: \{ dormant: '未添加'/, '模板未加入任务列表时状态显示「未添加」')
   assert.doesNotMatch(clientSource, /templateEnable|templateEnabling|去启用模板|启用一个内置模板/, '模板添加动作不再写成启用')
@@ -277,12 +339,18 @@ test('任务详情按状态收敛：头部去重、状态化卡片、配置页�
   const config = clientSource.slice(configStart, configEnd)
   assert.doesNotMatch(config, /capital-automation-formnote/, '配置页不再常驻内置模板覆盖说明')
   assert.doesNotMatch(config, /configBuiltinHint/, '删除会让人困惑的内置模板覆盖说明')
-  assert.match(config, /useDraftIssues\(task, task\.id\)/, '配置页必须逐字段跟踪失焦状态')
+  assert.match(config, /useDraftIssues\(task, task\.id, meta\)/, '配置页必须逐字段跟踪失焦状态')
   assert.match(config, /error: titleError/, '标题错误必须挂在标题字段')
   assert.match(config, /error: instructionError/, '指令错误必须挂在指令字段')
-  assert.match(config, /onBlur: \(\) => touch\('title'\)/, '标题失焦即校验')
-  assert.match(config, /onBlur: \(\) => touch\('instruction'\)/, '指令失焦即校验')
-  assert.match(config, /onClick: submit/, '保存按钮走内联校验')
+  assert.match(config, /onBlur: \(\) => \{ touch\('title'\); flush\(\) \}/, '标题失焦即校验并提交自动保存')
+  assert.match(config, /onBlur: \(\) => \{ touch\('instruction'\); flush\(\) \}/, '指令失焦即校验并提交自动保存')
+  assert.doesNotMatch(config, /onClick: submit/, '配置页不再有保存按钮')
+  assert.doesNotMatch(config, /zh\.save\b|zh\.saved\b|zh\.dirty\b/, '配置页不再渲染手动保存相关文案')
+  assert.match(config, /zh\.autosaveHint/, '配置页必须说明修改会自动保存')
+  assert.match(config, /zh\.autosaveSaved/, '配置页必须给出已自动保存的反馈')
+  assert.match(config, /onClick: retry/, '自动保存失败时必须能手动重试')
+  assert.match(config, /className: 'capital-automation-autosavestate'/, '自动保存状态必须有独立落点')
+  assert.doesNotMatch(config, /clear\(\); reset\(\)/, '配置页不再有取消并回滚按钮')
   assert.doesNotMatch(config, /zh\.required/, '必填错误不能合并成一条顶部提示')
   assert.match(config, /className: 'capital-automation-titlerow'/, '任务分类必须和任务标题同行')
   assert.match(config, /maxLength: TITLE_MAX_LENGTH/, '任务标题必须有字数上限')
@@ -311,8 +379,17 @@ test('任务详情按状态收敛：头部去重、状态化卡片、配置页�
   assert.match(clientSource, /onPaste:/, '粘贴必须转成纯文本')
   assert.doesNotMatch(clientSource, /capital-automation-field textarea|h\('textarea'/, '客户端不能再渲染原生 textarea')
 
-  assert.match(clientSource, /function draftIssues\(task\)/, '校验必须按字段返回问题集合')
-  assert.match(clientSource, /function useDraftIssues\(task, resetKey\)/, '失焦状态必须有单处实现')
+  assert.match(clientSource, /function draftIssues\(task, meta\)/, '校验必须按字段返回问题集合')
+  assert.match(clientSource, /function useDraftIssues\(task, resetKey, meta\)/, '失焦状态必须有单处实现')
+  assert.match(clientSource, /const AUTOSAVE_DELAY_MS = 600/, '自动保存必须有防抖窗口')
+  assert.match(clientSource, /function TaskDetailPage\(props\)[\s\S]*?api\.patch\(taskId, payload\)/, '配置修改必须走同一个 PATCH 保存')
+  assert.match(clientSource, /saveInFlightRef/, '自动保存必须串行，不能并发覆盖')
+  assert.match(clientSource, /saveTimerRef/, '自动保存必须清掉旧计时器')
+  assert.match(clientSource, /samePayload\(current, nextSaved\)/, '详情刷新不能覆盖用户未保存的编辑')
+  assert.match(clientSource, /payloadKey\(current\) === previousAcked/, '外部刷新只在本地没有未保存编辑时接管草稿')
+  assert.match(clientSource, /void flushRef\.current\?\.\(\)/, '切换页签 / 离开页面时必须冲刷待保存修改')
+  assert.match(clientSource, /kind === 'hibernate' \|\| kind === 'delete'[\s\S]*?await flushBeforeAction\(\)/, '休眠 / 删除前必须等自动保存收口，避免旧保存复活覆盖层')
+  assert.match(clientSource, /capital-automation-autosavestate/, '自动保存状态必须有独立样式')
   assert.match(clientSource, /function FieldHead\(props\)/, '字段标题行必须有独立实现')
   assert.match(clientSource, /h\(FieldHead, \{ label, note, error \}\),\n    children,/, '标题行必须排在输入之前')
   assert.match(clientSource, /\.capital-automation-fieldhead \{ display: flex/, '标题行必须能横排字数与错误')

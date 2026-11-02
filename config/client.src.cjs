@@ -66,11 +66,19 @@ const CREDENTIAL_FIELDS = ['fuyao', 'ftshare', 'anysearch', 'wind', 'paddleocr']
 const AUTOMATION_FIELDS = ['tickMs', 'runTimeoutMinutes', 'idleTimeoutMinutes', 'maxSteps', 'maxToolCalls', 'inAppNotifications']
 const AUTOMATION_DEFAULTS = {
   tickMs: 60_000,
-  runTimeoutMinutes: 30,
+  runTimeoutMinutes: 60,
   idleTimeoutMinutes: 5,
   maxSteps: 300,
   maxToolCalls: 1_200,
   inAppNotifications: true,
+}
+/** Mirrors `automation/defaults.js`; out-of-range values get an inline error instead of a silent clamp. */
+const AUTOMATION_RANGES = {
+  tickMs: { min: 30_000, max: 3_600_000, unit: 'automationUnitMs' },
+  runTimeoutMinutes: { min: 5, max: 120, unit: 'automationUnitMinutes' },
+  idleTimeoutMinutes: { min: 1, max: 30, unit: 'automationUnitMinutes' },
+  maxSteps: { min: 100, max: 2_000, unit: 'automationUnitSteps' },
+  maxToolCalls: { min: 100, max: 5_000, unit: 'automationUnitCalls' },
 }
 const SELECTED_SKILL_FIELDS = SELECTED_SKILL_CATALOG.map(({ key }) => key)
 // Stable orders: facet counts change with the other dimension, but chips must not jump under the cursor.
@@ -102,9 +110,17 @@ const zh = {
   localFetchLabel: '允许启动本地提取网页内容',
   localFetchHint: '开启后本地抓取兜底（回执来源 local-http）。保存后新自动模式会话生效。',
   automationTitle: '投研自动化',
-  automationHint: '调度器与无人值守运行的默认上限；任务详情里的设置优先。改动在下一个 tick 生效。',
-  automationTick: '调度间隔（毫秒）',
-  automationRunTimeout: 'wall-clock 上限（分钟）',
+  automationScheduleGroup: '调度',
+  automationRunGroup: '单次运行上限',
+  automationNotifyGroup: '通知',
+  automationInAppHint: '运行结束、失败或超时后，在应用内通知里留一条记录。',
+  automationTick: '自动检查间隔（毫秒）',
+  automationRunTimeout: '最长运行时间（分钟）',
+  automationInvalid: '请填写 {min}–{max} {unit}',
+  automationUnitMs: '毫秒',
+  automationUnitMinutes: '分钟',
+  automationUnitSteps: '步',
+  automationUnitCalls: '次',
   automationIdleTimeout: '空闲超时（分钟）',
   automationMaxSteps: '最大步骤',
   automationMaxToolCalls: '最大工具调用',
@@ -136,7 +152,9 @@ const zh = {
   save: '保存',
   saving: '保存中…',
   readOnly: '本部署的设置为只读。',
-  saveFailed: '本部署没有接受这些值，已保留供你修改。',
+  // A rejected or non-landing write (stale page revision, transport hiccup). Plain words only:
+  // the typed value is still there, so the next action is retry, not a restart.
+  saveFailed: '没有保存成功，请再试一次。',
   unavailable: '该插件当前未加载，暂时无法配置。',
   githubLabel: 'GitHub 仓库',
   npmLabel: 'npm 包页面',
@@ -157,9 +175,17 @@ const en = {
   localFetchLabel: 'Allow local web page extraction',
   localFetchHint: 'When on, a failed fetch falls back to local direct fetching (receipt via: local-http). Takes effect in new Auto mode sessions.',
   automationTitle: 'Research automation',
-  automationHint: 'Scheduler and unattended-run defaults; per-task limits win. Changes apply on the next tick.',
-  automationTick: 'Tick interval (ms)',
-  automationRunTimeout: 'Wall-clock limit (minutes)',
+  automationScheduleGroup: 'Scheduling',
+  automationRunGroup: 'Per-run limits',
+  automationNotifyGroup: 'Notifications',
+  automationInAppHint: 'Leave an in-app notification when a run finishes, fails, or times out.',
+  automationTick: 'Auto-check interval (ms)',
+  automationRunTimeout: 'Max run time (minutes)',
+  automationInvalid: 'Enter a whole number from {min} to {max} {unit}',
+  automationUnitMs: 'ms',
+  automationUnitMinutes: 'minutes',
+  automationUnitSteps: 'steps',
+  automationUnitCalls: 'calls',
   automationIdleTimeout: 'Idle timeout (minutes)',
   automationMaxSteps: 'Max steps',
   automationMaxToolCalls: 'Max tool calls',
@@ -191,7 +217,7 @@ const en = {
   save: 'Save',
   saving: 'Saving…',
   readOnly: 'This deployment stores settings read-only.',
-  saveFailed: 'The deployment did not accept these values; they were left for you to correct.',
+  saveFailed: "That didn't save. Please try again.",
   unavailable: 'This plugin is not loaded, so it cannot be configured right now.',
   githubLabel: 'GitHub repository',
   npmLabel: 'npm package page',
@@ -221,6 +247,7 @@ function installStyles() {
     .capital-config-panel[hidden] { display: none; }
     /* Host rows section: positive :has rules only, so any mismatch leaves it visible. */
     [data-plugin-detail="${BUNDLE_NAME}"]:has(.capital-config-card[data-capital-config-tab="sources"]) section[data-plugin-rows] { display: none; }
+    [data-plugin-detail="${BUNDLE_NAME}"]:has(.capital-config-card[data-capital-config-tab="automation"]) section[data-plugin-rows] { display: none; }
     [data-plugin-detail="${BUNDLE_NAME}"]:has(.capital-config-card[data-capital-config-tab="skills"]) section[data-plugin-rows] { display: none; }
     /* Internal roles must stay declared for delegation; hide their user-selectable cards in Settings. */
     [data-agent-preset-id="capital-data-junior"],
@@ -230,8 +257,14 @@ function installStyles() {
     .capital-config-secret-row label { flex: 0 1 auto; }
     .capital-config-secret-row label ~ span { order: 1; margin-left: auto; }
     .capital-config-field { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; border-top: 0.5px solid var(--dsw-alias-border-l2); }
+    .capital-config-automation { display: flex; flex-direction: column; gap: 16px; padding-top: 12px; }
+    .capital-config-automation-group { display: flex; flex-direction: column; gap: 8px; }
+    .capital-config-automation-group > .capital-config-group-label { color: var(--dsw-alias-label-secondary); font-size: 12px; font-weight: 500; line-height: 18px; }
+    .capital-config-number { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .capital-config-number-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
+    .capital-config-number-head .capital-config-write-failed { font-size: 11px; line-height: 16px; }
     .capital-config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
-    .capital-config-field input[type="number"] { width: 100%; box-sizing: border-box; padding: 6px 8px; border: .5px solid var(--dsw-alias-border-l1); border-radius: 8px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font: inherit; font-size: 12px; }
+    .capital-config-automation input[type="number"] { width: 100%; box-sizing: border-box; padding: 6px 8px; border: .5px solid var(--dsw-alias-border-l1); border-radius: 8px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font: inherit; font-size: 12px; }
     .capital-config-selected-mode { padding: 12px 14px; border: 0.5px solid var(--dsw-alias-border-l1); border-radius: 10px; background: var(--dsw-alias-bg-layer-2); }
     .capital-config-switch-row { align-items: center; gap: 12px; display: flex; }
     .capital-config-switch-text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
@@ -303,6 +336,7 @@ class CapitalCardController {
     this.selectedSkillsModeFailed = false
     this.automationWriting = new Set()
     this.automationFailed = new Set()
+    this.automationInvalid = new Set()
     // Row count is external: null = unknown, never 0; fetch only after the card is shown.
     this.bundleRows = null
     this.rowsRequested = false
@@ -357,6 +391,7 @@ class CapitalCardController {
         on: snapshot.value?.automation?.[field] !== false,
         writing: this.automationWriting.has(field),
         failed: this.automationFailed.has(field),
+        invalid: this.automationInvalid.has(field),
       }])),
       // `count === null` means unknown, not zero: the card decides whether to draw it.
       components: { count: this.bundleRows },
@@ -471,24 +506,46 @@ class CapitalCardController {
     this.store.set(this.projection())
   }
 
+  /** Returns why the write did or did not land: the card restores the input only for `invalid`. */
   async writeAutomation(field, value) {
-    if (!AUTOMATION_FIELDS.includes(field) || this.automationWriting.has(field)) return
+    if (!AUTOMATION_FIELDS.includes(field) || this.automationWriting.has(field)) return 'ignored'
     const snapshot = this.scope.getSnapshot()
-    if (snapshot.status !== 'ready' || !snapshot.writable) return
-    const next = field === 'inAppNotifications' ? value === true : Number(value)
-    if (field !== 'inAppNotifications' && !Number.isFinite(next)) return
+    if (snapshot.status !== 'ready' || !snapshot.writable) return 'ignored'
+    let next
+    if (field === 'inAppNotifications') {
+      next = value === true
+    } else {
+      const { min, max } = AUTOMATION_RANGES[field]
+      const raw = typeof value === 'string' ? value.trim() : value
+      next = Number(raw)
+      if (raw === '' || raw === null || raw === undefined || !Number.isInteger(next) || next < min || next > max) {
+        // Point at the range and write nothing; the card puts the saved value back.
+        this.automationInvalid.add(field)
+        this.automationFailed.delete(field)
+        this.store.set(this.projection())
+        return 'invalid'
+      }
+      this.automationInvalid.delete(field)
+    }
     this.automationWriting.add(field)
     this.automationFailed.delete(field)
     this.store.set(this.projection())
     try {
-      const current = this.scope.getSnapshot().value?.automation ?? { ...AUTOMATION_DEFAULTS }
-      await this.scope.mutate([{ op: 'set', path: ['automation'], value: { ...AUTOMATION_DEFAULTS, ...current, [field]: next } }])
+      // Only leaves are volatile: writing the `automation` container is rejected by the settings
+      // service even though every child field is editable.
+      await this.scope.mutate([{ op: 'set', path: ['automation', field], value: next }])
     } catch {
       // The landed check below reports the failure.
     }
     this.automationWriting.delete(field)
     const landed = this.scope.getSnapshot().value?.automation?.[field] ?? AUTOMATION_DEFAULTS[field]
     if (landed !== next) this.automationFailed.add(field)
+    this.store.set(this.projection())
+    return landed === next ? 'saved' : 'failed'
+  }
+
+  clearAutomationInvalid(field) {
+    if (!this.automationInvalid.delete(field)) return
     this.store.set(this.projection())
   }
 
@@ -533,6 +590,7 @@ class CapitalCardController {
       ...this.model.actions(),
       toggleLocalFetch: (value) => this.toggleLocalFetch(value),
       writeAutomation: (field, value) => this.writeAutomation(field, value),
+      clearAutomationInvalid: (field) => this.clearAutomationInvalid(field),
       toggleSelectedSkill: (field, value) => this.toggleSelectedSkill(field, value),
       toggleSelectedSkillsMode: (auto) => this.toggleSelectedSkillsMode(auto),
       ensureBundleRows: () => this.ensureBundleRows(),
@@ -789,37 +847,75 @@ function CapitalCard(props) {
     ),
     state.localFetch?.failed ? h('p', { role: 'status', className: 'capital-config-write-failed' }, t('saveFailed')) : null,
   )
-  const automationNumber = (field, label, min, max) => h('label', { className: 'capital-config-field' },
-    h('span', { className: 'capital-config-switch-label' }, t(label)),
-    h('input', {
-      type: 'number',
-      min,
-      max,
-      defaultValue: state.automation?.[field]?.value,
-      disabled: disabled || state.saving,
-      onBlur: (event) => props.writeAutomation(field, event.target.value),
-    }),
-    state.automation?.[field]?.failed ? h('p', { role: 'status', className: 'capital-config-write-failed' }, t('saveFailed')) : null,
-  )
-  const automationSection = h('div', { className: 'capital-config-field' },
-    h('span', { className: 'capital-config-switch-label' }, t('automationTitle')),
-    h('p', { className: 'capital-config-hint' }, t('automationHint')),
-    h('div', { className: 'capital-config-grid' },
-      automationNumber('tickMs', 'automationTick', 30000, 3600000),
-      automationNumber('runTimeoutMinutes', 'automationRunTimeout', 5, 120),
-      automationNumber('idleTimeoutMinutes', 'automationIdleTimeout', 1, 30),
-      automationNumber('maxSteps', 'automationMaxSteps', 10, 2000),
-      automationNumber('maxToolCalls', 'automationMaxToolCalls', 10, 6000),
-    ),
-    h('label', { className: 'capital-config-switch-row' },
-      h('span', { className: 'capital-config-switch-label' }, t('automationInApp')),
+  const automationNumber = (field, label) => {
+    const { min, max, unit } = AUTOMATION_RANGES[field]
+    const stored = state.automation?.[field]?.value
+    const invalid = state.automation?.[field]?.invalid === true
+    const error = invalid
+      ? t('automationInvalid', { min, max, unit: t(unit) })
+      : state.automation?.[field]?.failed ? t('saveFailed') : null
+    return h('label', { className: 'capital-config-number' },
+      // Error sits on the title row (the card's usual spot), not under the box.
+      h('span', { className: 'capital-config-number-head' },
+        h('span', { className: 'capital-config-switch-label' }, t(label)),
+        error ? h('span', {
+          id: `capital-config-automation-${field}-error`,
+          role: invalid ? 'alert' : 'status',
+          className: 'capital-config-write-failed',
+        }, error) : null,
+      ),
       h('input', {
-        type: 'checkbox',
-        checked: state.automation?.inAppNotifications?.on !== false,
+        type: 'number',
+        min,
+        max,
+        step: 1,
+        defaultValue: stored,
         disabled: disabled || state.saving,
-        onChange: (event) => props.writeAutomation('inAppNotifications', event.target.checked),
+        'aria-invalid': invalid ? 'true' : undefined,
+        'aria-describedby': error ? `capital-config-automation-${field}-error` : undefined,
+        onFocus: () => props.clearAutomationInvalid(field),
+        onBlur: (event) => {
+          const input = event.target
+          return Promise.resolve(props.writeAutomation(field, input.value)).then((outcome) => {
+            if (outcome === 'invalid' && stored !== undefined) input.value = String(stored)
+          })
+        },
       }),
-    ),
+    )
+  }
+  const automationGroup = (labelKey, children) => h('div', { className: 'capital-config-automation-group' },
+    h('span', { className: 'capital-config-group-label' }, t(labelKey)),
+    ...children,
+  )
+  const automationSection = h('div', { className: 'capital-config-automation' },
+    automationGroup('automationScheduleGroup', [
+      h('div', { className: 'capital-config-grid' },
+        automationNumber('tickMs', 'automationTick'),
+      ),
+    ]),
+    automationGroup('automationRunGroup', [
+      h('div', { className: 'capital-config-grid' },
+        automationNumber('runTimeoutMinutes', 'automationRunTimeout'),
+        automationNumber('idleTimeoutMinutes', 'automationIdleTimeout'),
+        automationNumber('maxSteps', 'automationMaxSteps'),
+        automationNumber('maxToolCalls', 'automationMaxToolCalls'),
+      ),
+    ]),
+    automationGroup('automationNotifyGroup', [
+      h('div', { className: 'capital-config-switch-row' },
+        h('div', { className: 'capital-config-switch-text' },
+          h('span', { className: 'capital-config-switch-label' }, t('automationInApp')),
+          h('p', { className: 'capital-config-hint' }, t('automationInAppHint')),
+        ),
+        h(Switch, {
+          label: t('automationInApp'),
+          checked: state.automation?.inAppNotifications?.on !== false,
+          disabled: disabled || state.saving || state.automation?.inAppNotifications?.writing === true,
+          onChange: (value) => props.writeAutomation('inAppNotifications', value),
+        }),
+      ),
+      state.automation?.inAppNotifications?.failed ? h('p', { role: 'status', className: 'capital-config-write-failed' }, t('saveFailed')) : null,
+    ]),
   )
   const modeSection = h('div', { className: 'capital-config-selected-mode' },
     h('div', { className: 'capital-config-switch-row' },
@@ -889,6 +985,7 @@ function CapitalCard(props) {
   const options = [
     // A dirty draft while Save is off-screen must be announced on the tab.
     { value: 'sources', label: state.dirty ? t('titleUnsaved') : t('title') },
+    { value: 'automation', label: t('automationTitle') },
     { value: 'skills', label: t('selectedSkillsTitle') },
     { value: 'components', label: withCount(t('componentsTitle'), state.components?.count) },
   ]
@@ -915,7 +1012,8 @@ function CapitalCard(props) {
         if (next === 'skills') setPinnedSkills(enabledKeys())
       },
     }),
-    panel('sources', [form, localFetchSection, automationSection]),
+    panel('sources', [form, localFetchSection]),
+    panel('automation', [automationSection]),
     panel('skills', autoMode
       ? [modeSection]
       : [modeSection, h('div', { className: 'capital-config-skills-browser' },

@@ -19,11 +19,9 @@ import {
   resolveTaskRecord,
 } from './schema.js'
 import { BUILTIN_BY_ID, BUILTIN_DEFINITIONS } from './builtins.js'
+import { DEFAULT_CUSTOM_ICON, builtinTaskIcon } from './task-icons.js'
 import {
-  DEFAULT_IDLE_TIMEOUT_MINUTES,
-  DEFAULT_MAX_STEPS,
-  DEFAULT_MAX_TOOL_CALLS,
-  DEFAULT_RUN_TIMEOUT_MINUTES,
+  DEFAULT_AUTOMATION_SETTINGS,
   MAX_ERRORS_PER_RUN,
   MAX_NOTIFICATIONS_PER_PROFILE,
   MAX_RUNS_PER_PROFILE,
@@ -34,6 +32,8 @@ import { canonicalTrigger, formatInZone, nextOccurrence } from './time.js'
 
 export const DOMAIN_NAME = 'capital_automation'
 export const ROUTE_PATH = '/capital-automation'
+
+const SYSTEM_NOTIFICATION_KINDS = new Set(['scheduler_standby'])
 
 /** Declared as a plain object; `defineDomain` only re-validates the same fields. */
 export const domainSpec = {
@@ -122,6 +122,7 @@ export function createAutomationStore(options) {
     now = () => Date.now(),
     random = () => randomUUID(),
     builtins = BUILTIN_DEFINITIONS,
+    settings,
   } = options
   const rawProfileName = String(profile?.name ?? '')
   const profileName = rawProfileName.slice(0, 200)
@@ -129,6 +130,39 @@ export function createAutomationStore(options) {
   const profileById = new Map(builtins.map((definition) => [definition.id, definition]))
   let opening
   let claimChain = Promise.resolve()
+
+  /** Profile-level defaults; a task without its own limits inherits these. */
+  function defaultLimits() {
+    let current
+    try {
+      current = typeof settings === 'function' ? settings() : undefined
+    } catch {
+      current = undefined
+    }
+    const source = current ?? DEFAULT_AUTOMATION_SETTINGS
+    return {
+      runTimeoutMinutes: source.runTimeoutMinutes,
+      idleTimeoutMinutes: source.idleTimeoutMinutes,
+      maxSteps: source.maxSteps,
+      maxToolCalls: source.maxToolCalls,
+    }
+  }
+
+  function isDefaultLimits(limits) {
+    if (limits === undefined) return false
+    const defaults = defaultLimits()
+    return Object.keys(defaults).every((key) => limits[key] === defaults[key])
+  }
+
+  /**
+   * Storing the current defaults would pin the task to them. Drop the block instead so the
+   * resolved task keeps following the settings card.
+   */
+  function withoutInheritedLimits(config) {
+    if (config?.limits === undefined || !isDefaultLimits(config.limits)) return config
+    const { limits: _inherited, ...rest } = config
+    return rest
+  }
 
   function serializeClaim(operation) {
     const next = claimChain.then(operation, operation)
@@ -233,7 +267,7 @@ export function createAutomationStore(options) {
 
   function resolve(record) {
     if (record.origin === 'builtin' && definitionOf(record) === undefined) return undefined
-    return resolveTaskRecord(record, definitionOf(record))
+    return resolveTaskRecord(record, definitionOf(record), defaultLimits())
   }
 
   async function listTasks() {
@@ -257,6 +291,7 @@ export function createAutomationStore(options) {
   function defaultCustomConfig() {
     return {
       category: 'research',
+      icon: DEFAULT_CUSTOM_ICON,
       title: '新建任务',
       description: '',
       instruction: '按任务说明完成一次研究并给出可核查的结论。',
@@ -268,23 +303,17 @@ export function createAutomationStore(options) {
         tradingDaysOnly: true,
       },
       cwdKind: 'profile',
-      limits: {
-        runTimeoutMinutes: DEFAULT_RUN_TIMEOUT_MINUTES,
-        idleTimeoutMinutes: DEFAULT_IDLE_TIMEOUT_MINUTES,
-        maxSteps: DEFAULT_MAX_STEPS,
-        maxToolCalls: DEFAULT_MAX_TOOL_CALLS,
-      },
       notifications: { inApp: true, onFailure: true, onSuccess: false },
     }
   }
 
   async function createTask(input) {
     const at = iso(now())
-    const config = TaskConfigSchema.parse({
+    const config = TaskConfigSchema.parse(withoutInheritedLimits({
       ...defaultCustomConfig(),
       ...input,
       cwdKind: 'profile',
-    })
+    }))
     const record = parseStrict(TaskRecordSchema, {
       schemaVersion: 1,
       id: `task_${random().replace(/-/g, '')}`,
@@ -316,10 +345,12 @@ export function createAutomationStore(options) {
         if (!isDeepStrictEqual(value, current[key])) changed[key] = value
       }
       const merged = TaskOverridesSchema.parse({ ...(record.overrides ?? {}), ...changed })
-      next.overrides = merged
+      if (isDefaultLimits(merged.limits)) delete merged.limits
+      if (Object.keys(merged).length === 0) delete next.overrides
+      else next.overrides = merged
     } else {
       const merged = TaskConfigSchema.parse({ ...record.custom, ...patch, cwdKind: 'profile' })
-      next.custom = merged
+      next.custom = withoutInheritedLimits(merged)
     }
     if (triggerChanged) {
       next.scheduleAnchorAt = at
@@ -375,8 +406,9 @@ export function createAutomationStore(options) {
     const task = resolve(record)
     if (task === undefined) return undefined
     const at = iso(now())
-    const config = TaskConfigSchema.parse({
+    const config = TaskConfigSchema.parse(withoutInheritedLimits({
       category: task.category,
+      icon: builtinTaskIcon(record.sourceBuiltinId),
       title: `${task.title}（副本）`.slice(0, 120),
       description: task.description,
       trigger: task.trigger,
@@ -385,7 +417,7 @@ export function createAutomationStore(options) {
       ...(task.workspaceId === undefined ? {} : { workspaceId: task.workspaceId }),
       limits: task.limits,
       notifications: task.notifications,
-    })
+    }))
     const custom = parseStrict(TaskRecordSchema, {
       schemaVersion: 1,
       id: `task_${random().replace(/-/g, '')}`,
@@ -591,11 +623,21 @@ export function createAutomationStore(options) {
     for (const record of records.slice(MAX_NOTIFICATIONS_PER_PROFILE)) await tables.notifications.delete(record.id)
   }
 
-  async function listNotifications({ unreadOnly = false, limit = 50, taskId } = {}) {
+  // Scheduler standby is a system state, not a task outcome: keep it out of the task inbox and
+  // its unread badge. One predicate for list/count/read so the three cannot drift apart.
+  function notificationInScope(record, scope) {
+    const system = SYSTEM_NOTIFICATION_KINDS.has(record.kind)
+    if (scope === 'system') return system
+    if (scope === 'all') return true
+    return !system
+  }
+
+  async function listNotifications({ unreadOnly = false, limit = 50, taskId, scope = 'task' } = {}) {
     const tables = await ensure()
     const records = []
     for (const [, record] of tables.notifications.entries()) {
       if (record.profileKey !== profileKey) continue
+      if (!notificationInScope(record, scope)) continue
       if (taskId !== undefined && record.taskId !== taskId) continue
       if (unreadOnly && record.readAt !== undefined) continue
       records.push(record)
@@ -604,22 +646,23 @@ export function createAutomationStore(options) {
     return records.slice(0, Math.max(1, Math.min(200, limit)))
   }
 
-  async function unreadNotificationCount() {
+  async function unreadNotificationCount(scope = 'task') {
     const tables = await ensure()
     let count = 0
     for (const [, record] of tables.notifications.entries()) {
-      if (record.profileKey === profileKey && record.readAt === undefined) count += 1
+      if (record.profileKey === profileKey && notificationInScope(record, scope) && record.readAt === undefined) count += 1
     }
     return count
   }
 
-  async function markNotificationsRead({ ids, all = false }) {
+  async function markNotificationsRead({ ids, all = false, scope = 'task' }) {
     const tables = await ensure()
     const wanted = new Set(ids ?? [])
     let changed = 0
     const at = iso(now())
     for (const [id, record] of [...tables.notifications.entries()]) {
       if (record.profileKey !== profileKey || record.readAt !== undefined) continue
+      if (!notificationInScope(record, scope)) continue
       if (!all && !wanted.has(id)) continue
       const next = parseStrict(NotificationSchema, { ...record, readAt: at }, 'notification')
       await tables.notifications.put(id, next)

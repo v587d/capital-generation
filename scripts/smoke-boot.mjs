@@ -12,6 +12,8 @@ import { locateDshCli } from './lib/run-tool.mjs'
 // Assembly rows come from test/preset-rows.mjs (ledger L17), never a second list.
 import { allPresets, capitalRowsOf } from '../test/preset-rows.mjs'
 import { INTERNAL_ROLE_PRESET_IDS, ROLE_PRESET_IDS, ROOT_PRESET_ID } from '../lib/preset-ids.js'
+// Builtin task identities come from the code definition, never a second list.
+import { BUILTIN_DEFINITIONS } from '../automation/builtins.js'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const SANDBOX = join(ROOT, '.tmp-boot')
@@ -31,6 +33,8 @@ const PRESET_ID = 'capital-generation'
 const SETTINGS_ENTRY_ID = 'capital-config'
 /** Bundle name from package.json: the plugin panel lists bundles by this name. */
 const PACKAGE_NAME = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).name
+/** Fresh scratch profile: every code-defined builtin is seeded once, by id, in dormant state. */
+const BUILTIN_IDS = BUILTIN_DEFINITIONS.map((definition) => definition.id).sort()
 /**
  * Family rows come from agent.patch.yml via test/preset-rows.mjs; only fiberState is checked. A
  * drifted row logs one warn and silently drops a whole tool family for that role.
@@ -158,6 +162,14 @@ async function automationMetaProbe(url, cookie) {
     tasksStatus: tasksResponse.status,
     tasks: Array.isArray(tasks?.tasks) ? tasks.tasks : null,
   }
+}
+
+/** The scratch profile is fresh: builtin ids must equal the code definitions, all dormant. */
+function automationTasksMatch(tasks) {
+  if (!Array.isArray(tasks) || tasks.length !== BUILTIN_IDS.length) return false
+  if (!tasks.every((task) => task.origin === 'builtin' && task.state === 'dormant')) return false
+  const ids = tasks.map((task) => task.sourceBuiltinId).sort()
+  return JSON.stringify(ids) === JSON.stringify(BUILTIN_IDS)
 }
 
 /**
@@ -515,10 +527,9 @@ try {
             && automationFence.policy === 'automation-v1'
             && automationFence.storage === 'ready'
             && automationFence.tasksStatus === 200
-            && automationFence.tasks?.length === 3
-            && automationFence.tasks.every((task) => task.origin === 'builtin' && task.state === 'dormant')
+            && automationTasksMatch(automationFence.tasks)
         automationFence.ok = ok && automationFence.cacheControl === 'no-store'
-        console.log(`smoke-boot: ${automationFence.ok ? '✅' : '❌'} /capital-automation/meta：匿名 HTTP ${automationFence.anonymousStatus}（应 401）、带 cookie HTTP ${automationFence.status}，profile=${automationFence.profile}，policy=${automationFence.policy}，scheduler=${automationFence.scheduler}，storage=${automationFence.storage}，tasks=${automationFence.tasks?.length ?? '?'}`)
+        console.log(`smoke-boot: ${automationFence.ok ? '✅' : '❌'} /capital-automation/meta：匿名 HTTP ${automationFence.anonymousStatus}（应 401）、带 cookie HTTP ${automationFence.status}，profile=${automationFence.profile}，policy=${automationFence.policy}，scheduler=${automationFence.scheduler}，storage=${automationFence.storage}，tasks=${automationFence.tasks?.length ?? '?'}/${BUILTIN_IDS.length}`)
       } catch (error) {
         automationFence = { ok: false, error: String(error?.message ?? error) }
         console.log(`smoke-boot: ❌ 投研自动化路由探针失败：${automationFence.error}`)
