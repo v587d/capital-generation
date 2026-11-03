@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { createWorkspaceCatalog, defaultWorkspacePath, defaultWorkspaceTitle, workspaceDisplayPath } from '../automation/workspaces.js'
 import { fakeContext } from './automation-harness.mjs'
 
@@ -130,7 +130,7 @@ test('专属默认工作区目录是 <dsh home>/CapGen-automation-workspace/<pro
   assert.equal(defaultWorkspaceTitle('web'), 'CapGen 投研自动化（web）')
   assert.equal(
     workspaceDisplayPath(join(home, 'CapGen-automation-workspace', 'web'), home),
-    '~/CapGen-automation-workspace/web',
+    `~${sep}CapGen-automation-workspace${sep}web`,
   )
   assert.equal(workspaceDisplayPath('/srv/research', '/home/shawn'), '/srv/research', '家目录外的路径仍写绝对路径')
 })
@@ -153,7 +153,7 @@ test('设置里的统一默认工作区优先；目录不可用时回退专属�
     assert.ok(dedicated, '专属默认工作区仍然注册并列出，作为回退项')
     assert.equal(preferred.default, true, '设置里选中的工作区承担默认标记')
     assert.equal(dedicated.default, false)
-    assert.equal(preferred.displayPath, '~/project', '设置卡片显示家目录缩写')
+    assert.equal(preferred.displayPath, `~${sep}project`, '设置卡片显示家目录缩写，分隔符跟随平台')
     assert.deepEqual(await configured.resolve(''), { workspaceId: other.id, path: other.path })
 
     other.status = async () => 'missing-dir'
