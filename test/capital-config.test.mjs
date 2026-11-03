@@ -96,6 +96,7 @@ test('capital-config Host：可编辑面全靠 Config 的 .volatile() 字段，�
     'retriever.windDocs.credentialRef', 'retriever.localFetch.enabled', 'retriever.paddleOcr.credentialRef',
     'automation.tickMs', 'automation.runTimeoutMinutes', 'automation.idleTimeoutMinutes',
     'automation.maxSteps', 'automation.maxToolCalls', 'automation.inAppNotifications',
+    'automation.defaultWorkspaceId',
   ]) {
     assert.ok(flags.includes(path), `${path} 必须 .volatile()，否则卡片改不动它（条目甚至不进 describe 镜像）`)
   }
@@ -226,9 +227,11 @@ function loadClient({ scope, primitives = {}, fetchImpl = defaultFetch } = {}) {
         SegmentedControl(props) { return { type: 'SegmentedControl', props, children: [] } },
         Pill(props) { return { type: 'Pill', props, children: props.children ?? [] } },
         Modal(props) { return { type: 'Modal', props, children: props.children ?? [] } },
+        Menu(props) { return { type: 'Menu', props, children: props.anchor ? [props.anchor] : [] } },
         Switch(props) { return { type: 'Switch', props, children: props.children ?? [] } },
         Tag(props) { return { type: 'Tag', props, children: props.children ?? [] } },
         IconRightUpOutlineRegular: () => ({ type: 'icon', props: {}, children: [] }),
+        IconChevronDownOutlineRegular: () => ({ type: 'chevron-icon', props: {}, children: [] }),
         IconWarningTriangleOutlineRegular: () => ({ type: 'warning-icon', props: {}, children: [] }),
         SettingsFormModel: function SettingsFormModel() { return model },
         writeClipboard: async (value) => { clipboardWrites.push(value); return true },
@@ -354,6 +357,8 @@ function cardProps(injected) {
     clearAutomationInvalid: injected.clearAutomationInvalid,
     toggleSelectedSkill: injected.toggleSelectedSkill,
     ensureBundleRows: injected.ensureBundleRows,
+    ensureWorkspaces: injected.ensureWorkspaces,
+    writeAutomationWorkspace: injected.writeAutomationWorkspace,
   }
 }
 
@@ -424,6 +429,7 @@ test('capital-config Client：五个密钥按序渲染，本机回退与 selecte
           : node.props.label === 'selectedSkillsModeLabel' ? 'selected-skills-mode' : 'selected-skill')
     }
     if (node?.type === 'input' && node.props.type === 'number') order.push('automation-number')
+    if (node?.type === 'button' && node.props.className === 'capital-config-select') order.push('automation-workspace')
     for (const child of node?.children ?? []) walk(child)
   }
   walk(card)
@@ -435,11 +441,12 @@ test('capital-config Client：五个密钥按序渲染，本机回退与 selecte
     'capital-config-paddleocr-key',
     'save',
     'local-fetch',
+    'automation-workspace',
     ...Array.from({ length: 5 }, () => 'automation-number'),
     'automation-notify',
     'selected-skills-mode',
     ...SELECTED_SKILL_CATALOG.map(() => 'selected-skill'),
-  ], '数据源格内只剩五个密钥 → 保存 → 回退开关；五个自动化上限与通知开关整组挪到第二格，精选 Skills 随后')
+  ], '数据源格内只剩五个密钥 → 保存 → 回退开关；第二格先默认工作区，再五个上限与通知开关，精选 Skills 随后')
 })
 
 test('capital-config Client：catalog 用到的每个能力标签都有中英两套显示名', () => {
@@ -540,10 +547,17 @@ test('capital-config Client：精选 Skills 以名称开原文，标签与适用
     '每个上限用用户能读的单位收尾',
   )
   for (const key of ['automationScheduleGroup', 'automationRunGroup', 'automationNotifyGroup', 'automationInAppHint',
-    'automationInvalid', 'automationUnitMs', 'automationUnitMinutes', 'automationUnitSteps', 'automationUnitCalls']) {
+    'automationInvalid', 'automationUnitMs', 'automationUnitMinutes', 'automationUnitSteps', 'automationUnitCalls',
+    'automationDefaultWorkspace',
+    'automationWorkspacePath', 'automationWorkspaceMissing', 'automationWorkspaceLoading',
+    'automationWorkspaceUnavailable', 'automationWorkspaceFallback']) {
     assert.equal(typeof dict.zh[key], 'string', `投研自动化那格缺 ${key} 的中文文案`)
     assert.equal(typeof dict.en[key], 'string', `投研自动化那格缺 ${key} 的英文文案`)
   }
+  assert.equal(dict.zh.automationDefaultWorkspace, '默认工作区')
+  assert.equal(dict.zh.automationWorkspacePath, '默认位置：{path}', '路径提示带插值，不能写死一个目录')
+  assert.equal(dict.zh.automationDefaultWorkspaceHint, undefined, '说明句已删：控件旁边的默认位置已经说清用途')
+  assert.equal(dict.zh.automationWorkspaceGroup, undefined, '单个字段不再套一层「工作区」组标题')
   assert.equal(dict.zh.selectedSkillsTitle, '精选 Skills')
   assert.equal(dict.zh.selectedSkillsHint, undefined, '已移除整段精选 Skills 说明')
   assert.equal(dict.zh.selectedSkillsModeLabel, '智能装载 Skills')
@@ -760,6 +774,19 @@ test('capital-config Client：四块面板各有 tabpanel 身份，第四块也�
     && node.children[0] === 'componentsHint'),
     '但 aria-controls 指的这块面板不许是空的：那句话改挂在读屏侧，零布局贡献')
   const automationPanel = panels[1]
+  const workspaceMenu = collect(automationPanel, 'Menu')[0]
+  assert.ok(workspaceMenu, '第二格要先让用户看到并切换统一默认工作区')
+  assert.equal(workspaceMenu.props.items.length, 1, '未取到列表时只画专属默认这一项，不画假的工作区')
+  assert.equal(workspaceMenu.props.items[0].label, 'automationWorkspaceFallback')
+  assert.equal(workspaceMenu.props.selectedId, workspaceMenu.props.items[0].id, '空值落在专属默认项')
+  const workspaceTrigger = workspaceMenu.props.anchor
+  assert.equal(workspaceTrigger.type, 'button')
+  assert.equal(workspaceTrigger.props.className, 'capital-config-select', '下拉触发器必须复用自动化页的胶囊按钮，不是原生 select')
+  assert.equal(workspaceTrigger.props['aria-haspopup'], 'menu')
+  assert.equal(workspaceTrigger.props['aria-expanded'], 'false')
+  assert.equal(workspaceTrigger.props['aria-describedby'], undefined, '没有路径可读时不指向空 id')
+  assert.equal(collect(workspaceTrigger, 'span')[0].children[0], 'automationWorkspaceFallback')
+  assert.equal(collect(automationPanel, 'select').length, 0, '原生 select 不得回到设置卡')
   const numberInputs = collect(automationPanel, 'input').filter((node) => node.props.type === 'number')
   assert.equal(numberInputs.length, 5, '五个上限全在第二格；数字输入不再挂在数据源格里')
   assert.deepEqual(numberInputs.map((node) => node.props.defaultValue), [
@@ -784,7 +811,7 @@ test('capital-config Client：四块面板各有 tabpanel 身份，第四块也�
   assert.deepEqual(
     collect(automationPanel, 'p').filter((node) => node.props.className === 'capital-config-hint').map((node) => node.children[0]),
     ['automationInAppHint'],
-    '顶部那段「调度器与无人值守运行的默认上限…」已删，只留通知开关的短说明',
+    '顶部那段「调度器与无人值守运行的默认上限…」已删；工作区说明句也删，只剩通知开关短说明',
   )
 })
 
@@ -959,12 +986,20 @@ test('capital-config Client：筛选条在清单上方、四格首行等距，�
   assert.match(rule('.capital-config-selected-mode'), /border:/, '智能装载开关单独成卡，与下面的清单分开')
   assert.match(rule('.capital-config-field'), /padding:\s*12px\s+0/, '数据源行的上内边距仍是一档 12px')
   assert.match(rule('.capital-config-automation'), /padding-top:\s*12px/, '第二格首行也要与另格等距：面板 gap 12 + 自身 12')
-  assert.match(rule('.capital-config-automation'), /display:\s*flex/, '自动化三组纵向排布')
+  assert.match(rule('.capital-config-automation'), /display:\s*flex/, '默认工作区 + 三个设置组纵向排布')
   assert.match(rule('.capital-config-number'), /display:\s*flex/, '数字框的标题与输入框上下成组')
   assert.match(rule('.capital-config-automation-group > .capital-config-group-label'), /font-size:\s*12px/,
     '分组标题比正文轻一档，不再抢 tab 条')
   assert.match(rule('.capital-config-automation input[type="number"]'), /width:\s*100%/,
     '数字框的框线 / 底色 / 字号仍挂在自动化格里（换了父节点最容易掉的就是这条）')
+  assert.match(rule('.capital-config-select'), /height:\s*34px/, '工作区下拉跟自动化页同款 34px 胶囊')
+  assert.match(rule('.capital-config-select'), /border-radius:\s*10px/)
+  assert.match(rule('.capital-config-select'), /background:\s*var\(--dsw-alias-bg-module-platform\)/,
+    '填充色只认宿主 token，别自造蓝底')
+  assert.match(rule('.capital-config-select:focus-visible'), /outline:/, '键盘焦点必须可见')
+  assert.match(rule('.capital-config-select:disabled'), /cursor:\s*not-allowed/)
+  assert.doesNotMatch(css, /\.capital-config-automation select/,
+    '原生 select 的旧样式不许留：它已经换成宿主 Menu + 触发器')
   assert.doesNotMatch(css, /\.capital-config-field input\[type="number"\]/,
     '旧选择器不许留：数字输入已经搬去第二格，留在数据源格里就是一条永远不命中的死规则')
   assert.match(rule('.capital-config-skill-row'), /display:\s*flex/)
@@ -1150,6 +1185,72 @@ test('capital-config Client：投研自动化按叶子路径写 automation.*，�
   await numbers()[2].props.onBlur({ target: { value: '9' } })
   assert.equal(store.getSnapshot().automation.idleTimeoutMinutes.value, 5, '写失败时不得显示成已改')
   assert.equal(store.getSnapshot().automation.idleTimeoutMinutes.failed, true)
+})
+
+test('capital-config Client：默认工作区读 /capital-automation/workspaces，选中项写 automation.defaultWorkspaceId', async () => {
+  const doc = { value: { automation: { defaultWorkspaceId: '' } } }
+  const writes = []
+  const scope = {
+    getSnapshot: () => ({ status: 'ready', writable: true, value: doc.value, user: {}, base: {}, revision: 0 }),
+    subscribe: () => () => {},
+    mutate: async (ops) => {
+      writes.push(ops)
+      const [op] = ops
+      doc.value = { automation: { ...doc.value.automation, [op.path[1]]: op.value } }
+      return true
+    },
+  }
+  const { mod, docRequests } = loadClient({
+    scope,
+    fetchImpl: async (url) => {
+      if (String(url) === '/capital-automation/workspaces') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            workspaces: [
+              { id: 'ws_default', title: 'CapGen 投研自动化（web）', path: '/home/shawn/.dsh/CapGen-automation-workspace/web', displayPath: '~/.dsh/CapGen-automation-workspace/web', default: true, dedicated: true },
+              { id: 'ws_duplicate', title: 'CapGen 投研自动化（web）', path: '/home/shawn/old-automation', displayPath: '~/old-automation', default: false, dedicated: false },
+              { id: 'ws_project', title: '研究项目', path: '/home/shawn/project', displayPath: '~/project', default: false, dedicated: false },
+            ],
+            defaultWorkspaceId: 'ws_default',
+          }),
+        }
+      }
+      return { ok: true, status: 200, json: async () => ({}), text: async () => '' }
+    },
+  })
+  const { ctx, registrations } = fakeCtx({ scope })
+  mod.apply(ctx)
+  const { injected, render } = cardRenderer(registrations)
+  const store = injected.hooks.capitalCard
+  await injected.ensureWorkspaces()
+  const menu = collect(render(), 'Menu')[0]
+  assert.deepEqual(docRequests.map((item) => item.url), ['/capital-automation/workspaces'], '只读一次工作区列表')
+  assert.deepEqual(Array.from(menu.props.items, (item) => item.label), [
+    'CapGen 投研自动化（web）',
+    'CapGen 投研自动化（web） · ~/old-automation',
+    '研究项目',
+  ], '专属默认工作区是首项；同名但不同路径的工作区用路径消歧')
+  assert.equal(menu.props.selectedId, menu.props.items[0].id, '空值先落在专属默认项，不落到别的 id 上')
+  assert.equal(menu.props.anchor.props['aria-describedby'], 'capital-config-automation-workspace-path', '路径存在时触发器关联路径说明')
+  assert.equal(collect(render(), 'select').length, 0, '不再有原生 select')
+  assert.equal(
+    collect(render(), 'p').filter((node) => node.children[0] === 'automationDefaultWorkspaceHint').length,
+    0,
+    '说明句已删，路径是唯一提示',
+  )
+  assert.equal(
+    collect(render(), 'p').filter((node) => node.children[0] === 'automationWorkspacePath').length,
+    1,
+    '专属默认工作区的路径直接展示',
+  )
+  await menu.props.onSelect('ws_project')
+  assert.equal(JSON.stringify(writes.at(-1)),
+    JSON.stringify([{ op: 'set', path: ['automation', 'defaultWorkspaceId'], value: 'ws_project' }]),
+    '默认工作区也走 volatile 叶子路径')
+  assert.equal(store.getSnapshot().workspace.selectedId, 'ws_project')
+  assert.equal(store.getSnapshot().workspace.current.path, '~/project', '路径跟着选中的工作区换')
 })
 
 test('capital-config Client：selected skill 开关只写允许的 volatile 路径且默认关闭', async () => {

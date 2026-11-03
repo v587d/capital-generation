@@ -1,4 +1,5 @@
 import { type QueryResult, type QuerySpec } from './query.js';
+import { type DatasetTimeCoverage } from './time-axis.js';
 /**
  * Workspace-local Dataset/profile store: immutable artifacts, host-written only. Agents receive
  * dataset_id / opaque artifact_ref, never real paths; raw rows never enter agent messages.
@@ -38,6 +39,8 @@ export interface DatasetRef {
     captured_at: number;
     retention_until: number;
     params_digest: string;
+    /** Host-computed from the stored rows; omitted only by manifests written before this field existed. */
+    time_coverage?: DatasetTimeCoverage;
 }
 export type DatasetShape = 'array' | 'envelope_item' | 'document' | 'none';
 export interface DatasetInspection extends DatasetRef {
@@ -293,6 +296,8 @@ export interface SaveDatasetInput {
     data: unknown;
     /** Host-only row key for envelope-shaped json_rows data. */
     row_key?: string;
+    /** Computed by the Hub from the same rows it is about to persist. */
+    time_coverage?: DatasetTimeCoverage;
     signal?: AbortSignal;
 }
 export interface WriteProfileInput {

@@ -4,7 +4,9 @@
  * profile filter; the wire body never selects a profile.
  */
 import {
+  ACTIVE_RUN_STATUSES,
   DEFAULT_AUTOMATION_SETTINGS,
+  FAILURE_RUN_STATUSES,
   MAX_IDLE_TIMEOUT_MINUTES,
   MAX_MAX_STEPS,
   MAX_MAX_TOOL_CALLS,
@@ -22,12 +24,47 @@ import {
   parseStrict,
 } from './schema.js'
 import { sanitizeMessage } from './redact.js'
+import { addDays, localPartsAt } from './time.js'
 
 const MAX_RUN_PAGE_LIMIT = 2_000
 const RUN_CURSOR_PATTERN = /^[A-Za-z0-9_-]{1,120}$/
+const HISTORY_DAYS = 371
+const ACTIVE_STATUSES = new Set(ACTIVE_RUN_STATUSES)
+const FAILURE_STATUSES = new Set(FAILURE_RUN_STATUSES)
 
 function invalidQuery(message) {
   return new AutomationError('invalid_query', message, 400)
+}
+
+function historyDaysOf(value) {
+  if (value === undefined) return HISTORY_DAYS
+  if (typeof value !== 'string' && typeof value !== 'number') throw invalidQuery('运行历史 days 参数无效。')
+  const text = String(value)
+  if (!/^\d{1,3}$/.test(text)) throw invalidQuery(`运行历史 days 必须是 1–${HISTORY_DAYS} 的整数。`)
+  const days = Number(text)
+  if (!Number.isSafeInteger(days) || days < 1 || days > HISTORY_DAYS) {
+    throw invalidQuery(`运行历史 days 必须是 1–${HISTORY_DAYS} 的整数。`)
+  }
+  return days
+}
+
+function historyTimeZoneOf(value) {
+  if (value === undefined) {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+    } catch {
+      return 'UTC'
+    }
+  }
+  if (typeof value !== 'string' || value.length === 0 || value.length > 64) {
+    throw invalidQuery('运行历史 tz 参数无效。')
+  }
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value })
+  } catch {
+    throw invalidQuery('运行历史 tz 参数无效。')
+  }
+  return value
 }
 
 function notificationScopeOf(value) {
@@ -165,6 +202,15 @@ export function createAutomationService(options) {
     }
   }
 
+  async function workspaceCatalog() {
+    if (typeof workspaces?.details !== 'function') return { workspaces: [], defaultWorkspaceId: null }
+    try {
+      return await workspaces.details()
+    } catch (error) {
+      throw new AutomationError('workspace_unavailable', sanitizeMessage(String(error?.message ?? error)), 503)
+    }
+  }
+
   async function createTask(input) {
     const parsed = parseStrict(TaskCreateSchema, input, 'task')
     const defaults = { ...DEFAULT_AUTOMATION_SETTINGS, ...settings() }
@@ -285,6 +331,47 @@ export function createAutomationService(options) {
     }
   }
 
+  /**
+   * Daily run counts for the contribution heatmap. Days are bucketed in the browser's zone,
+   * because `queuedAt` is an instant and the calendar day is a local fact.
+   */
+  async function runHistory(query = {}) {
+    const days = historyDaysOf(query.days)
+    const timeZone = historyTimeZoneOf(query.tz)
+    const end = localPartsAt(now(), timeZone)
+    const start = addDays(end, -(days - 1))
+    const buckets = []
+    const byDate = new Map()
+    for (let index = 0; index < days; index += 1) {
+      const date = addDays(start, index).date
+      const bucket = { date, total: 0, success: 0, failure: 0, active: 0 }
+      buckets.push(bucket)
+      byDate.set(date, bucket)
+    }
+    const page = await store.listRunsPage({ limit: MAX_RUN_PAGE_LIMIT })
+    let total = 0
+    let success = 0
+    let failure = 0
+    for (const run of page.runs) {
+      const at = Date.parse(run.queuedAt)
+      if (Number.isNaN(at)) continue
+      const bucket = byDate.get(localPartsAt(at, timeZone).date)
+      if (bucket === undefined) continue
+      bucket.total += 1
+      total += 1
+      if (run.status === 'succeeded') {
+        bucket.success += 1
+        success += 1
+      }
+      if (FAILURE_STATUSES.has(run.status)) {
+        bucket.failure += 1
+        failure += 1
+      }
+      if (ACTIVE_STATUSES.has(run.status)) bucket.active += 1
+    }
+    return { days: buckets, total, success, failure }
+  }
+
   async function listNotifications(query = {}) {
     let unreadOnly = false
     if (query.unread !== undefined) {
@@ -316,6 +403,7 @@ export function createAutomationService(options) {
   return {
     serialize,
     meta,
+    workspaceCatalog,
     listTasks,
     taskDetail,
     createTask,
@@ -327,6 +415,7 @@ export function createAutomationService(options) {
     cancelRun,
     getRun,
     listRuns,
+    runHistory,
     listNotifications,
     markNotificationsRead,
     storageState: async () => {

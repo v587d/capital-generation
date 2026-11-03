@@ -56,17 +56,17 @@
 
 ## 12.4 运行与无人值守边界
 
-- 每次运行创建新 session（`agentPreset: capital-generation`，即 Capital 自动模式）；任务配置保存
-  已注册工作区 id，未选择时把 `<dsh home>/automation-workspace/<profile>` 注册为
-  `CapGen 投研自动化（<profile>）` 并使用。创建 session 时传 `workspaceId`，**不**传裸 `cwd`，
-  这样 session 进入用户选择的工作区分组，而不是「未分组」；只有 workspace registry 不可用时才退回
-  受控目录并记 warn。标题 `[CapGen 投研自动化·<profile>] <task-title>·<run-short-id>`。终态后不再向
-  该 session 追加消息；Phase 1 不做 compaction，也不继承上次运行的上下文。
-- 工作区只接受 `workspaceRegistry` 中已注册的 id（保存时 `get` + `status()` 校验，运行前再校验一次）；
-  客户端不能传路径、`cwd` 或 `projectRoot`。默认工作区首次读取 `meta`/运行任务时注册，并把
-  cwd 相同的历史 session 重新 attach，避免旧运行继续留在未分组。注册失败不阻断运行，只退回受控目录。
+- 每次运行创建新 session（`agentPreset: capital-generation`，即 Capital 自动模式）。任务保存已注册工作区 id；
+  未选择时按设置卡的统一默认工作区（`automation.defaultWorkspaceId`，须已注册且目录可用）启动，否则注册并使用
+  `<dsh home>/CapGen-automation-workspace/<profile>`（标题 `CapGen 投研自动化（<profile>）`）。创建 session 时传
+  `workspaceId`、**不**传裸 `cwd`，让 session 进入对应工作区分组；只有 workspace registry 不可用时才退回受控目录并记 warn。
+  标题是触发时区的 `<MM-DD> <task-title> <run-id-prefix>`（默认 8 位）。终态后不再追加消息；Phase 1 不做 compaction，也不继承上下文。
+- 工作区只接受 `workspaceRegistry` 中已注册的 id（保存时 `get` + `status()` 校验，运行前再校验一次）；客户端不能传路径、
+  `cwd` 或 `projectRoot`。专属默认工作区首次读取 `meta` / 设置卡 / 运行任务时注册，并把 cwd 相同的历史 session 重新 attach，
+  避免旧运行留在未分组；注册失败不阻断运行。设置卡下拉从 `/workspaces` 读取 id / 标题 / 路径，只展示 `~` 缩写。
 - 首条 prompt 含任务指令、任务分类、触发原因、run/task/occurrence、当前时间与时区、
-  `automation-v1` 无人值守标识。任务分类同时决定输出结构与通用侧重，这段分类要求排在任务
+  **宿主算出的最晚结束时刻**与预算时钟规则（收口/等待前必须先调 `get_local_datetime`，
+  不得用步数或等待次数估算）、`automation-v1` 无人值守标识。任务分类同时决定输出结构与通用侧重，这段分类要求排在任务
   指令之前且不覆盖任务指令。内置模板的指令只写覆盖范围与交付口径（逐档覆盖、按什么分级、
   什么算做完），不点名工具，也不复制分类结构、数据纪律与无人值守策略；标题与说明用 JSON
   引号串作为背景数据嵌入，并明确以「任务指令」为任务目标，背景资料里的指令性文字按数据
@@ -92,14 +92,14 @@
 ## 12.5 API、页面与验收
 
 - 路由前缀 `/capital-automation`；所有 handler 第一步 `connection.requestRejection(req)`，
-  被拒时不读 body、不碰 storage。提供 `/meta`、`/tasks`（CRUD + activate/pause/hibernate/copy/run）、
-  `/runs`（列表/详情/cancel）、`/notifications`（列表/已读）。不提供 `/legacy`、`/catalog` 或条件接口。
+  被拒时不读 body、不碰 storage。提供 `/meta`、`/workspaces`（设置卡的下拉，带路径与专属默认标记）、`/tasks`（CRUD + activate/pause/hibernate/copy/run）、
+  `/runs`（列表/详情/cancel）、`/runs/history`（按浏览器时区聚合的每日运行数）、`/notifications`（列表/已读）；不提供 `/legacy`、`/catalog` 或条件接口。
 - 页面顶部只保留品牌与居中的「任务 / 运行」页签，右上角是任务通知中心与「新建任务」；
   profile / scheduler / 日历等诊断信息不常驻，只在 scheduler standby、存储或交易日历不可用
   时以 banner 提示；调度/日历的当前状态与最近一次中断放在页面底部「系统状态」，技术原因折叠，
   版本号不在页面展示。明暗主题跟随 `body[data-ds-dark-theme]`；
   浅色模式的灰阶、表格分隔线、标签/状态文字色单独覆盖，页签选中态用高对比实心胶囊。任务页由
-  最近 30 天运行历史、运行中条、任务表（分类/我的任务筛选、搜索、行内操作菜单）和内置模板区组成：
+  运行中条、任务表（分类/我的任务筛选、搜索、行内操作菜单）和内置模板区组成：
   `dormant` 的内置任务以模板卡展示，添加后进入任务表；`active` / `paused` 任务与自定义任务留在任务表。
   分类/来源标签与任务标题同排（模板卡标题只带分类标签），超过 12 个字截断，窄屏换到标题下一行；
   模板卡的添加按钮是品牌色实心主按钮，不靠 hover 才可见；筛选计数是圆圈数字，模板区标题只留「模板」。
@@ -134,7 +134,7 @@
   仍是最后写入生效。删除自定义任务、休眠内置模板都要二次确认，取消活动运行同样需要确认。任务详情运行中只显示取消；
   未添加的模板用「添加」、已暂停任务用「启用」，二者是主按钮；已启用后「立即运行」是主按钮；
   终态后才开放 session 入口。
-- 运行页复用同一张 30 天历史卡，按全部/进行中/成功/失败筛选 profile 级运行记录；每行标题
+- 运行页顶部是 12 个月热力卡，按全部/进行中/成功/失败筛选 profile 级运行记录；每行标题
   在前、状态在后，时间、耗时与步骤等元数据在第二行左对齐，错误条数紧跟「工具调用」，
   取消 / session 操作靠右。点击错误条数在行内展开具体错误（消息 + code），摘要不展开——
   结果与过程以 session 为准。可取消活动运行或在终态后打开 session。
@@ -142,8 +142,7 @@
   `calendar_unavailable`），默认按 `scope=task` 过滤并只统计这些未读；`/notifications?scope=system`
   仅供诊断查看旧的 `scheduler_standby` 记录。API 的 `scope` 默认 `task`，全部已读也默认只处理任务事件。
 - 设置默认值集中在 `automation/defaults.js`；用户级字段走现有 `capital-config` 条目的
-  `automation.*` volatile 字段，在插件设置卡片的「投研自动化」格集中编辑（与「数据源」平级），
-  优先级固定为代码默认 → 部署行 → 当前 profile → 任务级覆盖：任务记录里的 `limits` 是可选覆盖层，省略即跟随 profile（改通用设置会跟着变），只有显式保存过的值才盖过它；新建任务表单也以 profile 值为初始值。
+  `automation.*` volatile 字段，在插件设置卡片的「投研自动化」格集中编辑（与「数据源」平级），最上面是「默认工作区」下拉（空 = 专属默认工作区），其后才是调度 / 单次运行上限 / 通知；优先级固定为代码默认 → 部署行 → 当前 profile → 任务级覆盖：任务记录里的 `limits` 是可选覆盖层，省略即跟随 profile，只有显式保存过的值才盖过它；新建任务表单也以 profile 值为初始值。默认工作区 id 同样按这个顺序解析，任务显式保存的 `workspaceId` 仍优先。
 - 回归：`test/automation-*.test.mjs`（schema/时区/DST/owner/store/route/scheduler/policy/runner/
   calendar-source/组合）+ `test/packaging.test.mjs`。日历上游形状用 `npm run smoke:calendar` 实测，
   不进 `npm test`（测试全部注入假 fetch，不打外网）。改 `automation/` 后跑 `npm test`；改 host 行或

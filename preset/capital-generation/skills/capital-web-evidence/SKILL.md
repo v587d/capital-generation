@@ -22,11 +22,14 @@ description: Use when returning or labelling what was retrieved — the numbered
 - 有网页链接的用 markdown 链接：方括号里列出**全部来源**（检索 provider 与具体媒体/机构名
   都写上），**链接只放一条最权威的**即可，不必逐个贴链接。示例：
   `情报1：公司今日召开临时股东会审议借款议案。[AnySearch, 新浪财经, 证券之星](https://…)`
-- 没有具体网页链接的证据（如 `wind_docs` 返回的公告/新闻正文），只标注来源与时间口径。示例：
-  `情报2：公司2024年年报披露净利润同比下降。（来源：万得 Wind 金融数据服务，2026-09-11）`
-  `wind_docs` 返回体内自带链接字段时可用那个链接；**不得编造链接**。
-- 来源标注要区分：候选来源（搜索摘要，未点开）、已获取正文（fetch 过）、wind_docs 官方文档
-  （来源：Wind）。**无来源的信息不得作为证据回传**；不编造来源。
+- 没有具体网页链接的证据（如 `eastmoney_announcement_body` / `wind_docs` 返回的公告/新闻正文），
+  只标注来源与时间口径。示例：
+  `情报2：公司2024年年报披露净利润同比下降。（来源：公告全文（东财转载），2026-09-11）`
+  `eastmoney_announcement_body` / `wind_docs` 返回体内自带 `pdf_url` / 链接字段时可用那个链接；
+  **不得编造链接**。权威引用尽量落到巨潮 PDF / 发行人原文。
+- 来源标注要区分：候选来源（搜索摘要，未点开）、已获取正文（fetch 过）、东财公告转载
+  （公告全文（东财转载））、wind_docs 官方文档（来源：Wind）。
+  **无来源的信息不得作为证据回传**；不编造来源。
 - 失败项与未核验项同样编号列出并注明原因，不与已证实证据混排；核心事实同一来源服务多条时逐条
   重复标注，不要用"同上"（外围清单可整段合标）。
 - 主 Agent 向用户呈现时保留这些来源标注；网页数字只能标"媒体转述旁证"。
@@ -78,7 +81,7 @@ description: Use when returning or labelling what was retrieved — the numbered
 - 搜索摘要只能用于发现候选来源，不能作为证券事实证据；报告中区分候选来源、已获取正文、
   未核验内容和失败原因，不编造缺失信息。
 
-### 7.1 WAF 挑战型站点：如实报错，改走 Wind
+### 7.1 WAF 挑战型站点：如实报错，改走公告库/官网
 
 有些站点（政府网站尤其多）挂在 **WAF 的 JavaScript 挑战**后面。识别特征：
 
@@ -94,20 +97,22 @@ description: Use when returning or labelling what was retrieved — the numbered
 
 1. **不重试、不尝试绕过**：不分析混淆脚本、不猜 cookie、不靠换 UA 碰运气。
 2. 如实回传：该 URL **未取得正文**，与其他已证实证据分开编号，域名核验状态写「未核验」。
-3. **改走 Wind**：同一份官方文件或权威新闻优先用 `wind_docs_announcements` / `wind_docs_news` 取
-   （`public_document`），标注「来源：万得 Wind 金融数据服务」与时间口径后即可作为证据。
-   Wind 也查不到时，再试同一内容的**其他官方入口**（中国政府网、部委主站镜像等），
+3. **改走公告库/官网**：公告清单先用 `eastmoney_announcements`，正文用
+   `eastmoney_announcement_body`；权威原文走巨潮 PDF / 官网 fetch。需要按语义找段落且东财
+   覆盖不到时，再用 `wind_docs_announcements` / `wind_docs_news`（`public_document`，计费），
+   标注「来源：万得 Wind 金融数据服务」与时间口径。
+   这些都查不到时，再试同一内容的**其他官方入口**（中国政府网、部委主站镜像等），
    并在回传里注明替代来源与原 URL 的关系。
 4. 不要因为一条被墙就放弃整个任务：把这一条标为「来源不可达」，其余结论照常给出。
 
 ## 8. 文档解析（`ocr`：PDF / 图片 → 正文）
 
-`capital-web-protocol` §1 那三个"硬边界"里唯一被拆掉的就是**研报 / 公告正文拿不到**：现在有一条明确的通路，
+`capital-web-protocol` §1 的"来源边界"里被拆掉的一条是**研报 / 公告正文拿不到**：现在有一条明确的通路，
 但它**要 token、按整篇计费**，所以用法比别的工具讲究。
 
-- **什么时候动它**：你手上有一条 `.pdf` 直链（`eastmoney_reports` 条目里的 `pdf_url`，或公告 /
-  招股书原文的直链），或委派消息给了一个工作目录内的本地文档路径（用户以 `@xxx.pdf` 推给
-  主 Agent 的那种）。`web_retriever_fetch` 拿到 PDF 是**能力边界**不是故障——不要重试 fetch，
+- **什么时候动它**：你手上有一条 `.pdf` 直链（`eastmoney_reports` 条目里的 `pdf_url`、
+  `eastmoney_announcement_body` 回执的 `pdf_url`，或公告 / 招股书原文的直链），或委派消息给了
+  一个工作目录内的本地文档路径（用户以 `@xxx.pdf` 推给主 Agent 的那种）。`web_retriever_fetch` 拿到 PDF 是**能力边界**不是故障——不要重试 fetch，
   改调 `ocr`。
 - **四种调用形态，一次只走一种**：`url`（外部 PDF 直链）/ `file`（工作目录相对路径的本地
   pdf 或图片）/ `job_id` + `doc_id`（**续查**上一次没跑完的作业）/ `doc_id` + `pages` \| `query`

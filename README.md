@@ -18,7 +18,7 @@
 <p align="center">
   <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.15.1-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.16.0-9cf" alt="Version"></a>
   <a href="https://www.npmjs.com/package/@v587d/capital-generation"><img src="https://img.shields.io/npm/v/%40v587d%2Fcapital-generation" alt="npm version"></a>
   <a href="https://github.com/deepseek-ai/deepseek-harness"><img src="https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white" alt="powered-by-dsh"></a>
 </p>
@@ -82,7 +82,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
      | --- | --- |
      | [同花顺 Fuyao](https://fuyao.aicubes.cn/docs/) | 行情、财务数据和自选股报价 |
      | [AnySearch](https://www.anysearch.com/docs) | 网页搜索和正文提取 |
-     | [Wind Alice](https://market.windalice.com/#/home) | 公告与新闻检索，以及宏观/行业/汇率指标与按日期区间取的历史 K 线 |
+     | [Wind Alice](https://market.windalice.com/#/home) | 公告与新闻的语义深研（**按次消耗积分**），以及宏观/行业/汇率指标与按日期区间取的历史 K 线；公告清单优先走零 key 的东财公告工具 |
      | [PaddleOCR AIStudio](https://aistudio.baidu.com/paddleocr) | 解析 PDF 和图片中的文字 |
      | [FTShare（非凸科技）](https://market.ft.tech/gateway/doc/p/pb8eizu3) | A 股行情与日 K 截面、主力资金流、涨跌停、龙虎榜席位、股东人数、指数权重、可转债行情、宏观利率，以及期货合约与贵金属行情等第二家上游口径 |
 
@@ -149,7 +149,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 
 ## 还能做什么
 
-- **查数据和资料：** 覆盖 A 股、港股、美股与期货等品种，由专用角色按需获取行情、财务、指数、基金、宏观行业与期货数据，检索公告、新闻和研报。共计 **128** 个数据收集能力和 **14** 个网页检索能力，部分公开数据源无需额外密钥；具体覆盖范围见 [数据收集能力表](docs/data-collector-capabilities.md) 和 [网页检索能力表](docs/web-retriever-capabilities.md)。
+- **查数据和资料：** 覆盖 A 股、港股、美股与期货等品种，由专用角色按需获取行情、财务、指数、基金、宏观行业与期货数据，检索公告、新闻和研报。共计 **128** 个数据收集能力和 **16** 个网页检索能力，部分公开数据源无需额外密钥；具体覆盖范围见 [数据收集能力表](docs/data-collector-capabilities.md) 和 [网页检索能力表](docs/web-retriever-capabilities.md)。
 - **数据质检：** 结构化数据不会直接进入模型上下文。每份数据先由分析师检查结构、时间轴、缺失与基础统计，再按受控方式汇总；原始数据行始终留在工具层。
 - **可视化：** 分析师判断数据适合图表，或你明确要图时，绘图专员会生成可交互图表；明确不要图时只完成质检。图表会登记为**最后一轮答复**的交付物，在答复末尾集中出现，可在侧栏查看或离线打开。了解处理流程可看 [Agent 角色说明](docs/agent-roles.md)。
 
@@ -183,7 +183,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 | [Quant Agent Skills](https://github.com/Howard-Jerry/quant-agent-skills) | 1 个跨市场选线 Skill：同一家公司在 A 股与港股、或美股 ADR 与港股各有一条线时该走哪一条——价差、币种与股息税、流动性与通道、披露文件路径各不相同。公司本身只研究一次，便宜的那条线不构成"这家公司更值得买"；A/H 溢价与 ADR 平价没有现成条目，须按两条线同一天的收盘价与当日汇率现算，缺任一项就只报缺的那一项 |
 
 <a id="capgen-automation" name="capgen-automation"></a>
-- **CapGen 投研自动化：** 内置 16 个模板（默认未添加，按需添加），覆盖资讯、行情、复盘、研究、组合与监控：交易日有盘前公告（08:00）、早间资讯（08:30）、午间快照（11:35）、当日公告（16:00）、港股收盘（16:30）与每日复盘（20:00），另有美股收盘（周二至周六 07:00）、美股盘前（周一至周五 20:30）、组合周报、自选股周检、行业周报、研究选题、财报跟踪、下周事件日历、市场周报与组合风险月报；也可新建自己的任务，并从 30 个图标里挑一个；内置模板也有各自的固定图标。到点自动新建 session 执行，也能手动运行。任务、运行历史与任务通知在同一页，支持运行预算、通知和仅交易日触发。
+- **CapGen 投研自动化：** 内置 16 个模板（默认未添加，按需添加），覆盖资讯、行情、复盘、研究、组合与监控：交易日有盘前公告（08:00）、早间资讯（08:30）、午间快照（11:35）、当日公告（16:00）、港股收盘（16:30）与每日复盘（20:00），另有美股收盘（周二至周六 07:00）、美股盘前（周一至周五 20:30）、组合周报、自选股周检、行业周报、研究选题、财报跟踪、下周事件日历、市场周报与组合风险月报；也可新建自己的任务，并从 30 个图标里挑一个；内置模板也有各自的固定图标。到点自动新建 session 执行，也能手动运行。任务、12 个月运行热力图与任务通知在同一页，可在设置卡把任一已注册工作区设为任务统一使用的默认工作区，支持运行预算、通知和仅交易日触发。
 
 <p align="center">
   <a href="assets/capgen-automation-tasks.png">
@@ -194,12 +194,12 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 ## 常见问题
 
 - **安装后找不到模式？** 确认插件出现在「插件」→ 已安装列表；Web / CLI profile 安装后要重启该 profile，并在新会话选择模式。选择器里应看到自动模式、行情专家、资讯专员；分析师和绘图专员是自动模式的内部角色，不会出现在这里。
-- **配置在哪？** 打开「插件」→ 已安装的 **Capital Generation**，页面顶部就是「数据源 / 投研自动化 / 精选 Skills / 包含的组件」四格，五把密钥都在第一格，自动检查间隔与最长运行时间等上限在第二格；不在 DSH 的普通「设置」页面，也不用点进任何一行组件。保存密钥后新建会话再试。
+- **配置在哪？** 打开「插件」→ 已安装的 **Capital Generation**，页面顶部就是「数据源 / 投研自动化 / 精选 Skills / 包含的组件」四格，五把密钥都在第一格；第二格可指定任务统一使用的默认工作区，也能改自动检查间隔与最长运行时间等上限；不在 DSH 的普通「设置」页面，也不用点进任何一行组件。保存密钥后新建会话再试。
 - **升级到 2.9.0 后，分析师和绘图专员去哪了？** 这一版把它们收进自动模式内部，不再出现在选择器与预设管理里，避免误开一个没有取数入口的空会话。旧会话仍能按原身份恢复；新任务直接用自动模式提出即可。
-- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.15.1` 或 `@2.15.1`。
+- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.16.0` 或 `@2.16.0`。
 - **刚发布的新版本装不到？** 桌面端取包时会跳过**刚发布不久**的版本（宿主侧包管理器的发布冷却策略，实测会静默装成上一个版本），国内镜像的同步也可能滞后一段时间。急着用最新代码，改用仓库地址安装最直接。
 - **网页抓取失败？** 配置卡片中的「允许启动本地提取网页内容」默认开启：AnySearch 提取失败时可尝试本机直连。关闭后，本机直连的具名来源查询也不可用；请检查该开关和网络连接。
-- **Wind 那部分会消耗积分？** 会。公告与新闻检索、宏观 / 行业 / 汇率指标、按日期区间取的历史 K 线都按次消耗你在 Wind 侧的额度；额度与条款以 Wind 为准，插件不做用量封顶。没配 `WIND_API_KEY` 时这几类不可用，其余功能照常。
+- **Wind 那部分会消耗积分？** 会。Wind 的公告 / 新闻语义检索、宏观 / 行业 / 汇率指标、按日期区间取的历史 K 线都按次消耗你在 Wind 侧的额度；额度与条款以 Wind 为准，插件不做用量封顶。没配 `WIND_API_KEY` 时这几类不可用，其余功能照常——公告清单与正文有零密钥的东财工具，不配 Wind 也能查。
 - **没有加载想要的精选 Skill？** 先看「智能装载 Skills」开关：关着时只给已勾选的方法；打开后按角色放开全部方法，但仍由模型判断任务是否命中。再确认它归哪个预设——自动模式偏研究/组合/写作，估值、财务与筛选由分析师在计算时加载，文档深读与核验由资讯专员加载。列表上方可以按「Skill 特点」和「适用预设」两个维度取交集筛选；点技能名可看原文。需要强制使用时，在对话里直接输入 `/` 加原文中的英文名（例如 `/china-earnings-analysis`），不要用中文标题。
 - **怎么知道这次分析用了哪些精选 Skill？** 最终答复会有一节「使用的方法」，逐项列出实际加载过的 Skill 并说明各自支撑了哪个判断；主 Agent 和子 Agent 的加载都会计入。没有加载过就不会出现这一节，答复里也不会挂没读过的名字。
 - **精选 Skill 的方法论很长，Agent 读得完吗？** 读得完。超过一次可读长度的正文已经重排成「入口 + 分册」：Agent 先看入口目录，需要具体规则、模板或阈值时把对应那一册整本读进来，并会告诉你它读了哪几册、哪些没读。设置卡片里点技能名打开的原文预览仍然只给入口那一份，想看某一册直接问 Agent。

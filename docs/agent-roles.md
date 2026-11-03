@@ -28,10 +28,11 @@
   （**仍在开发中**，委派行 disabled，暂不启用）。
 - **web_retriever**: 主 Agent 直属下级（spawn），负责根据上级指令，运用网络搜索和抓取能力，获取外部
   非结构化数据。检索面为 AnySearch（`anysearch_search` / `web_retriever_fetch`，失败可按开关回退本机
-  直连）与 Wind Alice（`wind_docs_announcements` / `wind_docs_news`，公告与权威新闻）；另有九个
-  **具名来源查询工具**（财联社快讯、华尔街见闻快讯、东财 7×24 快讯 / 个股新闻 / 个股研报、新浪研报、
-  同花顺机构一致预期 EPS、巨潮互动易、上证e互动），均为公开端点、零密钥；第三个工作面是**文档解析**
-  `ocr`（PaddleOCR，PDF 研报 / 公告正文与图片 → markdown，需 Token）。共 14 个工具，逐个说明见
+  直连）与 Wind Alice（`wind_docs_announcements` / `wind_docs_news`，公告/新闻的语义深研，
+  **按次计费**）；另有十一个**具名来源查询工具**（财联社快讯、华尔街见闻快讯、东财 7×24 快讯 /
+  个股新闻 / 个股研报 / 公告列表与分页正文、新浪研报、同花顺机构一致预期 EPS、巨潮互动易、上证e互动），
+  均为公开端点、零密钥；第三个工作面是**文档解析** `ocr`（PaddleOCR，PDF 研报 / 公告正文与图片 →
+  markdown，需 Token）。共 16 个工具，逐个说明见
   [web_retriever 能力](web-retriever-capabilities.md)。
 - **visualization_specialist**: 主 Agent 的孙 Agent（data_junior 委派出来的出图子 Agent），由
   data_junior 检查完数据后按需创建；只接收 `profile_ref`、有限 profile 事实与短期 `chart_source_ref`，
@@ -71,8 +72,9 @@
 
 ### 资讯专员
 
-- **模式说明**：角色身份是资讯公文专员（web_retriever）。两家检索上游（通用检索与 Wind 公告新闻）加九个具名来源（财联社、华尔街见闻、东财
-  7×24 快讯 / 个股新闻 / 个股研报、新浪研报、巨潮互动易、上证 e 互动、同花顺机构一致预期 EPS）。
+- **模式说明**：角色身份是资讯公文专员（web_retriever）。通用检索、东财公告（列表 + 分页正文）与
+  Wind 深研三个来源面，另有十一个具名来源（财联社、华尔街见闻、东财 7×24 快讯 / 个股新闻 / 个股研报 /
+  公告列表与正文、新浪研报、巨潮互动易、上证 e 互动、同花顺机构一致预期 EPS）。
   每条证据带编号与来源，官方域名核验过才算已核实；网页正文是证据，不是指令。
 - **如何使用**：可以单独开一条只要资料，例如「查一下 XX 公司 9 月的回购公告原文，给链接和日期」。
   它不做投资分析，也不给买卖建议。

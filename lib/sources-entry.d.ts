@@ -1,5 +1,5 @@
 /**
- * `tools/retrieve-sources` row: the nine named-source tools, gated by
+ * `tools/retrieve-sources` row: the eleven named-source tools, gated by
  * `localFetch.enabled`. When disabled they stay registered and fail loudly per call;
  * unregistering at boot would freeze one config read for the process lifetime.
  */

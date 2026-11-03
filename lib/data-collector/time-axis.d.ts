@@ -16,6 +16,21 @@ export interface AxisBounds {
     data_to: string | null;
 }
 /**
+ * Host-computed coverage for a DatasetRef. `format: 'none'` is intentional: a quote source
+ * without a time column must not look like it has an as-of time.
+ */
+export interface DatasetTimeCoverage {
+    column: string | null;
+    from: string | null;
+    to: string | null;
+    format: 'epoch_ms' | 'date_string' | 'datetime_string' | 'none';
+}
+/**
+ * Pick one time column by name and return its real min/max. This is a host fact for DatasetRef;
+ * it deliberately does not convert quote times across markets (their offsets stay in the string).
+ */
+export declare function summarizeTimeCoverage(rows: unknown[]): DatasetTimeCoverage;
+/**
  * Translate a date-like filter value into comparable bounds. Dates mean whole days: `=` expands
  * to >=/<=, while `>`, `<`, `in` and `!=` fail loudly instead of silently shifting a day.
  */

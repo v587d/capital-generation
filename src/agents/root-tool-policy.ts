@@ -6,12 +6,14 @@
 import { CAPITAL_PRESET_IDS, ROOT_PRESET_ID } from '../preset-ids.js'
 import { readPresetClaim } from '../preset-claim.js'
 
-/** Outbound tools (search 2 + wind 2 + named sources 9); `ocr` is excluded because only its url form is restricted. */
+/** Outbound tools (search 2 + wind 2 + named sources 11); `ocr` is excluded because only its url form is restricted. */
 export const RETRIEVAL_DENIED_TOOLS = [
   'anysearch_search', 'web_retriever_fetch',
   'wind_docs_announcements', 'wind_docs_news',
   'cls_telegraph', 'wscn_lives', 'cninfo_irm', 'sseinfo_qa',
-  'eastmoney_724', 'eastmoney_stock_news', 'eastmoney_reports', 'sina_reports', 'ths_eps_forecast',
+  'eastmoney_724', 'eastmoney_stock_news', 'eastmoney_reports',
+  'eastmoney_announcements', 'eastmoney_announcement_body',
+  'sina_reports', 'ths_eps_forecast',
 ] as const
 
 export const OCR_TOOL_NAME = 'ocr'

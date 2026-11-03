@@ -166,7 +166,8 @@ child id 是随机 UUID，长会话里凭记忆复述极易抄错，甚至把 A 
 | `send_message` 投错对象（目标 child 的回应与角色不符） | `interrupt_agent` 停当前轮（已结束为 no-op）→ 重新 `list_agents` → 向正确 id 重发；委派正文自带角色字样与任务标识，错投可被及时发现 |
 | 子 Agent 回告「工具未挂载」 | 如实转述状态与检查建议，不要编造工具或数据；数据侧提示检查 `request_data`/`list_capabilities`，统计侧提示检查 `inspect_dataset`/`profile_dataset` |
 | 子 Agent 回传 `failed` | 按 `error` 与 `code` 判断：参数问题修正后 `send_message` 重试；网络/服务类最多重试 1 次；同一请求累计最多重试 2 次仍失败就如实告知用户 |
-| 子 Agent 回传 wind_docs 失败（AUTH/RATE_LIMIT/额度类） | Wind 能力暂不可用（Key 缺失/过期/额度不足）：如实告知用户；本轮材料由 anysearch 承担（公告线索 + 官方披露页 fetch），不要重试 Wind、不要索取或改配 Key |
+| 子 Agent 回传 eastmoney 公告失败 | 公告清单转巨潮/官网 fetch，再转 anysearch；Wind 只做语义深研（计费），不要用 Wind 补"列全公告" |
+| 子 Agent 回传 wind_docs 失败（AUTH/RATE_LIMIT/额度类） | Wind 能力暂不可用：公告清单改走 eastmoney_announcements / 巨潮 / anysearch；不重试 Wind、不改 Key |
 | 出现「想直接读取 Dataset 内容」的冲动 | 改为委派 `data_junior`（`inspect_dataset` / `profile_dataset`）；主 Agent 直接调用 Dataset 系列工具会被工具层拒绝（`dataset_session_mismatch`），被拒后不要重试直读，改走委派 |
 | 任务需要分钟级数据 | 检查 `tencent_kline`：支持 m1/m5/m15/m30/m60，仅支持最近 `count` 根（最多 320），无 `start/end` 历史区间；旧分钟历史不可编造，不满足就披露边界 |
 | 需要周期刷新（如每日收盘快照） | 用 `send_message` 指示 `data_collector` 再次获取并回传；不存在订阅机制——新需求 = 新消息，回传即唤醒 |

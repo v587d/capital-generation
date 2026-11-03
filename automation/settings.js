@@ -26,6 +26,11 @@ function intIn(value, minimum, maximum, fallback) {
 
 export function normalizeAutomationSettings(value = {}, fallback = DEFAULT_AUTOMATION_SETTINGS) {
   const source = value ?? {}
+  const workspaceId = source.defaultWorkspaceId === undefined
+    ? fallback.defaultWorkspaceId
+    : typeof source.defaultWorkspaceId === 'string'
+      ? source.defaultWorkspaceId.trim()
+      : fallback.defaultWorkspaceId
   return {
     tickMs: intIn(source.tickMs, MIN_TICK_MS, MAX_TICK_MS, fallback.tickMs),
     runTimeoutMinutes: intIn(source.runTimeoutMinutes, MIN_RUN_TIMEOUT_MINUTES, MAX_RUN_TIMEOUT_MINUTES, fallback.runTimeoutMinutes),
@@ -33,6 +38,7 @@ export function normalizeAutomationSettings(value = {}, fallback = DEFAULT_AUTOM
     maxSteps: intIn(source.maxSteps, MIN_MAX_STEPS, MAX_MAX_STEPS, fallback.maxSteps),
     maxToolCalls: intIn(source.maxToolCalls, MIN_MAX_TOOL_CALLS, MAX_MAX_TOOL_CALLS, fallback.maxToolCalls),
     inAppNotifications: source.inAppNotifications === undefined ? fallback.inAppNotifications : source.inAppNotifications !== false,
+    defaultWorkspaceId: workspaceId ?? '',
   }
 }
 

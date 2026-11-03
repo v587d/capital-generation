@@ -9,6 +9,8 @@ const {
   Switch,
   Tag,
   Modal,
+  Menu,
+  IconChevronDownOutlineRegular,
   IconRightUpOutlineRegular,
 } = require('@deepseek-ai/dsh-client-ui-primitives')
 const { SELECTED_SKILL_CATALOG, SELECTED_SKILL_TAG_LABELS } = require('../selected-skills/catalog.js')
@@ -25,6 +27,7 @@ const {
   SELECTED_SKILL_PRESET_ORDER,
   SELECTED_SKILL_ROUTING,
 } = require('../selected-skills/routing.js')
+const { WORKSPACES_ROUTE } = require('../automation/contract.js')
 
 /**
  * Two different strings: `ENTRY_ID` is the settings namespace (= profile entry
@@ -64,6 +67,8 @@ const DOC_URLS = {
 /** Render order = array order; one list drives status, refs, drafts and event refresh. */
 const CREDENTIAL_FIELDS = ['fuyao', 'ftshare', 'anysearch', 'wind', 'paddleocr']
 const AUTOMATION_FIELDS = ['tickMs', 'runTimeoutMinutes', 'idleTimeoutMinutes', 'maxSteps', 'maxToolCalls', 'inAppNotifications']
+const AUTOMATION_WORKSPACE_FIELD = 'defaultWorkspaceId'
+const WORKSPACE_DEDICATED_MENU_ID = '__capgen_dedicated_workspace__'
 const AUTOMATION_DEFAULTS = {
   tickMs: 60_000,
   runTimeoutMinutes: 60,
@@ -125,6 +130,12 @@ const zh = {
   automationMaxSteps: '最大步骤',
   automationMaxToolCalls: '最大工具调用',
   automationInApp: '写入应用内通知',
+  automationDefaultWorkspace: '默认工作区',
+  automationWorkspacePath: '默认位置：{path}',
+  automationWorkspaceMissing: '原工作区已被移除，运行会回退到专属默认工作区。',
+  automationWorkspaceLoading: '工作区列表读取中…',
+  automationWorkspaceUnavailable: '工作区列表暂时读不到；任务仍会使用默认工作区，切回本格会重试。',
+  automationWorkspaceFallback: '专属默认工作区',
   windLabel: 'Wind Alice API Key',
   windHint: 'Wind 金融信披类文档检索接口。保存后新自动模式会话生效。',
   paddleocrLabel: 'PaddleOCR 文档解析 Token',
@@ -190,6 +201,12 @@ const en = {
   automationMaxSteps: 'Max steps',
   automationMaxToolCalls: 'Max tool calls',
   automationInApp: 'Write in-app notifications',
+  automationDefaultWorkspace: 'Default workspace',
+  automationWorkspacePath: 'Location: {path}',
+  automationWorkspaceMissing: 'That workspace was removed; runs fall back to the dedicated default workspace.',
+  automationWorkspaceLoading: 'Loading workspaces…',
+  automationWorkspaceUnavailable: 'The workspace list is unavailable; runs still use the default workspace. Re-entering this tab retries.',
+  automationWorkspaceFallback: 'Dedicated default workspace',
   windLabel: 'Wind Alice API Key',
   windHint: 'Wind financial disclosure document retrieval interface. Takes effect in new Auto mode sessions.',
   paddleocrLabel: 'PaddleOCR document token',
@@ -261,10 +278,17 @@ function installStyles() {
     .capital-config-automation-group { display: flex; flex-direction: column; gap: 8px; }
     .capital-config-automation-group > .capital-config-group-label { color: var(--dsw-alias-label-secondary); font-size: 12px; font-weight: 500; line-height: 18px; }
     .capital-config-number { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .capital-config-workspace { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
     .capital-config-number-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
     .capital-config-number-head .capital-config-write-failed { font-size: 11px; line-height: 16px; }
     .capital-config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
     .capital-config-automation input[type="number"] { width: 100%; box-sizing: border-box; padding: 6px 8px; border: .5px solid var(--dsw-alias-border-l1); border-radius: 8px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font: inherit; font-size: 12px; }
+    .capital-config-select { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-width: 0; height: 34px; padding: 0 10px 0 12px; border: 0; border-radius: 10px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font: inherit; font-size: 12.5px; line-height: 20px; text-align: left; cursor: pointer; transition: background .15s, opacity .15s; }
+    .capital-config-select:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+    .capital-config-select:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--dsw-alias-brand-primary)); outline-offset: 0; }
+    .capital-config-select:disabled { opacity: .5; cursor: not-allowed; }
+    .capital-config-selectvalue { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .capital-config-select > svg { flex: none; color: var(--dsw-alias-label-tertiary); }
     .capital-config-selected-mode { padding: 12px 14px; border: 0.5px solid var(--dsw-alias-border-l1); border-radius: 10px; background: var(--dsw-alias-bg-layer-2); }
     .capital-config-switch-row { align-items: center; gap: 12px; display: flex; }
     .capital-config-switch-text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
@@ -323,6 +347,89 @@ function installStyles() {
   return () => style.remove()
 }
 
+/**
+ * Dedicated workspace is the empty value, so the dropdown can keep one "follow default"
+ * entry even when the registry list is empty or the saved id has been removed.
+ */
+function workspaceProjection(details, rawSelected, state) {
+  const selectedId = typeof rawSelected === 'string' ? rawSelected.trim() : ''
+  const items = Array.isArray(details?.workspaces) ? details.workspaces : []
+  const dedicated = items.find((item) => item?.dedicated === true)
+  const dedicatedPath = typeof dedicated?.path === 'string' ? dedicated.path : ''
+  const options = [{
+    id: '',
+    title: typeof dedicated?.title === 'string' ? dedicated.title : '',
+    path: typeof dedicated?.displayPath === 'string' ? dedicated.displayPath : '',
+    dedicated: true,
+    missing: false,
+  }]
+  for (const item of items) {
+    if (item?.dedicated === true || (dedicatedPath !== '' && item?.path === dedicatedPath) || typeof item?.id !== 'string') continue
+    options.push({
+      id: item.id,
+      title: typeof item.title === 'string' ? item.title : item.id,
+      path: typeof item.displayPath === 'string' ? item.displayPath : '',
+      dedicated: false,
+      missing: false,
+    })
+  }
+  const missing = selectedId !== '' && !options.some((option) => option.id === selectedId)
+  if (missing) options.push({ id: selectedId, title: '', path: '', dedicated: false, missing: true })
+  const current = options.find((option) => option.id === selectedId) ?? options[0]
+  return { options, selectedId, current, missing, ...state }
+}
+
+/**
+ * DSH General-settings style selector: same filled pill + host `Menu` surface as the
+ * automation page. Native `<select>` is avoided so light/dark themes follow host tokens.
+ */
+function WorkspaceSelect({ value, options, onChange, disabled, label, describedBy }) {
+  const [open, setOpen] = useState(false)
+  const triggerRef = useRef(null)
+  const currentValue = typeof value === 'string' ? value : ''
+  const items = options.map((option) => ({
+    id: option.id === '' ? WORKSPACE_DEDICATED_MENU_ID : option.id,
+    label: option.label,
+  }))
+  const menuValue = currentValue === '' ? WORKSPACE_DEDICATED_MENU_ID : currentValue
+  const current = items.find((item) => item.id === menuValue) ?? items[0]
+  useEffect(() => {
+    if (disabled === true && open) setOpen(false)
+  }, [disabled, open])
+  const closeMenu = () => setOpen(false)
+  const selectValue = (id) => {
+    setOpen(false)
+    triggerRef.current?.focus?.({ preventScroll: true })
+    const next = id === WORKSPACE_DEDICATED_MENU_ID ? '' : id
+    if (next === currentValue) return undefined
+    return onChange(next)
+  }
+  const trigger = h('button', {
+    ref: triggerRef,
+    type: 'button',
+    className: 'capital-config-select',
+    disabled,
+    'aria-label': current?.label ? `${label}：${current.label}` : label,
+    'aria-haspopup': 'menu',
+    'aria-expanded': open ? 'true' : 'false',
+    'aria-describedby': describedBy,
+    title: current?.label,
+    onClick: () => setOpen((currentOpen) => !currentOpen),
+  },
+  h('span', { className: 'capital-config-selectvalue', title: current?.label }, current?.label ?? ''),
+  h(IconChevronDownOutlineRegular, { size: 14 }))
+  return h(Menu, {
+    open,
+    anchor: trigger,
+    items,
+    selectedId: menuValue,
+    onSelect: selectValue,
+    onClose: closeMenu,
+    align: 'start',
+    portal: true,
+  })
+}
+
 class CapitalCardController {
   constructor(scope, ctx) {
     this.scope = scope
@@ -337,6 +444,11 @@ class CapitalCardController {
     this.automationWriting = new Set()
     this.automationFailed = new Set()
     this.automationInvalid = new Set()
+    this.workspaceWriting = false
+    this.workspaceFailed = false
+    this.workspaceDetails = null
+    this.workspacesInFlight = false
+    this.workspacesFailed = false
     // Row count is external: null = unknown, never 0; fetch only after the card is shown.
     this.bundleRows = null
     this.rowsRequested = false
@@ -393,6 +505,12 @@ class CapitalCardController {
         failed: this.automationFailed.has(field),
         invalid: this.automationInvalid.has(field),
       }])),
+      workspace: workspaceProjection(this.workspaceDetails, snapshot.value?.automation?.[AUTOMATION_WORKSPACE_FIELD], {
+        loading: this.workspacesInFlight,
+        unavailable: this.workspacesFailed && this.workspaceDetails === null,
+        writing: this.workspaceWriting,
+        failed: this.workspaceFailed,
+      }),
       // `count === null` means unknown, not zero: the card decides whether to draw it.
       components: { count: this.bundleRows },
     }
@@ -582,6 +700,51 @@ class CapitalCardController {
     this.store.set(this.projection())
   }
 
+  /**
+   * Workspace ids come from the automation route (same auth plane as its page), never from
+   * a path in settings. Failures are not cached: re-entering the tab retries.
+   */
+  async ensureWorkspaces() {
+    if (this.workspaceDetails !== null || this.workspacesInFlight) return
+    this.workspacesInFlight = true
+    this.workspacesFailed = false
+    this.store.set(this.projection())
+    try {
+      if (typeof fetch !== 'function') throw new Error('fetch_unavailable')
+      const response = await fetch(WORKSPACES_ROUTE, { method: 'GET', cache: 'no-store', credentials: 'same-origin' })
+      if (!response?.ok) throw new Error(`http_${response?.status ?? 0}`)
+      const payload = await response.json()
+      if (!Array.isArray(payload?.workspaces)) throw new Error('invalid_payload')
+      this.workspaceDetails = {
+        workspaces: payload.workspaces.filter((item) => item !== null && typeof item === 'object' && typeof item.id === 'string'),
+      }
+    } catch {
+      this.workspacesFailed = true
+    }
+    this.workspacesInFlight = false
+    this.store.set(this.projection())
+  }
+
+  async writeAutomationWorkspace(value) {
+    if (this.workspaceWriting) return 'ignored'
+    const snapshot = this.scope.getSnapshot()
+    if (snapshot.status !== 'ready' || !snapshot.writable) return 'ignored'
+    const next = typeof value === 'string' ? value.trim() : ''
+    this.workspaceWriting = true
+    this.workspaceFailed = false
+    this.store.set(this.projection())
+    try {
+      await this.scope.mutate([{ op: 'set', path: ['automation', AUTOMATION_WORKSPACE_FIELD], value: next }])
+    } catch {
+      // The landed check below reports the failure.
+    }
+    this.workspaceWriting = false
+    const landed = (this.scope.getSnapshot().value?.automation?.[AUTOMATION_WORKSPACE_FIELD] ?? '') === next
+    if (!landed) this.workspaceFailed = true
+    this.store.set(this.projection())
+    return landed ? 'saved' : 'failed'
+  }
+
   inject() {
     return {
       hooks: {
@@ -594,6 +757,8 @@ class CapitalCardController {
       toggleSelectedSkill: (field, value) => this.toggleSelectedSkill(field, value),
       toggleSelectedSkillsMode: (auto) => this.toggleSelectedSkillsMode(auto),
       ensureBundleRows: () => this.ensureBundleRows(),
+      ensureWorkspaces: () => this.ensureWorkspaces(),
+      writeAutomationWorkspace: (value) => this.writeAutomationWorkspace(value),
     }
   }
 }
@@ -802,6 +967,10 @@ function CapitalCard(props) {
   const [presetFilter, setPresetFilter] = useState(SELECTED_SKILL_FILTER_ALL)
   // Fetch on mount: tab labels carry numbers; hooks must precede the unavailable return.
   useEffect(() => { props.ensureBundleRows() }, [])
+  // The workspace list lives behind the automation route; fetch when its tab first opens.
+  useEffect(() => {
+    if (tab === 'automation') props.ensureWorkspaces()
+  }, [tab])
   // Pinned order is snapshotted on tab entry so rows never move under the cursor.
   const enabledKeys = () => new Set(SELECTED_SKILL_CATALOG
     .filter((entry) => state.selectedSkills?.[entry.key]?.on === true)
@@ -887,7 +1056,60 @@ function CapitalCard(props) {
     h('span', { className: 'capital-config-group-label' }, t(labelKey)),
     ...children,
   )
+  const workspaceState = state.workspace ?? {
+    options: [],
+    selectedId: '',
+    current: null,
+    missing: false,
+    loading: false,
+    unavailable: false,
+    writing: false,
+    failed: false,
+  }
+  const workspacePathId = 'capital-config-automation-workspace-path'
+  const namedWorkspaceOptions = workspaceState.options.map((option) => ({
+    id: option.id,
+    path: option.path,
+    label: option.id === ''
+      ? (option.title || t('automationWorkspaceFallback'))
+      : option.missing ? t('automationWorkspaceMissing') : option.title,
+  }))
+  const workspaceLabelCounts = new Map()
+  for (const option of namedWorkspaceOptions) {
+    workspaceLabelCounts.set(option.label, (workspaceLabelCounts.get(option.label) ?? 0) + 1)
+  }
+  const workspaceOptions = namedWorkspaceOptions.map((option) => {
+    if (option.id === '' || !option.path || (workspaceLabelCounts.get(option.label) ?? 0) < 2) return option
+    // Two registered workspaces may legitimately share a title; path keeps the menu unambiguous.
+    return { ...option, label: `${option.label} · ${option.path}` }
+  })
+  const workspaceSection = h('div', { className: 'capital-config-workspace' },
+    h('span', { className: 'capital-config-number-head' },
+      h('span', { className: 'capital-config-switch-label' }, t('automationDefaultWorkspace')),
+      workspaceState.failed
+        ? h('span', { role: 'status', className: 'capital-config-write-failed' }, t('saveFailed'))
+        : null,
+    ),
+    h(WorkspaceSelect, {
+      value: workspaceState.selectedId,
+      options: workspaceOptions,
+      onChange: (next) => props.writeAutomationWorkspace(next),
+      disabled: disabled || state.saving || workspaceState.writing,
+      label: t('automationDefaultWorkspace'),
+      describedBy: workspaceState.current?.path ? workspacePathId : undefined,
+    }),
+    workspaceState.unavailable
+      ? h('p', { role: 'status', className: 'capital-config-hint' }, t('automationWorkspaceUnavailable'))
+      : workspaceState.loading
+        ? h('p', { className: 'capital-config-hint' }, t('automationWorkspaceLoading'))
+        : workspaceState.missing
+          ? h('p', { role: 'status', className: 'capital-config-write-failed' }, t('automationWorkspaceMissing'))
+          : workspaceState.current?.path
+            ? h('p', { id: workspacePathId, className: 'capital-config-hint' }, t('automationWorkspacePath', { path: workspaceState.current.path }))
+            : null,
+  )
   const automationSection = h('div', { className: 'capital-config-automation' },
+    workspaceSection,
     automationGroup('automationScheduleGroup', [
       h('div', { className: 'capital-config-grid' },
         automationNumber('tickMs', 'automationTick'),
@@ -1008,6 +1230,7 @@ function CapitalCard(props) {
         setTab(next)
         // Re-read on every switch to this tab: a previous failure retries here.
         if (next === 'components') props.ensureBundleRows()
+        if (next === 'automation') props.ensureWorkspaces()
         // Re-pin only when entering Skills, so the row under the cursor never jumps.
         if (next === 'skills') setPinnedSkills(enabledKeys())
       },

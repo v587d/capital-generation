@@ -80,12 +80,15 @@ function request(overrides = {}) {
 function fakeStore({ failWith } = {}) {
   let saves = 0
   const refs = []
+  const inputs = []
   return {
     refs,
+    inputs,
     saves: () => saves,
     async save(input) {
       if (failWith) throw failWith
       saves += 1
+      inputs.push(input)
       const ref = {
         dataset_id: `ds_${saves}`,
         task_id: input.task_id ?? null,
@@ -99,6 +102,7 @@ function fakeStore({ failWith } = {}) {
         captured_at: 1_700_000_000_000 + saves,
         retention_until: 1_700_000_000_000 + saves + 604_800_000,
         params_digest: input.params_digest,
+        ...(input.time_coverage === undefined ? {} : { time_coverage: input.time_coverage }),
       }
       refs.push(ref)
       return ref
@@ -539,6 +543,27 @@ test('Dataset shape：顶层数组落成 json_rows，后续可被 query_dataset 
   const ref = await hub.request(request({ capability: 'array_rows', params: {} }))
   assert.equal(ref.format, 'json_rows')
   assert.equal(ref.row_count, 2)
+})
+
+test('Dataset shape：time_coverage 由宿主从行计算，模型自述不参与', async () => {
+  const { hub, store } = makeHub()
+  hub.registerSource({
+    schema: { capability: 'timed_rows', name: 'timed rows', source: 'test', data_key: 'test.timed_rows', input_schema: {} },
+    execute: async () => ({
+      data: [
+        { code: 'A', quote_time: '2026-10-30 16:00:01' },
+        { code: 'B', quote_time: '2026-10-28 16:00:02' },
+      ],
+    }),
+  })
+  const ref = await hub.request(request({ capability: 'timed_rows', params: {} }))
+  assert.deepEqual(ref.time_coverage, {
+    column: 'quote_time',
+    from: '2026-10-28 16:00:02',
+    to: '2026-10-30 16:00:01',
+    format: 'datetime_string',
+  })
+  assert.deepEqual(store.inputs.at(-1).time_coverage, ref.time_coverage, '落盘前传入 store 的覆盖范围必须与回执一致')
 })
 
 test('normalizeParams：Hub 在 digest 与执行前规范化参数，语义相同的请求复用同一 Dataset', async () => {

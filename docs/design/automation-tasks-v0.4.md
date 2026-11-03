@@ -231,9 +231,10 @@ Phase 1 不允许用户指定：
 - 任意外部通知地址。
 
 任务运行使用当前 profile 的已注册工作区：任务保存 `workspaceId`，未选择时把受控运行目录
-`<dsh home>/automation-workspace/<profile>` 注册为专属工作区。只接受 `workspaceRegistry` 中的 id，
-客户端不能传路径；保存前与运行前都做 `get` + `status()` 校验。workspace registry 不可用时退回
-受控目录。
+`<dsh home>/CapGen-automation-workspace/<profile>` 注册为专属工作区；设置卡还可指定一个
+「统一默认工作区」（已注册 id），未选择任务工作区时优先用它，缺失或目录不可用时回退专属工作区。
+只接受 `workspaceRegistry` 中的 id，客户端不能传路径；保存前与运行前都做 `get` + `status()` 校验。
+workspace registry 不可用时退回受控目录。
 
 ### 2.4 无人值守运行边界
 
@@ -352,8 +353,8 @@ interface BuiltinDefinition {
 Phase 1 不继承上一次运行的上下文。每次运行创建一个新的 automation session：
 
 - `agentPreset = capital-generation`（Capital 自动模式）；
-- 使用任务保存的已注册 `workspaceId`；未选择时使用专属受控运行目录并注册为工作区；
-- 标题格式：`[CapGen 投研自动化·<profile>] <task-title>·<run-short-id>`；
+- 使用任务保存的已注册 `workspaceId`；未选择时使用设置卡指定的统一默认工作区，未指定或不可用时使用专属受控运行目录并注册为工作区；
+- 标题格式：`<MM-DD> <task-title> <run-id-prefix>`（月-日取任务时区，id 默认前 8 位）；
 - `run.sessionId` 保存服务端创建结果；
 - 运行终态后不再向该 session 自动追加消息。
 

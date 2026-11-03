@@ -70,6 +70,12 @@ export function offshoreQuoteTime(value: unknown): string | null {
   return match ? `${match[1]}-${match[2]}-${match[3]} ${match[4]}` : null
 }
 
+/** A-share snapshots give a compact `YYYYMMDDHHMMSS` (Beijing time), not the HK/US spaced form. */
+export function aShareQuoteTime(value: unknown): string | null {
+  const match = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(String(value ?? '').trim())
+  return match ? `${match[1]}-${match[2]}-${match[3]} ${match[4]}:${match[5]}:${match[6]}` : null
+}
+
 export function snapshotRows(text: string, requested: Set<string>): Array<{ symbol: string; fields: string[] }> {
   const rows: Array<{ symbol: string; fields: string[] }> = []
   for (const line of text.split(';')) {

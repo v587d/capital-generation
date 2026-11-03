@@ -14,6 +14,8 @@ export declare const HK_QUOTE_FIELDS = 78;
 export declare const US_QUOTE_FIELDS = 73;
 /** Exchange-local time; separator drifts per row (`/` vs `-`), normalize to hyphen. */
 export declare function offshoreQuoteTime(value: unknown): string | null;
+/** A-share snapshots give a compact `YYYYMMDDHHMMSS` (Beijing time), not the HK/US spaced form. */
+export declare function aShareQuoteTime(value: unknown): string | null;
 export declare function snapshotRows(text: string, requested: Set<string>): Array<{
     symbol: string;
     fields: string[];

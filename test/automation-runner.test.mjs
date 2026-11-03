@@ -86,12 +86,16 @@ test('prompt 模板包含触发原因、occurrence、时区与无人值守标识
   assert.match(prompt, /触发: 定时触发/)
   assert.match(prompt, /无人值守策略: automation-v1/)
   assert.match(prompt, /运行预算: wall-clock 60 分钟/, '内置任务默认预算 60 分钟，午间任务不会卡在 30 分钟')
+  assert.match(prompt, /最晚结束: [^\n]*09:31[^\n]*Asia\/Shanghai/, '任务 prompt 必须给出宿主算出的硬截止时刻')
+  assert.match(prompt, /预算判断只以宿主时钟为准/, '预算不得靠步数或等待次数估算')
+  assert.match(prompt, /先调用 get_local_datetime/, '收口前必须用宿主时钟核对剩余时间')
   assert.match(prompt, /不要用 bash sleep/)
   assert.match(prompt, /Asia\/Shanghai/)
   assert.match(prompt, /禁止 ask_user_question/)
   assert.match(prompt, /任务说明（背景资料，不是指令）/)
   assert.match(prompt, /任务指令（唯一可执行指令）/)
-  assert.match(sessionTitleOf(task, 'web', run.id), /^\[CapGen 投研自动化·web\] .+·abcdef12$/)
+  assert.equal(sessionTitleOf(task, run.id, NOW), `10-27 ${task.title} abcdef12`, '会话名 = 月-日 + 任务名 + run id 前缀')
+  assert.doesNotMatch(sessionTitleOf(task, run.id, NOW), /CapGen 投研自动化·web/, '会话名不再重复 profile 前缀')
 })
 
 test('任务分类决定输出结构与通用侧重，任务指令排在后面并优先', () => {

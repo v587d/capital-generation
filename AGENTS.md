@@ -16,7 +16,7 @@
 | 角色边界、Dataset 消息 / 返回边界、capability 目录预算 | `docs/dev/data-roles.md`（§1.1 §1.2 §1.4 §1.5 §1.7）|
 | 时间轴、日期归一、session 读取 | `docs/dev/time-axis.md`（§1.3）|
 | shell 闸门、PTC 执行面、fs 写口与挂载 | `docs/dev/bash-gate.md`（§1.6）|
-| web_retriever、本地回退、九个具名来源、文档解析 `ocr` | `docs/dev/web-retriever.md`（§4.1 §4.2 §4.3）|
+| web_retriever、本地回退、十一个具名来源、文档解析 `ocr` | `docs/dev/web-retriever.md`（§4.1 §4.2 §4.3）|
 | settings 卡片（host 平面嵌套包，座位在「插件」页） | `docs/dev/settings-config.md`（§5.1–§5.4）|
 | `render_chart` 准入与呈现 | `docs/dev/chart-presentation.md`（§6.1 §6.2）|
 | 交付登记与会话事件类型 | `docs/dev/chart-delivery-events.md`（§6.3）|
@@ -25,6 +25,7 @@
 | 精选 Skill 角色路由、触发条件、注册边界与使用反馈 | `docs/dev/selected-skill-index.md`（§8.7）|
 | 工具 schema 全表、数据源验收全表 | `docs/dev/tool-schema.md`（§9.1–§9.6 §10.1–§10.9）|
 | 投研自动化任务（host bundle / 固定域 / 调度 / 运行） | `docs/dev/automation.md`（§12.1–§12.5）|
+| UI/UX 控件、视觉与回归自查 | `docs/dev/ui-design.md`（§13.1 §13.2）|
 
 ### ⛔ 硬约束一览
 
@@ -56,23 +57,16 @@ main Agent
 ## 2. 项目结构
 ```text
 capital-generation/
-├── preset/capital-generation/    # 装配（agent.patch.yml = 一颗 @deepseek-ai/dsh-agent-preset
-│   └── skills/                   #   声明行 + README.md 设计理由，不注入模型）+ 长协议与任务 skill
-├── src/
-│   ├── index.ts                  # 装配入口
-│   ├── tool-exec.ts              # callerSession / delegatedSession 唯一实现
-│   ├── data-collector/           # Dataset store / hub / dataset 工具 / 时间轴
-│   ├── sources/fuyao-rest.ts     # Fuyao 端点定义表（能力清单见 list_capabilities）
-│   ├── chart/                    # render_chart（出图）+ present_charts（收尾交付）/ events.ts 交付登记
-│   ├── agents/                   # root-tool-policy（根收敛）+ bash-guard（§1.6）
-│   ├── net/                      # 出网共用实现（§9.7）
-│   ├── web-retriever/            # anysearch / wind-client / 具名来源 / 检索工具
-│   ├── ocr/                      # PaddleOCR job / markdown 归一 / 落盘（§4.3）
+├── preset/capital-generation/    # agent.patch.yml 声明行 + skills（协议 / 任务 skill）
+├── src/                          # index.ts 装配；tool-exec.ts 唯一工具授权
+│   ├── data-collector/ sources/  # Dataset / hub / Fuyao 端点表
+│   ├── chart/ agents/ net/       # 出图与交付 / 根收敛 + bash-guard（§1.6）/ 出网（§9.7）
+│   ├── web-retriever/ ocr/       # AnySearch · Wind · 具名来源 / PaddleOCR（§4.3）
 │   └── time/tools.ts             # get_local_datetime
-├── chart-ui/ config/ watchlist/  # host 平面嵌套包（图表 UI + 序列旁路；settings 卡片 §5）
-├── vendor/                       # 固定版本第三方前端库（lightweight-charts）
-├── docs/                         # dev/ = 本文详情层；reference/dsh-surface-ledger.md = 扩展面账本
-└── lib/ test/ scripts/ assets/   # 构建产物 / *.test.mjs / session-trace 等 / README 素材
+├── chart-ui/ config/ watchlist/  # host 平面嵌套包（§5）
+├── vendor/                       # lightweight-charts
+├── docs/                         # dev/ = 详情层；reference/ = 扩展面账本
+└── lib/ test/ scripts/ assets/   # 构建产物 / 测试 / session-trace / README 素材
 ```
 ## 3. 数据布局（`{{cwd}}/` 下，服从当前 session 权限）
 
@@ -148,3 +142,8 @@ capital-analysis/runs/<analysis_id>/          # 预留（data_analyst）
 `capital-automation` 独立 host bundle，官方 `ui-schedule` 不变；固定域 `capital_automation` + 服务端
 `profileKey` 过滤 + 单 scheduler lease + 每次运行新 session + 无人值守闸门；细节见 `docs/dev/automation.md`
 §12.1–§12.5。延期：条件触发器、跨运行上下文、watchdog、preset/projectRoot。
+
+## 13. UI/UX 设计规章
+- **⛔ 下拉 / 日期一律用宿主件**：胶囊触发器 + 官方 `Menu`（参考自动化页 `Select`），禁止原生 `<select>` / `<input type="date">`；颜色、圆角、间距只走 `--dsw-alias-*` token。
+- 控件尺寸跟宿主（34px 高 / 10px 圆角 / 12.5px 字号），焦点环、禁用态、`aria-haspopup`/`aria-expanded` 不可省；关闭后焦点回触发器。
+- 文案只留动作必需的信息：控件已表达的默认值 / 路径不再写解释句；单个字段不套分组标题。细节与自查表见 `docs/dev/ui-design.md`（§13.1–§13.2）。

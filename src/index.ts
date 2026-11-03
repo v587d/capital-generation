@@ -80,6 +80,7 @@ const AutomationSchema = z.object({
   maxSteps: z.number().default(300).description('单次运行最大步骤数（100–2000）'),
   maxToolCalls: z.number().default(1_200).description('单次运行最大工具调用数（100–5000）'),
   inAppNotifications: z.boolean().default(true).description('是否写入应用内通知'),
+  defaultWorkspaceId: z.string().default('').description('统一默认工作区 id；空 = 专属默认工作区'),
 })
 
 export interface Config {
@@ -95,6 +96,7 @@ export interface Config {
     maxSteps?: number
     maxToolCalls?: number
     inAppNotifications?: boolean
+    defaultWorkspaceId?: string
   }
   retriever?: RetrieverConfig
 }
@@ -128,6 +130,7 @@ export const Config = z.object({
     maxSteps: 300,
     maxToolCalls: 1_200,
     inAppNotifications: true,
+    defaultWorkspaceId: '',
   }).description('投研自动化默认值；任务级覆盖优先'),
   retriever: RetrieverSchema.default({ baseURL: '', credentialRef: 'ANYSEARCH_API_KEY', windDocs: { endpoint: '', credentialRef: 'WIND_API_KEY', timeoutMs: 60000 }, localFetch: { ...LOCAL_FETCH_DEFAULTS }, paddleOcr: { ...PADDLE_OCR_DEFAULTS } })
     .description('web_retriever 配置（可选；缺省使用 AnySearch 默认地址与凭据名）'),

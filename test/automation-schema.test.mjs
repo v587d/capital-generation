@@ -23,6 +23,7 @@ import {
 } from '../automation/defaults.js'
 import { Config as HostConfig } from '../config/index.js'
 import { Config as MainConfig } from '../lib/index.js'
+import { normalizeAutomationSettings } from '../automation/settings.js'
 
 const record = {
   schemaVersion: 1,
@@ -257,6 +258,13 @@ test('automation/defaults.js 与两处配置 schema 的默认值不漂移', () =
   for (const schema of [HostConfig, MainConfig]) {
     assert.deepEqual(plainConfig(schema({})).automation, DEFAULT_AUTOMATION_SETTINGS, '默认值必须只在 defaults.js 有一份真值，两处 schema 跟着它')
   }
+})
+
+test('默认工作区设置只接受字符串 id：空值保留专属默认，非字符串回落而不是写进设置', () => {
+  assert.equal(normalizeAutomationSettings({ defaultWorkspaceId: ' ws_project ' }).defaultWorkspaceId, 'ws_project')
+  assert.equal(normalizeAutomationSettings({ defaultWorkspaceId: '' }).defaultWorkspaceId, '')
+  assert.equal(normalizeAutomationSettings({ defaultWorkspaceId: 42 }).defaultWorkspaceId, '')
+  assert.equal(normalizeAutomationSettings({}).defaultWorkspaceId, '')
 })
 
 test('预算默认值能容纳一个真实多 Agent 任务，同时保留硬上限', () => {

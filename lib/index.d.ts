@@ -20,6 +20,7 @@ export interface Config {
         maxSteps?: number;
         maxToolCalls?: number;
         inAppNotifications?: boolean;
+        defaultWorkspaceId?: string;
     };
     retriever?: RetrieverConfig;
 }
@@ -40,6 +41,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
         maxSteps: z<number, number, "defined">;
         maxToolCalls: z<number, number, "defined">;
         inAppNotifications: z<boolean, boolean, "defined">;
+        defaultWorkspaceId: z<string, string, "defined">;
     }>>, Schemastery.ObjectT<NoInfer<{
         tickMs: z<number, number, "defined">;
         runTimeoutMinutes: z<number, number, "defined">;
@@ -47,6 +49,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
         maxSteps: z<number, number, "defined">;
         maxToolCalls: z<number, number, "defined">;
         inAppNotifications: z<boolean, boolean, "defined">;
+        defaultWorkspaceId: z<string, string, "defined">;
     }>>, "defined">;
     retriever: z<Schemastery.ObjectS<NoInfer<{
         baseURL: z<string, string, "defined">;
@@ -142,6 +145,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
         maxSteps: z<number, number, "defined">;
         maxToolCalls: z<number, number, "defined">;
         inAppNotifications: z<boolean, boolean, "defined">;
+        defaultWorkspaceId: z<string, string, "defined">;
     }>>, Schemastery.ObjectT<NoInfer<{
         tickMs: z<number, number, "defined">;
         runTimeoutMinutes: z<number, number, "defined">;
@@ -149,6 +153,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
         maxSteps: z<number, number, "defined">;
         maxToolCalls: z<number, number, "defined">;
         inAppNotifications: z<boolean, boolean, "defined">;
+        defaultWorkspaceId: z<string, string, "defined">;
     }>>, "defined">;
     retriever: z<Schemastery.ObjectS<NoInfer<{
         baseURL: z<string, string, "defined">;

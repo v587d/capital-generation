@@ -13,7 +13,9 @@ export const CAPITAL_ROW_TOOLS = {
   '@v587d/capital-generation/tools/retrieve-search': ['anysearch_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news'],
   '@v587d/capital-generation/tools/retrieve-sources': [
     'cls_telegraph', 'wscn_lives', 'cninfo_irm', 'sseinfo_qa',
-    'eastmoney_724', 'eastmoney_stock_news', 'eastmoney_reports', 'sina_reports', 'ths_eps_forecast',
+    'eastmoney_724', 'eastmoney_stock_news', 'eastmoney_reports',
+    'eastmoney_announcements', 'eastmoney_announcement_body',
+    'sina_reports', 'ths_eps_forecast',
   ],
   '@v587d/capital-generation/tools/ocr': ['ocr'],
   // Root-only one-turn wait across delegated children and their descendants.

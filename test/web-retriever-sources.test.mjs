@@ -11,9 +11,12 @@ import {
   clsTelegraph,
   cninfoIrm,
   createSourceTransport,
+  eastmoneyAnnouncementBody,
+  eastmoneyAnnouncements,
   eastmoneyFastNews,
   eastmoneyReports,
   eastmoneyStockNews,
+  normalizeAnnouncementCodes,
   sinaReports,
   sinaSymbol,
   SSE_UID_LOCATE_TIMEOUT_MS,
@@ -476,11 +479,13 @@ function registerSources() {
   return definitions
 }
 
-test('工具注册：九个来源工具 named provider_operation，且参数根为 object', () => {
+test('工具注册：十一个来源工具 named provider_operation，且参数根为 object', () => {
   const definitions = registerSources()
   assert.deepEqual(definitions.map((definition) => definition.name), [
     'cls_telegraph', 'wscn_lives', 'cninfo_irm', 'sseinfo_qa',
-    'eastmoney_724', 'eastmoney_stock_news', 'eastmoney_reports', 'sina_reports', 'ths_eps_forecast',
+    'eastmoney_724', 'eastmoney_stock_news', 'eastmoney_reports',
+    'eastmoney_announcements', 'eastmoney_announcement_body',
+    'sina_reports', 'ths_eps_forecast',
   ])
   for (const definition of definitions) {
     assert.equal(definition.parameters.type, 'object', `${definition.name} 的 parameters 根必须是 object`)
@@ -553,7 +558,7 @@ test('工具输出：调用方取消必须原样抛出，不得降级成 ok:fals
   )
 })
 
-test('同意开关：enabled:false 时九个来源工具响亮失败（DISABLED），且一次本机 HTTP 都不发起', async () => {
+test('同意开关：enabled:false 时十一个来源工具响亮失败（DISABLED），且一次本机 HTTP 都不发起', async () => {
   const definitions = []
   const runtime = { register: (definition) => { definitions.push(definition); return () => {} } }
   registerSourceTools({ get: (name) => (name === 'tools' ? runtime : undefined), effect: (fn) => fn() },
@@ -562,7 +567,7 @@ test('同意开关：enabled:false 时九个来源工具响亮失败（DISABLED�
   try {
     const byName = new Map(definitions.map((definition) => [definition.name, definition]))
     const exec = { signal: new AbortController().signal, agent: { session: { id: 'source-disabled' } } }
-    // One direct-source and one shared-client tool; the switch covers all nine.
+    // One direct-source and one shared-client tool; the switch covers all eleven.
     for (const name of ['cls_telegraph', 'eastmoney_724']) {
       await assert.rejects(byName.get(name).execute({}, exec), (error) => {
         const payload = JSON.parse(error.message)
@@ -879,6 +884,324 @@ test('ths_eps_forecast：找不到目标表格时报错，不返回空表', asyn
   const restore = installFetch(async () => makeResponse(200, { 'content-type': 'text/html' }, '<table><tr><td>没有目标表</td></tr></table>'))
   try {
     await assert.rejects(thsEpsForecast(makeTransport(), { code: '688017' }), /没有含「每股收益 \/ 均值」列的表格/)
+  } finally {
+    restore.restore()
+  }
+})
+
+test('公告代码归一化：A/H/US 的前后缀、去重与混合市场拒绝', () => {
+  assert.deepEqual(normalizeAnnouncementCodes(['600519.SH', 'SH600519', '000001'], 'A'), {
+    codes: ['600519', '000001'], market: 'A',
+  })
+  assert.deepEqual(normalizeAnnouncementCodes(['0700.HK', '00700', '700'], 'H'), {
+    codes: ['00700'], market: 'H',
+  })
+  assert.deepEqual(normalizeAnnouncementCodes(['AAPL.O', 'aapl'], 'U'), {
+    codes: ['AAPL'], market: 'U',
+  })
+  assert.throws(() => normalizeAnnouncementCodes(['600519', '00700'], 'auto'), /one market/)
+  assert.throws(() => normalizeAnnouncementCodes(['60051'], 'A'), /six digits/)
+  assert.throws(() => normalizeAnnouncementCodes(['600519.SH'], 'H'), /HK announcement code/)
+})
+
+const ANNOUNCEMENT_LIST = {
+  data: {
+    total_hits: 3,
+    page_index: 1,
+    page_size: 100,
+    list: [
+      {
+        art_code: 'AN202611031831342761',
+        codes: [{ stock_code: '600519', short_name: '贵州茅台' }],
+        columns: [{ column_name: '其他' }],
+        display_time: '2026-11-03 08:01:02:000',
+        notice_date: '2026-11-03 00:00:00',
+        title: '贵州茅台:<em>关于召开2026年第三季度业绩说明会的公告</em>',
+      },
+      {
+        art_code: 'AN202610301831000001',
+        codes: [{ stock_code: '600519', short_name: '贵州茅台' }],
+        columns: [{ column_name: '三季度报告' }],
+        display_time: '2026-10-30 18:00:00:000',
+        notice_date: '2026-10-31 00:00:00',
+        title: '贵州茅台:2026年第三季度报告',
+      },
+      {
+        art_code: 'AN202610201831000002',
+        codes: [{ stock_code: '600519', short_name: '贵州茅台' }],
+        columns: [],
+        display_time: '2026-10-20 09:00:00:000',
+        notice_date: '2026-10-20 00:00:00',
+        title: '窗口外的旧公告',
+      },
+    ],
+  },
+}
+
+test('eastmoney_announcements：按 display_time 过滤，不用 notice_date；标题剥标签、按时间倒序', async () => {
+  const restore = installFetch(async (url) => {
+    const parsed = new URL(url)
+    assert.equal(parsed.searchParams.get('ann_type'), 'A')
+    assert.equal(parsed.searchParams.get('stock_list'), '600519')
+    return json(ANNOUNCEMENT_LIST)
+  })
+  try {
+    const outcome = await eastmoneyAnnouncements(makeEastmoneyClient(), {
+      codes: ['600519'], market: 'A', startDate: '2026-10-28', endDate: '2026-11-03', cursor: 0, pageSize: 20,
+    })
+    assert.equal(outcome.source, 'eastmoney')
+    assert.equal(outcome.operation, 'announcements')
+    assert.deepEqual(outcome.items.map((item) => [item.date, item.art_code, item.title]), [
+      ['2026-11-03', 'AN202611031831342761', '贵州茅台:关于召开2026年第三季度业绩说明会的公告'],
+      ['2026-10-30', 'AN202610301831000001', '贵州茅台:2026年第三季度报告'],
+    ], '10-30 的公告不能被 notice_date=10-31 挪到次日，旧公告必须排除')
+    assert.equal(outcome.items[0].category, '其他')
+    assert.match(String(outcome.items[0].url), /^https:\/\/data\.eastmoney\.com\/notices\/detail\/600519\/AN202611031831342761\.html$/)
+    assert.match(String(outcome.note), /转载/)
+    assert.match(String(outcome.note), /display_time/)
+  } finally {
+    restore.restore()
+  }
+})
+
+test('eastmoney_announcements：港股 ann_type=H、stock_list 用 5 位；空列表是合法空结果', async () => {
+  const restore = installFetch(async (url) => {
+    const parsed = new URL(url)
+    assert.equal(parsed.searchParams.get('ann_type'), 'H')
+    assert.equal(parsed.searchParams.get('stock_list'), '00700')
+    return json({ data: { total_hits: 0, page_index: 1, page_size: 100, list: null } })
+  })
+  try {
+    const outcome = await eastmoneyAnnouncements(makeEastmoneyClient(), {
+      codes: ['00700'], market: 'H', startDate: '2026-10-28', endDate: '2026-11-03', cursor: 0, pageSize: 20,
+    })
+    assert.equal(outcome.items.length, 0)
+    assert.match(String(outcome.note), /窗口内没有公告/)
+  } finally {
+    restore.restore()
+  }
+})
+
+test('eastmoney_announcements：超过 page_size 时给 next_cursor，第二页按 cursor 切片', async () => {
+  const restore = installFetch(async () => json(ANNOUNCEMENT_LIST))
+  try {
+    const first = await eastmoneyAnnouncements(makeEastmoneyClient(), {
+      codes: ['600519'], market: 'A', startDate: '2026-10-28', endDate: '2026-11-03', cursor: 0, pageSize: 1,
+    })
+    assert.equal(first.items.length, 1)
+    assert.equal(first.next_cursor, '1')
+    const second = await eastmoneyAnnouncements(makeEastmoneyClient(), {
+      codes: ['600519'], market: 'A', startDate: '2026-10-28', endDate: '2026-11-03', cursor: 1, pageSize: 1,
+    })
+    assert.equal(second.items[0].art_code, 'AN202610301831000001')
+    assert.equal(second.next_cursor, undefined)
+  } finally {
+    restore.restore()
+  }
+})
+
+test('eastmoney_announcement_body：5,000 字符/页 + offset 切片，next_offset/next_page/done 闭合', async () => {
+  const long = `开头\n${'A'.repeat(5000)}`
+  const restore = installFetch(async (url) => {
+    const parsed = new URL(url)
+    assert.equal(parsed.searchParams.get('art_code'), 'AN202610291831185370')
+    const page = Number(parsed.searchParams.get('page_index'))
+    return json({
+      data: {
+        art_code: 'AN202610291831185370',
+        notice_title: '立讯精密:2026年三季度报告',
+        notice_date: '2026-10-30 00:00:00',
+        attach_url: 'https://pdf.dfcfw.com/pdf/H2_AN202610291831185370_1.pdf?x.pdf',
+        page_size: 2,
+        notice_content: page === 1 ? long : '尾声\n' + 'B'.repeat(820),
+      },
+    })
+  })
+  try {
+    const client = makeEastmoneyClient()
+    const first = await eastmoneyAnnouncementBody(client, { artCode: 'AN202610291831185370', page: 1, offset: 0, limit: 3500 })
+    assert.equal(first.content.length, 3500)
+    assert.equal(first.next_offset, 3500)
+    assert.equal(first.next_page, undefined)
+    assert.equal(first.done, false)
+    assert.equal(first.total_pages, 2)
+    assert.match(String(first.pdf_url), /^https:\/\/pdf\.dfcfw\.com\//)
+
+    const second = await eastmoneyAnnouncementBody(client, { artCode: 'AN202610291831185370', page: 1, offset: 3500, limit: 3500 })
+    assert.equal(second.content.length, 1503)
+    assert.equal(second.next_offset, undefined)
+    assert.equal(second.next_page, 2)
+    assert.equal(second.done, false)
+
+    const third = await eastmoneyAnnouncementBody(client, { artCode: 'AN202610291831185370', page: 2, offset: 0, limit: 3500 })
+    assert.equal(third.content.length, 823)
+    assert.equal(third.done, true)
+  } finally {
+    restore.restore()
+  }
+})
+
+test('eastmoney_announcement_body：美股空正文是事实（done + pdf_url），不是失败', async () => {
+  const restore = installFetch(async () => json({
+    data: { art_code: 'AN202611031831342761', page_size: 1, attach_url: 'https://pdf.dfcfw.com/pdf/H2_US_1.pdf', notice_content: '' },
+  }))
+  try {
+    const body = await eastmoneyAnnouncementBody(makeEastmoneyClient(), { artCode: 'AN202611031831342761', page: 1, offset: 0, limit: 3500 })
+    assert.equal(body.content, '')
+    assert.equal(body.done, true)
+    assert.match(String(body.pdf_url), /pdf\.dfcfw\.com/)
+    assert.match(String(body.note), /正文在 PDF/)
+  } finally {
+    restore.restore()
+  }
+})
+
+test('eastmoney_announcement_body：page 超过总页数 / art_code 非法均明确失败', async () => {
+  const restore = installFetch(async () => json({
+    data: { art_code: 'AN202611031831342761', page_size: 2, attach_url: '', notice_content: '正文' },
+  }))
+  try {
+    const body = await eastmoneyAnnouncementBody(makeEastmoneyClient(), { artCode: 'AN202611031831342761', page: 3, offset: 0, limit: 3500 })
+    assert.equal(body.done, true)
+    assert.match(String(body.note), /超过总页数/)
+    await assert.rejects(
+      () => eastmoneyAnnouncementBody(makeEastmoneyClient(), { artCode: '600519', page: 1, offset: 0, limit: 3500 }),
+      /art_code/,
+    )
+  } finally {
+    restore.restore()
+  }
+})
+
+test('工具层：公告列表与正文注册、输出 schema 满足、正文超预算时保留 next_offset', async () => {
+  const definitions = registerSources()
+  const byName = new Map(definitions.map((definition) => [definition.name, definition]))
+  const restore = installFetch(async (url) => {
+    if (url.includes('/api/security/ann')) return json(ANNOUNCEMENT_LIST)
+    return json({
+      data: {
+        art_code: 'AN202610301831000001',
+        notice_title: '贵州茅台:2026年第三季度报告',
+        notice_date: '2026-10-30 00:00:00',
+        attach_url: 'https://pdf.dfcfw.com/pdf/H2_x_1.pdf',
+        page_size: 2,
+        notice_content: 'X'.repeat(5000),
+      },
+    })
+  })
+  try {
+    const exec = { signal: new AbortController().signal, agent: { session: { id: 'ann-tool' } } }
+    const list = await byName.get('eastmoney_announcements').execute({
+      codes: ['600519.SH'], start_date: '2026-10-28', end_date: '2026-11-03', page_size: 1,
+    }, exec)
+    assert.equal(list.provider, 'eastmoney')
+    assert.equal(list.count, 1)
+    assert.ok(list.next_cursor)
+    assert.equal(list.provider_tally.eastmoney, 1)
+    assertToolOutput(byName.get('eastmoney_announcements'), list)
+
+    const body = await byName.get('eastmoney_announcement_body').execute({
+      art_code: 'AN202610301831000001', limit: 4000,
+    }, exec)
+    assert.equal(body.provider, 'eastmoney')
+    assert.equal(body.done, false)
+    assert.ok(body.content.length > 0)
+    assert.ok(body.next_offset > 0, '本页未读完时必须给 next_offset')
+    assert.ok(JSON.stringify(body).length <= SOURCE_OUTPUT_BUDGET_CHARS, '正文回执必须留在剪枝阈值内')
+    assert.equal(body.provider_tally.eastmoney, 2)
+    assertToolOutput(byName.get('eastmoney_announcement_body'), body)
+  } finally {
+    restore.restore()
+  }
+})
+
+test('工具层：公告列表拒绝混合市场与超过 31 天的窗口', async () => {
+  const definitions = registerSources()
+  const listTool = definitions.find((definition) => definition.name === 'eastmoney_announcements')
+  const exec = { signal: new AbortController().signal, agent: { session: { id: 'ann-invalid' } } }
+  await assert.rejects(
+    () => listTool.execute({ codes: ['600519', '00700'], start_date: '2026-10-28', end_date: '2026-11-03' }, exec),
+    /one market/,
+  )
+  await assert.rejects(
+    () => listTool.execute({ codes: ['600519'], start_date: '2026-09-01', end_date: '2026-11-03' }, exec),
+    /more than 31 days/,
+  )
+})
+
+test('eastmoney_announcements：窗口早于扫描范围时必须说"未被覆盖"，不能伪装成"没有公告"', async () => {
+  const restore = installFetch(async () => json({
+    data: {
+      total_hits: 2,
+      page_index: 1,
+      page_size: 100,
+      list: [
+        { art_code: 'AN202610301831000001', codes: [{ stock_code: '600519', short_name: '贵州茅台' }], display_time: '2026-10-30 18:00:00:000', title: '新公告' },
+        { art_code: 'AN202610291831000002', codes: [{ stock_code: '600519', short_name: '贵州茅台' }], display_time: '2026-10-29 18:00:00:000', title: '次新公告' },
+      ],
+    },
+  }))
+  try {
+    const outcome = await eastmoneyAnnouncements(makeEastmoneyClient(), {
+      codes: ['600519'], market: 'A', startDate: '2026-09-01', endDate: '2026-09-05', cursor: 0, pageSize: 20,
+    })
+    assert.equal(outcome.items.length, 0)
+    assert.match(String(outcome.note), /窗口未被覆盖/)
+    assert.doesNotMatch(String(outcome.note), /窗口内没有公告/)
+  } finally {
+    restore.restore()
+  }
+})
+
+test('eastmoney_announcements：上游时间不可解析时响亮失败，不静默丢行', async () => {
+  const restore = installFetch(async () => json({
+    data: {
+      total_hits: 1,
+      page_index: 1,
+      page_size: 100,
+      list: [{ art_code: 'AN202610301831000001', codes: [{ stock_code: '600519' }], display_time: 'not-a-date', title: '坏时间' }],
+    },
+  }))
+  try {
+    await assert.rejects(
+      () => eastmoneyAnnouncements(makeEastmoneyClient(), {
+        codes: ['600519'], market: 'A', startDate: '2026-10-28', endDate: '2026-11-03', cursor: 0, pageSize: 20,
+      }),
+      (error) => {
+        assert.equal(error.code, 'INVALID_RESPONSE')
+        assert.match(error.message, /时间不可解析/)
+        return true
+      },
+    )
+  } finally {
+    restore.restore()
+  }
+})
+
+test('工具层：公告列表被输出预算裁剪时，next_cursor 必须指向第一条被省略的公告，不得跳过', async () => {
+  const rows = Array.from({ length: 10 }, (_unused, index) => ({
+    art_code: `AN20261103183100000${index}`,
+    codes: [{ stock_code: '600519', short_name: '贵州茅台' }],
+    columns: [{ column_name: '其他' }],
+    display_time: `2026-11-03 0${9 - index}:00:00:000`,
+    notice_date: '2026-11-03 00:00:00',
+    title: `第${index}条${'长'.repeat(1200)}`,
+  }))
+  const restore = installFetch(async () => json({ data: { total_hits: rows.length, page_index: 1, page_size: 100, list: rows } }))
+  try {
+    const definitions = registerSources()
+    const listTool = definitions.find((definition) => definition.name === 'eastmoney_announcements')
+    const exec = { signal: new AbortController().signal, agent: { session: { id: 'ann-budget' } } }
+    const first = await listTool.execute({
+      codes: ['600519'], start_date: '2026-11-03', end_date: '2026-11-03', page_size: 10,
+    }, exec)
+    assert.ok(first.count < 10, '10 条 1,200 字标题必然超预算，必须裁')
+    assert.equal(first.next_cursor, String(first.count), 'cursor 要退回到第一条被省略的条目，而不是页尾')
+    assert.match(String(first.note), /省略其后/)
+    const second = await listTool.execute({
+      codes: ['600519'], start_date: '2026-11-03', end_date: '2026-11-03', page_size: 10, cursor: first.next_cursor,
+    }, exec)
+    assert.equal(second.items[0].art_code, rows[first.count].art_code, '第二页必须从第一条被省略的条目开始，不能跳过')
   } finally {
     restore.restore()
   }

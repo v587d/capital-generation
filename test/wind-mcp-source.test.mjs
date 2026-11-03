@@ -143,6 +143,7 @@ test('createWindSources：三条能力注册齐全，data_key 与来源标注都
     assert.equal(source.schema.data_key, buildDataKey('wind', 'mcp', source.schema.data_key.slice('wind.mcp.'.length)))
     assert.equal(source.schema.paginated, false)
     assert.deepEqual(source.schema.rowShape, { rootArray: true })
+    assert.match(source.schema.summary, /^\[计费\] /, '选能力时必须在 list_capabilities 一眼看见价格')
     assert.ok(source.schema.summary.length < 60, '摘要进能力目录，必须短')
   }
   // Registration survives an unresolved key; missing-key handling belongs to call time (§9.7).

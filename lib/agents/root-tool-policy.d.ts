@@ -2,8 +2,8 @@
  * Root Agent tool convergence on the root's own scope: preset-level deny would also hit
  * children. Listeners must live on `ctx.root`; tagged standing-scope listeners miss agent/created.
  */
-/** Outbound tools (search 2 + wind 2 + named sources 9); `ocr` is excluded because only its url form is restricted. */
-export declare const RETRIEVAL_DENIED_TOOLS: readonly ["anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "sina_reports", "ths_eps_forecast"];
+/** Outbound tools (search 2 + wind 2 + named sources 11); `ocr` is excluded because only its url form is restricted. */
+export declare const RETRIEVAL_DENIED_TOOLS: readonly ["anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "eastmoney_announcements", "eastmoney_announcement_body", "sina_reports", "ths_eps_forecast"];
 export declare const OCR_TOOL_NAME = "ocr";
 /** Name-level deny cannot express the form distinction; this is a call-level guard. */
 export declare const OCR_ROOT_URL_DENIED: string;
@@ -12,7 +12,7 @@ export declare function ocrUrlFormRequested(exec: GuardedExecution | undefined):
 export declare function ocrFormGuardReasonFor(ctx: PolicyContext): (exec: GuardedExecution | undefined) => string | undefined;
 /** Mounted as a platform pair; recognize both everywhere or the other platform's gate is dead. */
 export declare const SHELL_TOOL_NAMES: readonly ["bash", "pwsh"];
-export declare const ROOT_AGENT_DENIED_TOOLS: readonly ["render_chart", "prepare_chart_source", "anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "sina_reports", "ths_eps_forecast", "write", "edit"];
+export declare const ROOT_AGENT_DENIED_TOOLS: readonly ["render_chart", "prepare_chart_source", "anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "eastmoney_announcements", "eastmoney_announcement_body", "sina_reports", "ths_eps_forecast", "write", "edit"];
 export declare const CAPITAL_PRESET_ID = "capital-generation";
 interface ToolRestriction {
     allow?: readonly string[];

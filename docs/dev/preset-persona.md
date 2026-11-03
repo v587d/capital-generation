@@ -119,14 +119,14 @@
   联动 → `chart-presentation.md` / `chart-delivery-events.md`）；② shell / `run_code` 闸门与 fs 写口
   （主 Agent shell 槽位、junior 的 PTC 程序面、升级 guard + `write`/`edit` 的根侧名单与全局 guard
   2026-10-15「开 read、同时保留 bash」，2026-10-23 junior 转 PTC → `bash-gate.md` §1.6）；③ 出网只有一个入口：`RETRIEVAL_DENIED_TOOLS`
-  （`src/agents/root-tool-policy.ts`，13 个检索 / 来源工具名的**唯一事实来源**，spread 进
+  （`src/agents/root-tool-policy.ts`，15 个检索 / 来源工具名的**唯一事实来源**，spread 进
   `ROOT_AGENT_DENIED_TOOLS`，**新增来源只改这一处**）+ 主 persona 禁直连
   文案；这批名字同时**只由 `capital-web-retriever` 挂的 `tools/retrieve-search` +
   `tools/retrieve-sources` 两行带出来**（§8.1 → `agent.patch.yml` 的组合与
-  `test/family-rows.mjs` 的行契约），别的角色没挂那两行、也就拿不到。④ 本地回退开关支配九个具名来源
+  `test/family-rows.mjs` 的行契约），别的角色没挂那两行、也就拿不到。④ 本地回退开关支配十一个具名来源
   （§4.2 → `web-retriever.md`）。②③ 由
   `test/persona.test.mjs`（无通配 + deepEqual 对齐同一名单）与 `test/root-tool-policy.test.mjs`
-  （名单长度 13）钉死。**教训**：`工具前缀_*` 通配在工具改名后一个都不匹配——禁直连文案必须
+  （名单长度 15）钉死。**教训**：`工具前缀_*` 通配在工具改名后一个都不匹配——禁直连文案必须
   **只点名宿主的 `web_search` / `web_fetch`**。
 - **③ 的唯一例外是 `ocr`，且例外开在"形态"而不是"工具名"上**（§4.3）：主 Agent 拿本地文档
   （`file` / `doc_id`）是正当入口，外部链接（`url`）仍必须委派。名字级 deny 表达不了这个粒度，所以走

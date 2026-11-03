@@ -151,6 +151,13 @@ async function automationMetaProbe(url, cookie) {
   } catch {
     tasks = undefined
   }
+  const workspacesResponse = await fetch(`${origin}/capital-automation/workspaces`, { headers, signal })
+  let workspaces
+  try {
+    workspaces = JSON.parse(await workspacesResponse.text())
+  } catch {
+    workspaces = undefined
+  }
   return {
     anonymousStatus: anonymous.status,
     status: authed.status,
@@ -161,6 +168,9 @@ async function automationMetaProbe(url, cookie) {
     storage: payload?.storage?.state ?? null,
     tasksStatus: tasksResponse.status,
     tasks: Array.isArray(tasks?.tasks) ? tasks.tasks : null,
+    workspacesStatus: workspacesResponse.status,
+    workspaces: Array.isArray(workspaces?.workspaces) ? workspaces.workspaces : null,
+    defaultWorkspaceId: workspaces?.defaultWorkspaceId ?? null,
   }
 }
 
@@ -170,6 +180,17 @@ function automationTasksMatch(tasks) {
   if (!tasks.every((task) => task.origin === 'builtin' && task.state === 'dormant')) return false
   const ids = tasks.map((task) => task.sourceBuiltinId).sort()
   return JSON.stringify(ids) === JSON.stringify(BUILTIN_IDS)
+}
+
+/** Settings card reads this instead of /meta paths: dedicated workspace must be registered by name. */
+function automationWorkspacesMatch(probe) {
+  if (probe.workspacesStatus !== 200 || !Array.isArray(probe.workspaces)) return false
+  const dedicated = probe.workspaces.find((item) => item.dedicated === true)
+  if (dedicated === undefined) return false
+  return dedicated.title === 'CapGen 投研自动化（scratch）'
+    && typeof dedicated.path === 'string'
+    && dedicated.path.includes('CapGen-automation-workspace')
+    && probe.defaultWorkspaceId === dedicated.id
 }
 
 /**
@@ -528,8 +549,9 @@ try {
             && automationFence.storage === 'ready'
             && automationFence.tasksStatus === 200
             && automationTasksMatch(automationFence.tasks)
+            && automationWorkspacesMatch(automationFence)
         automationFence.ok = ok && automationFence.cacheControl === 'no-store'
-        console.log(`smoke-boot: ${automationFence.ok ? '✅' : '❌'} /capital-automation/meta：匿名 HTTP ${automationFence.anonymousStatus}（应 401）、带 cookie HTTP ${automationFence.status}，profile=${automationFence.profile}，policy=${automationFence.policy}，scheduler=${automationFence.scheduler}，storage=${automationFence.storage}，tasks=${automationFence.tasks?.length ?? '?'}/${BUILTIN_IDS.length}`)
+        console.log(`smoke-boot: ${automationFence.ok ? '✅' : '❌'} /capital-automation/meta：匿名 HTTP ${automationFence.anonymousStatus}（应 401）、带 cookie HTTP ${automationFence.status}，profile=${automationFence.profile}，policy=${automationFence.policy}，scheduler=${automationFence.scheduler}，storage=${automationFence.storage}，tasks=${automationFence.tasks?.length ?? '?'}/${BUILTIN_IDS.length}，workspaces=${automationFence.workspaces?.length ?? '?'}（默认 ${automationFence.defaultWorkspaceId ?? '?'}）`)
       } catch (error) {
         automationFence = { ok: false, error: String(error?.message ?? error) }
         console.log(`smoke-boot: ❌ 投研自动化路由探针失败：${automationFence.error}`)

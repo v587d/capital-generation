@@ -72,7 +72,9 @@ const TIMEZONES = [
   'America/Sao_Paulo',
   'Australia/Sydney',
 ]
-const HISTORY_DAYS = 30
+const HISTORY_DAYS = 371
+const HEATMAP_WEEKS = 53
+const WEEKDAY_SHORT = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 const DETAIL_RECENT_RUN_LIMIT = 3
 const TITLE_MAX_LENGTH = 12
 const DESCRIPTION_MAX_LENGTH = 100
@@ -249,11 +251,19 @@ const zh = {
   techInfo: '技术信息',
   profileKey: 'profileKey',
   runHistory: '运行历史',
-  last30Days: '最近 30 天',
+  last12Months: '最近 12 个月',
   runCount: '{n} 次运行',
   successCount: '{n} 成功',
   failureCount: '{n} 失败',
-  historyEmpty: '最近 30 天还没有运行记录。',
+  activeCount: '{n} 进行中',
+  historyEmpty: '最近 12 个月还没有运行记录。',
+  heatLess: '少',
+  heatMore: '多',
+  heatFailed: '有失败',
+  heatActive: '进行中',
+  heatNoRuns: '没有运行',
+  heatFuture: '尚未到来',
+  heatSummary: '最近 12 个月共 {total} 次运行：{success} 成功，{failure} 失败。',
   historyViewAll: '查看全部运行',
   runFilterAll: '全部',
   runFilterActive: '进行中',
@@ -370,8 +380,8 @@ function installStyles() {
   const style = document.createElement('style')
   style.setAttribute(`data-${STYLE_TAG}`, 'true')
   style.textContent = `
-    .capital-automation-page, .capital-automation-modal { --ca-card: var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-layer-1)); --ca-line: var(--dsw-alias-border-l3, var(--dsw-alias-border-l1)); --ca-line-soft: var(--dsw-alias-border-l2, var(--dsw-alias-border-l1)); --ca-table-line: var(--ca-line); --ca-muted: var(--dsw-alias-label-tertiary); --ca-caption: var(--dsw-alias-label-caption, var(--dsw-alias-label-tertiary)); --ca-hover: var(--dsw-alias-interactive-bg-hover); --ca-field: var(--dsw-alias-bg-module-platform); --ca-business: var(--dsw-alias-state-business-primary, var(--dsw-alias-brand-primary)); --ca-success: var(--dsw-alias-state-success-primary); --ca-error: var(--dsw-alias-state-error-primary); --ca-warn: var(--dsw-alias-state-warn-label); --ca-business-text: var(--ca-business); --ca-success-text: var(--ca-success); --ca-error-text: var(--ca-error); --ca-warn-text: var(--ca-warn); }
-    body:not([data-ds-dark-theme]) .capital-automation-page, body:not([data-ds-dark-theme]) .capital-automation-modal { --ca-line: #0000001f; --ca-line-soft: #0000001a; --ca-table-line: #00000026; --ca-muted: #5d626a; --ca-caption: #6a6f77; --ca-hover: #eef1f5; --ca-field: #f7f8fa; --ca-business: #2f63d6; --ca-success: #16a34a; --ca-error: #dc2626; --ca-warn: #d97706; --ca-business-text: #2f63d6; --ca-success-text: #15803d; --ca-error-text: #c81e1e; --ca-warn-text: #b45309; --ca-tag-news: #2f6fd0; --ca-tag-market: #a85a08; --ca-tag-review: #6d4ac4; --ca-tag-research: #0f766e; --ca-tag-portfolio: #4d7c0f; --ca-tag-monitor: #0e7490; --ca-tag-custom: #b3246d; }
+    .capital-automation-page, .capital-automation-modal { --ca-card: var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-layer-1)); --ca-line: var(--dsw-alias-border-l3, var(--dsw-alias-border-l1)); --ca-line-soft: var(--dsw-alias-border-l2, var(--dsw-alias-border-l1)); --ca-table-line: var(--ca-line); --ca-muted: var(--dsw-alias-label-tertiary); --ca-caption: var(--dsw-alias-label-caption, var(--dsw-alias-label-tertiary)); --ca-hover: var(--dsw-alias-interactive-bg-hover); --ca-field: var(--dsw-alias-bg-module-platform); --ca-business: var(--dsw-alias-state-business-primary, var(--dsw-alias-brand-primary)); --ca-success: var(--dsw-alias-state-success-primary); --ca-error: var(--dsw-alias-state-error-primary); --ca-warn: var(--dsw-alias-state-warn-label); --ca-business-text: var(--ca-business); --ca-success-text: var(--ca-success); --ca-error-text: var(--ca-error); --ca-warn-text: var(--ca-warn); --ca-heat-0: #262626; --ca-heat-1: #1b5e3a; --ca-heat-2: #2f8a56; --ca-heat-3: #40b366; --ca-heat-4: #56d364; --ca-heat-fail: #f85149; }
+    body:not([data-ds-dark-theme]) .capital-automation-page, body:not([data-ds-dark-theme]) .capital-automation-modal { --ca-line: #0000001f; --ca-line-soft: #0000001a; --ca-table-line: #00000026; --ca-muted: #5d626a; --ca-caption: #6a6f77; --ca-hover: #eef1f5; --ca-field: #f7f8fa; --ca-business: #2f63d6; --ca-success: #16a34a; --ca-error: #dc2626; --ca-warn: #d97706; --ca-business-text: #2f63d6; --ca-success-text: #15803d; --ca-error-text: #c81e1e; --ca-warn-text: #b45309; --ca-tag-news: #2f6fd0; --ca-tag-market: #a85a08; --ca-tag-review: #6d4ac4; --ca-tag-research: #0f766e; --ca-tag-portfolio: #4d7c0f; --ca-tag-monitor: #0e7490; --ca-tag-custom: #b3246d; --ca-heat-0: #eef1f4; --ca-heat-1: #b7e4c0; --ca-heat-2: #74c98a; --ca-heat-3: #3ba55c; --ca-heat-4: #1f7a3a; --ca-heat-fail: #cf222e; }
     .capital-automation-page { display: flex; flex-direction: column; min-height: 0; height: 100%; color: var(--dsw-alias-label-primary); }
     .capital-automation-head { flex: none; padding: 18px 0 0; }
     .capital-automation-headinner { box-sizing: border-box; width: min(1080px, 100%); margin: 0 auto; padding: 0 clamp(20px, 3vw, 36px); }
@@ -411,7 +421,7 @@ function installStyles() {
     .capital-automation-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
     .capital-automation-container { box-sizing: border-box; width: min(1080px, 100%); margin: 0 auto; padding: 20px clamp(20px, 3vw, 36px) 72px; }
     .capital-automation-card { box-sizing: border-box; border: .5px solid var(--ca-line); border-radius: 16px; background: var(--ca-card); }
-    .capital-automation-history { padding: 18px 20px 14px; }
+    .capital-automation-history { position: relative; padding: 18px 20px 14px; }
     .capital-automation-historyhead { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 18px; }
     .capital-automation-historytitle { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
     .capital-automation-historytitle h2 { margin: 0; font-size: 14px; line-height: 22px; font-weight: 600; }
@@ -420,18 +430,45 @@ function installStyles() {
     .capital-automation-historystat { display: inline-flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
     .capital-automation-historystat[data-tone="ok"] { color: var(--ca-success-text); }
     .capital-automation-historystat[data-tone="error"] { color: var(--ca-error-text); }
+    .capital-automation-historystat[data-tone="active"] { color: var(--ca-business-text); }
     .capital-automation-statusdot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
     .capital-automation-historylink { display: inline-flex; align-items: center; gap: 2px; height: 24px; padding: 0 6px; border: 0; border-radius: 7px; background: transparent; color: var(--ca-muted); font: inherit; font-size: 12px; cursor: pointer; }
     .capital-automation-historylink:hover { background: var(--ca-hover); color: var(--dsw-alias-label-primary); }
-    .capital-automation-timeline { display: grid; grid-template-columns: repeat(${HISTORY_DAYS}, minmax(0, 1fr)); align-items: end; gap: 2px; height: 28px; margin-top: 18px; border-bottom: 1px dashed var(--ca-line); }
-    .capital-automation-timeline-day { position: relative; display: flex; align-items: flex-end; justify-content: center; height: 100%; padding-bottom: 3px; }
-    .capital-automation-timeline-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ca-caption); box-shadow: 0 0 0 2px var(--ca-card); }
-    .capital-automation-timeline-dot[data-tone="ok"] { background: var(--ca-success); }
-    .capital-automation-timeline-dot[data-tone="error"] { background: var(--ca-error); }
-    .capital-automation-timeline-dot[data-tone="active"] { background: var(--ca-business); }
-    .capital-automation-timeline-dot[data-tone="warn"] { background: var(--ca-warn); }
-    .capital-automation-timelinelabels { display: flex; justify-content: space-between; margin-top: 7px; color: var(--ca-caption); font-size: 11px; line-height: 16px; }
-    .capital-automation-historyempty { margin-top: 12px; text-align: center; color: var(--ca-muted); font-size: 12px; line-height: 18px; }
+    .capital-automation-heatmap { display: flex; align-items: flex-start; gap: 8px; margin-top: 16px; }
+    .capital-automation-heatweekdays { flex: none; display: grid; grid-template-rows: repeat(7, 1fr); gap: 3px; width: 28px; padding-top: 22px; color: var(--ca-caption); font-size: 10.5px; line-height: 1; align-self: stretch; }
+    .capital-automation-heatweekday { display: flex; align-items: center; }
+    .capital-automation-heatscroll { flex: 1 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; scrollbar-width: thin; }
+    .capital-automation-heatscroll[data-faded="true"] { -webkit-mask-image: linear-gradient(to right, transparent 0, #000 18px); mask-image: linear-gradient(to right, transparent 0, #000 18px); }
+    .capital-automation-heatcanvas { min-width: 620px; }
+    .capital-automation-heatmonths { display: grid; grid-template-columns: repeat(${HEATMAP_WEEKS}, minmax(0, 1fr)); gap: 3px; height: 16px; margin-bottom: 6px; }
+    .capital-automation-heatmonth { color: var(--ca-caption); font-size: 10.5px; line-height: 16px; white-space: nowrap; letter-spacing: .01em; }
+    .capital-automation-heatgrid { display: grid; grid-template-columns: repeat(${HEATMAP_WEEKS}, minmax(0, 1fr)); grid-template-rows: repeat(7, auto); grid-auto-flow: column; gap: 3px; }
+    .capital-automation-heatcell { display: block; min-width: 0; aspect-ratio: 1; border-radius: 2.5px; background: var(--ca-heat-0); box-shadow: inset 0 0 0 .5px color-mix(in srgb, var(--dsw-alias-label-primary) 4%, transparent); transition: background .12s, box-shadow .12s, outline-color .12s; }
+    .capital-automation-heatcell[data-level="1"] { background: var(--ca-heat-1); }
+    .capital-automation-heatcell[data-level="2"] { background: var(--ca-heat-2); }
+    .capital-automation-heatcell[data-level="3"] { background: var(--ca-heat-3); }
+    .capital-automation-heatcell[data-level="4"] { background: var(--ca-heat-4); }
+    .capital-automation-heatcell[data-future="true"] { opacity: .45; }
+    .capital-automation-heatcell[data-failed="true"] { box-shadow: inset 0 0 0 1.5px var(--ca-heat-fail); }
+    .capital-automation-heatcell[data-active="true"] { box-shadow: inset 0 0 0 1.5px var(--ca-business); animation: capital-automation-heatpulse 1.8s ease-in-out infinite; }
+    .capital-automation-heatcell:hover { outline: 1px solid var(--dsw-alias-label-primary); outline-offset: 1px; }
+    .capital-automation-heattip { position: absolute; z-index: 5; min-width: 128px; max-width: 220px; padding: 7px 9px; border: .5px solid var(--ca-line); border-radius: 9px; background: var(--dsw-alias-bg-layer-3, var(--ca-card)); box-shadow: 0 8px 22px rgba(0, 0, 0, .28); color: var(--dsw-alias-label-primary); pointer-events: none; transform: translate(-50%, -100%); }
+    .capital-automation-heattipdate { display: block; font-size: 11.5px; font-weight: 600; line-height: 16px; white-space: nowrap; }
+    .capital-automation-heattipmeta { display: block; margin-top: 2px; color: var(--ca-muted); font-size: 11px; line-height: 16px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .capital-automation-heatfoot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; margin-top: 8px; color: var(--ca-caption); font-size: 11px; line-height: 16px; }
+    .capital-automation-heatrange { font-variant-numeric: tabular-nums; }
+    .capital-automation-heatlegend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 5px; }
+    .capital-automation-heatlegendlabel { color: var(--ca-caption); }
+    .capital-automation-heatsample { width: 10px; height: 10px; border-radius: 2px; background: var(--ca-heat-0); box-shadow: inset 0 0 0 .5px color-mix(in srgb, var(--dsw-alias-label-primary) 5%, transparent); }
+    .capital-automation-heatsample[data-level="1"] { background: var(--ca-heat-1); }
+    .capital-automation-heatsample[data-level="2"] { background: var(--ca-heat-2); }
+    .capital-automation-heatsample[data-level="3"] { background: var(--ca-heat-3); }
+    .capital-automation-heatsample[data-level="4"] { background: var(--ca-heat-4); }
+    .capital-automation-heatkey { display: inline-flex; align-items: center; gap: 5px; margin-right: 7px; }
+    .capital-automation-heatfailbox { width: 10px; height: 10px; border-radius: 2px; background: var(--ca-heat-0); box-shadow: inset 0 0 0 1.5px var(--ca-heat-fail); }
+    .capital-automation-heatactivebox { width: 10px; height: 10px; border-radius: 2px; background: var(--ca-heat-0); box-shadow: inset 0 0 0 1.5px var(--ca-business); }
+    @keyframes capital-automation-heatpulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+    @media (prefers-reduced-motion: reduce) { .capital-automation-heatcell[data-active="true"] { animation: none; } }
     .capital-automation-section { margin-top: 26px; }
     .capital-automation-sectionhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 10px; }
     .capital-automation-sectionhead h2 { margin: 0; font-size: 14px; line-height: 22px; font-weight: 600; }
@@ -516,8 +553,11 @@ function installStyles() {
     .capital-automation-loading { display: flex; flex-direction: column; pointer-events: none; }
     .capital-automation-skeletonlabel { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     .capital-automation-skeleton { display: block; flex: none; max-width: 100%; border-radius: 6px; background: var(--dsw-alias-bg-skeleton); animation: capital-automation-breathe 1.8s ease-in-out infinite; }
-    .capital-automation-skeletontimeline { display: flex; align-items: flex-end; gap: 2px; height: 28px; margin-top: 18px; border-bottom: 1px dashed var(--ca-line); }
-    .capital-automation-skeletontimeline > .capital-automation-skeleton { flex: 1 1 0; min-width: 0; }
+    .capital-automation-skeletonheat { margin-top: 16px; padding-left: 36px; }
+    .capital-automation-skeletonmonths { display: grid; grid-template-columns: repeat(${HEATMAP_WEEKS}, minmax(0, 1fr)); gap: 3px; height: 16px; margin-bottom: 6px; }
+    .capital-automation-skeletonmonths > .capital-automation-skeleton { width: 22px; height: 8px; border-radius: 3px; }
+    .capital-automation-skeletongrid { display: grid; grid-template-columns: repeat(${HEATMAP_WEEKS}, minmax(0, 1fr)); grid-template-rows: repeat(7, auto); grid-auto-flow: column; gap: 3px; }
+    .capital-automation-skeletongrid > .capital-automation-skeleton { width: 100%; aspect-ratio: 1; border-radius: 2.5px; }
     .capital-automation-skeletonstack { display: flex; flex: 1 1 auto; flex-direction: column; gap: 6px; min-width: 0; }
     .capital-automation-skeletonrow .capital-automation-trowmain { min-height: 57px; cursor: default; }
     .capital-automation-skeletonrow .capital-automation-cell[data-cell] { display: flex; flex-direction: column; gap: 5px; }
@@ -843,6 +883,7 @@ function createApi() {
     run: (id) => request(`/tasks/${encodeURIComponent(id)}/run`, { method: 'POST' }),
     cancel: (id) => request(`/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
     runs: (query = '') => request(`/runs${query}`),
+    history: (query = '') => request(`/runs/history${query}`),
     notifications: () => request('/notifications'),
     markRead: (body) => request('/notifications/read', { method: 'POST', body }),
   }
@@ -1075,10 +1116,6 @@ function formatRelative(value) {
     if (abs >= unitMs || unit === 'minute') return formatter.format(Math.round(diff / unitMs), unit)
   }
   return ''
-}
-
-function formatRangeLabel(date) {
-  return new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric' }).format(date)
 }
 
 function weekdayText(trigger) {
@@ -1335,42 +1372,121 @@ function cloneTask(task) {
   }
 }
 
-function groupRunCounts(runs) {
-  const since = new Date()
-  since.setHours(0, 0, 0, 0)
-  since.setDate(since.getDate() - (HISTORY_DAYS - 1))
-  const days = []
-  const byKey = new Map()
-  for (let index = 0; index < HISTORY_DAYS; index += 1) {
-    const date = new Date(since)
-    date.setDate(since.getDate() + index)
-    const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
-    const bucket = { date, key, runs: [] }
-    days.push(bucket)
-    byKey.set(key, bucket)
-  }
-  let success = 0
-  let failure = 0
-  let total = 0
-  for (const run of runs) {
-    const date = new Date(run.queuedAt)
-    if (Number.isNaN(date.getTime()) || date < since) continue
-    if (run.status === 'succeeded') success += 1
-    if (isFailureStatus(run.status)) failure += 1
-    total += 1
-    const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
-    const bucket = byKey.get(key)
-    if (bucket !== undefined) bucket.runs.push(run)
-  }
-  return { days, success, failure, total }
+function pad2(value) {
+  return String(value).padStart(2, '0')
 }
 
-function dayTone(bucket) {
-  if (bucket.runs.some((run) => isActiveRun(run))) return 'active'
-  if (bucket.runs.some((run) => isFailureStatus(run.status))) return 'error'
-  if (bucket.runs.some((run) => run.status === 'succeeded')) return 'ok'
-  if (bucket.runs.length > 0) return 'warn'
-  return null
+function localDateKey(date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+}
+
+function addLocalDays(date, delta) {
+  const next = new Date(date)
+  next.setDate(next.getDate() + delta)
+  return next
+}
+
+function startOfLocalWeek(date) {
+  const start = new Date(date)
+  start.setHours(0, 0, 0, 0)
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7))
+  return start
+}
+
+function parseLocalDateKey(key) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key ?? ''))
+  if (match === null) return null
+  return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) }
+}
+
+function historyBucketMap(history) {
+  const buckets = new Map()
+  for (const bucket of history?.days ?? []) {
+    if (typeof bucket?.date === 'string') buckets.set(bucket.date, bucket)
+  }
+  return buckets
+}
+
+function heatLevel(total) {
+  if (total <= 0) return 0
+  if (total === 1) return 1
+  if (total === 2) return 2
+  if (total <= 4) return 3
+  return 4
+}
+
+function buildHeatmap(history) {
+  const byDate = historyBucketMap(history)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const first = addLocalDays(startOfLocalWeek(today), -7 * (HEATMAP_WEEKS - 1))
+  const weeks = []
+  let total = 0
+  let success = 0
+  let failure = 0
+  let active = 0
+  for (let weekIndex = 0; weekIndex < HEATMAP_WEEKS; weekIndex += 1) {
+    const weekStart = addLocalDays(first, weekIndex * 7)
+    const days = []
+    let label = null
+    for (let dayIndex = 0; dayIndex < 7; dayIndex += 1) {
+      const date = addLocalDays(weekStart, dayIndex)
+      const key = localDateKey(date)
+      const bucket = byDate.get(key)
+      const dayTotal = Number.isFinite(bucket?.total) ? bucket.total : 0
+      total += dayTotal
+      success += Number.isFinite(bucket?.success) ? bucket.success : 0
+      failure += Number.isFinite(bucket?.failure) ? bucket.failure : 0
+      active += Number.isFinite(bucket?.active) ? bucket.active : 0
+      if (date.getDate() === 1) label = `${date.getMonth() + 1}月`
+      days.push({
+        date: key,
+        total: dayTotal,
+        success: Number.isFinite(bucket?.success) ? bucket.success : 0,
+        failure: Number.isFinite(bucket?.failure) ? bucket.failure : 0,
+        active: Number.isFinite(bucket?.active) ? bucket.active : 0,
+        level: heatLevel(dayTotal),
+        future: date.getTime() > today.getTime(),
+      })
+    }
+    weeks.push({ key: localDateKey(weekStart), label, days })
+  }
+  // A trailing window starts mid-month; label it only when the next month is far enough away.
+  const firstLabelIndex = weeks.findIndex((week) => week.label !== null)
+  if (weeks[0].label === null && firstLabelIndex >= 3) weeks[0].label = `${first.getMonth() + 1}月`
+  return {
+    weeks,
+    total: Number.isFinite(history?.total) ? history.total : total,
+    success: Number.isFinite(history?.success) ? history.success : success,
+    failure: Number.isFinite(history?.failure) ? history.failure : failure,
+    active,
+    first: localDateKey(first),
+    last: localDateKey(addLocalDays(first, HEATMAP_WEEKS * 7 - 1)),
+  }
+}
+
+function formatHeatDay(key) {
+  const parts = parseLocalDateKey(key)
+  if (parts === null) return String(key ?? '')
+  const date = new Date(parts.year, parts.month - 1, parts.day)
+  return `${parts.year}年${parts.month}月${parts.day}日 ${WEEKDAY_SHORT[date.getDay()]}`
+}
+
+function formatHeatRange(first, last) {
+  const left = parseLocalDateKey(first)
+  const right = parseLocalDateKey(last)
+  if (left === null || right === null) return ''
+  return `${left.year}.${pad2(left.month)} – ${right.year}.${pad2(right.month)}`
+}
+
+function heatDayMeta(day) {
+  if (day.future) return zh.heatFuture
+  if (day.total === 0) return zh.heatNoRuns
+  const parts = [zh.runCount.replace('{n}', String(day.total))]
+  if (day.success > 0) parts.push(zh.successCount.replace('{n}', String(day.success)))
+  if (day.failure > 0) parts.push(zh.failureCount.replace('{n}', String(day.failure)))
+  if (day.active > 0) parts.push(zh.activeCount.replace('{n}', String(day.active)))
+  return parts.join(' · ')
 }
 
 function eventTone(kind) {
@@ -1449,13 +1565,57 @@ function limitValue(meta, key, fallback) {
 }
 
 function RunHistoryCard(props) {
-  const { runs, onViewAll, showLink = true } = props
-  const { days, success, failure, total } = groupRunCounts(runs)
-  return h('section', { className: 'capital-automation-card capital-automation-history', 'aria-label': zh.runHistory },
+  const { history, onViewAll, showLink = true } = props
+  const model = buildHeatmap(history)
+  const { total, success, failure, active, weeks } = model
+  const cardRef = useRef(null)
+  const scrollRef = useRef(null)
+  const [tip, setTip] = useState(null)
+
+  useEffect(() => {
+    const node = scrollRef.current
+    if (node === null) return undefined
+    node.scrollLeft = node.scrollWidth
+    const syncFade = () => { node.dataset.faded = node.scrollLeft > 1 ? 'true' : 'false' }
+    node.addEventListener('scroll', syncFade, { passive: true })
+    syncFade()
+    return () => node.removeEventListener('scroll', syncFade)
+  }, [])
+
+  function showTip(day, event) {
+    const card = cardRef.current
+    if (card === null || event === undefined) return
+    const cell = event.currentTarget.getBoundingClientRect()
+    const base = card.getBoundingClientRect()
+    const half = 110
+    const left = Math.min(Math.max(cell.left - base.left + cell.width / 2, half), Math.max(half, base.width - half))
+    setTip({ day, left, top: cell.top - base.top - 7 })
+  }
+
+  const monthLabels = weeks.map((week, index) => week.label === null ? null : h('span', {
+    key: week.key,
+    className: 'capital-automation-heatmonth',
+    style: index >= HEATMAP_WEEKS - 2
+      ? { gridColumn: index + 1, justifySelf: 'end' }
+      : { gridColumn: index + 1 },
+  }, week.label))
+
+  const cells = weeks.flatMap((week) => week.days.map((day) => h('span', {
+    key: day.date,
+    className: 'capital-automation-heatcell',
+    'data-level': day.level,
+    'data-future': day.future ? 'true' : undefined,
+    'data-failed': day.failure > 0 ? 'true' : undefined,
+    'data-active': day.active > 0 ? 'true' : undefined,
+    title: `${formatHeatDay(day.date)} · ${heatDayMeta(day)}`,
+    onMouseEnter: (event) => showTip(day, event),
+  })))
+
+  return h('section', { ref: cardRef, className: 'capital-automation-card capital-automation-history', 'aria-label': zh.runHistory },
     h('div', { className: 'capital-automation-historyhead' },
       h('div', { className: 'capital-automation-historytitle' },
         h('h2', null, zh.runHistory),
-        h('span', null, zh.last30Days)),
+        h('span', null, zh.last12Months)),
       h('div', { className: 'capital-automation-historystats' },
         h('span', { className: 'capital-automation-historystat', 'data-tone': 'ok' },
           h('span', { className: 'capital-automation-statusdot' }),
@@ -1463,21 +1623,56 @@ function RunHistoryCard(props) {
         h('span', { className: 'capital-automation-historystat', 'data-tone': 'error' },
           h('span', { className: 'capital-automation-statusdot' }),
           zh.failureCount.replace('{n}', String(failure))),
+        active > 0
+          ? h('span', { className: 'capital-automation-historystat', 'data-tone': 'active' },
+            h('span', { className: 'capital-automation-statusdot' }),
+            zh.activeCount.replace('{n}', String(active)))
+          : null,
         showLink && onViewAll !== undefined
           ? h('button', { type: 'button', className: 'capital-automation-historylink', onClick: onViewAll },
             zh.runCount.replace('{n}', String(total)),
             h(IconChevronRightOutlineRegular, { size: 13 }))
           : h('span', { className: 'capital-automation-historystat' }, zh.runCount.replace('{n}', String(total))))),
-    h('div', { className: 'capital-automation-timeline', 'aria-hidden': 'true' },
-      days.map((bucket) => {
-        const tone = dayTone(bucket)
-        return h('div', { key: bucket.key, className: 'capital-automation-timeline-day', title: `${formatRangeLabel(bucket.date)}：${bucket.runs.length} 次运行` },
-          tone === null ? null : h('span', { className: 'capital-automation-timeline-dot', 'data-tone': tone }))
-      })),
-    h('div', { className: 'capital-automation-timelinelabels' },
-      h('span', null, formatRangeLabel(days[0].date)),
-      h('span', null, formatRangeLabel(days[days.length - 1].date))),
-    total === 0 ? h('p', { className: 'capital-automation-historyempty' }, zh.historyEmpty) : null)
+    h('div', { className: 'capital-automation-heatmap' },
+      h('div', { className: 'capital-automation-heatweekdays', 'aria-hidden': 'true' },
+        [0, 1, 2, 3, 4, 5, 6].map((index) => h('span', { key: index, className: 'capital-automation-heatweekday' },
+          index === 0 ? '周一' : index === 2 ? '周三' : index === 4 ? '周五' : ''))),
+      h('div', { ref: scrollRef, className: 'capital-automation-heatscroll' },
+        h('div', { className: 'capital-automation-heatcanvas' },
+          h('div', { className: 'capital-automation-heatmonths', 'aria-hidden': 'true' }, monthLabels),
+          h('div', {
+            className: 'capital-automation-heatgrid',
+            role: 'img',
+            'aria-label': zh.heatSummary
+              .replace('{total}', String(total))
+              .replace('{success}', String(success))
+              .replace('{failure}', String(failure)),
+            onMouseLeave: () => setTip(null),
+          }, cells)))),
+    h('div', { className: 'capital-automation-heatfoot' },
+      h('span', { className: 'capital-automation-heatrange' },
+        total === 0 ? zh.historyEmpty : formatHeatRange(model.first, model.last)),
+      h('div', { className: 'capital-automation-heatlegend' },
+        active > 0
+          ? h('span', { className: 'capital-automation-heatkey' },
+            h('span', { className: 'capital-automation-heatactivebox' }),
+            zh.heatActive)
+          : null,
+        failure > 0
+          ? h('span', { className: 'capital-automation-heatkey' },
+            h('span', { className: 'capital-automation-heatfailbox' }),
+            zh.heatFailed)
+          : null,
+        h('span', { className: 'capital-automation-heatlegendlabel' }, zh.heatLess),
+        [0, 1, 2, 3, 4].map((level) => h('span', { key: level, className: 'capital-automation-heatsample', 'data-level': level })),
+        h('span', { className: 'capital-automation-heatlegendlabel' }, zh.heatMore))),
+    tip === null ? null : h('div', {
+      className: 'capital-automation-heattip',
+      role: 'tooltip',
+      style: { left: `${tip.left}px`, top: `${tip.top}px` },
+    },
+    h('span', { className: 'capital-automation-heattipdate' }, formatHeatDay(tip.day.date)),
+    h('span', { className: 'capital-automation-heattipmeta' }, heatDayMeta(tip.day))))
 }
 
 function RunStatus(props) {
@@ -1884,15 +2079,21 @@ function SkeletonHistory() {
         h(SkeletonBlock, { width: 64, height: 12 }),
         h(SkeletonBlock, { width: 64, height: 12 }),
         h(SkeletonBlock, { width: 56, height: 12 }))),
-    h('div', { className: 'capital-automation-skeletontimeline' },
-      Array.from({ length: HISTORY_DAYS }, (_, index) => h(SkeletonBlock, {
-        key: index,
-        height: 6 + ((index * 11) % 22),
-        radius: 2,
-      }))),
-    h('div', { className: 'capital-automation-timelinelabels' },
-      h(SkeletonBlock, { width: 34, height: 9 }),
-      h(SkeletonBlock, { width: 34, height: 9 })))
+    h('div', { className: 'capital-automation-skeletonheat' },
+      h('div', { className: 'capital-automation-skeletonmonths' },
+        Array.from({ length: 12 }, (_, index) => h('span', {
+          key: index,
+          className: 'capital-automation-skeleton',
+          style: { gridColumn: 1 + index * 4, width: 22, height: 8 },
+        }))),
+      h('div', { className: 'capital-automation-skeletongrid' },
+        Array.from({ length: HEATMAP_WEEKS * 7 }, (_, index) => h('span', {
+          key: index,
+          className: 'capital-automation-skeleton',
+        })))),
+    h('div', { className: 'capital-automation-heatfoot' },
+      h(SkeletonBlock, { width: 108, height: 9 }),
+      h(SkeletonBlock, { width: 96, height: 9 })))
 }
 
 function SkeletonSectionHead(props) {
@@ -1980,8 +2181,7 @@ function LoadingSkeleton(props) {
 
 function TaskDashboardSkeleton() {
   return h(LoadingSkeleton, null,
-    h(SkeletonHistory),
-    h('section', { className: 'capital-automation-section' },
+    h('section', { className: 'capital-automation-section', style: { marginTop: 0 } },
       h(SkeletonSectionHead),
       h(SkeletonTaskTable, { rows: 4 })),
     h('section', { className: 'capital-automation-section' },
@@ -2001,7 +2201,7 @@ function RunsSkeleton() {
 }
 
 function TaskDashboard(props) {
-  const { tasks, templates, runs, onOpenTask, onNewTask, onEnableTemplate, onAction, onRequestConfirm, onEdit, onGoRuns, onRequestCancelRun, schedulerActive, storageReady, busyTaskId } = props
+  const { tasks, templates, runs, onOpenTask, onNewTask, onEnableTemplate, onAction, onRequestConfirm, onEdit, onRequestCancelRun, schedulerActive, storageReady, busyTaskId } = props
   const [filter, setFilter] = useState('all')
   const [query, setQuery] = useState('')
   const runningTasks = tasks.filter((task) => isActiveRun(task.lastRun))
@@ -2026,8 +2226,7 @@ function TaskDashboard(props) {
   }
   const filters = ['all', 'custom', 'news', 'market', 'review', 'research', 'portfolio', 'monitor']
   return h('div', null,
-    h(RunHistoryCard, { runs, onViewAll: onGoRuns }),
-    h('section', { className: 'capital-automation-section' },
+    h('section', { className: 'capital-automation-section', style: { marginTop: 0 } },
       h('div', { className: 'capital-automation-sectionhead' },
         h('h2', null, zh.taskSection),
         h('span', null, zh.taskSectionHint),
@@ -2520,7 +2719,7 @@ function RunFilters(props) {
 }
 
 function RunsPage(props) {
-  const { runs, tasks, onCancel, onOpenSession, onOpenTask, onGoTasks, onNewTask, busy } = props
+  const { runs, history, tasks, onCancel, onOpenSession, onOpenTask, onGoTasks, onNewTask, busy } = props
   const [filter, setFilter] = useState('all')
   const counts = {
     all: runs.length,
@@ -2535,7 +2734,7 @@ function RunsPage(props) {
     return true
   })
   return h('div', null,
-    h(RunHistoryCard, { runs, showLink: false }),
+    h(RunHistoryCard, { history, showLink: false }),
     h('section', { className: 'capital-automation-section' },
       h('div', { className: 'capital-automation-sectionhead' },
         h('h2', null, zh.runsTitle),
@@ -3401,11 +3600,21 @@ function InboxModal(props) {
       }))))
 }
 
+function browserTimeZone() {
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    return typeof zone === 'string' && zone.length > 0 ? zone : 'Asia/Shanghai'
+  } catch {
+    return 'Asia/Shanghai'
+  }
+}
+
 function AutomationPage(props) {
   const { api, openSession } = props
   const [meta, setMeta] = useState(null)
   const [tasks, setTasks] = useState([])
   const [runs, setRuns] = useState([])
+  const [history, setHistory] = useState(null)
   const [notifications, setNotifications] = useState([])
   const [unread, setUnread] = useState(0)
   const [selectedId, setSelectedId] = useState(null)
@@ -3441,10 +3650,11 @@ function AutomationPage(props) {
     refreshSequenceRef.current = requestSequence
     const request = (async () => {
       try {
-        const [nextMeta, nextTasks, nextRuns, nextNotifications] = await Promise.all([
+        const [nextMeta, nextTasks, nextRuns, nextHistory, nextNotifications] = await Promise.all([
           api.meta(),
           api.tasks(),
           api.runs('?limit=200'),
+          api.history(`?days=${HISTORY_DAYS}&tz=${encodeURIComponent(browserTimeZone())}`),
           api.notifications(),
         ])
         if (!mountedRef.current || requestSequence !== refreshSequenceRef.current) return
@@ -3453,6 +3663,7 @@ function AutomationPage(props) {
         tasksRef.current = nextTaskList
         setTasks(nextTaskList)
         setRuns(Array.isArray(nextRuns.runs) ? nextRuns.runs : [])
+        setHistory(nextHistory ?? null)
         setNotifications(Array.isArray(nextNotifications.notifications) ? nextNotifications.notifications : [])
         setUnread(typeof nextNotifications.unread === 'number' ? nextNotifications.unread : 0)
         setLoadError('')
@@ -3705,7 +3916,6 @@ function AutomationPage(props) {
                 onAction: (task, action) => { void performTaskAction(task, action) },
                 onRequestConfirm: requestConfirm,
                 onEdit: (id) => selectTask(id, 'config'),
-                onGoRuns: () => switchTab('runs'),
                 onRequestCancelRun: (task, run) => requestConfirm('cancel-run', task, run),
                 schedulerActive,
                 storageReady,
@@ -3715,6 +3925,7 @@ function AutomationPage(props) {
             ? h(RunsSkeleton)
             : h(RunsPage, {
               runs,
+              history,
               tasks,
               onCancel: (run) => requestConfirm('cancel-run', { id: run.taskId, title: run.taskTitle }, run),
               onOpenSession: openSession,

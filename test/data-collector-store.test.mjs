@@ -155,6 +155,20 @@ test('save：raw.json 与 manifest.json 原子 createIfAbsent 写入 workspace�
   assert.ok(!JSON.stringify(ref).includes('/workspace'), 'DatasetRef 不得泄露绝对路径')
 })
 
+test('save：time_coverage 原样写入回执与 manifest，旧 manifest 仍可读', async () => {
+  const { store, fs } = makeStore({ newId: deterministicId() })
+  const timeCoverage = { column: 'quote_time', from: '2026-10-28 16:00:02', to: '2026-10-30 16:00:01', format: 'datetime_string' }
+  const ref = await store.save(saveInput({ time_coverage: timeCoverage }))
+  assert.deepEqual(ref.time_coverage, timeCoverage)
+  const manifest = JSON.parse(fs.files.get(manifestPath('/workspace/proj', ref.dataset_id)))
+  assert.deepEqual(manifest.time_coverage, timeCoverage)
+
+  const { time_coverage: _coverage, ...legacy } = manifest
+  fs.files.set(manifestPath('/workspace/proj', ref.dataset_id), JSON.stringify(legacy))
+  const reopened = await store.readRef(ref.dataset_id, SESSION)
+  assert.equal(reopened.time_coverage, undefined, '旧 manifest 没有该字段时不能伪造')
+})
+
 test('save：task_id 可关联任务', async () => {
   const { store } = makeStore({ newId: deterministicId() })
   const ref = await store.save(saveInput({ task_id: 'task-7' }))

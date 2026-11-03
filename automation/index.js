@@ -4,6 +4,7 @@
  * `ui-schedule` row and its `schedules` identities are untouched.
  */
 import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { createRunRunner, buildRunPrompt, sessionTitleOf } from './runner.js'
@@ -14,7 +15,7 @@ import { createAutomationRouteHandler } from './route.js'
 import { resolveAutomationSettings } from './settings.js'
 import { installAutomationPolicy } from './policy.js'
 import { createCalendarSource } from './calendar-source.js'
-import { createWorkspaceCatalog } from './workspaces.js'
+import { createWorkspaceCatalog, defaultWorkspacePath } from './workspaces.js'
 import { sanitizeMessage } from './redact.js'
 
 export const name = 'capital-automation'
@@ -28,10 +29,6 @@ function versionOf() {
   }
 }
 
-function safeSegment(value) {
-  return String(value).replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 120)
-}
-
 /**
  * Build the runtime without Cordis services. Exported for tests and for the desktop carrier
  * that supplies its own HTTP/auth plane.
@@ -42,7 +39,7 @@ export function createAutomationRuntime(options) {
   const rawProfileName = String(profile.name)
   const displayName = rawProfileName.slice(0, 200)
   const home = profile.home ?? profile.dir ?? process.cwd()
-  const runDir = profile.runDir ?? join(home, 'automation-workspace', safeSegment(displayName))
+  const runDir = profile.runDir ?? defaultWorkspacePath(profile)
   const ownerDir = profile.ownerDir ?? join(home, 'storages', 'capital-automation-locks')
   const calendar = options.calendar ?? createCalendarSource({
     cacheDir: join(home, 'storages', 'capital-automation-calendar'),
@@ -50,7 +47,14 @@ export function createAutomationRuntime(options) {
     now,
   })
   const policyContext = options.policyContext ?? ctx
-  const workspaces = createWorkspaceCatalog({ ctx, displayName, runDir, logger })
+  const workspaces = createWorkspaceCatalog({
+    ctx,
+    displayName,
+    runDir,
+    displayHome: homedir(),
+    getDefaultWorkspaceId: () => getSettings()?.defaultWorkspaceId,
+    logger,
+  })
   const store = createAutomationStore({
     openDomain: () => storageDomain.open(domainSpec),
     profile: { name: rawProfileName },

@@ -136,7 +136,9 @@ const PLUGIN_TOOLS = [
   'wind_docs_announcements', 'wind_docs_news',
   // Named source query tools must resolve against real registrations; a phantom name hides the tool.
   'cls_telegraph', 'wscn_lives', 'cninfo_irm', 'sseinfo_qa',
-  'eastmoney_724', 'eastmoney_stock_news', 'eastmoney_reports', 'sina_reports', 'ths_eps_forecast',
+  'eastmoney_724', 'eastmoney_stock_news', 'eastmoney_reports',
+  'eastmoney_announcements', 'eastmoney_announcement_body',
+  'sina_reports', 'ths_eps_forecast',
 ]
 const PRESET_TOOLS = [
   'send_message', 'interrupt_agent', 'list_agents',
@@ -666,7 +668,8 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
   assertDelegationRowShape(retrieverRow, 'subagent_web_retriever', ROLE_PRESET_IDS.retriever)
   // Retriever surface: search tools, named sources, OCR, time tools.
   assert.deepEqual(capitalFace(ROLE_PRESET_IDS.retriever), [
-    'anysearch_search', 'cls_telegraph', 'cninfo_irm', 'eastmoney_724', 'eastmoney_reports', 'eastmoney_stock_news',
+    'anysearch_search', 'cls_telegraph', 'cninfo_irm', 'eastmoney_724', 'eastmoney_announcement_body',
+    'eastmoney_announcements', 'eastmoney_reports', 'eastmoney_stock_news',
     'get_local_datetime', 'ocr', 'resolve_data_time_range', 'sina_reports', 'sseinfo_qa', 'ths_eps_forecast',
     'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'wscn_lives',
   ], 'web_retriever 的组合工具面必须恰好是这些：多挂一行就是越权，少挂一行等于能力消失')
@@ -674,14 +677,17 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
   for (const pattern of [/金融信息检索专员（web_retriever）/, /anysearch_search/, /web_retriever_fetch/, /先定来源再动手/, /不要等 anysearch 空转后才想起/, /禁止把搜索结果全部 fetch/, /一次只能提交一个 URL/, /search_engine_provider/, /Wind 三要素/, /public_document/, /wind_docs_announcements/, /wind_docs_news/, /recent_retrievals/, /provider_tally/, /不得重试 wind/, /每条证据都要有来源/, /不得编造链接/, /无来源的信息不得作为证据/, /verified_official 只能来自/, /verified_official/, /unverified/, /not_verified/, /宿主若暴露 web_search \/ web_fetch 等其他检索工具/, /不索取或保存.*API Key/, /resolve_data_time_range/, /skill capital-web-protocol/]) {
     assertRule(RETRIEVER_PERSONA, pattern, `web_retriever persona 缺少要点: ${pattern}`)
   }
-  // Named-source hard rules: all nine tool names, plus reproducibility, paging-to-empty and the SSE/SZSE split.
+  // Named-source hard rules: all eleven tool names, plus reproducibility, paging-to-empty and the SSE/SZSE split.
   for (const pattern of [
     /cls_telegraph/, /wscn_lives/, /cninfo_irm/, /sseinfo_qa/,
-    /eastmoney_724/, /eastmoney_stock_news/, /eastmoney_reports/, /sina_reports/, /ths_eps_forecast/,
+    /eastmoney_724/, /eastmoney_stock_news/, /eastmoney_reports/,
+    /eastmoney_announcements/, /eastmoney_announcement_body/,
+    /sina_reports/, /ths_eps_forecast/,
     /确定、可复现的结果集/, /空结果是真事实/, /深沪不可互换/, /北交所两边都没有/,
     // ocr trio in persona: PDF body goes to ocr, billing is whole-document, retrieval is by doc_id.
     /正文是 PDF 交 ocr/, /整篇计费/, /doc_id 用 pages\/query 取回/,
-    /具名来源都是媒体或互动平台.*不得标 verified_official/,
+    /媒体\/互动平台只能作旁证/,
+    /东财公告.*转载/,
   ]) {
     assertRule(RETRIEVER_PERSONA, pattern, `web_retriever persona 缺少具名来源要点: ${pattern}`)
   }
@@ -697,6 +703,7 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
     /不得重试 wind/, /recent_retrievals/, /provider_tally/, /public_document/,
     // Named-source protocol: the two work surfaces, empty results, paging, status/note/truncation wording.
     /cls_telegraph/, /wscn_lives/, /cninfo_irm/, /sseinfo_qa/,
+    /eastmoney_announcements/, /eastmoney_announcement_body/, /display_time/, /公告全文（东财转载）/,
     /来源查询/, /该翻页就翻到没有/, /空结果是真事实/, /深沪不可互换/, /北交所两个平台都没有/,
     /status.*answered.*unanswered/, /回执 `note` 必须读/, /1200 字符/, /INVALID_RESPONSE/, /NOT_FOUND/,
     // Output budget, dropped links, code shape and TIMEOUT semantics: each is a receipt the model misreads.

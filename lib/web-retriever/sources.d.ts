@@ -128,6 +128,64 @@ export declare function eastmoneyReports(client: EastmoneyClient, input: {
     pageNo: number;
     signal?: AbortSignal;
 }): Promise<SourceOutcome>;
+export type AnnouncementMarket = 'A' | 'H' | 'U';
+export interface NormalizedAnnouncementCode {
+    code: string;
+    market: AnnouncementMarket;
+}
+/**
+ * Accept the forms users actually paste (`600519.SH` / `SH600519` / `0700.HK` / `AAPL.O`).
+ * The market is inferred only from an unambiguous shape; a mixed list is rejected rather
+ * than silently sent to one `ann_type`.
+ */
+export declare function normalizeAnnouncementCode(value: unknown, market?: AnnouncementMarket | 'auto'): NormalizedAnnouncementCode;
+export declare function normalizeAnnouncementCodes(values: unknown, market?: AnnouncementMarket | 'auto'): {
+    codes: string[];
+    market: AnnouncementMarket;
+};
+/**
+ * Eastmoney republishes issuer announcements; it is a complete issuer-scoped list by day,
+ * whereas Wind's NL RAG is semantic and can miss the newest item. The list is the primary
+ * path for "what was disclosed"; the authoritative PDF remains cninfo / the issuer.
+ */
+export declare function eastmoneyAnnouncements(client: EastmoneyClient, input: {
+    codes: string[];
+    market: AnnouncementMarket;
+    startDate: string;
+    endDate: string;
+    cursor: number;
+    pageSize: number;
+    signal?: AbortSignal;
+}): Promise<SourceOutcome>;
+export interface AnnouncementBody {
+    source: 'eastmoney';
+    operation: 'announcement_body';
+    art_code: string;
+    page: number;
+    offset: number;
+    page_chars: number;
+    total_pages: number;
+    content: string;
+    next_offset?: number;
+    next_page?: number;
+    done: boolean;
+    pdf_url?: string;
+    title?: string;
+    notice_date?: string;
+    note?: string;
+}
+/**
+ * The detail API returns at most 5,000 characters per `page_index`; `page_size` is the
+ * total page count, so `done` is knowable without fetching a sentinel page. US filings
+ * often return an empty body while still carrying a PDF — that is a fact, not an error.
+ */
+export declare function eastmoneyAnnouncementBody(client: EastmoneyClient, input: {
+    artCode: string;
+    page: number;
+    offset: number;
+    limit: number;
+    signal?: AbortSignal;
+}): Promise<AnnouncementBody>;
 /**
  * Always add the exchange prefix: bare codes get a fake empty page for STAR/ChiNext.
  * That page is HTTP 200 and looks like "no reports", so also verify the numbered row count.

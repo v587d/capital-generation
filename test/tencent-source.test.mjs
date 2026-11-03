@@ -390,6 +390,7 @@ test('tencent_quote parses GBK-text-compatible snapshot fields and preserves sta
     assert.equal(result.data.length, 2)
     assert.equal(result.data[0].code, '600519.SH')
     assert.equal(result.data[0].is_stale, true)
+    assert.equal(result.data[0].quote_time, '2026-09-24 10:00:00', 'A 股快照必须带北京时间，时点不能靠 captured_at 猜')
     assert.equal(result.data[1].name, 'TEST2')
     assert.equal(sources.tencent_quote.validateOutput(result.data), true)
   } finally {

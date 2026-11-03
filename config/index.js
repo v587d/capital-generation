@@ -83,6 +83,7 @@ export const Config = z.object({
     maxSteps: z.number().default(300).volatile().description('单次运行最大步骤数（100–2000）'),
     maxToolCalls: z.number().default(1_200).volatile().description('单次运行最大工具调用数（100–5000）'),
     inAppNotifications: z.boolean().default(true).volatile().description('是否写入应用内通知'),
+    defaultWorkspaceId: z.string().default('').volatile().description('统一默认工作区 id；空 = 专属默认工作区'),
   }).default({
     tickMs: 60_000,
     runTimeoutMinutes: 60,
@@ -90,6 +91,7 @@ export const Config = z.object({
     maxSteps: 300,
     maxToolCalls: 1_200,
     inAppNotifications: true,
+    defaultWorkspaceId: '',
   }).description('投研自动化默认值；任务级覆盖优先'),
   retriever: z.object({
     baseURL: z.string().default('').volatile().description('AnySearch API 地址'),

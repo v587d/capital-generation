@@ -9,7 +9,8 @@
   `request_data` 返回一份 DatasetRef 就向主 Agent 发送一次 `dataset_ready`（缓存命中、分页每页也一样），
   每次最终失败发 `data_failed`，所有请求结束再发 `data_collection_completed`。不设单回合能力数量上限，
   根据问题所需证据与实际来源选择，绝不为凑能力而全量遍历。叶子节点——不得创建或指挥下游子 Agent
-  （回归 `test/persona.test.mjs`，下同「叶子边界」）。
+  （回归 `test/persona.test.mjs`，下同「叶子边界」）。`DatasetRef.time_coverage` 是宿主从落盘行算出的
+  真实最早/最晚（无时间列时 `format:'none'`），必须原样转达；不得拿请求区间或 `captured_at` 冒充。
 - **`data_junior`**（`subagent_data_junior`）：主 Agent 直接子 Agent，与 data_collector 是兄弟、
   后者不得指挥它；接收 `DatasetRef`，也接没有 Dataset 的假设建模（估值 / 情景 / 敏感性）。用法口径在工具 description、子 persona 与 skill
   `capital-data-profile` / `capital-data-query`，本节只留维护者约束：

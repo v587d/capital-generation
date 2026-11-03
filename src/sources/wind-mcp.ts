@@ -497,7 +497,7 @@ export function createWindSources(resolveApiKey: WindApiKeyResolver): DataSource
       tool: 'search_economic_indicator',
       server: 'economic_data',
       cacheMaxAgeMs: 6 * 3_600_000,
-      summary: 'Wind EDB 宏观/行业/汇率指标检索（只找码不取数）',
+      summary: '[计费] Wind EDB 宏观/行业/汇率指标检索（只找码不取数）',
       description: EDB_SEARCH_DESCRIPTION,
       inputSchema: {
         type: 'object',
@@ -516,7 +516,7 @@ export function createWindSources(resolveApiKey: WindApiKeyResolver): DataSource
       tool: 'query_economic_indicator_data',
       server: 'economic_data',
       cacheMaxAgeMs: 6 * 3_600_000,
-      summary: 'Wind EDB 指标时间序列（宏观/行业/汇率，按日期区间）',
+      summary: '[计费] Wind EDB 指标时间序列（宏观/行业/汇率，按日期区间）',
       description: EDB_QUERY_DESCRIPTION,
       inputSchema: {
         type: 'object',
@@ -539,7 +539,7 @@ export function createWindSources(resolveApiKey: WindApiKeyResolver): DataSource
       tool: 'get_stock_kline',
       server: 'stock_data',
       cacheMaxAgeMs: 60_000,
-      summary: 'Wind 日周月与 1–30 分钟 K 线（按日期区间，A股+港股+美股）',
+      summary: '[计费] Wind 日周月与 1–30 分钟 K 线（按日期区间，A股+港股+美股）',
       description: KLINE_DESCRIPTION,
       inputSchema: {
         type: 'object',

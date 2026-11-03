@@ -221,9 +221,9 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 
 | capability | 端点 | 主要参数 | 分页 | 用途 |
 |---|---|---|---|---|
-| `wind_edb_search` | `/wind/edb_search` | `question`\* | 否 | Wind EDB 宏观/行业/汇率指标检索（只找码不取数） |
-| `wind_edb_query` | `/wind/edb_query` | `indicator`\* `start_date`\* `end_date`\* | 否 | Wind EDB 指标时间序列（宏观/行业/汇率，按日期区间） |
-| `wind_stock_kline` | `/wind/stock_kline` | `code`\* `start_date`\* `end_date`\* `period` `adjust` | 否 | Wind 日周月与 1–30 分钟 K 线（按日期区间，A股+港股+美股） |
+| `wind_edb_search` | `/wind/edb_search` | `question`\* | 否 | [计费] Wind EDB 宏观/行业/汇率指标检索（只找码不取数） |
+| `wind_edb_query` | `/wind/edb_query` | `indicator`\* `start_date`\* `end_date`\* | 否 | [计费] Wind EDB 指标时间序列（宏观/行业/汇率，按日期区间） |
+| `wind_stock_kline` | `/wind/stock_kline` | `code`\* `start_date`\* `end_date`\* `period` `adjust` | 否 | [计费] Wind 日周月与 1–30 分钟 K 线（按日期区间，A股+港股+美股） |
 
 ## FTShare（资金流 + 行情与日 K 截面 + 快照与日历 + 大宗交易、业绩预告/快报、申万行业 + 涨跌停价、龙虎榜席位、股东人数、指数权重、可转债 K 线，plan B）
 

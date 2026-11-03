@@ -103,7 +103,13 @@ description: Use when composing or reading a Capital data message — data_reque
       "schema": { "columns": ["date_ms", "open_price", "high_price", "low_price", "close_price", "volume", "turnover"] },
       "row_count": 240,
       "captured_at": 1780000000000,
-      "retention_until": 1780604800000
+      "retention_until": 1780604800000,
+      "time_coverage": {
+        "column": "quote_time",
+        "from": "2026-10-28 16:00:02",
+        "to": "2026-10-30 16:00:01",
+        "format": "datetime_string"
+      }
     }
   ]
 }
@@ -134,7 +140,8 @@ description: Use when composing or reading a Capital data message — data_reque
 - `data_failed` 只结束该次请求；只有 `data_collection_completed` 才结束本次委派。未发出终结消息前，主 Agent 不得把任意一次进度通知或子 Agent 结算当作取数完成。若 junior 在已结算后发 `data_gap`，主 Agent 再次委派同一个 collector，此次补数也须逐份回传并另发终结消息。
 - 每个 `data_failed` 和终结消息里的失败项必须包含真实 `error`，只有工具返回了 `code` 才附带原值，不能把错误文本编造成 code。
 - `dataset_id` / `artifact_ref` / `capability` / `source_label` / `schema` / `row_count` /
-  `captured_at` / `retention_until` 按工具返回**原样填入**，字段名、数值、日期不改写。
+  `captured_at` / `retention_until` / `time_coverage` 按工具返回**原样填入**，字段名、数值、日期不改写。
+- `time_coverage` 是宿主从行里算出的真实覆盖范围，不是请求区间，也不是 `captured_at`；没有时间列时工具会回 `format: "none"`，必须原样保留，不得猜一个时间、不得拿 `captured_at` 冒充。
 - 载荷中不得出现原始数据行、内部数据源键名或文件绝对路径。
 - 主 Agent 收到后把 DatasetRef 记入委派清单，后续引用一律原样转达 `artifact_ref`，
   不自行改写、不自行拼路径。

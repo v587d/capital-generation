@@ -6,6 +6,7 @@ import { isLikelyIndex, normalizeSecurityCodes, parseSecurityCode, requireTencen
 // capabilities and K-line/tick orchestration. Two throttles = no throttle.
 import {
   QUOTE_URL,
+  aShareQuoteTime,
   fetchOffshoreIndexQuotes,
   fetchOffshoreQuotes,
   isRecord,
@@ -63,6 +64,7 @@ const quoteOutput = {
       limit_down: { oneOf: [{ type: 'number' }, { type: 'null' }] },
       vol_ratio: { oneOf: [{ type: 'number' }, { type: 'null' }] },
       pe_static: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+      quote_time: { type: 'string', description: '交易所当地时间（北京时间），不是抓取时刻' },
       is_stale: { type: 'boolean' },
       stale_reason: { oneOf: [{ type: 'string' }, { type: 'null' }] },
     },
@@ -204,6 +206,8 @@ function parseQuoteRows(text: string, requested: Map<string, SecurityCode>): Jso
     if (!code) continue
     const values = match[3].split('~')
     if (values.length < 53) throw sourceError(`Tencent quote ${symbol} returned ${values.length} fields, expected at least 53`, 'tencent_invalid_response')
+    const quoteTime = aShareQuoteTime(values[30])
+    if (quoteTime === null) throw sourceError(`Tencent quote ${symbol} has an unreadable timestamp ${JSON.stringify(values[30] ?? '')}`, 'tencent_invalid_response')
     const value = (index: number): number | null => numberOrNull(values[index])
     const row: JsonRecord = {
       code: code.canonical,
@@ -227,6 +231,7 @@ function parseQuoteRows(text: string, requested: Map<string, SecurityCode>): Jso
       limit_down: value(48),
       vol_ratio: value(49),
       pe_static: value(52),
+      quote_time: quoteTime,
     }
     const stale = row.amount_wan === 0 && row.price !== null && row.price === row.last_close
     row.is_stale = stale
@@ -750,7 +755,7 @@ export function createTencentSources(): DataSource[] {
       cacheMaxAgeMs: 60_000,
       name: 'get_tencent_quote',
       summary: '腾讯实时行情、估值、涨跌停和 ETF 快照',
-      description: '批量获取 SH/SZ 股票、指数或 ETF 的腾讯实时快照。输入 codes 为完整证券代码数组（如 600519.SH、000001.SZ、000001.SH、510300.SH），返回保留腾讯字段语义的行数组：价格、涨跌、成交额（万元）、换手率、PE/PB、市值和涨跌停价。44 为流通市值、45 为总市值；43 为振幅，不是 PB。腾讯返回成交额为 0 且最新价等于昨收时标记 is_stale=true，不把它当作当日有效成交。BJ 代码当前明确拒绝。',
+      description: '批量获取 SH/SZ 股票、指数或 ETF 的腾讯实时快照。输入 codes 为完整证券代码数组（如 600519.SH、000001.SZ、000001.SH、510300.SH），返回保留腾讯字段语义的行数组：价格、涨跌、成交额（万元）、换手率、PE/PB、市值和涨跌停价。quote_time 是交易所当地时间（北京时间）的最后成交时刻，不是抓取时刻；判断“数据是不是今天”要用它，不要用 captured_at 代替。44 为流通市值、45 为总市值；43 为振幅，不是 PB。腾讯返回成交额为 0 且最新价等于昨收时标记 is_stale=true，不把它当作当日有效成交。BJ 代码当前明确拒绝。',
       inputSchema: { type: 'object', properties: { codes: { type: 'array', minItems: 1, maxItems: 50, items: { type: 'string', description: '完整证券代码，如 600519.SH' } } }, required: ['codes'], additionalProperties: false },
       outputSchema: quoteOutput,
       paginated: false,

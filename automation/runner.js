@@ -6,6 +6,7 @@
 import { mkdir } from 'node:fs/promises'
 import { CANCEL_GRACE_MS, MAX_ERRORS_PER_RUN, QUIET_SETTLE_MS, SETTLED_RUN_STATUSES } from './defaults.js'
 import { sanitizeMessage } from './redact.js'
+import { localPartsAt } from './time.js'
 
 const PRESET_ID = 'capital-generation'
 const POLICY_ID = 'automation-v1'
@@ -39,11 +40,28 @@ function iso(now) {
 }
 
 function shortRunId(id) {
-  return String(id).replace(/^run_/, '').slice(-8) || 'unknown'
+  return String(id).replace(/^run_/, '').slice(0, 8) || 'unknown'
 }
 
-export function sessionTitleOf(task, profileName, runId) {
-  const raw = `[CapGen 投研自动化·${profileName}] ${task.title}·${shortRunId(runId)}`
+function pad2(value) {
+  return String(value).padStart(2, '0')
+}
+
+/**
+ * Session title is `<mm-dd> <task title> <run id prefix>` in the trigger's zone, so the
+ * sidebar reads chronologically without repeating the automation profile name.
+ */
+export function sessionTitleOf(task, runId, at = Date.now()) {
+  const instant = typeof at === 'string' ? Date.parse(at) : Number(at)
+  const time = Number.isFinite(instant) ? instant : Date.now()
+  let monthDay
+  try {
+    const { month, day } = localPartsAt(time, task.trigger.timezone)
+    monthDay = `${pad2(month)}-${pad2(day)}`
+  } catch {
+    monthDay = '00-00'
+  }
+  const raw = `${monthDay} ${task.title} ${shortRunId(runId)}`
   return raw.length > 200 ? `${raw.slice(0, 197)}...` : raw
 }
 
@@ -53,7 +71,7 @@ function promptData(value) {
 }
 
 export function buildRunPrompt({ task, run, trigger, profileName, now }) {
-  const local = new Intl.DateTimeFormat('zh-CN', {
+  const formatLocal = (instant) => new Intl.DateTimeFormat('zh-CN', {
     timeZone: task.trigger.timezone,
     year: 'numeric',
     month: '2-digit',
@@ -61,7 +79,9 @@ export function buildRunPrompt({ task, run, trigger, profileName, now }) {
     hour: '2-digit',
     minute: '2-digit',
     hourCycle: 'h23',
-  }).format(new Date(now))
+  }).format(new Date(instant))
+  const local = formatLocal(now)
+  const deadline = formatLocal(Number(now) + task.limits.runTimeoutMinutes * 60_000)
   const reason = trigger === 'manual' ? '手动运行' : '定时触发'
   return `【CapGen 投研自动化】
 运行: ${run.id}
@@ -69,6 +89,7 @@ export function buildRunPrompt({ task, run, trigger, profileName, now }) {
 触发: ${reason}
 occurrence: ${run.occurrenceKey}
 ${run.scheduledFor === undefined ? '' : `计划时刻: ${run.scheduledFor}\n`}当前时间: ${local}（${task.trigger.timezone}）
+最晚结束: ${deadline}（${task.trigger.timezone}）
 profile: ${promptData(profileName)}
 任务分类: ${task.category}
 无人值守策略: ${POLICY_ID}
@@ -88,6 +109,7 @@ ${task.instruction}
 - 这是无人值守运行：禁止 ask_user_question、禁止等待审批、禁止写文件或提权。
 - 使用当前角色可见的工具面；结构化数据交 data_collector，网页材料交 web_retriever，分析交 data_junior。
 - 墙钟预算覆盖整棵运行子树；预算过半后优先完成主交付，剩余时间再补图表/可选材料，不要为可选图表或对账耗尽预算。
+- 预算判断只以宿主时钟为准：本 prompt 的「当前时间」是起点，「最晚结束」是硬截止；不要用步数、等待次数或工具耗时估算。每次决定「继续等待 / 收口 / 改用网页口径」前，先调用 get_local_datetime，用当前时间与最晚结束计算剩余时间；剩余时间足够就继续等数据，不够才收口。
 - 等待子 Agent 用 wait_for_agents；不要用 bash sleep 代替等待，它会阻塞回传处理，也不会让子 Agent 更快收敛。
 - 最终答复必须自足：结论、证据与来源、局限与风险；不要写“见上”“已完成”。
 - 缺少关键输入时，采用最保守的可核查口径继续，并在开头写明「需要用户确认」及具体缺口。`
@@ -777,7 +799,7 @@ export function createRunRunner(options) {
         await stopEntryAgent(entry, controller)
         return
       }
-      const title = sessionTitleOf(task, profile.displayName, run.id)
+      const title = sessionTitleOf(task, run.id, run.queuedAt)
       const renamed = controller.rename === undefined
         ? undefined
         : await controller.rename({ sessionId: created.sessionId, title }).catch(() => undefined)

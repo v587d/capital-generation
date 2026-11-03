@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createWorkspaceCatalog } from '../automation/workspaces.js'
+import { createWorkspaceCatalog, defaultWorkspacePath, defaultWorkspaceTitle, workspaceDisplayPath } from '../automation/workspaces.js'
 import { fakeContext } from './automation-harness.mjs'
 
 function registry() {
@@ -36,11 +36,18 @@ function registry() {
 
 async function harness(options = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'capgen-workspaces-'))
-  const runDir = join(dir, 'automation')
+  const runDir = options.runDir ?? join(dir, 'automation')
   const reg = options.registry ?? registry()
   const persistence = options.persistence ?? { list: async () => [] }
   const { ctx } = fakeContext({ workspaceRegistry: reg, sessionPersistence: persistence })
-  const catalog = createWorkspaceCatalog({ ctx, displayName: 'web', runDir, logger: { warn() {} } })
+  const catalog = createWorkspaceCatalog({
+    ctx,
+    displayName: 'web',
+    runDir,
+    displayHome: options.displayHome ?? dir,
+    getDefaultWorkspaceId: options.getDefaultWorkspaceId,
+    logger: { warn() {} },
+  })
   return { dir, runDir, reg, ctx, catalog, cleanup: () => rm(dir, { recursive: true, force: true }) }
 }
 
@@ -111,4 +118,58 @@ test('workspaceRegistry 不可用时退回受控目录，不阻断运行与页�
   const catalog = createWorkspaceCatalog({ ctx, displayName: 'web', runDir: '/tmp/capgen-no-registry', logger: { warn() {} } })
   assert.deepEqual(await catalog.list(), [])
   assert.deepEqual(await catalog.resolve(''), { workspaceId: undefined, path: '/tmp/capgen-no-registry' })
+})
+
+test('专属默认工作区目录是 <dsh home>/CapGen-automation-workspace/<profile>，页面显示仍为 ~', () => {
+  const home = join(tmpdir(), 'capgen-home')
+  assert.equal(
+    defaultWorkspacePath({ home, name: 'web' }),
+    join(home, 'CapGen-automation-workspace', 'web'),
+    '默认目录名与 profile 名分开：改显示名不会再改路径',
+  )
+  assert.equal(defaultWorkspaceTitle('web'), 'CapGen 投研自动化（web）')
+  assert.equal(
+    workspaceDisplayPath(join(home, 'CapGen-automation-workspace', 'web'), home),
+    '~/CapGen-automation-workspace/web',
+  )
+  assert.equal(workspaceDisplayPath('/srv/research', '/home/shawn'), '/srv/research', '家目录外的路径仍写绝对路径')
+})
+
+test('设置里的统一默认工作区优先；目录不可用时回退专属默认工作区', async () => {
+  const { dir, runDir, reg, ctx, catalog, cleanup } = await harness()
+  try {
+    const other = await reg.create(join(dir, 'project'), '研究项目')
+    const configured = createWorkspaceCatalog({
+      ctx,
+      displayName: 'web',
+      runDir,
+      displayHome: dir,
+      getDefaultWorkspaceId: () => other.id,
+      logger: { warn() {} },
+    })
+    const details = await configured.details()
+    const dedicated = details.workspaces.find((item) => item.dedicated === true)
+    const preferred = details.workspaces.find((item) => item.id === other.id)
+    assert.ok(dedicated, '专属默认工作区仍然注册并列出，作为回退项')
+    assert.equal(preferred.default, true, '设置里选中的工作区承担默认标记')
+    assert.equal(dedicated.default, false)
+    assert.equal(preferred.displayPath, '~/project', '设置卡片显示家目录缩写')
+    assert.deepEqual(await configured.resolve(''), { workspaceId: other.id, path: other.path })
+
+    other.status = async () => 'missing-dir'
+    const fallback = await configured.resolve('')
+    assert.equal(fallback.workspaceId, dedicated.id, '被移除/不可用的目录不能阻断运行')
+    assert.equal(fallback.path, runDir)
+
+    const missing = createWorkspaceCatalog({
+      ctx,
+      displayName: 'web',
+      runDir,
+      getDefaultWorkspaceId: () => 'ws_missing',
+      logger: { warn() {} },
+    })
+    assert.equal((await missing.resolve('')).workspaceId, dedicated.id, '未知 id 回退到专属默认工作区')
+  } finally {
+    await cleanup()
+  }
 })

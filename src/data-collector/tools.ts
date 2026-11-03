@@ -64,6 +64,17 @@ const datasetRefSchema = (): object => jsonObject({
   captured_at: { type: 'integer' },
   retention_until: { type: 'integer' },
   params_digest: { type: 'string' },
+  time_coverage: {
+    type: 'object',
+    properties: {
+      column: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+      from: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+      to: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+      format: { type: 'string', enum: ['epoch_ms', 'date_string', 'datetime_string', 'none'] },
+    },
+    required: ['column', 'from', 'to', 'format'],
+    additionalProperties: false,
+  },
 }, ['dataset_id', 'task_id', 'session_id', 'artifact_ref', 'format', 'capability', 'source_label', 'schema', 'row_count', 'captured_at', 'retention_until', 'params_digest'])
 
 function render(_args: unknown, value: unknown): Array<{ type: 'text'; text: string }> {
@@ -276,5 +287,5 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
 export const DATASET_REF_FIELDS = [
   'dataset_id', 'task_id', 'session_id', 'artifact_ref', 'format',
   'capability', 'source_label', 'schema', 'row_count', 'captured_at',
-  'retention_until', 'params_digest',
+  'retention_until', 'params_digest', 'time_coverage',
 ] as const satisfies readonly (keyof DatasetRef)[]

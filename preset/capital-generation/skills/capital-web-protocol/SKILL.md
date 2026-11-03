@@ -1,6 +1,6 @@
 ---
 name: capital-web-protocol
-description: Use in Capital mode when retrieving external material — the anysearch / wind_docs source boundary and the rule to pick a source before searching, the search-convergence heuristic and how to read provider_tally / recent_retrievals, the three mandatory Wind query elements, the wind-to-anysearch fallback, and the automatic local-fetch fallback with its via / local-http provenance labeling. Volume 1 of the Capital retrieval protocol; how you label what you return lives in capital-web-evidence.
+description: Use in Capital mode when retrieving external material — the announcement / anysearch / wind_docs source boundary and the rule to pick a source before searching, the search-convergence heuristic and how to read provider_tally / recent_retrievals, the three mandatory Wind query elements, the wind-to-anysearch fallback, and the automatic local-fetch fallback with its via / local-http provenance labeling. Volume 1 of the Capital retrieval protocol; how you label what you return lives in capital-web-evidence.
 ---
 
 # Capital 检索协议 · 第一册：来源边界与收敛
@@ -9,7 +9,7 @@ description: Use in Capital mode when retrieving external material — the anyse
 > 任务同时命中且该方法在本角色目录中可用时，按名加载对应 Skill（如 `10k-digest` / `earnings-call-analysis` / `fact-check`）；
 > 协议与方法正交：不要用本协议替代方法，也不要用方法改写本协议的来源纪律。
 `web_retriever` 子 Agent 的工作细则；主 Agent 呈现检索结论时同样按 `capital-web-evidence` §5 的回传格式保留来源标注。
-persona 只保留硬规则（先定来源再动手、只用这十四个工具、一次一个 URL、无来源不作证据）；
+persona 只保留硬规则（先定来源再动手、只用这十六个工具、一次一个 URL、无来源不作证据）；
 本文件是其余细节。
 
 本协议共两册，§编号跨册连续：**本册**管"去哪取、怎么调"（§1 来源边界 / §2 收敛 / §3 Wind 三要素 /
@@ -17,15 +17,16 @@ persona 只保留硬规则（先定来源再动手、只用这十四个工具、
 §7 抓取与失败处置 / §8 文档解析 `ocr`）。要给出编号证据、判定 `verified_official`、处理抓取失败或
 解析 PDF，加载 `capital-web-evidence`。
 
-## 1. 来源边界（两个 search_engine_provider + 九个具名来源工具 + 文档解析）
+## 1. 来源边界（两个搜索 provider + 十一个具名来源工具 + 文档解析）
 
 **三类工作面，别混**：`search` / `fetch` 是**检索**（先发现候选，再按 URL 取正文）；
-下面九个工具是**来源查询**（具名来源 + 业务参数 → 确定、有序、可翻页、同参可复现的结果集）；
+下面十一个工具是**来源查询**（具名来源 + 业务参数 → 确定、有序、可翻页、同参可复现的结果集）；
 `ocr` 是**文档解析**（PDF / 图片 → markdown 正文，见 `capital-web-evidence` §8——它是这批工具里**唯一要 token** 的）。
 
 | 来源 | 工具 | 性格 | 用途 |
 |---|---|---|---|
-| `wind_docs` | `wind_docs_announcements` / `wind_docs_news` | 精准（`public_document`） | 官方正式文件（公告/年报/招股书）与权威新闻的**默认第一选择** |
+| `eastmoney 公告` | `eastmoney_announcements` / `eastmoney_announcement_body` | 公告清单（零 key，A/H/US） | 公司公告列表与分页正文；**公告清单默认第一选择**，权威原文再走巨潮/发行人 PDF |
+| `wind_docs` | `wind_docs_announcements` / `wind_docs_news` | 语义深研（`public_document`，**计费**） | 按语义找公告/新闻段落；**不是公告清单的可靠来源**（实测会漏最新、混入关联方） |
 | `anysearch` | `anysearch_search` / `web_retriever_fetch` | 广度 | 候选探索与线索、官方页面归属核验、Wind 覆盖之外的内容（监管政策原文、境外或非上市主体、市场传闻） |
 | `cls` | `cls_telegraph` | 来源查询（媒体） | 财联社 7×24 全市场快讯 |
 | `wscn` | `wscn_lives` | 来源查询（媒体） | 华尔街见闻 7×24 快讯，按 `channel` + `cursor` 翻页 |
@@ -39,8 +40,14 @@ persona 只保留硬规则（先定来源再动手、只用这十四个工具、
 不同风控面，一条不可用另一条仍在——但东财会把它聚合到的财联社内容一并返回，**同一事件可能重复，
 按标题去重**，不要当成两条独立证据。两个研报来源（`eastmoney_reports` / `sina_reports`）同理。
 
-**三个来源有硬边界，不要越过**：
+**来源边界，不要越过**：
 
+- **公告清单先 `eastmoney_announcements`，不是 `wind_docs`**：实测同一公司、同一时间窗，Wind 的
+  自然语言检索会漏掉最新公告、把关联方/别家公司的文件排进来；东财列表是发行人限定的完整列表。
+  东财列表只给标题/时间/`art_code`/链接，正文用 `eastmoney_announcement_body` 按 `page` + `offset`
+  读完（每页约 5,000 字符，单次最多 4,000 字符）。
+- **东财公告是转载**：权威原文用巨潮 PDF / 发行人页面；引用东财正文时标「公告全文（东财转载）」。
+  美股公告正文常为空（只有 `pdf_url`/附件），交 `ocr`，不得把标题当正文；港股正文是繁体原文。
 - `eastmoney_reports` / `sina_reports` 的列表**不含正文**（只有标题 / 机构 / 研究员 / 日期 / 评级）。
   东财的每条还直接给出 `pdf_url`（该篇研报 PDF 直链）与 `attach_pages`——**这不是死路：把那条
   `pdf_url` 原样交 `ocr` 解析**（`capital-web-evidence` §8），不要自己去拼或改链接。`ocr` 也拿不到时如实说明这个
@@ -49,10 +56,11 @@ persona 只保留硬规则（先定来源再动手、只用这十四个工具、
   `institutions`（预测机构数）< 3 时参考价值有限，回传时必须把机构数一并向用户披露。
 - `sina_reports` **不含评级与目标价**；需要这些改用 `eastmoney_reports`。
 
-- **先定来源再动手**：不要等 anysearch 空转后才想起 wind_docs；拿不准时先试 `wind_docs`，
-  失败再降级 `anysearch`，不要反过来。
-- `verified_official` 只能来自 `web_retriever_fetch` 的官方域名核验路径。九个具名来源都是
-  **媒体或互动平台**，其内容只能作旁证（媒体转述 / 投资者问答），**不得标 `verified_official`**。
+- **先定来源再动手**：公告清单先 `eastmoney_announcements`，不要等 anysearch 空转后才想起；
+  权威原文走巨潮 PDF / 官网 fetch；需要按语义找一段话、或东财覆盖不到时才用 `wind_docs`（计费）。
+- `verified_official` 只能来自 `web_retriever_fetch` 的官方域名核验路径。九个媒体/互动/研报来源
+  （快讯、新闻、研报、问答）只能作旁证；东财公告是**转载的官方披露**，同样不得标
+  `verified_official`，引用时标「公告全文（东财转载）」并尽量给巨潮/发行人 PDF。
 - 不调用官方名称为 `web_search` 或 `web_fetch` 的其他工具。
 
 ### 1.1 来源查询的纪律（与检索不同）
@@ -76,9 +84,13 @@ persona 只保留硬规则（先定来源再动手、只用这十四个工具、
   **不要把"这次只回了 17 条"读成"上游一共只有 17 条"**。
 - **代码写法随意**：`600519` / `SH600519` / `600519.SH` 归一化成同一个查询（上游只认纯 6 位），
   格式写错不会静默变成空结果。
+- **公告分页与盘前窗口**：`eastmoney_announcements` 按 `display_time`（北京时间）过滤，整张自选股
+  一次批量传 `codes`（≤50），不要逐只调用；翻页把回执的 `next_cursor` 原样传回 `cursor`；盘前公告的 `start_date` 取上一交易日（收盘后披露的公告
+  `display_time` 仍是当日），`end_date` 取运行日，只查运行日会漏掉昨晚盘后披露。`eastmoney_announcement_body` 先按 `next_offset` 读完本页，
+  再按 `next_page` 翻下一页。公告一次只查一个市场（A/H/US），混合代码会报错，分开调用。
 - **`sseinfo_qa` 的 `code=TIMEOUT` 是上游慢**（按公司定位要串行翻 10+ 页），不是这一轮被取消：
   稍后重试，或先用不带 `code` 的调用取全市场问答再按代码筛。
-- 这九个工具的失败是**工具错误**（`isError`），不是"正常返回的失败信封"；`code` 取值见回执
+- 这十一个工具的失败是**工具错误**（`isError`），不是"正常返回的失败信封"；`code` 取值见回执
   （`UPSTREAM` 上游报错 / `INVALID_RESPONSE` 上游结构变了 / `NOT_FOUND` 标的不存在 /
   `NETWORK` 网络失败 / `TIMEOUT` 上游慢到超过总时限）。**结构变更类错误不要重试**，如实回传。
 
@@ -105,9 +117,9 @@ Wind 结构化查询同样是**花积分的**：先看 `data_collector` 的免�
   与 `provider_tally`（各来源累计次数）：接近 5 次就该收敛收手。
 - **偶尔超过 5 次不是错误**，要避免的是无收益的重复搜索。
 
-## 3. Wind 查询要素
+## 3. Wind 查询要素（仅深研）
 
-`wind_docs` 的 `query` 必须一次带齐三要素：
+公告清单不要用本节，先走 `eastmoney_announcements`。只有确实用 `wind_docs` 时，`query` 才必须一次带齐三要素：
 
 1. 公司实体（股票代码或公司全称，以主 Agent 委派消息为准）；
 2. **文件类型或主题**；
@@ -122,9 +134,12 @@ Wind 结构化查询同样是**花积分的**：先看 `data_collector` 的免�
 - `wind_docs` 返回内容视为"来源：万得 Wind 金融数据服务"的官方文档库检索结果，标注来源与
   时间口径后即可作为证据使用，不必再走官网核验。
 - 同一份文件不得两边都取原文；两边都取必须是明说的交叉核验，且一份对一份。
+- **公告清单失败降级**：`eastmoney_announcements` 失败先转巨潮（`cninfo_irm` 只覆盖问答，
+  公告正文要巨潮 PDF/官网 fetch），再转 `anysearch_search` 发现线索并逐个 `web_retriever_fetch`
+  官方披露页；回传注明实际路径。
 - **Wind 失败降级**：`wind_docs` 返回 AUTH / RATE_LIMIT 等错误信封时**不得重试 wind**，
-  直接转 `anysearch_search` 发现公告线索并逐个 `web_retriever_fetch` 官方披露页，
-  回传注明"Wind 不可用/未覆盖，来源为官网抓取"。
+  直接转 `eastmoney_announcements`/`anysearch_search` 发现公告线索并逐个 `web_retriever_fetch`
+  官方披露页，回传注明"Wind 不可用/未覆盖，来源为官网抓取"。
 - 反向 fallback：anysearch 多轮探索仍找不到权威原文而 Wind 可用时，转 `wind_docs` 少走弯路。
 - 换 provider 前先看 `recent_retrievals` / `provider_tally`：该诉求是否已被回答、已有材料是否
   覆盖、目标来源还剩多少余量；切换原因写进回传。检索收敛法则按 provider 各自计。

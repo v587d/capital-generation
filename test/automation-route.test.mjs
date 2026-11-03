@@ -163,6 +163,70 @@ test('任务详情按 taskId 先过滤再分页，不被全局最新运行记录
   assert.deepEqual(routed.json().runs.map((run) => run.id), ['run_a_old'])
 })
 
+test('运行历史按浏览器时区聚合，按日返回成功 / 失败 / 进行中', async () => {
+  const { handler, store } = harness()
+  const succeeded = await store.createRun({
+    taskId: 'task_history',
+    taskTitle: '历史',
+    trigger: 'manual',
+    occurrenceKey: 'history-a',
+    status: 'succeeded',
+  })
+  const failed = await store.createRun({
+    taskId: 'task_history',
+    taskTitle: '历史',
+    trigger: 'manual',
+    occurrenceKey: 'history-b',
+    status: 'failed',
+  })
+  // 2026-10-26 23:30 in Shanghai, still 2026-10-26 in UTC.
+  await store.updateRun(succeeded.id, { queuedAt: '2026-10-26T15:30:00.000Z' })
+  // 2026-10-27 00:30 in Shanghai, 2026-10-26 in UTC.
+  await store.updateRun(failed.id, { queuedAt: '2026-10-26T16:30:00.000Z' })
+
+  const shanghai = await call(handler, { method: 'GET', url: '/capital-automation/runs/history?days=2&tz=Asia/Shanghai' })
+  assert.equal(shanghai.statusCode, 200)
+  const shanghaiDays = shanghai.json().days
+  assert.deepEqual(shanghaiDays.map((day) => day.date), ['2026-10-26', '2026-10-27'])
+  assert.deepEqual(shanghaiDays.map((day) => day.total), [1, 1])
+  assert.deepEqual(shanghaiDays.map((day) => day.success), [1, 0])
+  assert.deepEqual(shanghaiDays.map((day) => day.failure), [0, 1])
+  assert.equal(shanghai.json().total, 2)
+  assert.equal(shanghai.json().success, 1)
+  assert.equal(shanghai.json().failure, 1)
+
+  const utc = await call(handler, { method: 'GET', url: '/capital-automation/runs/history?days=2&tz=UTC' })
+  assert.deepEqual(utc.json().days.map((day) => day.total), [2, 0], '同一天的 UTC 与上海日期不能混用')
+
+  const active = await store.createRun({
+    taskId: 'task_history',
+    taskTitle: '历史',
+    trigger: 'manual',
+    occurrenceKey: 'history-c',
+    status: 'running',
+  })
+  const withActive = await call(handler, { method: 'GET', url: '/capital-automation/runs/history?days=2&tz=Asia/Shanghai' })
+  assert.equal(withActive.json().days[1].active, 1)
+  assert.equal(withActive.json().total, 3)
+  assert.equal(withActive.json().days[1].total, 2)
+  await store.updateRun(active.id, { status: 'canceled', finishedAt: '2026-10-27T00:01:00.000Z' })
+})
+
+test('运行历史拒绝非法 days / tz，且 query 仍走白名单', async () => {
+  const { handler } = harness()
+  for (const url of [
+    '/capital-automation/runs/history?days=0',
+    '/capital-automation/runs/history?days=372',
+    '/capital-automation/runs/history?days=abc',
+    '/capital-automation/runs/history?tz=Mars%2FBase',
+    '/capital-automation/runs/history?unknown=x',
+  ]) {
+    const response = await call(handler, { method: 'GET', url })
+    assert.equal(response.statusCode, 400, url)
+    assert.equal(response.json().code, 'invalid_query', url)
+  }
+})
+
 test('query 参数拒绝未知键、重复键、超长值和非法分页值', async () => {
   const { handler } = harness()
   for (const url of [
@@ -316,6 +380,28 @@ test('meta 暴露当前 profile、scheduler、工作区列表与 execution polic
   assert.equal(meta.execution.policy, 'automation-v1')
   assert.deepEqual(meta.execution.cadences, ['daily', 'weekly', 'monthly', 'once'])
   assert.equal(JSON.stringify(meta).includes('/home/'), false)
+})
+
+test('/workspaces 只给设置卡片读路径与专属默认标记，meta 仍不暴露绝对路径', async () => {
+  const workspaces = {
+    list: async () => [],
+    validate: async () => {},
+    details: async () => ({
+      workspaces: [
+        { id: 'ws_default', title: 'CapGen 投研自动化（web）', path: '/home/shawn/.dsh/CapGen-automation-workspace/web', displayPath: '~/.dsh/CapGen-automation-workspace/web', default: true, dedicated: true },
+        { id: 'ws_project', title: '研究项目', path: '/home/shawn/project', displayPath: '~/project', default: false, dedicated: false },
+      ],
+      defaultWorkspaceId: 'ws_default',
+    }),
+  }
+  const { handler } = harness({ workspaces })
+  const res = await call(handler, { method: 'GET', url: '/capital-automation/workspaces' })
+  assert.equal(res.statusCode, 200)
+  assert.equal(res.headers['cache-control'], 'no-store')
+  const body = res.json()
+  assert.equal(body.defaultWorkspaceId, 'ws_default')
+  assert.equal(body.workspaces[1].displayPath, '~/project')
+  assert.equal(body.workspaces[0].dedicated, true)
 })
 
 test('保存任务时工作区 id 走服务端 allowlist；未知 id 拒绝，空值表示默认工作区', async () => {

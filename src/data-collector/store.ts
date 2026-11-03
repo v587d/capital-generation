@@ -1,5 +1,5 @@
 import { DatasetQueryError, executeJsonRowsQuery, type QueryResult, type QuerySpec } from './query.js'
-import { defaultAxisWindows, isoDateFromEpoch, probeTimeAxis, readAxisDates } from './time-axis.js'
+import { defaultAxisWindows, isoDateFromEpoch, probeTimeAxis, readAxisDates, type DatasetTimeCoverage } from './time-axis.js'
 
 /**
  * Workspace-local Dataset/profile store: immutable artifacts, host-written only. Agents receive
@@ -57,6 +57,8 @@ export interface DatasetRef {
   captured_at: number
   retention_until: number
   params_digest: string
+  /** Host-computed from the stored rows; omitted only by manifests written before this field existed. */
+  time_coverage?: DatasetTimeCoverage
 }
 
 type StoredDatasetManifest = DatasetRef & {
@@ -357,6 +359,8 @@ export interface SaveDatasetInput {
   data: unknown
   /** Host-only row key for envelope-shaped json_rows data. */
   row_key?: string
+  /** Computed by the Hub from the same rows it is about to persist. */
+  time_coverage?: DatasetTimeCoverage
   signal?: AbortSignal
 }
 
@@ -477,6 +481,7 @@ export class WorkspaceDatasetStore {
       captured_at: capturedAt,
       retention_until: capturedAt + this.retentionMs,
       params_digest: input.params_digest,
+      ...(input.time_coverage === undefined ? {} : { time_coverage: input.time_coverage }),
     }
 
     const storedManifest: StoredDatasetManifest = {
@@ -1442,6 +1447,16 @@ function profileQuantile(sorted: number[], probability: number): number {
   return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower)
 }
 
+function validTimeCoverage(value: unknown): value is DatasetTimeCoverage {
+  if (!isRecord(value)) return false
+  if (Object.keys(value).some((key) => !['column', 'from', 'to', 'format'].includes(key))) return false
+  if (!['epoch_ms', 'date_string', 'datetime_string', 'none'].includes(String(value.format))) return false
+  if (value.format === 'none') return value.column === null && value.from === null && value.to === null
+  return typeof value.column === 'string' && value.column.length > 0 && value.column.length <= 128
+    && typeof value.from === 'string' && value.from.length > 0
+    && typeof value.to === 'string' && value.to.length > 0
+}
+
 function validateStoredDatasetManifest(value: unknown, datasetId: string): StoredDatasetManifest | undefined {
   if (!isRecord(value)) return undefined
   if (value.dataset_id !== datasetId || !DATASET_ID_PATTERN.test(datasetId)) return undefined
@@ -1456,6 +1471,7 @@ function validateStoredDatasetManifest(value: unknown, datasetId: string): Store
   if (!Number.isSafeInteger(value.captured_at) || !Number.isSafeInteger(value.retention_until)) return undefined
   if (typeof value.params_digest !== 'string' || value.params_digest.length === 0) return undefined
   if (value.row_key !== undefined && (typeof value.row_key !== 'string' || value.row_key.length === 0 || value.row_key.length > 128)) return undefined
+  if (value.time_coverage !== undefined && !validTimeCoverage(value.time_coverage)) return undefined
   const ref: DatasetRef = {
     dataset_id: value.dataset_id as string,
     task_id: value.task_id as string | null,
@@ -1469,6 +1485,7 @@ function validateStoredDatasetManifest(value: unknown, datasetId: string): Store
     captured_at: value.captured_at as number,
     retention_until: value.retention_until as number,
     params_digest: value.params_digest as string,
+    ...(value.time_coverage === undefined ? {} : { time_coverage: value.time_coverage }),
   }
   return {
     ...ref,

@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { DataTimeContract } from '../time/tools.js'
+import { summarizeTimeCoverage } from './time-axis.js'
 import type { DatasetRef, SaveDatasetInput, SessionLike } from './store.js'
 
 /** Normalize an internal data_key token; data_key is host-only and never model-visible. */
@@ -420,6 +421,9 @@ export class DataCollectorHub {
           throw new Error(`data source ${source.schema.name} returned data incompatible with its output contract`)
         }
         const { format, rowCount, rowKey } = shapeOf(output.data, source.schema.rowShape)
+        const rows = Array.isArray(output.data)
+          ? output.data
+          : (rowKey === undefined ? [] : rowsAtPath(output.data, rowKey) ?? [])
         const ref = await this.store.save({
           session: item.request.session,
           capability: item.request.capability,
@@ -431,6 +435,7 @@ export class DataCollectorHub {
           row_count: rowCount,
           data: output.data,
           row_key: rowKey,
+          ...(format === 'json_rows' ? { time_coverage: summarizeTimeCoverage(rows) } : {}),
         })
         for (const waiter of [...item.waiters]) this.settleWaiter(item, waiter, { kind: 'ok', ref })
       } finally {

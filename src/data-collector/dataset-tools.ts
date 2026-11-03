@@ -193,6 +193,17 @@ const datasetRefProperties = {  dataset_id: { type: 'string' },
   captured_at: { type: 'integer' },
   retention_until: { type: 'integer' },
   params_digest: { type: 'string' },
+  time_coverage: {
+    type: 'object',
+    properties: {
+      column: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+      from: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+      to: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+      format: { type: 'string', enum: ['epoch_ms', 'date_string', 'datetime_string', 'none'] },
+    },
+    required: ['column', 'from', 'to', 'format'],
+    additionalProperties: false,
+  },
 }
 
 const datasetRefWithAccessSchema = jsonObject({
@@ -344,6 +355,17 @@ const describeResultSchema = jsonObject({
   captured_at: { type: 'integer' },
   retention_until: { type: 'integer' },
   params_digest: { type: 'string' },
+  time_coverage: {
+    type: 'object',
+    properties: {
+      column: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+      from: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+      to: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+      format: { type: 'string', enum: ['epoch_ms', 'date_string', 'datetime_string', 'none'] },
+    },
+    required: ['column', 'from', 'to', 'format'],
+    additionalProperties: false,
+  },
   query_access: jsonObject({
     readable: { type: 'boolean' },
     shape: { type: 'string', enum: ['array', 'envelope_item', 'document', 'none'] },

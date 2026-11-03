@@ -29,4 +29,4 @@ export interface DataCollectorDiagnostics {
 }
 export declare function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, diagnostics?: DataCollectorDiagnostics): void;
 /** Model-visible DatasetRef field whitelist (tests and host assertions). */
-export declare const DATASET_REF_FIELDS: readonly ["dataset_id", "task_id", "session_id", "artifact_ref", "format", "capability", "source_label", "schema", "row_count", "captured_at", "retention_until", "params_digest"];
+export declare const DATASET_REF_FIELDS: readonly ["dataset_id", "task_id", "session_id", "artifact_ref", "format", "capability", "source_label", "schema", "row_count", "captured_at", "retention_until", "params_digest", "time_coverage"];

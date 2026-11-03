@@ -44,10 +44,10 @@ test('ROOT_AGENT_DENIED_TOOLS：2026-10-15 用户决策「开 read、同时保�
   assert.ok(!ROOT_AGENT_DENIED_TOOLS.includes('read_image'), 'read_image 不点名：条件注册 + 只读')
 })
 
-test('RETRIEVAL_DENIED_TOOLS：十三个出网工具全部从根 Agent 拿掉（出网只有一个入口）', () => {
+test('RETRIEVAL_DENIED_TOOLS：十五个出网工具全部从根 Agent 拿掉（出网只有一个入口）', () => {
   // External retrieval isolation must be structural; a missing name leaves that source reachable.
-  assert.equal(RETRIEVAL_DENIED_TOOLS.length, 13, '检索面 2 + wind 2 + 具名来源 9 = 13')
-  assert.equal(new Set(RETRIEVAL_DENIED_TOOLS).size, 13, '出网名单不得有重名')
+  assert.equal(RETRIEVAL_DENIED_TOOLS.length, 15, '检索面 2 + wind 2 + 具名来源 11 = 15')
+  assert.equal(new Set(RETRIEVAL_DENIED_TOOLS).size, 15, '出网名单不得有重名')
   for (const name of RETRIEVAL_DENIED_TOOLS) {
     assert.ok(ROOT_AGENT_DENIED_TOOLS.includes(name), `主 Agent 不得看到出网工具 ${name}`)
   }

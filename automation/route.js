@@ -6,8 +6,9 @@ import { MAX_REQUEST_BODY_BYTES } from './defaults.js'
 import { AutomationError } from './service.js'
 import { SchemaError } from './schema.js'
 import { sanitizeMessage } from './redact.js'
+import { AUTOMATION_ROUTE, WORKSPACES_SUFFIX } from './contract.js'
 
-export const ROUTE_PREFIX = '/capital-automation'
+export const ROUTE_PREFIX = AUTOMATION_ROUTE
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,120}$/
 
 function send(res, status, payload, extraHeaders = {}) {
@@ -226,8 +227,14 @@ async function dispatch({ req, method, suffix, url, service, requestId }) {
     if (method === 'DELETE') return { body: await service.deleteTask(id) }
     throw new AutomationError('method_not_allowed', '只支持 GET / PATCH / DELETE。', 405)
   }
+  if (suffix === WORKSPACES_SUFFIX && method === 'GET') {
+    return { body: await service.workspaceCatalog() }
+  }
   if (suffix === '/runs' && method === 'GET') {
     return { body: await service.listRuns(queryOf(url, new Set(['limit', 'before']))) }
+  }
+  if (suffix === '/runs/history' && method === 'GET') {
+    return { body: await service.runHistory(queryOf(url, new Set(['days', 'tz']))) }
   }
   if (suffix === '/notifications' && method === 'GET') {
     return { body: await service.listNotifications(queryOf(url, new Set(['unread', 'scope']))) }
