@@ -126,6 +126,9 @@ test('盘前公告在 08:00 补晚间披露，按开盘前优先级排', () => {
     assert.match(instruction, new RegExp(kind), `盘前公告缺少「${kind}」这一类`)
   }
   assert.match(instruction, /上一交易日收盘后至运行时刻/, '盘前公告要覆盖 16:00 到开盘前的窗口')
+  assert.match(instruction, /A 股、港股、美股/, '盘前公告必须覆盖全部自选股市场，不能只做 A 股')
+  assert.match(instruction, /不得只做 A 股/, '盘前公告要明确禁止只做 A 股')
+  assert.match(instruction, /每只股票都要有结论/, '自选股逐只要给结论，不能把港股/美股标成不适用')
   assert.match(instruction, /开盘前必看/, '晚间披露要按开盘前优先级分级')
   assert.match(instruction, /只写公告/, '盘前公告不复述隔夜外盘与大盘行情')
   assert.match(instruction, /未取到/, '取不到公告要明说，不能写成没有公告')

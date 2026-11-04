@@ -1079,7 +1079,7 @@ export async function eastmoneyAnnouncements(
   const offset = Number.isSafeInteger(input.cursor) && input.cursor >= 0 ? input.cursor : 0
   const items = sorted.slice(offset, offset + input.pageSize)
   const windowOutOfRange = !reachedOlder && oldestScanned !== undefined && oldestScanned > end
-  const notes = ['东财公告是官方披露的转载；权威原文用巨潮 PDF / 发行人页面；正文用 eastmoney_announcement_body；窗口按 display_time（北京时间）过滤']
+  const notes = ['东财公告是官方披露的转载；正文/PDF 可作公告事实的权威引用（authoritative_reprint），verified_official 仍只给官方域名；正文用 eastmoney_announcement_body；窗口按 display_time（北京时间）过滤']
   if (sorted.length === 0 && !windowOutOfRange) notes.push('窗口内没有公告（合法空结果；东财列表只覆盖最近若干页）')
   if (windowOutOfRange) {
     notes.push(`窗口未被覆盖：只扫描到最近 ${scannedPages * EM_ANNOUNCEMENT_PAGE_SIZE} 条（最早 ${oldestScanned}），所请求窗口早于此；请缩小日期/代码范围，或改用巨潮 PDF`)
@@ -1107,6 +1107,7 @@ export interface AnnouncementBody {
   offset: number
   page_chars: number
   total_pages: number
+  is_ai_summary: boolean
   content: string
   next_offset?: number
   next_page?: number
@@ -1146,6 +1147,7 @@ export async function eastmoneyAnnouncementBody(
   const pdfUrl = itemUrl(data.attach_url_web ?? data.attach_url)
   const title = clip(data.notice_title)
   const noticeDate = clip(data.notice_date)
+  const aiSummary = Number(data.is_ai_summary) === 1
   const base: Omit<AnnouncementBody, 'content' | 'done'> = {
     source: 'eastmoney',
     operation: 'announcement_body',
@@ -1154,6 +1156,7 @@ export async function eastmoneyAnnouncementBody(
     offset: input.offset,
     page_chars: content.length,
     total_pages: totalPages,
+    is_ai_summary: aiSummary,
     ...(pdfUrl.length > 0 ? { pdf_url: pdfUrl } : {}),
     ...(title.length > 0 ? { title } : {}),
     ...(noticeDate.length > 0 ? { notice_date: noticeDate } : {}),
@@ -1163,7 +1166,9 @@ export async function eastmoneyAnnouncementBody(
       ...base,
       content: '',
       done: true,
-      note: '该公告正文接口没有返回文本（美股公告常见；若为 A/H 公告，可能是上游结构变更）；正文在 PDF/附件，用 ocr 解析，别把标题当正文',
+      note: `该公告正文接口没有返回文本（美股公告常见；若为 A/H 公告，可能是上游结构变更）；正文在附件：PDF 交 ocr，.html 用 web_retriever_fetch，别把标题当正文${
+        aiSummary ? '；东财标记为 AI 摘要（is_ai_summary=1），不是全文' : ''
+      }`,
     }
   }
   if (page > totalPages) {
@@ -1186,7 +1191,8 @@ export async function eastmoneyAnnouncementBody(
   const done = nextOffset === undefined && nextPage === undefined
   const notes: string[] = []
   if (totalPages > 1) notes.push(`全文共 ${totalPages} 页（每页约 5,000 字符）；用 next_offset / next_page 继续读`)
-  if (pdfUrl.length > 0) notes.push('PDF 直链在 pdf_url；权威引用请用巨潮/发行人原文')
+  if (aiSummary) notes.push('东财标记为 AI 摘要（is_ai_summary=1），不是公告全文；全文用 pdf_url + ocr')
+  if (pdfUrl.length > 0) notes.push('附件直链在 pdf_url（可能是 .html；PDF 交 ocr，HTML 用 web_retriever_fetch）；verified_official 仍只给官方域名')
   return {
     ...base,
     content: slice,

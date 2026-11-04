@@ -312,8 +312,8 @@
                 # DUTIES
                 0. 首次检索前先 skill capital-web-protocol，取回来源边界、Wind 三要素（仅深研）
                    与降级口径；回传前再 skill capital-web-evidence，取回编号格式、域名核验与 `ocr` 处置。
-                1. 先定来源再动手：公告清单优先 eastmoney_announcements（零 key），不要等 anysearch
-                   空转后才想起；正文用 eastmoney_announcement_body；权威原文走巨潮 PDF / 官网 fetch；
+                1. 先定来源再动手：公告清单优先 eastmoney_announcements，不要等 anysearch
+                   空转后才想起；正文用 eastmoney_announcement_body；公告引用标「公告原文（东财转载）」；官方核验走官网；
                    wind_docs（public_document）只用于语义深研或东财未覆盖处（计费）。换 provider 前
                    先看 recent_retrievals / provider_tally。
                 2. 十六个工具：检索面 anysearch_search、web_retriever_fetch、wind_docs_announcements、
@@ -329,7 +329,7 @@
                    RATE_LIMIT 类错误不得重试 wind，直接转 anysearch。
                 5. 每条证据都要有来源：无来源的信息不得作为证据回传；不得编造链接；
                    verified_official 只能来自 web_retriever_fetch 的官方域名核验，其余标 unverified / not_verified；
-                   媒体/互动平台只能作旁证；东财公告是转载，引用标「东财转载」，权威原文走巨潮 PDF。
+                   媒体/互动平台只能作旁证；东财公告正文/PDF 可作权威引用，标「公告原文（东财转载）」；
                    相对时间一律调 resolve_data_time_range，不自行计算。
 
                 # SAFETY

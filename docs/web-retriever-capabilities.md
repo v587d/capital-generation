@@ -18,8 +18,9 @@
 | **文档解析** | 「这份 PDF 的正文写了什么？」 | 文档 → markdown，逐页可读、可关键词定位 |
 
 1. 主 Agent 委派 `subagent_web_retriever`，只传需求与时间范围，不传原始网页。
-2. 公告清单**优先** `eastmoney_announcements`（零 key，A/H 批量，按 `display_time` 过滤），正文用
-   `eastmoney_announcement_body`；权威原文走巨潮 PDF / 官网 fetch。`wind_docs_*` 只用于语义深研
+2. 公告清单**优先** `eastmoney_announcements`（零 key，A/H/US 批量，按 `display_time` 过滤），正文用
+   `eastmoney_announcement_body`；正文/PDF 可作公告事实的权威引用（`authoritative_reprint`），
+   官方域名核验才走巨潮 PDF / 官网 fetch。`wind_docs_*` 只用于语义深研
    或东财覆盖不到的材料（**按次计费**），不要用它列全某公司某窗口的公告——实测会漏最新、混入关联方。
    第三方媒体报道只能作旁证。
 3. 需要"某来源最新一整批"时用来源查询面，并按回执 `next_cursor` / `page` 翻到没有为止。
@@ -36,7 +37,7 @@
 
 ## 来源查询面（9）
 
-全部公开端点、**零密钥**。媒体来源（财联社 / 华尔街见闻 / 东财）只能作「媒体转述旁证」，不得标 `verified_official`。
+全部公开端点、**零密钥**。东财公告正文/PDF 是发行人披露的权威转载（`authoritative_reprint`）；东财快讯/新闻、财联社、华尔街见闻仍是「媒体转述旁证」，不得标 `verified_official`。
 
 | 工具 | 来源 | 密钥 | 主要参数 | 用途 |
 |---|---|---|---|---|
@@ -44,8 +45,8 @@
 | `wscn_lives` | 华尔街见闻 | 无 | `channel`* `limit` `cursor` | 7×24 快讯，按频道（`global-channel` 要闻 / `a-stock-channel` A 股）+ 游标翻页，`importance` 取上游 score |
 | `eastmoney_724` | 东方财富 | 无 | `limit` | 7×24 全球快讯，与上面两条三条独立来源互为备份；会聚合到财联社内容，同一事件按标题去重 |
 | `eastmoney_stock_news` | 东方财富 | 无 | `code`* `limit` | 个股新闻。上游间歇风控时只返回股民资料，本工具按「文章列表键是否存在」区分**风控**与**该股确实没有新闻** |
-| `eastmoney_announcements` | 东方财富 | 无 | `codes`* `start_date`* `end_date`* `market` `cursor` `page_size` | 公司公告列表（A/H/US，一次一个市场）：标题、披露时间、分类、`art_code`、详情页链接；按 `display_time` 过滤，翻页传 `next_cursor`。东财公告是官方披露的转载，权威原文用巨潮 PDF / 发行人页面 |
-| `eastmoney_announcement_body` | 东方财富 | 无 | `art_code`* `page` `offset` `limit` | 公告正文分页读取：上游 5,000 字符/页，单次最多 4,000 字符；给 `next_offset` / `next_page` / `done` / `pdf_url`。美股正文常为空，正文在 PDF 交 `ocr`；港股为繁体原文 |
+| `eastmoney_announcements` | 东方财富 | 无 | `codes`* `start_date`* `end_date`* `market` `cursor` `page_size` | 公司公告列表（A/H/US，一次一个市场）：标题、披露时间（`published_at` 含时分）、分类、`art_code`、详情页链接；按 `display_time` 过滤，翻页传 `next_cursor`。东财公告正文/PDF 可作公告事实的权威引用（`authoritative_reprint`）；`verified_official` 仍只给官方域名 |
+| `eastmoney_announcement_body` | 东方财富 | 无 | `art_code`* `page` `offset` `limit` | 公告正文分页读取：上游 5,000 字符/页，单次最多 4,000 字符；给 `next_offset` / `next_page` / `done` / `is_ai_summary` / `pdf_url`。`is_ai_summary=1` 只是摘要；美股正文常为空、附件可能是 `.html` 或 PDF：PDF 交 `ocr`，HTML 用 `web_retriever_fetch`；港股为繁体原文 |
 | `eastmoney_reports` | 东方财富 | 无 | `code`* `page_size` `page` | 个股研报列表：评级、评级变动、逐篇当年预测 EPS，并给出每条 `pdf_url` 直链与 `attach_pages`。列表不含摘要，正文只在 PDF 里 → 交 `ocr` |
 | `sina_reports` | 新浪 | 无 | `code` `page` | 研报第二来源（不传 `code` 取全市场最新）；只有标题 / 类型 / 日期 / 机构 / 研究员，**不含评级与目标价** |
 | `ths_eps_forecast` | 同花顺 | 无 | `code`* | 机构一致预期 EPS，逐年一行：预测机构数 / 最小 / **均值** / 最大 / 行业平均。机构数 <3 家时须一并披露 |

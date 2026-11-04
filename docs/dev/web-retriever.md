@@ -41,9 +41,9 @@
   混入关联方/别家公司；东财列表是发行人限定的完整列表）：`eastmoney_announcements` 按
   `display_time`（北京时间）过滤，一次只查一个市场，多标的批量；`eastmoney_announcement_body`
   按上游 5,000 字符/页分页，工具层用 `page` + `offset` 返回最多 4,000 字符，`done` 由上游
-  `page_size` 总页数决定。美股正文常为空（只有 PDF/附件）——这是事实，回执必须给 `pdf_url`
-  并提示走 `ocr`，不得把标题当正文。权威引用仍落巨潮 PDF / 发行人原文；东财正文标
-  「公告全文（东财转载）」。
+  `page_size` 总页数决定。美股正文常为空（只有附件）——这是事实，回执必须给 `pdf_url`
+  并提示附件形态：PDF 交 `ocr`，`.html` 用 `web_retriever_fetch`；不得把标题当正文。正文/PDF 可作公告事实的权威引用（`authoritative_reprint`），
+  但 `verified_official` 仍只给官方域名核验；`is_ai_summary=1` 只是摘要，不是全文。
 - **具名来源输出预算**：`SOURCE_OUTPUT_BUDGET_CHARS`（6144 = 剪枝阈值 75%，与 §1.5 同口径）内的
   条目才装进 `items`，`count` 只说真放下的条数、省略写进 `note`——**声明与正文不一致比报错
   危险**。阈值真值在 preset `compaction` 组 `tool-result-pruner` 子行，`test/persona.test.mjs`

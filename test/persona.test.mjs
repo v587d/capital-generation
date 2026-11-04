@@ -703,7 +703,7 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
     /不得重试 wind/, /recent_retrievals/, /provider_tally/, /public_document/,
     // Named-source protocol: the two work surfaces, empty results, paging, status/note/truncation wording.
     /cls_telegraph/, /wscn_lives/, /cninfo_irm/, /sseinfo_qa/,
-    /eastmoney_announcements/, /eastmoney_announcement_body/, /display_time/, /公告全文（东财转载）/,
+    /eastmoney_announcements/, /eastmoney_announcement_body/, /display_time/, /公告原文（东财转载/, /authoritative_reprint/,
     /来源查询/, /该翻页就翻到没有/, /空结果是真事实/, /深沪不可互换/, /北交所两个平台都没有/,
     /status.*answered.*unanswered/, /回执 `note` 必须读/, /1200 字符/, /INVALID_RESPONSE/, /NOT_FOUND/,
     // Output budget, dropped links, code shape and TIMEOUT semantics: each is a receipt the model misreads.
@@ -721,7 +721,7 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
   // Ownership: these four must sit in a named volume, not merely somewhere in the family.
   const protocolVolume1 = readFileSync(`${SKILL_DIR}capital-web-protocol/SKILL.md`, 'utf8')
   const protocolVolume2 = readFileSync(`${SKILL_DIR}capital-web-evidence/SKILL.md`, 'utf8')
-  for (const pattern of [/来源边界/, /搜索收敛/, /Wind 查询要素/, /空结果是真事实/]) {
+  for (const pattern of [/来源边界/, /搜索收敛/, /Wind 查询要素/, /空结果是真事实/, /A 股、港股、美股/, /不得只做 A 股/]) {
     assertRule(protocolVolume1, pattern, `检索协议第一册（去哪取、怎么调）缺少: ${pattern}`)
   }
   for (const pattern of [/回传格式/, /verified_official/, /文档解析（`ocr`/, /加速乐/]) {

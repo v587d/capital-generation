@@ -24,11 +24,14 @@ description: Use when returning or labelling what was retrieved — the numbered
   `情报1：公司今日召开临时股东会审议借款议案。[AnySearch, 新浪财经, 证券之星](https://…)`
 - 没有具体网页链接的证据（如 `eastmoney_announcement_body` / `wind_docs` 返回的公告/新闻正文），
   只标注来源与时间口径。示例：
-  `情报2：公司2024年年报披露净利润同比下降。（来源：公告全文（东财转载），2026-09-11）`
+  `情报2：公司2024年年报披露净利润同比下降。（来源：公告原文（东财转载，authoritative_reprint），2026-09-11）`
   `eastmoney_announcement_body` / `wind_docs` 返回体内自带 `pdf_url` / 链接字段时可用那个链接；
-  **不得编造链接**。权威引用尽量落到巨潮 PDF / 发行人原文。
+  **不得编造链接**。`authoritative_reprint` 只给东财公告正文/PDF；`verified_official` 仍只给官方域名核验。
+- **`authoritative_reprint`（公告原文，东财转载）**：`art_code` 来自发行人限定列表，正文
+  `is_ai_summary=0`，且 `content` 非空或 `pdf_url` 可用；`done=true` 才标「全文」，否则「部分正文」。
+  它是公告事实的权威引用，但不是 `verified_official`；东财快讯/新闻仍是媒体旁证，不能套这个标签。
 - 来源标注要区分：候选来源（搜索摘要，未点开）、已获取正文（fetch 过）、东财公告转载
-  （公告全文（东财转载））、wind_docs 官方文档（来源：Wind）。
+  （公告原文（东财转载），`authoritative_reprint`）、wind_docs 官方文档（来源：Wind）。
   **无来源的信息不得作为证据回传**；不编造来源。
 - 失败项与未核验项同样编号列出并注明原因，不与已证实证据混排；核心事实同一来源服务多条时逐条
   重复标注，不要用"同上"（外围清单可整段合标）。
@@ -51,6 +54,8 @@ description: Use when returning or labelling what was retrieved — the numbered
   第三方域名，不代表该域名自动属于官方。
 - 只有官方页面能够直接证明归属和用途时，才能标记为 `verified_official`；否则标记为
   `unverified` 或 `not_verified`，不得猜测或列入白名单。
+- 东财公告的 `pdf.dfcfw.com` 是转载域名，不得当官方域名；公告引用用 `authoritative_reprint`，
+  域名核验仍标 `not_verified`。
 - 每个已核验域名输出：机构、司法辖区、机构类型、规范化域名、官方网址、核验用途、可信原因、
   核验状态、证据网址、抓取时间和使用限制。
 - 将"已核验官方白名单"和"候选/未核验域名"分开；没有充分证据时明确写"未核验"，不得为了
@@ -98,7 +103,8 @@ description: Use when returning or labelling what was retrieved — the numbered
 1. **不重试、不尝试绕过**：不分析混淆脚本、不猜 cookie、不靠换 UA 碰运气。
 2. 如实回传：该 URL **未取得正文**，与其他已证实证据分开编号，域名核验状态写「未核验」。
 3. **改走公告库/官网**：公告清单先用 `eastmoney_announcements`，正文用
-   `eastmoney_announcement_body`；权威原文走巨潮 PDF / 官网 fetch。需要按语义找段落且东财
+   `eastmoney_announcement_body`；公告引用用 `authoritative_reprint`（正文/PDF），官方域名核验才走
+   官网 fetch。需要按语义找段落且东财
    覆盖不到时，再用 `wind_docs_announcements` / `wind_docs_news`（`public_document`，计费），
    标注「来源：万得 Wind 金融数据服务」与时间口径。
    这些都查不到时，再试同一内容的**其他官方入口**（中国政府网、部委主站镜像等），

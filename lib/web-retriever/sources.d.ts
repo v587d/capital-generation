@@ -165,6 +165,7 @@ export interface AnnouncementBody {
     offset: number;
     page_chars: number;
     total_pages: number;
+    is_ai_summary: boolean;
     content: string;
     next_offset?: number;
     next_page?: number;

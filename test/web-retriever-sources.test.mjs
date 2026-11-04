@@ -1025,6 +1025,7 @@ test('eastmoney_announcement_body：5,000 字符/页 + offset 切片，next_offs
     assert.equal(first.next_page, undefined)
     assert.equal(first.done, false)
     assert.equal(first.total_pages, 2)
+    assert.equal(first.is_ai_summary, false)
     assert.match(String(first.pdf_url), /^https:\/\/pdf\.dfcfw\.com\//)
 
     const second = await eastmoneyAnnouncementBody(client, { artCode: 'AN202610291831185370', page: 1, offset: 3500, limit: 3500 })
@@ -1050,7 +1051,27 @@ test('eastmoney_announcement_body：美股空正文是事实（done + pdf_url）
     assert.equal(body.content, '')
     assert.equal(body.done, true)
     assert.match(String(body.pdf_url), /pdf\.dfcfw\.com/)
-    assert.match(String(body.note), /正文在 PDF/)
+    assert.match(String(body.note), /正文在附件/)
+  } finally {
+    restore.restore()
+  }
+})
+
+test('eastmoney_announcement_body：is_ai_summary=1 只能当摘要，不能当全文', async () => {
+  const restore = installFetch(async () => json({
+    data: {
+      art_code: 'AN202611031831342762',
+      page_size: 1,
+      is_ai_summary: 1,
+      attach_url: 'https://pdf.dfcfw.com/pdf/H2_AI_1.pdf',
+      notice_content: '这是摘要，不是全文',
+    },
+  }))
+  try {
+    const body = await eastmoneyAnnouncementBody(makeEastmoneyClient(), { artCode: 'AN202611031831342762', page: 1, offset: 0, limit: 3500 })
+    assert.equal(body.is_ai_summary, true)
+    assert.match(String(body.note), /AI 摘要/)
+    assert.equal(body.content, '这是摘要，不是全文')
   } finally {
     restore.restore()
   }
@@ -1105,6 +1126,7 @@ test('工具层：公告列表与正文注册、输出 schema 满足、正文超
     }, exec)
     assert.equal(body.provider, 'eastmoney')
     assert.equal(body.done, false)
+    assert.equal(body.is_ai_summary, false)
     assert.ok(body.content.length > 0)
     assert.ok(body.next_offset > 0, '本页未读完时必须给 next_offset')
     assert.ok(JSON.stringify(body).length <= SOURCE_OUTPUT_BUDGET_CHARS, '正文回执必须留在剪枝阈值内')
