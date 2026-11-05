@@ -80,12 +80,121 @@ const TITLE_MAX_LENGTH = 12
 const DESCRIPTION_MAX_LENGTH = 100
 const INSTRUCTION_MAX_LENGTH = 12_000
 const AUTOSAVE_DELAY_MS = 600
+const BOARD_UI_KEY = 'capital-automation:board-ui:v3'
+const BOARD_PANEL_KEYS = ['todo', 'stocks', 'gaps', 'health']
+const BOARD_TODO_PERIODS = ['today', 'tomorrow', 'week', 'later', 'nodate', 'expired']
+const BOARD_PANEL_IDS = {
+  'capital-automation-todo': 'todo',
+  'capital-automation-stocks': 'stocks',
+  'capital-automation-gaps': 'gaps',
+  'capital-automation-health': 'health',
+}
 
 const zh = {
   panel: 'CapGen 投研自动化',
   title: 'CapGen 投研自动化',
   subtitle: '定时投研，自动执行，结果可追溯',
-  tabs: { tasks: '任务', runs: '运行' },
+  tabs: { board: '看板', tasks: '任务', runs: '运行' },
+  board: {
+    emptyTitle: '还没有任务简报',
+    emptyHint: '在任务页点任务右侧的「运行」，跑完回来看板。',
+    goTasks: '去任务页运行',
+    goEnable: '去启用任务',
+    newTask: '新建任务',
+    statsBriefs: '本期简报',
+    statsTodos: 'TODO',
+    statsStocks: '标的',
+    statsGaps: '缺口',
+    statsIssues: '近 7 天异常',
+    refresh: '刷新',
+    range: '时间范围',
+    range7: '最近 7 天',
+    range14: '最近 14 天',
+    range30: '最近 30 天',
+    rangeAll: '全部',
+    category: '分类',
+    allCategories: '全部',
+    briefTitle: '任务简报',
+    todoTitle: 'TODO',
+    hideRail: '收起右侧',
+    showRail: '展开右侧',
+    collapse: '收起',
+    expand: '展开',
+    briefPending: '正在生成任务简报…',
+    briefFailed: '任务简报生成失败',
+    briefSkipped: '这次运行没有可简报的结论',
+    retry: '重试',
+    retryQueued: '已重新提交任务简报',
+    aiBadge: 'AI 简报',
+    partial: '原文过长，已取头尾',
+    stocksCount: '{n} 个标的',
+    gapsCount: '{n} 个缺口',
+    todoConfirm: '待确认',
+    todoVerify: '待验证',
+    todoTrack: '跟踪',
+    todoEmpty: '最近运行没有明确提出待验证项',
+    todoEmptyGroup: '「{label}」没有待办',
+    todoFilterAll: '全部',
+    todoFilterLabel: '按日期筛选',
+    dueToday: '今天',
+    dueTomorrow: '明天',
+    dueThisWeek: '本周',
+    dueLater: '以后',
+    dueNoDate: '未定',
+    dueExpired: '已过期',
+    showBasis: '查看依据',
+    hideBasis: '收起依据',
+    seenCount: '{n} 次运行提到',
+    sourceRun: '来源',
+    stockEmpty: '最近运行没有提到自选股',
+    stockOther: '其他事件 {n} 只',
+    stockTodoCount: '{n} 项待办',
+    roleHolding: '持仓',
+    roleWatch: '关注',
+    roleEvent: '事件',
+    roleRisk: '风险',
+    gapEmpty: '最近运行没有报告数据缺口',
+    gapCapability: '能力缺口',
+    gapTransient: '本次未取到',
+    gapConflict: '口径冲突',
+    gapQuality: '数据质量',
+    gapSeen: '{n} 次运行',
+    gapAll: '查看全部',
+    healthTitle: '运行健康',
+    healthWindow: '最近 7 天',
+    healthRuns: '运行',
+    healthBriefs: '简报状态',
+    healthScheduler: '调度器',
+    healthSchedulerOk: '正常',
+    healthSchedulerStandby: '本窗口待命',
+    healthSchedulerBad: '不可用',
+    healthCalendar: '交易日历',
+    healthIssues: '异常',
+    healthNoIssues: '最近 7 天没有异常运行',
+    healthViewRuns: '查看运行',
+    healthSucceeded: '成功',
+    healthFailed: '失败',
+    healthTimeout: '超时',
+    healthMissed: '错过',
+    healthUnknown: '中断/未知',
+    healthBlocked: '需确认',
+    healthActive: '进行中',
+    healthBriefReady: '完成',
+    healthBriefPending: '生成中',
+    healthBriefFailed: '失败',
+    healthBriefSkipped: '跳过',
+    healthNoBrief: '没有已入队简报',
+    healthRecovered: '已补跑',
+    healthOpen: '打开 session',
+    healthCalendarOk: '正常',
+    healthCalendarBad: '不可用',
+    loadError: '看板暂时不可用',
+    rangeEmpty: '最近 14 天没有任务简报',
+    viewAll: '查看全部时间',
+    loadMore: '加载更早的简报',
+    clearFilter: '清除筛选',
+    categoryEmpty: '没有符合筛选的任务简报',
+  },
   storageUnavailable: '存储不可用，页面只读',
   standbyBanner: '本窗口的定时任务已暂停：定时触发与手动运行不可用；若另一个 CapGen 窗口在运行，定时任务仍会由它执行。',
   storageBanner: '投研自动化存储暂时不可用：页面只读，调度器不会启动。',
@@ -609,6 +718,7 @@ function installStyles() {
     .capital-automation-panelhead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-bottom: 12px; }
     .capital-automation-panelhead h3 { margin: 0; font-size: 13.5px; line-height: 20px; font-weight: 600; }
     .capital-automation-panelhead .capital-automation-btn { margin-left: auto; }
+    .capital-automation-panelhead .capital-automation-select { margin-left: auto; }
     .capital-automation-panelhead .capital-automation-btn[data-variant="ghost"] { padding-right: 0; }
     .capital-automation-kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 18px; }
     .capital-automation-kvitem { min-width: 0; }
@@ -837,6 +947,125 @@ function installStyles() {
       .capital-automation-heroactions { padding-left: 0; }
       .capital-automation-modal-content { max-height: calc(100dvh - 112px); }
     }
+
+    .capital-automation-board { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+    .capital-automation-boardtoolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
+    .capital-automation-boardtools { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+    .capital-automation-boardactions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-left: auto; }
+    .capital-automation-boardstats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+    .capital-automation-boardstat { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-height: 62px; padding: 10px 12px; border: .5px solid var(--ca-line); border-radius: 12px; background: var(--ca-card); color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background .15s, border-color .15s; }
+    .capital-automation-boardstat:hover { background: color-mix(in srgb, var(--ca-hover) 58%, var(--ca-card)); border-color: color-mix(in srgb, var(--ca-business) 24%, var(--ca-line)); }
+    .capital-automation-boardstat:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: 1px; }
+    .capital-automation-boardstatlabel { color: var(--ca-muted); font-size: 11.5px; line-height: 17px; }
+    .capital-automation-boardstat strong { color: var(--dsw-alias-label-primary); font-size: 18px; line-height: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .capital-automation-boardgrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 340px); align-items: start; gap: 20px; min-width: 0; }
+    .capital-automation-boardgrid[data-rail="closed"] { grid-template-columns: minmax(0, 1fr); }
+    .capital-automation-boardmain { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+    .capital-automation-briefcard { box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; padding: 16px 18px 13px; border: .5px solid var(--ca-line); border-radius: 16px; background: var(--ca-card); min-width: 0; }
+    .capital-automation-briefhead { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px 14px; }
+    .capital-automation-brieftitle { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 7px; min-width: 0; }
+    .capital-automation-brieftitle h3 { margin: 0; color: var(--dsw-alias-label-primary); font-size: 13.5px; line-height: 20px; font-weight: 600; overflow-wrap: anywhere; }
+    .capital-automation-brieftime { color: var(--ca-caption); font-size: 11.5px; line-height: 18px; font-variant-numeric: tabular-nums; }
+    .capital-automation-briefcard h4 { margin: 0; color: var(--dsw-alias-label-primary); font-size: 18px; line-height: 27px; font-weight: 600; letter-spacing: .1px; overflow-wrap: anywhere; }
+    .capital-automation-brieftext { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 14px; line-height: 1.68; overflow-wrap: anywhere; }
+    .capital-automation-briefmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 10px; color: var(--ca-caption); font-size: 11.5px; line-height: 18px; }
+    .capital-automation-briefpartial { color: var(--ca-warn-text); }
+    .capital-automation-briefai { color: var(--ca-business-text); font-weight: 500; }
+    .capital-automation-briefstate { display: flex; flex-direction: column; gap: 7px; color: var(--ca-muted); font-size: 12.5px; line-height: 19px; }
+    .capital-automation-briefstate[data-tone="error"] { color: var(--ca-error-text); }
+    .capital-automation-briefstate p { margin: 0; }
+    .capital-automation-briefactions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 2px; }
+    .capital-automation-boardrail { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+    .capital-automation-boardrail[hidden] { display: none; }
+    .capital-automation-boardrail .capital-automation-panel { min-width: 0; }
+    .capital-automation-boardrail .capital-automation-panelhead { margin-bottom: 8px; }
+    .capital-automation-boardrail .capital-automation-panel[data-collapsed="true"] { padding-bottom: 13px; }
+    .capital-automation-boardrail .capital-automation-panel[data-collapsed="true"] .capital-automation-panelhead { margin-bottom: 0; }
+    .capital-automation-paneltoggle { display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+    .capital-automation-paneltoggle:hover { color: var(--dsw-alias-label-primary); }
+    .capital-automation-paneltoggle:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: 3px; border-radius: 4px; }
+    .capital-automation-panelchevron { flex: none; color: var(--ca-caption); transition: transform .15s; }
+    .capital-automation-panelchevron[data-open="false"] { transform: rotate(-90deg); }
+    .capital-automation-panelbody[hidden] { display: none; }
+    .capital-automation-boardempty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; min-height: min(440px, calc(100dvh - 260px)); padding: 44px 24px; border: .5px dashed var(--ca-line); border-radius: 20px; background: var(--ca-card); color: var(--ca-muted); text-align: center; }
+    .capital-automation-boardemptyicon { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 14px; background: color-mix(in srgb, var(--ca-business) 12%, var(--ca-card)); color: var(--ca-business-text); }
+    .capital-automation-boardempty h2 { margin: 3px 0 0; color: var(--dsw-alias-label-primary); font-size: 20px; line-height: 28px; font-weight: 600; }
+    .capital-automation-boardempty p { max-width: 520px; margin: 0; font-size: 13px; line-height: 20px; }
+    .capital-automation-boardemptyhint { color: var(--ca-caption); font-size: 11.5px !important; line-height: 18px !important; }
+    .capital-automation-boardemptyactions { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; margin-top: 6px; }
+    .capital-automation-todolist, .capital-automation-stocktodos, .capital-automation-gaplist, .capital-automation-gaprow { list-style: none; margin: 0; padding: 0; }
+    .capital-automation-todoitem { padding: 8px 0; border-top: .5px solid var(--ca-line); }
+    .capital-automation-todoitem:first-child { border-top: 0; }
+    .capital-automation-todoline { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+    .capital-automation-todokind { display: inline-flex; flex: none; align-items: center; justify-content: center; min-height: 20px; padding: 0 5px; border-radius: 5px; background: var(--dsw-alias-bg-module-platform); color: var(--ca-muted); font-size: 10px; line-height: 20px; white-space: nowrap; }
+    .capital-automation-todokind[data-kind="confirm"] { color: var(--ca-warn-text); }
+    .capital-automation-todokind[data-kind="verify"] { color: var(--ca-business-text); }
+    .capital-automation-todokind[data-kind="track"] { color: var(--ca-success-text); }
+    .capital-automation-todotitle { flex: 1 1 auto; min-width: 0; padding: 0; border: 0; background: transparent; font: inherit; color: var(--dsw-alias-label-primary); font-size: 13px; line-height: 20px; font-weight: 600; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+    .capital-automation-todotitle:hover, .capital-automation-gaptitle:hover { color: var(--ca-business-text); }
+    .capital-automation-todotitle:focus-visible, .capital-automation-gaptitle:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: 2px; border-radius: 4px; }
+    .capital-automation-basiscaret { display: inline-flex; align-items: center; margin-left: 4px; color: var(--ca-muted); vertical-align: -2px; transform: rotate(-90deg); transition: transform .16s ease; }
+    .capital-automation-todotitle[aria-expanded="true"] .capital-automation-basiscaret, .capital-automation-gaptitle[aria-expanded="true"] .capital-automation-basiscaret { transform: rotate(0deg); }
+    .capital-automation-tododesc { margin: 3px 0 0; color: var(--ca-muted); font-size: 12px; line-height: 20px; overflow-wrap: anywhere; }
+    .capital-automation-todometa { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 3px; color: var(--ca-caption); font-size: 11px; line-height: 17px; }
+    .capital-automation-tododetail { margin: 6px 0 0; padding: 7px 9px; border-left: 2px solid var(--ca-line); background: var(--ca-field); border-radius: 0 7px 7px 0; }
+    .capital-automation-tododetail blockquote { margin: 0; color: var(--ca-muted); font-size: 11.5px; line-height: 19px; overflow-wrap: anywhere; }
+    .capital-automation-todosource { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 5px 8px; margin-top: 5px; color: var(--ca-caption); font-size: 11px; line-height: 17px; }
+    .capital-automation-stockrow { border-top: .5px solid var(--ca-line); }
+    .capital-automation-stockrow:first-of-type { border-top: 0; }
+    .capital-automation-stockmain { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 7px; width: 100%; padding: 8px 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+    .capital-automation-stockmain:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: -2px; }
+    .capital-automation-stockname { color: var(--dsw-alias-label-primary); font-size: 12.5px; line-height: 19px; font-weight: 600; }
+    .capital-automation-stockcode { color: var(--ca-caption); font-size: 11px; line-height: 17px; }
+    .capital-automation-stockroles { display: inline-flex; flex-wrap: wrap; gap: 3px; }
+    .capital-automation-stockrole { display: inline-flex; align-items: center; padding: 0 5px; border-radius: 4px; background: var(--dsw-alias-bg-module-platform); color: var(--ca-muted); font-size: 10px; line-height: 17px; }
+    .capital-automation-stockrole[data-role="holding"] { color: var(--ca-success-text); }
+    .capital-automation-stockrole[data-role="risk"] { color: var(--ca-error-text); }
+    .capital-automation-stockrole[data-role="event"] { color: var(--ca-warn-text); }
+    .capital-automation-stocknote { flex: 1 1 100%; color: var(--ca-muted); font-size: 12px; line-height: 19px; overflow-wrap: anywhere; }
+    .capital-automation-stockmeta { display: flex; flex-wrap: wrap; gap: 4px 9px; color: var(--ca-caption); font-size: 11px; line-height: 17px; }
+    .capital-automation-stocktodos { margin: 0 0 7px; padding: 0 0 0 8px; border-left: 2px solid var(--ca-line); }
+    .capital-automation-stocktodos li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; padding: 3px 0; color: var(--ca-muted); font-size: 11.5px; line-height: 18px; }
+    .capital-automation-gaprow { padding: 8px 0; border-top: .5px solid var(--ca-line); }
+    .capital-automation-gaprow:first-child { border-top: 0; }
+    .capital-automation-gaphead { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+    .capital-automation-gapkind { display: inline-flex; flex: none; align-items: center; justify-content: center; min-height: 20px; padding: 0 5px; border-radius: 5px; background: var(--dsw-alias-bg-module-platform); color: var(--ca-muted); font-size: 10px; line-height: 20px; white-space: nowrap; }
+    .capital-automation-gapkind[data-kind="capability"] { color: var(--ca-warn-text); }
+    .capital-automation-gapkind[data-kind="conflict"] { color: var(--ca-error-text); }
+    .capital-automation-gapkind[data-kind="quality"] { color: var(--ca-warn-text); }
+    .capital-automation-gaptitle { flex: 1 1 auto; min-width: 0; padding: 0; border: 0; background: transparent; font: inherit; color: var(--dsw-alias-label-primary); font-size: 13px; line-height: 20px; font-weight: 600; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+    .capital-automation-gapdesc { margin: 3px 0 0; color: var(--ca-muted); font-size: 12px; line-height: 20px; overflow-wrap: anywhere; }
+    .capital-automation-healthgrid { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 10px; align-items: baseline; }
+    .capital-automation-healthkey { color: var(--ca-caption); font-size: 11.5px; line-height: 19px; }
+    .capital-automation-healthval { color: var(--dsw-alias-label-primary); font-size: 12.5px; line-height: 19px; overflow-wrap: anywhere; }
+    .capital-automation-healthval[data-tone="warn"] { color: var(--ca-warn-text); }
+    .capital-automation-healthval[data-tone="bad"] { color: var(--ca-error-text); }
+    .capital-automation-healthempty { margin: 9px 0 0; color: var(--ca-muted); font-size: 12px; line-height: 19px; }
+    .capital-automation-healthissues { list-style: none; margin: 10px 0 0; padding: 0; border-top: .5px solid var(--ca-line); }
+    .capital-automation-healthissues li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; padding: 7px 0; border-bottom: .5px solid var(--ca-line); color: var(--ca-muted); font-size: 12px; line-height: 19px; }
+    .capital-automation-healthissues li:last-child { border-bottom: 0; }
+    .capital-automation-healthissue { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; }
+    .capital-automation-healthissuetitle { color: var(--dsw-alias-label-primary); font-size: 12.5px; line-height: 19px; font-weight: 600; }
+    .capital-automation-healthissuestatus { font-size: 11px; line-height: 17px; }
+    .capital-automation-healthissuestatus[data-tone="bad"], .capital-automation-statusdot[data-tone="bad"] { color: var(--ca-error-text); }
+    .capital-automation-healthissuestatus[data-tone="warn"], .capital-automation-statusdot[data-tone="warn"] { color: var(--ca-warn-text); }
+    .capital-automation-healthrecovered { color: var(--ca-success-text); font-size: 11px; line-height: 17px; }
+    .capital-automation-board .capital-automation-tag { font-size: 10px; line-height: 16px; }
+    .capital-automation-boardmore { align-self: center; margin: 2px 0 6px; }
+    @media (max-width: 860px) {
+      .capital-automation-boardgrid { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+      .capital-automation-boardrail { order: 2; }
+      .capital-automation-boardstats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+    @media (max-width: 560px) {
+      .capital-automation-boardtoolbar { align-items: flex-start; }
+      .capital-automation-boardstats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .capital-automation-boardempty { min-height: 320px; padding: 32px 16px; }
+      .capital-automation-briefcard { padding: 14px 14px 12px; }
+      .capital-automation-briefcard h4 { font-size: 17px; line-height: 25px; }
+      .capital-automation-briefhead { grid-template-columns: minmax(0, 1fr); }
+      .capital-automation-briefhead > .capital-automation-btn { justify-self: start; }
+    }
   `
   document.head.appendChild(style)
   return () => style.remove()
@@ -884,6 +1113,8 @@ function createApi() {
     cancel: (id) => request(`/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
     runs: (query = '') => request(`/runs${query}`),
     history: (query = '') => request(`/runs/history${query}`),
+    board: (query = '') => request(`/board${query}`),
+    retryBrief: (runId) => request(`/board/briefs/${encodeURIComponent(runId)}/retry`, { method: 'POST' }),
     notifications: () => request('/notifications'),
     markRead: (body) => request('/notifications/read', { method: 'POST', body }),
   }
@@ -1825,7 +2056,7 @@ function Header(props) {
           h('span', { className: 'capital-automation-brandmark', 'aria-hidden': 'true' }, h(IconChecklistOutlineRegular, { size: 16 })),
           h('h1', null, zh.title)),
         h('div', { className: 'capital-automation-tabs', role: 'tablist', 'aria-label': zh.title },
-          ['tasks', 'runs'].map((value) => h('button', {
+          ['board', 'tasks', 'runs'].map((value) => h('button', {
             key: value,
             type: 'button',
             role: 'tab',
@@ -3609,6 +3840,727 @@ function browserTimeZone() {
   }
 }
 
+function boardRelativeTime(value, now = Date.now()) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const diff = Math.max(0, now - date.getTime())
+  const minute = 60_000
+  const hour = 60 * minute
+  const day = 24 * hour
+  const week = 7 * day
+  const month = 30 * day
+  const year = 365 * day
+  if (diff < minute) return zh.relativeNow
+  if (diff < hour) return `${Math.floor(diff / minute)}分钟前`
+  if (diff < day) return `${Math.floor(diff / hour)}小时前`
+  if (diff < week) return `${Math.floor(diff / day)}天前`
+  if (diff < month) return `${Math.floor(diff / week)}周前`
+  if (diff < year) return `${Math.floor(diff / month)}个月前`
+  return `${Math.floor(diff / year)}年前`
+}
+
+function boardTodoPeriod(item) {
+  if (typeof item.dueAt !== 'string' || item.dueAt.length === 0) return 'nodate'
+  const today = localDateKey(new Date())
+  if (item.dueAt < today) return 'expired'
+  if (item.dueAt === today) return 'today'
+  const tomorrow = localDateKey(addLocalDays(new Date(), 1))
+  if (item.dueAt === tomorrow) return 'tomorrow'
+  const week = localDateKey(addLocalDays(new Date(), 7))
+  return item.dueAt <= week ? 'week' : 'later'
+}
+
+function boardTodoGroupLabel(period) {
+  if (period === 'all') return zh.board.todoFilterAll
+  if (period === 'today') return zh.board.dueToday
+  if (period === 'tomorrow') return zh.board.dueTomorrow
+  if (period === 'week') return zh.board.dueThisWeek
+  if (period === 'later') return zh.board.dueLater
+  if (period === 'expired') return zh.board.dueExpired
+  return zh.board.dueNoDate
+}
+
+function boardTodoFilterOptions() {
+  return ['all'].concat(BOARD_TODO_PERIODS).map((period) => ({ value: period, label: boardTodoGroupLabel(period) }))
+}
+
+function boardTodoDueLabel(item, period) {
+  const note = typeof item.dueAt === 'string' && item.dueAt.length >= 10 ? item.dueAt.slice(5) : (item.dueLabel ?? '')
+  if (period === 'today') return zh.board.dueToday
+  if (period === 'tomorrow') return zh.board.dueTomorrow
+  if (period === 'expired') return note ? `${zh.board.dueExpired} · ${note}` : zh.board.dueExpired
+  if (period === 'nodate') return note || zh.board.dueNoDate
+  return note
+}
+
+function boardTodoKindLabel(kind) {
+  if (kind === 'confirm') return zh.board.todoConfirm
+  if (kind === 'verify') return zh.board.todoVerify
+  return zh.board.todoTrack
+}
+
+function boardCategoryOptions() {
+  return [{ value: 'all', label: zh.board.allCategories }].concat(
+    Object.entries(zh.category).map(([value, label]) => ({ value, label })),
+  )
+}
+
+function boardRangeOptions() {
+  return [
+    { value: '7', label: zh.board.range7 },
+    { value: '14', label: zh.board.range14 },
+    { value: '30', label: zh.board.range30 },
+    { value: 'all', label: zh.board.rangeAll },
+  ]
+}
+
+function boardQueryOf(range, category, before) {
+  const params = new URLSearchParams()
+  params.set('days', range)
+  params.set('tz', browserTimeZone())
+  params.set('limit', '30')
+  if (category !== 'all') params.set('category', category)
+  if (typeof before === 'string' && before.length > 0) params.set('before', before)
+  return `?${params.toString()}`
+}
+
+function readBoardUi() {
+  if (typeof localStorage === 'undefined') return {}
+  try {
+    const parsed = JSON.parse(localStorage.getItem(BOARD_UI_KEY) ?? '{}')
+    return parsed !== null && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveBoardUi(patch) {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(BOARD_UI_KEY, JSON.stringify({ ...readBoardUi(), ...patch }))
+  } catch {
+    // A blocked localStorage must not break the board.
+  }
+}
+
+function boardPanelFlags(value) {
+  const saved = value !== null && typeof value === 'object' ? value : null
+  const flags = { todo: true, stocks: true, gaps: false, health: false }
+  if (saved === null) return flags
+  for (const key of BOARD_PANEL_KEYS) flags[key] = saved[key] === true
+  return flags
+}
+
+function boardPanelKey(id) {
+  return BOARD_PANEL_IDS[id] ?? null
+}
+
+function BoardEmpty(props) {
+  const { hasActiveTasks, storageReady, onGoTasks, onNewTask } = props
+  return h('section', { className: 'capital-automation-boardempty', 'aria-labelledby': 'capital-automation-boardempty-title' },
+    h('span', { className: 'capital-automation-boardemptyicon', 'aria-hidden': 'true' }, h(IconSparkleRegular, { size: 22 })),
+    h('h2', { id: 'capital-automation-boardempty-title' }, zh.board.emptyTitle),
+    storageReady === false ? h('p', null, zh.storageBanner) : null,
+    h('div', { className: 'capital-automation-boardemptyactions' },
+      h('button', {
+        type: 'button',
+        className: 'capital-automation-btn',
+        'data-variant': 'primary',
+        disabled: storageReady === false,
+        onClick: onGoTasks,
+      }, hasActiveTasks ? zh.board.goTasks : zh.board.goEnable),
+      h('button', {
+        type: 'button',
+        className: 'capital-automation-btn',
+        disabled: storageReady === false,
+        onClick: onNewTask,
+      }, zh.board.newTask)),
+    h('p', { className: 'capital-automation-boardemptyhint' }, zh.board.emptyHint))
+}
+
+function BoardStats(props) {
+  const { stats, onJump } = props
+  const items = [
+    { id: 'capital-automation-briefs', label: zh.board.statsBriefs, value: stats?.briefs ?? 0 },
+    { id: 'capital-automation-todo', label: zh.board.statsTodos, value: stats?.todos ?? 0 },
+    { id: 'capital-automation-stocks', label: zh.board.statsStocks, value: stats?.stocks ?? 0 },
+    { id: 'capital-automation-gaps', label: zh.board.statsGaps, value: stats?.gaps ?? 0 },
+    { id: 'capital-automation-health', label: zh.board.statsIssues, value: stats?.issues7d ?? 0 },
+  ]
+  const jump = (id) => {
+    if (typeof document === 'undefined') return
+    const node = document.getElementById(id)
+    if (node !== null && typeof node.scrollIntoView === 'function') node.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }
+  const activate = typeof onJump === 'function' ? onJump : jump
+  return h('div', { className: 'capital-automation-boardstats', role: 'group', 'aria-label': zh.board.title },
+    items.map((item) => h('button', {
+      key: item.id,
+      type: 'button',
+      className: 'capital-automation-boardstat',
+      onClick: () => activate(item.id),
+    }, h('span', { className: 'capital-automation-boardstatlabel' }, item.label), h('strong', null, String(item.value)))))
+}
+
+function BoardToolbar(props) {
+  const { range, category, loading, onRange, onCategory, onRefresh, railOpen, onToggleRail } = props
+  return h('div', { className: 'capital-automation-boardtoolbar' },
+    h('div', { className: 'capital-automation-boardtools' },
+      h(Select, {
+        value: range,
+        options: boardRangeOptions(),
+        onChange: onRange,
+        label: zh.board.range,
+        size: 'sm',
+      }),
+      h(Select, {
+        value: category,
+        options: boardCategoryOptions(),
+        onChange: onCategory,
+        label: zh.board.category,
+        size: 'sm',
+      })),
+    h('div', { className: 'capital-automation-boardactions' },
+      h('button', {
+        type: 'button',
+        className: 'capital-automation-btn',
+        'data-size': 'sm',
+        disabled: loading === true,
+        onClick: onRefresh,
+        title: zh.board.refresh,
+        'aria-label': zh.board.refresh,
+      }, h(IconRefreshOutlineRegular, { size: 13 }), h('span', { className: 'capital-automation-btnlabel' }, zh.board.refresh)),
+      h('button', {
+        type: 'button',
+        className: 'capital-automation-btn',
+        'data-size': 'sm',
+        'aria-expanded': railOpen === true ? 'true' : 'false',
+        'aria-controls': 'capital-automation-boardrail',
+        onClick: onToggleRail,
+      },
+      h(railOpen === true ? IconChevronRightOutlineRegular : IconChevronLeftOutlineRegular, { size: 13 }),
+      h('span', { className: 'capital-automation-btnlabel' }, railOpen === true ? zh.board.hideRail : zh.board.showRail))))
+}
+
+function BriefCard(props) {
+  const { card, onOpenSession, onRetry, retrying } = props
+  const brief = card.brief
+  const status = brief?.status ?? 'pending'
+  const titleId = `capital-automation-brief-${card.runId}`
+  const sessionId = card.sessionId
+  const open = sessionId
+    ? h('button', { type: 'button', className: 'capital-automation-btn', 'data-size': 'sm', onClick: () => onOpenSession(sessionId) }, zh.openSession)
+    : null
+  const trigger = card.trigger === 'manual' ? zh.triggerManual : zh.triggerScheduled
+  const relativeTime = boardRelativeTime(card.finishedAt)
+  const exactTime = formatTime(card.finishedAt)
+  let body
+  if (status === 'ready') {
+    body = h('div', null,
+      h('h4', null, brief.headline),
+      h('p', { className: 'capital-automation-brieftext' }, brief.plain),
+      h('div', { className: 'capital-automation-briefmeta' },
+        brief.coverage === 'partial' ? h('span', { className: 'capital-automation-briefpartial' }, zh.board.partial) : null,
+        h('span', { className: 'capital-automation-briefai' }, zh.board.aiBadge)))
+  } else if (status === 'failed') {
+    body = h('div', { className: 'capital-automation-briefstate', 'data-tone': 'error' },
+      h('p', null, zh.board.briefFailed),
+      h('p', { className: 'capital-automation-hint' }, brief?.error ?? zh.errorGeneric),
+      h('div', { className: 'capital-automation-briefactions' },
+        h('button', {
+          type: 'button',
+          className: 'capital-automation-btn',
+          'data-size': 'sm',
+          disabled: retrying === true,
+          onClick: () => onRetry(card.runId),
+        }, retrying === true ? zh.processing : zh.board.retry),
+        open))
+  } else if (status === 'skipped') {
+    body = h('div', { className: 'capital-automation-briefstate' },
+      h('p', null, zh.board.briefSkipped),
+      h('div', { className: 'capital-automation-briefactions' }, open))
+  } else {
+    body = h('div', { className: 'capital-automation-briefstate' },
+      h(SkeletonBlock, { width: '72%', height: 14 }),
+      h(SkeletonBlock, { width: '100%', height: 10 }),
+      h(SkeletonBlock, { width: '88%', height: 10 }),
+      h('p', { className: 'capital-automation-hint' }, zh.board.briefPending))
+  }
+  return h('article', { className: 'capital-automation-briefcard', 'data-status': status, 'aria-labelledby': titleId },
+    h('div', { className: 'capital-automation-briefhead' },
+      h('div', { className: 'capital-automation-brieftitle' },
+        h('h3', { id: titleId }, card.taskTitle),
+        h('span', { className: 'capital-automation-tag', 'data-tone': card.category }, categoryLabel(card.category)),
+        h('span', { className: 'capital-automation-tag' }, trigger),
+        h('time', {
+          className: 'capital-automation-brieftime',
+          dateTime: card.finishedAt,
+          title: exactTime,
+        }, relativeTime)),
+      open),
+    body)
+}
+
+function BoardSkeleton(props) {
+  const { railOpen = false } = props
+  return h('div', { className: 'capital-automation-loading', 'aria-busy': 'true' },
+    h('span', { className: 'capital-automation-skeletonlabel', role: 'status', 'aria-live': 'polite' }, zh.loading),
+    h('div', { className: 'capital-automation-board' },
+    h('div', { className: 'capital-automation-boardtoolbar' },
+      h('div', { className: 'capital-automation-boardtools' }, h(SkeletonBlock, { width: 82, height: 28, radius: 999 }), h(SkeletonBlock, { width: 72, height: 28, radius: 999 })),
+      h('div', { className: 'capital-automation-boardactions' }, h(SkeletonBlock, { width: 58, height: 28, radius: 999 }), h(SkeletonBlock, { width: 84, height: 28, radius: 999 }))),
+    h('div', { className: 'capital-automation-boardstats' },
+      Array.from({ length: 5 }, (_, index) => h('div', { key: index, className: 'capital-automation-boardstat' }, h(SkeletonBlock, { width: 46, height: 9 }), h(SkeletonBlock, { width: 24, height: 16 })))),
+    h('div', { className: 'capital-automation-boardgrid', 'data-rail': railOpen === true ? 'open' : 'closed' },
+      h('section', { className: 'capital-automation-boardmain' },
+        [0, 1].map((index) => h('div', { key: index, className: 'capital-automation-briefcard' },
+          h(SkeletonBlock, { width: '48%', height: 12 }),
+          h(SkeletonBlock, { width: '80%', height: 16 }),
+          h(SkeletonBlock, { width: '100%', height: 10 }),
+          h(SkeletonBlock, { width: '92%', height: 10 })))),
+      railOpen === true
+        ? h('aside', { className: 'capital-automation-boardrail' },
+          h('div', { className: 'capital-automation-card capital-automation-panel' },
+            h(SkeletonBlock, { width: 68, height: 14 }),
+            h(SkeletonBlock, { width: '100%', height: 10 }),
+            h(SkeletonBlock, { width: '86%', height: 10 })))
+        : null)))
+}
+
+function BriefFeed(props) {
+  const { cards, loading, error, onOpenSession, onRetry, retryingRunId, onViewAll, onClearFilter, onLoadMore, hasMore, loadingMore, railOpen } = props
+  if (loading === true) return h(BoardSkeleton, { railOpen })
+  if (typeof error === 'string' && error.length > 0) {
+    return h('section', { className: 'capital-automation-boardmain', id: 'capital-automation-briefs' },
+      h('div', { className: 'capital-automation-banner', 'data-tone': 'error', role: 'alert' }, error))
+  }
+  if (cards.length === 0) {
+    return h('section', { className: 'capital-automation-boardmain', id: 'capital-automation-briefs' },
+      h('div', { className: 'capital-automation-empty' },
+        h('span', { className: 'capital-automation-emptyicon' }, h(IconChecklistOutlineRegular, { size: 19 })),
+        h('h3', null, zh.board.rangeEmpty),
+        h('p', null, zh.board.emptyHint),
+        h('div', { className: 'capital-automation-boardemptyactions' },
+          onViewAll ? h('button', { type: 'button', className: 'capital-automation-btn', onClick: onViewAll }, zh.board.viewAll) : null,
+          onClearFilter ? h('button', { type: 'button', className: 'capital-automation-btn', onClick: onClearFilter }, zh.board.clearFilter) : null)))
+  }
+  return h('section', { className: 'capital-automation-boardmain', id: 'capital-automation-briefs', 'aria-label': zh.board.briefTitle },
+    cards.map((card) => h(BriefCard, {
+      key: card.runId,
+      card,
+      onOpenSession,
+      onRetry,
+      retrying: retryingRunId === card.runId,
+    })),
+    hasMore
+      ? h('button', {
+        type: 'button',
+        className: 'capital-automation-btn capital-automation-boardmore',
+        disabled: loadingMore === true,
+        onClick: onLoadMore,
+      }, loadingMore === true ? zh.loading : zh.board.loadMore)
+      : null)
+}
+
+function TodoRow(props) {
+  const { item, period, showDue = true, onOpenSession } = props
+  const [open, setOpen] = useState(false)
+  const quote = item.sourceQuote ?? item.sources?.[0]?.sourceQuote
+  const due = showDue === true ? boardTodoDueLabel(item, period) : ''
+  const source = {
+    taskTitle: item.taskTitle,
+    finishedAt: item.finishedAt,
+    sessionId: item.sessionId ?? item.sources?.[0]?.sessionId,
+  }
+  const meta = []
+  if (due) meta.push(h('span', { key: 'due' }, due))
+  if (item.seenCount > 1) meta.push(h('span', { key: 'seen' }, zh.board.seenCount.replace('{n}', String(item.seenCount))))
+  const basisAction = open ? zh.board.hideBasis : zh.board.showBasis
+  const basisCaret = h('span', { className: 'capital-automation-basiscaret', 'aria-hidden': 'true' }, h(IconChevronDownOutlineRegular, { size: 12 }))
+  return h('li', { className: 'capital-automation-todoitem' },
+    h('div', { className: 'capital-automation-todoline' },
+      h('span', { className: 'capital-automation-todokind', 'data-kind': item.kind }, boardTodoKindLabel(item.kind)),
+      h('button', {
+        type: 'button',
+        className: 'capital-automation-todotitle',
+        'aria-expanded': open ? 'true' : 'false',
+        'aria-label': `${item.title}，${basisAction}`,
+        title: basisAction,
+        onClick: () => setOpen((value) => !value),
+      }, item.title, basisCaret)),
+    item.detail ? h('p', { className: 'capital-automation-tododesc' }, item.detail) : null,
+    meta.length > 0 ? h('div', { className: 'capital-automation-todometa' }, meta) : null,
+    open
+      ? h('div', { className: 'capital-automation-tododetail' },
+        h('blockquote', null, quote),
+        source
+          ? h('div', { className: 'capital-automation-todosource' },
+            h('span', null, `${zh.board.sourceRun}：${source.taskTitle} · ${formatShortTime(source.finishedAt)}`),
+            source.sessionId ? h('button', { type: 'button', className: 'capital-automation-btn', 'data-size': 'sm', onClick: () => onOpenSession(source.sessionId) }, zh.openSession) : null)
+          : null)
+      : null)
+}
+
+function BoardPanelHead(props) {
+  const { id, title, open, onToggle, meta, action } = props
+  return h('div', { className: 'capital-automation-panelhead' },
+    h('h3', null,
+      h('button', {
+        type: 'button',
+        className: 'capital-automation-paneltoggle',
+        'aria-expanded': open === true ? 'true' : 'false',
+        'aria-controls': `${id}-body`,
+        'aria-label': `${title}（${open === true ? zh.board.collapse : zh.board.expand}）`,
+        title: open === true ? zh.board.collapse : zh.board.expand,
+        onClick: onToggle,
+      },
+      h('span', null, title),
+      h(IconChevronDownOutlineRegular, {
+        size: 14,
+        className: 'capital-automation-panelchevron',
+        'data-open': open === true ? 'true' : 'false',
+      }))),
+    meta ?? null,
+    action ?? null)
+}
+
+function BoardPanel(props) {
+  const { id, title, open, onToggle, meta, action, children } = props
+  return h('section', {
+    className: 'capital-automation-card capital-automation-panel',
+    id,
+    'data-collapsed': open === true ? 'false' : 'true',
+  },
+  h(BoardPanelHead, { id, title, open, onToggle, meta, action }),
+  h('div', {
+    id: `${id}-body`,
+    className: 'capital-automation-panelbody',
+    hidden: open !== true,
+  }, children))
+}
+
+function TodoPanel(props) {
+  const { todos, onOpenSession, open, onToggle } = props
+  const [filter, setFilter] = useState('all')
+  const entries = todos.map((item) => ({ item, period: boardTodoPeriod(item) }))
+  entries.sort((left, right) => BOARD_TODO_PERIODS.indexOf(left.period) - BOARD_TODO_PERIODS.indexOf(right.period))
+  const visible = filter === 'all' ? entries : entries.filter((entry) => entry.period === filter)
+  const emptyText = filter === 'all'
+    ? zh.board.todoEmpty
+    : zh.board.todoEmptyGroup.replace('{label}', boardTodoGroupLabel(filter))
+  return h(BoardPanel, {
+    id: 'capital-automation-todo',
+    title: zh.board.todoTitle,
+    open,
+    onToggle,
+    action: h(Select, {
+      value: filter,
+      options: boardTodoFilterOptions(),
+      onChange: setFilter,
+      size: 'sm',
+      label: zh.board.todoFilterLabel,
+      align: 'end',
+    }),
+  },
+  visible.length === 0
+    ? h('p', { className: 'capital-automation-hint' }, emptyText)
+    : h('ul', { className: 'capital-automation-todolist' }, visible.map((entry) => h(TodoRow, {
+      key: entry.item.id,
+      item: entry.item,
+      period: entry.period,
+      showDue: filter === 'all',
+      onOpenSession,
+    }))))
+}
+
+function boardRoleLabel(role) {
+  if (role === 'holding') return zh.board.roleHolding
+  if (role === 'watch') return zh.board.roleWatch
+  if (role === 'event') return zh.board.roleEvent
+  return zh.board.roleRisk
+}
+
+function StockRow(props) {
+  const { stock, todos, onOpenSession } = props
+  const [open, setOpen] = useState(false)
+  const related = todos.filter((item) => item.symbol === stock.symbol)
+  return h('div', { className: 'capital-automation-stockrow' },
+    h('button', {
+      type: 'button',
+      className: 'capital-automation-stockmain',
+      'aria-expanded': open ? 'true' : 'false',
+      onClick: () => setOpen((value) => !value),
+    },
+    h('span', { className: 'capital-automation-stockname' }, stock.name),
+    h('span', { className: 'capital-automation-stockcode' }, stock.symbol),
+    h('span', { className: 'capital-automation-stockroles' },
+      stock.roles.map((role) => h('span', { key: role, className: 'capital-automation-stockrole', 'data-role': role }, boardRoleLabel(role)))),
+    stock.note ? h('span', { className: 'capital-automation-stocknote' }, stock.note) : null,
+    h('span', { className: 'capital-automation-stockmeta' },
+      stock.nextAt ? h('span', null, stock.nextAt) : null,
+      stock.todoCount > 0 ? h('span', null, zh.board.stockTodoCount.replace('{n}', String(stock.todoCount))) : null)),
+    open && related.length > 0
+      ? h('ul', { className: 'capital-automation-stocktodos' }, related.map((item) => h('li', { key: item.id },
+        h('span', null, item.title),
+        item.sessionId ? h('button', { type: 'button', className: 'capital-automation-btn', 'data-size': 'sm', onClick: () => onOpenSession(item.sessionId) }, zh.openSession) : null)))
+      : null)
+}
+
+function StockRadar(props) {
+  const { stocks, todos, total, onOpenSession, open, onToggle } = props
+  const hidden = Math.max(0, (total ?? stocks.length) - stocks.length)
+  return h(BoardPanel, {
+    id: 'capital-automation-stocks',
+    title: zh.board.statsStocks,
+    open,
+    onToggle,
+    meta: stocks.length === 0 ? null : h('span', { className: 'capital-automation-hint' }, zh.board.stocksCount.replace('{n}', String(total ?? stocks.length))),
+  },
+  stocks.length === 0
+    ? h('p', { className: 'capital-automation-hint' }, zh.board.stockEmpty)
+    : stocks.map((stock) => h(StockRow, { key: stock.symbol, stock, todos, onOpenSession })),
+  hidden > 0 ? h('p', { className: 'capital-automation-hint' }, zh.board.stockOther.replace('{n}', String(hidden))) : null)
+}
+
+function boardGapLabel(kind) {
+  if (kind === 'capability') return zh.board.gapCapability
+  if (kind === 'conflict') return zh.board.gapConflict
+  if (kind === 'quality') return zh.board.gapQuality
+  return zh.board.gapTransient
+}
+
+function GapRow(props) {
+  const { gap, onOpenSession } = props
+  const [open, setOpen] = useState(false)
+  const source = gap.sources?.[0]
+  const basisAction = open ? zh.board.hideBasis : zh.board.showBasis
+  return h('li', { className: 'capital-automation-gaprow' },
+    h('div', { className: 'capital-automation-gaphead' },
+      h('span', { className: 'capital-automation-gapkind', 'data-kind': gap.kind }, boardGapLabel(gap.kind)),
+      h('button', {
+        type: 'button',
+        className: 'capital-automation-gaptitle',
+        'aria-expanded': open ? 'true' : 'false',
+        'aria-label': `${gap.topic}，${basisAction}`,
+        title: basisAction,
+        onClick: () => setOpen((value) => !value),
+      }, gap.topic, h('span', { className: 'capital-automation-basiscaret', 'aria-hidden': 'true' }, h(IconChevronDownOutlineRegular, { size: 12 })))),
+    h('p', { className: 'capital-automation-gapdesc' }, gap.detail),
+    open
+      ? h('div', { className: 'capital-automation-tododetail' },
+        h('blockquote', null, source?.sourceQuote ?? gap.sourceQuote),
+        source ? h('p', { className: 'capital-automation-hint' }, `${source.taskTitle} · ${formatShortTime(source.finishedAt)}`) : null,
+        source?.sessionId ? h('button', { type: 'button', className: 'capital-automation-btn', 'data-size': 'sm', onClick: () => onOpenSession(source.sessionId) }, zh.openSession) : null)
+      : null)
+}
+
+function DataHealthPanel(props) {
+  const { gaps, total, onOpenSession, open, onToggle } = props
+  const [showAll, setShowAll] = useState(false)
+  const visible = showAll ? gaps : gaps.slice(0, 5)
+  return h(BoardPanel, {
+    id: 'capital-automation-gaps',
+    title: zh.board.statsGaps,
+    open,
+    onToggle,
+  },
+  gaps.length === 0
+    ? h('p', { className: 'capital-automation-hint' }, zh.board.gapEmpty)
+    : h('ul', { className: 'capital-automation-gaplist' }, visible.map((gap) => h(GapRow, { key: gap.id, gap, onOpenSession }))),
+  (total ?? gaps.length) > visible.length
+    ? h('button', { type: 'button', className: 'capital-automation-btn', 'data-size': 'sm', onClick: () => setShowAll(true) }, zh.board.gapAll)
+    : null)
+}
+
+function healthIssueTone(status) {
+  if (status === 'failed' || status === 'timed_out' || status === 'unknown_after_restart') return 'bad'
+  if (status === 'missed' || status === 'blocked_requires_user') return 'warn'
+  return null
+}
+
+function RunHealthPanel(props) {
+  const { health, onGoRuns, onOpenSession, open, onToggle } = props
+  const runs = health?.runs ?? {}
+  const briefs = health?.briefs ?? {}
+  const runParts = [
+    ['healthSucceeded', runs.succeeded ?? 0],
+    ['healthFailed', runs.failed ?? 0],
+    ['healthTimeout', runs.timedOut ?? 0],
+    ['healthMissed', runs.missed ?? 0],
+    ['healthUnknown', runs.unknown ?? 0],
+    ['healthBlocked', runs.blocked ?? 0],
+    ['healthActive', runs.active ?? 0],
+  ].filter(([, value]) => value > 0)
+  const briefParts = [
+    ['healthBriefReady', briefs.ready ?? 0],
+    ['healthBriefPending', briefs.pending ?? 0],
+    ['healthBriefFailed', briefs.failed ?? 0],
+    ['healthBriefSkipped', briefs.skipped ?? 0],
+  ].filter(([, value]) => value > 0)
+  const countText = (parts) => parts.length === 0 ? '0' : parts.map(([key, value]) => `${zh.board[key]} ${value}`).join(' · ')
+  const schedulerState = health?.scheduler?.state
+  const scheduler = schedulerState === 'active' ? zh.board.healthSchedulerOk : schedulerState === 'standby' ? zh.board.healthSchedulerStandby : zh.board.healthSchedulerBad
+  const schedulerHint = schedulerState === 'active' ? zh.systemActive : schedulerState === 'standby' ? zh.systemStandby : zh.systemUnavailable
+  const schedulerTone = schedulerState === 'active' ? null : schedulerState === 'standby' ? 'warn' : 'bad'
+  const calendar = health?.calendar?.available === false ? zh.board.healthCalendarBad : zh.board.healthCalendarOk
+  const calendarTone = health?.calendar?.available === false ? 'bad' : null
+  return h(BoardPanel, {
+    id: 'capital-automation-health',
+    title: zh.board.healthTitle,
+    open,
+    onToggle,
+    meta: h('span', { className: 'capital-automation-hint' }, zh.board.healthWindow),
+    action: h('button', { type: 'button', className: 'capital-automation-btn', 'data-size': 'sm', onClick: onGoRuns }, zh.board.healthViewRuns),
+  },
+  h('div', { className: 'capital-automation-healthgrid' },
+    h('span', { className: 'capital-automation-healthkey' }, zh.board.healthRuns),
+    h('span', { className: 'capital-automation-healthval' }, countText(runParts)),
+    h('span', { className: 'capital-automation-healthkey' }, zh.board.healthBriefs),
+    h('span', { className: 'capital-automation-healthval' }, countText(briefParts)),
+    h('span', { className: 'capital-automation-healthkey' }, zh.board.healthScheduler),
+    h('span', { className: 'capital-automation-healthval', 'data-tone': schedulerTone ?? undefined, title: schedulerHint }, scheduler),
+    h('span', { className: 'capital-automation-healthkey' }, zh.board.healthCalendar),
+    h('span', { className: 'capital-automation-healthval', 'data-tone': calendarTone ?? undefined }, calendar)),
+  health?.issueCount > 0
+    ? h('ul', { className: 'capital-automation-healthissues' }, (health.recentIssues ?? []).map((issue) => {
+      const tone = healthIssueTone(issue.status)
+      return h('li', { key: issue.runId },
+        h('span', { className: 'capital-automation-healthissue', title: issue.message || undefined },
+          h('span', { className: 'capital-automation-statusdot', 'data-tone': tone ?? undefined }),
+          h('span', { className: 'capital-automation-healthissuetitle' }, issue.taskTitle),
+          h('span', { className: 'capital-automation-healthissuestatus', 'data-tone': tone ?? undefined }, statusLabel(issue.status)),
+          issue.recoveredByRunId ? h('span', { className: 'capital-automation-healthrecovered' }, zh.board.healthRecovered) : null),
+        issue.sessionId ? h('button', { type: 'button', className: 'capital-automation-btn', 'data-size': 'sm', onClick: () => onOpenSession(issue.sessionId) }, zh.board.healthOpen) : null)
+    }))
+    : h('p', { className: 'capital-automation-healthempty' }, zh.board.healthNoIssues))
+}
+
+function BoardPage(props) {
+  const {
+    board, loading, error, range, category, onRange, onCategory, onRefresh,
+    onOpenSession, onRetryBrief, retryingRunId, onLoadMore, loadingMore, onGoTasks, onNewTask, onGoRuns,
+    hasActiveTasks, storageReady,
+  } = props
+  const [railOpen, setRailOpen] = useState(() => readBoardUi().rail !== false)
+  const [openPanels, setOpenPanels] = useState(() => boardPanelFlags(readBoardUi().panels))
+  const [pendingJump, setPendingJump] = useState(null)
+
+  useEffect(() => {
+    if (typeof pendingJump !== 'string') return undefined
+    const timer = setTimeout(() => {
+      if (typeof document !== 'undefined') {
+        const node = document.getElementById(pendingJump)
+        if (node !== null && typeof node.scrollIntoView === 'function') node.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      }
+      setPendingJump(null)
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [pendingJump])
+
+  const togglePanel = (key) => {
+    setOpenPanels((current) => {
+      const next = { ...current, [key]: current[key] !== true }
+      saveBoardUi({ panels: next })
+      return next
+    })
+  }
+
+  const toggleRail = () => {
+    setRailOpen((value) => {
+      const next = value !== true
+      saveBoardUi({ rail: next })
+      return next
+    })
+  }
+
+  const jumpTo = (id) => {
+    const key = boardPanelKey(id)
+    if (key !== null) {
+      setRailOpen(true)
+      saveBoardUi({ rail: true })
+      setOpenPanels((current) => {
+        if (current[key] === true) return current
+        const next = { ...current, [key]: true }
+        saveBoardUi({ panels: next })
+        return next
+      })
+    }
+    setPendingJump(id)
+  }
+
+  if (loading === true && board === null) return h(BoardSkeleton, { railOpen })
+  if (error.length > 0 && board === null) {
+    return h('div', { className: 'capital-automation-board' },
+      h('div', { className: 'capital-automation-banner', 'data-tone': 'error', role: 'alert' },
+        `${zh.board.loadError}：${error}`,
+        h('button', { type: 'button', className: 'capital-automation-btn', 'data-size': 'sm', onClick: onRefresh }, zh.loadRetry)))
+  }
+  if (board?.empty === true) {
+    return h('div', { className: 'capital-automation-board' },
+      error.length > 0 ? h('div', { className: 'capital-automation-banner', 'data-tone': 'error', role: 'alert' }, error) : null,
+      h(BoardEmpty, { hasActiveTasks, storageReady, onGoTasks, onNewTask }))
+  }
+  return h('div', { className: 'capital-automation-board' },
+    h(BoardToolbar, {
+      range,
+      category,
+      loading,
+      onRange,
+      onCategory,
+      onRefresh,
+      railOpen,
+      onToggleRail: toggleRail,
+    }),
+    error.length > 0 ? h('div', { className: 'capital-automation-banner', 'data-tone': 'error', role: 'alert' }, error) : null,
+    h(BoardStats, { stats: board?.stats, onJump: jumpTo }),
+    h('div', {
+      className: 'capital-automation-boardgrid',
+      'data-rail': railOpen === true ? 'open' : 'closed',
+    },
+      h(BriefFeed, {
+        cards: board?.cards ?? [],
+        loading: loading === true && board === null,
+        error: '',
+        onOpenSession,
+        onRetry: onRetryBrief,
+        retryingRunId,
+        onViewAll: range === 'all' ? undefined : () => onRange('all'),
+        onClearFilter: category === 'all' ? undefined : () => onCategory('all'),
+        onLoadMore,
+        hasMore: board?.nextBefore !== null && board?.nextBefore !== undefined,
+        loadingMore,
+        railOpen,
+      }),
+      h('aside', {
+        id: 'capital-automation-boardrail',
+        className: 'capital-automation-boardrail',
+        hidden: railOpen !== true,
+      },
+        h(TodoPanel, { todos: board?.todos ?? [], onOpenSession, open: openPanels.todo, onToggle: () => togglePanel('todo') }),
+        h(StockRadar, {
+          stocks: board?.stocks ?? [],
+          todos: board?.todos ?? [],
+          total: board?.stats?.stocks,
+          onOpenSession,
+          open: openPanels.stocks,
+          onToggle: () => togglePanel('stocks'),
+        }),
+        h(DataHealthPanel, {
+          gaps: board?.gaps ?? [],
+          total: board?.stats?.gaps,
+          onOpenSession,
+          open: openPanels.gaps,
+          onToggle: () => togglePanel('gaps'),
+        }),
+        h(RunHealthPanel, {
+          health: board?.health,
+          onGoRuns,
+          onOpenSession,
+          open: openPanels.health,
+          onToggle: () => togglePanel('health'),
+        }))))
+}
+
 function AutomationPage(props) {
   const { api, openSession } = props
   const [meta, setMeta] = useState(null)
@@ -3616,10 +4568,17 @@ function AutomationPage(props) {
   const [runs, setRuns] = useState([])
   const [history, setHistory] = useState(null)
   const [notifications, setNotifications] = useState([])
+  const [board, setBoard] = useState(null)
+  const [boardLoading, setBoardLoading] = useState(true)
+  const [boardError, setBoardError] = useState('')
+  const [boardRange, setBoardRange] = useState('14')
+  const [boardCategory, setBoardCategory] = useState('all')
+  const [retryingBriefId, setRetryingBriefId] = useState(null)
+  const [boardLoadingMore, setBoardLoadingMore] = useState(false)
   const [unread, setUnread] = useState(0)
   const [selectedId, setSelectedId] = useState(null)
   const [detail, setDetail] = useState(null)
-  const [tab, setTab] = useState('tasks')
+  const [tab, setTab] = useState('board')
   const [detailTab, setDetailTab] = useState('overview')
   const [wizard, setWizard] = useState(false)
   const [inbox, setInbox] = useState(false)
@@ -3636,6 +4595,7 @@ function AutomationPage(props) {
   const refreshInFlightRef = useRef(null)
   const refreshSequenceRef = useRef(0)
   const detailSequenceRef = useRef(0)
+  const boardSequenceRef = useRef(0)
   const scrollRef = useRef(null)
 
   useEffect(() => {
@@ -3690,6 +4650,52 @@ function AutomationPage(props) {
     }
   }
 
+  async function loadBoard(nextRange = boardRange, nextCategory = boardCategory, before = null) {
+    const requestSequence = boardSequenceRef.current + 1
+    boardSequenceRef.current = requestSequence
+    if (before === null) setBoardLoading(true)
+    try {
+      const value = await api.board(boardQueryOf(nextRange, nextCategory, before))
+      if (!mountedRef.current || requestSequence !== boardSequenceRef.current) return
+      if (before === null) setBoard(value)
+      else setBoard((current) => current === null
+        ? value
+        : { ...value, cards: [...current.cards, ...value.cards] })
+      setBoardError('')
+    } catch (error) {
+      if (mountedRef.current && requestSequence === boardSequenceRef.current) {
+        setBoardError(error.message ?? zh.board.loadError)
+      }
+    } finally {
+      if (mountedRef.current && requestSequence === boardSequenceRef.current) setBoardLoading(false)
+    }
+  }
+
+  async function loadMoreBoard() {
+    if (board?.nextBefore === null || board?.nextBefore === undefined || boardLoadingMore) return
+    setBoardLoadingMore(true)
+    try {
+      await loadBoard(boardRange, boardCategory, board.nextBefore)
+    } finally {
+      setBoardLoadingMore(false)
+    }
+  }
+
+  async function retryBrief(runId) {
+    if (retryingBriefId !== null) return
+    setRetryingBriefId(runId)
+    setBoardError('')
+    try {
+      await api.retryBrief(runId)
+      setNotice(zh.board.retryQueued)
+      await loadBoard(boardRange, boardCategory)
+    } catch (error) {
+      setBoardError(error.message ?? zh.errorGeneric)
+    } finally {
+      setRetryingBriefId(null)
+    }
+  }
+
   async function loadDetail(id) {
     const requestSequence = detailSequenceRef.current + 1
     detailSequenceRef.current = requestSequence
@@ -3730,7 +4736,7 @@ function AutomationPage(props) {
 
   function switchTab(nextTab) {
     if (nextTab === tab && nextTab === 'tasks' && selectedIdRef.current !== null) return
-    if (nextTab === 'runs' && selectedIdRef.current !== null) {
+    if ((nextTab === 'board' || nextTab === 'runs') && selectedIdRef.current !== null) {
       selectedIdRef.current = null
       detailSequenceRef.current += 1
       setDetail(null)
@@ -3850,6 +4856,23 @@ function AutomationPage(props) {
   }, [])
 
   useEffect(() => {
+    if (tab !== 'board') return undefined
+    void loadBoard(boardRange, boardCategory)
+    const timer = setInterval(() => {
+      if (document.visibilityState !== 'hidden') void loadBoard(boardRange, boardCategory)
+    }, 30_000)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void loadBoard(boardRange, boardCategory)
+    }
+    document.addEventListener?.('visibilitychange', onVisibilityChange)
+    return () => {
+      boardSequenceRef.current += 1
+      clearInterval(timer)
+      document.removeEventListener?.('visibilitychange', onVisibilityChange)
+    }
+  }, [tab, boardRange, boardCategory])
+
+  useEffect(() => {
     if (selectedId === null) {
       setDetail(null)
       detailSequenceRef.current += 1
@@ -3881,8 +4904,29 @@ function AutomationPage(props) {
     h(PageBanners, { meta, loadError, onRetry: () => { void refresh() } }),
     h('div', { className: 'capital-automation-scroll', ref: scrollRef },
       h('div', { className: 'capital-automation-container' },
-        tab === 'tasks'
-          ? selectedId !== null
+        tab === 'board'
+          ? h(BoardPage, {
+            board,
+            loading: boardLoading,
+            error: boardError,
+            range: boardRange,
+            category: boardCategory,
+            onRange: setBoardRange,
+            onCategory: setBoardCategory,
+            onRefresh: () => { void loadBoard(boardRange, boardCategory) },
+            onOpenSession: openSession,
+            onRetryBrief: (runId) => { void retryBrief(runId) },
+            retryingRunId: retryingBriefId,
+            onLoadMore: () => { void loadMoreBoard() },
+            loadingMore: boardLoadingMore,
+            onGoTasks: () => switchTab('tasks'),
+            onNewTask: () => setWizard(true),
+            onGoRuns: () => switchTab('runs'),
+            hasActiveTasks: tasks.some((task) => task.state === 'active'),
+            storageReady,
+          })
+          : tab === 'tasks'
+            ? selectedId !== null
             ? h('div', null,
               h(DetailBar, { onBack: backToTasks }),
               detail === null
@@ -3933,7 +4977,7 @@ function AutomationPage(props) {
               onGoTasks: () => switchTab('tasks'),
               onNewTask: () => setWizard(true),
               busy: confirmBusy,
-            }), detailOpen ? null : h(SystemStatus, { meta }))),
+            }), detailOpen || tab === 'board' ? null : h(SystemStatus, { meta }))),
     h(NewTaskModal, {
       open: wizard,
       onClose: () => setWizard(false),

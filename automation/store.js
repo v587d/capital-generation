@@ -12,6 +12,7 @@ import {
   OwnerRecordSchema,
   RunRecordSchema,
   TaskConfigSchema,
+  TaskBriefSchema,
   TaskOverridesSchema,
   TaskRecordSchema,
   isActiveRun,
@@ -46,6 +47,7 @@ export const domainSpec = {
     attempts: { valueSchema: AttemptRecordSchema },
     notifications: { valueSchema: NotificationSchema },
     meta: { valueSchema: OwnerRecordSchema },
+    briefs: { valueSchema: TaskBriefSchema },
   },
 }
 
@@ -181,6 +183,7 @@ export function createAutomationStore(options) {
           attempts: domain.table('attempts'),
           notifications: domain.table('notifications'),
           meta: domain.table('meta'),
+          briefs: domain.table('briefs'),
         }
       })()
     }
@@ -198,6 +201,10 @@ export function createAutomationStore(options) {
   }
 
   function ownRun(record) {
+    return record !== undefined && record.profileKey === profileKey
+  }
+
+  function ownBrief(record) {
     return record !== undefined && record.profileKey === profileKey
   }
 
@@ -397,6 +404,11 @@ export function createAutomationStore(options) {
         await tables.notifications.delete(notificationId)
       }
     }
+    for (const [briefId, brief] of [...tables.briefs.entries()]) {
+      if (ownBrief(brief) && (brief.taskId === id || runIds.has(brief.runId))) {
+        await tables.briefs.delete(briefId)
+      }
+    }
     return tables.tasks.delete(id)
   }
 
@@ -544,7 +556,11 @@ export function createAutomationStore(options) {
       perTask.set(run.taskId, count)
       if (index >= MAX_RUNS_PER_PROFILE || count > MAX_RUNS_PER_TASK) doomed.add(run.id)
     })
-    for (const id of doomed) await tables.runs.delete(id)
+    for (const id of doomed) {
+      await tables.runs.delete(id)
+      const brief = tables.briefs.get(id)
+      if (ownBrief(brief)) await tables.briefs.delete(id)
+    }
   }
 
   async function claimOccurrence(input) {
@@ -669,6 +685,122 @@ export function createAutomationStore(options) {
       changed += 1
     }
     return changed
+  }
+
+  async function createBrief(input) {
+    const tables = await ensure()
+    const existing = tables.briefs.get(input.runId)
+    if (existing !== undefined) return ownBrief(existing) ? existing : undefined
+    const at = iso(now())
+    const record = parseStrict(TaskBriefSchema, {
+      schemaVersion: 1,
+      profileKey,
+      runId: input.runId,
+      taskId: input.taskId,
+      ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
+      status: 'pending',
+      items: [],
+      stocks: [],
+      gaps: [],
+      promptVersion: input.promptVersion ?? 1,
+      attempts: 0,
+      updatedAt: at,
+    }, 'brief')
+    await tables.briefs.put(record.runId, record)
+    return record
+  }
+
+  async function putBrief(record) {
+    const tables = await ensure()
+    const clean = parseStrict(TaskBriefSchema, { ...record, profileKey }, 'brief')
+    await tables.briefs.put(clean.runId, clean)
+    return clean
+  }
+
+  async function getBrief(runId) {
+    const tables = await ensure()
+    const record = tables.briefs.get(runId)
+    return ownBrief(record) ? record : undefined
+  }
+
+  async function listBriefsForRuns(runIds) {
+    const tables = await ensure()
+    const result = new Map()
+    for (const runId of runIds) {
+      const record = tables.briefs.get(runId)
+      if (ownBrief(record)) result.set(runId, record)
+    }
+    return result
+  }
+
+  async function listBriefsForProfile() {
+    const tables = await ensure()
+    const records = []
+    for (const [, record] of tables.briefs.entries()) if (ownBrief(record)) records.push(record)
+    records.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.runId.localeCompare(right.runId))
+    return records
+  }
+
+  async function countBriefs() {
+    const tables = await ensure()
+    let count = 0
+    for (const [, record] of tables.briefs.entries()) if (ownBrief(record)) count += 1
+    return count
+  }
+
+  async function updateBrief(runId, patch) {
+    const tables = await ensure()
+    const current = tables.briefs.get(runId)
+    if (!ownBrief(current)) return undefined
+    const next = {
+      ...current,
+      ...patch,
+      profileKey,
+      updatedAt: iso(now()),
+    }
+    if (next.status === 'pending') {
+      if (typeof current.error === 'string' && current.error.length > 0) {
+        next.lastError = current.error
+        next.lastErrorAt = iso(now())
+      }
+      delete next.headline
+      delete next.plain
+      delete next.error
+      delete next.generatedAt
+      next.items = []
+      next.stocks = []
+      next.gaps = []
+    }
+    const clean = parseStrict(TaskBriefSchema, next, 'brief')
+    await tables.briefs.put(runId, clean)
+    return clean
+  }
+
+  async function deleteBrief(runId) {
+    const tables = await ensure()
+    const current = tables.briefs.get(runId)
+    if (!ownBrief(current)) return false
+    return tables.briefs.delete(runId)
+  }
+
+  function publicBrief(brief) {
+    return {
+      runId: brief.runId,
+      taskId: brief.taskId,
+      sessionId: brief.sessionId ?? null,
+      status: brief.status,
+      headline: brief.headline ?? null,
+      plain: brief.plain ?? null,
+      coverage: brief.coverage ?? null,
+      error: brief.error ?? null,
+      attempts: brief.attempts,
+      generatedAt: brief.generatedAt ?? null,
+      counts: {
+        items: brief.items.length,
+        stocks: brief.stocks.length,
+        gaps: brief.gaps.length,
+      },
+    }
   }
 
   async function setOwnerMeta(record) {
@@ -811,6 +943,15 @@ export function createAutomationStore(options) {
     hasAttempt,
     setAttemptState,
     listAttemptsForRun,
+    createBrief,
+    putBrief,
+    getBrief,
+    listBriefsForRuns,
+    listBriefsForProfile,
+    countBriefs,
+    updateBrief,
+    deleteBrief,
+    publicBrief,
     addNotification,
     listNotifications,
     unreadNotificationCount,

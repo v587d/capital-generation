@@ -22,7 +22,7 @@ function taskInput() {
   }
 }
 
-async function harness({ promptFails = false, createFails = false, createPending = false, workspaces } = {}) {
+async function harness({ promptFails = false, createFails = false, createPending = false, workspaces, onRunSucceeded } = {}) {
   const fake = createFakeDomain()
   const store = createAutomationStore({ openDomain: async () => fake.domain, profile: { name: 'web' }, now: () => NOW, calendar: tradingCalendar })
   const created = await store.createTask(taskInput())
@@ -62,6 +62,7 @@ async function harness({ promptFails = false, createFails = false, createPending
     settings: { inAppNotifications: false },
     profile: { displayName: 'web', runDir: '/tmp/capital-automation-runner-test' },
     workspaces,
+    onRunSucceeded,
     now: () => NOW,
     logger: { info() {}, warn() {}, error() {} },
   })
@@ -165,6 +166,23 @@ test('正常运行：创建新 session、接受 prompt、turn/end completed 后�
     status: 'succeeded',
     at: new Date(NOW).toISOString(),
   })
+  runner.dispose()
+})
+
+test('成功收口后把 run/task 交给简报服务，但简报失败不影响运行', async () => {
+  let seen
+  const { store, task, agent, run, runner, ctx } = await harness({
+    onRunSucceeded: (payload) => { seen = payload; throw new Error('brief service down') },
+  })
+  await runner.dispatch(run, task, 'manual')
+  ctx.emit('session/event', agent.session, sessionEvent('turn/end', { turn: 1, reason: { kind: 'completed' } }, 1))
+  agent.status = 'idle'
+  ctx.emit('agent/status', { agent, status: 'idle' })
+  await new Promise((resolve) => setTimeout(resolve, 1_100))
+  const done = await store.getRun(run.id)
+  assert.equal(done.status, 'succeeded', '简报回调抛错不能把 run 改成失败')
+  assert.equal(seen?.run?.id, run.id)
+  assert.equal(seen?.task?.id, task.id)
   runner.dispose()
 })
 

@@ -8,6 +8,8 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { createRunRunner, buildRunPrompt, sessionTitleOf } from './runner.js'
+import { createBriefService } from './brief.js'
+import { createBoardService } from './board.js'
 import { createScheduler } from './scheduler.js'
 import { createAutomationService, AutomationError } from './service.js'
 import { createAutomationStore, domainSpec, ROUTE_PATH } from './store.js'
@@ -62,12 +64,14 @@ export function createAutomationRuntime(options) {
     calendar,
     settings: getSettings,
   })
+  let briefs
   const runner = createRunRunner({
     ctx,
     store,
     settings: getSettings,
     profile: { displayName, runDir },
     workspaces,
+    onRunSucceeded: (payload) => briefs?.onRunSucceeded(payload),
     now,
     logger,
   })
@@ -80,6 +84,18 @@ export function createAutomationRuntime(options) {
     now,
     logger,
   })
+  briefs = createBriefService({
+    ctx,
+    store,
+    scheduler,
+    now,
+    logger,
+  })
+  const boardService = createBoardService({
+    store,
+    scheduler,
+    now,
+  })
   const service = createAutomationService({
     store,
     scheduler,
@@ -89,6 +105,8 @@ export function createAutomationRuntime(options) {
     workspaces,
     version,
     settings: getSettings,
+    briefs,
+    boardService,
     now,
   })
   runner.installListeners()
@@ -97,7 +115,7 @@ export function createAutomationRuntime(options) {
       installAutomationPolicy({ ctx: toolsCtx, runner, logger })
     })
   }
-  return { store, runner, scheduler, service, calendar, workspaces, profile: { displayName, runDir, ownerDir } }
+  return { store, runner, scheduler, briefs, service, calendar, workspaces, profile: { displayName, runDir, ownerDir } }
 }
 
 function authorizeFactory(ctx) {
@@ -158,12 +176,16 @@ export function apply(ctx) {
       })
       activeService = created.service
       created.scheduler.start()
-        .then(() => logger?.info?.(`capital-automation: scheduler ${created.scheduler.status().state}`))
+        .then(() => {
+          created.briefs?.start()
+          logger?.info?.(`capital-automation: scheduler ${created.scheduler.status().state}`)
+        })
         .catch((error) => logger?.error?.(`capital-automation: scheduler 启动失败：${String(error)}`))
       appCtx.effect(() => async () => {
         if (activeService === created.service) {
           activeService = undefined
         }
+        await created.briefs?.stop?.()
         await created.scheduler.stop().catch(() => {})
         created.calendar.dispose?.()
         await created.runner.dispose?.()

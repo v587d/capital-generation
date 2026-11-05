@@ -278,6 +278,66 @@ export const NotificationSchema = z.strictObject({
   readAt: isoInstant.optional(),
 })
 
+/** Derived task brief. One per successful run; storage validates it on every open. */
+export const BriefItemSchema = z.strictObject({
+  kind: z.enum(['confirm', 'verify', 'track']),
+  title: z.string().min(1).max(40),
+  detail: z.string().max(120).optional(),
+  symbol: z.string().max(20).optional(),
+  trigger: z.string().max(80).optional(),
+  dueAt: z.string().refine(isCalendarDate, { message: 'must be a valid YYYY-MM-DD date' }).optional(),
+  dueLabel: z.string().max(20).optional(),
+  sourceQuote: z.string().min(1).max(160),
+})
+
+export const BriefStockSchema = z.strictObject({
+  symbol: z.string().min(1).max(20),
+  name: z.string().min(1).max(40),
+  roles: z.array(z.enum(['holding', 'watch', 'event', 'risk'])).min(1).max(3),
+  note: z.string().max(80).optional(),
+  nextAt: z.string().refine(isCalendarDate, { message: 'must be a valid YYYY-MM-DD date' }).optional(),
+})
+
+export const BriefGapSchema = z.strictObject({
+  kind: z.enum(['capability', 'transient', 'conflict', 'quality']),
+  topic: z.string().min(2).max(24),
+  detail: z.string().min(1).max(100),
+  sourceQuote: z.string().min(1).max(160),
+})
+
+export const TaskBriefSchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  profileKey: z.string().min(1).max(80),
+  runId: z.string().min(1).max(80),
+  taskId: z.string().min(1).max(80),
+  sessionId: z.string().min(1).max(120).optional(),
+  status: z.enum(['pending', 'ready', 'failed', 'skipped']),
+  headline: z.string().min(4).max(24).optional(),
+  plain: z.string().min(40).max(200).optional(),
+  items: z.array(BriefItemSchema).max(6),
+  stocks: z.array(BriefStockSchema).max(8),
+  gaps: z.array(BriefGapSchema).max(6),
+  coverage: z.enum(['full', 'partial']).optional(),
+  model: z.string().max(120).optional(),
+  promptVersion: z.number().int().min(1).max(99),
+  sourceHash: z.string().regex(/^[a-f0-9]{16}$/).optional(),
+  error: z.string().max(300).optional(),
+  lastError: z.string().max(300).optional(),
+  lastErrorAt: isoInstant.optional(),
+  attempts: z.number().int().min(0).max(5),
+  generatedAt: isoInstant.optional(),
+  updatedAt: isoInstant,
+}).superRefine((brief, ctx) => {
+  if (brief.status === 'ready') {
+    if (brief.headline === undefined) ctx.addIssue({ code: 'custom', path: ['headline'], message: 'ready brief requires headline' })
+    if (brief.plain === undefined) ctx.addIssue({ code: 'custom', path: ['plain'], message: 'ready brief requires plain' })
+  } else if (brief.status === 'failed') {
+    if (brief.error === undefined) ctx.addIssue({ code: 'custom', path: ['error'], message: 'failed brief requires error' })
+  } else if (brief.headline !== undefined || brief.plain !== undefined) {
+    ctx.addIssue({ code: 'custom', message: `${brief.status} brief must not carry headline/plain` })
+  }
+})
+
 export const OwnerRecordSchema = z.strictObject({
   schemaVersion: z.literal(1),
   profileKey: z.string().min(1).max(80),

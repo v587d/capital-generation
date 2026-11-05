@@ -158,6 +158,13 @@ async function automationMetaProbe(url, cookie) {
   } catch {
     workspaces = undefined
   }
+  const boardResponse = await fetch(`${origin}/capital-automation/board?days=14&tz=Asia%2FShanghai&limit=30`, { headers, signal })
+  let board
+  try {
+    board = JSON.parse(await boardResponse.text())
+  } catch {
+    board = undefined
+  }
   return {
     anonymousStatus: anonymous.status,
     status: authed.status,
@@ -171,6 +178,9 @@ async function automationMetaProbe(url, cookie) {
     workspacesStatus: workspacesResponse.status,
     workspaces: Array.isArray(workspaces?.workspaces) ? workspaces.workspaces : null,
     defaultWorkspaceId: workspaces?.defaultWorkspaceId ?? null,
+    boardStatus: boardResponse.status,
+    boardEmpty: board?.empty === true,
+    boardRange: board?.range?.days ?? null,
   }
 }
 
@@ -550,8 +560,11 @@ try {
             && automationFence.tasksStatus === 200
             && automationTasksMatch(automationFence.tasks)
             && automationWorkspacesMatch(automationFence)
+            && automationFence.boardStatus === 200
+            && automationFence.boardEmpty === true
+            && automationFence.boardRange === 14
         automationFence.ok = ok && automationFence.cacheControl === 'no-store'
-        console.log(`smoke-boot: ${automationFence.ok ? '✅' : '❌'} /capital-automation/meta：匿名 HTTP ${automationFence.anonymousStatus}（应 401）、带 cookie HTTP ${automationFence.status}，profile=${automationFence.profile}，policy=${automationFence.policy}，scheduler=${automationFence.scheduler}，storage=${automationFence.storage}，tasks=${automationFence.tasks?.length ?? '?'}/${BUILTIN_IDS.length}，workspaces=${automationFence.workspaces?.length ?? '?'}（默认 ${automationFence.defaultWorkspaceId ?? '?'}）`)
+        console.log(`smoke-boot: ${automationFence.ok ? '✅' : '❌'} /capital-automation/meta：匿名 HTTP ${automationFence.anonymousStatus}（应 401）、带 cookie HTTP ${automationFence.status}，profile=${automationFence.profile}，policy=${automationFence.policy}，scheduler=${automationFence.scheduler}，storage=${automationFence.storage}，tasks=${automationFence.tasks?.length ?? '?'}/${BUILTIN_IDS.length}，workspaces=${automationFence.workspaces?.length ?? '?'}（默认 ${automationFence.defaultWorkspaceId ?? '?'}），board=${automationFence.boardStatus}（empty=${automationFence.boardEmpty}）`)
       } catch (error) {
         automationFence = { ok: false, error: String(error?.message ?? error) }
         console.log(`smoke-boot: ❌ 投研自动化路由探针失败：${automationFence.error}`)

@@ -121,12 +121,12 @@ function decodeId(raw) {
   return id
 }
 
-function queryOf(url, allowedKeys) {
+function queryOf(url, allowedKeys, maxKeys = MAX_QUERY_KEYS) {
   const result = {}
   let count = 0
   for (const [key, value] of url.searchParams.entries()) {
     count += 1
-    if (count > MAX_QUERY_KEYS || !allowedKeys.has(key) || Object.prototype.hasOwnProperty.call(result, key)) {
+    if (count > maxKeys || !allowedKeys.has(key) || Object.prototype.hasOwnProperty.call(result, key)) {
       throw new AutomationError('invalid_query', '查询参数无效。', 400)
     }
     if (value.length > MAX_QUERY_VALUE_CHARS) {
@@ -229,6 +229,13 @@ async function dispatch({ req, method, suffix, url, service, requestId }) {
   }
   if (suffix === WORKSPACES_SUFFIX && method === 'GET') {
     return { body: await service.workspaceCatalog() }
+  }
+  if (suffix === '/board' && method === 'GET') {
+    return { body: await service.board(queryOf(url, new Set(['days', 'tz', 'limit', 'before', 'category']), 5)) }
+  }
+  const briefRetry = /^\/board\/briefs\/([^/]+)\/retry$/.exec(suffix)
+  if (briefRetry !== null && method === 'POST') {
+    return { body: await service.retryBrief(decodeId(briefRetry[1])), status: 202 }
   }
   if (suffix === '/runs' && method === 'GET') {
     return { body: await service.listRuns(queryOf(url, new Set(['limit', 'before']))) }

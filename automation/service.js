@@ -104,7 +104,7 @@ export class AutomationError extends Error {
 }
 
 export function createAutomationService(options) {
-  const { store, scheduler, runner, calendar, profile, workspaces, version, settings, now = () => Date.now() } = options
+  const { store, scheduler, runner, calendar, profile, workspaces, version, settings, briefs, boardService, now = () => Date.now() } = options
   let chain = Promise.resolve()
 
   function serialize(operation) {
@@ -372,6 +372,33 @@ export function createAutomationService(options) {
     return { days: buckets, total, success, failure }
   }
 
+  async function board(query = {}) {
+    if (boardService === undefined || typeof boardService.board !== 'function') {
+      throw new AutomationError('board_unavailable', '看板服务暂时不可用。', 503)
+    }
+    try {
+      return await boardService.board(query)
+    } catch (error) {
+      if (error?.boardError === true) throw new AutomationError(error.code, error.message, error.status ?? 400)
+      throw error
+    }
+  }
+
+  async function retryBrief(runId) {
+    if (briefs === undefined || typeof briefs.retry !== 'function') {
+      throw new AutomationError('brief_not_found', '任务简报服务暂时不可用。', 503)
+    }
+    const result = await briefs.retry(runId)
+    if (result?.ok !== true) {
+      throw new AutomationError(
+        result?.code ?? 'brief_not_retryable',
+        result?.message ?? '这条任务简报暂时不能重试。',
+        result?.status ?? 409,
+      )
+    }
+    return { queued: true }
+  }
+
   async function listNotifications(query = {}) {
     let unreadOnly = false
     if (query.unread !== undefined) {
@@ -416,6 +443,8 @@ export function createAutomationService(options) {
     getRun,
     listRuns,
     runHistory,
+    board,
+    retryBrief,
     listNotifications,
     markNotificationsRead,
     storageState: async () => {

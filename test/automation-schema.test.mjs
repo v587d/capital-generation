@@ -8,6 +8,7 @@ import {
   TaskOverridesSchema,
   TaskPatchSchema,
   TaskRecordSchema,
+  TaskBriefSchema,
   assertCleanJson,
   resolveTaskRecord,
 } from '../automation/schema.js'
@@ -370,4 +371,33 @@ test('任务上限是覆盖层：没单独设置就跟随通用设置，设置�
     custom: { ...config, limits: { runTimeoutMinutes: 40, idleTimeoutMinutes: 5, maxSteps: 300, maxToolCalls: 1_200 } },
   }
   assert.equal(resolveTaskRecord(own, undefined, defaults).limits.runTimeoutMinutes, 40, '自定义任务自己的上限优先')
+})
+
+
+test('任务简报 schema：ready 必须有 headline/plain，failed 必须有 error，pending 不带正文', () => {
+  const base = {
+    schemaVersion: 1,
+    profileKey: 'p_x',
+    runId: 'run_x',
+    taskId: 'task_x',
+    status: 'pending',
+    items: [],
+    stocks: [],
+    gaps: [],
+    promptVersion: 1,
+    attempts: 0,
+    updatedAt: '2026-11-04T00:00:00.000Z',
+  }
+  assert.equal(TaskBriefSchema.parse(base).status, 'pending')
+  assert.throws(() => TaskBriefSchema.parse({ ...base, headline: '有内容' }), 'pending 不能带正文')
+  assert.throws(() => TaskBriefSchema.parse({ ...base, status: 'ready' }), 'ready 必须有 headline/plain')
+  assert.equal(TaskBriefSchema.parse({
+    ...base,
+    status: 'ready',
+    headline: '科技股又跌了，救兵还没到',
+    plain: '昨晚美国科技股继续下跌，市场怕的是它们之前涨得太贵。国内出了稳市场的新办法，但真正买股票的钱还没进来。今天开盘先看科技股能不能止跌，不然大盘还会被它们拖着走。',
+  }).status, 'ready')
+  assert.throws(() => TaskBriefSchema.parse({ ...base, status: 'failed' }), 'failed 必须有 error')
+  assert.throws(() => TaskBriefSchema.parse({ ...base, status: 'pending', items: [{ kind: 'verify', title: 'x', sourceQuote: 'y', dueAt: '2026-02-30' }] }), '非法日期必须被拒')
+  assert.throws(() => TaskBriefSchema.parse({ ...base, unknown: true }), '未知字段必须被拒')
 })

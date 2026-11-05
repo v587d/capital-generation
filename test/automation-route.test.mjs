@@ -32,6 +32,8 @@ function harness(options = {}) {
     workspaces: options.workspaces,
     version: '2.12.0',
     settings: () => ({ tickMs: 60_000, inAppNotifications: true }),
+    briefs: options.briefs,
+    boardService: options.boardService,
     now: () => NOW,
   })
   const handler = createAutomationRouteHandler(service, { authorize: options.authorize ?? (() => undefined) })
@@ -431,4 +433,59 @@ test('保存任务时工作区 id 走服务端 allowlist；未知 id 拒绝，�
   const defaulted = await call(handler, { method: 'POST', url: '/capital-automation/tasks', body: { ...base, workspaceId: '' } })
   assert.equal(defaulted.statusCode, 201)
   assert.equal(defaulted.json().task.workspaceId, '')
+})
+
+test('看板 GET 允许 5 个 query 参数，未知/超限参数仍被白名单拒绝', async () => {
+  let seen
+  const boardService = {
+    async board(query) {
+      seen = query
+      return {
+        ok: true,
+        empty: true,
+        range: { days: 14, from: null, to: '2026-11-04' },
+        stats: { briefs: 0, todos: 0, stocks: 0, gaps: 0, issues7d: 0 },
+        cards: [],
+        todos: [],
+        stocks: [],
+        gaps: [],
+        health: { windowDays: 7, runs: {}, briefs: {}, recentIssues: [] },
+        nextBefore: null,
+      }
+    },
+  }
+  const { handler } = harness({ boardService })
+  const response = await call(handler, {
+    method: 'GET',
+    url: '/capital-automation/board?days=14&tz=Asia%2FShanghai&limit=30&category=news&before=run_x',
+  })
+  assert.equal(response.statusCode, 200)
+  assert.equal(response.json().empty, true)
+  assert.deepEqual(seen, { days: '14', tz: 'Asia/Shanghai', limit: '30', category: 'news', before: 'run_x' })
+  for (const url of [
+    '/capital-automation/board?days=14&tz=UTC&limit=30&category=news&before=run_x&extra=1',
+    '/capital-automation/board?days=14&tz=UTC&limit=30&before=run_x&extra=1',
+  ]) {
+    const rejected = await call(handler, { method: 'GET', url })
+    assert.equal(rejected.statusCode, 400, url)
+    assert.equal(rejected.json().code, 'invalid_query', url)
+  }
+})
+
+test('失败简报重试：只走单条 POST，状态码与错误码稳定', async () => {
+  let called = 0
+  const briefs = {
+    async retry(runId) {
+      called += 1
+      assert.equal(runId, 'run_brief')
+      return { ok: false, code: 'brief_not_retryable', message: '这条简报已达到重试上限。', status: 409 }
+    },
+  }
+  const { handler } = harness({ briefs })
+  const rejected = await call(handler, { method: 'POST', url: '/capital-automation/board/briefs/run_brief/retry' })
+  assert.equal(called, 1)
+  assert.equal(rejected.statusCode, 409)
+  assert.equal(rejected.json().code, 'brief_not_retryable')
+  const noBackfill = await call(handler, { method: 'POST', url: '/capital-automation/board/backfill' })
+  assert.equal(noBackfill.statusCode, 404)
 })

@@ -125,11 +125,12 @@ const tables = document.tables
 const counts = {
   runs: Object.keys(tables.runs ?? {}).length,
   attempts: Object.keys(tables.attempts ?? {}).length,
+  briefs: Object.keys(tables.briefs ?? {}).length,
   notifications: keepNotifications ? 0 : Object.keys(tables.notifications ?? {}).length,
 }
 
 if (dryRun) {
-  console.log(`dry-run: 将删除 runs=${counts.runs} attempts=${counts.attempts} notifications=${counts.notifications}`)
+  console.log(`dry-run: 将删除 runs=${counts.runs} attempts=${counts.attempts} briefs=${counts.briefs} notifications=${counts.notifications}`)
   console.log(`存储文件：${storagePath}`)
   process.exit(0)
 }
@@ -141,6 +142,7 @@ copyFileSync(storagePath, backupPath)
 tables.runs = {}
 tables.attempts = {}
 if (!keepNotifications) tables.notifications = {}
+tables.briefs = {}
 
 const tempPath = `${storagePath}.tmp-${process.pid}`
 writeFileSync(tempPath, JSON.stringify(document), { mode: 0o600 })
@@ -149,8 +151,9 @@ renameSync(tempPath, storagePath)
 
 const verify = JSON.parse(readFileSync(storagePath, 'utf8'))
 if (Object.keys(verify.tables?.runs ?? {}).length !== 0) fail('写入后验证失败：runs 仍非空。')
+if (Object.keys(verify.tables?.briefs ?? {}).length !== 0) fail('写入后验证失败：briefs 仍非空。')
 
-console.log(`已清空：runs=${counts.runs} attempts=${counts.attempts} notifications=${counts.notifications}`)
+console.log(`已清空：runs=${counts.runs} attempts=${counts.attempts} briefs=${counts.briefs} notifications=${counts.notifications}`)
 console.log(`保留：tasks、meta、global`)
 console.log(`备份：${backupPath}`)
 console.log('现在启动 dsh；页面上的运行记录会重新从空表读取。')

@@ -116,7 +116,7 @@ ${task.instruction}
 }
 
 export function createRunRunner(options) {
-  const { ctx, store, settings, profile, workspaces, now = () => Date.now(), logger, random } = options
+  const { ctx, store, settings, profile, workspaces, onRunSucceeded, now = () => Date.now(), logger, random } = options
   const entries = new Map()
   const pendingDispatches = new Set()
   const bySession = new Map()
@@ -317,7 +317,19 @@ export function createRunRunner(options) {
     })
     entries.delete(entry.id)
     if (entry.sessionId !== undefined) bySession.delete(entry.sessionId)
-    await notify(entry, updated ?? { ...entry.run, status })
+    const finalRun = updated ?? { ...entry.run, status }
+    try {
+      await notify(entry, finalRun)
+    } catch (error) {
+      logger?.warn?.(`capital-automation: run notification failed: ${String(error)}`)
+    }
+    if (finalRun.status === 'succeeded' && typeof onRunSucceeded === 'function') {
+      try {
+        await onRunSucceeded({ run: finalRun, task: entry.task })
+      } catch (error) {
+        logger?.warn?.(`capital-automation: brief enqueue failed: ${String(error)}`)
+      }
+    }
   }
 
   async function notify(entry, run) {

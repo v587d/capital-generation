@@ -335,3 +335,39 @@ test('运行上限继承通用设置；任务单独改过才覆盖，改回通�
   settings.runTimeoutMinutes = 30
   assert.equal((await store.getTask(pinned.id)).limits.runTimeoutMinutes, 30, '之后继续跟随通用设置')
 })
+
+test('brief 按 profile 隔离，任务删除时与 run 一起级联删除', async () => {
+  const fake = createFakeDomain()
+  const a = make('web', fake)
+  const b = make('capital', fake)
+  const created = await a.store.createTask(createInput)
+  const task = await a.store.getTask(created.id)
+  const run = await a.store.createRun({
+    taskId: task.id,
+    taskTitle: task.title,
+    trigger: 'manual',
+    occurrenceKey: 'brief-cascade',
+    status: 'succeeded',
+    sessionId: 'session-brief',
+  })
+  const brief = await a.store.createBrief({ runId: run.id, taskId: task.id, sessionId: run.sessionId })
+  assert.equal(brief.status, 'pending')
+  assert.equal(await b.store.getBrief(run.id), undefined, '跨 profile 不能读')
+  assert.equal((await a.store.createBrief({ runId: run.id, taskId: task.id, sessionId: run.sessionId })).runId, run.id, '同一 run 只登记一次')
+  await a.store.updateBrief(run.id, {
+    status: 'ready',
+    headline: '科技股又跌了，救兵还没到',
+    plain: '昨晚美国科技股继续下跌，市场怕的是它们之前涨得太贵。国内出了稳市场的新办法，但真正买股票的钱还没进来。今天开盘先看科技股能不能止跌，不然大盘还会被它们拖着走。',
+    items: [],
+    stocks: [],
+    gaps: [],
+  })
+  assert.equal((await a.store.getBrief(run.id)).status, 'ready')
+  await a.store.updateBrief(run.id, { status: 'pending' })
+  const pending = await a.store.getBrief(run.id)
+  assert.equal(pending.headline, undefined)
+  assert.equal(pending.plain, undefined)
+  assert.deepEqual(pending.items, [])
+  await a.store.deleteTask(created.id)
+  assert.equal(await a.store.getBrief(run.id), undefined, '删除自定义任务时 brief 必须一起删除')
+})
