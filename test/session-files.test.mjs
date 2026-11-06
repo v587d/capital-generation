@@ -1,9 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { createRequire } from 'node:module'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { findSessionRecords, findWorkspaceSessionRecords, latestSessionFile } from '../scripts/lib/session-files.mjs'
+import { locateDshPackage } from '../scripts/lib/run-tool.mjs'
 
 // `verify:sessions` needed a gate on its own gate: scripts/verify-sessions.mjs hardcoded
 // `session.v3.jsonl.zstd` while the host writes `session.v4.jsonl.zstd` — no error ever, it read 0
@@ -89,6 +92,27 @@ test('findWorkspaceSessionRecords：直接指向一个工作区时也能读到�
     assert.equal(records.length, 1)
     assert.equal(records[0].id, 'session-scoped')
     assert.deepEqual(findWorkspaceSessionRecords(join(root, 'missing')), [])
+  } finally {
+    cleanup()
+  }
+})
+
+test('verify:sessions：0.2.2 的 JSONL 后端是 apply 插件，默认导出类已删除', async (t) => {
+  const dsh = locateDshPackage()
+  if (dsh === undefined) return t.skip('找不到已安装的 dsh（设置 DSH_PACKAGE_DIR 可启用）')
+  const nested = join(dsh, 'node_modules', '@deepseek-ai')
+  const require = createRequire(join(nested, 'dsh-session-persistence-jsonl/package.json'))
+  const cordis = await import(pathToFileURL(require.resolve('@deepseek-ai/cordis')).href)
+  const persistence = await import(pathToFileURL(join(nested, 'dsh-session-persistence-jsonl/lib/index.js')).href)
+  // 0.2.2 删掉了 default 类；scripts/verify-sessions.mjs 若不改，会在核对任何会话之前
+  // TypeError: Backend is not a constructor（本仓 2026-11-06 实机命中）。
+  assert.equal(typeof persistence.apply, 'function', '宿主导出面变了：verify-sessions 必须用 apply 挂载后端')
+  const { root, cleanup } = store()
+  try {
+    mkdirSync(root, { recursive: true })
+    const ctx = new cordis.Context()
+    await persistence.apply(ctx, { root, compression: 'zstd' })
+    assert.ok(ctx.get('sessionPersistence') !== undefined, 'apply 之后必须能取到 sessionPersistence 服务')
   } finally {
     cleanup()
   }

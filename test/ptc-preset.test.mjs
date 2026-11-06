@@ -8,7 +8,7 @@ import { allPresets, allRowsOf, rolePersona } from './preset-rows.mjs'
 import { ROOT_AGENT_DENIED_TOOLS } from '../lib/agents/root-tool-policy.js'
 import { CAPITAL_ROW_TOOLS } from './family-rows.mjs'
 
-const PRESENTATION = '@deepseek-ai/dsh-agent-tool-presentation'
+const PRESENTATION = '@deepseek-ai/dsh-tool-executor-ptc'
 const JUNIOR = 'capital-data-junior'
 const SHELL_ROWS = /^@deepseek-ai\/dsh-tool-(bash|pwsh)$/
 
@@ -26,20 +26,21 @@ const presentationRows = (preset) => allRowsOf(preset.config.id)
 const shellRows = (preset) => allRowsOf(preset.config.id)
   .filter((row) => SHELL_ROWS.test(row?.name ?? ''))
 
-test('presentation：只有 data_junior 有 tool-presentation，且 mode 恰好是 ptc', () => {
+test('presentation：只有 data_junior 挂 PTC executor 行，且并发池上限钉在 10', () => {
   const owners = allPresets()
     .filter((preset) => preset.disabled !== true)
     .filter((preset) => presentationRows(preset).length > 0)
     .map((preset) => preset.config.id)
   assert.deepEqual(owners, [JUNIOR],
-    '一颗 agent 只能一种呈现方式；把 ptc 挂到别的 preset 等于给主 Agent / 其他角色开万能执行面')
+    '一颗 agent 只能一种执行面；把 ptc 挂到别的 preset 等于给主 Agent / 其他角色开万能执行面')
 
   const junior = allPresets().find((preset) => preset?.config?.id === JUNIOR)
   assert.ok(junior, '必须存在 data_junior preset')
   const rows = presentationRows(junior)
-  assert.equal(rows.length, 1, '同一颗 preset 只能声明一次 presentation')
+  assert.equal(rows.length, 1, '同一颗 preset 只能声明一次执行面')
   assert.equal(rows[0].id, 'tool-presentation', '行 id 保持 tool-presentation：装配探针与文档都点名它')
-  assert.deepEqual(rows[0].config, { mode: 'ptc' }, 'presentation 行只允许 mode 一个配置键（runtime 由宿主提供）')
+  assert.deepEqual(rows[0].config, { maxParallelSubCalls: 10 },
+    '0.2.2 起直接挂 PTC executor 行：只写并发上限，runtime 与系统提示由宿主提供')
   assert.equal(junior.config.plugins.some((row) => row?.config?.systemPrompt?.toolOrder !== undefined), false,
     'ptc 下不能再配 systemPrompt.toolOrder 指向原生工具名')
 })
@@ -65,7 +66,7 @@ test('junior 仍是叶子 + 出图委派：PTC 不改工具面与 barrier', () =
   // run_code is a framework transport, not one of our family tools: it must not leak into row contracts.
   for (const names of Object.values(CAPITAL_ROW_TOOLS)) assert.ok(!names.includes('run_code'), 'run_code 不属于任何族行')
   assert.ok(!ROOT_AGENT_DENIED_TOOLS.includes('run_code'),
-    'run_code 是保留名：restrict() 点名会抛错，根侧不可见只靠“部署级 tools.mode 保持 native”')
+    'run_code 是保留名：restrict() 点名会抛错，根侧不可见靠“部署级仍由宿主 native executor 提供”')
 })
 
 test('junior persona：program discipline 覆盖直接取值、打印协议、回传与禁区', () => {

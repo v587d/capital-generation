@@ -772,7 +772,7 @@ test('子 Agent 委派行：选对角色 preset，工具面由行组合封闭且
     }
     // Skills are gated by row mounting, not an allow list: without the tool-skill row the named protocol volume never loads.
     assert.ok(mountsRow(presetId, '@deepseek-ai/dsh-tool-skill'), `${row.id} 必须挂 tool-skill 行，否则子 Agent 拿不到协议 skill`)
-    // The control row buys send_message and also brings interrupt_agent, subtracted by name in role-tool-policy.
+    // The control row buys send_message and also brings interrupt_agent / list_agents, subtracted by name in role-tool-policy.
     assert.ok(mountsRow(presetId, '@deepseek-ai/dsh-tool-subagent-control'), `${row.id} 必须挂 control 行才能 send_message 回传`)
     // Shell rows must be declared as a platform pair; one row alone leaves the other platform without a shell entry.
     const shellRows = allRowsOf(presetId).filter((row) => /^@deepseek-ai\/dsh-tool-(bash|pwsh)$/.test(row?.name ?? ''))
@@ -1055,8 +1055,8 @@ test('subagent_data_junior 行：选对角色 preset，工具面只含只读 Dat
   // Execution comes from PTC, not a shell row: only `run_code` may be called directly.
   assert.ok(!mountsRow(ROLE_PRESET_IDS.junior, '@deepseek-ai/dsh-tool-bash') && !mountsRow(ROLE_PRESET_IDS.junior, '@deepseek-ai/dsh-tool-pwsh'),
     'data_junior 不挂 shell：程序面是唯一执行入口（否则 SDK 会主动塞 tools.bash 示例）')
-  assert.ok(mountsRow(ROLE_PRESET_IDS.junior, '@deepseek-ai/dsh-agent-tool-presentation'),
-    'data_junior 必须挂 tool-presentation 行，mode: ptc 才让 SDK 成为它的工具面')
+  assert.ok(mountsRow(ROLE_PRESET_IDS.junior, '@deepseek-ai/dsh-tool-executor-ptc'),
+    'data_junior 必须挂 PTC executor 行：只有它能让 SDK 成为 junior 的工具面')
   assert.ok(mountsRow(ROLE_PRESET_IDS.junior, '@deepseek-ai/dsh-tool-skill') && mountsRow(ROLE_PRESET_IDS.junior, '@deepseek-ai/dsh-tool-subagent-control'),
     'junior 要能按需加载协议册子并 send_message 回传：skill 行与 control 行都得挂')
 })
@@ -1240,11 +1240,11 @@ test('data_collector preset：hub / store 仍住 isolate realm，realm 里只有
     'realm 里只许挂 tools/collect：hub 与 128 个数据源只能由它建，别挂进来就会跨 preset 重名')
 })
 
-test('data_junior preset：PTC presentation 与出图委派仍是 YAML 框架行，不靠运行期名单', () => {
+test('data_junior preset：PTC executor 与出图委派仍是 YAML 框架行，不靠运行期名单', () => {
   const plugins = allRowsOf(ROLE_PRESET_IDS.junior)
   assert.ok(!plugins.some((row) => row?.id === 'capital-generation-scope'), 'junior 不建 hub，也就不需要 collector 的 isolate 组')
-  assert.ok(plugins.some((row) => row?.name === '@deepseek-ai/dsh-agent-tool-presentation' && row?.config?.mode === 'ptc'),
-    'junior 的呈现方式由 preset 自己的 tool-presentation 行声明（mode: ptc）')
+  assert.ok(plugins.some((row) => row?.name === '@deepseek-ai/dsh-tool-executor-ptc' && row?.config?.maxParallelSubCalls === 10),
+    'junior 的执行面由 preset 自己的 tool-presentation 行声明（直接挂 PTC executor）')
   assert.ok(!plugins.some((row) => /^@deepseek-ai\/dsh-tool-(bash|pwsh)$/.test(row?.name ?? '')), 'junior 不挂 shell 行')
   assert.ok(plugins.some((row) => row?.name === '@deepseek-ai/dsh-tool-subagent' && row?.config?.toolName === 'subagent_visualization_specialist'),
     'specialist 委派行仍由 YAML 提供')

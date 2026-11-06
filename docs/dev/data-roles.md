@@ -33,7 +33,8 @@
     并写明"未出图是委派收窄而非数据不支持"。回归 `test/persona.test.mjs`「可视化 gate」用例。
   - **能力边界**：工具面没有外部行情 API、网页检索、通用 filesystem、Python coding，不自查凭据；
     `run_code` 里的 Node 能力也不是这些入口（软边界，见 §1.6）。
-    2026-10-23 起它不挂 shell，唯一执行面是 PTC `run_code`（`tool-presentation: ptc`）；程序只调度
+    2026-10-23 起它不挂 shell，唯一执行面是 PTC `run_code`（`tool-presentation` 行直接挂
+    `@deepseek-ai/dsh-tool-executor-ptc`）；程序只调度
     已授权工具与做算术，**不是取数通道**，也不读 `capital-data/**` 落盘（§1.6 → `bash-gate.md`）。
     外层 `run_code` 结果只走宿主的 `tool-result-pruner`（8192），本仓不新设第二道闸门；程序只
     `return` 结论是纪律，不是 gate。data_analyst 启用前逐行 / 序列级分析没有合规路径，须如实告知

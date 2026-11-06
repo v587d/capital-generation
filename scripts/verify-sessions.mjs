@@ -39,7 +39,10 @@ const since = Date.parse(argValue('--since', (() => {
 
 const require = createRequire(join(NESTED, 'dsh-session-persistence-jsonl/package.json'))
 const cordis = await import(pathToFileURL(require.resolve('@deepseek-ai/cordis')).href)
-const Backend = (await import(pathToFileURL(join(NESTED, 'dsh-session-persistence-jsonl/lib/index.js')).href)).default
+// 0.2.2 exports the JSONL backend as a plugin (`apply`) instead of a default class; mount it on a
+// bare Context and read the service. A class import fails as "Backend is not a constructor" before
+// the gate checks any session.
+const persistence = await import(pathToFileURL(join(NESTED, 'dsh-session-persistence-jsonl/lib/index.js')).href)
 
 const sessionSrc = readFileSync(join(NESTED, 'dsh-session/lib/index.js'), 'utf8')
 const KNOWN = new Set(
@@ -63,7 +66,12 @@ const watermark = decoded
   .reduce((max, record) => Math.max(max, record.mtime), 0)
 
 const backendCtx = new cordis.Context()
-const backend = new Backend(backendCtx, { root: sessionsRoot, compression: 'zstd' })
+await persistence.apply(backendCtx, { root: sessionsRoot, compression: 'zstd' })
+const backend = backendCtx.get('sessionPersistence')
+if (backend === undefined) {
+  console.error('verify-sessions: 挂载 JSONL 后端后 ctx.get("sessionPersistence") 为空；核对宿主包的插件导出面。')
+  process.exit(1)
+}
 
 const legacy = []
 const regressions = []

@@ -78,7 +78,7 @@ test('角色残留面只剩"同行兄弟"：不许出现 allow 清单', () => {
   }
   // Only control-row roles have a sibling name to deny.
   for (const role of [ROLE_PRESET_IDS.collector, ROLE_PRESET_IDS.junior, ROLE_PRESET_IDS.retriever, ROLE_PRESET_IDS.analyst]) {
-    assert.deepEqual([...ROLE_TOOL_SURFACES[role].denySiblings], [...SIBLING_DENIED_TOOLS], `${role} 要 send_message，就得减掉焊在一起的 interrupt_agent`)
+    assert.deepEqual([...ROLE_TOOL_SURFACES[role].denySiblings], [...SIBLING_DENIED_TOOLS], `${role} 要 send_message，就得减掉焊在一起的 interrupt_agent / list_agents`)
   }
   for (const role of [ROLE_PRESET_IDS.specialist]) {
     assert.equal(ROLE_TOOL_SURFACES[role].denySiblings, undefined, `${role} 不挂 control 行，不该有清单`)
@@ -149,13 +149,13 @@ test('agent/created 只收敛角色 child，且同一颗 child 只收敛一次',
 
   const tools = fakeTools()
   created(first.rootListeners.find((entry) => entry.event === 'agent/created'))({ agent: childAgent(tools) })
-  assert.equal(tools.calls.length, 1, '角色 child 应被收敛一次')
+  assert.equal(tools.calls.length, SIBLING_DENIED_TOOLS.length, '角色 child 的每个兄弟名字各提交一次 deny')
 
   // Two preset listeners may see the same child; convergence must be idempotent.
   const second = fakeCtx((agentCtx) => agentCtx?.presetId)
   registerRoleToolPolicy(second.ctx)
   created(second.rootListeners.find((entry) => entry.event === 'agent/created'))({ agent: childAgent(tools) })
-  assert.equal(tools.calls.length, 1, '同一颗 child 被两个监听器各收敛一次')
+  assert.equal(tools.calls.length, SIBLING_DENIED_TOOLS.length, '同一颗 child 被两个监听器各收敛一次')
 
   const probes = rolePolicyProbes()
   assert.equal(probes.length, 1, '现场记录必须去重（否则窗口被同一颗 child 刷满）')
@@ -167,7 +167,7 @@ test('agent/created 只收敛角色 child，且同一颗 child 只收敛一次',
   created(second.rootListeners.find((entry) => entry.event === 'agent/disposed'))({ agent: childAgent(fakeTools()) })
   const redo = fakeTools()
   created(first.rootListeners.find((entry) => entry.event === 'agent/created'))({ agent: childAgent(redo) })
-  assert.equal(redo.calls.length, 1, '释放后同 id 的 child 必须能重新收敛')
+  assert.equal(redo.calls.length, SIBLING_DENIED_TOOLS.length, '释放后同 id 的 child 必须能重新收敛')
 })
 
 test('deny 名单只写真存在的兄弟名字：shell 名字不归这里管（在 bash-guard 与 YAML 行里）', () => {
@@ -202,22 +202,27 @@ test('挂在角色 preset 的根会话（用户手选角色 preset 开的会话�
  * ⛔ The call-level guard, not created-time restrict, covers manually opened sessions:
  * the host creates the Agent before selecting its preset.
  */
-test('roleSiblingGuardReasonFor：角色人设调 interrupt_agent 被拒，其余一律放行', () => {
+test('roleSiblingGuardReasonFor：角色人设调 interrupt_agent / list_agents 被拒，其余一律放行', () => {
   const guard = roleSiblingGuardReasonFor(fakeCtx((agentCtx) => agentCtx?.presetId).ctx)
   for (const presetId of [ROLE_PRESET_IDS.collector, ROLE_PRESET_IDS.junior, ROLE_PRESET_IDS.retriever, ROLE_PRESET_IDS.analyst]) {
-    const reason = guard({ name: 'interrupt_agent', agent: { ctx: { presetId } } })
-    assert.ok(typeof reason === 'string' && reason.length > 0, `${presetId} 必须拦下 interrupt_agent`)
-    assert.match(reason, new RegExp(presetId), '拒绝要点名是谁被拒')
-    assert.match(reason, /send_message/, '拒绝必须给出正确路径（回告主 Agent）')
+    for (const name of SIBLING_DENIED_TOOLS) {
+      const reason = guard({ name, agent: { ctx: { presetId } } })
+      assert.ok(typeof reason === 'string' && reason.length > 0, `${presetId} 必须拦下 ${name}`)
+      assert.match(reason, new RegExp(presetId), '拒绝要点名是谁被拒')
+      assert.match(reason, /send_message/, '拒绝必须给出正确路径（回告主 Agent）')
+      assert.match(reason, name === 'list_agents' ? /子 Agent 名单/ : /打断/, '拒绝理由要说明这颗工具的真实用途')
+    }
   }
-  // Root may interrupt its children; unknown presets must remain allowed.
-  assert.equal(guard({ name: 'interrupt_agent', agent: { ctx: { presetId: 'capital-generation' } } }), undefined)
-  assert.equal(guard({ name: 'interrupt_agent', agent: { ctx: { presetId: 'standard' } } }), undefined)
-  assert.equal(guard({ name: 'interrupt_agent', agent: { ctx: {} } }), undefined)
-  assert.equal(roleSiblingGuardReasonFor(fakeCtx(undefined, { registry: false }).ctx)({ name: 'interrupt_agent', agent: { ctx: { presetId: ROLE_PRESET_IDS.retriever } } }), undefined,
-    'registry 读不到就放行：宁可少一层闸门，也不能吃掉开发会话')
+  // Root may interrupt / list its children; unknown presets must remain allowed.
+  for (const name of SIBLING_DENIED_TOOLS) {
+    assert.equal(guard({ name, agent: { ctx: { presetId: 'capital-generation' } } }), undefined)
+    assert.equal(guard({ name, agent: { ctx: { presetId: 'standard' } } }), undefined)
+    assert.equal(guard({ name, agent: { ctx: {} } }), undefined)
+    assert.equal(roleSiblingGuardReasonFor(fakeCtx(undefined, { registry: false }).ctx)({ name, agent: { ctx: { presetId: ROLE_PRESET_IDS.retriever } } }), undefined,
+      'registry 读不到就放行：宁可少一层闸门，也不能吃掉开发会话')
+  }
   // send_message is the leaf role's return channel and must never be denied.
-  for (const name of ['send_message', 'list_agents', 'request_data', undefined]) {
+  for (const name of ['send_message', 'request_data', undefined]) {
     assert.equal(guard({ name, agent: { ctx: { presetId: ROLE_PRESET_IDS.retriever } } }), undefined, `${name} 不是这格管的`)
   }
 })

@@ -5,18 +5,18 @@
 
 > 2026-10-15 用户决策「开 read、同时保留 bash」：主 Agent 保留 `bash` / `pwsh`（读 skill 分册、
 > 纯计算），新开 `read` 读文件；文件写口（`write` / `edit`）不开——落盘只走工具实现。
-> 2026-10-23 起 data_junior 改用宿主 PTC：只挂 `tool-presentation`（`mode: ptc`），不挂 shell；
-> 它的程序面是 `run_code`，同样只做工具调度与派生算术，不是取数通道。
+> 2026-10-23 起 data_junior 改用宿主 PTC：只挂 `tool-presentation`（0.2.2 起直接挂
+> `@deepseek-ai/dsh-tool-executor-ptc`），不挂 shell；它的程序面是 `run_code`，同样只做工具调度与派生算术，不是取数通道。
 
 ## 1.6 接线与结构件
 
 - **接线**：shell 行 preset 自持、**平台成对**挂载（Linux `tool-bash` / Windows `tool-pwsh`；Web
   平面把 host 层两行都 disabled，Windows 没有 bash-sandbox，只挂 bash 会实际执行 PowerShell），
-  **只给主 Agent**（2026-10-23 起 data_junior 改挂 `tool-presentation` 的 `mode: ptc`，程序面是
+  **只给主 Agent**（2026-10-23 起 data_junior 改挂 `tool-presentation`，行里直接是 PTC executor，程序面是
   `run_code`）。`enableRunInBackground: false`。文件口一颗 `tool-fs`（本层只注册 `read`，`write` / `edit` 留在这里不注册——但**这不等于看不见**，见下）。
 - **⛔ 行组合管得住的只有"我们自己的工具"与"同名变体的替换"**（2026-10-19 真机实测）：宿主
   `dsh-base` 在 **global 层**挂了 `dsh-tool-bash` / `dsh-tool-pwsh` / `dsh-tool-fs` /
-  `dsh-tool-fs-search` / `dsh-tool-subagent-control`(+`/list-agents`) / `dsh-tool-todo` /
+  `dsh-tool-fs-search` / `dsh-tool-subagent-control`（0.2.2 起主入口同时注册 `send_message` / `interrupt_agent` / `list_agents`） / `dsh-tool-todo` /
   `dsh-tool-web`，而 `ScopedLayers.merge()` 是"global 打底 + 作用域链覆盖**同名变体**"——**本层不注册
   一个名字，不等于把它从视图里删掉**。实测三条：根 preset 的 `tool-fs` 行写着 `write: false /
   edit: false`，手开 Capital 仍看得见 `write` 且真的落盘；手开 资讯 里 `interrupt_agent` 直接执行

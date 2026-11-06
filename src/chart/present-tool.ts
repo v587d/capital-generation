@@ -2,10 +2,11 @@
  * present_charts: the root Agent's final-turn delivery step.
  *
  * render_chart only mints a chart_ref (the specialist row no longer auto-delivers). DSH's
- * deliverable card replays only declarations recorded before the closing assistant message, so
- * the card has to be written by the turn that carries the final answer: the root Agent presents
- * its collected refs/deliverables here immediately before writing that answer. Never a custom
- * event type — the session-event vocabulary is closed (see events.ts).
+ * deliverable card replays declarations from the whole closing turn (0.2.2 dropped the
+ * `file.seq < owner.seq` filter), but the card still has to be attributed to the turn that
+ * carries the final answer: the root Agent presents its collected refs/deliverables here
+ * immediately before writing that answer. Never a custom event type — the session-event
+ * vocabulary is closed (see events.ts).
  */
 import type { Context } from '@deepseek-ai/cordis'
 

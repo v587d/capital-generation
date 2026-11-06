@@ -14,11 +14,14 @@
   `present_charts` 只记录本轮清单（refs 或 task_id，提前调用也安全）。真正的
   `deliverables/presented` 由 `agent/assistant-stream` 的终端 `finish` 帧触发：只有
   `reason.kind === 'stop'`、本次 attempt 没出现 tool-call、inbox 没有可执行消息、且没有运行中的
-  直属子 Agent 时才写（`subagent-settled` 通知不算可执行消息）。宿主要等流结束后才 `append('assistant/message')`，所以事件的 seq 必然早于收尾消息——
-  这是唯一同时满足"知道这轮是纯文本收尾"与"消息还没落盘"的时机（探针 L34）。
+  直属子 Agent 时才写（`subagent-settled` 通知不算可执行消息）。宿主要等流结束后才
+  `append('assistant/message')`；0.2.2 起客户端重放**整轮**（去掉了 `file.seq < owner.seq` 过滤），
+  所以"早于收尾消息"不再是卡片可见的前提，但终端 `finish` 帧仍是唯一同时满足"知道这轮是纯文本收尾"
+  与"收尾轮归属已定"的时机（探针 L34）。
 - **⛔ 禁止用回合钩子猜"最终轮"**：在 `turn/start` 补登记会落进被折叠的过程轮（真机
   `session-16129aa9`：5 张图分两轮落在中间轮，最后一轮只剩一句"见上"）；在 `turn-stopping` 补登记
-  晚于收尾消息，被客户端 `presentedForClosing` 过滤。也不能只信模型：真机 `session-32e54e60` 在
+  在 0.2.2 已不会被 seq 过滤，但它只能看到"轮要关了"，看不到"这次 finish 是纯文本收尾"，
+  提前栈下的图表仍可能落在过程轮。也不能只信模型：真机 `session-32e54e60` 在
   junior 尚未结算时提前调用 `present_charts`，随后又继续查询，最终报告落到 turn 16、卡片留在
   turn 14——写入点必须由宿主判定。
 - **收尾帧必须撤掉冗余的 `subagent-settled`**：只把结算通知排除在 idle 判定外不够——宿主 loop 仍

@@ -6,15 +6,16 @@
 import type { AgentLike, GuardedExecution, PolicyContext } from './root-tool-policy.js';
 import { type RolePresetId } from '../preset-ids.js';
 export { ROLE_PRESET_IDS, ROLE_PRESET_ID_LIST, type RolePresetId } from '../preset-ids.js';
-/** Welded to `send_message` by `tool-subagent-control`; no host switch, so leaf roles deny it by name. */
-export declare const SIBLING_DENIED_TOOLS: readonly ["interrupt_agent"];
+/** Registered together with `send_message` by `tool-subagent-control`; no host switch, so leaf roles deny these by name.
+ * 0.2.2 moved `list_agents` into the same main entry, so the welded set grew from one to two names. */
+export declare const SIBLING_DENIED_TOOLS: readonly ["interrupt_agent", "list_agents"];
 /** Residual surface; no allow list: family rows define the tool surface. */
 export interface RoleSurface {
     /** Sibling names welded into a needed row that this persona must not have. */
     readonly denySiblings?: readonly string[];
 }
-/** Leaf roles need `send_message`, so they inherit the welded `interrupt_agent`; specialist
- * mounts no control row. Tolerant per-name deny records misses without failing open. */
+/** Leaf roles need `send_message`, so they inherit the welded `interrupt_agent` / `list_agents`;
+ * specialist mounts no control row. Tolerant per-name deny records misses without failing open. */
 export declare const ROLE_TOOL_SURFACES: Record<RolePresetId, RoleSurface>;
 /** Role preset id only, undefined for root and other presets; failure means "do not converge". */
 export declare function rolePresetIdOf(ctx: PolicyContext, agent: AgentLike | undefined): RolePresetId | undefined;

@@ -1,6 +1,6 @@
 {
   "name": "@v587d/capital-generation",
-  "version": "2.17.0",
+  "version": "2.18.0",
   "description": "Capital Generation：面向中国散户的 AI 投资助手插件（自动模式 Agent Preset）",
   "icon": "assets/cg-icon.png",
   "author": "v587d",
@@ -161,23 +161,23 @@
     "report:skill-usage": "node scripts/skill-usage-report.mjs"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-skill": "0.2.1-rc.5",
-    "@deepseek-ai/dsh-skill-filesystem": "0.2.1-rc.5"
+    "@deepseek-ai/cordis": "~4.1.0",
+    "@deepseek-ai/dsh-skill": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-skill-filesystem": "0.2.2-rc.1"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-skill": "^0.2.1-rc.5",
-    "@deepseek-ai/dsh-skill-filesystem": "^0.2.1-rc.5",
-    "@deepseek-ai/dsh-system-prompt": "^0.2.1-rc.5",
-    "@deepseek-ai/schemastery": "^3.18.4",
+    "@deepseek-ai/cordis": "~4.1.0",
+    "@deepseek-ai/dsh-skill": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-skill-filesystem": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "^0.2.2-rc.1",
+    "@deepseek-ai/schemastery": "^3.19.0",
     "esbuild": "^0.28.2",
     "js-yaml": "^5.4.1",
     "lightweight-charts": "5.2.1",
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "@deepseek-ai/schemastery": "^3.18.4",
+    "@deepseek-ai/schemastery": "^3.19.0",
     "@joplin/turndown-plugin-gfm": "^1.0.68",
     "turndown": "^7.2.4",
     "zod": "^4.5.4"

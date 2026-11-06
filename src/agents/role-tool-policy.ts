@@ -11,8 +11,9 @@ import { ROLE_PRESET_ID_LIST, ROLE_PRESET_IDS, type RolePresetId } from '../pres
 
 export { ROLE_PRESET_IDS, ROLE_PRESET_ID_LIST, type RolePresetId } from '../preset-ids.js'
 
-/** Welded to `send_message` by `tool-subagent-control`; no host switch, so leaf roles deny it by name. */
-export const SIBLING_DENIED_TOOLS = ['interrupt_agent'] as const
+/** Registered together with `send_message` by `tool-subagent-control`; no host switch, so leaf roles deny these by name.
+ * 0.2.2 moved `list_agents` into the same main entry, so the welded set grew from one to two names. */
+export const SIBLING_DENIED_TOOLS = ['interrupt_agent', 'list_agents'] as const
 
 /** Residual surface; no allow list: family rows define the tool surface. */
 export interface RoleSurface {
@@ -20,8 +21,8 @@ export interface RoleSurface {
   readonly denySiblings?: readonly string[]
 }
 
-/** Leaf roles need `send_message`, so they inherit the welded `interrupt_agent`; specialist
- * mounts no control row. Tolerant per-name deny records misses without failing open. */
+/** Leaf roles need `send_message`, so they inherit the welded `interrupt_agent` / `list_agents`;
+ * specialist mounts no control row. Tolerant per-name deny records misses without failing open. */
 export const ROLE_TOOL_SURFACES: Record<RolePresetId, RoleSurface> = {
   [ROLE_PRESET_IDS.collector]: { denySiblings: SIBLING_DENIED_TOOLS },
   [ROLE_PRESET_IDS.junior]: { denySiblings: SIBLING_DENIED_TOOLS },
@@ -113,6 +114,10 @@ export function roleSiblingGuardReasonFor(ctx: PolicyContext): (exec: GuardedExe
     const claim = readPresetClaim(ctx, exec?.agent)
     if (claim.registryMissing || claim.failed || claim.claim === undefined) return undefined
     if (!ROLE_PRESET_ID_LIST.includes(claim.claim)) return undefined
+    if (name === 'list_agents') {
+      return `${name} 不对人设 ${claim.claim} 开放：叶子角色只回传自己的结果，子 Agent 名单与调度归主 Agent。`
+        + '需要别的 Agent 配合，用 send_message 回告主 Agent；不要自己换工具硬做。'
+    }
     return `${name} 不对人设 ${claim.claim} 开放：叶子角色只回传自己的结果，打断别的会话归主 Agent 决定。`
       + '需要别的 Agent 停下来，用 send_message 回告主 Agent；不要自己换工具硬做。'
   }

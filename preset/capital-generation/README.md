@@ -23,7 +23,7 @@
 
 ## 2. 人设（persona）承载与官方语义
 
-实测 `dsh 0.2.1-rc.5`（`test/persona.test.mjs` 对着本机 dsh 核对字段名），两层载体注册的是
+实测 `dsh 0.2.2-rc.1`（`test/persona.test.mjs` 对着本机 dsh 核对字段名），两层载体注册的是
 **同一个 system-prompt 节名**：
 
 | 载体 | 位置 | 字段 | 生效范围 |
@@ -160,13 +160,15 @@
 
 ### 5.1.1 PTC：只给 data_junior，主 Agent 仍是 native
 
-- **一行怎么落**：junior preset 挂 `@deepseek-ai/dsh-agent-tool-presentation`（`mode: ptc`），
-  同时删掉 `tool-bash` / `tool-pwsh`。宿主 `ptc-runtime` 由 `dsh-base` 提供，preset 写不进去；
-  `smoke:boot` 同时断言 presentation 行 `fiberState=2` 与 `ctx.get('ptcRuntime')` 在场。
+- **一行怎么落**：junior preset 挂 `tool-presentation` 行，0.2.2 起行里直接是
+  `@deepseek-ai/dsh-tool-executor-ptc`（`maxParallelSubCalls: 10`；旧的
+  `dsh-agent-tool-presentation` + `mode: ptc` 只剩兼容壳），同时删掉 `tool-bash` / `tool-pwsh`。
+  宿主 `ptc-runtime` 由 `dsh-base` 提供，preset 写不进去；`smoke:boot` 同时断言 executor 行
+  `fiberState=2` 与 `ctx.get('ptcRuntime')` 在场。
 - **为什么删 shell 而不是并存**：PTC SDK 在可见 `bash` 时会主动塞一条 `tools.bash({command:'pwd'})`
   示例，并存等于官方提示词把模型往 shell 引；junior 只需要一个执行面。主 Agent 仍是 native，
-  拿到的是原生 shell，根侧 `restrict()` 不能点名保留名 `run_code`（只在部署级 `tools.mode`
-  被改成 `ptc` 时才会出现，本仓只允许 preset 行）。
+  继承部署级宿主 `dsh-tool-executor-native`，拿到的是原生 shell；根侧 `restrict()` 不能点名保留名
+  `run_code`（只有 PTC executor 才会把它放进模型面，本仓只挂在 junior 的 preset 行）。
 - **省的是回合与抄写，不是安全升级**：`run_code` 里的 Node 仍能 `import('node:fs/promises')` /
   `fetch` / `child_process`；宿主沙箱只拦写。`# PROGRAM DISCIPLINE` 与
   `capital-data-query` §3.3 是纪律，不是边界；要硬隔离只能换容器 / VM / 远端 runtime。

@@ -1,12 +1,13 @@
 /**
  * Chart delivery at the closing answer.
  *
- * DSH's deliverable card only replays `deliverables/presented` events whose seq is before the
- * turn's closing assistant message, and a turn is final only after the fact. The one place that is
- * provably before the closing message is the assistant stream's terminal `finish` chunk: the loop
- * appends the message after the stream ends. So delivery is deferred to that chunk, gated on the
- * root session being idle (no actionable inbox input, no running direct children), which is exactly
- * the shape of a closing turn. Waiting/aborted/tool-call responses never flush.
+ * DSH's deliverable card replays `deliverables/presented` from the closing turn (0.2.2 dropped the
+ * `file.seq < owner.seq` filter, so late declarations are no longer lost). A turn is still final
+ * only after the fact, and the one place where that is knowable before the turn closes is the
+ * assistant stream's terminal `finish` chunk: the loop appends the message after the stream ends.
+ * So delivery is deferred to that chunk, gated on the root session being idle (no actionable inbox
+ * input, no running direct children), which is exactly the shape of a closing turn.
+ * Waiting/aborted/tool-call responses never flush.
  *
  * `subagent-settled` notices are not actionable input: they can arrive while the closing answer is
  * already streaming. Counting them as pending would strand a card that the model has just selected,
@@ -60,7 +61,7 @@ function inboxMessages(inbox: InboxStateLike | undefined): unknown[] {
 
 export interface ChartDeliveryOptions {
   artifacts: ChartArtifactRegistry
-  /** Writes one first-party deliverables/presented batch; must be synchronous (pre-message seq). */
+  /** Writes one first-party deliverables/presented batch; must be synchronous (listener runs before the message commits). */
   publish: (sessionId: string, inputs: ChartTurnEventInput[]) => boolean
   /** Durable pending input; synchronous projection read. Absent means "cannot tell" → proceed. */
   inboxOf?: (session: SessionLike) => InboxStateLike | undefined

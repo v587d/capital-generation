@@ -3,9 +3,11 @@
  *
  * The model only records which charts belong to the answer. The actual first-party
  * `deliverables/presented` append happens in the terminal assistant-stream chunk, before the closing
- * message commits, gated on an idle root (no actionable inbox input, no running direct children). That is the only
- * point where "the final answer" is knowable, so early/no `present_charts` calls cannot strand the
- * card in a folded process turn (rationale: docs/dev/chart-delivery-events.md §6.3).
+ * message commits, gated on an idle root (no actionable inbox input, no running direct children).
+ * That is the first point where "the final answer" is knowable, so early/no `present_charts` calls
+ * cannot strand the card in a folded process turn (rationale: docs/dev/chart-delivery-events.md §6.3).
+ * 0.2.2 made the client replay the whole turn, so this write point is about turn attribution and
+ * ordering, not about dodging a seq cutoff.
  */
 import type { Context } from '@deepseek-ai/cordis'
 

@@ -189,11 +189,13 @@
             config:
               role: data_junior
 
-          # PTC: presentation is preset-scoped; the host runtime (dsh-base) stays per-call.
+          # PTC executor is preset-scoped; the host runtime (dsh-base) stays per-call. 0.2.2 replaced
+          # the presentation selector with the executor row itself; `maxParallelSubCalls` is pinned
+          # to the documented 10 instead of inheriting the executor default.
           - id: tool-presentation
-            name: '@deepseek-ai/dsh-agent-tool-presentation'
+            name: '@deepseek-ai/dsh-tool-executor-ptc'
             config:
-              mode: ptc
+              maxParallelSubCalls: 10
 
           # ── compaction: both rows must live in one realm; thresholdChars 8192 is the instance-wide single value ──
           - id: compaction
@@ -664,11 +666,10 @@
               toolName: subagent_data_analyst
               agentPreset: capital-data-analyst
               # If this row is ever enabled, `query_dataset` stays aggregate-only: it must not reopen raw rows.
+          # 0.2.2 registers send_message / interrupt_agent / list_agents from the main entry; the
+          # old `list-agents` subpath is gone and a row naming it keeps the whole preset broken.
           - id: tool-subagent-control
             name: '@deepseek-ai/dsh-tool-subagent-control'
-
-          - id: tool-subagent-list-agents
-            name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
 
           - id: tool-ask-user
             name: '@deepseek-ai/dsh-tool-ask-user'

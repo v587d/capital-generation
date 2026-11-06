@@ -146,7 +146,7 @@ const probes = [
   {
     id: 'L11',
     title: '会话日志 first-party 事件（Session.append）+ ctx.sessions.get + sessionProjections.stateOf',
-    why: '图表以官方 `deliverables/presented` 登记为本轮交付（2026-09-18 起不再自造事件类型）；append 变成 surface-only、`deliverables/presented` 掉出已知词汇表、deriveEventMessage 开始透传未知类型（污染上下文）、或 stateOf 改名，都会静默失效。',
+    why: '图表以官方 `deliverables/presented` 登记为本轮交付（2026-09-18 起不再自造事件类型）；append 变成 surface-only、`deliverables/presented` 掉出已知词汇表、deriveEventMessage 开始透传未知类型（污染上下文）、或 stateOf 改名，都会静默失效。0.2.2 起交付卡重放**整轮**（含收尾回复之后的交付），不再按 seq 截断。',
     run() {
       const sessionFile = join(PKG('dsh-session'), 'lib/index.js')
       const session = readIfPresent(sessionFile)
@@ -167,14 +167,14 @@ const probes = [
         // Key invariant: the delivery event must stay in the closed vocabulary, or written logs are
         // rejected at cold load and the whole session becomes unopenable.
         ['deliverables/presented 属于 KNOWN_SESSION_EVENT_TYPES', /"deliverables\/presented"/, session, sessionFile],
-        // Our present_charts step depends on this replay rule: a card declared AFTER the closing
-        // assistant message is silently dropped, which is why delivery is a pre-answer model step.
-        ['交付卡片只重放收尾消息之前的事件（presentedForClosing: file.seq < owner.seq）',
-          /presentedForClosing\(owner\)[\s\S]{0,800}?file\.seq\s*<\s*owner\.seq/, deliverables, deliverablesFile],
+        // 0.2.2 drops the `file.seq < owner.seq` filter: the card covers the whole turn, including
+        // deliveries written after the closing reply. Our pre-message write still lands in the turn.
+        ['交付卡片重放整轮：presentedForClosing 不再按 seq 截断',
+          /function presentedForClosing\(owner\)[\s\S]{0,400}?for \(const file of owner\.turn\.data\.get\("deliverables"\)\?\.presented \?\? \[\]\) files\.set\(file\.path, file\)/, deliverables, deliverablesFile],
       ]
       const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
       return missing.length === 0
-        ? { status: PASS, detail: 'append / sessions.get / stateOf 都还在，deliverables/presented 仍在闭集词汇表内，交付卡片只重放收尾消息之前的事件' }
+        ? { status: PASS, detail: 'append / sessions.get / stateOf 都还在，deliverables/presented 仍在闭集词汇表内，交付卡片重放整轮' }
         : { status: FAIL, detail: `图表交付通道的接口变了：${missing.join(' / ')}（见账本 L11）` }
     },
   },
@@ -192,6 +192,9 @@ const probes = [
       const agentTypes = join(PKG('dsh-agent'), 'lib/types/runtime-types.d.ts')
       const types = readIfPresent(agentTypes)
       if (types === undefined) return { status: FAIL, detail: `读不到 ${agentTypes}` }
+      const agentFile = join(PKG('dsh-agent'), 'lib/index.js')
+      const agentRegistry = readIfPresent(agentFile)
+      if (agentRegistry === undefined) return { status: FAIL, detail: `读不到 ${agentFile}` }
       const toolsFile = join(PKG('dsh-tools'), 'lib/index.js')
       const tools = readIfPresent(toolsFile)
       if (tools === undefined) return { status: FAIL, detail: `读不到 ${toolsFile}` }
@@ -202,14 +205,13 @@ const probes = [
       const checks = [
         ["'agent/created'(this: Scoped<Agent>, payload: { agent })", /'agent\/created'\(this: Scoped<Agent>/, types, agentTypes],
         ['payload 带 agent（监听器据此拿 agent.ctx）', /'agent\/created'\(this: Scoped<Agent>, payload: \{[\s\S]{0,120}agent: Agent/, types, agentTypes],
+        ['Agent 类型仍暴露自己的 ctx（scoped restrict 的唯一入口）', /readonly ctx: Context;/, types, agentTypes],
+        ['agent registry 仍在 serial 派发里带 created agent', /this\.ctx\.serial\(entry\.carrier, "agent\/created", \{\s*agent: entry\.agent/, agentRegistry, agentFile],
         ['tools.restrict() 要求 scoped context（agent.ctx）', /tools\.restrict\(\) requires a scoped context/, tools, toolsFile],
         ['restrict 走 layer.restrictions.append（作用域层过滤）', /layer\.restrictions\.append\(compiled\)/, tools, toolsFile],
-        ['restriction 只过滤继承层，不碰本层自注册（逐名 deny 不误伤本行注册工具的前提）', /A restriction filters what a scope inherits[\s\S]{0,160}never what its OWN layer registers/, tools, toolsFile],
-        ['preset 的工具对 agent scope 是"祖先贡献"（角色侧那份 deny 筛得掉它们的依据）', /presets moved them onto the agent plane they became an ANCESTOR[\s\S]{0,80}contribution/, tools, toolsFile],
-        // 0.1.7: dsh-agent-presets was replaced by agent-preset-registry; dsh-tool-subagent is the
-        // current user of the same invariant (it scopes the created agent's own ctx, not ctx.root).
-        ['上游自己在 agent/created 里拿 created agent', /"agent\/created",\s*(?:async\s*)?\(\{ agent/, subagent, subagentFile],
-        ['并经由该 agent 自己的 ctx 注入 scoped 运行时', /\w\.ctx\.inject\(\[/, subagent, subagentFile],
+        ['restriction 只过滤继承的 global / ancestor 工具，本层自注册豁免（逐名 deny 不误伤本行注册工具的前提）',
+          /Restrictions across the\s+\*\s+scope chain intersect over inherited global and ancestor tools; the viewing\s+\*\s+scope's own registrations remain exempt/, tools, toolsFile],
+        ['restrict 的公开面仍写明 "scoped registrations remain visible"', /intersect; scoped registrations remain visible\./, tools, toolsFile],
         ['0.2.1 起委派行拒绝 persona / toolFilter（名字级收敛只剩 agent scope 这一格）', /const field of \["persona", "toolFilter"\][\s\S]{0,200}is no longer supported/, subagent, subagentFile],
       ]
       const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
@@ -234,20 +236,21 @@ const probes = [
   },
   {
     id: 'L6',
-    title: 'host 侧 webServer.register({ kind, path, handler })',
+    title: 'host 侧 webServer.register({ kind, path, handler })（0.2.2 起与 resource 路由同为 WebRoute 联合）',
     why: '图表序列走我们自己的 HTTP 路由（数据不进模型上下文）；签名变了取数通道就断。',
     run() {
       const file = join(PKG('dsh-host-webserver'), 'lib/types/index.d.ts')
       const text = readIfPresent(file)
       if (text === undefined) return { status: FAIL, detail: `读不到 ${file}` }
       const checks = [
-        ['register(route: WebRoute)', /register\(\s*route:\s*WebRoute\s*\)/],
-        ["kind: WebRouteKind", /kind:\s*WebRouteKind/],
+        ['register(route: WebRoute | WebResourceRoute)', /register\(\s*route:\s*WebRoute\s*\|\s*WebResourceRoute\s*\)\s*:\s*\(\)\s*=>\s*void/],
+        ["kind: WebRouteKind（handler 路由）", /interface WebRoute \{[\s\S]{0,200}?kind:\s*WebRouteKind/],
         ['WebRouteKind = exact | prefix', /WebRouteKind\s*=\s*'exact'\s*\|\s*'prefix'/],
+        ['handler 仍要自己持有完整响应生命周期', /handler:\s*\(req:\s*IncomingMessage,\s*res:\s*ServerResponse\)\s*=>\s*void\s*\|\s*Promise<void>/],
       ]
       const missing = checks.filter(([, pattern]) => !pattern.test(text)).map(([label]) => label)
       return missing.length === 0
-        ? { status: PASS, detail: 'register(route: WebRoute) 与 exact|prefix 仍在' }
+        ? { status: PASS, detail: 'register(WebRoute | WebResourceRoute) 的 handler 分支仍带 exact|prefix 与完整响应所有权' }
         : { status: FAIL, detail: `签名或类型变了：${missing.join(' / ')}` }
     },
   },
@@ -439,20 +442,20 @@ const probes = [
       + '本仓 test/output-contract.mjs 是这条规则的镜像断言；上游若不再按 output.schema 校验返回值，镜像就该退休，'
       + '所以这里逐条探测：漂移必须是一条具名失败。',
     run() {
-      const toolsIndex = readIfPresent(join(PKG('dsh-tools'), 'lib/index.js'))
-      if (toolsIndex === undefined) return { status: FAIL, detail: `读不到 ${join(PKG('dsh-tools'), 'lib/index.js')}` }
+      const pipeline = readIfPresent(join(PKG('dsh-tools'), 'lib/pipeline.js'))
+      if (pipeline === undefined) return { status: FAIL, detail: `读不到 ${join(PKG('dsh-tools'), 'lib/pipeline.js')}（0.2.2 把 invoke pipeline 拆出了 index.js）` }
+      const shared = readIfPresent(join(PKG('dsh-tools'), 'lib/shared-DTdn5dXO.js'))
+      if (shared === undefined) return { status: FAIL, detail: `读不到 ${join(PKG('dsh-tools'), 'lib/shared-DTdn5dXO.js')}` }
       const jsonSchema = readIfPresent(join(PKG('dsh-tools'), 'lib/types/json-schema.js'))
       if (jsonSchema === undefined) return { status: FAIL, detail: `读不到 ${join(PKG('dsh-tools'), 'lib/types/json-schema.js')}` }
-      const errorTypes = readIfPresent(join(PKG('dsh-tools'), 'lib/types/index.js'))
-      if (errorTypes === undefined) return { status: FAIL, detail: `读不到 ${join(PKG('dsh-tools'), 'lib/types/index.js')}` }
       const checks = [
         ['validateJsonSchemaValue 仍是命名导出', /export function validateJsonSchemaValue\(schema, value, path/, jsonSchema, 'json-schema.js'],
         ['返回值 snapshot 后按 output.schema 校验',
-          /snapshotToolValue\([\s\S]{0,160}validateJsonSchemaValue\(tool\.output\.schema,\s*detached,\s*"value"\)/, toolsIndex, 'index.js'],
+          /snapshotToolValue\(tool\.name, candidate\)[\s\S]{0,200}validateJsonSchemaValue\(tool\.output\.schema, detached, "value"\)/, pipeline, 'pipeline.js'],
         ['违反声明抛 ToolOutputError（INVALID_TOOL_OUTPUT）',
-          /class ToolOutputError[\s\S]{0,400}INVALID_TOOL_OUTPUT/, errorTypes, 'types/index.js'],
+          /ToolOutputError = class[\s\S]{0,400}INVALID_TOOL_OUTPUT/, shared, 'shared chunk'],
         ['required 缺失判据是"不存在或 undefined"', /missing required property/, jsonSchema, 'json-schema.js'],
-        ['additionalProperties: false 拒绝未声明字段', /additionalProperties\s*===\s*false/, toolsIndex, 'index.js'],
+        ['additionalProperties: false 拒绝未声明字段', /additionalProperties === false[\s\S]{0,240}is not a declared property \(additionalProperties: false\)/, shared, 'shared chunk'],
       ]
       const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
       return missing.length === 0
@@ -935,7 +938,7 @@ const probes = [
   },
   {
     id: 'L30',
-    title: '框架并发池的分类器契约：`ToolDefinition.isConcurrencySafe?(args)` —— **只有严格返回 `true` 才判 parallel**，未声明 / 非 true / 抛错 / 工具不可见一律 exclusive（fail-closed）；调度门是 exclusive 要求 `inFlight.size === 0`、parallel 可凑到 `maxParallel`（`maxParallelSubCalls` 默认 10）',
+    title: '框架并发池的分类器契约：`ToolDefinition.isConcurrencySafe?(args)` —— **只有严格返回 `true` 才判 parallel**，未声明 / 非 true / 抛错 / 工具不可见一律 exclusive（fail-closed）；0.2.2 起调度器在 `dsh-tools/lib/pipeline.js`，池上限来自 executor（默认 10）',
     why: '`docs/dev/data-roles.md` §1.1 把整条"省往返"路线押在这一个判定上：不合并多份结果、不做 digest 与裁剪阶梯，'
       + '而是让模型在同一条消息里发多个调用、由框架放进有界并发池。消费这条的三处都在本仓'
       + '（`describe_dataset`、`list_capabilities`、`describe_capability`），而 `request_data` 刻意**不**声明'
@@ -950,19 +953,28 @@ const probes = [
       + 'call→result 交替、整批 1426 毫秒；混发三条各自独占、整批 2116 毫秒（池在第一颗未声明的调用处断开）。'
       + '0.1.5-rc.1 的 `executionMode` 源码与今天同为 fail-closed，所以默认串行这条不是本版才有的行为。',
     run() {
-      const file = join(PKG('dsh-tools'), 'lib/index.js')
-      const text = readIfPresent(file)
-      if (text === undefined) return { status: FAIL, detail: `读不到 ${file}（框架换了并发池的实现位置？账本 L30 要跟着改）` }
-      const typesFile = join(PKG('dsh-tools'), 'lib/types/index.d.ts')
+      const pipelineFile = join(PKG('dsh-tools'), 'lib/pipeline.js')
+      const pipeline = readIfPresent(pipelineFile)
+      if (pipeline === undefined) return { status: FAIL, detail: `读不到 ${pipelineFile}（0.2.2 把调度器拆出了 index.js）` }
+      const typesFile = join(PKG('dsh-tools'), 'lib/types/contracts.d.ts')
       const types = readIfPresent(typesFile)
       if (types === undefined) return { status: FAIL, detail: `读不到 ${typesFile}` }
+      const nativeFile = join(PKG('dsh-tool-executor-native'), 'lib/index.js')
+      const native = readIfPresent(nativeFile)
+      if (native === undefined) return { status: FAIL, detail: `读不到 ${nativeFile}` }
+      const ptcFile = join(PKG('dsh-tool-executor-ptc'), 'lib/index.js')
+      const ptc = readIfPresent(ptcFile)
+      if (ptc === undefined) return { status: FAIL, detail: `读不到 ${ptcFile}` }
       const checks = [
         ['ToolDefinition 仍带这条可选并发声明', /isConcurrencySafe\?\(args: unknown\): boolean;/, types, typesFile],
-        ['未声明就是 exclusive（fail-closed 的方向：默认串行）', /if \(!tool\?\.isConcurrencySafe\) return \{ kind: "exclusive" \};/, text, file],
-        ['仍然只有严格 === true 才判 parallel', /tool\.isConcurrencySafe\(exec\.arguments\) === true \? \{ kind: "parallel" \}/, text, file],
-        ['分类器抛错回落 exclusive（不吞成 parallel）', /catch \{\s*return \{ kind: "exclusive" \};/, text, file],
-        ['调度门仍是"exclusive 要空池、parallel 到 maxParallel"', /mode === "exclusive" \? inFlight\.size === 0 : inFlight\.size < maxParallel/, text, file],
-        ['并发池默认上限仍是 10（改成 1 就等于把模型的批量纪律作废）', /maxParallelSubCalls = value \?\? 10/, text, file],
+        ['未声明就是 exclusive（fail-closed 的方向：默认串行）', /if \(!tool\?\.isConcurrencySafe\) return \{ kind: "exclusive" \};/, pipeline, pipelineFile],
+        ['仍然只有严格 === true 才判 parallel', /tool\.isConcurrencySafe\(exec\.arguments\) === true \? \{ kind: "parallel" \} : \{ kind: "exclusive" \}/, pipeline, pipelineFile],
+        ['分类器抛错回落 exclusive（不吞成 parallel）', /catch \{\s*return \{ kind: "exclusive" \};/, pipeline, pipelineFile],
+        ['exclusive 是单条 barrier，parallel 才能凑进并发池', /mode === "parallel" \? planned\.slice\(next\) : \[first\]/, pipeline, pipelineFile],
+        ['池的启动门仍然是 inFlight.size < 上限', /inFlight\.size < maxParallelToolCalls/, pipeline, pipelineFile],
+        ['批量上限未给时读 executor 的当前上限', /maxParallelToolCalls \?\? maxParallel\(\)/, pipeline, pipelineFile],
+        ['native executor 默认上限仍是 10（改成 1 就等于把模型的批量纪律作废）', /maxParallel = \(\) => 10/, native, nativeFile],
+        ['PTC executor 默认上限仍是 10', /maxParallelSubCalls: z\.natural\(\)\.min\(1\)\.default\(10\)/, ptc, ptcFile],
       ]
       const missing = checks.filter(([, pattern, source]) => !pattern.test(source))
         .map(([label, , , source]) => `${label}（${source}）`)
@@ -973,17 +985,18 @@ const probes = [
   },
   {
     id: 'L31',
-    title: '委派行 Config 的**闭集**（`dsh-tool-subagent`）：provider / toolName / modelSelectionSettings / agentOptions / agentPreset / allowedAgentPresets / maxDepth，且 agentPreset 押在 agent-presets 服务与 provider 能力上',
+    title: '委派行 Config 的**闭集**（`dsh-tool-subagent`）：provider / toolName / modelSelection / modelDiscovery / agentOptions / agentPreset / allowedAgentPresets / maxDepth，且 agentPreset 押在 agent-presets 服务与 provider 能力上',
     why: '0.2.1 迁移的直接教训：persona 与 toolFilter 从这颗 Config 移出后，**旧键不会报错、只会被 zod 静默剥掉**'
       + '（L12 当时是绿的，装配却已经在按 0.2.0 的形状写）。preset 里每颗委派行都靠 `agentPreset` 指向角色 preset，'
       + '角色 preset 的名字与 `ROLE_PRESET_IDS` 同字——这三处（Config 键闭集、agent-presets 服务、provider 的'
-      + ' agentPreset 能力）任一漂移，症状都是"委派行还在、选不到角色"或"孩子拿到父级整张工具表"。',
+      + ' agentPreset 能力）任一漂移，症状都是"委派行还在、选不到角色"或"孩子拿到父级整张工具表"。'
+      + '0.2.2 把 `modelSelectionSettings` 拆成 `modelSelection` + `modelDiscovery`；旧键同样被 zod 静默剥掉。',
     run() {
       const file = join(PKG('dsh-tool-subagent'), 'lib/index.js')
       const text = readIfPresent(file)
       if (text === undefined) return { status: FAIL, detail: `读不到 ${file}（宿主换了这颗委派工具包？账本 L31 要跟着改）` }
       const checks = [
-        ['Config 仍收 provider / toolName / modelSelectionSettings / agentOptions 四件', /const Config = z\.object\(\{\s*provider: z\.string\(\)\.required\(\),\s*toolName: z\.string\(\)\.default\("subagent"\),\s*modelSelectionSettings: z\.boolean\(\)\.default\(false\),\s*agentOptions: z\.object\(/, text, file],
+        ['Config 仍收 provider / toolName / modelSelection / modelDiscovery / agentOptions', /const Config = z\.object\(\{\s*provider: z\.string\(\)\.required\(\),\s*toolName: z\.string\(\)\.default\("subagent"\),\s*modelSelection: z\.boolean\(\)\.default\(false\),\s*modelDiscovery: z\.boolean\(\)\.default\(false\),\s*agentOptions: z\.object\(/, text, file],
         ['agentPreset / allowedAgentPresets 仍是字符串型（角色 preset 的选法）', /agentPreset: z\.string\(\)\.min\(1\),\s*allowedAgentPresets: z\.array\(z\.string\(\)\.min\(1\)\)\.min\(1\)/, text, file],
         ['maxDepth 仍接受自然数或 "provider-managed"', /maxDepth: z\.union\(\[z\.natural\(\)\.max\(Number\.MAX_SAFE_INTEGER\), z\.const\("provider-managed"\)\]/, text, file],
         ['allowedAgentPresets 必须包含 agentPreset（两份名单的一致性由它自己拦）', /agentPreset must be included in allowedAgentPresets/, text, file],
@@ -1080,16 +1093,18 @@ const probes = [
   },
   {
     id: 'L35',
-    title: 'PTC：preset 级 presentation 行 + 宿主 ptc-runtime + run_code / SDK 契约',
-    why: 'data_junior 的唯一执行面是 run_code：presentation 行按 preset scope 声明，runtime 必须由宿主提供；'
-      + 'presentation 被改成 composition-wide、runtime 行被移出 dsh-base、run_code 名字/并发池/绑定 agent 任一处漂移，'
-      + '症状都不是报错，而是 junior 拿不到 run_code、或嵌套工具调用绕过原有授权与并发语义。'
+    title: 'PTC：preset 级 executor 行 + 宿主 ptc-runtime + run_code / SDK 契约',
+    why: 'data_junior 的唯一执行面是 run_code：0.2.2 把 0.2.1 的 presentation 选择器拆成 executor 行，'
+      + 'preset 直接挂 `dsh-tool-executor-ptc`（旧的 `dsh-agent-tool-presentation` 只剩兼容壳）；'
+      + 'executor 行按 preset scope 选最近的一层，runtime 必须由宿主提供。executor 被改成 composition-wide、'
+      + 'runtime 行被移出 dsh-base、run_code 名字/并发池/绑定 agent 任一处漂移，症状都不是报错，'
+      + '而是 junior 拿不到 run_code、或嵌套工具调用绕过原有授权与并发语义。'
       + 'tool-skill 的 canonical value 与 subagent 的 parent id 提示也必须仍按当前形状：PTC 程序拿到的是对象，'
       + '不是原生 render 出来的 <skill_content>。',
     run() {
-      const presentationFile = join(PKG('dsh-agent-tool-presentation'), 'lib/index.js')
-      const presentation = readIfPresent(presentationFile)
-      if (presentation === undefined) return { status: FAIL, detail: `读不到 ${presentationFile}` }
+      const ptcFile = join(PKG('dsh-tool-executor-ptc'), 'lib/index.js')
+      const ptc = readIfPresent(ptcFile)
+      if (ptc === undefined) return { status: FAIL, detail: `读不到 ${ptcFile}` }
       const basePatchFile = join(PKG('dsh-base'), 'cordis.patch.yml')
       const basePatch = readIfPresent(basePatchFile)
       if (basePatch === undefined) return { status: FAIL, detail: `读不到 ${basePatchFile}` }
@@ -1099,6 +1114,12 @@ const probes = [
       const toolsFile = join(PKG('dsh-tools'), 'lib/index.js')
       const tools = readIfPresent(toolsFile)
       if (tools === undefined) return { status: FAIL, detail: `读不到 ${toolsFile}` }
+      const sharedFile = join(PKG('dsh-tools'), 'lib/shared-DTdn5dXO.js')
+      const shared = readIfPresent(sharedFile)
+      if (shared === undefined) return { status: FAIL, detail: `读不到 ${sharedFile}` }
+      const selectorManifestFile = join(PKG('dsh-agent-tool-presentation'), 'package.json')
+      const selectorManifest = readIfPresent(selectorManifestFile)
+      if (selectorManifest === undefined) return { status: FAIL, detail: `读不到 ${selectorManifestFile}` }
       const skillFile = join(PKG('dsh-tool-skill'), 'lib/index.js')
       const skill = readIfPresent(skillFile)
       if (skill === undefined) return { status: FAIL, detail: `读不到 ${skillFile}` }
@@ -1106,18 +1127,18 @@ const probes = [
       const subagent = readIfPresent(subagentFile)
       if (subagent === undefined) return { status: FAIL, detail: `读不到 ${subagentFile}` }
       const checks = [
-        ['presentation 行 inject 仍是 tools', /const inject = \["tools"\];/, presentation, presentationFile],
-        ['mode 仍是 native|ptc 的必填枚举', /z\.union\(\["native", "ptc"\]\)\.required\(\)/, presentation, presentationFile],
-        ['ptc 分支仍等 ptcRuntime 后 presentAs', /ctx\.inject\(\["ptcRuntime"\][\s\S]{0,160}runtimeCtx\.tools\.presentAs\(config\.mode\)/, presentation, presentationFile],
+        ['executor 行仍等 tools / systemPrompt / ptcRuntime 三个服务', /const inject = \[\s*"tools",\s*"systemPrompt",\s*"ptcRuntime"\s*\];/, ptc, ptcFile],
+        ['0.2.2 起由 ctx.tools.setExecutor 选执行面', /ctx\.tools\.setExecutor\(new PtcExecutor\(ctx, config\)\)/, ptc, ptcFile],
+        ['PTC 并发池配置默认仍是 10', /maxParallelSubCalls: z\.natural\(\)\.min\(1\)\.default\(10\)/, ptc, ptcFile],
+        ['0.2.1 的 presentation 选择器已标为 Deprecated（不要再回到 mode: ptc）', /Deprecated tool presentation selector/, selectorManifest, selectorManifestFile],
         ['dsh-base 仍挂宿主 ptc-runtime 行', /- id: ptc-runtime[\s\S]{0,120}name: '@deepseek-ai\/dsh-ptc-runtime-node'/, basePatch, basePatchFile],
         ['runtime 默认 per-call', /\| `executionMode` \| `per-call` \|/, runtimeReadme, runtimeReadmeFile],
         ['runtime 默认 120s / 上限 600s', /\| `timeoutMs` \| `120,000` \|[\s\S]{0,200}\| `maxTimeoutMs` \| `600,000` \|/, runtimeReadme, runtimeReadmeFile],
-        ['run_code 仍是保留传输名', /const RUN_CODE_NAME = "run_code";/, tools, toolsFile],
-        ['presentAs(mode) 仍在 registry 上', /presentAs\(mode\) \{/, tools, toolsFile],
-        ['并发池默认仍是 10', /maxParallelSubCalls = value \?\? 10/, tools, toolsFile],
-        ['嵌套绑定仍带 agent: exec.agent', /agent: exec\.agent,/, tools, toolsFile],
-        ['SDK 仍渲染工具 description（docLines）', /docLines\$1\(schema\.description, 1\)/, tools, toolsFile],
-        ['可见 bash 时才注入 tools.bash 示例', /renderBashExample\(sorted, programFormat\)/, tools, toolsFile],
+        ['run_code 仍是保留传输名', /const RUN_CODE_NAME = "run_code";/, shared, sharedFile],
+        ['registry 仍暴露 setExecutor（executor 按 scope 选择的唯一入口）', /setExecutor\(executor\) \{/, tools, toolsFile],
+        ['嵌套绑定仍带 agent: exec.agent', /agent: exec\.agent,/, ptc, ptcFile],
+        ['SDK 仍渲染工具 description（docLines）', /docLines\$1\(schema\.description, 1\)/, ptc, ptcFile],
+        ['可见 bash 时才注入 tools.bash 示例', /renderBashExample\(sorted, programFormat\)/, ptc, ptcFile],
         ['skill 的 canonical value 仍有 content', /content: skill\.content/, skill, skillFile],
         ['skill 的 native render 仍是 renderSkillContent', /text: renderSkillContent\(value\)/, skill, skillFile],
         ['subagent 仍注入 parent agent id 提示', /Your parent agent id is \$\{encodedParentId\}/, subagent, subagentFile],
@@ -1126,7 +1147,7 @@ const probes = [
       const missing = checks.filter(([, pattern, source]) => !pattern.test(source))
         .map(([label, , , source]) => `${label}（${source}）`)
       return missing.length === 0
-        ? { status: PASS, detail: 'presentation 按 preset、runtime 在宿主、run_code/SDK/skill/parent id 契约未变' }
+        ? { status: PASS, detail: 'executor 行按 preset、runtime 在宿主、run_code/SDK/skill/parent id 契约未变' }
         : { status: FAIL, detail: `PTC 契约漂移：${missing.join(' / ')}（见账本 L35；先重判 junior 的执行面，再动 preset）` }
     },
   },

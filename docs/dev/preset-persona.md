@@ -4,7 +4,7 @@
 > （§8.3）与新增角色流程（§8.5）留在 `AGENTS.md`，因为它们是每次动手都要过的闸门。
 > §编号沿用 `AGENTS.md` 的全局命名空间。
 
-## 8.1 现状（实测于 dsh 0.2.1-rc.5）
+## 8.1 现状（实测于 dsh 0.2.2-rc.1）
 
 - 装配整体住 **`preset/capital-generation/agent.patch.yml`**：**六颗**
   `@deepseek-ai/dsh-agent-preset` insert 行——根 `capital-generation` 加五颗角色 preset，每颗
@@ -32,7 +32,7 @@
   那是**另一颗 generation**，不是往主 persona 上追加一节。
 - **工具面落点（D0，2026-10-19）**：六颗 preset 只挂 `.../tools/<family>` 的**族行**——组合表住
   `test/persona.test.mjs`、行契约住 `test/family-rows.mjs`（抄两份就是 §9.7 的开端）；运行期 allow 已删，
-  只剩 `interrupt_agent` 逐名减掉。2026-10-23 起 junior 另挂 `tool-presentation`（`mode: ptc`）、删 shell 两行：唯一直调是 `run_code`（`test/ptc-preset.test.mjs`）。
+  只剩 `interrupt_agent` / `list_agents` 逐名减掉。2026-10-23 起 junior 另挂 `tool-presentation` 行（0.2.2 起直接挂 `@deepseek-ai/dsh-tool-executor-ptc`）、删 shell 两行：唯一直调是 `run_code`（`test/ptc-preset.test.mjs`）。
 - **host 平面**：`capital-runtime` 只 provide 一份 chart token/artifact；`capital-policy` 在 host
   装一次 root/role/shell/fs 监听；root 可见性已由组合期负责（deny:false），旧单体调用点已删。
 - 长协议由 `skill-filesystem` + `tool-skill` 两行发现；组合设计理由住同目录 `README.md`（不注入

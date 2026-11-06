@@ -7,6 +7,49 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**、2.9.0 的选择器收敛与质检前置——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [2.18.0] - 2026-11-06
+
+适配 DSH 0.2.2-rc.1：宿主把工具执行面拆成 native / PTC 两个 executor、把工具调用管线与并发调度
+移出 `dsh-tools` 主入口，并重做了交付卡重放与委派工具面的几处契约。本版同步插件装配、依赖
+pin、探针与文档；本插件自己的工具与数据契约不变。
+
+### Changed
+
+- **宿主基线升至 `@deepseek-ai/dsh@0.2.2-rc.1`**：两个 dsh peer 精确 pin 到该版本，devDependencies
+  与 `package-lock.json` 同步；`@deepseek-ai/cordis` 升到 `~4.1.0`、`@deepseek-ai/schemastery` 升到
+  `^3.19.0`。宿主最低 Node.js 版本现为 24.9。
+- **data_junior 的 PTC 行改为直接挂 `@deepseek-ai/dsh-tool-executor-ptc`**（`maxParallelSubCalls: 10`）：
+  0.2.1 的 `@deepseek-ai/dsh-agent-tool-presentation`（`mode: ptc`）在 0.2.2 只剩 Deprecated 兼容壳。
+  行 id 仍是 `tool-presentation`，宿主 `ptc-runtime` 仍由 `dsh-base` 提供。
+- **删掉 `@deepseek-ai/dsh-tool-subagent-control/list-agents` 子路径行**：0.2.2 起主入口一次注册
+  `send_message` / `interrupt_agent` / `list_agents`，旧子路径不存在；保留它会让整颗根 preset
+  `broken`、所有根族行不激活。
+- **叶子角色同时减掉 `list_agents`**：它随 `tool-subagent-control` 主入口焊进每颗角色，角色只需
+  `send_message`；`role-tool-policy` 的兄弟名字 deny 与调用级 guard 都从一颗变两颗。
+- **交付卡语义跟随上游**：0.2.2 的客户端重放**整轮** `deliverables/presented`（去掉
+  `file.seq < owner.seq` 过滤），收尾回复之后写入的交付也会显示；本仓仍在收尾流 `finish` 帧写入，
+  因为那里才是"这轮是纯文本收尾"的判定点，不再是为了躲 seq 截断。
+- **探针与账本跟随 0.2.2 的实现落点**：`tools` 的 invoke pipeline / 并发调度移到
+  `dsh-tools/lib/pipeline.js`；`tools.guard` 与 `tools.layers` 分成两个 ScopedLayers（smoke 读
+  `tools.guards.global.guards`）；`webServer.register` 收 `WebRoute | WebResourceRoute`；
+  `dsh-tool-subagent` 的 `modelSelectionSettings` 拆成 `modelSelection` / `modelDiscovery`。
+
+### Fixed
+
+- **`verify:sessions` 跟随 0.2.2 的持久化导出面**：`@deepseek-ai/dsh-session-persistence-jsonl`
+  不再默认导出后端类，改为插件 `apply`；脚本改为挂载到裸 `Context` 后取 `sessionPersistence`
+  服务。旧写法在核对任何会话之前就 `TypeError: Backend is not a constructor`，整道闸门失效；
+  新增回归用例钉住导出面。实机 E2E 复核（自动模式取数→分析→出图、资讯专员、设置卡片、自动化
+  看板）见 `docs/reference/host-upgrade-analysis-0.2.1-rc.5-to-0.2.2-rc.1.md` §5.1。
+
+### Migration
+
+- **先升宿主，再更新插件**：`npm install -g @deepseek-ai/dsh@0.2.2-rc.1`，重启 dsh 后再把本插件
+  更新到 2.18.0。顺序反过来时，2.18.0 会被 0.2.1 宿主的兼容预检拒绝（peer 精确 pin）。
+- 不需要改任务、配置或历史会话：preset `config.id` 与 `tool-presentation` 行 id 都没变，
+  已保存的 Capital 会话仍能恢复。
+- 仍停留在 0.2.1-rc.5 的用户留在 2.17.0；2.18.0 不声明对旧宿主兼容。
+
 ## [2.17.0] - 2026-11-05
 
 投研自动化补上默认首页「看板」：把每次成功运行的结论收成任务简报，并把待办、自选股、
