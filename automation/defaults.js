@@ -35,6 +35,7 @@ export const QUIET_SETTLE_MS = 750
 export const MAX_RUNS_PER_TASK = 200
 export const MAX_RUNS_PER_PROFILE = 2_000
 export const MAX_NOTIFICATIONS_PER_PROFILE = 200
+export const MAX_TODO_ACKS_PER_PROFILE = 500
 export const MAX_ERRORS_PER_RUN = 20
 
 export const MAX_TITLE_CHARS = 120

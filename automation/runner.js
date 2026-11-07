@@ -440,7 +440,7 @@ export function createRunRunner(options) {
             armIdle(entry)
             return
           }
-          await finalize(entry, outcomeOf(entry), outcomeError(entry))
+          await finalize(entry, outcomeOf(entry), { error: outcomeError(entry) })
         } finally {
           entry.completing = false
         }
@@ -680,7 +680,7 @@ export function createRunRunner(options) {
     if (settled !== undefined) {
       entry.abandoned = true
       entry.abandonPromise = (async () => {
-        await finalize(entry, settled)
+        await finalize(entry, settled, { error: outcomeError(entry) })
         await stopEntryAgent(entry, controller)
       })()
       return entry.abandonPromise

@@ -14,7 +14,7 @@ import {
 } from './schema.js'
 import { sanitizeMessage } from './redact.js'
 
-export const BRIEF_PROMPT_VERSION = 4
+export const BRIEF_PROMPT_VERSION = 6
 export const BRIEF_PENDING_STALE_MS = 10 * 60_000
 export const BRIEF_MAX_ATTEMPTS = 5
 export const BRIEF_MAX_ANSWER_CHARS = 12_000
@@ -55,7 +55,7 @@ export const BRIEF_SYSTEM_PROMPT = `你是 CapGen 投研自动化的任务简报
       "symbol": "有具体标的时填；优先用原文里的写法（如 300803.SZ），原文只有 6 位代码就只写 6 位",
       "trigger": "verify 的触发条件，可省略",
       "dueAt": "YYYY-MM-DD，能确定才填",
-      "dueLabel": "今天/明天/本周/尽快，不能确定日期时填",
+      "dueLabel": "只填 今天 或 尽快；其他相对时点不要填，有明确日期就填 dueAt",
       "sourceId": 12
     }
   ],
@@ -81,12 +81,11 @@ export const BRIEF_SYSTEM_PROMPT = `你是 CapGen 投研自动化的任务简报
 sourceId 必须是 sourceBlocks 中某个 block 的 id（从 1 开始），且该 block 包含这条结论的关键标的或数字；不要选章节标题或空泛行，也不要自己写 sourceQuote。找不到依据就少写一条，不要编造。
 
 items 只提取 sourceBlocks 明确要求用户确认、验证或跟踪的事项，最多 6 条；宁可少，不要凑。
+dueAt 只填 sourceBlocks 能确定的日期；dueLabel 只写今天或尽快，不要写明天、本周或以后。
 stocks 只列明确出现的标的，最多 8 个；roles 取 1-3 个。
 gaps 只列明确写出的数据缺口/口径冲突/质量问题，最多 6 条。
 如果 sourceBlocks 没有实质结论（只有流程对账或“已完成”），返回 {"skip":true}。`
 
-const BANNED_WORDS = ['震惊', '炸裂', '崩了', '爆了', '必看', '抄底', '逃顶', '血亏', '一夜暴富', '家人们', '宝子们']
-const TRADE_WORDS = ['买入', '卖出', '加仓', '减仓', '目标价', '满仓', '清仓']
 const KINDS = new Set(['confirm', 'verify', 'track'])
 const GAP_KINDS = new Set(['capability', 'transient', 'conflict', 'quality'])
 const ROLES = new Set(['holding', 'watch', 'event', 'risk'])
@@ -238,9 +237,6 @@ function validateHeadline(headline) {
   if (/\p{Extended_Pictographic}/u.test(headline)) {
     throw new BriefValidationError('headline_emoji', 'headline 不能含表情')
   }
-  if (BANNED_WORDS.some((word) => headline.includes(word))) {
-    throw new BriefValidationError('headline_tone', 'headline 含标题党用语')
-  }
 }
 
 function validatePlain(plain) {
@@ -254,12 +250,6 @@ function validatePlain(plain) {
   }
   if (/\p{Extended_Pictographic}/u.test(plain)) {
     throw new BriefValidationError('plain_emoji', 'plain 不能含表情')
-  }
-  if (BANNED_WORDS.some((word) => plain.includes(word))) {
-    throw new BriefValidationError('plain_tone', 'plain 含标题党用语')
-  }
-  if (TRADE_WORDS.some((word) => plain.includes(word))) {
-    throw new BriefValidationError('plain_advice', 'plain 含买卖建议')
   }
   if (plain.includes('\n')) {
     throw new BriefValidationError('plain_layout', 'plain 必须是单段')

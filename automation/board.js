@@ -119,6 +119,15 @@ function todoKey(item) {
   return `track|${item.symbol ?? ''}|${item.dueAt ?? normalize(item.title)}`
 }
 
+/** An ack hides only the version the user saw; a later run makes the item visible again. */
+function todoAckCovers(ack, item) {
+  if (ack === undefined) return false
+  const confirmedAt = Date.parse(ack.confirmedAt)
+  const lastSeenAt = Date.parse(item.lastSeenAt)
+  if (!Number.isFinite(confirmedAt) || !Number.isFinite(lastSeenAt)) return true
+  return lastSeenAt <= confirmedAt
+}
+
 function sourceOf(run, item) {
   return {
     runId: run.id,
@@ -404,6 +413,7 @@ export function createBoardService(options) {
     const tasks = await store.listTasks()
     const taskById = new Map(tasks.map((task) => [task.id, task]))
     const briefs = await store.listBriefsForRuns(page.runs.map((run) => run.id))
+    const todoAcks = await store.listTodoAcks()
     const lifetime = await store.countBriefs()
     const entries = []
     for (const run of page.runs) {
@@ -425,7 +435,8 @@ export function createBoardService(options) {
     }
     const pageEntries = entries.slice(start, start + parsed.limit)
     const nextBefore = start + pageEntries.length < entries.length ? pageEntries.at(-1)?.run.id ?? null : null
-    const todos = aggregateTodos(entries)
+    const ackById = new Map(todoAcks.map((ack) => [ack.todoId, ack]))
+    const todos = aggregateTodos(entries).filter((item) => !todoAckCovers(ackById.get(item.id), item))
     const stocks = aggregateStocks(entries, todos)
     const gaps = aggregateGaps(entries)
     const health = healthOf({
@@ -457,5 +468,10 @@ export function createBoardService(options) {
     }
   }
 
-  return { board }
+  async function confirmTodo(todoId) {
+    const record = await store.confirmTodo(todoId)
+    return { id: record.todoId, confirmedAt: record.confirmedAt }
+  }
+
+  return { board, confirmTodo }
 }

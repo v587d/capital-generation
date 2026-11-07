@@ -233,6 +233,9 @@ async function dispatch({ req, method, suffix, url, service, requestId }) {
   if (suffix === '/board' && method === 'GET') {
     return { body: await service.board(queryOf(url, new Set(['days', 'tz', 'limit', 'before', 'category']), 5)) }
   }
+  if (suffix === '/board/todos/confirm' && method === 'POST') {
+    return { body: await service.confirmTodo(await readBody(req)) }
+  }
   const briefRetry = /^\/board\/briefs\/([^/]+)\/retry$/.exec(suffix)
   if (briefRetry !== null && method === 'POST') {
     return { body: await service.retryBrief(decodeId(briefRetry[1])), status: 202 }

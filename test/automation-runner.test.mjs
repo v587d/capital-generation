@@ -22,7 +22,7 @@ function taskInput() {
   }
 }
 
-async function harness({ promptFails = false, createFails = false, createPending = false, workspaces, onRunSucceeded } = {}) {
+async function harness({ promptFails = false, createFails = false, createPending = false, workspaces, onRunSucceeded, settings = { inAppNotifications: false } } = {}) {
   const fake = createFakeDomain()
   const store = createAutomationStore({ openDomain: async () => fake.domain, profile: { name: 'web' }, now: () => NOW, calendar: tradingCalendar })
   const created = await store.createTask(taskInput())
@@ -59,7 +59,7 @@ async function harness({ promptFails = false, createFails = false, createPending
   const runner = createRunRunner({
     ctx,
     store,
-    settings: { inAppNotifications: false },
+    settings,
     profile: { displayName: 'web', runDir: '/tmp/capital-automation-runner-test' },
     workspaces,
     onRunSucceeded,
@@ -166,6 +166,30 @@ test('正常运行：创建新 session、接受 prompt、turn/end completed 后�
     status: 'succeeded',
     at: new Date(NOW).toISOString(),
   })
+  runner.dispose()
+})
+
+test('首轮模型请求 429 收口为 failed，原因写进运行错误与失败通知', async () => {
+  const { store, task, agent, run, runner, ctx } = await harness({ settings: { inAppNotifications: true } })
+  await runner.dispatch(run, task, 'manual')
+  const message = '429: {"type":"server_error","message":"Upstream request failed: [prefill_cap_refused] the cell is at capacity; retry shortly (after 30 s)"}'
+  ctx.emit('session/event', agent.session, sessionEvent('turn/end', {
+    turn: 1,
+    reason: { kind: 'error', error: { message, code: 'RATE_LIMIT' } },
+  }, 1))
+  agent.status = 'idle'
+  ctx.emit('agent/status', { agent, status: 'idle' })
+  await new Promise((resolve) => setTimeout(resolve, 1_100))
+  const done = await store.getRun(run.id)
+  assert.equal(done.status, 'failed')
+  assert.equal(done.toolCalls, 0, '首轮就被拒绝时没有工具调用')
+  assert.equal(done.errors.length, 1, '模型失败必须落进 run.errors，不能只留一个空列表')
+  assert.equal(done.errors[0].phase, 'llm')
+  assert.equal(done.errors[0].code, 'RATE_LIMIT')
+  assert.match(done.errors[0].message, /prefill_cap_refused/)
+  const [notification] = await store.listNotifications({ taskId: task.id })
+  assert.equal(notification?.kind, 'run_failed')
+  assert.match(String(notification?.message), /prefill_cap_refused/, '失败通知正文不能是空串')
   runner.dispose()
 })
 

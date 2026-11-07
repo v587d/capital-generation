@@ -338,6 +338,18 @@ export const TaskBriefSchema = z.strictObject({
   }
 })
 
+/**
+ * User acknowledgement of an aggregated TODO. Briefs stay read-only; the ack only suppresses
+ * the version the user saw. A later run mentioning the same item produces a newer `lastSeenAt`
+ * and the item shows up again.
+ */
+export const TodoAckSchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  profileKey: z.string().min(1).max(80),
+  todoId: z.string().min(1).max(200),
+  confirmedAt: isoInstant,
+})
+
 export const OwnerRecordSchema = z.strictObject({
   schemaVersion: z.literal(1),
   profileKey: z.string().min(1).max(80),
@@ -372,6 +384,10 @@ export const TaskPatchSchema = z.strictObject({
   workspaceId: workspaceId.optional(),
   limits: LimitsSchema.optional(),
   notifications: NotificationsSchema.optional(),
+})
+
+export const TodoConfirmSchema = z.strictObject({
+  id: z.string().min(1).max(200),
 })
 
 export const NotificationsReadSchema = z.strictObject({

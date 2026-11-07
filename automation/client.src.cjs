@@ -82,7 +82,7 @@ const INSTRUCTION_MAX_LENGTH = 12_000
 const AUTOSAVE_DELAY_MS = 600
 const BOARD_UI_KEY = 'capital-automation:board-ui:v3'
 const BOARD_PANEL_KEYS = ['todo', 'stocks', 'gaps', 'health']
-const BOARD_TODO_PERIODS = ['today', 'tomorrow', 'week', 'later', 'nodate', 'expired']
+const BOARD_TODO_PERIODS = ['today', 'future', 'expired']
 const BOARD_PANEL_IDS = {
   'capital-automation-todo': 'todo',
   'capital-automation-stocks': 'stocks',
@@ -102,7 +102,7 @@ const zh = {
     goEnable: '去启用任务',
     newTask: '新建任务',
     statsBriefs: '本期简报',
-    statsTodos: 'TODO',
+    statsTodos: '今日 TODO',
     statsStocks: '标的',
     statsGaps: '缺口',
     statsIssues: '近 7 天异常',
@@ -132,15 +132,16 @@ const zh = {
     todoConfirm: '待确认',
     todoVerify: '待验证',
     todoTrack: '跟踪',
-    todoEmpty: '最近运行没有明确提出待验证项',
-    todoEmptyGroup: '「{label}」没有待办',
-    todoFilterAll: '全部',
+    todoAck: '确认',
+    todoAckTitle: '确认并移除这条 TODO',
+    todoAcked: '已确认，已从 TODO 移除',
+    todoEmptyToday: '今天暂无待办',
+    todoEmptyGroup: '暂无「{label}」待办',
     todoFilterLabel: '按日期筛选',
     dueToday: '今天',
-    dueTomorrow: '明天',
-    dueThisWeek: '本周',
-    dueLater: '以后',
+    dueAsap: '尽快',
     dueNoDate: '未定',
+    dueFuture: '将来',
     dueExpired: '已过期',
     showBasis: '查看依据',
     hideBasis: '收起依据',
@@ -996,12 +997,13 @@ function installStyles() {
     .capital-automation-todolist, .capital-automation-stocktodos, .capital-automation-gaplist, .capital-automation-gaprow { list-style: none; margin: 0; padding: 0; }
     .capital-automation-todoitem { padding: 8px 0; border-top: .5px solid var(--ca-line); }
     .capital-automation-todoitem:first-child { border-top: 0; }
-    .capital-automation-todoline { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+    .capital-automation-todoline { display: flex; flex-direction: column; align-items: stretch; gap: 5px; min-width: 0; }
+    .capital-automation-todotop { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
     .capital-automation-todokind { display: inline-flex; flex: none; align-items: center; justify-content: center; min-height: 20px; padding: 0 5px; border-radius: 5px; background: var(--dsw-alias-bg-module-platform); color: var(--ca-muted); font-size: 10px; line-height: 20px; white-space: nowrap; }
     .capital-automation-todokind[data-kind="confirm"] { color: var(--ca-warn-text); }
     .capital-automation-todokind[data-kind="verify"] { color: var(--ca-business-text); }
     .capital-automation-todokind[data-kind="track"] { color: var(--ca-success-text); }
-    .capital-automation-todotitle { flex: 1 1 auto; min-width: 0; padding: 0; border: 0; background: transparent; font: inherit; color: var(--dsw-alias-label-primary); font-size: 13px; line-height: 20px; font-weight: 600; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+    .capital-automation-todotitle { flex: none; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; font: inherit; color: var(--dsw-alias-label-primary); font-size: 13px; line-height: 20px; font-weight: 600; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
     .capital-automation-todotitle:hover, .capital-automation-gaptitle:hover { color: var(--ca-business-text); }
     .capital-automation-todotitle:focus-visible, .capital-automation-gaptitle:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: 2px; border-radius: 4px; }
     .capital-automation-basiscaret { display: inline-flex; align-items: center; margin-left: 4px; color: var(--ca-muted); vertical-align: -2px; transform: rotate(-90deg); transition: transform .16s ease; }
@@ -1063,8 +1065,6 @@ function installStyles() {
       .capital-automation-boardempty { min-height: 320px; padding: 32px 16px; }
       .capital-automation-briefcard { padding: 14px 14px 12px; }
       .capital-automation-briefcard h4 { font-size: 17px; line-height: 25px; }
-      .capital-automation-briefhead { grid-template-columns: minmax(0, 1fr); }
-      .capital-automation-briefhead > .capital-automation-btn { justify-self: start; }
     }
   `
   document.head.appendChild(style)
@@ -1114,6 +1114,7 @@ function createApi() {
     runs: (query = '') => request(`/runs${query}`),
     history: (query = '') => request(`/runs/history${query}`),
     board: (query = '') => request(`/board${query}`),
+    confirmTodo: (id) => request('/board/todos/confirm', { method: 'POST', body: { id } }),
     retryBrief: (runId) => request(`/board/briefs/${encodeURIComponent(runId)}/retry`, { method: 'POST' }),
     notifications: () => request('/notifications'),
     markRead: (body) => request('/notifications/read', { method: 'POST', body }),
@@ -3859,38 +3860,44 @@ function boardRelativeTime(value, now = Date.now()) {
   return `${Math.floor(diff / year)}年前`
 }
 
-function boardTodoPeriod(item) {
-  if (typeof item.dueAt !== 'string' || item.dueAt.length === 0) return 'nodate'
-  const today = localDateKey(new Date())
-  if (item.dueAt < today) return 'expired'
-  if (item.dueAt === today) return 'today'
-  const tomorrow = localDateKey(addLocalDays(new Date(), 1))
-  if (item.dueAt === tomorrow) return 'tomorrow'
-  const week = localDateKey(addLocalDays(new Date(), 7))
-  return item.dueAt <= week ? 'week' : 'later'
+function boardTodoPeriod(item, now = new Date()) {
+  const today = localDateKey(now)
+  if (typeof item.dueAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.dueAt)) {
+    if (item.dueAt < today) return 'expired'
+    if (item.dueAt === today) return 'today'
+    // Future dates are not today's action items; they become today on the date itself.
+    return 'future'
+  }
+  const label = typeof item.dueLabel === 'string' ? item.dueLabel.trim() : ''
+  const seen = typeof item.finishedAt === 'string' ? new Date(item.finishedAt) : null
+  const seenToday = seen !== null && !Number.isNaN(seen.getTime()) && localDateKey(seen) === today
+  if (['尽快', '马上', '现在'].includes(label)) return seenToday ? 'today' : 'future'
+  if (['今天', '今日'].includes(label)) return seenToday ? 'today' : 'expired'
+  return 'future'
+}
+
+function boardTodoTodayCount(todos, now = new Date()) {
+  return todos.filter((item) => boardTodoPeriod(item, now) === 'today').length
 }
 
 function boardTodoGroupLabel(period) {
-  if (period === 'all') return zh.board.todoFilterAll
   if (period === 'today') return zh.board.dueToday
-  if (period === 'tomorrow') return zh.board.dueTomorrow
-  if (period === 'week') return zh.board.dueThisWeek
-  if (period === 'later') return zh.board.dueLater
   if (period === 'expired') return zh.board.dueExpired
-  return zh.board.dueNoDate
+  return zh.board.dueFuture
 }
 
 function boardTodoFilterOptions() {
-  return ['all'].concat(BOARD_TODO_PERIODS).map((period) => ({ value: period, label: boardTodoGroupLabel(period) }))
+  return BOARD_TODO_PERIODS.map((period) => ({ value: period, label: boardTodoGroupLabel(period) }))
 }
 
 function boardTodoDueLabel(item, period) {
-  const note = typeof item.dueAt === 'string' && item.dueAt.length >= 10 ? item.dueAt.slice(5) : (item.dueLabel ?? '')
-  if (period === 'today') return zh.board.dueToday
-  if (period === 'tomorrow') return zh.board.dueTomorrow
-  if (period === 'expired') return note ? `${zh.board.dueExpired} · ${note}` : zh.board.dueExpired
-  if (period === 'nodate') return note || zh.board.dueNoDate
-  return note
+  const date = typeof item.dueAt === 'string' && item.dueAt.length >= 10 ? item.dueAt.slice(5) : ''
+  if (period === 'today') {
+    const label = typeof item.dueLabel === 'string' ? item.dueLabel.trim() : ''
+    return ['尽快', '马上', '现在'].includes(label) && date.length === 0 ? zh.board.dueAsap : zh.board.dueToday
+  }
+  if (period === 'expired') return date ? `${zh.board.dueExpired} · ${date}` : zh.board.dueExpired
+  return date || zh.board.dueNoDate
 }
 
 function boardTodoKindLabel(kind) {
@@ -4048,8 +4055,19 @@ function BriefCard(props) {
   const status = brief?.status ?? 'pending'
   const titleId = `capital-automation-brief-${card.runId}`
   const sessionId = card.sessionId
-  const open = sessionId
-    ? h('button', { type: 'button', className: 'capital-automation-btn', 'data-size': 'sm', onClick: () => onOpenSession(sessionId) }, zh.openSession)
+  const openSession = sessionId ? () => onOpenSession(sessionId) : null
+  const openIcon = openSession
+    ? h('button', {
+      type: 'button',
+      className: 'capital-automation-btn',
+      'data-size': 'icon',
+      title: zh.openSession,
+      'aria-label': zh.openSession,
+      onClick: openSession,
+    }, h(IconRightUpOutlineRegular, { size: 14 }))
+    : null
+  const openLink = openSession
+    ? h('button', { type: 'button', className: 'capital-automation-btn', 'data-size': 'sm', onClick: openSession }, zh.openSession)
     : null
   const trigger = card.trigger === 'manual' ? zh.triggerManual : zh.triggerScheduled
   const relativeTime = boardRelativeTime(card.finishedAt)
@@ -4074,11 +4092,11 @@ function BriefCard(props) {
           disabled: retrying === true,
           onClick: () => onRetry(card.runId),
         }, retrying === true ? zh.processing : zh.board.retry),
-        open))
+        openLink))
   } else if (status === 'skipped') {
     body = h('div', { className: 'capital-automation-briefstate' },
       h('p', null, zh.board.briefSkipped),
-      h('div', { className: 'capital-automation-briefactions' }, open))
+      h('div', { className: 'capital-automation-briefactions' }, openLink))
   } else {
     body = h('div', { className: 'capital-automation-briefstate' },
       h(SkeletonBlock, { width: '72%', height: 14 }),
@@ -4097,7 +4115,7 @@ function BriefCard(props) {
           dateTime: card.finishedAt,
           title: exactTime,
         }, relativeTime)),
-      open),
+      openIcon),
     body)
 }
 
@@ -4163,7 +4181,7 @@ function BriefFeed(props) {
 }
 
 function TodoRow(props) {
-  const { item, period, showDue = true, onOpenSession } = props
+  const { item, period, showDue = true, onOpenSession, onAck, acking = false, ackDisabled = false } = props
   const [open, setOpen] = useState(false)
   const quote = item.sourceQuote ?? item.sources?.[0]?.sourceQuote
   const due = showDue === true ? boardTodoDueLabel(item, period) : ''
@@ -4179,7 +4197,17 @@ function TodoRow(props) {
   const basisCaret = h('span', { className: 'capital-automation-basiscaret', 'aria-hidden': 'true' }, h(IconChevronDownOutlineRegular, { size: 12 }))
   return h('li', { className: 'capital-automation-todoitem' },
     h('div', { className: 'capital-automation-todoline' },
-      h('span', { className: 'capital-automation-todokind', 'data-kind': item.kind }, boardTodoKindLabel(item.kind)),
+      h('div', { className: 'capital-automation-todotop' },
+        h('span', { className: 'capital-automation-todokind', 'data-kind': item.kind }, boardTodoKindLabel(item.kind)),
+        h('button', {
+          type: 'button',
+          className: 'capital-automation-btn',
+          'data-size': 'sm',
+          title: zh.board.todoAckTitle,
+          'aria-label': `${zh.board.todoAckTitle}：${item.title}`,
+          disabled: ackDisabled === true,
+          onClick: () => onAck(item),
+        }, acking === true ? zh.processing : zh.board.todoAck)),
       h('button', {
         type: 'button',
         className: 'capital-automation-todotitle',
@@ -4240,13 +4268,14 @@ function BoardPanel(props) {
 }
 
 function TodoPanel(props) {
-  const { todos, onOpenSession, open, onToggle } = props
-  const [filter, setFilter] = useState('all')
-  const entries = todos.map((item) => ({ item, period: boardTodoPeriod(item) }))
+  const { todos, onOpenSession, onAckTodo, ackingTodoId, open, onToggle } = props
+  const [filter, setFilter] = useState('today')
+  const now = new Date()
+  const entries = todos.map((item) => ({ item, period: boardTodoPeriod(item, now) }))
   entries.sort((left, right) => BOARD_TODO_PERIODS.indexOf(left.period) - BOARD_TODO_PERIODS.indexOf(right.period))
-  const visible = filter === 'all' ? entries : entries.filter((entry) => entry.period === filter)
-  const emptyText = filter === 'all'
-    ? zh.board.todoEmpty
+  const visible = entries.filter((entry) => entry.period === filter)
+  const emptyText = filter === 'today'
+    ? zh.board.todoEmptyToday
     : zh.board.todoEmptyGroup.replace('{label}', boardTodoGroupLabel(filter))
   return h(BoardPanel, {
     id: 'capital-automation-todo',
@@ -4268,8 +4297,11 @@ function TodoPanel(props) {
       key: entry.item.id,
       item: entry.item,
       period: entry.period,
-      showDue: filter === 'all',
+      showDue: true,
       onOpenSession,
+      onAck: onAckTodo,
+      acking: ackingTodoId === entry.item.id,
+      ackDisabled: ackingTodoId !== null && ackingTodoId !== undefined,
     }))))
 }
 
@@ -4439,7 +4471,7 @@ function BoardPage(props) {
   const {
     board, loading, error, range, category, onRange, onCategory, onRefresh,
     onOpenSession, onRetryBrief, retryingRunId, onLoadMore, loadingMore, onGoTasks, onNewTask, onGoRuns,
-    hasActiveTasks, storageReady,
+    onAckTodo, ackingTodoId, hasActiveTasks, storageReady,
   } = props
   const [railOpen, setRailOpen] = useState(() => readBoardUi().rail !== false)
   const [openPanels, setOpenPanels] = useState(() => boardPanelFlags(readBoardUi().panels))
@@ -4500,6 +4532,9 @@ function BoardPage(props) {
       error.length > 0 ? h('div', { className: 'capital-automation-banner', 'data-tone': 'error', role: 'alert' }, error) : null,
       h(BoardEmpty, { hasActiveTasks, storageReady, onGoTasks, onNewTask }))
   }
+  const boardStats = board?.stats === undefined
+    ? undefined
+    : { ...board.stats, todos: boardTodoTodayCount(board?.todos ?? []) }
   return h('div', { className: 'capital-automation-board' },
     h(BoardToolbar, {
       range,
@@ -4512,7 +4547,7 @@ function BoardPage(props) {
       onToggleRail: toggleRail,
     }),
     error.length > 0 ? h('div', { className: 'capital-automation-banner', 'data-tone': 'error', role: 'alert' }, error) : null,
-    h(BoardStats, { stats: board?.stats, onJump: jumpTo }),
+    h(BoardStats, { stats: boardStats, onJump: jumpTo }),
     h('div', {
       className: 'capital-automation-boardgrid',
       'data-rail': railOpen === true ? 'open' : 'closed',
@@ -4536,7 +4571,14 @@ function BoardPage(props) {
         className: 'capital-automation-boardrail',
         hidden: railOpen !== true,
       },
-        h(TodoPanel, { todos: board?.todos ?? [], onOpenSession, open: openPanels.todo, onToggle: () => togglePanel('todo') }),
+        h(TodoPanel, {
+          todos: board?.todos ?? [],
+          onOpenSession,
+          onAckTodo,
+          ackingTodoId,
+          open: openPanels.todo,
+          onToggle: () => togglePanel('todo'),
+        }),
         h(StockRadar, {
           stocks: board?.stocks ?? [],
           todos: board?.todos ?? [],
@@ -4574,6 +4616,7 @@ function AutomationPage(props) {
   const [boardRange, setBoardRange] = useState('14')
   const [boardCategory, setBoardCategory] = useState('all')
   const [retryingBriefId, setRetryingBriefId] = useState(null)
+  const [ackingTodoId, setAckingTodoId] = useState(null)
   const [boardLoadingMore, setBoardLoadingMore] = useState(false)
   const [unread, setUnread] = useState(0)
   const [selectedId, setSelectedId] = useState(null)
@@ -4693,6 +4736,39 @@ function AutomationPage(props) {
       setBoardError(error.message ?? zh.errorGeneric)
     } finally {
       setRetryingBriefId(null)
+    }
+  }
+
+  async function ackTodo(item) {
+    if (ackingTodoId !== null) return
+    setAckingTodoId(item.id)
+    setBoardError('')
+    try {
+      await api.confirmTodo(item.id)
+      setBoard((current) => {
+        if (current === null) return current
+        const removed = (current.todos ?? []).find((entry) => entry.id === item.id)
+        if (removed === undefined) return current
+        const todos = current.todos.filter((entry) => entry.id !== item.id)
+        const stocks = (current.stocks ?? []).map((stock) =>
+          removed.symbol !== undefined && stock.symbol === removed.symbol
+            ? { ...stock, todoCount: Math.max(0, (stock.todoCount ?? 0) - 1) }
+            : stock)
+        return {
+          ...current,
+          todos,
+          stocks,
+          stats: current.stats === undefined
+            ? current.stats
+            : { ...current.stats, todos: Math.max(0, (current.stats.todos ?? 0) - 1) },
+        }
+      })
+      setNotice(zh.board.todoAcked)
+      void loadBoard(boardRange, boardCategory)
+    } catch (error) {
+      setBoardError(error.message ?? zh.errorGeneric)
+    } finally {
+      setAckingTodoId(null)
     }
   }
 
@@ -4917,6 +4993,8 @@ function AutomationPage(props) {
             onOpenSession: openSession,
             onRetryBrief: (runId) => { void retryBrief(runId) },
             retryingRunId: retryingBriefId,
+            onAckTodo: (item) => { void ackTodo(item) },
+            ackingTodoId,
             onLoadMore: () => { void loadMoreBoard() },
             loadingMore: boardLoadingMore,
             onGoTasks: () => switchTab('tasks'),

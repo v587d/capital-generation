@@ -472,6 +472,37 @@ test('看板 GET 允许 5 个 query 参数，未知/超限参数仍被白名单�
   }
 })
 
+test('TODO 确认：POST /board/todos/confirm 只接受字符串 id', async () => {
+  let seen
+  const boardService = {
+    async confirmTodo(id) {
+      seen = id
+      return { id, confirmedAt: '2026-11-07T00:00:00.000Z' }
+    },
+  }
+  const { handler } = harness({ boardService })
+  const id = 'verify|300803.SZ|收盘价站回 44.01'
+  const confirmed = await call(handler, {
+    method: 'POST',
+    url: '/capital-automation/board/todos/confirm',
+    body: { id },
+  })
+  assert.equal(confirmed.statusCode, 200)
+  assert.equal(confirmed.json().id, id)
+  assert.equal(confirmed.json().confirmedAt, '2026-11-07T00:00:00.000Z')
+  assert.equal(seen, id)
+
+  for (const body of [{ id: '' }, { id: 5 }, { id: 'x', extra: true }, {}]) {
+    const rejected = await call(handler, {
+      method: 'POST',
+      url: '/capital-automation/board/todos/confirm',
+      body,
+    })
+    assert.equal(rejected.statusCode, 400, JSON.stringify(body))
+    assert.equal(rejected.json().code, 'invalid_request')
+  }
+})
+
 test('失败简报重试：只走单条 POST，状态码与错误码稳定', async () => {
   let called = 0
   const briefs = {

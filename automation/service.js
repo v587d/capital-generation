@@ -21,6 +21,7 @@ import {
   TaskCategorySchema,
   TaskCreateSchema,
   TaskPatchSchema,
+  TodoConfirmSchema,
   parseStrict,
 } from './schema.js'
 import { sanitizeMessage } from './redact.js'
@@ -384,6 +385,19 @@ export function createAutomationService(options) {
     }
   }
 
+  async function confirmTodo(input) {
+    if (boardService === undefined || typeof boardService.confirmTodo !== 'function') {
+      throw new AutomationError('board_unavailable', '看板服务暂时不可用。', 503)
+    }
+    const parsed = parseStrict(TodoConfirmSchema, input, 'board/todo-confirm')
+    try {
+      return await boardService.confirmTodo(parsed.id)
+    } catch (error) {
+      if (error?.boardError === true) throw new AutomationError(error.code, error.message, error.status ?? 400)
+      throw error
+    }
+  }
+
   async function retryBrief(runId) {
     if (briefs === undefined || typeof briefs.retry !== 'function') {
       throw new AutomationError('brief_not_found', '任务简报服务暂时不可用。', 503)
@@ -444,6 +458,7 @@ export function createAutomationService(options) {
     listRuns,
     runHistory,
     board,
+    confirmTodo,
     retryBrief,
     listNotifications,
     markNotificationsRead,

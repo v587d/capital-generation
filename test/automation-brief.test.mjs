@@ -96,10 +96,14 @@ test('简报输出：代码围栏、原文引用、股票角色与跳过', () =>
   assert.throws(() => parseBriefOutput('not json', ANSWER), BriefValidationError)
 })
 
-test('简报输出：超长、Markdown、买卖建议和伪造引用都被拒绝或丢弃', () => {
+test('简报输出：超长、Markdown 和伪造引用被拒绝或丢弃；内容语气与买卖建议交给用户', () => {
   assert.throws(() => parseBriefOutput(JSON.stringify(output({ plain: '字'.repeat(201) })), ANSWER), /plain 长度/)
   assert.throws(() => parseBriefOutput(JSON.stringify(output({ plain: `${PLAIN} \`\`\`` })), ANSWER), /Markdown/)
-  assert.throws(() => parseBriefOutput(JSON.stringify(output({ plain: `${PLAIN} 建议买入。` })), ANSWER), /买卖建议/)
+  const freeText = parseBriefOutput(JSON.stringify(output({
+    plain: `${PLAIN} 今天崩了，龙虎榜买入 2.54 亿、卖出 2.03 亿，目标价 50 元，建议买入。`,
+  })), ANSWER)
+  assert.match(freeText.plain, /建议买入/, '不再按词表判断买卖建议')
+  assert.match(freeText.plain, /崩了/, '不再按词表判断标题党语气')
   const dropped = parseBriefOutput(JSON.stringify(output({
     items: [{ ...output().items[0], sourceQuote: '原文里没有这句话' }],
   })), ANSWER)

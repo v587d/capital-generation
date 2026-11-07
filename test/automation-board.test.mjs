@@ -126,6 +126,58 @@ test('卡片只含有 brief 的成功运行；顶部统计/TODO/雷达/缺口都
   assert.deepEqual(board.stats, { briefs: 5, todos: 1, stocks: 1, gaps: 1, issues7d: 0 })
 })
 
+test('TODO 确认：按 profile 落库，确认后从 TODO/雷达隐藏，后续运行再次出现', async () => {
+  const { fake, store } = await makeStore()
+  const task = await makeTask(store)
+  const item = {
+    kind: 'verify',
+    title: '指南针能否站回 44.01',
+    detail: '收盘价站回 44.01 才算修复；否则按短线破位处理。',
+    symbol: '300803.SZ',
+    trigger: '收盘价站回 44.01',
+    dueAt: '2026-11-07',
+    sourceQuote: '指南针跌破 44.01 且成交额不低于 12.66 亿，才确认修复。',
+  }
+  const stock = { symbol: '300803.SZ', name: '指南针', roles: ['holding'] }
+  await addBrief(store, task, {
+    key: 'ack-old',
+    finishedAt: '2026-11-03T00:40:32.876Z',
+    items: [item],
+    stocks: [stock],
+  })
+  const service = boardService(store)
+  const before = await service.board({ days: '14', tz: TZ })
+  assert.equal(before.todos.length, 1)
+  assert.equal(before.stocks[0].todoCount, 1)
+
+  const ack = await service.confirmTodo(before.todos[0].id)
+  assert.equal(ack.id, before.todos[0].id)
+  const stored = [...fake.tables.get('todo_acks').values()]
+  assert.equal(stored.length, 1)
+  assert.equal(stored[0].profileKey, store.profileKey)
+  assert.equal(stored[0].todoId, before.todos[0].id)
+
+  const after = await service.board({ days: '14', tz: TZ })
+  assert.equal(after.todos.length, 0, '确认后不再出现在 TODO')
+  assert.equal(after.stats.todos, 0)
+  assert.equal(after.stocks[0].todoCount, 0, '自选股雷达同步扣除待办数')
+  assert.equal(after.gaps.length, 0)
+
+  await service.confirmTodo(before.todos[0].id)
+  assert.equal(fake.tables.get('todo_acks').size, 1, '重复确认同一项只保留一条记录')
+
+  await addBrief(store, task, {
+    key: 'ack-new',
+    finishedAt: '2026-11-04T03:00:00.000Z',
+    items: [item],
+    stocks: [stock],
+  })
+  const again = await service.board({ days: '14', tz: TZ })
+  assert.equal(again.todos.length, 1, '后续运行再次提到同一项时重新出现')
+  assert.equal(again.todos[0].lastSeenAt, '2026-11-04T03:00:00.000Z')
+  assert.equal(again.stocks[0].todoCount, 1)
+})
+
 test('按分类/游标分页，TODO 与统计仍覆盖整个筛选范围', async () => {
   const { store } = await makeStore()
   const news = await makeTask(store, { title: '早间资讯', category: 'news' })

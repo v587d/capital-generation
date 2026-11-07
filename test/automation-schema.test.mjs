@@ -9,6 +9,8 @@ import {
   TaskPatchSchema,
   TaskRecordSchema,
   TaskBriefSchema,
+  TodoAckSchema,
+  TodoConfirmSchema,
   assertCleanJson,
   resolveTaskRecord,
 } from '../automation/schema.js'
@@ -400,4 +402,20 @@ test('任务简报 schema：ready 必须有 headline/plain，failed 必须有 er
   assert.throws(() => TaskBriefSchema.parse({ ...base, status: 'failed' }), 'failed 必须有 error')
   assert.throws(() => TaskBriefSchema.parse({ ...base, status: 'pending', items: [{ kind: 'verify', title: 'x', sourceQuote: 'y', dueAt: '2026-02-30' }] }), '非法日期必须被拒')
   assert.throws(() => TaskBriefSchema.parse({ ...base, unknown: true }), '未知字段必须被拒')
+})
+
+test('TODO 确认 schema：记录严格且只收 id，不写 brief', () => {
+  const ack = {
+    schemaVersion: 1,
+    profileKey: 'p_x',
+    todoId: 'verify|300803.SZ|收盘价站回 44.01',
+    confirmedAt: '2026-11-07T00:00:00.000Z',
+  }
+  assert.equal(TodoAckSchema.parse(ack).todoId, ack.todoId)
+  assert.throws(() => TodoAckSchema.parse({ ...ack, unknown: true }), '未知字段必须被拒')
+  assert.throws(() => TodoAckSchema.parse({ ...ack, confirmedAt: '2026-11-07T00:00:00Z' }), '确认时间必须是规范 UTC')
+  assert.throws(() => TodoAckSchema.parse({ ...ack, todoId: 'x'.repeat(201) }), 'TODO id 超长必须被拒')
+  assert.equal(TodoConfirmSchema.parse({ id: ack.todoId }).id, ack.todoId)
+  assert.throws(() => TodoConfirmSchema.parse({}), '缺少 id 必须被拒')
+  assert.throws(() => TodoConfirmSchema.parse({ id: 'x', extra: true }), '未知字段必须被拒')
 })

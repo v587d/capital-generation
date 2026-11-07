@@ -15,6 +15,7 @@ import {
   TaskBriefSchema,
   TaskOverridesSchema,
   TaskRecordSchema,
+  TodoAckSchema,
   isActiveRun,
   parseStrict,
   resolveTaskRecord,
@@ -27,6 +28,7 @@ import {
   MAX_NOTIFICATIONS_PER_PROFILE,
   MAX_RUNS_PER_PROFILE,
   MAX_RUNS_PER_TASK,
+  MAX_TODO_ACKS_PER_PROFILE,
   SETTLED_RUN_STATUSES,
 } from './defaults.js'
 import { canonicalTrigger, formatInZone, nextOccurrence } from './time.js'
@@ -48,6 +50,7 @@ export const domainSpec = {
     notifications: { valueSchema: NotificationSchema },
     meta: { valueSchema: OwnerRecordSchema },
     briefs: { valueSchema: TaskBriefSchema },
+    todo_acks: { valueSchema: TodoAckSchema },
   },
 }
 
@@ -58,6 +61,11 @@ export function profileKeyOf(profileName) {
 
 function builtinRecordId(profileKey, builtinId) {
   return `bt_${createHash('sha256').update(`${profileKey}:${builtinId}`).digest('hex').slice(0, 24)}`
+}
+
+/** Hash the long, user-visible TODO id so the storage key stays bounded and plain. */
+function todoAckRecordId(profileKey, todoId) {
+  return `ta_${createHash('sha256').update(`${profileKey}\u0000${todoId}`).digest('hex').slice(0, 32)}`
 }
 
 function iso(now) {
@@ -184,6 +192,7 @@ export function createAutomationStore(options) {
           notifications: domain.table('notifications'),
           meta: domain.table('meta'),
           briefs: domain.table('briefs'),
+          todoAcks: domain.table('todo_acks'),
         }
       })()
     }
@@ -748,6 +757,40 @@ export function createAutomationStore(options) {
     return count
   }
 
+  async function listTodoAcks() {
+    const tables = await ensure()
+    const records = []
+    for (const [, record] of tables.todoAcks.entries()) {
+      if (record.profileKey === profileKey) records.push(record)
+    }
+    return records
+  }
+
+  async function retainTodoAcks(tables) {
+    const records = []
+    for (const [key, record] of tables.todoAcks.entries()) {
+      if (record.profileKey === profileKey) records.push({ key, record })
+    }
+    if (records.length <= MAX_TODO_ACKS_PER_PROFILE) return
+    records.sort((left, right) =>
+      right.record.confirmedAt.localeCompare(left.record.confirmedAt)
+      || right.key.localeCompare(left.key))
+    for (const entry of records.slice(MAX_TODO_ACKS_PER_PROFILE)) await tables.todoAcks.delete(entry.key)
+  }
+
+  async function confirmTodo(todoId) {
+    const tables = await ensure()
+    const record = parseStrict(TodoAckSchema, {
+      schemaVersion: 1,
+      profileKey,
+      todoId,
+      confirmedAt: iso(now()),
+    }, 'todo ack')
+    await tables.todoAcks.put(todoAckRecordId(profileKey, todoId), record)
+    await retainTodoAcks(tables)
+    return record
+  }
+
   async function updateBrief(runId, patch) {
     const tables = await ensure()
     const current = tables.briefs.get(runId)
@@ -949,6 +992,8 @@ export function createAutomationStore(options) {
     listBriefsForRuns,
     listBriefsForProfile,
     countBriefs,
+    listTodoAcks,
+    confirmTodo,
     updateBrief,
     deleteBrief,
     publicBrief,
