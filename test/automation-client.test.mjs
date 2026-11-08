@@ -21,6 +21,7 @@ import {
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const source = readFileSync(join(ROOT, 'automation', 'client.js'), 'utf8')
 const clientSource = readFileSync(join(ROOT, 'automation', 'client.src.cjs'), 'utf8')
+const iconsSource = readFileSync(join(ROOT, 'automation', 'task-icons.js'), 'utf8')
 
 function element() {
   const dataset = new Proxy({}, {
@@ -183,9 +184,10 @@ test('客户端 bundle：apply 在真实 DOM 形状下不抛错，注册 main �
   assert.match(clientSource, /task\?\.state === 'dormant' \? zh\.add : zh\.activate/, '模板的激活动作叫「添加」，暂停任务仍叫「启用」')
   assert.match(clientSource, /task\?\.state === 'dormant' \? IconPlusOutlineRegular : IconPlayOutlineRegular/, '「添加」用加号图标，和「立即运行」的播放图标区分')
   assert.match(clientSource, /function TaskGlyph/, '任务必须走独立的 TaskGlyph 渲染器')
-  assert.match(clientSource, /builtinTaskIcon\(task\?\.sourceBuiltinId\)/, '内置任务图标必须按 sourceBuiltinId 一一映射')
-  assert.match(clientSource, /task\?\.origin === 'custom'/, '自定义任务必须读自己保存的 icon')
-  assert.match(clientSource, /iconDefinition\(task\?\.icon\) !== undefined\) return task\.icon/, '新建草稿也要用已选图标，不能只看 origin')
+  assert.match(clientSource, /taskIconId\(task\)/, '任务与看板必须共用 task-icons 的图标解析器')
+  assert.match(iconsSource, /builtinTaskIcon\(task\?\.sourceBuiltinId\)/, '内置任务图标必须按 sourceBuiltinId 一一映射')
+  assert.match(iconsSource, /task\?\.origin === 'custom'/, '自定义任务必须读自己保存的 icon')
+  assert.match(iconsSource, /hasOwnProperty\.call\(TASK_ICON_CATALOG, id\)\) return id/, '新建草稿也要用已选图标，不能只看 origin')
   assert.match(clientSource, /function IconPickerTrigger/, '任务图标必须是点击后弹出的选择器')
   assert.match(clientSource, /h\(Menu, \{[\s\S]*?anchor: h\('button'/, '图标选择器必须复用宿主 Menu 的锚点与收起行为')
   assert.match(clientSource, /listClassName: 'capital-automation-iconmenu'/, '图标菜单必须能单独定宽（portal 出去后作用域选择器够不到）')
@@ -637,6 +639,10 @@ test('看板：默认首页、空态引导手动运行、五个模块与无历�
   assert.match(briefCard, /'data-size': 'icon',\s*title: zh\.openSession,\s*'aria-label': zh\.openSession,/, '卡片右上角只留图标按钮，靠 title / aria-label 交代动作')
   assert.match(briefCard, /h\(IconRightUpOutlineRegular, \{ size: 14 \}\)/, '打开 session 图标沿用外链箭头')
   assert.match(briefCard, /'data-size': 'sm', onClick: openSession \}, zh\.openSession\)/, '失败 / 跳过态卡内操作仍保留文字按钮')
+  assert.match(briefCard, /const identity = typeof card\.icon === 'string' \? card : \(task \?\? card\)/, '旧 /board 载荷没有图标时必须回退到任务列表')
+  assert.match(briefCard, /h\(Glyph, \{ task: identity, size: 24, radius: 8, glyphSize: 14 \}\),\s*h\('h3'/, '简报卡标题左侧必须复用任务的身份图标')
+  assert.match(clientSource, /task: taskById\.get\(card\.taskId\)/, '简报卡必须按 taskId 关联任务图标')
+  assert.match(clientSource, /h\(BoardPage, \{\s*board,\s*tasks,/, '看板必须拿到任务列表以兼容旧 board 载荷')
   assert.match(clientSource, /\.capital-automation-btn\[data-size="icon"\] \{ width: 30px; height: 30px;/, '图标按钮必须复用方形尺寸规则')
   assert.match(clientSource, /function TodoPanel\(/, '必须有 TODO 面板')
   assert.match(clientSource, /function StockRadar\(/, '必须有自选股雷达')

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { createAutomationStore } from '../automation/store.js'
 import { createBoardService, BoardError } from '../automation/board.js'
 import { tradingCalendar } from '../automation/calendar.js'
+import { BUILTIN_TASK_ICONS } from '../automation/task-icons.js'
 import { createFakeDomain } from './automation-harness.mjs'
 
 const NOW = Date.parse('2026-11-04T02:00:00Z')
@@ -124,6 +125,22 @@ test('卡片只含有 brief 的成功运行；顶部统计/TODO/雷达/缺口都
   assert.equal(board.gaps.length, 1)
   assert.equal(board.gaps[0].seenCount, 5)
   assert.deepEqual(board.stats, { briefs: 5, todos: 1, stocks: 1, gaps: 1, issues7d: 0 })
+})
+
+test('卡片保留任务图标：自定义任务用创建时的选择，内置模板用固定映射', async () => {
+  const { store } = await makeStore()
+  const custom = await makeTask(store, { title: '深研清单', category: 'research', icon: 'microscope' })
+  await addBrief(store, custom, { key: 'custom-icon' })
+  const builtin = (await store.listTasks()).find((task) => task.sourceBuiltinId === 'research-topics')
+  assert.ok(builtin, '内置模板必须已落库')
+  await addBrief(store, builtin, { key: 'builtin-icon' })
+  const board = await boardService(store).board({ days: '14', tz: TZ })
+  const customCard = board.cards.find((card) => card.taskId === custom.id)
+  assert.equal(customCard.icon, 'microscope', '自定义任务必须沿用创建时选的图标')
+  assert.equal(customCard.origin, 'custom', '自定义任务的色调按任务页的 custom 处理')
+  const builtinCard = board.cards.find((card) => card.taskId === builtin.id)
+  assert.equal(builtinCard.icon, BUILTIN_TASK_ICONS['research-topics'], '内置模板必须用固定图标')
+  assert.equal(builtinCard.origin, 'builtin')
 })
 
 test('TODO 确认：按 profile 落库，确认后从 TODO/雷达隐藏，后续运行再次出现', async () => {

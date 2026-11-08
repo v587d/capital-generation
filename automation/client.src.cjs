@@ -34,7 +34,7 @@ const {
   TASK_ICON_CATALOG,
   TASK_ICON_IDS,
   DEFAULT_CUSTOM_ICON,
-  builtinTaskIcon,
+  taskIconId,
 } = require('./task-icons.js')
 
 const ENTRY_NAME = 'capital-automation'
@@ -494,7 +494,7 @@ function installStyles() {
     body:not([data-ds-dark-theme]) .capital-automation-page, body:not([data-ds-dark-theme]) .capital-automation-modal { --ca-line: #0000001f; --ca-line-soft: #0000001a; --ca-table-line: #00000026; --ca-muted: #5d626a; --ca-caption: #6a6f77; --ca-hover: #eef1f5; --ca-field: #f7f8fa; --ca-business: #2f63d6; --ca-success: #16a34a; --ca-error: #dc2626; --ca-warn: #d97706; --ca-business-text: #2f63d6; --ca-success-text: #15803d; --ca-error-text: #c81e1e; --ca-warn-text: #b45309; --ca-tag-news: #2f6fd0; --ca-tag-market: #a85a08; --ca-tag-review: #6d4ac4; --ca-tag-research: #0f766e; --ca-tag-portfolio: #4d7c0f; --ca-tag-monitor: #0e7490; --ca-tag-custom: #b3246d; --ca-heat-0: #eef1f4; --ca-heat-1: #b7e4c0; --ca-heat-2: #74c98a; --ca-heat-3: #3ba55c; --ca-heat-4: #1f7a3a; --ca-heat-fail: #cf222e; }
     .capital-automation-page { display: flex; flex-direction: column; min-height: 0; height: 100%; color: var(--dsw-alias-label-primary); }
     .capital-automation-head { flex: none; padding: 18px 0 0; }
-    .capital-automation-headinner { box-sizing: border-box; width: min(1080px, 100%); margin: 0 auto; padding: 0 clamp(20px, 3vw, 36px); }
+    .capital-automation-headinner { box-sizing: border-box; width: min(1080px, 100%); margin: 0 auto 5px; padding: 0 clamp(20px, 3vw, 36px); }
     .capital-automation-topbar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 12px 18px; min-width: 0; }
     .capital-automation-brand { display: flex; align-items: center; gap: 10px; min-width: 0; justify-self: start; }
     .capital-automation-brandmark { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 9px; color: #fff; background: linear-gradient(135deg, #4f8cff, #7c3aed); box-shadow: inset 0 1px 0 rgba(255,255,255,.24); }
@@ -1196,12 +1196,6 @@ function iconDefinition(id) {
     : undefined
 }
 
-function taskIconId(task) {
-  if (iconDefinition(task?.icon) !== undefined) return task.icon
-  if (task?.origin === 'custom') return DEFAULT_CUSTOM_ICON
-  return builtinTaskIcon(task?.sourceBuiltinId)
-}
-
 function taskIcon(task) {
   return iconDefinition(taskIconId(task)) ?? TASK_ICON_CATALOG[DEFAULT_CUSTOM_ICON]
 }
@@ -1226,13 +1220,13 @@ function TaskGlyph(props) {
 }
 
 function Glyph(props) {
-  const { task, size = 34, large = false } = props
+  const { task, size = 34, large = false, radius, glyphSize } = props
   const edge = large ? 44 : size
   return h('span', {
     className: 'capital-automation-glyph',
     'data-tone': toneOf(task),
-    style: { width: edge, height: edge, borderRadius: large ? 13 : 10 },
-  }, h(TaskGlyph, { task, size: large ? 22 : 17 }))
+    style: { width: edge, height: edge, borderRadius: radius ?? (large ? 13 : 10) },
+  }, h(TaskGlyph, { task, size: glyphSize ?? (large ? 22 : 17) }))
 }
 
 function IconPickerTrigger(props) {
@@ -4050,7 +4044,9 @@ function BoardToolbar(props) {
 }
 
 function BriefCard(props) {
-  const { card, onOpenSession, onRetry, retrying } = props
+  const { card, task, onOpenSession, onRetry, retrying } = props
+  // Older /board payloads omit icon/origin; the task list carries the same identity.
+  const identity = typeof card.icon === 'string' ? card : (task ?? card)
   const brief = card.brief
   const status = brief?.status ?? 'pending'
   const titleId = `capital-automation-brief-${card.runId}`
@@ -4107,6 +4103,7 @@ function BriefCard(props) {
   return h('article', { className: 'capital-automation-briefcard', 'data-status': status, 'aria-labelledby': titleId },
     h('div', { className: 'capital-automation-briefhead' },
       h('div', { className: 'capital-automation-brieftitle' },
+        h(Glyph, { task: identity, size: 24, radius: 8, glyphSize: 14 }),
         h('h3', { id: titleId }, card.taskTitle),
         h('span', { className: 'capital-automation-tag', 'data-tone': card.category }, categoryLabel(card.category)),
         h('span', { className: 'capital-automation-tag' }, trigger),
@@ -4132,7 +4129,9 @@ function BoardSkeleton(props) {
     h('div', { className: 'capital-automation-boardgrid', 'data-rail': railOpen === true ? 'open' : 'closed' },
       h('section', { className: 'capital-automation-boardmain' },
         [0, 1].map((index) => h('div', { key: index, className: 'capital-automation-briefcard' },
-          h(SkeletonBlock, { width: '48%', height: 12 }),
+          h('div', { className: 'capital-automation-brieftitle' },
+            h(SkeletonBlock, { width: 24, height: 24, radius: 8 }),
+            h(SkeletonBlock, { width: '48%', height: 12 })),
           h(SkeletonBlock, { width: '80%', height: 16 }),
           h(SkeletonBlock, { width: '100%', height: 10 }),
           h(SkeletonBlock, { width: '92%', height: 10 })))),
@@ -4146,7 +4145,7 @@ function BoardSkeleton(props) {
 }
 
 function BriefFeed(props) {
-  const { cards, loading, error, onOpenSession, onRetry, retryingRunId, onViewAll, onClearFilter, onLoadMore, hasMore, loadingMore, railOpen } = props
+  const { cards, tasks, loading, error, onOpenSession, onRetry, retryingRunId, onViewAll, onClearFilter, onLoadMore, hasMore, loadingMore, railOpen } = props
   if (loading === true) return h(BoardSkeleton, { railOpen })
   if (typeof error === 'string' && error.length > 0) {
     return h('section', { className: 'capital-automation-boardmain', id: 'capital-automation-briefs' },
@@ -4162,10 +4161,12 @@ function BriefFeed(props) {
           onViewAll ? h('button', { type: 'button', className: 'capital-automation-btn', onClick: onViewAll }, zh.board.viewAll) : null,
           onClearFilter ? h('button', { type: 'button', className: 'capital-automation-btn', onClick: onClearFilter }, zh.board.clearFilter) : null)))
   }
+  const taskById = new Map((Array.isArray(tasks) ? tasks : []).map((task) => [task.id, task]))
   return h('section', { className: 'capital-automation-boardmain', id: 'capital-automation-briefs', 'aria-label': zh.board.briefTitle },
     cards.map((card) => h(BriefCard, {
       key: card.runId,
       card,
+      task: taskById.get(card.taskId),
       onOpenSession,
       onRetry,
       retrying: retryingRunId === card.runId,
@@ -4469,7 +4470,7 @@ function RunHealthPanel(props) {
 
 function BoardPage(props) {
   const {
-    board, loading, error, range, category, onRange, onCategory, onRefresh,
+    board, tasks, loading, error, range, category, onRange, onCategory, onRefresh,
     onOpenSession, onRetryBrief, retryingRunId, onLoadMore, loadingMore, onGoTasks, onNewTask, onGoRuns,
     onAckTodo, ackingTodoId, hasActiveTasks, storageReady,
   } = props
@@ -4554,6 +4555,7 @@ function BoardPage(props) {
     },
       h(BriefFeed, {
         cards: board?.cards ?? [],
+        tasks,
         loading: loading === true && board === null,
         error: '',
         onOpenSession,
@@ -4983,6 +4985,7 @@ function AutomationPage(props) {
         tab === 'board'
           ? h(BoardPage, {
             board,
+            tasks,
             loading: boardLoading,
             error: boardError,
             range: boardRange,

@@ -73,3 +73,11 @@ export function builtinTaskIcon(sourceBuiltinId) {
   return icon ?? DEFAULT_CUSTOM_ICON
 }
 
+/** Resolve the glyph a task renders: an explicit pick wins, otherwise builtins use their fixed map. */
+export function taskIconId(task) {
+  const id = task?.icon
+  if (typeof id === 'string' && Object.prototype.hasOwnProperty.call(TASK_ICON_CATALOG, id)) return id
+  if (task?.origin === 'custom') return DEFAULT_CUSTOM_ICON
+  return builtinTaskIcon(task?.sourceBuiltinId)
+}
+

@@ -3,6 +3,7 @@
  * radar and data-health rows are merged from briefs here so the three views cannot drift apart.
  */
 import { TaskCategorySchema, isValidTimeZone } from './schema.js'
+import { taskIconId } from './task-icons.js'
 import { addDays, localPartsAt } from './time.js'
 
 const DAY_VALUES = new Set(['7', '14', '30', 'all'])
@@ -385,6 +386,10 @@ function cardOf(run, brief, task) {
     taskId: run.taskId,
     taskTitle: run.taskTitle,
     category: task?.category ?? 'research',
+    // Cards keep the task's identity tile: custom tasks show the icon they were created with,
+    // builtins their fixed glyph. The fallback only covers a task record missing from the store.
+    origin: task?.origin ?? 'builtin',
+    icon: taskIconId(task),
     trigger: run.trigger,
     finishedAt: run.finishedAt ?? run.queuedAt,
     sessionId: run.sessionId ?? null,
