@@ -1,6 +1,6 @@
 {
   "name": "@v587d/capital-generation",
-  "version": "2.19.2",
+  "version": "2.19.3",
   "description": "Capital Generation：面向中国散户的 AI 投资助手插件（自动模式 Agent Preset）",
   "icon": "assets/cg-icon.png",
   "author": "v587d",
@@ -123,6 +123,7 @@
     "selected-skills/quant-agent-skills",
     "cordis.patch.yml",
     "assets/cg-icon.png",
+    "plugin-page",
     "README.md",
     "CHANGELOG.md",
     "THIRD_PARTY_NOTICES.md"

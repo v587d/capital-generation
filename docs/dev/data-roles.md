@@ -127,3 +127,14 @@
 - **失败面**：`subagents` 服务缺失时工具响亮失败；`waitForChildren` 没有 abort 参数，取消由工具
   自己的 signal 竞速处理，后台观察不会写入 inbox。实现 `src/agents/wait-for-agents.ts`；宿主契约
   账本 L36；回归 `test/wait-for-agents.test.mjs`、`test/persona.test.mjs`。
+
+## 1.8 角色树
+
+```text
+main Agent
+  +-- data_collector   外部取数，立即持久化，只回传 DatasetRef
+  +-- data_junior      质量 / 建模 / 统计 / 可视化 gate（PTC `run_code`），只回传 profile_ref / 聚合结果 / chart_ref
+  |     └── visualization_specialist  异步出图，只回传 chart_ref / 小回执
+  +-- data_analyst     Python 分析（仅预留，未启用）
+  +-- web_retriever    网页材料获取（一次一个）
+```

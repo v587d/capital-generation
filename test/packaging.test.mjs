@@ -196,17 +196,34 @@ test('插件显示名：根包 locale meta 必须能被宿主读到，且 README
 
   const files = readdirSync(join(ROOT, 'locale')).filter((name) => name.endsWith('.json'))
   assert.ok(files.includes('en.json'), '缺 locale/en.json —— 它是宿主扫目录的入口，缺它则所有语言都不生效')
+  const paths = packedFilePaths()
   for (const name of files) {
     assert.match(name, /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*\.json$/u,
       `locale/${name} 的文件名不是语言 id：宿主对整份 meta 抛错并回落到包名`)
     const meta = JSON.parse(readFileSync(join(ROOT, 'locale', name), 'utf8')).meta
     assert.ok(typeof meta?.title === 'string' && meta.title.trim() !== '', `locale/${name} 缺少非空 meta.title`)
     assert.ok(typeof meta?.description === 'string' && meta.description.trim() !== '', `locale/${name} 缺少非空 meta.description`)
-  }
-
-  const paths = packedFilePaths()
-  for (const name of files) {
     assert.ok(paths.has(`locale/${name}`), `locale/${name} 不在发布清单里（files 是否漏了 locale？）`)
+
+    assert.ok(typeof meta?.detail === 'string' && meta.detail.endsWith('.md'),
+      `locale/${name} 的 meta.detail 必须是包内 Markdown 路径`)
+    assert.match(meta.detail, /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[^\\]+$/u,
+      `locale/${name} 的 meta.detail 必须是包内相对路径：${meta.detail}`)
+    assert.ok(existsSync(join(ROOT, meta.detail)), `locale/${name} 的 meta.detail 指向不存在的文件：${meta.detail}`)
+    assert.ok(paths.has(meta.detail), `locale/${name} 的 meta.detail 不在发布清单里：${meta.detail}`)
+
+    const doc = readFileSync(join(ROOT, meta.detail), 'utf8')
+    const prose = doc.replace(/^```[\s\S]*?^```[ \t]*$/gm, '').replace(/`[^`]*`/gu, '')
+    assert.ok(!/<[a-z][^>]*>/iu.test(prose),
+      `${meta.detail} 含 raw HTML：插件页按 omitHtml 渲染，HTML 会被整段省略`)
+    const images = [...doc.matchAll(/!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/gu)].map((match) => match[1])
+    const localImages = images.filter((src) => !/^https?:\/\//u.test(src))
+    assert.deepEqual(localImages, [],
+      `${meta.detail} 不放本地图片；截图留在 README，徽章走绝对 HTTPS`)
+    assert.ok(images.some((src) => src.includes('img.shields.io/npm/v/')),
+      `${meta.detail} 缺少 npm 动态版本徽章：版本要跟着 npm 自动变`)
+    assert.ok(doc.split('\n').length <= 80, `${meta.detail} 超过 80 行：它是索引页，不是 README 副本`)
+    assert.ok(Buffer.byteLength(doc, 'utf8') <= 6 * 1024, `${meta.detail} 超过 6 KB：它是索引页，不是 README 副本`)
   }
 
   // Cards draw only meta.title, so the README must not send users looking for the npm package name.

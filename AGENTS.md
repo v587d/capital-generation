@@ -13,7 +13,7 @@
 ## 0. 阅读路径
 | 你要动什么 | 详情在 |
 |---|---|
-| 角色边界、Dataset 消息 / 返回边界、capability 目录预算 | `docs/dev/data-roles.md`（§1.1 §1.2 §1.4 §1.5 §1.7）|
+| 角色边界、Dataset 消息 / 返回边界、capability 目录预算 | `docs/dev/data-roles.md`（§1.1 §1.2 §1.4 §1.5 §1.7 §1.8）|
 | 时间轴、日期归一、session 读取 | `docs/dev/time-axis.md`（§1.3）|
 | shell 闸门、PTC 执行面、fs 写口与挂载 | `docs/dev/bash-gate.md`（§1.6）|
 | web_retriever、本地回退、十一个具名来源、文档解析 `ocr` | `docs/dev/web-retriever.md`（§4.1 §4.2 §4.3）|
@@ -26,6 +26,7 @@
 | 工具 schema 全表、数据源验收全表 | `docs/dev/tool-schema.md`（§9.1–§9.6 §10.1–§10.9）|
 | 投研自动化任务（host bundle / 固定域 / 调度 / 运行） | `docs/dev/automation.md`（§12.1–§12.5）|
 | UI/UX 控件、视觉与回归自查 | `docs/dev/ui-design.md`（§13.1 §13.2）|
+| 插件页详情文档（索引页、`meta.detail`、徽章） | `docs/dev/plugin-page.md`（§14.1–§14.5）|
 
 ### ⛔ 硬约束一览
 
@@ -42,14 +43,7 @@
 - **§9.5 / §9.6** 工具返回值必须无损 JSON（`undefined` / `NaN` / 空洞不许带出），且必须满足自己
   声明的 `output.schema`——多返回一个未声明字段同样致命。
 ## 1. 角色边界与数据调度纪律
-```text
-main Agent
-  +-- data_collector   外部取数，立即持久化，只回传 DatasetRef
-  +-- data_junior      质量 / 建模 / 统计 / 可视化 gate（PTC `run_code`），只回传 profile_ref / 聚合结果 / chart_ref
-  |     └── visualization_specialist  异步出图，只回传 chart_ref / 小回执
-  +-- data_analyst     Python 分析（仅预留，未启用）
-  +-- web_retriever    网页材料获取（一次一个）
-```
+角色树与逐角色边界见 `docs/dev/data-roles.md`（§1.1–§1.8）。
 
 一句话版：**原始 rows 永不出工具层**，Agent 间只传引用与聚合；主 Agent 一律委派、自己不出图；
 角色是叶子，互通经主 Agent；data_junior 只跑 PTC `run_code`，程序只调度工具与算术；委派后
@@ -147,3 +141,6 @@ capital-analysis/runs/<analysis_id>/          # 预留（data_analyst）
 - **⛔ 下拉 / 日期一律用宿主件**：胶囊触发器 + 官方 `Menu`（参考自动化页 `Select`），禁止原生 `<select>` / `<input type="date">`；颜色、圆角、间距只走 `--dsw-alias-*` token。
 - 控件尺寸跟宿主（34px 高 / 10px 圆角 / 12.5px 字号），焦点环、禁用态、`aria-haspopup`/`aria-expanded` 不可省；关闭后焦点回触发器。
 - 文案只留动作必需的信息：控件已表达的默认值 / 路径不再写解释句；单个字段不套分组标题。细节与自查表见 `docs/dev/ui-design.md`（§13.1–§13.2）。
+
+## 14. 插件页详情文档
+`plugin-page/` 是已安装用户的索引页，不是 README 副本；`meta.detail` 指向它，只写 Markdown、禁 raw HTML；不放本地图片，徽章走绝对 HTTPS。规则见 `docs/dev/plugin-page.md`（§14.1–§14.5）。

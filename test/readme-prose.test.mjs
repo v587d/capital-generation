@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { SELECTED_SKILL_CATALOG } from '../selected-skills/catalog.js'
 
@@ -47,4 +48,26 @@ test('README「精选 Skills」的项目数与 Skill 数跟着 catalog 走', () 
   assert.equal(Number(stated[1]), projects, `首页写的开源项目数是 ${stated[1]}，catalog 现算是 ${projects}`)
   assert.equal(Number(stated[2]), SELECTED_SKILL_CATALOG.length,
     `首页写的 Skill 总数是 ${stated[2]}，catalog 现算是 ${SELECTED_SKILL_CATALOG.length}（接新快照时两处一起改）`)
+})
+
+const PLUGIN_PAGE_DOCS = ['plugin-page/README.zh.md', 'plugin-page/README.en.md']
+
+test('插件页详情文档是索引页：不写研发黑话，也不复制会随版本变的事实', () => {
+  for (const file of PLUGIN_PAGE_DOCS) {
+    const text = readFileSync(join(ROOT, file), 'utf8')
+    const pageProse = text.replace(/^```[\s\S]*?^```[ \t]*$/gm, '')
+    for (const [pattern, reason] of JARGON) {
+      const hits = [...pageProse.matchAll(pattern)].map((match) => match[0])
+      assert.deepEqual(hits, [],
+        `${file} 出现了「${hits.join('、')}」——${reason}。插件页只写用户可见内容，细节链到 README。`)
+    }
+    const versions = [...pageProse.matchAll(/\b\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\b/gu)].map((match) => match[0])
+    assert.deepEqual(versions, [],
+      `${file} 写了具体版本号（${versions.join('、')}）：版本号会随发版变，应链到 CHANGELOG。`)
+    const counts = [...pageProse.matchAll(/\b(?:128|70|16)\s*(?:个|项|条|张)/gu)].map((match) => match[0])
+    assert.deepEqual(counts, [],
+      `${file} 写了会变的能力/模板/Skill 数量（${counts.join('、')}）：应链到能力表。`)
+    assert.ok(text.includes('https://github.com/v587d/capital-generation'),
+      `${file} 缺少指向 README/CHANGELOG 的绝对链接`)
+  }
 })
