@@ -336,6 +336,44 @@ test('运行上限继承通用设置；任务单独改过才覆盖，改回通�
   assert.equal((await store.getTask(pinned.id)).limits.runTimeoutMinutes, 30, '之后继续跟随通用设置')
 })
 
+test('看板追问按 profile 隔离，同一 run 只允许一条 running，删除任务时级联', async () => {
+  const fake = createFakeDomain()
+  const a = make('web', fake)
+  const b = make('capital', fake)
+  const created = await a.store.createTask(createInput)
+  const task = await a.store.getTask(created.id)
+  const run = await a.store.createRun({
+    taskId: task.id,
+    taskTitle: task.title,
+    trigger: 'manual',
+    occurrenceKey: 'ask-cascade',
+    status: 'succeeded',
+    sessionId: 'session-ask',
+  })
+  const ask = await a.store.createAsk({
+    runId: run.id,
+    sessionId: run.sessionId,
+    question: '成交量怎么看？',
+    baselineSeq: 12,
+  })
+  assert.equal(ask.status, 'running')
+  assert.equal((await a.store.pendingAskForRun(run.id)).id, ask.id)
+  assert.equal(await b.store.getAsk(ask.id), undefined, '跨 profile 不能读')
+  await assert.rejects(
+    () => a.store.createAsk({ runId: run.id, sessionId: run.sessionId, question: '第二条', baselineSeq: 13 }),
+    (error) => error.code === 'ask_pending' && error.askId === ask.id,
+  )
+  const ready = await a.store.updateAsk(ask.id, {
+    status: 'ready',
+    preview: '先看成交量。',
+    finishedAt: '2026-11-09T00:01:00.000Z',
+  })
+  assert.equal(ready.status, 'ready')
+  assert.equal((await a.store.latestAsksForRuns([run.id])).get(run.id).preview, '先看成交量。')
+  await a.store.deleteTask(created.id)
+  assert.equal(await a.store.getAsk(ask.id), undefined, '删除自定义任务时追问必须一起删除')
+})
+
 test('brief 按 profile 隔离，任务删除时与 run 一起级联删除', async () => {
   const fake = createFakeDomain()
   const a = make('web', fake)

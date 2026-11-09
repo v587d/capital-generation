@@ -15,7 +15,7 @@
 
 ## 12.2 固定域与 profile 隔离
 
-- 固定 `capital_automation` 域（`layout: 'single'`），表：`tasks` / `runs` / `attempts` / `notifications` / `meta` / `briefs` / `todo_acks`。`briefs` 是成功运行的派生任务简报（一 run 一条），TODO / 雷达 / 数据体检都由它读取时聚合；`todo_acks` 只存用户对单条 TODO 的确认（`profileKey` + `todoId` + `confirmedAt`，每 profile 最多 500 条），读取时按 `confirmedAt` 过滤，不回写 brief。
+- 固定 `capital_automation` 域（`layout: 'single'`），表：`tasks` / `runs` / `attempts` / `notifications` / `meta` / `briefs` / `todo_acks` / `asks`。`briefs` 是成功运行的派生任务简报（一 run 一条），TODO / 雷达 / 数据体检都由它读取时聚合；`todo_acks` 只存用户对单条 TODO 的确认（`profileKey` + `todoId` + `confirmedAt`，每 profile 最多 500 条），读取时按 `confirmedAt` 过滤，不回写 brief；`asks` 存看板追问（`runId` + 原始问题 + 追问前日志游标 + 前 160 字预览，每 profile 最多 400 条），同一 run 同时只允许一条 `running`，不复制 session 正文。
 - 每条记录带服务端派生的 `profileKey`（当前 `ctx.profileContext.name` 的完整原始字符串 sha256 前 24 位；
   页面显示名可截断）。列表、读取、运行、取消、通知查询一律先按 `profileKey` 过滤；请求体里的 profile / owner /
   session / preset / cwd / state 字段由 strict schema 直接拒绝。
@@ -92,9 +92,9 @@
 ## 12.5 API、页面与验收
 
 - 路由前缀 `/capital-automation`；所有 handler 第一步 `connection.requestRejection(req)`，
-  被拒时不读 body、不碰 storage。提供 `/meta`、`/workspaces`（设置卡的下拉，带路径与专属默认标记）、`/tasks`（CRUD + activate/pause/hibernate/copy/run）、
-  `/runs`（列表/详情/cancel）、`/runs/history`（按浏览器时区聚合的每日运行数）、`/notifications`（列表/已读）、`/board`（看板聚合）、`/board/briefs/:runId/retry`（只重试已入队的失败新简报）与 `/board/todos/confirm`（POST `{ id }` 确认单条 TODO，body 严格校验）；不提供 `/legacy`、`/catalog`、历史回填或条件接口。
-- 页面顶部只保留品牌与居中的「看板 / 任务 / 运行」页签，默认停在看板；右上角是任务通知中心与「新建任务」。看板无 brief 时只显示空态引导（去任务页手动运行 / 新建任务），不显示统计、右栏或历史占位；有数据时由任务简报、TODO、自选股雷达、数据体检、运行健康五块组成；TODO 默认只看今天/尽快，筛选只有今天/尽快、将来、已过期三档，未来日期进将来（有具体日期直接显示，没有则显示未定；到当天自动浮到今天），当天没有待办显示「今天暂无待办」，每行标签独占一行、标题在标签下方，行内「确认」写入 `todo_acks` 后立即移除，后续运行再次提到同一项时重新出现（确认只覆盖已看到的版本）；简报按完成时间倒序平铺、首行带任务身份图标（与任务页同源）、显示相对时间（完整时间在 `title`）；卡片右上角的「打开 session」是 30px 方形图标按钮（`title` / `aria-label` 交代动作，窄屏仍留在标题行右侧），失败 / 跳过态卡内操作仍用文字按钮；右栏默认展开，TODO 与自选股雷达默认展开、数据体检与运行健康折叠，工具栏可整体收起，统计锚点会展开目标面板。
+  被拒时不读 body、不碰 storage。提供 `/meta`（页面壳；`notifications.unread` 直接带任务通知未读数）、`/workspaces`（设置卡的下拉，带路径与专属默认标记）、`/tasks`（CRUD + activate/pause/hibernate/copy/run）、
+  `/runs`（列表/详情/cancel）、`/runs/history`（按浏览器时区聚合的每日运行数）、`/notifications`（列表/已读）、`/board`（看板聚合）、`/board/briefs/:runId/retry`（只重试已入队的失败新简报）、`/board/briefs/:runId/ask`（POST `{ question, timeZone? }`，把追问追加到该 run 的 session，202 入队）、`/board/asks/:id`（轮询追问状态与前 160 字预览）与 `/board/asks/:id/answer`（按需读取完整回答）、`/board/todos/confirm`（POST `{ id }` 确认单条 TODO，body 严格校验）；不提供 `/legacy`、`/catalog`、历史回填或条件接口。
+- 页面顶部只保留品牌与居中的「看板 / 任务 / 运行」页签，默认停在看板；右上角是任务通知中心与「新建任务」。看板无 brief 时只显示空态引导（去任务页手动运行 / 新建任务），不显示统计、右栏或历史占位；有数据时由任务简报、TODO、自选股雷达、数据体检、运行健康五块组成；TODO 默认只看今天/尽快，筛选只有今天/尽快、将来、已过期三档，未来日期进将来（有具体日期直接显示，没有则显示未定；到当天自动浮到今天），当天没有待办显示「今天暂无待办」，每行标签独占一行、标题在标签下方，行内「确认」写入 `todo_acks` 后立即移除，后续运行再次提到同一项时重新出现（确认只覆盖已看到的版本），展开依据后来源行右侧的「打开 session」也是 30px 外链箭头（文字只留在 `title` / `aria-label`）；简报按完成时间倒序平铺、首行带任务身份图标（与任务页同源）、显示相对时间（完整时间在 `title`）；卡片不再显示「AI 简报」标识、「原文过长」截断标记或常驻输入框，右上角改为聊天 icon（与「打开 session」外链箭头同排）；点开后是 headless 的「对话」弹窗，顶部还原任务身份与简报原文，右上角可打开 session（与关闭按钮同款 30px 图标），底部输入问题；弹窗只展示最新一轮问答，不列历史（历史全文在 session）；卡片内同样只保留最新一轮问答（问题右对齐气泡、回复左侧强调线，不再显示「你问 / 回答」标签），回复默认显示前 160 字（最多三行），「查看更多」在卡内展开完整回答并可「收起」；卡片右上角的「打开 session」是 30px 方形图标按钮（`title` / `aria-label` 交代动作，窄屏仍留在标题行右侧），失败 / 跳过态卡内操作仍用文字按钮；右栏默认展开，TODO 与自选股雷达默认展开、数据体检与运行健康折叠，工具栏可整体收起，统计锚点会展开目标面板。
   profile / scheduler / 日历等诊断信息不常驻，只在 scheduler standby、存储或交易日历不可用
   时以 banner 提示；任务页/运行页底部保留「系统状态」，看板把调度与日历状态并入运行健康，
   技术原因折叠，版本号不在页面展示。明暗主题跟随 `body[data-ds-dark-theme]`；
@@ -103,9 +103,10 @@
   `dormant` 的内置任务以模板卡展示，添加后进入任务表；`active` / `paused` 任务与自定义任务留在任务表。
   分类/来源标签与任务标题同排（模板卡标题只带分类标签），超过 12 个字截断，窄屏换到标题下一行；
   模板卡的添加按钮是品牌色实心主按钮，不靠 hover 才可见；筛选计数是圆圈数字，模板区标题只留「模板」。
-  首屏在 `/meta` 与 `/tasks` 一起返回前只渲染与最终布局同轮廓的骨架屏（官方
-  `--dsw-alias-bg-skeleton` token + 呼吸动画，`prefers-reduced-motion` 下停用），不得先显示
-  「还没有任务」；首次请求失败则落在错误 banner + 重试，不留在骨架屏。
+  进入页面只取 `/meta`（页面壳，含未读徽标）与当前看板的 `/board`；任务、运行与通知列表按页签懒加载，
+  首次打开任务 / 运行页签时才渲染与最终布局同轮廓的骨架屏（官方 `--dsw-alias-bg-skeleton` token +
+  呼吸动画，`prefers-reduced-motion` 下停用），不得先显示「还没有任务」；刷新与 30 秒轮询也只带页面壳与当前页签，首次请求失败则落在错误 banner + 重试，不留在骨架屏。
+  应用空闲时（`requestIdleCallback`，无此 API 时 2 秒后）预取一次默认 14 天看板，每次成功取到默认看板都写模块级快照，重新进入先用快照出内容、再后台校正（其他筛选视图不写快照）；诊断对象 `window.__CA_LAST_TIMING__` 分开记录 `clickToMountMs`（宿主点击 → 页面挂载）与 `mountToBoardMs`（页面挂载 → 看板首帧）。
 - 任务简报只在成功且存在 `sessionId` 时入队：先写 `briefs.pending`，再由固定 system prompt 的无工具模型改写；服务端用 `sessionQuery.readSession(sessionId)` 取最后一条主 assistant 文本，`llm.stream` 必须带 `sessionId`（opencode-go 需要 `x-opencode-session`），模型不读 session、不挂 preset/persona、不写 session，失败不改变运行终态；不回填历史、不扫描旧 run、不用 `run.summary` 凑简报，失败的新简报只提供单条重试。简报校验只保留长度、Markdown/表情/单段与来源引用；不按词表判断买卖建议或语气，内容交给用户判断。
 - 任务详情是独立焦点页，不重复全局页头，顶部只留「所有任务」返回条；含概览、配置、运行记录、
   通知四个页签。详情头只保留标题、状态、说明与操作，不再有分类 / 日程摘要行；下次运行、上次结果

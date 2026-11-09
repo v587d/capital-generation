@@ -8,6 +8,8 @@ import {
   ACTIVE_RUN_STATUSES,
   DEFAULT_AUTOMATION_SETTINGS,
   MAX_DESCRIPTION_CHARS,
+  MAX_ASK_PREVIEW_CHARS,
+  MAX_ASK_QUESTION_CHARS,
   MAX_ERROR_MESSAGE_CHARS,
   MAX_ERRORS_PER_RUN,
   MAX_INSTRUCTION_CHARS,
@@ -350,6 +352,37 @@ export const TodoAckSchema = z.strictObject({
   confirmedAt: isoInstant,
 })
 
+/**
+ * One board follow-up. The question and its first finished turn live here; the Session remains
+ * the full transcript. `baselineSeq` is the log cursor before the prompt, so a later lazy read
+ * can tell this answer apart from the run's original assistant message.
+ */
+export const AskRecordSchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  id: z.string().min(1).max(80),
+  profileKey: z.string().min(1).max(80),
+  runId: z.string().min(1).max(120),
+  sessionId: z.string().min(1).max(120),
+  question: z.string().trim().min(1).max(MAX_ASK_QUESTION_CHARS),
+  baselineSeq: z.number().int().min(-1),
+  status: z.enum(['running', 'ready', 'failed']),
+  preview: z.string().min(1).max(MAX_ASK_PREVIEW_CHARS).optional(),
+  error: z.string().max(300).optional(),
+  createdAt: isoInstant,
+  updatedAt: isoInstant,
+  finishedAt: isoInstant.optional(),
+}).superRefine((ask, ctx) => {
+  if (ask.status === 'ready') {
+    if (ask.preview === undefined) ctx.addIssue({ code: 'custom', path: ['preview'], message: 'ready ask requires preview' })
+    if (ask.finishedAt === undefined) ctx.addIssue({ code: 'custom', path: ['finishedAt'], message: 'ready ask requires finishedAt' })
+  } else if (ask.status === 'failed') {
+    if (ask.error === undefined) ctx.addIssue({ code: 'custom', path: ['error'], message: 'failed ask requires error' })
+    if (ask.finishedAt === undefined) ctx.addIssue({ code: 'custom', path: ['finishedAt'], message: 'failed ask requires finishedAt' })
+  } else if (ask.preview !== undefined || ask.error !== undefined || ask.finishedAt !== undefined) {
+    ctx.addIssue({ code: 'custom', message: 'running ask must not carry preview/error/finishedAt' })
+  }
+})
+
 export const OwnerRecordSchema = z.strictObject({
   schemaVersion: z.literal(1),
   profileKey: z.string().min(1).max(80),
@@ -388,6 +421,11 @@ export const TaskPatchSchema = z.strictObject({
 
 export const TodoConfirmSchema = z.strictObject({
   id: z.string().min(1).max(200),
+})
+
+export const AskCreateSchema = z.strictObject({
+  question: z.string().trim().min(1).max(MAX_ASK_QUESTION_CHARS),
+  timeZone: timeZone.optional(),
 })
 
 export const NotificationsReadSchema = z.strictObject({

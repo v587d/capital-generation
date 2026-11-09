@@ -6,6 +6,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import {
+  AskRecordSchema,
   AttemptRecordSchema,
   AutomationTaskSchema,
   NotificationSchema,
@@ -24,6 +25,7 @@ import { BUILTIN_BY_ID, BUILTIN_DEFINITIONS } from './builtins.js'
 import { DEFAULT_CUSTOM_ICON, builtinTaskIcon } from './task-icons.js'
 import {
   DEFAULT_AUTOMATION_SETTINGS,
+  MAX_ASKS_PER_PROFILE,
   MAX_ERRORS_PER_RUN,
   MAX_NOTIFICATIONS_PER_PROFILE,
   MAX_RUNS_PER_PROFILE,
@@ -51,6 +53,7 @@ export const domainSpec = {
     meta: { valueSchema: OwnerRecordSchema },
     briefs: { valueSchema: TaskBriefSchema },
     todo_acks: { valueSchema: TodoAckSchema },
+    asks: { valueSchema: AskRecordSchema },
   },
 }
 
@@ -140,6 +143,7 @@ export function createAutomationStore(options) {
   const profileById = new Map(builtins.map((definition) => [definition.id, definition]))
   let opening
   let claimChain = Promise.resolve()
+  let askChain = Promise.resolve()
 
   /** Profile-level defaults; a task without its own limits inherits these. */
   function defaultLimits() {
@@ -180,6 +184,12 @@ export function createAutomationStore(options) {
     return next
   }
 
+  function serializeAsk(operation) {
+    const next = askChain.then(operation, operation)
+    askChain = next.then(() => {}, () => {})
+    return next
+  }
+
   async function open() {
     if (opening === undefined) {
       opening = (async () => {
@@ -193,6 +203,7 @@ export function createAutomationStore(options) {
           meta: domain.table('meta'),
           briefs: domain.table('briefs'),
           todoAcks: domain.table('todo_acks'),
+          asks: domain.table('asks'),
         }
       })()
     }
@@ -214,6 +225,10 @@ export function createAutomationStore(options) {
   }
 
   function ownBrief(record) {
+    return record !== undefined && record.profileKey === profileKey
+  }
+
+  function ownAsk(record) {
     return record !== undefined && record.profileKey === profileKey
   }
 
@@ -418,6 +433,9 @@ export function createAutomationStore(options) {
         await tables.briefs.delete(briefId)
       }
     }
+    for (const [askId, ask] of [...tables.asks.entries()]) {
+      if (ownAsk(ask) && runIds.has(ask.runId)) await tables.asks.delete(askId)
+    }
     return tables.tasks.delete(id)
   }
 
@@ -569,6 +587,9 @@ export function createAutomationStore(options) {
       await tables.runs.delete(id)
       const brief = tables.briefs.get(id)
       if (ownBrief(brief)) await tables.briefs.delete(id)
+      for (const [askId, ask] of [...tables.asks.entries()]) {
+        if (ownAsk(ask) && ask.runId === id) await tables.asks.delete(askId)
+      }
     }
   }
 
@@ -755,6 +776,98 @@ export function createAutomationStore(options) {
     let count = 0
     for (const [, record] of tables.briefs.entries()) if (ownBrief(record)) count += 1
     return count
+  }
+
+  async function retainAsks(tables) {
+    const records = []
+    for (const [, record] of tables.asks.entries()) if (ownAsk(record)) records.push(record)
+    if (records.length <= MAX_ASKS_PER_PROFILE) return
+    records.sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id))
+    for (const record of records.slice(MAX_ASKS_PER_PROFILE)) {
+      // A running ask is still the user's only handle on that turn; drop it only after it settles.
+      if (record.status !== 'running') await tables.asks.delete(record.id)
+    }
+  }
+
+  async function pendingAskForRunIn(tables, runId) {
+    let found
+    for (const [, record] of tables.asks.entries()) {
+      if (!ownAsk(record) || record.runId !== runId || record.status !== 'running') continue
+      if (found === undefined || record.createdAt > found.createdAt) found = record
+    }
+    return found
+  }
+
+  async function createAsk(input) {
+    return serializeAsk(async () => {
+      const tables = await ensure()
+      const pending = await pendingAskForRunIn(tables, input.runId)
+      if (pending !== undefined) {
+        const error = new Error('上一条追问还在回答，等它结束再问。')
+        error.code = 'ask_pending'
+        error.askId = pending.id
+        throw error
+      }
+      const at = iso(now())
+      const record = parseStrict(AskRecordSchema, {
+        schemaVersion: 1,
+        id: `ask_${random().replace(/-/g, '')}`,
+        profileKey,
+        runId: input.runId,
+        sessionId: input.sessionId,
+        question: input.question,
+        baselineSeq: Number.isSafeInteger(input.baselineSeq) ? input.baselineSeq : -1,
+        status: 'running',
+        createdAt: at,
+        updatedAt: at,
+      }, 'ask')
+      await tables.asks.put(record.id, record)
+      await retainAsks(tables)
+      return record
+    })
+  }
+
+  async function getAsk(id) {
+    const tables = await ensure()
+    const record = tables.asks.get(id)
+    return ownAsk(record) ? record : undefined
+  }
+
+  async function pendingAskForRun(runId) {
+    const tables = await ensure()
+    return pendingAskForRunIn(tables, runId)
+  }
+
+  async function latestAsksForRuns(runIds) {
+    const tables = await ensure()
+    const wanted = new Set(runIds)
+    const result = new Map()
+    for (const [, record] of tables.asks.entries()) {
+      if (!ownAsk(record) || !wanted.has(record.runId)) continue
+      const current = result.get(record.runId)
+      if (current === undefined || record.createdAt > current.createdAt) result.set(record.runId, record)
+    }
+    return result
+  }
+
+  async function updateAsk(id, patch) {
+    const tables = await ensure()
+    const current = tables.asks.get(id)
+    if (!ownAsk(current)) return undefined
+    const next = parseStrict(AskRecordSchema, {
+      ...current,
+      ...patch,
+      updatedAt: iso(now()),
+    }, 'ask')
+    await tables.asks.put(id, next)
+    return next
+  }
+
+  async function deleteAsk(id) {
+    const tables = await ensure()
+    const current = tables.asks.get(id)
+    if (!ownAsk(current)) return false
+    return tables.asks.delete(id)
   }
 
   async function listTodoAcks() {
@@ -992,6 +1105,12 @@ export function createAutomationStore(options) {
     listBriefsForRuns,
     listBriefsForProfile,
     countBriefs,
+    createAsk,
+    getAsk,
+    pendingAskForRun,
+    latestAsksForRuns,
+    updateAsk,
+    deleteAsk,
     listTodoAcks,
     confirmTodo,
     updateBrief,

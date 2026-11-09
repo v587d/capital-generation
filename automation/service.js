@@ -17,6 +17,7 @@ import {
   MIN_RUN_TIMEOUT_MINUTES,
 } from './defaults.js'
 import {
+  AskCreateSchema,
   NotificationsReadSchema,
   TaskCategorySchema,
   TaskCreateSchema,
@@ -105,7 +106,7 @@ export class AutomationError extends Error {
 }
 
 export function createAutomationService(options) {
-  const { store, scheduler, runner, calendar, profile, workspaces, version, settings, briefs, boardService, now = () => Date.now() } = options
+  const { store, scheduler, runner, calendar, profile, workspaces, version, settings, briefs, asks, boardService, now = () => Date.now() } = options
   let chain = Promise.resolve()
 
   function serialize(operation) {
@@ -170,6 +171,15 @@ export function createAutomationService(options) {
     } catch (error) {
       storage = { state: 'unavailable', error: sanitizeMessage(String(error)) }
     }
+    let unread = 0
+    if (storage.state === 'ready') {
+      // The badge ships with the page shell so entry never has to list notifications.
+      try {
+        unread = await store.unreadNotificationCount('task')
+      } catch {
+        unread = 0
+      }
+    }
     let workspaceList = []
     let workspaceError
     try {
@@ -181,6 +191,7 @@ export function createAutomationService(options) {
       profile: { key: store.profileKey, name: profile.displayName, state: 'current' },
       version,
       storage,
+      notifications: { unread },
       workspaces: workspaceList,
       defaultWorkspaceId: workspaceList.find((item) => item.default === true)?.id ?? null,
       ...(workspaceError === undefined ? {} : { workspaceError }),
@@ -398,6 +409,47 @@ export function createAutomationService(options) {
     }
   }
 
+  function mapAskError(error) {
+    if (error?.askError === true) {
+      throw new AutomationError(error.code, error.message, error.status ?? 400, error.extra)
+    }
+    throw error
+  }
+
+  async function askBrief(runId, input) {
+    if (asks === undefined || typeof asks.ask !== 'function') {
+      throw new AutomationError('ask_unavailable', '追问服务暂时不可用。', 503)
+    }
+    const parsed = parseStrict(AskCreateSchema, input, 'board/ask')
+    try {
+      return { ask: await asks.ask(runId, parsed) }
+    } catch (error) {
+      mapAskError(error)
+    }
+  }
+
+  async function askStatus(askId) {
+    if (asks === undefined || typeof asks.status !== 'function') {
+      throw new AutomationError('ask_unavailable', '追问服务暂时不可用。', 503)
+    }
+    try {
+      return { ask: await asks.status(askId) }
+    } catch (error) {
+      mapAskError(error)
+    }
+  }
+
+  async function askAnswer(askId) {
+    if (asks === undefined || typeof asks.answer !== 'function') {
+      throw new AutomationError('ask_unavailable', '追问服务暂时不可用。', 503)
+    }
+    try {
+      return await asks.answer(askId)
+    } catch (error) {
+      mapAskError(error)
+    }
+  }
+
   async function retryBrief(runId) {
     if (briefs === undefined || typeof briefs.retry !== 'function') {
       throw new AutomationError('brief_not_found', '任务简报服务暂时不可用。', 503)
@@ -460,6 +512,9 @@ export function createAutomationService(options) {
     board,
     confirmTodo,
     retryBrief,
+    askBrief,
+    askStatus,
+    askAnswer,
     listNotifications,
     markNotificationsRead,
     storageState: async () => {

@@ -60,9 +60,10 @@ async function addBrief(store, task, options = {}) {
   return store.getRun(run.id)
 }
 
-function boardService(store) {
+function boardService(store, asks) {
   return createBoardService({
     store,
+    asks,
     scheduler: {
       status: () => ({ state: 'active', calendar: { available: true, coverageDays: 420 } }),
       displayNext: (task) => ({ kind: 'occurrence', scheduledFor: '2026-11-05T00:00:00.000Z', taskId: task.id }),
@@ -246,4 +247,32 @@ test('运行健康：7 天失败、简报状态与已补跑', async () => {
   assert.equal(board.health.recentIssues[0].status, 'failed')
   assert.equal(board.health.recentIssues[0].recoveredByRunId !== undefined, true)
   assert.equal(board.stats.issues7d, 1)
+})
+
+test('看板卡片带上该 run 的最新追问，不被别的 run 串走', async () => {
+  const { store } = await makeStore()
+  const task = await makeTask(store)
+  const run = await addBrief(store, task, { key: 'ask-card' })
+  let wanted
+  const asks = {
+    async latestForRuns(runIds) {
+      wanted = runIds
+      return new Map([[run.id, {
+        id: 'ask_card',
+        runId: run.id,
+        sessionId: run.sessionId,
+        question: '成交量怎么看？',
+        status: 'ready',
+        preview: '先看成交量。',
+        error: null,
+        createdAt: '2026-11-04T00:41:00.000Z',
+        finishedAt: '2026-11-04T00:42:00.000Z',
+      }]])
+    },
+  }
+  const board = await boardService(store, asks).board({ days: '14', tz: TZ })
+  assert.deepEqual(wanted, [run.id])
+  assert.equal(board.cards[0].ask.id, 'ask_card')
+  assert.equal(board.cards[0].ask.preview, '先看成交量。')
+  assert.equal(board.cards[0].ask.sessionId, run.sessionId)
 })

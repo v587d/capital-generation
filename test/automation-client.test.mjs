@@ -49,6 +49,12 @@ function loadBundle() {
       querySelector: () => null,
       head: { appendChild() {} },
     },
+    // Effects only run in the mount-payload test; keep their timers inert there.
+    setTimeout: () => 0,
+    clearTimeout: () => {},
+    setInterval: () => 0,
+    clearInterval: () => {},
+    URLSearchParams,
     console,
   }
   runInNewContext(source, sandbox)
@@ -264,8 +270,8 @@ test('客户端 bundle：apply 在真实 DOM 形状下不抛错，注册 main �
   assert.match(clientSource, /notificationMessage/, '空消息通知必须有可读回退，不能只显示标题')
   assert.doesNotMatch(clientSource, /nextTaskList\[0\]/, '初始加载不能自动选中第一项，应停在任务概览')
   assert.match(clientSource, /const initialLoading = meta === null && loadError\.length === 0/, '首次数据返回前必须识别为加载中，不能把空数组当成没有任务')
-  assert.match(clientSource, /initialLoading\s*\n\s*\? h\(TaskDashboardSkeleton\)/, '任务页首屏必须渲染骨架屏')
-  assert.match(clientSource, /initialLoading\s*\n\s*\? h\(RunsSkeleton\)/, '运行页首屏必须渲染骨架屏')
+  assert.match(clientSource, /tasksPending\s*\n\s*\? h\(TaskDashboardSkeleton\)/, '任务页首屏必须渲染骨架屏')
+  assert.match(clientSource, /runsPending\s*\n\s*\? h\(RunsSkeleton\)/, '运行页首屏必须渲染骨架屏')
   assert.match(clientSource, /--dsw-alias-bg-skeleton/, '骨架屏必须使用官方 skeleton token')
   assert.match(clientSource, /\.capital-automation-skeleton \{ animation: none; \}/, '减少动效时必须停掉骨架屏呼吸动画')
 })
@@ -621,6 +627,83 @@ test('首次打开在 /meta 返回前显示骨架屏，而不是「还没有任�
   assert.match(text, /读取中…/, '骨架屏必须给读屏留下加载文案')
 })
 
+test('进入页面只请求 /meta 与 /board，任务 / 运行 / 通知留到打开页签再取', async () => {
+  const createElement = (type, props, ...children) => ({ type, props: { ...(props ?? {}) }, children })
+  const effects = []
+  const reactStub = {
+    createElement,
+    useEffect: (callback) => { effects.push(callback) },
+    useState: (value) => [typeof value === 'function' ? value() : value, () => {}],
+    useRef: (value) => ({ current: value }),
+  }
+  const mod = loadBundle().factory((name) => name === 'react' ? reactStub : factoryRequire(name))
+  let page
+  mod.apply({
+    get: () => undefined,
+    effect: (callback) => { callback(); return () => {} },
+    slots: {
+      inject: (slot, callback) => { assert.ok(['main', 'sidebar.panellist'].includes(slot)); return callback() },
+      register: (declaration, component) => {
+        if (declaration.name === 'main') page = component
+        return () => {}
+      },
+    },
+    logger: { info() {} },
+  })
+  const calls = []
+  const responses = {
+    meta: { storage: { state: 'ready' }, scheduler: { state: 'active' }, notifications: { unread: 2 } },
+    board: { ok: true, empty: false, cards: [], todos: [], stocks: [], gaps: [], stats: {}, health: {} },
+  }
+  const api = new Proxy({}, {
+    get: (_target, name) => (...args) => {
+      calls.push([String(name), ...args])
+      return Promise.resolve(responses[String(name)] ?? {})
+    },
+  })
+  const previousDocument = globalThis.document
+  globalThis.document = { visibilityState: 'visible', addEventListener() {}, removeEventListener() {} }
+  try {
+    page({ api, openSession() {} })
+    const cleanups = effects.map((callback) => callback()).filter((value) => typeof value === 'function')
+    await new Promise((resolve) => setImmediate(resolve))
+    cleanups.forEach((cleanup) => cleanup())
+  } finally {
+    if (previousDocument === undefined) delete globalThis.document
+    else globalThis.document = previousDocument
+  }
+  const entry = calls.map(([name]) => name).sort()
+  assert.deepEqual(entry, ['board', 'meta'], `入口只该取页面壳与看板，实际请求：${entry.join(', ')}`)
+})
+
+
+test('进入页面只取页面壳与看板，任务 / 运行 / 通知按页签懒加载', () => {
+  assert.match(clientSource, /async function loadTasks\(\)/, '任务必须有独立的加载入口')
+  assert.match(clientSource, /async function loadRuns\(\)/, '运行必须有独立的加载入口')
+  assert.match(clientSource, /async function loadNotifications\(\)/, '任务通知必须有独立的加载入口')
+  assert.match(clientSource, /const pending = \[loadMeta\(\)\]/, '刷新/轮询的底包只能是页面壳 /meta')
+  assert.match(clientSource, /if \(selectedIdRef\.current !== null \|\| tabRef\.current === 'tasks'\) pending\.push\(loadTasks\(\)\)/, '只有任务页签或任务详情才加载任务')
+  assert.match(clientSource, /if \(tabRef\.current === 'runs'\) pending\.push\(loadRuns\(\)\)/, '只有运行页签才加载运行与历史')
+  assert.match(clientSource, /if \(inboxRef\.current\) pending\.push\(loadNotifications\(\)\)/, '只有任务通知弹窗打开时才加载通知列表')
+  assert.match(clientSource, /if \(tab === 'tasks'\) \{\s*\n\s*void loadMeta\(\)\s*\n\s*void loadTasks\(\)/, '切到任务页签才首次拉取任务')
+  assert.match(clientSource, /if \(tab === 'runs'\) \{\s*\n\s*void loadMeta\(\)\s*\n\s*void loadRuns\(\)/, '切到运行页签才首次拉取运行')
+  assert.match(clientSource, /if \(inbox\) void loadNotifications\(\)/, '打开任务通知才拉取通知')
+  assert.match(clientSource, /value\?\.notifications\?\.unread/, '未读徽标必须跟页面壳一起返回，不能为此拉整份通知')
+  assert.doesNotMatch(clientSource, /api\.meta\(\)[\s\S]{0,120}api\.tasks\(\)/, '入口不得把任务和页面壳捆在同一批请求里')
+  assert.doesNotMatch(clientSource, /api\.runs\(''?\+?'\?limit=200'\)[\s\S]{0,120}api\.notifications\(\)/, '入口不得把运行和通知捆在同一批请求里')
+  assert.match(clientSource, /void refresh\(\)\s*\n\s*\}, 30_000\)/, '页面轮询间隔不得短于 30 秒')
+  assert.doesNotMatch(clientSource, /void refresh\(\)\s*\n\s*\}, 15_000\)/, '15 秒全量轮询必须移除')
+  assert.match(clientSource, /meta\?\.scheduler\?\.state !== 'standby'/, '调度器待命时才需要加快页面壳轮询')
+  assert.match(clientSource, /void loadMeta\(\)\s*\n\s*\}, 10_000\)/, '待命时页面壳每 10 秒重读一次，租约交接后提示自动消失')
+  assert.match(clientSource, /function readBoardSnapshot\(query\)/, '看板必须有跨挂载快照，重新进入先画旧数据')
+  assert.match(clientSource, /function writeBoardSnapshot\(query, value\)/, '每次成功取数都要更新快照')
+  assert.match(clientSource, /const snapshot = before === null \? readBoardSnapshot\(query\) : null/, '看板首帧必须先读快照再后台校正')
+  assert.match(clientSource, /requestIdleCallback\(startWarm, \{ timeout: 4_000 \}\)/, '应用空闲时预取默认看板，首次打开不再等请求')
+  assert.match(clientSource, /window\.__CA_LAST_TIMING__ = \{/, '必须提供 click→mount 与 mount→board 的只读计时对象')
+  assert.match(clientSource, /const TIME_FORMATTERS = new Map\(\)/, 'Intl 格式化器必须缓存，不能每张卡新建')
+})
+
+
 test('看板：默认首页、空态引导手动运行、五个模块与无历史回填', () => {
   assert.match(clientSource, /tabs: \{ board: '看板', tasks: '任务', runs: '运行' \}/, '页签必须先是看板')
   assert.match(clientSource, /\['board', 'tasks', 'runs'\]\.map/, 'Header 顺序必须是看板/任务/运行')
@@ -653,10 +736,67 @@ test('看板：默认首页、空态引导手动运行、五个模块与无历�
   assert.doesNotMatch(clientSource, /AI 简报，以原文为准/, '简报卡不再重复 AI 免责声明')
   assert.doesNotMatch(clientSource, /capital-automation-brieffoot/, '简报卡不再保留 footer 行')
   assert.doesNotMatch(clientSource, /zh\.board\.itemsCount/, '简报卡不再显示待办/标的计数')
-  assert.match(clientSource, /className: 'capital-automation-briefai'\s*\}, zh\.board\.aiBadge/, '简报卡保留 AI 标识')
+  assert.doesNotMatch(clientSource, /aiBadge|capital-automation-briefai|capital-automation-briefpartial|capital-automation-briefmeta/, 'AI 简报标识、截断标记与旧 meta 行全部移除')
+  assert.doesNotMatch(clientSource, /function AskBar\(/, '旧的常驻输入框组件必须移除')
+  assert.match(clientSource, /function AskDock\(/, '每张简报卡需要挂追问入口')
+  assert.match(clientSource, /function AskDialog\(/, '点击聊天 icon 必须打开对话弹窗')
+  assert.match(clientSource, /function AskExchange\(/, '问答必须抽成可复用的对话项')
+  assert.match(clientSource, /IconNewChatOutlineRegular/, '入口必须是聊天 icon')
+  assert.match(clientSource, /className: 'capital-automation-briefheadactions'/, '聊天 icon 必须放在卡片头部动作区')
+  assert.match(clientSource, /onClick: \(\) => setAskOpen\(true\)/, '聊天 icon 必须打开对话弹窗')
+  assert.match(clientSource, /className: 'capital-automation-askinput'/, '输入框只应出现在弹窗里')
+  assert.doesNotMatch(briefCard, /capital-automation-askinput/, '简报卡本体不再常驻输入框')
+  assert.match(clientSource, /api\.askBrief\(card\.runId, text, browserTimeZone\(\)\)/, '弹窗提交必须写回该卡片对应的 run')
+  assert.match(clientSource, /api\.askStatus\(latest\.id\)/, '回答中必须轮询状态')
+  assert.doesNotMatch(clientSource, /api\.askHistory|askLoadMore|capital-automation-chathistory|capital-automation-askitem/, '历史对话列表与分页必须移除')
+  assert.doesNotMatch(clientSource, /askUserLabel|askReplyLabel|capital-automation-askwho|capital-automation-askreplyhead|capital-automation-askstate/, '去掉「你问」「回答」文字标签')
+  assert.match(clientSource, /className: 'capital-automation-askuser'/, '用户提问必须独立成气泡')
+  assert.match(clientSource, /className: 'capital-automation-askreply'/, '回复必须独立成块')
+  assert.doesNotMatch(clientSource, /capital-automation-askresult|capital-automation-askanswer/, '旧的未区分问答的 DOM 必须移除')
+  assert.match(clientSource, /\.capital-automation-askuser \{[^}]*align-self: flex-end/, '用户提问必须右对齐，和回复分开')
+  assert.match(clientSource, /\.capital-automation-askreply \{[^}]*border-left: 2px solid var\(--ca-business\)/, '回复块必须有左侧强调线')
+  assert.match(clientSource, /\.capital-automation-askreply\[data-status="failed"\] \{[^}]*border-left-color: var\(--ca-error\)/, '失败的回复块改用错误色强调')
+  assert.match(clientSource, /\.capital-automation-askpreview \{[^}]*-webkit-line-clamp: 3/, '回复预览默认 3 行后截断')
+  assert.match(clientSource, /\.capital-automation-askfull \{[^}]*white-space: pre-wrap/, '展开后必须显示完整回复并保留换行')
+  assert.match(clientSource, /api\.askAnswer\(ask\.id\)/, '查看更多必须读取完整回答')
+  assert.match(clientSource, /zh\.board\.askCollapse/, '展开后必须有收起')
+  const askStart = clientSource.indexOf('function AskExchange(props)')
+  const askEnd = clientSource.indexOf('function AskDialog(props)', askStart)
+  assert.ok(askStart >= 0 && askEnd > askStart, '必须能定位对话项组件')
+  const askExchange = clientSource.slice(askStart, askEnd)
+  assert.match(askExchange, /api\.askAnswer\(ask\.id\)/, '查看更多只在对话项内展开完整回复')
+  assert.doesNotMatch(askExchange, /onOpenSession/, '查看更多不再跳转 session')
+  assert.match(askExchange, /capital-automation-askuser[\s\S]*capital-automation-askquestion/, '问题只能出现在用户气泡里')
+  assert.match(askExchange, /capital-automation-askreply[\s\S]*capital-automation-askpreview/, '默认预览只能出现在回复块里')
+  const dialogStart = clientSource.indexOf('function AskDialog(props)')
+  const dialogEnd = clientSource.indexOf('function AskDock(props)', dialogStart)
+  assert.ok(dialogStart >= 0 && dialogEnd > dialogStart, '必须能定位对话弹窗组件')
+  const askDialog = clientSource.slice(dialogStart, dialogEnd)
+  assert.match(askDialog, /headless: true/, '对话弹窗必须用 headless Modal 自定义 X 式头部')
+  assert.match(askDialog, /className: 'capital-automation-chaticonbtn'[\s\S]{0,160}IconCloseOutlineRegular/, '关闭按钮在左上角')
+  assert.doesNotMatch(askDialog, /askCount|chatcount/, '对话数量不再显示')
+  assert.match(askDialog, /className: 'capital-automation-chaticonbtn'[\s\S]{0,180}IconRightUpOutlineRegular/, '打开 session 与关闭按钮共用同一图标按钮样式')
+  assert.match(askDialog, /title: zh\.openSession,[\s\S]{0,120}'aria-label': zh\.openSession/, '打开 session 图标必须有提示与无障碍名称')
+  assert.match(askDialog, /className: 'capital-automation-chatcontext'/, '弹窗顶部必须展示来源简报（X 式父帖）')
+  assert.match(askDialog, /h\(Glyph, \{ task: identity \?\? card, size: 38, radius: 999/, '父帖必须有任务头像')
+  assert.match(askDialog, /h\(AskExchange, \{ key: ask\.id, ask, api \}\)/, '弹窗内只展示最新一轮问答')
+  assert.doesNotMatch(askDialog, /askHistory|chathistory|askLoadMore|asks\.map/, '对话弹窗不再显示历史列表')
+  assert.match(clientSource, /askEmptyTitle: '暂无提问'/, '空对话只显示「暂无提问」')
+  assert.doesNotMatch(clientSource, /askEmptyHint|在下方输入问题/, '空对话不再追加解释句')
+  assert.match(askDialog, /className: 'capital-automation-chatcomposer'/, '弹窗底部必须有输入区')
+  assert.match(askDialog, /zh\.board\.askSubmit/, '底部必须用文字「提问」按钮')
+  assert.match(clientSource, /h\(AskDock, \{\s*card,\s*identity,\s*api,\s*onOpenSession,\s*open: askOpen/, '每张简报卡都挂追问入口与弹窗')
+  assert.match(briefCard, /h\(AskDock, \{\s*card,\s*identity,\s*api,\s*onOpenSession,\s*open: askOpen/, '追问入口必须在简报卡内')
   assert.match(clientSource, /api\.board\(/, '客户端必须请求 /board')
   assert.match(clientSource, /api\.retryBrief\(/, '失败简报必须有单条重试入口')
   assert.match(clientSource, /className: 'capital-automation-todotitle',\s*'aria-expanded'/, 'TODO 标题本身就是依据展开入口')
+  const todoStart = clientSource.indexOf('function TodoRow(props)')
+  const todoEnd = clientSource.indexOf('function BoardPanelHead(props)', todoStart)
+  assert.ok(todoStart >= 0 && todoEnd > todoStart, '必须能定位 TODO 行组件')
+  const todoRow = clientSource.slice(todoStart, todoEnd)
+  assert.match(todoRow, /'data-size': 'icon',\s*title: zh\.openSession,\s*'aria-label': zh\.openSession,/, 'TODO 依据行的打开 session 只留图标按钮，靠 title / aria-label 交代动作')
+  assert.match(todoRow, /h\(IconRightUpOutlineRegular, \{ size: 14 \}\)/, 'TODO 打开 session 沿用简报卡的外链箭头')
+  assert.doesNotMatch(todoRow, /\}, zh\.openSession\)/, 'TODO 依据行不再保留文字版打开 session')
   assert.doesNotMatch(clientSource, /capital-automation-todobasis/, 'TODO 行不再单列依据按钮')
   assert.match(clientSource, /capital-automation-healthissues/, '运行健康必须列异常')
   assert.doesNotMatch(clientSource, /capital-automation-board[\s\S]{0,2000}api\.run\(/, '看板空态/卡片不能自动运行任务')

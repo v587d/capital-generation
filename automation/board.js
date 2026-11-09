@@ -380,7 +380,7 @@ function healthOf({ runs, briefs, timeZone, now, scheduler, tasks }) {
   }
 }
 
-function cardOf(run, brief, task) {
+function cardOf(run, brief, task, ask) {
   return {
     runId: run.id,
     taskId: run.taskId,
@@ -393,6 +393,7 @@ function cardOf(run, brief, task) {
     trigger: run.trigger,
     finishedAt: run.finishedAt ?? run.queuedAt,
     sessionId: run.sessionId ?? null,
+    ask: ask ?? null,
     brief: brief === undefined ? null : {
       status: brief.status,
       headline: brief.headline ?? null,
@@ -410,7 +411,7 @@ function cardOf(run, brief, task) {
 }
 
 export function createBoardService(options) {
-  const { store, scheduler, now = () => Date.now() } = options
+  const { store, scheduler, asks, now = () => Date.now() } = options
 
   async function board(query = {}) {
     const parsed = parseBoardQuery(query, now)
@@ -440,6 +441,10 @@ export function createBoardService(options) {
     }
     const pageEntries = entries.slice(start, start + parsed.limit)
     const nextBefore = start + pageEntries.length < entries.length ? pageEntries.at(-1)?.run.id ?? null : null
+    const pageRunIds = pageEntries.map((entry) => entry.run.id)
+    const askByRun = typeof asks?.latestForRuns === 'function'
+      ? await asks.latestForRuns(pageRunIds)
+      : new Map()
     const ackById = new Map(todoAcks.map((ack) => [ack.todoId, ack]))
     const todos = aggregateTodos(entries).filter((item) => !todoAckCovers(ackById.get(item.id), item))
     const stocks = aggregateStocks(entries, todos)
@@ -464,7 +469,7 @@ export function createBoardService(options) {
         gaps: gaps.length,
         issues7d: health.issueCount,
       },
-      cards: pageEntries.map((entry) => cardOf(entry.run, entry.brief, entry.task)),
+      cards: pageEntries.map((entry) => cardOf(entry.run, entry.brief, entry.task, askByRun.get(entry.run.id))),
       todos: todos.slice(0, MAX_TODOS),
       stocks: stocks.slice(0, MAX_STOCKS),
       gaps: gaps.slice(0, MAX_GAPS),

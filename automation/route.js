@@ -236,6 +236,20 @@ async function dispatch({ req, method, suffix, url, service, requestId }) {
   if (suffix === '/board/todos/confirm' && method === 'POST') {
     return { body: await service.confirmTodo(await readBody(req)) }
   }
+  const askCreate = /^\/board\/briefs\/([^/]+)\/ask$/.exec(suffix)
+  if (askCreate !== null && method === 'POST') {
+    return { body: await service.askBrief(decodeId(askCreate[1]), await readBody(req)), status: 202 }
+  }
+  const askAnswer = /^\/board\/asks\/([^/]+)\/answer$/.exec(suffix)
+  if (askAnswer !== null) {
+    if (method !== 'GET') throw new AutomationError('method_not_allowed', '只支持 GET。', 405)
+    return { body: await service.askAnswer(decodeId(askAnswer[1])) }
+  }
+  const askDetail = /^\/board\/asks\/([^/]+)$/.exec(suffix)
+  if (askDetail !== null) {
+    if (method !== 'GET') throw new AutomationError('method_not_allowed', '只支持 GET。', 405)
+    return { body: await service.askStatus(decodeId(askDetail[1])) }
+  }
   const briefRetry = /^\/board\/briefs\/([^/]+)\/retry$/.exec(suffix)
   if (briefRetry !== null && method === 'POST') {
     return { body: await service.retryBrief(decodeId(briefRetry[1])), status: 202 }

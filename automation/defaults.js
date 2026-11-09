@@ -36,6 +36,11 @@ export const MAX_RUNS_PER_TASK = 200
 export const MAX_RUNS_PER_PROFILE = 2_000
 export const MAX_NOTIFICATIONS_PER_PROFILE = 200
 export const MAX_TODO_ACKS_PER_PROFILE = 500
+export const MAX_ASKS_PER_PROFILE = 400
+export const MAX_ASK_QUESTION_CHARS = 500
+export const MAX_ASK_PREVIEW_CHARS = 160
+export const MAX_ASK_ANSWER_CHARS = 20_000
+export const ASK_TIMEOUT_MS = 30 * 60_000
 export const MAX_ERRORS_PER_RUN = 20
 
 export const MAX_TITLE_CHARS = 120

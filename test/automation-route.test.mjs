@@ -33,6 +33,7 @@ function harness(options = {}) {
     version: '2.12.0',
     settings: () => ({ tickMs: 60_000, inAppNotifications: true }),
     briefs: options.briefs,
+    asks: options.asks,
     boardService: options.boardService,
     now: () => NOW,
   })
@@ -371,10 +372,13 @@ test('meta 暴露当前 profile、scheduler、工作区列表与 execution polic
     list: async () => [{ id: 'ws_1', title: '研究项目', default: true }],
     validate: async () => {},
   }
-  const { handler } = harness({ workspaces })
+  const { handler, store } = harness({ workspaces })
+  await store.addNotification({ kind: 'run_failed', title: '失败', message: 'x' })
+  await store.addNotification({ kind: 'scheduler_standby', title: '待命', message: 'y' })
   const res = await call(handler, { method: 'GET', url: '/capital-automation/meta' })
   const meta = res.json()
   assert.equal(meta.profile.name, 'web')
+  assert.deepEqual(meta.notifications, { unread: 1 }, '未读徽标随页面壳返回，且只算任务通知')
   assert.deepEqual(meta.workspaces, [{ id: 'ws_1', title: '研究项目', default: true }])
   assert.equal(meta.defaultWorkspaceId, 'ws_1')
   assert.equal(meta.execution.preset, 'capital-generation')
@@ -503,6 +507,75 @@ test('TODO 确认：POST /board/todos/confirm 只接受字符串 id', async () =
   }
 })
 
+
+test('看板追问：POST 只接受严格 body，GET 按 id 读状态', async () => {
+  const seen = []
+  const asks = {
+    async ask(runId, input) {
+      seen.push({ runId, input })
+      return {
+        id: 'ask_1',
+        runId,
+        sessionId: 'session_ask',
+        question: input.question,
+        status: 'running',
+        preview: null,
+        error: null,
+        createdAt: '2026-11-09T00:00:00.000Z',
+        finishedAt: null,
+      }
+    },
+    async status(id) {
+      seen.push({ id })
+      return { id, status: 'ready', preview: '先看成交量。', sessionId: 'session_ask' }
+    },
+  }
+  const { handler } = harness({ asks })
+  const created = await call(handler, {
+    method: 'POST',
+    url: '/capital-automation/board/briefs/run_ask/ask',
+    body: { question: '成交量怎么看？', timeZone: 'Asia/Shanghai' },
+  })
+  assert.equal(created.statusCode, 202)
+  assert.equal(created.json().ask.id, 'ask_1')
+  assert.equal(seen[0].runId, 'run_ask')
+  assert.equal(seen[0].input.question, '成交量怎么看？')
+
+  const state = await call(handler, { method: 'GET', url: '/capital-automation/board/asks/ask_1' })
+  assert.equal(state.statusCode, 200)
+  assert.equal(state.json().ask.preview, '先看成交量。')
+  assert.deepEqual(seen[1], { id: 'ask_1' })
+
+  for (const body of [{}, { question: '' }, { question: 'x', extra: true }]) {
+    const rejected = await call(handler, {
+      method: 'POST',
+      url: '/capital-automation/board/briefs/run_ask/ask',
+      body,
+    })
+    assert.equal(rejected.statusCode, 400, JSON.stringify(body))
+    assert.equal(rejected.json().code, 'invalid_request')
+  }
+  const wrongMethod = await call(handler, { method: 'POST', url: '/capital-automation/board/asks/ask_1' })
+  assert.equal(wrongMethod.statusCode, 405)
+})
+
+test('看板完整回答：GET /board/asks/:id/answer，不被单条状态路由吞掉', async () => {
+  let seen
+  const asks = {
+    async answer(id) {
+      seen = id
+      return { answer: '完整回答正文', truncated: false, finishedAt: '2026-11-09T00:01:00.000Z' }
+    },
+  }
+  const { handler } = harness({ asks })
+  const response = await call(handler, { method: 'GET', url: '/capital-automation/board/asks/ask_1/answer' })
+  assert.equal(response.statusCode, 200)
+  assert.equal(response.json().answer, '完整回答正文')
+  assert.equal(response.json().truncated, false)
+  assert.equal(seen, 'ask_1')
+  const wrongMethod = await call(handler, { method: 'POST', url: '/capital-automation/board/asks/ask_1/answer' })
+  assert.equal(wrongMethod.statusCode, 405)
+})
 test('失败简报重试：只走单条 POST，状态码与错误码稳定', async () => {
   let called = 0
   const briefs = {

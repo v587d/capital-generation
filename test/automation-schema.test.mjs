@@ -1,6 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  AskCreateSchema,
+  AskRecordSchema,
   AutomationTaskSchema,
   TaskCategorySchema,
   TaskConfigSchema,
@@ -418,4 +420,51 @@ test('TODO 确认 schema：记录严格且只收 id，不写 brief', () => {
   assert.equal(TodoConfirmSchema.parse({ id: ack.todoId }).id, ack.todoId)
   assert.throws(() => TodoConfirmSchema.parse({}), '缺少 id 必须被拒')
   assert.throws(() => TodoConfirmSchema.parse({ id: 'x', extra: true }), '未知字段必须被拒')
+})
+
+test('看板追问 schema：running / ready / failed 三态的必填与禁填字段', () => {
+  const base = {
+    schemaVersion: 1,
+    id: 'ask_x',
+    profileKey: 'p_x',
+    runId: 'run_x',
+    sessionId: 'session_x',
+    question: '成交量怎么看？',
+    baselineSeq: 10,
+    status: 'running',
+    createdAt: '2026-11-09T00:00:00.000Z',
+    updatedAt: '2026-11-09T00:00:00.000Z',
+  }
+  assert.equal(AskRecordSchema.parse(base).status, 'running')
+  assert.throws(() => AskRecordSchema.parse({ ...base, preview: '抢先' }), 'running 不能带 preview')
+  assert.throws(() => AskRecordSchema.parse({ ...base, status: 'ready' }), 'ready 必须有 preview/finishedAt')
+  assert.equal(AskRecordSchema.parse({
+    ...base,
+    status: 'ready',
+    preview: '先看成交量。',
+    finishedAt: '2026-11-09T00:01:00.000Z',
+  }).preview, '先看成交量。')
+  assert.equal(AskRecordSchema.parse({
+    ...base,
+    status: 'ready',
+    preview: '字'.repeat(160),
+    finishedAt: '2026-11-09T00:01:00.000Z',
+  }).preview.length, 160)
+  assert.throws(() => AskRecordSchema.parse({
+    ...base,
+    status: 'ready',
+    preview: '字'.repeat(161),
+    finishedAt: '2026-11-09T00:01:00.000Z',
+  }), '160 字上限必须保留')
+  assert.throws(() => AskRecordSchema.parse({ ...base, status: 'failed' }), 'failed 必须有 error/finishedAt')
+  assert.equal(AskRecordSchema.parse({
+    ...base,
+    status: 'failed',
+    error: '回答被中止。',
+    finishedAt: '2026-11-09T00:01:00.000Z',
+  }).status, 'failed')
+  assert.throws(() => AskRecordSchema.parse({ ...base, unknown: true }), '未知字段必须被拒')
+  assert.equal(AskCreateSchema.parse({ question: '  成交量怎么看？  ' }).question, '成交量怎么看？')
+  assert.throws(() => AskCreateSchema.parse({ question: 'x', extra: true }), '未知字段必须被拒')
+  assert.throws(() => AskCreateSchema.parse({ question: 'x'.repeat(501) }), '问题超长必须被拒')
 })

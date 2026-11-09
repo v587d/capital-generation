@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { createRunRunner, buildRunPrompt, sessionTitleOf } from './runner.js'
 import { createBriefService } from './brief.js'
 import { createBoardService } from './board.js'
+import { createAskService } from './ask.js'
 import { createScheduler } from './scheduler.js'
 import { createAutomationService, AutomationError } from './service.js'
 import { createAutomationStore, domainSpec, ROUTE_PATH } from './store.js'
@@ -64,6 +65,12 @@ export function createAutomationRuntime(options) {
     calendar,
     settings: getSettings,
   })
+  const asks = createAskService({
+    ctx,
+    store,
+    now,
+    logger,
+  })
   let briefs
   const runner = createRunRunner({
     ctx,
@@ -94,6 +101,7 @@ export function createAutomationRuntime(options) {
   const boardService = createBoardService({
     store,
     scheduler,
+    asks,
     now,
   })
   const service = createAutomationService({
@@ -106,6 +114,7 @@ export function createAutomationRuntime(options) {
     version,
     settings: getSettings,
     briefs,
+    asks,
     boardService,
     now,
   })
@@ -115,7 +124,7 @@ export function createAutomationRuntime(options) {
       installAutomationPolicy({ ctx: toolsCtx, runner, logger })
     })
   }
-  return { store, runner, scheduler, briefs, service, calendar, workspaces, profile: { displayName, runDir, ownerDir } }
+  return { store, runner, scheduler, briefs, asks, service, calendar, workspaces, profile: { displayName, runDir, ownerDir } }
 }
 
 function authorizeFactory(ctx) {

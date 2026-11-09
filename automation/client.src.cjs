@@ -10,12 +10,14 @@ const {
   IconChevronDownOutlineRegular,
   IconChevronLeftOutlineRegular,
   IconChevronRightOutlineRegular,
+  IconCloseOutlineRegular,
   IconClockOutlineRegular,
   IconCopyOutlineRegular,
   IconEditOutlineRegular,
   IconEllipsisOutlineRegular,
   IconFolderOpenOutlineRegular,
   IconInfoOutlineRegular,
+  IconNewChatOutlineRegular,
   IconPauseOutlineRegular,
   IconPlayOutlineRegular,
   IconPlusOutlineRegular,
@@ -125,8 +127,15 @@ const zh = {
     briefSkipped: '这次运行没有可简报的结论',
     retry: '重试',
     retryQueued: '已重新提交任务简报',
-    aiBadge: 'AI 简报',
-    partial: '原文过长，已取头尾',
+    askLabel: '就这条简报提问',
+    askPlaceholder: '快速提问…',
+    askDialogTitle: '对话',
+    askEmptyTitle: '暂无提问',
+    askSubmit: '提问',
+    askCollapse: '收起',
+    askPending: '正在回答…',
+    askFailed: '回答失败',
+    askMore: '查看更多',
     stocksCount: '{n} 个标的',
     gapsCount: '{n} 个缺口',
     todoConfirm: '待确认',
@@ -968,11 +977,47 @@ function installStyles() {
     .capital-automation-brieftitle h3 { margin: 0; color: var(--dsw-alias-label-primary); font-size: 13.5px; line-height: 20px; font-weight: 600; overflow-wrap: anywhere; }
     .capital-automation-brieftime { color: var(--ca-caption); font-size: 11.5px; line-height: 18px; font-variant-numeric: tabular-nums; }
     .capital-automation-briefcard h4 { margin: 0; color: var(--dsw-alias-label-primary); font-size: 18px; line-height: 27px; font-weight: 600; letter-spacing: .1px; overflow-wrap: anywhere; }
+    .capital-automation-briefbody { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
     .capital-automation-brieftext { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 14px; line-height: 1.68; overflow-wrap: anywhere; }
-    .capital-automation-briefmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 10px; color: var(--ca-caption); font-size: 11.5px; line-height: 18px; }
-    .capital-automation-briefpartial { color: var(--ca-warn-text); }
-    .capital-automation-briefai { color: var(--ca-business-text); font-weight: 500; }
     .capital-automation-briefstate { display: flex; flex-direction: column; gap: 7px; color: var(--ca-muted); font-size: 12.5px; line-height: 19px; }
+    .capital-automation-briefheadactions { display: flex; align-items: center; gap: 6px; }
+    .capital-automation-askdock { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin-top: 1px; padding-top: 10px; border-top: .5px solid var(--ca-line); }
+    .capital-automation-askinput { box-sizing: border-box; flex: 1 1 auto; min-width: 0; height: 34px; padding: 0 11px; border: .5px solid var(--ca-line-soft); border-radius: 10px; background: var(--ca-field); color: var(--dsw-alias-label-primary); font: inherit; font-size: 12.5px; line-height: 20px; outline: 0; }
+    .capital-automation-askinput::placeholder { color: var(--ca-caption); }
+    .capital-automation-askinput:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: 1px; }
+    .capital-automation-askinput:disabled { opacity: .62; cursor: not-allowed; }
+    .capital-automation-askthread { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .capital-automation-askuser { display: block; align-self: flex-end; max-width: min(100%, 620px); padding: 7px 10px; border: .5px solid color-mix(in srgb, var(--ca-business) 26%, var(--ca-line-soft)); border-radius: 12px 12px 4px 12px; background: color-mix(in srgb, var(--ca-business) 11%, var(--ca-field)); }
+    .capital-automation-askquestion { margin: 0; color: var(--dsw-alias-label-primary); font-size: 12.5px; line-height: 18px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+    .capital-automation-askreply { display: flex; flex-direction: column; gap: 5px; align-self: stretch; padding: 8px 10px; border: .5px solid var(--ca-line); border-left: 2px solid var(--ca-business); border-radius: 4px 12px 12px 12px; background: var(--ca-field); }
+    .capital-automation-askreply[data-status="failed"] { border-left-color: var(--ca-error); }
+    .capital-automation-askpreview { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+    .capital-automation-askfull { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .capital-automation-askhint { margin: 0; color: var(--ca-muted); font-size: 12px; line-height: 19px; }
+    .capital-automation-askaction { align-self: flex-end; margin-top: 1px; }
+    .capital-automation-askaction[data-expanded="true"] { color: var(--ca-muted); }
+    .capital-automation-askerror { margin: 0; color: var(--ca-error-text); font-size: 11.5px; line-height: 18px; overflow-wrap: anywhere; }
+    .capital-automation-modal-chat { width: min(640px, calc(100vw - 32px)); max-width: min(640px, calc(100vw - 32px)); }
+    .capital-automation-chatshell { display: flex; flex-direction: column; height: min(640px, calc(100dvh - 40px)); max-height: calc(100dvh - 40px); min-height: 360px; overflow: hidden; border-radius: 16px; background: var(--ca-card); }
+    .capital-automation-chathead { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px 6px; }
+    .capital-automation-chaticonbtn { display: grid; flex: none; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--dsw-alias-label-primary); cursor: pointer; }
+    .capital-automation-chaticonbtn:hover { background: var(--ca-hover); }
+    .capital-automation-chaticonbtn:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: 1px; }
+    .capital-automation-chatscroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 2px 18px 12px; }
+    .capital-automation-chatcontext { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 10px; padding: 8px 0 14px; }
+    .capital-automation-chatcontextbody { min-width: 0; }
+    .capital-automation-chatcontexthead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
+    .capital-automation-chatcontexthead strong { color: var(--dsw-alias-label-primary); font-size: 13.5px; line-height: 20px; font-weight: 600; }
+    .capital-automation-chatcontextmeta { color: var(--ca-caption); font-size: 11.5px; line-height: 18px; }
+    .capital-automation-chatcontext h3 { margin: 5px 0 0; color: var(--dsw-alias-label-primary); font-size: 16px; line-height: 24px; font-weight: 600; letter-spacing: .1px; overflow-wrap: anywhere; }
+    .capital-automation-chatcontexttext { margin: 5px 0 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .capital-automation-chatthread { margin-left: 18px; padding: 12px 0 4px 30px; border-left: 2px solid var(--ca-line); }
+    .capital-automation-chatempty { margin-left: 18px; padding: 12px 0 4px 30px; border-left: 2px solid var(--ca-line); }
+    .capital-automation-chatempty p { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }
+    .capital-automation-chatcomposer { display: flex; align-items: center; gap: 8px; padding: 10px 16px 14px; border-top: .5px solid var(--ca-line); }
+    .capital-automation-chatcomposer .capital-automation-askinput { height: 38px; }
+    .capital-automation-chatsend { flex: none; height: 36px; padding: 0 16px; font-weight: 600; }
+    .capital-automation-chaterror { padding: 8px 0 0; }
     .capital-automation-briefstate[data-tone="error"] { color: var(--ca-error-text); }
     .capital-automation-briefstate p { margin: 0; }
     .capital-automation-briefactions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 2px; }
@@ -1071,10 +1116,35 @@ function installStyles() {
   return () => style.remove()
 }
 
+const BOARD_SNAPSHOT_MAX_AGE_MS = 30 * 60_000
+let boardSnapshot = null
+let warmStarted = false
+let lastBoardFetchAt = 0
+let lastClickAt = 0
+
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+  // Capture fires before any panel handler, so the page can report click → mount (shell cost).
+  document.addEventListener('click', () => {
+    lastClickAt = typeof performance === 'undefined' ? Date.now() : performance.now()
+  }, true)
+}
+
+function readBoardSnapshot(query) {
+  if (boardSnapshot === null || boardSnapshot.query !== query) return null
+  if (Date.now() - boardSnapshot.at > BOARD_SNAPSHOT_MAX_AGE_MS) return null
+  return boardSnapshot.value
+}
+
+function writeBoardSnapshot(query, value) {
+  // Entry always starts at the default view; a filtered board must not evict its snapshot.
+  if (query !== boardQueryOf('14', 'all', null)) return
+  boardSnapshot = { query, at: Date.now(), value }
+}
+
 function createApi() {
   async function request(path, options = {}) {
     const controller = typeof AbortController === 'function' ? new AbortController() : undefined
-    const timeout = setTimeout(() => controller?.abort(), 20_000)
+    const timeout = setTimeout(() => controller?.abort(), options.timeoutMs ?? 20_000)
     let response
     let payload
     try {
@@ -1101,6 +1171,25 @@ function createApi() {
     }
     return payload
   }
+
+  /**
+   * Boot-time idle prefetch: it only seeds the snapshot. The page still fetches a fresh board
+   * on open, so a snapshot is never mistaken for a revalidated payload.
+   */
+  async function warm() {
+    if (warmStarted) return
+    const query = boardQueryOf('14', 'all', null)
+    if (readBoardSnapshot(query) !== null) return
+    if (Date.now() - lastBoardFetchAt < 10_000) return
+    warmStarted = true
+    lastBoardFetchAt = Date.now()
+    try {
+      writeBoardSnapshot(query, await request(`/board${query}`))
+    } catch {
+      warmStarted = false
+    }
+  }
+
   return {
     meta: () => request('/meta'),
     tasks: () => request('/tasks'),
@@ -1113,9 +1202,20 @@ function createApi() {
     cancel: (id) => request(`/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
     runs: (query = '') => request(`/runs${query}`),
     history: (query = '') => request(`/runs/history${query}`),
-    board: (query = '') => request(`/board${query}`),
+    board: (query = '') => {
+      lastBoardFetchAt = Date.now()
+      return request(`/board${query}`)
+    },
+    warm,
     confirmTodo: (id) => request('/board/todos/confirm', { method: 'POST', body: { id } }),
     retryBrief: (runId) => request(`/board/briefs/${encodeURIComponent(runId)}/retry`, { method: 'POST' }),
+    askBrief: (runId, question, timeZone) => request(`/board/briefs/${encodeURIComponent(runId)}/ask`, {
+      method: 'POST',
+      body: { question, timeZone },
+      timeoutMs: 60_000,
+    }),
+    askStatus: (askId) => request(`/board/asks/${encodeURIComponent(askId)}`),
+    askAnswer: (askId) => request(`/board/asks/${encodeURIComponent(askId)}/answer`),
     notifications: () => request('/notifications'),
     markRead: (body) => request('/notifications/read', { method: 'POST', body }),
   }
@@ -1297,19 +1397,28 @@ function StateBadge(props) {
     label)
 }
 
+const TIME_FORMATTERS = new Map()
+const RELATIVE_TIME_FORMAT = new Intl.RelativeTimeFormat('zh-CN', { numeric: 'auto' })
+
 function formatTime(value, options = {}) {
   if (typeof value !== 'string' || value.length === 0) return zh.never
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('zh-CN', {
-    year: options.short === true ? undefined : 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-    ...(typeof options.timeZone === 'string' && options.timeZone.length > 0 ? { timeZone: options.timeZone } : {}),
-  }).format(date)
+  const key = `${options.short === true ? 'short' : 'full'}|${options.timeZone ?? ''}`
+  let formatter = TIME_FORMATTERS.get(key)
+  if (formatter === undefined) {
+    formatter = new Intl.DateTimeFormat('zh-CN', {
+      year: options.short === true ? undefined : 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      ...(typeof options.timeZone === 'string' && options.timeZone.length > 0 ? { timeZone: options.timeZone } : {}),
+    })
+    TIME_FORMATTERS.set(key, formatter)
+  }
+  return formatter.format(date)
 }
 
 function formatShortTime(value, timeZone) {
@@ -1337,7 +1446,7 @@ function formatRelative(value) {
     [3_600_000, 'hour'],
     [60_000, 'minute'],
   ]
-  const formatter = new Intl.RelativeTimeFormat('zh-CN', { numeric: 'auto' })
+  const formatter = RELATIVE_TIME_FORMAT
   for (const [unitMs, unit] of units) {
     if (abs >= unitMs || unit === 'minute') return formatter.format(Math.round(diff / unitMs), unit)
   }
@@ -4043,8 +4152,293 @@ function BoardToolbar(props) {
       h('span', { className: 'capital-automation-btnlabel' }, railOpen === true ? zh.board.hideRail : zh.board.showRail))))
 }
 
+function AskExchange(props) {
+  const { ask, api } = props
+  const [expanded, setExpanded] = useState(false)
+  const [full, setFull] = useState('')
+  const [truncated, setTruncated] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    setExpanded(false)
+    setFull('')
+    setTruncated(false)
+    setLoading(false)
+    setError('')
+  }, [ask?.id])
+
+  async function toggle() {
+    if (expanded) {
+      setExpanded(false)
+      return
+    }
+    if (full.length > 0) {
+      setExpanded(true)
+      return
+    }
+    if (typeof api?.askAnswer !== 'function') {
+      setError(zh.errorGeneric)
+      return
+    }
+    setLoading(true)
+    setError('')
+    try {
+      const payload = await api.askAnswer(ask.id)
+      if (typeof payload?.answer === 'string' && payload.answer.length > 0) {
+        setFull(payload.answer)
+        setTruncated(payload.truncated === true)
+        setExpanded(true)
+      } else {
+        setError(zh.errorGeneric)
+      }
+    } catch (failure) {
+      setError(failure?.message ?? zh.errorGeneric)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const ready = ask.status === 'ready'
+  const canExpand = ready && typeof ask.preview === 'string' && ask.preview.endsWith('…')
+  const fullText = expanded && full.length > 0
+  return h('div', { className: 'capital-automation-askthread', 'data-status': ask.status },
+    h('div', { className: 'capital-automation-askuser' },
+      h('p', { className: 'capital-automation-askquestion', title: ask.question }, ask.question)),
+    h('div', { className: 'capital-automation-askreply', 'data-status': ask.status },
+      ready
+        ? h('p', { className: fullText ? 'capital-automation-askfull' : 'capital-automation-askpreview' },
+          fullText ? full : (ask.preview ?? ''))
+        : ask.status === 'failed'
+          ? h('p', { className: 'capital-automation-askerror' }, ask.error ?? zh.board.askFailed)
+          : h('p', { className: 'capital-automation-askhint', role: 'status' }, zh.board.askPending),
+      canExpand
+        ? h('button', {
+          type: 'button',
+          className: 'capital-automation-btn capital-automation-askaction',
+          'data-size': 'sm',
+          'data-variant': 'ghost',
+          'data-expanded': fullText ? 'true' : 'false',
+          disabled: loading,
+          onClick: toggle,
+        }, loading ? zh.loading : fullText ? zh.board.askCollapse : zh.board.askMore,
+        loading || fullText ? null : h(IconChevronDownOutlineRegular, { size: 12 }))
+        : null,
+      error.length > 0 ? h('p', { className: 'capital-automation-askerror', role: 'alert' }, error) : null,
+      truncated ? h('p', { className: 'capital-automation-askhint' }, '回答过长，已截断；完整内容请打开 session 查看。') : null))
+}
+
+function AskDialog(props) {
+  const { open, onClose, card, identity, ask, api, question, onQuestionChange, onSubmit, busy, error, onOpenSession } = props
+  const inputRef = useRef(null)
+  useEffect(() => {
+    if (!open) return undefined
+    const timer = setTimeout(() => inputRef.current?.focus?.(), 0)
+    return () => clearTimeout(timer)
+  }, [open])
+  if (!open) return null
+  const brief = card.brief
+  const status = brief?.status ?? 'pending'
+  const sessionId = card.sessionId
+  const openSession = typeof onOpenSession === 'function' && typeof sessionId === 'string' && sessionId.length > 0
+    ? () => onOpenSession(sessionId)
+    : null
+  const trigger = card.trigger === 'manual' ? zh.triggerManual : zh.triggerScheduled
+  const relativeTime = boardRelativeTime(card.finishedAt)
+  const exactTime = formatTime(card.finishedAt)
+  const running = ask?.status === 'running'
+  let context
+  if (status === 'ready') {
+    context = h('div', null,
+      h('h3', null, brief.headline),
+      h('p', { className: 'capital-automation-chatcontexttext' }, brief.plain))
+  } else if (status === 'failed') {
+    context = h('div', null,
+      h('p', { className: 'capital-automation-chatcontexttext' }, zh.board.briefFailed),
+      h('p', { className: 'capital-automation-askhint' }, brief?.error ?? zh.errorGeneric))
+  } else if (status === 'skipped') {
+    context = h('p', { className: 'capital-automation-chatcontexttext' }, zh.board.briefSkipped)
+  } else {
+    context = h('p', { className: 'capital-automation-chatcontexttext' }, zh.board.briefPending)
+  }
+  return h(Modal, {
+    open,
+    headless: true,
+    onClose,
+    title: zh.board.askDialogTitle,
+    closeLabel: zh.close,
+    className: 'capital-automation-modal capital-automation-modal-chat',
+  },
+  h('div', { className: 'capital-automation-chatshell' },
+    h('header', { className: 'capital-automation-chathead' },
+      h('button', {
+        type: 'button',
+        className: 'capital-automation-chaticonbtn',
+        title: zh.close,
+        'aria-label': zh.close,
+        onClick: onClose,
+      }, h(IconCloseOutlineRegular, { size: 18 })),
+      openSession
+        ? h('button', {
+          type: 'button',
+          className: 'capital-automation-chaticonbtn',
+          title: zh.openSession,
+          'aria-label': zh.openSession,
+          onClick: openSession,
+        }, h(IconRightUpOutlineRegular, { size: 18 }))
+        : null),
+    h('div', { className: 'capital-automation-chatscroll' },
+      h('div', { className: 'capital-automation-chatcontext' },
+        h(Glyph, { task: identity ?? card, size: 38, radius: 999, glyphSize: 18 }),
+        h('div', { className: 'capital-automation-chatcontextbody' },
+          h('div', { className: 'capital-automation-chatcontexthead' },
+            h('strong', null, card.taskTitle),
+            h('span', { className: 'capital-automation-chatcontextmeta' },
+              `${categoryLabel(card.category)} · ${trigger} · `,
+              h('time', { dateTime: card.finishedAt, title: exactTime }, relativeTime))),
+          context)),
+      ask !== null
+        ? h('div', { className: 'capital-automation-chatthread' }, h(AskExchange, { key: ask.id, ask, api }))
+        : h('div', { className: 'capital-automation-chatempty' },
+          h('p', null, zh.board.askEmptyTitle)),
+      error.length > 0 ? h('p', { className: 'capital-automation-askerror', role: 'alert' }, error) : null),
+    h('form', { className: 'capital-automation-chatcomposer', onSubmit },
+      h('input', {
+        ref: inputRef,
+        type: 'text',
+        className: 'capital-automation-askinput',
+        value: question,
+        maxLength: 500,
+        enterKeyHint: 'send',
+        placeholder: running ? zh.board.askPending : zh.board.askPlaceholder,
+        'aria-label': zh.board.askLabel,
+        disabled: busy || running,
+        onChange: (event) => onQuestionChange(event.target.value),
+        onKeyDown: (event) => {
+          if (event.key === 'Enter' && event.nativeEvent?.isComposing === true) event.preventDefault()
+        },
+      }),
+      h('button', {
+        type: 'submit',
+        className: 'capital-automation-btn capital-automation-chatsend',
+        'data-variant': 'primary',
+        disabled: busy || running || question.trim().length === 0,
+      }, busy ? zh.processing : zh.board.askSubmit))))
+}
+
+function AskDock(props) {
+  const { card, identity, api, onOpenSession, open, onClose } = props
+  const [latest, setLatest] = useState(card.ask ?? null)
+  const [question, setQuestion] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const incoming = card.ask ?? null
+
+  useEffect(() => {
+    setLatest((current) => {
+      // A board refresh can trail a just-created/resolved local ask; never drop or roll it back.
+      if (incoming === null) return current
+      if (current === null || current.id !== incoming.id) {
+        if (current !== null && String(current.createdAt ?? '') > String(incoming.createdAt ?? '')) return current
+        return incoming
+      }
+      if (current.status !== 'running' && incoming.status === 'running') return current
+      return incoming
+    })
+  }, [incoming?.id, incoming?.status, incoming?.preview, incoming?.error])
+
+  useEffect(() => {
+    if (!open) return
+    setQuestion('')
+    setError('')
+  }, [open])
+
+  useEffect(() => {
+    if (latest === null || latest.status !== 'ready' || typeof api?.askStatus !== 'function') return undefined
+    if (typeof latest.preview !== 'string' || !latest.preview.endsWith('…') || Array.from(latest.preview).length > 80) return undefined
+    let cancelled = false
+    api.askStatus(latest.id).then((payload) => {
+      if (!cancelled && payload?.ask) setLatest(payload.ask)
+    }).catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [latest?.id, latest?.status, latest?.preview, api])
+
+  useEffect(() => {
+    if (latest === null || latest.status !== 'running' || typeof api?.askStatus !== 'function') return undefined
+    let cancelled = false
+    let timer
+    const poll = async () => {
+      try {
+        const payload = await api.askStatus(latest.id)
+        if (cancelled) return
+        if (payload?.ask) setLatest(payload.ask)
+      } catch {
+        // The dialog shows the actionable error; the card preview keeps its last known state.
+      } finally {
+        if (!cancelled) timer = setTimeout(poll, 2_000)
+      }
+    }
+    void poll()
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [latest?.id, latest?.status, api])
+
+  async function submit(event) {
+    event.preventDefault()
+    const text = question.trim()
+    const running = latest?.status === 'running'
+    if (text.length === 0 || busy || running) return
+    if (typeof api?.askBrief !== 'function') {
+      setError(zh.errorGeneric)
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      const payload = await api.askBrief(card.runId, text, browserTimeZone())
+      if (payload?.ask) {
+        setLatest(payload.ask)
+        setQuestion('')
+      } else {
+        setError(zh.errorGeneric)
+      }
+    } catch (failure) {
+      setError(failure?.message ?? zh.errorGeneric)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const requestClose = () => {
+    if (!busy) onClose()
+  }
+  const dialog = h(AskDialog, {
+    open,
+    onClose: requestClose,
+    card,
+    identity,
+    ask: latest,
+    api,
+    question,
+    onQuestionChange: setQuestion,
+    onSubmit: submit,
+    busy,
+    error,
+    onOpenSession,
+  })
+  if (latest === null) return dialog
+  return h('div', { className: 'capital-automation-askdock' },
+    h(AskExchange, { key: latest.id, ask: latest, api }),
+    dialog)
+}
+
 function BriefCard(props) {
-  const { card, task, onOpenSession, onRetry, retrying } = props
+  const { card, task, api, onOpenSession, onRetry, retrying } = props
+  const [askOpen, setAskOpen] = useState(false)
   // Older /board payloads omit icon/origin; the task list carries the same identity.
   const identity = typeof card.icon === 'string' ? card : (task ?? card)
   const brief = card.brief
@@ -4062,6 +4456,16 @@ function BriefCard(props) {
       onClick: openSession,
     }, h(IconRightUpOutlineRegular, { size: 14 }))
     : null
+  const askIcon = sessionId
+    ? h('button', {
+      type: 'button',
+      className: 'capital-automation-btn',
+      'data-size': 'icon',
+      title: zh.board.askDialogTitle,
+      'aria-label': `${zh.board.askDialogTitle}：${card.taskTitle ?? ''}`,
+      onClick: () => setAskOpen(true),
+    }, h(IconNewChatOutlineRegular, { size: 14 }))
+    : null
   const openLink = openSession
     ? h('button', { type: 'button', className: 'capital-automation-btn', 'data-size': 'sm', onClick: openSession }, zh.openSession)
     : null
@@ -4070,12 +4474,9 @@ function BriefCard(props) {
   const exactTime = formatTime(card.finishedAt)
   let body
   if (status === 'ready') {
-    body = h('div', null,
+    body = h('div', { className: 'capital-automation-briefbody' },
       h('h4', null, brief.headline),
-      h('p', { className: 'capital-automation-brieftext' }, brief.plain),
-      h('div', { className: 'capital-automation-briefmeta' },
-        brief.coverage === 'partial' ? h('span', { className: 'capital-automation-briefpartial' }, zh.board.partial) : null,
-        h('span', { className: 'capital-automation-briefai' }, zh.board.aiBadge)))
+      h('p', { className: 'capital-automation-brieftext' }, brief.plain))
   } else if (status === 'failed') {
     body = h('div', { className: 'capital-automation-briefstate', 'data-tone': 'error' },
       h('p', null, zh.board.briefFailed),
@@ -4112,8 +4513,16 @@ function BriefCard(props) {
           dateTime: card.finishedAt,
           title: exactTime,
         }, relativeTime)),
-      openIcon),
-    body)
+      h('div', { className: 'capital-automation-briefheadactions' }, askIcon, openIcon)),
+    body,
+    h(AskDock, {
+      card,
+      identity,
+      api,
+      onOpenSession,
+      open: askOpen,
+      onClose: () => setAskOpen(false),
+    }))
 }
 
 function BoardSkeleton(props) {
@@ -4145,7 +4554,7 @@ function BoardSkeleton(props) {
 }
 
 function BriefFeed(props) {
-  const { cards, tasks, loading, error, onOpenSession, onRetry, retryingRunId, onViewAll, onClearFilter, onLoadMore, hasMore, loadingMore, railOpen } = props
+  const { cards, tasks, api, loading, error, onOpenSession, onRetry, retryingRunId, onViewAll, onClearFilter, onLoadMore, hasMore, loadingMore, railOpen } = props
   if (loading === true) return h(BoardSkeleton, { railOpen })
   if (typeof error === 'string' && error.length > 0) {
     return h('section', { className: 'capital-automation-boardmain', id: 'capital-automation-briefs' },
@@ -4167,6 +4576,7 @@ function BriefFeed(props) {
       key: card.runId,
       card,
       task: taskById.get(card.taskId),
+      api,
       onOpenSession,
       onRetry,
       retrying: retryingRunId === card.runId,
@@ -4225,7 +4635,16 @@ function TodoRow(props) {
         source
           ? h('div', { className: 'capital-automation-todosource' },
             h('span', null, `${zh.board.sourceRun}：${source.taskTitle} · ${formatShortTime(source.finishedAt)}`),
-            source.sessionId ? h('button', { type: 'button', className: 'capital-automation-btn', 'data-size': 'sm', onClick: () => onOpenSession(source.sessionId) }, zh.openSession) : null)
+            source.sessionId
+              ? h('button', {
+                type: 'button',
+                className: 'capital-automation-btn',
+                'data-size': 'icon',
+                title: zh.openSession,
+                'aria-label': zh.openSession,
+                onClick: () => onOpenSession(source.sessionId),
+              }, h(IconRightUpOutlineRegular, { size: 14 }))
+              : null)
           : null)
       : null)
 }
@@ -4470,7 +4889,7 @@ function RunHealthPanel(props) {
 
 function BoardPage(props) {
   const {
-    board, tasks, loading, error, range, category, onRange, onCategory, onRefresh,
+    board, tasks, api, loading, error, range, category, onRange, onCategory, onRefresh,
     onOpenSession, onRetryBrief, retryingRunId, onLoadMore, loadingMore, onGoTasks, onNewTask, onGoRuns,
     onAckTodo, ackingTodoId, hasActiveTasks, storageReady,
   } = props
@@ -4556,6 +4975,7 @@ function BoardPage(props) {
       h(BriefFeed, {
         cards: board?.cards ?? [],
         tasks,
+        api,
         loading: loading === true && board === null,
         error: '',
         onOpenSession,
@@ -4621,6 +5041,8 @@ function AutomationPage(props) {
   const [ackingTodoId, setAckingTodoId] = useState(null)
   const [boardLoadingMore, setBoardLoadingMore] = useState(false)
   const [unread, setUnread] = useState(0)
+  const [tasksReady, setTasksReady] = useState(false)
+  const [runsReady, setRunsReady] = useState(false)
   const [selectedId, setSelectedId] = useState(null)
   const [detail, setDetail] = useState(null)
   const [tab, setTab] = useState('board')
@@ -4636,12 +5058,23 @@ function AutomationPage(props) {
   const [loadError, setLoadError] = useState('')
   const mountedRef = useRef(false)
   const tasksRef = useRef([])
+  const tabRef = useRef('board')
+  const inboxRef = useRef(false)
   const selectedIdRef = useRef(null)
   const refreshInFlightRef = useRef(null)
+  const metaInFlightRef = useRef(null)
+  const tasksInFlightRef = useRef(null)
+  const runsInFlightRef = useRef(null)
+  const notificationsInFlightRef = useRef(null)
   const refreshSequenceRef = useRef(0)
   const detailSequenceRef = useRef(0)
   const boardSequenceRef = useRef(0)
   const scrollRef = useRef(null)
+  const mountedAtRef = useRef(typeof performance === 'undefined' ? 0 : performance.now())
+  const timingRecordedRef = useRef(false)
+  // Polls and visibility wake-ups close over the first render; the current tab must be a ref.
+  tabRef.current = tab
+  inboxRef.current = inbox
 
   useEffect(() => {
     if (notice.length === 0) return undefined
@@ -4649,43 +5082,125 @@ function AutomationPage(props) {
     return () => clearTimeout(timer)
   }, [notice])
 
+  async function loadMeta() {
+    if (metaInFlightRef.current !== null) return metaInFlightRef.current
+    const request = (async () => {
+      try {
+        const value = await api.meta()
+        if (!mountedRef.current) return
+        setMeta(value)
+        if (typeof value?.notifications?.unread === 'number') setUnread(value.notifications.unread)
+        setLoadError('')
+      } catch (error) {
+        if (mountedRef.current) setLoadError(error.message ?? zh.errorGeneric)
+      }
+    })()
+    metaInFlightRef.current = request
+    try {
+      await request
+    } finally {
+      if (metaInFlightRef.current === request) metaInFlightRef.current = null
+    }
+  }
+
+  function reconcileSelection(nextTaskList) {
+    const currentId = selectedIdRef.current
+    const nextId = currentId !== null && nextTaskList.some((task) => task.id === currentId) ? currentId : null
+    if (nextId === currentId) return
+    selectedIdRef.current = nextId
+    detailSequenceRef.current += 1
+    setDetail(null)
+    setSelectedId(nextId)
+    if (nextId === null) setDetailTab('overview')
+  }
+
+  async function loadTasks() {
+    if (tasksInFlightRef.current !== null) return tasksInFlightRef.current
+    const request = (async () => {
+      try {
+        const body = await api.tasks()
+        if (!mountedRef.current) return
+        const nextTaskList = Array.isArray(body.tasks) ? body.tasks : []
+        tasksRef.current = nextTaskList
+        setTasks(nextTaskList)
+        reconcileSelection(nextTaskList)
+        setLoadError('')
+      } catch (error) {
+        if (mountedRef.current) setLoadError(error.message ?? zh.errorGeneric)
+      } finally {
+        if (mountedRef.current) setTasksReady(true)
+      }
+    })()
+    tasksInFlightRef.current = request
+    try {
+      await request
+    } finally {
+      if (tasksInFlightRef.current === request) tasksInFlightRef.current = null
+    }
+  }
+
+  async function loadRuns() {
+    if (runsInFlightRef.current !== null) return runsInFlightRef.current
+    const request = (async () => {
+      try {
+        const [nextRuns, nextHistory] = await Promise.all([
+          api.runs('?limit=200'),
+          api.history(`?days=${HISTORY_DAYS}&tz=${encodeURIComponent(browserTimeZone())}`),
+        ])
+        if (!mountedRef.current) return
+        setRuns(Array.isArray(nextRuns.runs) ? nextRuns.runs : [])
+        setHistory(nextHistory ?? null)
+        setLoadError('')
+      } catch (error) {
+        if (mountedRef.current) setLoadError(error.message ?? zh.errorGeneric)
+      } finally {
+        if (mountedRef.current) setRunsReady(true)
+      }
+    })()
+    runsInFlightRef.current = request
+    try {
+      await request
+    } finally {
+      if (runsInFlightRef.current === request) runsInFlightRef.current = null
+    }
+  }
+
+  async function loadNotifications() {
+    if (notificationsInFlightRef.current !== null) return notificationsInFlightRef.current
+    const request = (async () => {
+      try {
+        const body = await api.notifications()
+        if (!mountedRef.current) return
+        setNotifications(Array.isArray(body.notifications) ? body.notifications : [])
+        setUnread(typeof body.unread === 'number' ? body.unread : 0)
+        setLoadError('')
+      } catch (error) {
+        if (mountedRef.current) setLoadError(error.message ?? zh.errorGeneric)
+      }
+    })()
+    notificationsInFlightRef.current = request
+    try {
+      await request
+    } finally {
+      if (notificationsInFlightRef.current === request) notificationsInFlightRef.current = null
+    }
+  }
+
+  /**
+   * Fetches the page shell plus the visible slice only. Tasks, runs and notifications belong
+   * to their tabs and loaders and are fetched when that tab is opened.
+   */
   async function refresh() {
     if (refreshInFlightRef.current !== null) return refreshInFlightRef.current
     const requestSequence = refreshSequenceRef.current + 1
     refreshSequenceRef.current = requestSequence
     const request = (async () => {
-      try {
-        const [nextMeta, nextTasks, nextRuns, nextHistory, nextNotifications] = await Promise.all([
-          api.meta(),
-          api.tasks(),
-          api.runs('?limit=200'),
-          api.history(`?days=${HISTORY_DAYS}&tz=${encodeURIComponent(browserTimeZone())}`),
-          api.notifications(),
-        ])
-        if (!mountedRef.current || requestSequence !== refreshSequenceRef.current) return
-        const nextTaskList = Array.isArray(nextTasks.tasks) ? nextTasks.tasks : []
-        setMeta(nextMeta)
-        tasksRef.current = nextTaskList
-        setTasks(nextTaskList)
-        setRuns(Array.isArray(nextRuns.runs) ? nextRuns.runs : [])
-        setHistory(nextHistory ?? null)
-        setNotifications(Array.isArray(nextNotifications.notifications) ? nextNotifications.notifications : [])
-        setUnread(typeof nextNotifications.unread === 'number' ? nextNotifications.unread : 0)
-        setLoadError('')
-        const currentId = selectedIdRef.current
-        const nextId = currentId !== null && nextTaskList.some((task) => task.id === currentId) ? currentId : null
-        if (nextId !== currentId) {
-          selectedIdRef.current = nextId
-          detailSequenceRef.current += 1
-          setDetail(null)
-          setSelectedId(nextId)
-          if (nextId === null) setDetailTab('overview')
-        }
-      } catch (error) {
-        if (mountedRef.current && requestSequence === refreshSequenceRef.current) {
-          setLoadError(error.message ?? zh.errorGeneric)
-        }
-      }
+      const pending = [loadMeta()]
+      if (selectedIdRef.current !== null || tabRef.current === 'tasks') pending.push(loadTasks())
+      if (tabRef.current === 'runs') pending.push(loadRuns())
+      if (inboxRef.current) pending.push(loadNotifications())
+      await Promise.all(pending)
+      if (!mountedRef.current || requestSequence !== refreshSequenceRef.current) return
     })()
     refreshInFlightRef.current = request
     try {
@@ -4696,14 +5211,25 @@ function AutomationPage(props) {
   }
 
   async function loadBoard(nextRange = boardRange, nextCategory = boardCategory, before = null) {
+    const query = boardQueryOf(nextRange, nextCategory, before)
+    const snapshot = before === null ? readBoardSnapshot(query) : null
     const requestSequence = boardSequenceRef.current + 1
     boardSequenceRef.current = requestSequence
-    if (before === null) setBoardLoading(true)
+    if (before === null) {
+      // A cached board paints immediately; the request below still revalidates it.
+      if (snapshot === null) setBoardLoading(true)
+      else {
+        setBoard(snapshot)
+        setBoardLoading(false)
+      }
+    }
     try {
-      const value = await api.board(boardQueryOf(nextRange, nextCategory, before))
+      const value = await api.board(query)
       if (!mountedRef.current || requestSequence !== boardSequenceRef.current) return
-      if (before === null) setBoard(value)
-      else setBoard((current) => current === null
+      if (before === null) {
+        setBoard(value)
+        writeBoardSnapshot(query, value)
+      } else setBoard((current) => current === null
         ? value
         : { ...value, cards: [...current.cards, ...value.cards] })
       setBoardError('')
@@ -4894,6 +5420,7 @@ function AutomationPage(props) {
     setInboxBusy(true)
     try {
       await api.markRead({ all: true })
+      setUnread(0)
       setNotice(zh.markReadDone)
       await refresh()
     } catch (failure) {
@@ -4903,14 +5430,14 @@ function AutomationPage(props) {
     }
   }
 
+  async function openTaskById(taskId) {
+    if (!tasksRef.current.some((task) => task.id === taskId)) await loadTasks()
+    if (tasksRef.current.some((task) => task.id === taskId)) selectTask(taskId)
+  }
+
   async function openTaskFromNotification(taskId) {
     setInbox(false)
-    if (tasksRef.current.some((task) => task.id === taskId)) {
-      selectTask(taskId)
-      return
-    }
-    await refresh()
-    if (tasksRef.current.some((task) => task.id === taskId)) selectTask(taskId)
+    await openTaskById(taskId)
   }
 
   useEffect(() => {
@@ -4918,7 +5445,7 @@ function AutomationPage(props) {
     void refresh()
     const timer = setInterval(() => {
       if (document.visibilityState !== 'hidden') void refresh()
-    }, 15_000)
+    }, 30_000)
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') void refresh()
     }
@@ -4932,6 +5459,33 @@ function AutomationPage(props) {
       document.removeEventListener?.('visibilitychange', onVisibilityChange)
     }
   }, [])
+
+  useEffect(() => {
+    if (tab === 'tasks') {
+      void loadMeta()
+      void loadTasks()
+    } else if (tab === 'runs') {
+      void loadMeta()
+      void loadRuns()
+    }
+    return undefined
+  }, [tab])
+
+  useEffect(() => {
+    if (inbox) void loadNotifications()
+    return undefined
+  }, [inbox])
+
+  // A restart hands the lease over only after the previous owner's 90s lease expires, and the
+  // scheduler retries on its next tick. While standby, poll the shell faster so the banner
+  // clears itself instead of waiting for the normal 30s refresh.
+  useEffect(() => {
+    if (meta?.scheduler?.state !== 'standby') return undefined
+    const timer = setInterval(() => {
+      if (document.visibilityState !== 'hidden') void loadMeta()
+    }, 10_000)
+    return () => clearInterval(timer)
+  }, [meta?.scheduler?.state])
 
   useEffect(() => {
     if (tab !== 'board') return undefined
@@ -4961,6 +5515,25 @@ function AutomationPage(props) {
     return () => { detailSequenceRef.current += 1 }
   }, [selectedId])
 
+  // Read-only diagnostics: `window.__CA_LAST_TIMING__` separates shell cost (click → mount)
+  // from this page's cost (mount → board painted).
+  useEffect(() => {
+    if (board === null || timingRecordedRef.current) return undefined
+    if (typeof window === 'undefined' || typeof requestAnimationFrame !== 'function') return undefined
+    const frame = requestAnimationFrame(() => {
+      const mountedAt = mountedAtRef.current
+      if (mountedAt === 0) return
+      timingRecordedRef.current = true
+      const elapsed = performance.now() - mountedAt
+      window.__CA_LAST_TIMING__ = {
+        clickToMountMs: lastClickAt > 0 && mountedAt - lastClickAt < 30_000 ? Math.round(mountedAt - lastClickAt) : null,
+        mountToBoardMs: Math.round(elapsed),
+        at: new Date().toISOString(),
+      }
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [board])
+
   const schedulerActive = meta?.scheduler?.state === 'active'
   const storageReady = meta?.storage?.state !== 'unavailable'
   const templates = tasks
@@ -4968,8 +5541,11 @@ function AutomationPage(props) {
     .sort(compareTemplates)
   const selectedTask = tasks.find((task) => task.id === selectedId)
   const detailOpen = tab === 'tasks' && selectedId !== null
-  // `/meta` arrives in the same batch as `/tasks`; until then the empty state would be a lie.
+  // The shell (`/meta`) and the board are the entry payload; other tabs report "loading"
+  // until their first lazy fetch lands, so an unvisited tab never shows a false empty state.
   const initialLoading = meta === null && loadError.length === 0
+  const tasksPending = initialLoading || !tasksReady
+  const runsPending = initialLoading || !runsReady
 
   return h('div', { className: 'capital-automation-page' },
     detailOpen ? null : h(Header, {
@@ -4986,6 +5562,7 @@ function AutomationPage(props) {
           ? h(BoardPage, {
             board,
             tasks,
+            api,
             loading: boardLoading,
             error: boardError,
             range: boardRange,
@@ -5029,7 +5606,7 @@ function AutomationPage(props) {
                     if (id !== null && selectedIdRef.current === id) await loadDetail(id)
                   },
                 }))
-            : initialLoading
+            : tasksPending
               ? h(TaskDashboardSkeleton)
               : h(TaskDashboard, {
                 tasks,
@@ -5046,7 +5623,7 @@ function AutomationPage(props) {
                 storageReady,
                 busyTaskId,
               })
-          : initialLoading
+          : runsPending
             ? h(RunsSkeleton)
             : h(RunsPage, {
               runs,
@@ -5054,7 +5631,7 @@ function AutomationPage(props) {
               tasks,
               onCancel: (run) => requestConfirm('cancel-run', { id: run.taskId, title: run.taskTitle }, run),
               onOpenSession: openSession,
-              onOpenTask: (id) => { if (tasksRef.current.some((task) => task.id === id)) selectTask(id) },
+              onOpenTask: (id) => { void openTaskById(id) },
               onGoTasks: () => switchTab('tasks'),
               onNewTask: () => setWizard(true),
               busy: confirmBusy,
@@ -5067,7 +5644,7 @@ function AutomationPage(props) {
       onCreated: async (taskId) => {
         setWizard(false)
         setNotice(zh.created)
-        await refresh()
+        await loadTasks()
         if (taskId !== null && tasksRef.current.some((task) => task.id === taskId)) selectTask(taskId)
       },
     }),
@@ -5104,6 +5681,13 @@ function apply(ctx) {
     }
   }
   ctx.effect(() => installStyles(), `${ENTRY_NAME}: styles`)
+  // Warm the default board while the app idles so the first open has no data wait. A page
+  // that opens later still revalidates; a page that never opens costs one request.
+  if (typeof window !== 'undefined' && typeof location !== 'undefined') {
+    const startWarm = () => { void api.warm() }
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(startWarm, { timeout: 4_000 })
+    else setTimeout(startWarm, 2_000)
+  }
   ctx.slots.inject('main', () => ctx.slots.register({
     name: 'main',
     key: PANEL_ID,
