@@ -11,15 +11,65 @@ const DEFAULT_DAYS = '14'
 const DEFAULT_LIMIT = 30
 const MAX_LIMIT = 50
 const MAX_TODOS = 50
-const MAX_STOCKS = 12
+// The client paints 12 rows first and reveals the rest on demand. 200 leaves room for that
+// interaction across a large run window without letting symbol churn inflate one response.
+const MAX_STOCKS = 200
+// Stock rows carry their own follow-up summaries so the count always equals what expands,
+// even when the page-wide TODO slice is capped. 100 leaves ample room per instrument without
+// duplicating every historical item into the board response.
+const MAX_STOCK_ITEMS = 100
 const MAX_GAPS = 20
 const HEALTH_DAYS = 7
 const RUN_ID_PATTERN = /^[A-Za-z0-9_-]{1,120}$/
 const CATEGORY_VALUES = new Set(TaskCategorySchema.options)
 const FAILURE_STATUSES = new Set(['failed', 'timed_out', 'blocked_requires_user', 'unknown_after_restart', 'missed'])
 const KIND_RANK = { confirm: 0, verify: 1, track: 2 }
+const WATCH_RANK = { triggered: 0, needs_human: 1, watching: 2, expired: 3, resolved: 4 }
 const GAP_RANK = { capability: 0, conflict: 1, quality: 2, transient: 3 }
 const ROLE_RANK = { holding: 0, risk: 1, event: 2, watch: 3 }
+const A_SHARE_MARKETS = new Set(['SH', 'SZ', 'BJ'])
+const US_MARKETS = new Set(['OQ', 'N', 'US', 'NYSE', 'NASDAQ'])
+
+function inferredMarket(code) {
+  if (/^\d{6}$/.test(code)) {
+    if (code.startsWith('6')) return 'SH'
+    if (code.startsWith('4') || code.startsWith('8')) return 'BJ'
+    return 'SZ'
+  }
+  if (/^\d{5}$/.test(code)) return 'HK'
+  return undefined
+}
+
+/**
+ * Merge the same instrument written with and without an exchange suffix. A bare six-digit A-share
+ * code can infer its market from the code pattern; explicit suffixes still win, so an index such as
+ * `000001.SS` does not collapse into Shenzhen's `000001`.
+ */
+export function stockSymbolKey(value) {
+  const raw = String(value ?? '').trim().toUpperCase()
+  if (raw.length === 0) return raw
+  const match = /^([A-Z0-9]+)\.([A-Z]+)$/.exec(raw)
+  if (match === null) {
+    const market = inferredMarket(raw)
+    return market === undefined ? raw : `${raw}.${market}`
+  }
+  const [, base, suffix] = match
+  if (/^\d{6}$/.test(base) && (suffix === 'SS' || A_SHARE_MARKETS.has(suffix))) {
+    return `${base}.${suffix === 'SS' ? 'SH' : suffix}`
+  }
+  if (/^\d{5}$/.test(base) && suffix === 'HK') return `${base}.HK`
+  if (US_MARKETS.has(suffix)) return base
+  return `${base}.${suffix}`
+}
+
+function symbolDisplayScore(symbol) {
+  const raw = String(symbol ?? '')
+  return (raw === raw.toUpperCase() ? 1 : 0) + (raw.includes('.') ? 2 : 0)
+}
+
+function preferredSymbol(current, incoming) {
+  return symbolDisplayScore(incoming) > symbolDisplayScore(current) ? incoming : current
+}
 
 export class BoardError extends Error {
   constructor(code, message, status = 400) {
@@ -114,13 +164,17 @@ function normalize(value) {
   return String(value ?? '').trim().toLowerCase().replace(/[\s|,，。；;:：()[\]{}'"“”‘’\-_/]+/g, '')
 }
 
+function gapKey(gap) {
+  return `${gap.kind}|${normalize(gap.topic)}`
+}
+
 function todoKey(item) {
   if (item.kind === 'confirm') return `confirm|${item.symbol ?? normalize(item.title)}`
   if (item.kind === 'verify') return `verify|${item.symbol ?? ''}|${normalize(item.trigger ?? item.detail ?? item.title)}`
   return `track|${item.symbol ?? ''}|${item.dueAt ?? normalize(item.title)}`
 }
 
-/** An ack hides only the version the user saw; a later run makes the item visible again. */
+/** An ack covers only the version the user saw; a later run makes the item open again. */
 function todoAckCovers(ack, item) {
   if (ack === undefined) return false
   const confirmedAt = Date.parse(ack.confirmedAt)
@@ -137,6 +191,24 @@ function sourceOf(run, item) {
     sessionId: run.sessionId ?? null,
     sourceQuote: item.sourceQuote,
   }
+}
+
+/** Only the tracking facts belong on the wire; profileKey and storage ids stay server-side. */
+function watchSummary(watch) {
+  if (watch === undefined) return null
+  return {
+    status: watch.status,
+    resolvedFrom: watch.resolvedFrom ?? null,
+    checkedAt: watch.checkedAt ?? null,
+    evidence: watch.evidence ?? null,
+    handoffReason: watch.handoffReason ?? null,
+    dueAt: watch.dueAt ?? null,
+  }
+}
+
+function watchRank(item) {
+  if (item.watch === null || item.watch === undefined) return 9
+  return WATCH_RANK[item.watch.resolvedFrom ?? item.watch.status] ?? 9
 }
 
 function aggregateTodos(entries) {
@@ -199,25 +271,30 @@ function aggregateTodos(entries) {
   return result
 }
 
-function aggregateStocks(entries, todos) {
+function aggregateStocks(entries, todos, firstSeenByKey = new Map()) {
   const bySymbol = new Map()
   for (const { run, brief } of entries) {
     if (brief.status !== 'ready') continue
     for (const stock of brief.stocks) {
       const at = run.finishedAt ?? run.queuedAt
-      const current = bySymbol.get(stock.symbol)
+      const symbolKey = stockSymbolKey(stock.symbol)
+      const current = bySymbol.get(symbolKey)
       if (current === undefined) {
-        bySymbol.set(stock.symbol, {
+        bySymbol.set(symbolKey, {
+          symbolKey,
           symbol: stock.symbol,
           name: stock.name,
           roles: new Set(stock.roles),
           note: stock.note,
           nextAt: stock.nextAt,
+          firstSeenAt: firstSeenByKey.get(symbolKey) ?? at,
           lastSeenAt: at,
         })
         continue
       }
       for (const role of stock.roles) current.roles.add(role)
+      current.symbol = preferredSymbol(current.symbol, stock.symbol)
+      if (at < current.firstSeenAt) current.firstSeenAt = at
       if (at >= current.lastSeenAt) {
         current.name = stock.name
         current.note = stock.note
@@ -226,17 +303,30 @@ function aggregateStocks(entries, todos) {
       if (stock.nextAt !== undefined && (current.nextAt === undefined || stock.nextAt < current.nextAt)) current.nextAt = stock.nextAt
     }
   }
-  const todoCounts = new Map()
-  for (const item of todos) if (item.symbol !== undefined) todoCounts.set(item.symbol, (todoCounts.get(item.symbol) ?? 0) + 1)
-  const result = [...bySymbol.values()].map((stock) => ({
-    symbol: stock.symbol,
-    name: stock.name,
-    roles: [...stock.roles].sort((left, right) => (ROLE_RANK[left] ?? 9) - (ROLE_RANK[right] ?? 9)),
-    ...(stock.note === undefined ? {} : { note: stock.note }),
-    ...(stock.nextAt === undefined ? {} : { nextAt: stock.nextAt }),
-    todoCount: todoCounts.get(stock.symbol) ?? 0,
-    lastSeenAt: stock.lastSeenAt,
-  }))
+  const stockItems = new Map()
+  for (const item of todos) {
+    if (item.symbol === undefined) continue
+    const key = stockSymbolKey(item.symbol)
+    const items = stockItems.get(key) ?? []
+    if (items.length >= MAX_STOCK_ITEMS) continue
+    items.push({ id: item.id, title: item.title, sessionId: item.sessionId ?? null })
+    stockItems.set(key, items)
+  }
+  const result = [...bySymbol.values()].map((stock) => {
+    const items = stockItems.get(stock.symbolKey) ?? []
+    return {
+      symbol: stock.symbol,
+      symbolKey: stock.symbolKey,
+      name: stock.name,
+      roles: [...stock.roles].sort((left, right) => (ROLE_RANK[left] ?? 9) - (ROLE_RANK[right] ?? 9)),
+      ...(stock.note === undefined ? {} : { note: stock.note }),
+      ...(stock.nextAt === undefined ? {} : { nextAt: stock.nextAt }),
+      todoCount: items.length,
+      items,
+      firstSeenAt: stock.firstSeenAt,
+      lastSeenAt: stock.lastSeenAt,
+    }
+  })
   result.sort((left, right) => {
     const role = (ROLE_RANK[left.roles[0]] ?? 9) - (ROLE_RANK[right.roles[0]] ?? 9)
     if (role !== 0) return role
@@ -245,12 +335,12 @@ function aggregateStocks(entries, todos) {
   return result
 }
 
-function aggregateGaps(entries) {
+function aggregateGaps(entries, firstSeenByKey = new Map()) {
   const byKey = new Map()
   for (const { run, brief } of entries) {
     if (brief.status !== 'ready') continue
     for (const gap of brief.gaps) {
-      const key = `${gap.kind}|${normalize(gap.topic)}`
+      const key = gapKey(gap)
       const at = run.finishedAt ?? run.queuedAt
       const source = {
         runId: run.id,
@@ -265,7 +355,7 @@ function aggregateGaps(entries) {
           id: key,
           ...gap,
           seenCount: 1,
-          firstSeenAt: at,
+          firstSeenAt: firstSeenByKey.get(key) ?? at,
           lastSeenAt: at,
           sources: [source],
           runIds: new Set([run.id]),
@@ -294,6 +384,25 @@ function aggregateGaps(entries) {
     return String(right.lastSeenAt).localeCompare(String(left.lastSeenAt)) || String(left.id).localeCompare(String(right.id))
   })
   return result
+}
+
+/** First mention across the whole retained run window, not just the selected date range. */
+function firstSeenMaps(entries) {
+  const stocks = new Map()
+  const gaps = new Map()
+  for (const { run, brief } of entries) {
+    if (brief.status !== 'ready') continue
+    const at = run.finishedAt ?? run.queuedAt
+    for (const stock of brief.stocks) {
+      const key = stockSymbolKey(stock.symbol)
+      if (!stocks.has(key) || at < stocks.get(key)) stocks.set(key, at)
+    }
+    for (const gap of brief.gaps) {
+      const key = gapKey(gap)
+      if (!gaps.has(key) || at < gaps.get(key)) gaps.set(key, at)
+    }
+  }
+  return { stocks, gaps }
 }
 
 function statusCounts(runs) {
@@ -376,6 +485,8 @@ function healthOf({ runs, briefs, timeZone, now, scheduler, tasks }) {
     calendar: schedulerStatus.calendar ?? { available: false, source: 'none' },
     recentIssues,
     issueCount: ordered.filter((run) => FAILURE_STATUSES.has(run.status)).length,
+    todayIssueCount: runs.filter((run) => FAILURE_STATUSES.has(run.status)
+      && dateOf(run.finishedAt ?? run.queuedAt, timeZone) === today).length,
     nextRuns,
   }
 }
@@ -413,26 +524,62 @@ function cardOf(run, brief, task, ask) {
 export function createBoardService(options) {
   const { store, scheduler, asks, now = () => Date.now() } = options
 
-  async function board(query = {}) {
-    const parsed = parseBoardQuery(query, now)
+  /** Same entries back the page projection and the unbounded watcher projection. */
+  async function entriesFor(parsed) {
     const page = await store.listRunsPage({ limit: 2_000 })
     const tasks = await store.listTasks()
     const taskById = new Map(tasks.map((task) => [task.id, task]))
     const briefs = await store.listBriefsForRuns(page.runs.map((run) => run.id))
-    const todoAcks = await store.listTodoAcks()
-    const lifetime = await store.countBriefs()
     const entries = []
+    const historyEntries = []
     for (const run of page.runs) {
       const brief = briefs.get(run.id)
       if (run.status !== 'succeeded' || brief === undefined) continue
       const task = taskById.get(run.taskId)
       if (parsed.category !== undefined && task?.category !== parsed.category) continue
+      const entry = { run, task, brief }
+      historyEntries.push(entry)
       if (!inRange(run.finishedAt ?? run.queuedAt, parsed.from, parsed.to, parsed.timeZone)) continue
-      entries.push({ run, task, brief })
+      entries.push(entry)
     }
     entries.sort((left, right) =>
       String(right.run.finishedAt ?? right.run.queuedAt).localeCompare(String(left.run.finishedAt ?? left.run.queuedAt))
       || String(right.run.id).localeCompare(String(left.run.id)))
+    return { page, tasks, briefs, entries, historyEntries }
+  }
+
+  async function todosFor(parsed, sourceEntries, options = {}) {
+    const entries = sourceEntries ?? (await entriesFor(parsed)).entries
+    const [acks, watches] = await Promise.all([store.listTodoAcks(), store.listTodoWatches()])
+    const ackById = new Map(acks.map((ack) => [ack.todoId, ack]))
+    const watchById = new Map(watches.map((watch) => [watch.todoId, watch]))
+    const todos = aggregateTodos(entries).map((item) => {
+      const ack = ackById.get(item.id)
+      const ackedAt = todoAckCovers(ack, item) ? ack.confirmedAt : undefined
+      return {
+        ...item,
+        watch: watchSummary(watchById.get(item.id)),
+        ...(item.symbol === undefined ? {} : { symbolKey: stockSymbolKey(item.symbol) }),
+        ...(ackedAt === undefined ? {} : { ackedAt }),
+      }
+    })
+    const visible = options.includeAcked === true ? todos : todos.filter((item) => item.ackedAt === undefined)
+    visible.sort((left, right) => {
+      const kind = (KIND_RANK[left.kind] ?? 9) - (KIND_RANK[right.kind] ?? 9)
+      if (kind !== 0) return kind
+      const watch = watchRank(left) - watchRank(right)
+      if (watch !== 0) return watch
+      return String(left.dueAt ?? '9999-12-31').localeCompare(String(right.dueAt ?? '9999-12-31'))
+        || String(right.lastSeenAt).localeCompare(String(left.lastSeenAt))
+        || String(left.id).localeCompare(String(right.id))
+    })
+    return visible
+  }
+
+  async function board(query = {}) {
+    const parsed = parseBoardQuery(query, now)
+    const { page, tasks, briefs, entries, historyEntries } = await entriesFor(parsed)
+    const lifetime = await store.countBriefs()
     let start = 0
     if (parsed.before !== undefined) {
       const index = entries.findIndex((entry) => entry.run.id === parsed.before)
@@ -445,10 +592,11 @@ export function createBoardService(options) {
     const askByRun = typeof asks?.latestForRuns === 'function'
       ? await asks.latestForRuns(pageRunIds)
       : new Map()
-    const ackById = new Map(todoAcks.map((ack) => [ack.todoId, ack]))
-    const todos = aggregateTodos(entries).filter((item) => !todoAckCovers(ackById.get(item.id), item))
-    const stocks = aggregateStocks(entries, todos)
-    const gaps = aggregateGaps(entries)
+    const todos = await todosFor(parsed, entries, { includeAcked: true })
+    const openTodos = todos.filter((item) => item.ackedAt === undefined)
+    const firstSeen = firstSeenMaps(historyEntries)
+    const stocks = aggregateStocks(entries, openTodos, firstSeen.stocks)
+    const gaps = aggregateGaps(entries, firstSeen.gaps)
     const health = healthOf({
       runs: page.runs,
       briefs,
@@ -457,6 +605,8 @@ export function createBoardService(options) {
       scheduler,
       tasks,
     })
+    const today = parsed.to
+    const isToday = (value) => dateOf(value, parsed.timeZone) === today
     return {
       ok: true,
       generatedAt: iso(now()),
@@ -464,10 +614,14 @@ export function createBoardService(options) {
       range: { days: parsed.days === 'all' ? 'all' : Number(parsed.days), from: parsed.from ?? null, to: parsed.to },
       stats: {
         briefs: entries.length,
-        todos: todos.length,
+        briefsToday: entries.filter((entry) => isToday(entry.run.finishedAt ?? entry.run.queuedAt)).length,
+        todos: openTodos.length,
         stocks: stocks.length,
+        stocksNewToday: stocks.filter((stock) => isToday(stock.firstSeenAt)).length,
         gaps: gaps.length,
+        gapsNewToday: gaps.filter((gap) => isToday(gap.firstSeenAt)).length,
         issues7d: health.issueCount,
+        issuesToday: health.todayIssueCount,
       },
       cards: pageEntries.map((entry) => cardOf(entry.run, entry.brief, entry.task, askByRun.get(entry.run.id))),
       todos: todos.slice(0, MAX_TODOS),
@@ -478,10 +632,15 @@ export function createBoardService(options) {
     }
   }
 
+  /** Unbounded TODO projection for the watcher; the page still gets MAX_TODOS. */
+  async function openTodos(query = {}) {
+    return todosFor(parseBoardQuery(query, now))
+  }
+
   async function confirmTodo(todoId) {
     const record = await store.confirmTodo(todoId)
     return { id: record.todoId, confirmedAt: record.confirmedAt }
   }
 
-  return { board, confirmTodo }
+  return { board, openTodos, confirmTodo }
 }

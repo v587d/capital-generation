@@ -17,6 +17,7 @@ import {
   TaskOverridesSchema,
   TaskRecordSchema,
   TodoAckSchema,
+  TodoWatchSchema,
   isActiveRun,
   parseStrict,
   resolveTaskRecord,
@@ -31,6 +32,7 @@ import {
   MAX_RUNS_PER_PROFILE,
   MAX_RUNS_PER_TASK,
   MAX_TODO_ACKS_PER_PROFILE,
+  MAX_TODO_WATCHES_PER_PROFILE,
   SETTLED_RUN_STATUSES,
 } from './defaults.js'
 import { canonicalTrigger, formatInZone, nextOccurrence } from './time.js'
@@ -53,6 +55,7 @@ export const domainSpec = {
     meta: { valueSchema: OwnerRecordSchema },
     briefs: { valueSchema: TaskBriefSchema },
     todo_acks: { valueSchema: TodoAckSchema },
+    todo_watches: { valueSchema: TodoWatchSchema },
     asks: { valueSchema: AskRecordSchema },
   },
 }
@@ -203,6 +206,7 @@ export function createAutomationStore(options) {
           meta: domain.table('meta'),
           briefs: domain.table('briefs'),
           todoAcks: domain.table('todo_acks'),
+          todoWatches: domain.table('todo_watches'),
           asks: domain.table('asks'),
         }
       })()
@@ -655,6 +659,7 @@ export function createAutomationStore(options) {
       message: input.message,
       ...(input.runId === undefined ? {} : { runId: input.runId }),
       ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
+      ...(input.todoId === undefined ? {} : { todoId: input.todoId }),
       createdAt: iso(now()),
     }, 'notification')
     await tables.notifications.put(record.id, record)
@@ -850,6 +855,18 @@ export function createAutomationStore(options) {
     return result
   }
 
+  async function listAsksForRun(runId) {
+    const tables = await ensure()
+    const records = []
+    for (const [, record] of tables.asks.entries()) {
+      if (ownAsk(record) && record.runId === runId) records.push(record)
+    }
+    records.sort((left, right) =>
+      String(left.createdAt).localeCompare(String(right.createdAt))
+      || String(left.id).localeCompare(String(right.id)))
+    return records
+  }
+
   async function updateAsk(id, patch) {
     const tables = await ensure()
     const current = tables.asks.get(id)
@@ -902,6 +919,35 @@ export function createAutomationStore(options) {
     await tables.todoAcks.put(todoAckRecordId(profileKey, todoId), record)
     await retainTodoAcks(tables)
     return record
+  }
+
+  async function listTodoWatches() {
+    const tables = await ensure()
+    const records = []
+    for (const [, record] of tables.todoWatches.entries()) {
+      if (record.profileKey === profileKey) records.push(record)
+    }
+    return records
+  }
+
+  async function putTodoWatch(record) {
+    const tables = await ensure()
+    const next = parseStrict(TodoWatchSchema, { ...record, profileKey }, 'todo watch')
+    await tables.todoWatches.put(next.id, next)
+    await retainTodoWatches(tables)
+    return next
+  }
+
+  async function retainTodoWatches(tables) {
+    const records = []
+    for (const [key, record] of tables.todoWatches.entries()) {
+      if (record.profileKey === profileKey) records.push({ key, record })
+    }
+    if (records.length <= MAX_TODO_WATCHES_PER_PROFILE) return
+    records.sort((left, right) =>
+      right.record.updatedAt.localeCompare(left.record.updatedAt)
+      || right.key.localeCompare(left.key))
+    for (const entry of records.slice(MAX_TODO_WATCHES_PER_PROFILE)) await tables.todoWatches.delete(entry.key)
   }
 
   async function updateBrief(runId, patch) {
@@ -1109,10 +1155,13 @@ export function createAutomationStore(options) {
     getAsk,
     pendingAskForRun,
     latestAsksForRuns,
+    listAsksForRun,
     updateAsk,
     deleteAsk,
     listTodoAcks,
     confirmTodo,
+    listTodoWatches,
+    putTodoWatch,
     updateBrief,
     deleteBrief,
     publicBrief,

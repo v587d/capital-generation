@@ -327,6 +327,13 @@ export function createAskService(options) {
     return result
   }
 
+  async function history(runId) {
+    const run = await store.getRun(runId)
+    if (run === undefined) throw new AskError('run_not_found', '运行不存在。', 404)
+    const records = await store.listAsksForRun(runId)
+    return records.map(publicOf)
+  }
+
   async function answer(askId) {
     const record = await store.getAsk(askId)
     if (record === undefined) throw new AskError('ask_not_found', '这条追问不存在。', 404)
@@ -353,5 +360,5 @@ export function createAskService(options) {
     }
   }
 
-  return { ask, status, latestForRuns, answer }
+  return { ask, status, latestForRuns, history, answer }
 }

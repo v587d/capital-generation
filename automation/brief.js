@@ -14,12 +14,9 @@ import {
 } from './schema.js'
 import { sanitizeMessage } from './redact.js'
 
-export const BRIEF_PROMPT_VERSION = 6
+export const BRIEF_PROMPT_VERSION = 7
 export const BRIEF_PENDING_STALE_MS = 10 * 60_000
 export const BRIEF_MAX_ATTEMPTS = 5
-export const BRIEF_MAX_ANSWER_CHARS = 12_000
-export const BRIEF_HEAD_CHARS = 6_000
-export const BRIEF_TAIL_CHARS = 6_000
 export const BRIEF_TIMEOUT_MS = 90_000
 // Reasoning models spend 1.5–2.5k thinking tokens before the JSON; 2.4k finishes at `length`.
 const BRIEF_MAX_TOKENS = 8_000
@@ -154,14 +151,17 @@ export function extractSessionAnswer(snapshot) {
 }
 
 /** Build the one input object the model sees. sessionId is traceability, not extra knowledge. */
-export function sourceBlocksOf(text) {
+export function sourceBlocksOf(text, maxLineChars = Number.POSITIVE_INFINITY) {
   const lines = String(text ?? '')
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
     .filter((line) => !line.includes('……（中间省略）……'))
     .filter((line) => !/^\|?[\s:|-]+\|?$/.test(line))
-  return lines.map((line, index) => ({ id: index + 1, text: line.slice(0, 600) }))
+  return lines.map((line, index) => ({
+    id: index + 1,
+    text: Number.isFinite(maxLineChars) ? line.slice(0, maxLineChars) : line,
+  }))
 }
 
 export function buildBriefPayload({ sessionId, task, run, answer, coverage }) {
@@ -176,23 +176,15 @@ export function buildBriefPayload({ sessionId, task, run, answer, coverage }) {
   }
 }
 
-export function clipFinalAnswer(text) {
-  const source = String(text ?? '').replace(/\u0000/g, '').trim()
-  const chars = Array.from(source)
-  if (chars.length <= BRIEF_MAX_ANSWER_CHARS) return { text: source, coverage: 'full' }
-  const head = chars.slice(0, BRIEF_HEAD_CHARS).join('')
-  const tail = chars.slice(-BRIEF_TAIL_CHARS).join('')
-  return {
-    text: `${head}\n\n……（中间省略）……\n\n${tail}`,
-    coverage: 'partial',
-  }
+export function normalizeFinalAnswer(text) {
+  return { text: String(text ?? '').replace(/\u0000/g, '').trim(), coverage: 'full' }
 }
 
 export function sourceHashOf(text) {
   return createHash('sha256').update(String(text ?? '')).digest('hex').slice(0, 16)
 }
 
-function normalizeQuote(text) {
+export function normalizeQuote(text) {
   // Compare content only: NFKC folds full-width forms, then drop all whitespace,
   // punctuation and symbols. Models often add periods/quotes/ellipses or rewrite
   // table pipes when quoting; those must not read as a fabricated citation.
@@ -216,7 +208,7 @@ function optionalDate(value) {
   return value
 }
 
-function includesQuote(source, quote) {
+export function includesQuote(source, quote) {
   const normalized = normalizeQuote(source)
   const wanted = normalizeQuote(quote)
   return wanted.length > 0 && normalized.includes(wanted)
@@ -418,7 +410,7 @@ async function readSessionAnswer(sessionQuery, sessionId) {
   throw new BriefValidationError('session_unavailable', `读取 session 失败：${String(lastError?.message ?? lastError)}`)
 }
 
-async function streamText(llm, options) {
+export async function streamText(llm, options) {
   const stream = llm.stream(options)
   let text = ''
   for await (const chunk of stream) {
@@ -465,6 +457,7 @@ export function createBriefService(options) {
     scheduler,
     now = () => Date.now(),
     logger,
+    onBriefReady,
     promptVersion = BRIEF_PROMPT_VERSION,
     maxActive = BRIEF_MAX_ACTIVE_PER_PROFILE,
     recoveryIntervalMs = BRIEF_RECOVERY_INTERVAL_MS,
@@ -551,22 +544,30 @@ export function createBriefService(options) {
     }
     if (!owner()) return
 
-    const clipped = clipFinalAnswer(extracted.text)
-    const sourceHash = sourceHashOf(clipped.text)
+    const normalized = normalizeFinalAnswer(extracted.text)
+    const sourceHash = sourceHashOf(normalized.text)
     const task = await store.getTask(run.taskId).catch(() => undefined)
     const payload = buildBriefPayload({
       sessionId: run.sessionId,
       task,
       run,
-      answer: clipped.text,
-      coverage: clipped.coverage,
+      answer: normalized.text,
+      coverage: normalized.coverage,
     })
     const route = extracted.provider !== undefined && extracted.model !== undefined
       ? { provider: extracted.provider, model: extracted.model }
       : fallbackModelRoute(ctx)
     if (route === undefined) {
-      await markFailed(runId, new Error('没有可用的模型路由'), { sourceHash, coverage: clipped.coverage, promptVersion })
+      await markFailed(runId, new Error('没有可用的模型路由'), { sourceHash, coverage: normalized.coverage, promptVersion })
       return
+    }
+    // Evaluate TODO conditions from the same answer even when brief generation later fails or skips.
+    if (typeof onBriefReady === 'function') {
+      try {
+        await onBriefReady({ run, task, text: normalized.text, route })
+      } catch (error) {
+        logger?.warn?.(`capital-automation: TODO 核验入队失败：${String(error)}`)
+      }
     }
 
     let attempts = brief.attempts
@@ -586,17 +587,17 @@ export function createBriefService(options) {
       }
     }
     if (raw === undefined) {
-      await markFailed(runId, callError ?? new Error('模型调用失败'), { attempts, model: routeLabel(route), sourceHash, coverage: clipped.coverage, promptVersion })
+      await markFailed(runId, callError ?? new Error('模型调用失败'), { attempts, model: routeLabel(route), sourceHash, coverage: normalized.coverage, promptVersion })
       return
     }
     if (!owner()) return
 
     let parsed
     try {
-      parsed = parseBriefOutput(raw, clipped.text, payload.sourceBlocks)
+      parsed = parseBriefOutput(raw, normalized.text, payload.sourceBlocks)
     } catch (firstError) {
       if (attempts >= BRIEF_MAX_ATTEMPTS) {
-        await markFailed(runId, firstError, { attempts, model: routeLabel(route), sourceHash, coverage: clipped.coverage, promptVersion })
+        await markFailed(runId, firstError, { attempts, model: routeLabel(route), sourceHash, coverage: normalized.coverage, promptVersion })
         return
       }
       try {
@@ -616,9 +617,9 @@ export function createBriefService(options) {
             },
           },
         })
-        parsed = parseBriefOutput(repair, clipped.text, payload.sourceBlocks)
+        parsed = parseBriefOutput(repair, normalized.text, payload.sourceBlocks)
       } catch (secondError) {
-        await markFailed(runId, secondError, { attempts, model: routeLabel(route), sourceHash, coverage: clipped.coverage, promptVersion })
+        await markFailed(runId, secondError, { attempts, model: routeLabel(route), sourceHash, coverage: normalized.coverage, promptVersion })
         return
       }
     }
@@ -631,7 +632,7 @@ export function createBriefService(options) {
         model: routeLabel(route),
         promptVersion,
         sourceHash,
-        coverage: clipped.coverage,
+        coverage: normalized.coverage,
         generatedAt: iso(now()),
       })
       return
@@ -647,7 +648,7 @@ export function createBriefService(options) {
       model: routeLabel(route),
       promptVersion,
       sourceHash,
-      coverage: clipped.coverage,
+      coverage: normalized.coverage,
       generatedAt: iso(now()),
     })
   }

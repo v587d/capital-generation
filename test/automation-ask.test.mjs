@@ -155,6 +155,33 @@ test('完整回答按需读取，不受 160 字预览限制', async () => {
   await assert.rejects(() => pendingHarness.asks.answer(pending.id), (error) => error.code === 'ask_not_ready')
 })
 
+test('弹窗历史：按 run 返回全部追问，按创建时间正序，不串别的 run', async () => {
+  const { store, asks, setNow } = harness()
+  const run = await seededRun(store)
+  const first = await asks.ask(run.id, { question: '第一问' })
+  assert.equal((await asks.status(first.id)).status, 'ready')
+  setNow(NOW + 60_000)
+  const second = await asks.ask(run.id, { question: '第二问' })
+  assert.equal((await asks.status(second.id)).status, 'ready')
+  const other = await store.createRun({
+    taskId: 'task-ask',
+    taskTitle: '每日复盘',
+    trigger: 'manual',
+    occurrenceKey: 'ask-other',
+    status: 'succeeded',
+    sessionId: 'session-ask',
+  })
+  const otherAsk = await asks.ask(other.id, { question: '别的 run' })
+  assert.equal((await asks.status(otherAsk.id)).status, 'ready')
+
+  const history = await asks.history(run.id)
+  assert.deepEqual(history.map((item) => item.question), ['第一问', '第二问'])
+  assert.equal(history[0].preview, '先看成交量。')
+  assert.equal(history[0].sessionId, 'session-ask')
+  assert.equal(history.some((item) => item.id === otherAsk.id), false, '历史只属于这个 run')
+  await assert.rejects(() => asks.history('run_missing'), (error) => error.code === 'run_not_found')
+})
+
 test('旧版 80 字摘要读取时会补到当前上限，不要求用户重新提问', async () => {
   const full = `旧回答补长。${'细节'.repeat(100)}`
   const { store, asks } = harness({

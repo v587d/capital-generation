@@ -85,6 +85,9 @@ const AUTOSAVE_DELAY_MS = 600
 const BOARD_UI_KEY = 'capital-automation:board-ui:v3'
 const BOARD_PANEL_KEYS = ['todo', 'stocks', 'gaps', 'health']
 const BOARD_TODO_PERIODS = ['today', 'future', 'expired']
+const BOARD_STOCK_PAGE_SIZE = 12
+const BOARD_STOCK_ROLES = ['holding', 'risk', 'event', 'watch']
+const BOARD_BRIEF_HIGHLIGHT_MS = 3_000
 const BOARD_PANEL_IDS = {
   'capital-automation-todo': 'todo',
   'capital-automation-stocks': 'stocks',
@@ -103,11 +106,23 @@ const zh = {
     goTasks: '去任务页运行',
     goEnable: '去启用任务',
     newTask: '新建任务',
-    statsBriefs: '本期简报',
-    statsTodos: '今日 TODO',
-    statsStocks: '标的',
-    statsGaps: '缺口',
-    statsIssues: '近 7 天异常',
+    statsBriefsToday: '今天简报',
+    statsBriefsTotal: '总简报',
+    statsTodos: '今天 TODO',
+    statsTodoManual: '人工',
+    statsTodoAuto: '自动',
+    statsStocks: '个股动态',
+    statsStocksNew: '新增',
+    statsGaps: '数据能力缺口',
+    statsGapsNew: '新增',
+    statsIssuesToday: '今天运行异常',
+    statsBriefsTodayHint: '点击高亮今天的简报卡片',
+    statsTodoHint: '点击查看今天的 TODO',
+    statsTodoManualHint: '需要你确认或跟踪的 TODO',
+    statsTodoAutoHint: '自动核验中的 TODO',
+    statsStockHint: '点击查看个股动态',
+    statsGapHint: '点击查看数据能力缺口',
+    statsIssuesTodayHint: '点击查看今天的运行异常',
     refresh: '刷新',
     range: '时间范围',
     range7: '最近 7 天',
@@ -136,14 +151,27 @@ const zh = {
     askPending: '正在回答…',
     askFailed: '回答失败',
     askMore: '查看更多',
-    stocksCount: '{n} 个标的',
+    stockTitle: '个股动态',
+    stocksCount: '共 {n} 只',
+    stockFilteredCount: '{shown} / {total} 只',
+    stockFilterLabel: '按标签筛选',
+    stockFilterAll: '全部',
+    stockFilterEmpty: '没有符合该标签的个股',
+    stockShowAll: '展开全部 {n} 只',
+    stockShowLess: '收起',
     gapsCount: '{n} 个缺口',
-    todoConfirm: '待确认',
-    todoVerify: '待验证',
-    todoTrack: '跟踪',
-    todoAck: '确认',
-    todoAckTitle: '确认并移除这条 TODO',
-    todoAcked: '已确认，已从 TODO 移除',
+    todoAckTitle: '标记为已确认',
+    todoAcked: '已确认',
+    watchWatching: '自动核验中',
+    watchTriggered: '已触发',
+    watchNeedsHuman: '待人工确认',
+    watchResolved: '已确认',
+    watchExpired: '已停止核验',
+    watchTracking: '跟踪',
+    watchEvidence: '核验依据',
+    watchChecked: '核验于 {time}',
+    notificationFallbackTodoTriggered: '条件已触发，查看 TODO 详情。',
+    notificationFallbackTodoNeedsHuman: '自动核验无法确认，需要你确认。',
     todoEmptyToday: '今天暂无待办',
     todoEmptyGroup: '暂无「{label}」待办',
     todoFilterLabel: '按日期筛选',
@@ -156,18 +184,19 @@ const zh = {
     hideBasis: '收起依据',
     seenCount: '{n} 次运行提到',
     sourceRun: '来源',
-    stockEmpty: '最近运行没有提到自选股',
-    stockOther: '其他事件 {n} 只',
-    stockTodoCount: '{n} 项待办',
+    stockEmpty: '最近运行没有提到个股',
+    stockOther: '另有 {n} 只未显示',
+    stockTodoCount: '{n} 条待跟进',
+    stockTodoCountHint: '与这只个股相关的待确认、待验证或待跟踪事项；展开后可直接打开来源 session',
     roleHolding: '持仓',
     roleWatch: '关注',
     roleEvent: '事件',
     roleRisk: '风险',
+    roleHoldingHint: '自选清单里标记为持仓',
+    roleWatchHint: '在自选清单里关注，未标记持仓',
+    roleEventHint: '近期运行提到需要跟踪的事件或催化',
+    roleRiskHint: '近期运行提示存在风险',
     gapEmpty: '最近运行没有报告数据缺口',
-    gapCapability: '能力缺口',
-    gapTransient: '本次未取到',
-    gapConflict: '口径冲突',
-    gapQuality: '数据质量',
     gapSeen: '{n} 次运行',
     gapAll: '查看全部',
     healthTitle: '运行健康',
@@ -195,7 +224,6 @@ const zh = {
     healthBriefSkipped: '跳过',
     healthNoBrief: '没有已入队简报',
     healthRecovered: '已补跑',
-    healthOpen: '打开 session',
     healthCalendarOk: '正常',
     healthCalendarBad: '不可用',
     loadError: '看板暂时不可用',
@@ -419,6 +447,7 @@ const zh = {
   allRead: '全部已读',
   noNotifications: '没有未读或历史任务通知。',
   notificationOpenTask: '查看任务',
+  notificationOpenTodo: '查看 TODO',
   systemStatus: '系统状态',
   systemActive: '定时调度正常',
   systemStandby: '本窗口待命，不启动新的定时运行',
@@ -963,15 +992,20 @@ function installStyles() {
     .capital-automation-boardtools { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
     .capital-automation-boardactions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-left: auto; }
     .capital-automation-boardstats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
-    .capital-automation-boardstat { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-height: 62px; padding: 10px 12px; border: .5px solid var(--ca-line); border-radius: 12px; background: var(--ca-card); color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background .15s, border-color .15s; }
-    .capital-automation-boardstat:hover { background: color-mix(in srgb, var(--ca-hover) 58%, var(--ca-card)); border-color: color-mix(in srgb, var(--ca-business) 24%, var(--ca-line)); }
-    .capital-automation-boardstat:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: 1px; }
-    .capital-automation-boardstatlabel { color: var(--ca-muted); font-size: 11.5px; line-height: 17px; }
-    .capital-automation-boardstat strong { color: var(--dsw-alias-label-primary); font-size: 18px; line-height: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .capital-automation-boardstat { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-height: 62px; padding: 10px 12px; border: .5px solid var(--ca-line); border-radius: 12px; background: var(--ca-card); color: inherit; text-align: left; }
+    .capital-automation-boardstatlabel { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 3px; color: var(--ca-muted); font-size: 11.5px; line-height: 17px; }
+    .capital-automation-boardstatvalue { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 2px; color: var(--dsw-alias-label-primary); font-size: 18px; line-height: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .capital-automation-boardstatnum { margin: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; font-variant-numeric: inherit; line-height: inherit; }
+    .capital-automation-boardstatnum[data-clickable="true"] { border-radius: 4px; cursor: pointer; transition: color .15s; }
+    .capital-automation-boardstatnum[data-clickable="true"]:hover { color: var(--ca-business-text); text-decoration: underline; text-underline-offset: 2px; }
+    .capital-automation-boardstatnum[data-clickable="true"]:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: 1px; }
+    .capital-automation-boardstatsep { color: var(--dsw-alias-label-secondary); font-weight: 500; }
+    .capital-automation-boardstatvalue .capital-automation-boardstatsep { padding: 0 3px; }
     .capital-automation-boardgrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 340px); align-items: start; gap: 20px; min-width: 0; }
     .capital-automation-boardgrid[data-rail="closed"] { grid-template-columns: minmax(0, 1fr); }
     .capital-automation-boardmain { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-    .capital-automation-briefcard { box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; padding: 16px 18px 13px; border: .5px solid var(--ca-line); border-radius: 16px; background: var(--ca-card); min-width: 0; }
+    .capital-automation-briefcard { box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; padding: 16px 18px 13px; border: .5px solid var(--ca-line); border-radius: 16px; background: var(--ca-card); min-width: 0; transition: border-color .2s ease, box-shadow .2s ease; }
+    .capital-automation-briefcard[data-highlight="true"] { border-color: var(--ca-business); box-shadow: 0 0 0 1px var(--ca-business); }
     .capital-automation-briefhead { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px 14px; }
     .capital-automation-brieftitle { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 7px; min-width: 0; }
     .capital-automation-brieftitle h3 { margin: 0; color: var(--dsw-alias-label-primary); font-size: 13.5px; line-height: 20px; font-weight: 600; overflow-wrap: anywhere; }
@@ -1012,6 +1046,7 @@ function installStyles() {
     .capital-automation-chatcontext h3 { margin: 5px 0 0; color: var(--dsw-alias-label-primary); font-size: 16px; line-height: 24px; font-weight: 600; letter-spacing: .1px; overflow-wrap: anywhere; }
     .capital-automation-chatcontexttext { margin: 5px 0 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
     .capital-automation-chatthread { margin-left: 18px; padding: 12px 0 4px 30px; border-left: 2px solid var(--ca-line); }
+    .capital-automation-chatexchange + .capital-automation-chatexchange { margin-top: 18px; padding-top: 16px; border-top: .5px solid var(--ca-line); }
     .capital-automation-chatempty { margin-left: 18px; padding: 12px 0 4px 30px; border-left: 2px solid var(--ca-line); }
     .capital-automation-chatempty p { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }
     .capital-automation-chatcomposer { display: flex; align-items: center; gap: 8px; padding: 10px 16px 14px; border-top: .5px solid var(--ca-line); }
@@ -1044,10 +1079,7 @@ function installStyles() {
     .capital-automation-todoitem:first-child { border-top: 0; }
     .capital-automation-todoline { display: flex; flex-direction: column; align-items: stretch; gap: 5px; min-width: 0; }
     .capital-automation-todotop { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
-    .capital-automation-todokind { display: inline-flex; flex: none; align-items: center; justify-content: center; min-height: 20px; padding: 0 5px; border-radius: 5px; background: var(--dsw-alias-bg-module-platform); color: var(--ca-muted); font-size: 10px; line-height: 20px; white-space: nowrap; }
-    .capital-automation-todokind[data-kind="confirm"] { color: var(--ca-warn-text); }
-    .capital-automation-todokind[data-kind="verify"] { color: var(--ca-business-text); }
-    .capital-automation-todokind[data-kind="track"] { color: var(--ca-success-text); }
+    .capital-automation-todotags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 5px; min-width: 0; }
     .capital-automation-todotitle { flex: none; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; font: inherit; color: var(--dsw-alias-label-primary); font-size: 13px; line-height: 20px; font-weight: 600; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
     .capital-automation-todotitle:hover, .capital-automation-gaptitle:hover { color: var(--ca-business-text); }
     .capital-automation-todotitle:focus-visible, .capital-automation-gaptitle:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: 2px; border-radius: 4px; }
@@ -1055,31 +1087,56 @@ function installStyles() {
     .capital-automation-todotitle[aria-expanded="true"] .capital-automation-basiscaret, .capital-automation-gaptitle[aria-expanded="true"] .capital-automation-basiscaret { transform: rotate(0deg); }
     .capital-automation-tododesc { margin: 3px 0 0; color: var(--ca-muted); font-size: 12px; line-height: 20px; overflow-wrap: anywhere; }
     .capital-automation-todometa { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 3px; color: var(--ca-caption); font-size: 11px; line-height: 17px; }
+    .capital-automation-todowatch { display: inline-flex; flex: none; align-items: center; min-height: 20px; padding: 0 6px; border-radius: 999px; background: var(--dsw-alias-bg-module-platform); color: var(--ca-muted); font-size: 10px; line-height: 20px; white-space: nowrap; }
+    .capital-automation-todowatch[data-status="triggered"] { background: color-mix(in srgb, var(--ca-error) 12%, var(--ca-card)); color: var(--ca-error-text); }
+    .capital-automation-todowatch[data-status="needs_human"] { background: color-mix(in srgb, var(--ca-warn) 14%, var(--ca-card)); color: var(--ca-warn-text); }
+    .capital-automation-todowatch[data-status="watching"] { color: var(--ca-business-text); }
+    .capital-automation-todowatch[data-status="resolved"] { background: color-mix(in srgb, var(--ca-success) 14%, var(--ca-card)); color: var(--ca-success-text); }
+    .capital-automation-todowatch[data-status="tracking"] { color: var(--ca-muted); }
+    .capital-automation-todowatch[data-status="expired"] { color: var(--ca-caption); }
+    .capital-automation-todowatchcheck { margin-left: 3px; font-size: 10px; }
+    .capital-automation-todocheck { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: 1.5px solid var(--ca-line); border-radius: 4px; background: var(--ca-card); cursor: pointer; transition: border-color .15s ease, background .15s ease; }
+    .capital-automation-todocheck:hover { border-color: var(--ca-business); background: color-mix(in srgb, var(--ca-business) 8%, var(--ca-card)); }
+    .capital-automation-todocheck:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: 2px; }
+    .capital-automation-todocheck[disabled] { opacity: .55; cursor: default; }
+    .capital-automation-todocheckspin { width: 10px; height: 10px; border: 2px solid var(--ca-line); border-top-color: var(--ca-business); border-radius: 50%; animation: capital-automation-todospin .7s linear infinite; }
+    @keyframes capital-automation-todospin { to { transform: rotate(360deg); } }
+    .capital-automation-todowatchmsg { margin: 1px 0 0; padding: 6px 9px; border-left: 2px solid var(--ca-line); border-radius: 0 7px 7px 0; background: var(--ca-field); color: var(--ca-muted); font-size: 11.5px; line-height: 18px; overflow-wrap: anywhere; }
+    .capital-automation-todowatchmsg[data-status="triggered"] { border-left-color: var(--ca-error); color: var(--ca-error-text); }
     .capital-automation-tododetail { margin: 6px 0 0; padding: 7px 9px; border-left: 2px solid var(--ca-line); background: var(--ca-field); border-radius: 0 7px 7px 0; }
     .capital-automation-tododetail blockquote { margin: 0; color: var(--ca-muted); font-size: 11.5px; line-height: 19px; overflow-wrap: anywhere; }
     .capital-automation-todosource { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 5px 8px; margin-top: 5px; color: var(--ca-caption); font-size: 11px; line-height: 17px; }
+    .capital-automation-stockfilters { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+    .capital-automation-stockfilters .capital-automation-select { margin-left: 0; }
     .capital-automation-stockrow { border-top: .5px solid var(--ca-line); }
     .capital-automation-stockrow:first-of-type { border-top: 0; }
     .capital-automation-stockmain { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 7px; width: 100%; padding: 8px 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+    .capital-automation-stockmain:hover .capital-automation-stockname, .capital-automation-stockmain:hover .capital-automation-stockcode { color: var(--ca-business-text); }
     .capital-automation-stockmain:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: -2px; }
     .capital-automation-stockname { color: var(--dsw-alias-label-primary); font-size: 12.5px; line-height: 19px; font-weight: 600; }
     .capital-automation-stockcode { color: var(--ca-caption); font-size: 11px; line-height: 17px; }
     .capital-automation-stockroles { display: inline-flex; flex-wrap: wrap; gap: 3px; }
-    .capital-automation-stockrole { display: inline-flex; align-items: center; padding: 0 5px; border-radius: 4px; background: var(--dsw-alias-bg-module-platform); color: var(--ca-muted); font-size: 10px; line-height: 17px; }
+    .capital-automation-stockrole { display: inline-flex; align-items: center; padding: 0 5px; border-radius: 4px; background: var(--dsw-alias-bg-module-platform); color: var(--ca-muted); font-size: 10px; line-height: 17px; cursor: help; }
     .capital-automation-stockrole[data-role="holding"] { color: var(--ca-success-text); }
     .capital-automation-stockrole[data-role="risk"] { color: var(--ca-error-text); }
     .capital-automation-stockrole[data-role="event"] { color: var(--ca-warn-text); }
     .capital-automation-stocknote { flex: 1 1 100%; color: var(--ca-muted); font-size: 12px; line-height: 19px; overflow-wrap: anywhere; }
     .capital-automation-stockmeta { display: flex; flex-wrap: wrap; gap: 4px 9px; color: var(--ca-caption); font-size: 11px; line-height: 17px; }
     .capital-automation-stocktodos { margin: 0 0 7px; padding: 0 0 0 8px; border-left: 2px solid var(--ca-line); }
-    .capital-automation-stocktodos li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; padding: 3px 0; color: var(--ca-muted); font-size: 11.5px; line-height: 18px; }
+    .capital-automation-stocktodos li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; color: var(--ca-muted); font-size: 11.5px; line-height: 18px; }
+    .capital-automation-stocktodo { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; width: 100%; padding: 4px 6px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color .15s ease, color .15s ease; }
+    .capital-automation-stocktodo:hover { background: color-mix(in srgb, var(--ca-business) 8%, transparent); color: var(--ca-business-text); }
+    .capital-automation-stocktodo:hover .capital-automation-stocktodotitle { color: var(--ca-business-text); }
+    .capital-automation-stocktodo:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: -2px; }
+    .capital-automation-stocktodo[data-static="true"] { cursor: default; }
+    .capital-automation-stocktodo[data-static="true"]:hover { background: transparent; color: inherit; }
+    .capital-automation-stocktodo svg { flex: none; color: var(--ca-caption); opacity: .65; }
+    .capital-automation-stocktodo:hover svg { color: var(--ca-business-text); opacity: 1; }
+    .capital-automation-stocktodotitle { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+    .capital-automation-stockmore { align-self: center; margin: 6px 0 2px; }
     .capital-automation-gaprow { padding: 8px 0; border-top: .5px solid var(--ca-line); }
     .capital-automation-gaprow:first-child { border-top: 0; }
-    .capital-automation-gaphead { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
-    .capital-automation-gapkind { display: inline-flex; flex: none; align-items: center; justify-content: center; min-height: 20px; padding: 0 5px; border-radius: 5px; background: var(--dsw-alias-bg-module-platform); color: var(--ca-muted); font-size: 10px; line-height: 20px; white-space: nowrap; }
-    .capital-automation-gapkind[data-kind="capability"] { color: var(--ca-warn-text); }
-    .capital-automation-gapkind[data-kind="conflict"] { color: var(--ca-error-text); }
-    .capital-automation-gapkind[data-kind="quality"] { color: var(--ca-warn-text); }
+    .capital-automation-gaphead { display: flex; align-items: flex-start; min-width: 0; }
     .capital-automation-gaptitle { flex: 1 1 auto; min-width: 0; padding: 0; border: 0; background: transparent; font: inherit; color: var(--dsw-alias-label-primary); font-size: 13px; line-height: 20px; font-weight: 600; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
     .capital-automation-gapdesc { margin: 3px 0 0; color: var(--ca-muted); font-size: 12px; line-height: 20px; overflow-wrap: anywhere; }
     .capital-automation-healthgrid { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 10px; align-items: baseline; }
@@ -1215,6 +1272,7 @@ function createApi() {
       timeoutMs: 60_000,
     }),
     askStatus: (askId) => request(`/board/asks/${encodeURIComponent(askId)}`),
+    askHistory: (runId) => request(`/board/briefs/${encodeURIComponent(runId)}/asks`),
     askAnswer: (askId) => request(`/board/asks/${encodeURIComponent(askId)}/answer`),
     notifications: () => request('/notifications'),
     markRead: (body) => request('/notifications/read', { method: 'POST', body }),
@@ -1826,7 +1884,7 @@ function heatDayMeta(day) {
 
 function eventTone(kind) {
   if (kind === 'run_failed' || kind === 'run_timeout') return 'error'
-  if (kind === 'scheduler_standby' || kind === 'calendar_unavailable') return 'warn'
+  if (kind === 'scheduler_standby' || kind === 'calendar_unavailable' || kind === 'todo_triggered' || kind === 'todo_needs_human') return 'warn'
   return 'neutral'
 }
 
@@ -1838,6 +1896,8 @@ function notificationMessage(item) {
   if (item.kind === 'scheduler_standby') return zh.notificationFallbackStandby
   if (item.kind === 'calendar_unavailable') return zh.notificationFallbackCalendar
   if (item.kind === 'skipped') return zh.notificationFallbackSkipped
+  if (item.kind === 'todo_triggered') return zh.notificationFallbackTodoTriggered
+  if (item.kind === 'todo_needs_human') return zh.notificationFallbackTodoNeedsHuman
   return ''
 }
 
@@ -3324,7 +3384,7 @@ function NotificationsTab(props) {
 
 function NotificationItem(props) {
   const { item, onClick, onOpenTask } = props
-  const clickable = typeof onClick === 'function' && item.taskId !== undefined
+  const clickable = typeof onClick === 'function' && (item.taskId !== undefined || item.todoId !== undefined)
   const tag = clickable ? 'button' : 'div'
   return h(tag, {
     type: clickable ? 'button' : undefined,
@@ -3340,8 +3400,8 @@ function NotificationItem(props) {
       item.readAt === undefined ? h('span', { className: 'capital-automation-count' }, zh.unread) : null),
     h('span', { className: 'capital-automation-notificationmessage' }, notificationMessage(item)),
     h('span', { className: 'capital-automation-notificationtime' }, formatShortTime(item.createdAt))),
-  onOpenTask !== undefined && item.taskId !== undefined
-    ? h('span', { className: 'capital-automation-hint' }, zh.notificationOpenTask)
+  onOpenTask !== undefined && (item.taskId !== undefined || item.todoId !== undefined)
+    ? h('span', { className: 'capital-automation-hint' }, item.todoId !== undefined ? zh.notificationOpenTodo : zh.notificationOpenTask)
     : null)
 }
 
@@ -3905,7 +3965,7 @@ function ConfirmModal(props) {
 }
 
 function InboxModal(props) {
-  const { open, onClose, notifications, onMarkAllRead, onOpenTask, busy } = props
+  const { open, onClose, notifications, onMarkAllRead, onOpenTask, onOpenTodo, busy } = props
   const unread = notifications.filter((item) => item.readAt === undefined).length
   return h(Modal, {
     open,
@@ -3931,7 +3991,11 @@ function InboxModal(props) {
         key: item.id,
         item,
         onOpenTask: onOpenTask,
-        onClick: item.taskId === undefined ? undefined : () => onOpenTask(item.taskId),
+        onClick: item.todoId !== undefined
+          ? () => onOpenTodo(item)
+          : item.taskId === undefined
+            ? undefined
+            : () => onOpenTask(item.taskId),
       }))))
 }
 
@@ -3963,8 +4027,19 @@ function boardRelativeTime(value, now = Date.now()) {
   return `${Math.floor(diff / year)}年前`
 }
 
+function boardCardIsToday(card, today = localDateKey(new Date())) {
+  if (typeof card?.finishedAt !== 'string') return false
+  const date = new Date(card.finishedAt)
+  return !Number.isNaN(date.getTime()) && localDateKey(date) === today
+}
+
 function boardTodoPeriod(item, now = new Date()) {
   const today = localDateKey(now)
+  // Triggered or handed-off items stay in today's action list even when dueAt has passed; a
+  // confirmed one only stays there through the day it was acknowledged.
+  const watchedStatus = item.watch?.resolvedFrom ?? item.watch?.status
+  const ackedToday = typeof item.ackedAt === 'string' && localDateKey(new Date(item.ackedAt)) === today
+  if ((watchedStatus === 'triggered' || watchedStatus === 'needs_human') && (item.ackedAt === undefined || ackedToday)) return 'today'
   if (typeof item.dueAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.dueAt)) {
     if (item.dueAt < today) return 'expired'
     if (item.dueAt === today) return 'today'
@@ -3979,8 +4054,20 @@ function boardTodoPeriod(item, now = new Date()) {
   return 'future'
 }
 
-function boardTodoTodayCount(todos, now = new Date()) {
-  return todos.filter((item) => boardTodoPeriod(item, now) === 'today').length
+/**
+ * Human / automatic is the watch axis, not the run trigger: `watching` items are checked by the
+ * service, everything else (confirmation, triggered, passive tracking, stopped checks) needs the user.
+ */
+function boardTodoTodaySplit(todos, now = new Date()) {
+  const split = { total: 0, manual: 0, auto: 0 }
+  for (const item of todos) {
+    const status = boardTodoStatus(item)
+    if (status === 'resolved' || boardTodoPeriod(item, now) !== 'today') continue
+    split.total += 1
+    if (status === 'watching') split.auto += 1
+    else split.manual += 1
+  }
+  return split
 }
 
 function boardTodoGroupLabel(period) {
@@ -4003,10 +4090,48 @@ function boardTodoDueLabel(item, period) {
   return date || zh.board.dueNoDate
 }
 
-function boardTodoKindLabel(kind) {
-  if (kind === 'confirm') return zh.board.todoConfirm
-  if (kind === 'verify') return zh.board.todoVerify
-  return zh.board.todoTrack
+const TODO_CHECKPOINT_IDS = new Set(['midday-snapshot', 'daily-review'])
+
+function boardTodoStatus(item) {
+  if (typeof item.ackedAt === 'string' && item.ackedAt.length > 0) return 'resolved'
+  if (item.watch !== null && item.watch !== undefined && typeof item.watch.status === 'string') return item.watch.status
+  // Track items are passive; everything else without a watch is waiting for the user.
+  return item.kind === 'track' ? 'tracking' : 'needs_human'
+}
+
+function boardTodoWatchLabel(status) {
+  if (status === 'triggered') return zh.board.watchTriggered
+  if (status === 'needs_human') return zh.board.watchNeedsHuman
+  if (status === 'resolved') return zh.board.watchResolved
+  if (status === 'expired') return zh.board.watchExpired
+  if (status === 'tracking') return zh.board.watchTracking
+  if (status === 'watching') return zh.board.watchWatching
+  return ''
+}
+
+function boardTodoWatchHint(status, checkpointHint) {
+  if (status === 'watching') return checkpointHint
+  if (status === 'triggered') return '自动核验已确认条件成立'
+  if (status === 'needs_human') return '需要你确认'
+  if (status === 'resolved') return '已确认'
+  if (status === 'tracking') return '仅展示，不自动核验'
+  if (status === 'expired') return '连续 3 天没有新运行提到，已停止自动核验'
+  return ''
+}
+
+function boardTodoCheckpointHint(tasks) {
+  const names = []
+  for (const task of Array.isArray(tasks) ? tasks : []) {
+    if (task?.origin !== 'builtin' || task.state !== 'active' || !TODO_CHECKPOINT_IDS.has(task.sourceBuiltinId)) continue
+    if (typeof task.title === 'string' && task.title.length > 0 && !names.includes(task.title)) names.push(task.title)
+  }
+  if (names.length > 0) return `自动核验跟随 ${names.join('、')} 运行`
+  if (!Array.isArray(tasks) || tasks.length === 0) return '自动核验跟随「午间快照」「每日复盘」运行'
+  return '自动核验检查点任务未启用'
+}
+
+function boardTodoCheckable(status) {
+  return status === 'needs_human' || status === 'triggered' || status === 'tracking'
 }
 
 function boardCategoryOptions() {
@@ -4089,27 +4214,129 @@ function BoardEmpty(props) {
 }
 
 function BoardStats(props) {
-  const { stats, onJump } = props
-  const items = [
-    { id: 'capital-automation-briefs', label: zh.board.statsBriefs, value: stats?.briefs ?? 0 },
-    { id: 'capital-automation-todo', label: zh.board.statsTodos, value: stats?.todos ?? 0 },
-    { id: 'capital-automation-stocks', label: zh.board.statsStocks, value: stats?.stocks ?? 0 },
-    { id: 'capital-automation-gaps', label: zh.board.statsGaps, value: stats?.gaps ?? 0 },
-    { id: 'capital-automation-health', label: zh.board.statsIssues, value: stats?.issues7d ?? 0 },
-  ]
+  const { stats, onJump, onHighlightTodayBriefs } = props
   const jump = (id) => {
     if (typeof document === 'undefined') return
     const node = document.getElementById(id)
     if (node !== null && typeof node.scrollIntoView === 'function') node.scrollIntoView({ block: 'start', behavior: 'smooth' })
   }
   const activate = typeof onJump === 'function' ? onJump : jump
-  return h('div', { className: 'capital-automation-boardstats', role: 'group', 'aria-label': zh.board.title },
-    items.map((item) => h('button', {
-      key: item.id,
+  const open = (id) => () => activate(id)
+  const labelParts = (parts) => parts.map((part, index) => h('span', {
+    key: `label-${index}`,
+    className: typeof part === 'string' && /^\s*[\/:]\s*$/.test(part) ? 'capital-automation-boardstatsep' : undefined,
+  }, part))
+  const valueParts = (parts) => parts.map((part, index) => {
+    if (typeof part === 'string') return h('span', { key: `sep-${index}`, className: 'capital-automation-boardstatsep' }, part)
+    if (typeof part.onClick !== 'function') {
+      return h('span', { key: `value-${index}`, className: 'capital-automation-boardstatnum' }, String(part.value))
+    }
+    return h('button', {
+      key: `value-${index}`,
       type: 'button',
-      className: 'capital-automation-boardstat',
-      onClick: () => activate(item.id),
-    }, h('span', { className: 'capital-automation-boardstatlabel' }, item.label), h('strong', null, String(item.value)))))
+      className: 'capital-automation-boardstatnum',
+      'data-clickable': 'true',
+      title: part.title,
+      'aria-label': part.ariaLabel,
+      onClick: part.onClick,
+    }, String(part.value))
+  })
+  const items = [
+    {
+      key: 'briefs',
+      label: [zh.board.statsBriefsToday, ' / ', zh.board.statsBriefsTotal],
+      values: [
+        {
+          value: stats?.briefsToday ?? 0,
+          title: zh.board.statsBriefsTodayHint,
+          ariaLabel: `${zh.board.statsBriefsToday} ${stats?.briefsToday ?? 0}，${zh.board.statsBriefsTodayHint}`,
+          onClick: typeof onHighlightTodayBriefs === 'function' ? onHighlightTodayBriefs : undefined,
+        },
+        ' / ',
+        { value: stats?.briefs ?? 0 },
+      ],
+    },
+    {
+      key: 'todos',
+      label: [zh.board.statsTodos, ' : ', zh.board.statsTodoManual, ' / ', zh.board.statsTodoAuto],
+      values: [
+        {
+          value: stats?.todos ?? 0,
+          title: zh.board.statsTodoHint,
+          ariaLabel: `${zh.board.statsTodos} ${stats?.todos ?? 0}，${zh.board.statsTodoHint}`,
+          onClick: open('capital-automation-todo'),
+        },
+        ' : ',
+        {
+          value: stats?.todosManual ?? 0,
+          title: zh.board.statsTodoManualHint,
+          ariaLabel: `${zh.board.statsTodoManual} ${stats?.todosManual ?? 0}，${zh.board.statsTodoManualHint}`,
+          onClick: open('capital-automation-todo'),
+        },
+        ' / ',
+        {
+          value: stats?.todosAuto ?? 0,
+          title: zh.board.statsTodoAutoHint,
+          ariaLabel: `${zh.board.statsTodoAuto} ${stats?.todosAuto ?? 0}，${zh.board.statsTodoAutoHint}`,
+          onClick: open('capital-automation-todo'),
+        },
+      ],
+    },
+    {
+      key: 'stocks',
+      label: [zh.board.statsStocks, ' / ', zh.board.statsStocksNew],
+      values: [
+        {
+          value: stats?.stocks ?? 0,
+          title: zh.board.statsStockHint,
+          ariaLabel: `${zh.board.statsStocks} ${stats?.stocks ?? 0}，${zh.board.statsStockHint}`,
+          onClick: open('capital-automation-stocks'),
+        },
+        ' / ',
+        {
+          value: stats?.stocksNewToday ?? 0,
+          title: zh.board.statsStockHint,
+          ariaLabel: `${zh.board.statsStocksNew} ${stats?.stocksNewToday ?? 0}，${zh.board.statsStockHint}`,
+          onClick: open('capital-automation-stocks'),
+        },
+      ],
+    },
+    {
+      key: 'gaps',
+      label: [zh.board.statsGaps, ' / ', zh.board.statsGapsNew],
+      values: [
+        {
+          value: stats?.gaps ?? 0,
+          title: zh.board.statsGapHint,
+          ariaLabel: `${zh.board.statsGaps} ${stats?.gaps ?? 0}，${zh.board.statsGapHint}`,
+          onClick: open('capital-automation-gaps'),
+        },
+        ' / ',
+        {
+          value: stats?.gapsNewToday ?? 0,
+          title: zh.board.statsGapHint,
+          ariaLabel: `${zh.board.statsGapsNew} ${stats?.gapsNewToday ?? 0}，${zh.board.statsGapHint}`,
+          onClick: open('capital-automation-gaps'),
+        },
+      ],
+    },
+    {
+      key: 'issues',
+      label: [zh.board.statsIssuesToday],
+      values: [
+        {
+          value: stats?.issuesToday ?? 0,
+          title: zh.board.statsIssuesTodayHint,
+          ariaLabel: `${zh.board.statsIssuesToday} ${stats?.issuesToday ?? 0}，${zh.board.statsIssuesTodayHint}`,
+          onClick: open('capital-automation-health'),
+        },
+      ],
+    },
+  ]
+  return h('div', { className: 'capital-automation-boardstats', role: 'group', 'aria-label': zh.board.title },
+    items.map((item) => h('div', { key: item.key, className: 'capital-automation-boardstat' },
+      h('span', { className: 'capital-automation-boardstatlabel' }, labelParts(item.label)),
+      h('span', { className: 'capital-automation-boardstatvalue' }, valueParts(item.values)))))
 }
 
 function BoardToolbar(props) {
@@ -4229,13 +4456,22 @@ function AskExchange(props) {
 }
 
 function AskDialog(props) {
-  const { open, onClose, card, identity, ask, api, question, onQuestionChange, onSubmit, busy, error, onOpenSession } = props
+  const { open, onClose, card, identity, asks = [], api, question, onQuestionChange, onSubmit, busy, error, historyError = '', onOpenSession } = props
   const inputRef = useRef(null)
+  const scrollRef = useRef(null)
   useEffect(() => {
     if (!open) return undefined
     const timer = setTimeout(() => inputRef.current?.focus?.(), 0)
     return () => clearTimeout(timer)
   }, [open])
+  useEffect(() => {
+    if (!open) return undefined
+    const timer = setTimeout(() => {
+      const node = scrollRef.current
+      if (node !== null) node.scrollTop = node.scrollHeight
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [open, asks.length])
   if (!open) return null
   const brief = card.brief
   const status = brief?.status ?? 'pending'
@@ -4246,7 +4482,7 @@ function AskDialog(props) {
   const trigger = card.trigger === 'manual' ? zh.triggerManual : zh.triggerScheduled
   const relativeTime = boardRelativeTime(card.finishedAt)
   const exactTime = formatTime(card.finishedAt)
-  const running = ask?.status === 'running'
+  const running = asks.some((item) => item.status === 'running')
   let context
   if (status === 'ready') {
     context = h('div', null,
@@ -4287,7 +4523,7 @@ function AskDialog(props) {
           onClick: openSession,
         }, h(IconRightUpOutlineRegular, { size: 18 }))
         : null),
-    h('div', { className: 'capital-automation-chatscroll' },
+    h('div', { ref: scrollRef, className: 'capital-automation-chatscroll' },
       h('div', { className: 'capital-automation-chatcontext' },
         h(Glyph, { task: identity ?? card, size: 38, radius: 999, glyphSize: 18 }),
         h('div', { className: 'capital-automation-chatcontextbody' },
@@ -4297,8 +4533,13 @@ function AskDialog(props) {
               `${categoryLabel(card.category)} · ${trigger} · `,
               h('time', { dateTime: card.finishedAt, title: exactTime }, relativeTime))),
           context)),
-      ask !== null
-        ? h('div', { className: 'capital-automation-chatthread' }, h(AskExchange, { key: ask.id, ask, api }))
+      historyError.length > 0
+        ? h('p', { className: 'capital-automation-askerror', role: 'alert' }, historyError)
+        : null,
+      asks.length > 0
+        ? h('div', { className: 'capital-automation-chatthread' },
+          asks.map((item) => h('div', { key: item.id, className: 'capital-automation-chatexchange' },
+            h(AskExchange, { ask: item, api }))))
         : h('div', { className: 'capital-automation-chatempty' },
           h('p', null, zh.board.askEmptyTitle)),
       error.length > 0 ? h('p', { className: 'capital-automation-askerror', role: 'alert' }, error) : null),
@@ -4326,39 +4567,75 @@ function AskDialog(props) {
       }, busy ? zh.processing : zh.board.askSubmit))))
 }
 
+function compareAsks(left, right) {
+  const time = String(left?.createdAt ?? '').localeCompare(String(right?.createdAt ?? ''))
+  if (time !== 0) return time
+  return String(left?.id ?? '').localeCompare(String(right?.id ?? ''))
+}
+
+function mergeAsks(current, incoming) {
+  const byId = new Map()
+  for (const ask of Array.isArray(current) ? current : []) {
+    if (ask !== null && typeof ask === 'object' && typeof ask.id === 'string') byId.set(ask.id, ask)
+  }
+  for (const ask of Array.isArray(incoming) ? incoming : []) {
+    if (ask === null || typeof ask !== 'object' || typeof ask.id !== 'string') continue
+    const existing = byId.get(ask.id)
+    if (existing !== undefined) {
+      // A board refresh can trail a resolved local ask; never roll a terminal state back to running.
+      if (existing.status !== 'running' && ask.status === 'running') continue
+      if (existing.status === ask.status
+        && typeof existing.preview === 'string' && typeof ask.preview === 'string'
+        && Array.from(existing.preview).length > Array.from(ask.preview).length) continue
+    }
+    byId.set(ask.id, ask)
+  }
+  return Array.from(byId.values()).sort(compareAsks)
+}
+
 function AskDock(props) {
   const { card, identity, api, onOpenSession, open, onClose } = props
-  const [latest, setLatest] = useState(card.ask ?? null)
+  const [thread, setThread] = useState(() => (card.ask ? [card.ask] : []))
   const [question, setQuestion] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [historyError, setHistoryError] = useState('')
   const incoming = card.ask ?? null
+  const latest = thread.length > 0 ? thread[thread.length - 1] : null
 
   useEffect(() => {
-    setLatest((current) => {
-      // A board refresh can trail a just-created/resolved local ask; never drop or roll it back.
-      if (incoming === null) return current
-      if (current === null || current.id !== incoming.id) {
-        if (current !== null && String(current.createdAt ?? '') > String(incoming.createdAt ?? '')) return current
-        return incoming
-      }
-      if (current.status !== 'running' && incoming.status === 'running') return current
-      return incoming
-    })
+    if (incoming === null) return
+    setThread((current) => mergeAsks(current, [incoming]))
   }, [incoming?.id, incoming?.status, incoming?.preview, incoming?.error])
 
   useEffect(() => {
     if (!open) return
     setQuestion('')
     setError('')
+    setHistoryError('')
   }, [open])
+
+  useEffect(() => {
+    if (!open || typeof api?.askHistory !== 'function') return undefined
+    let cancelled = false
+    api.askHistory(card.runId).then((payload) => {
+      if (cancelled) return
+      setThread((current) => mergeAsks(current, Array.isArray(payload?.asks) ? payload.asks : []))
+      setHistoryError('')
+    }).catch((failure) => {
+      if (!cancelled) setHistoryError(failure?.message ?? zh.errorGeneric)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [open, card.runId, api])
 
   useEffect(() => {
     if (latest === null || latest.status !== 'ready' || typeof api?.askStatus !== 'function') return undefined
     if (typeof latest.preview !== 'string' || !latest.preview.endsWith('…') || Array.from(latest.preview).length > 80) return undefined
     let cancelled = false
     api.askStatus(latest.id).then((payload) => {
-      if (!cancelled && payload?.ask) setLatest(payload.ask)
+      if (!cancelled && payload?.ask) setThread((current) => mergeAsks(current, [payload.ask]))
     }).catch(() => {})
     return () => {
       cancelled = true
@@ -4373,7 +4650,7 @@ function AskDock(props) {
       try {
         const payload = await api.askStatus(latest.id)
         if (cancelled) return
-        if (payload?.ask) setLatest(payload.ask)
+        if (payload?.ask) setThread((current) => mergeAsks(current, [payload.ask]))
       } catch {
         // The dialog shows the actionable error; the card preview keeps its last known state.
       } finally {
@@ -4401,7 +4678,7 @@ function AskDock(props) {
     try {
       const payload = await api.askBrief(card.runId, text, browserTimeZone())
       if (payload?.ask) {
-        setLatest(payload.ask)
+        setThread((current) => mergeAsks(current, [payload.ask]))
         setQuestion('')
       } else {
         setError(zh.errorGeneric)
@@ -4421,13 +4698,14 @@ function AskDock(props) {
     onClose: requestClose,
     card,
     identity,
-    ask: latest,
+    asks: thread,
     api,
     question,
     onQuestionChange: setQuestion,
     onSubmit: submit,
     busy,
     error,
+    historyError,
     onOpenSession,
   })
   if (latest === null) return dialog
@@ -4437,7 +4715,7 @@ function AskDock(props) {
 }
 
 function BriefCard(props) {
-  const { card, task, api, onOpenSession, onRetry, retrying } = props
+  const { card, task, api, onOpenSession, onRetry, retrying, highlighted = false } = props
   const [askOpen, setAskOpen] = useState(false)
   // Older /board payloads omit icon/origin; the task list carries the same identity.
   const identity = typeof card.icon === 'string' ? card : (task ?? card)
@@ -4501,7 +4779,12 @@ function BriefCard(props) {
       h(SkeletonBlock, { width: '88%', height: 10 }),
       h('p', { className: 'capital-automation-hint' }, zh.board.briefPending))
   }
-  return h('article', { className: 'capital-automation-briefcard', 'data-status': status, 'aria-labelledby': titleId },
+  return h('article', {
+    className: 'capital-automation-briefcard',
+    'data-status': status,
+    'data-highlight': highlighted === true ? 'true' : undefined,
+    'aria-labelledby': titleId,
+  },
     h('div', { className: 'capital-automation-briefhead' },
       h('div', { className: 'capital-automation-brieftitle' },
         h(Glyph, { task: identity, size: 24, radius: 8, glyphSize: 14 }),
@@ -4554,7 +4837,7 @@ function BoardSkeleton(props) {
 }
 
 function BriefFeed(props) {
-  const { cards, tasks, api, loading, error, onOpenSession, onRetry, retryingRunId, onViewAll, onClearFilter, onLoadMore, hasMore, loadingMore, railOpen } = props
+  const { cards, tasks, api, loading, error, onOpenSession, onRetry, retryingRunId, onViewAll, onClearFilter, onLoadMore, hasMore, loadingMore, railOpen, highlightToken = 0 } = props
   if (loading === true) return h(BoardSkeleton, { railOpen })
   if (typeof error === 'string' && error.length > 0) {
     return h('section', { className: 'capital-automation-boardmain', id: 'capital-automation-briefs' },
@@ -4571,6 +4854,7 @@ function BriefFeed(props) {
           onClearFilter ? h('button', { type: 'button', className: 'capital-automation-btn', onClick: onClearFilter }, zh.board.clearFilter) : null)))
   }
   const taskById = new Map((Array.isArray(tasks) ? tasks : []).map((task) => [task.id, task]))
+  const today = localDateKey(new Date())
   return h('section', { className: 'capital-automation-boardmain', id: 'capital-automation-briefs', 'aria-label': zh.board.briefTitle },
     cards.map((card) => h(BriefCard, {
       key: card.runId,
@@ -4580,6 +4864,7 @@ function BriefFeed(props) {
       onOpenSession,
       onRetry,
       retrying: retryingRunId === card.runId,
+      highlighted: highlightToken > 0 && boardCardIsToday(card, today),
     })),
     hasMore
       ? h('button', {
@@ -4592,7 +4877,7 @@ function BriefFeed(props) {
 }
 
 function TodoRow(props) {
-  const { item, period, showDue = true, onOpenSession, onAck, acking = false, ackDisabled = false } = props
+  const { item, period, showDue = true, onOpenSession, onAck, acking = false, ackDisabled = false, checkpointHint = '' } = props
   const [open, setOpen] = useState(false)
   const quote = item.sourceQuote ?? item.sources?.[0]?.sourceQuote
   const due = showDue === true ? boardTodoDueLabel(item, period) : ''
@@ -4604,21 +4889,44 @@ function TodoRow(props) {
   const meta = []
   if (due) meta.push(h('span', { key: 'due' }, due))
   if (item.seenCount > 1) meta.push(h('span', { key: 'seen' }, zh.board.seenCount.replace('{n}', String(item.seenCount))))
+  const watch = item.watch && typeof item.watch === 'object' ? item.watch : null
+  const status = boardTodoStatus(item)
+  const watchLabel = boardTodoWatchLabel(status)
+  if (watch?.checkedAt && status !== 'resolved' && status !== 'tracking') {
+    meta.push(h('span', { key: 'checked' }, zh.board.watchChecked.replace('{time}', formatShortTime(watch.checkedAt))))
+  }
+  const watchMessage = status === 'triggered'
+    ? `${zh.board.watchEvidence}：${watch?.evidence ?? ''}`
+    : ''
+  const checkable = boardTodoCheckable(status)
   const basisAction = open ? zh.board.hideBasis : zh.board.showBasis
   const basisCaret = h('span', { className: 'capital-automation-basiscaret', 'aria-hidden': 'true' }, h(IconChevronDownOutlineRegular, { size: 12 }))
   return h('li', { className: 'capital-automation-todoitem' },
     h('div', { className: 'capital-automation-todoline' },
       h('div', { className: 'capital-automation-todotop' },
-        h('span', { className: 'capital-automation-todokind', 'data-kind': item.kind }, boardTodoKindLabel(item.kind)),
-        h('button', {
-          type: 'button',
-          className: 'capital-automation-btn',
-          'data-size': 'sm',
-          title: zh.board.todoAckTitle,
-          'aria-label': `${zh.board.todoAckTitle}：${item.title}`,
-          disabled: ackDisabled === true,
-          onClick: () => onAck(item),
-        }, acking === true ? zh.processing : zh.board.todoAck)),
+        h('div', { className: 'capital-automation-todotags' },
+          watchLabel.length > 0
+            ? h('span', {
+              className: 'capital-automation-todowatch',
+              'data-status': status,
+              title: boardTodoWatchHint(status, checkpointHint),
+            },
+            watchLabel,
+            status === 'resolved' ? h('span', { className: 'capital-automation-todowatchcheck', 'aria-hidden': 'true' }, '✓') : null)
+            : null),
+        checkable
+          ? h('button', {
+            type: 'button',
+            className: 'capital-automation-todocheck',
+            role: 'checkbox',
+            'aria-checked': 'false',
+            title: zh.board.todoAckTitle,
+            'aria-label': `${zh.board.todoAckTitle}：${item.title}`,
+            'data-busy': acking === true ? 'true' : undefined,
+            disabled: ackDisabled === true,
+            onClick: () => onAck(item),
+          }, acking === true ? h('span', { className: 'capital-automation-todocheckspin', 'aria-hidden': 'true' }) : null)
+          : null),
       h('button', {
         type: 'button',
         className: 'capital-automation-todotitle',
@@ -4628,6 +4936,9 @@ function TodoRow(props) {
         onClick: () => setOpen((value) => !value),
       }, item.title, basisCaret)),
     item.detail ? h('p', { className: 'capital-automation-tododesc' }, item.detail) : null,
+    watchMessage.length > 0
+      ? h('p', { className: 'capital-automation-todowatchmsg', 'data-status': status }, watchMessage)
+      : null,
     meta.length > 0 ? h('div', { className: 'capital-automation-todometa' }, meta) : null,
     open
       ? h('div', { className: 'capital-automation-tododetail' },
@@ -4688,12 +4999,13 @@ function BoardPanel(props) {
 }
 
 function TodoPanel(props) {
-  const { todos, onOpenSession, onAckTodo, ackingTodoId, open, onToggle } = props
+  const { todos, tasks, onOpenSession, onAckTodo, ackingTodoId, open, onToggle } = props
   const [filter, setFilter] = useState('today')
   const now = new Date()
   const entries = todos.map((item) => ({ item, period: boardTodoPeriod(item, now) }))
   entries.sort((left, right) => BOARD_TODO_PERIODS.indexOf(left.period) - BOARD_TODO_PERIODS.indexOf(right.period))
   const visible = entries.filter((entry) => entry.period === filter)
+  const checkpointHint = boardTodoCheckpointHint(tasks)
   const emptyText = filter === 'today'
     ? zh.board.todoEmptyToday
     : zh.board.todoEmptyGroup.replace('{label}', boardTodoGroupLabel(filter))
@@ -4722,6 +5034,7 @@ function TodoPanel(props) {
       onAck: onAckTodo,
       acking: ackingTodoId === entry.item.id,
       ackDisabled: ackingTodoId !== null && ackingTodoId !== undefined,
+      checkpointHint,
     }))))
 }
 
@@ -4732,53 +5045,134 @@ function boardRoleLabel(role) {
   return zh.board.roleRisk
 }
 
+function boardRoleHint(role) {
+  if (role === 'holding') return zh.board.roleHoldingHint
+  if (role === 'watch') return zh.board.roleWatchHint
+  if (role === 'event') return zh.board.roleEventHint
+  return zh.board.roleRiskHint
+}
+
+function boardRoleTitle(role) {
+  return `${boardRoleLabel(role)}：${boardRoleHint(role)}`
+}
+
+function boardStockFilterOptions() {
+  return [{ value: 'all', label: zh.board.stockFilterAll }].concat(
+    BOARD_STOCK_ROLES.map((role) => ({ value: role, label: boardRoleLabel(role) })),
+  )
+}
+
+function boardEntrySymbolKey(entry) {
+  return typeof entry.symbolKey === 'string' ? entry.symbolKey : entry.symbol
+}
+
 function StockRow(props) {
   const { stock, todos, onOpenSession } = props
   const [open, setOpen] = useState(false)
-  const related = todos.filter((item) => item.symbol === stock.symbol)
+  const stockKey = boardEntrySymbolKey(stock)
+  const related = Array.isArray(stock.items)
+    ? stock.items
+    : todos.filter((item) => item.ackedAt === undefined && boardEntrySymbolKey(item) === stockKey)
+  const followUpCount = Array.isArray(stock.items) ? stock.items.length : (stock.todoCount ?? 0)
+  const roleSummary = stock.roles.map((role) => boardRoleTitle(role)).join('；')
   return h('div', { className: 'capital-automation-stockrow' },
     h('button', {
       type: 'button',
       className: 'capital-automation-stockmain',
       'aria-expanded': open ? 'true' : 'false',
+      'aria-label': `${stock.name} ${stock.symbol}${roleSummary.length > 0 ? `，${roleSummary}` : ''}`,
       onClick: () => setOpen((value) => !value),
     },
     h('span', { className: 'capital-automation-stockname' }, stock.name),
     h('span', { className: 'capital-automation-stockcode' }, stock.symbol),
     h('span', { className: 'capital-automation-stockroles' },
-      stock.roles.map((role) => h('span', { key: role, className: 'capital-automation-stockrole', 'data-role': role }, boardRoleLabel(role)))),
+      stock.roles.map((role) => h('span', {
+        key: role,
+        className: 'capital-automation-stockrole',
+        'data-role': role,
+        title: boardRoleTitle(role),
+      }, boardRoleLabel(role)))),
     stock.note ? h('span', { className: 'capital-automation-stocknote' }, stock.note) : null,
     h('span', { className: 'capital-automation-stockmeta' },
       stock.nextAt ? h('span', null, stock.nextAt) : null,
-      stock.todoCount > 0 ? h('span', null, zh.board.stockTodoCount.replace('{n}', String(stock.todoCount))) : null)),
+      followUpCount > 0
+        ? h('span', { title: zh.board.stockTodoCountHint }, zh.board.stockTodoCount.replace('{n}', String(followUpCount)))
+        : null)),
     open && related.length > 0
       ? h('ul', { className: 'capital-automation-stocktodos' }, related.map((item) => h('li', { key: item.id },
-        h('span', null, item.title),
-        item.sessionId ? h('button', { type: 'button', className: 'capital-automation-btn', 'data-size': 'sm', onClick: () => onOpenSession(item.sessionId) }, zh.openSession) : null)))
+        item.sessionId
+          ? h('button', {
+            type: 'button',
+            className: 'capital-automation-stocktodo',
+            title: zh.openSession,
+            'aria-label': `${item.title}，${zh.openSession}`,
+            onClick: () => onOpenSession(item.sessionId),
+          },
+          h('span', { className: 'capital-automation-stocktodotitle' }, item.title),
+          h(IconRightUpOutlineRegular, { size: 12, 'aria-hidden': 'true' }))
+          : h('span', { className: 'capital-automation-stocktodo', 'data-static': 'true' }, item.title))))
       : null)
 }
 
 function StockRadar(props) {
   const { stocks, todos, total, onOpenSession, open, onToggle } = props
-  const hidden = Math.max(0, (total ?? stocks.length) - stocks.length)
+  const [filter, setFilter] = useState('all')
+  const [showAll, setShowAll] = useState(false)
+  const totalCount = total ?? stocks.length
+  const filtered = filter === 'all'
+    ? stocks
+    : stocks.filter((stock) => Array.isArray(stock.roles) && stock.roles.includes(filter))
+  const visible = showAll ? filtered : filtered.slice(0, BOARD_STOCK_PAGE_SIZE)
+  const hidden = Math.max(0, filtered.length - visible.length)
+  const capped = Math.max(0, totalCount - stocks.length)
+  const countText = filter === 'all'
+    ? zh.board.stocksCount.replace('{n}', String(totalCount))
+    : zh.board.stockFilteredCount.replace('{shown}', String(filtered.length)).replace('{total}', String(totalCount))
   return h(BoardPanel, {
     id: 'capital-automation-stocks',
-    title: zh.board.statsStocks,
+    title: zh.board.stockTitle,
     open,
     onToggle,
-    meta: stocks.length === 0 ? null : h('span', { className: 'capital-automation-hint' }, zh.board.stocksCount.replace('{n}', String(total ?? stocks.length))),
+    action: stocks.length === 0
+      ? null
+      : h('div', { className: 'capital-automation-stockfilters' },
+        h('span', { className: 'capital-automation-hint' }, countText),
+        h(Select, {
+          value: filter,
+          options: boardStockFilterOptions(),
+          onChange: (value) => { setFilter(value); setShowAll(false) },
+          size: 'sm',
+          label: zh.board.stockFilterLabel,
+          align: 'end',
+        })),
   },
   stocks.length === 0
     ? h('p', { className: 'capital-automation-hint' }, zh.board.stockEmpty)
-    : stocks.map((stock) => h(StockRow, { key: stock.symbol, stock, todos, onOpenSession })),
-  hidden > 0 ? h('p', { className: 'capital-automation-hint' }, zh.board.stockOther.replace('{n}', String(hidden))) : null)
-}
-
-function boardGapLabel(kind) {
-  if (kind === 'capability') return zh.board.gapCapability
-  if (kind === 'conflict') return zh.board.gapConflict
-  if (kind === 'quality') return zh.board.gapQuality
-  return zh.board.gapTransient
+    : filtered.length === 0
+      ? h('p', { className: 'capital-automation-hint' }, zh.board.stockFilterEmpty)
+      : [
+        ...visible.map((stock) => h(StockRow, { key: boardEntrySymbolKey(stock), stock, todos, onOpenSession })),
+        hidden > 0
+          ? h('button', {
+            key: 'stock-more',
+            type: 'button',
+            className: 'capital-automation-btn capital-automation-stockmore',
+            'data-size': 'sm',
+            onClick: () => setShowAll(true),
+          }, zh.board.stockShowAll.replace('{n}', String(hidden)))
+          : showAll && filtered.length > BOARD_STOCK_PAGE_SIZE
+            ? h('button', {
+              key: 'stock-less',
+              type: 'button',
+              className: 'capital-automation-btn capital-automation-stockmore',
+              'data-size': 'sm',
+              onClick: () => setShowAll(false),
+            }, zh.board.stockShowLess)
+            : null,
+        capped > 0
+          ? h('p', { key: 'stock-capped', className: 'capital-automation-hint' }, zh.board.stockOther.replace('{n}', String(capped)))
+          : null,
+      ])
 }
 
 function GapRow(props) {
@@ -4788,7 +5182,6 @@ function GapRow(props) {
   const basisAction = open ? zh.board.hideBasis : zh.board.showBasis
   return h('li', { className: 'capital-automation-gaprow' },
     h('div', { className: 'capital-automation-gaphead' },
-      h('span', { className: 'capital-automation-gapkind', 'data-kind': gap.kind }, boardGapLabel(gap.kind)),
       h('button', {
         type: 'button',
         className: 'capital-automation-gaptitle',
@@ -4801,8 +5194,20 @@ function GapRow(props) {
     open
       ? h('div', { className: 'capital-automation-tododetail' },
         h('blockquote', null, source?.sourceQuote ?? gap.sourceQuote),
-        source ? h('p', { className: 'capital-automation-hint' }, `${source.taskTitle} · ${formatShortTime(source.finishedAt)}`) : null,
-        source?.sessionId ? h('button', { type: 'button', className: 'capital-automation-btn', 'data-size': 'sm', onClick: () => onOpenSession(source.sessionId) }, zh.openSession) : null)
+        source
+          ? h('div', { className: 'capital-automation-todosource' },
+            h('span', null, `${source.taskTitle} · ${formatShortTime(source.finishedAt)}`),
+            source.sessionId
+              ? h('button', {
+                type: 'button',
+                className: 'capital-automation-btn',
+                'data-size': 'icon',
+                title: zh.openSession,
+                'aria-label': zh.openSession,
+                onClick: () => onOpenSession(source.sessionId),
+              }, h(IconRightUpOutlineRegular, { size: 14 }))
+              : null)
+          : null)
       : null)
 }
 
@@ -4882,7 +5287,16 @@ function RunHealthPanel(props) {
           h('span', { className: 'capital-automation-healthissuetitle' }, issue.taskTitle),
           h('span', { className: 'capital-automation-healthissuestatus', 'data-tone': tone ?? undefined }, statusLabel(issue.status)),
           issue.recoveredByRunId ? h('span', { className: 'capital-automation-healthrecovered' }, zh.board.healthRecovered) : null),
-        issue.sessionId ? h('button', { type: 'button', className: 'capital-automation-btn', 'data-size': 'sm', onClick: () => onOpenSession(issue.sessionId) }, zh.board.healthOpen) : null)
+        issue.sessionId
+          ? h('button', {
+            type: 'button',
+            className: 'capital-automation-btn',
+            'data-size': 'icon',
+            title: zh.openSession,
+            'aria-label': zh.openSession,
+            onClick: () => onOpenSession(issue.sessionId),
+          }, h(IconRightUpOutlineRegular, { size: 14 }))
+          : null)
     }))
     : h('p', { className: 'capital-automation-healthempty' }, zh.board.healthNoIssues))
 }
@@ -4896,6 +5310,13 @@ function BoardPage(props) {
   const [railOpen, setRailOpen] = useState(() => readBoardUi().rail !== false)
   const [openPanels, setOpenPanels] = useState(() => boardPanelFlags(readBoardUi().panels))
   const [pendingJump, setPendingJump] = useState(null)
+  const [briefHighlight, setBriefHighlight] = useState(0)
+
+  useEffect(() => {
+    if (briefHighlight === 0) return undefined
+    const timer = setTimeout(() => setBriefHighlight(0), BOARD_BRIEF_HIGHLIGHT_MS)
+    return () => clearTimeout(timer)
+  }, [briefHighlight])
 
   useEffect(() => {
     if (typeof pendingJump !== 'string') return undefined
@@ -4952,9 +5373,10 @@ function BoardPage(props) {
       error.length > 0 ? h('div', { className: 'capital-automation-banner', 'data-tone': 'error', role: 'alert' }, error) : null,
       h(BoardEmpty, { hasActiveTasks, storageReady, onGoTasks, onNewTask }))
   }
+  const todoToday = boardTodoTodaySplit(board?.todos ?? [])
   const boardStats = board?.stats === undefined
     ? undefined
-    : { ...board.stats, todos: boardTodoTodayCount(board?.todos ?? []) }
+    : { ...board.stats, todos: todoToday.total, todosManual: todoToday.manual, todosAuto: todoToday.auto }
   return h('div', { className: 'capital-automation-board' },
     h(BoardToolbar, {
       range,
@@ -4967,7 +5389,11 @@ function BoardPage(props) {
       onToggleRail: toggleRail,
     }),
     error.length > 0 ? h('div', { className: 'capital-automation-banner', 'data-tone': 'error', role: 'alert' }, error) : null,
-    h(BoardStats, { stats: boardStats, onJump: jumpTo }),
+    h(BoardStats, {
+      stats: boardStats,
+      onJump: jumpTo,
+      onHighlightTodayBriefs: () => setBriefHighlight((value) => value + 1),
+    }),
     h('div', {
       className: 'capital-automation-boardgrid',
       'data-rail': railOpen === true ? 'open' : 'closed',
@@ -4987,6 +5413,7 @@ function BoardPage(props) {
         hasMore: board?.nextBefore !== null && board?.nextBefore !== undefined,
         loadingMore,
         railOpen,
+        highlightToken: briefHighlight,
       }),
       h('aside', {
         id: 'capital-automation-boardrail',
@@ -4995,6 +5422,7 @@ function BoardPage(props) {
       },
         h(TodoPanel, {
           todos: board?.todos ?? [],
+          tasks,
           onOpenSession,
           onAckTodo,
           ackingTodoId,
@@ -5273,15 +5701,33 @@ function AutomationPage(props) {
     setBoardError('')
     try {
       await api.confirmTodo(item.id)
+      const ackedAt = new Date().toISOString()
       setBoard((current) => {
         if (current === null) return current
-        const removed = (current.todos ?? []).find((entry) => entry.id === item.id)
-        if (removed === undefined) return current
-        const todos = current.todos.filter((entry) => entry.id !== item.id)
-        const stocks = (current.stocks ?? []).map((stock) =>
-          removed.symbol !== undefined && stock.symbol === removed.symbol
-            ? { ...stock, todoCount: Math.max(0, (stock.todoCount ?? 0) - 1) }
-            : stock)
+        const target = (current.todos ?? []).find((entry) => entry.id === item.id)
+        if (target === undefined) return current
+        const todos = current.todos.map((entry) => entry.id === item.id
+          ? {
+            ...entry,
+            ackedAt,
+            ...(entry.watch === null || entry.watch === undefined
+              ? {}
+              : {
+                watch: {
+                  ...entry.watch,
+                  status: 'resolved',
+                  resolvedFrom: entry.watch.resolvedFrom ?? entry.watch.status,
+                },
+              }),
+          }
+          : entry)
+        const targetKey = target.symbol === undefined ? undefined : boardEntrySymbolKey(target)
+        const stocks = (current.stocks ?? []).map((stock) => {
+          if (targetKey === undefined || boardEntrySymbolKey(stock) !== targetKey) return stock
+          if (!Array.isArray(stock.items)) return { ...stock, todoCount: Math.max(0, (stock.todoCount ?? 0) - 1) }
+          const items = stock.items.filter((entry) => entry.id !== target.id)
+          return { ...stock, items, todoCount: items.length }
+        })
         return {
           ...current,
           todos,
@@ -5438,6 +5884,25 @@ function AutomationPage(props) {
   async function openTaskFromNotification(taskId) {
     setInbox(false)
     await openTaskById(taskId)
+  }
+
+  async function openTodoFromNotification(item) {
+    setInbox(false)
+    const wasUnread = item.readAt === undefined
+    setNotifications((current) => current.map((entry) => entry.id === item.id && entry.readAt === undefined
+      ? { ...entry, readAt: new Date().toISOString() }
+      : entry))
+    if (wasUnread) setUnread((current) => Math.max(0, current - 1))
+    try {
+      await api.markRead({ ids: [item.id] })
+    } catch {
+      // Navigation still works when the read receipt fails; the next poll reconciles the badge.
+    }
+    switchTab('board')
+    void loadBoard(boardRange, boardCategory)
+    requestAnimationFrame(() => {
+      document.getElementById('capital-automation-todo')?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+    })
   }
 
   useEffect(() => {
@@ -5654,6 +6119,7 @@ function AutomationPage(props) {
       notifications,
       onMarkAllRead: () => { void markAllRead() },
       onOpenTask: (taskId) => { void openTaskFromNotification(taskId) },
+      onOpenTodo: (item) => { void openTodoFromNotification(item) },
       busy: inboxBusy,
     }),
     h(ConfirmModal, {

@@ -559,6 +559,26 @@ test('看板追问：POST 只接受严格 body，GET 按 id 读状态', async ()
   assert.equal(wrongMethod.statusCode, 405)
 })
 
+test('看板历史：GET /board/briefs/:runId/asks 返回全部追问', async () => {
+  let seen
+  const asks = {
+    async history(runId) {
+      seen = runId
+      return [
+        { id: 'ask_1', question: '第一问', status: 'ready' },
+        { id: 'ask_2', question: '第二问', status: 'running' },
+      ]
+    },
+  }
+  const { handler } = harness({ asks })
+  const response = await call(handler, { method: 'GET', url: '/capital-automation/board/briefs/run_ask/asks' })
+  assert.equal(response.statusCode, 200)
+  assert.equal(seen, 'run_ask')
+  assert.deepEqual(response.json().asks.map((ask) => ask.id), ['ask_1', 'ask_2'])
+  const wrongMethod = await call(handler, { method: 'POST', url: '/capital-automation/board/briefs/run_ask/asks' })
+  assert.equal(wrongMethod.statusCode, 405)
+})
+
 test('看板完整回答：GET /board/asks/:id/answer，不被单条状态路由吞掉', async () => {
   let seen
   const asks = {

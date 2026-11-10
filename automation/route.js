@@ -240,6 +240,11 @@ async function dispatch({ req, method, suffix, url, service, requestId }) {
   if (askCreate !== null && method === 'POST') {
     return { body: await service.askBrief(decodeId(askCreate[1]), await readBody(req)), status: 202 }
   }
+  const askHistory = /^\/board\/briefs\/([^/]+)\/asks$/.exec(suffix)
+  if (askHistory !== null) {
+    if (method !== 'GET') throw new AutomationError('method_not_allowed', '只支持 GET。', 405)
+    return { body: await service.askHistory(decodeId(askHistory[1])) }
+  }
   const askAnswer = /^\/board\/asks\/([^/]+)\/answer$/.exec(suffix)
   if (askAnswer !== null) {
     if (method !== 'GET') throw new AutomationError('method_not_allowed', '只支持 GET。', 405)

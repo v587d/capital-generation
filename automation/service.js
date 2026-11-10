@@ -439,6 +439,17 @@ export function createAutomationService(options) {
     }
   }
 
+  async function askHistory(runId) {
+    if (asks === undefined || typeof asks.history !== 'function') {
+      throw new AutomationError('ask_unavailable', '追问服务暂时不可用。', 503)
+    }
+    try {
+      return { asks: await asks.history(runId) }
+    } catch (error) {
+      mapAskError(error)
+    }
+  }
+
   async function askAnswer(askId) {
     if (asks === undefined || typeof asks.answer !== 'function') {
       throw new AutomationError('ask_unavailable', '追问服务暂时不可用。', 503)
@@ -514,6 +525,7 @@ export function createAutomationService(options) {
     retryBrief,
     askBrief,
     askStatus,
+    askHistory,
     askAnswer,
     listNotifications,
     markNotificationsRead,

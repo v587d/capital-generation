@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { createRunRunner, buildRunPrompt, sessionTitleOf } from './runner.js'
 import { createBriefService } from './brief.js'
 import { createBoardService } from './board.js'
+import { createTodoWatchService } from './watch.js'
 import { createAskService } from './ask.js'
 import { createScheduler } from './scheduler.js'
 import { createAutomationService, AutomationError } from './service.js'
@@ -91,18 +92,28 @@ export function createAutomationRuntime(options) {
     now,
     logger,
   })
+  const boardService = createBoardService({
+    store,
+    scheduler,
+    asks,
+    now,
+  })
+  const watches = createTodoWatchService({
+    ctx,
+    store,
+    board: boardService,
+    now,
+    logger,
+    getSettings,
+    isOwner: () => scheduler.status().state === 'active',
+  })
   briefs = createBriefService({
     ctx,
     store,
     scheduler,
     now,
     logger,
-  })
-  const boardService = createBoardService({
-    store,
-    scheduler,
-    asks,
-    now,
+    onBriefReady: (payload) => watches.onBriefReady(payload),
   })
   const service = createAutomationService({
     store,
@@ -124,7 +135,7 @@ export function createAutomationRuntime(options) {
       installAutomationPolicy({ ctx: toolsCtx, runner, logger })
     })
   }
-  return { store, runner, scheduler, briefs, asks, service, calendar, workspaces, profile: { displayName, runDir, ownerDir } }
+  return { store, runner, scheduler, briefs, watches, asks, service, calendar, workspaces, profile: { displayName, runDir, ownerDir } }
 }
 
 function authorizeFactory(ctx) {
@@ -187,6 +198,7 @@ export function apply(ctx) {
       created.scheduler.start()
         .then(() => {
           created.briefs?.start()
+          created.watches?.start()
           logger?.info?.(`capital-automation: scheduler ${created.scheduler.status().state}`)
         })
         .catch((error) => logger?.error?.(`capital-automation: scheduler 启动失败：${String(error)}`))
@@ -195,6 +207,7 @@ export function apply(ctx) {
           activeService = undefined
         }
         await created.briefs?.stop?.()
+        created.watches?.stop?.()
         await created.scheduler.stop().catch(() => {})
         created.calendar.dispose?.()
         await created.runner.dispose?.()

@@ -271,11 +271,21 @@ export const NotificationSchema = z.strictObject({
   schemaVersion: z.literal(1),
   id: z.string().min(1).max(80),
   profileKey: z.string().min(1).max(80),
-  kind: z.enum(['run_failed', 'run_timeout', 'run_succeeded', 'scheduler_standby', 'calendar_unavailable', 'skipped']),
+  kind: z.enum([
+    'run_failed',
+    'run_timeout',
+    'run_succeeded',
+    'scheduler_standby',
+    'calendar_unavailable',
+    'skipped',
+    'todo_triggered',
+    'todo_needs_human',
+  ]),
   title: z.string().min(1).max(120),
   message: z.string().max(MAX_ERROR_MESSAGE_CHARS),
   runId: z.string().min(1).max(80).optional(),
   taskId: z.string().min(1).max(80).optional(),
+  todoId: z.string().min(1).max(200).optional(),
   createdAt: isoInstant,
   readAt: isoInstant.optional(),
 })
@@ -350,6 +360,41 @@ export const TodoAckSchema = z.strictObject({
   profileKey: z.string().min(1).max(80),
   todoId: z.string().min(1).max(200),
   confirmedAt: isoInstant,
+})
+
+/** Derived tracking state for one TODO item; briefs and acks stay the source of truth. */
+export const TodoWatchSchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  id: z.string().min(1).max(80),
+  profileKey: z.string().min(1).max(80),
+  todoId: z.string().min(1).max(200),
+  kind: z.enum(['confirm', 'verify']),
+  status: z.enum(['watching', 'triggered', 'needs_human', 'resolved', 'expired']),
+  resolvedFrom: z.enum(['watching', 'triggered', 'needs_human', 'expired']).optional(),
+  title: z.string().min(1).max(40),
+  detail: z.string().max(120).optional(),
+  symbol: z.string().max(20).optional(),
+  trigger: z.string().max(80).optional(),
+  dueAt: z.string().refine(isCalendarDate, { message: 'must be a valid YYYY-MM-DD date' }).optional(),
+  firstSeenAt: isoInstant,
+  lastSeenAt: isoInstant,
+  checkedAt: isoInstant.optional(),
+  verdict: z.enum(['triggered', 'not_triggered', 'insufficient']).optional(),
+  evidence: z.string().max(300).optional(),
+  handoffReason: z.string().max(160).optional(),
+  evidenceRunId: z.string().min(1).max(80).optional(),
+  evidenceSessionId: z.string().min(1).max(120).optional(),
+  notifiedAt: isoInstant.optional(),
+  notifiedStatus: z.enum(['triggered', 'needs_human']).optional(),
+  createdAt: isoInstant,
+  updatedAt: isoInstant,
+}).superRefine((watch, ctx) => {
+  if (watch.status === 'triggered' && watch.evidence === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['evidence'], message: 'triggered watch requires evidence' })
+  }
+  if (watch.status === 'needs_human' && watch.handoffReason === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['handoffReason'], message: 'needs_human watch requires handoffReason' })
+  }
 })
 
 /**

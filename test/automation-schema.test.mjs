@@ -11,8 +11,10 @@ import {
   TaskPatchSchema,
   TaskRecordSchema,
   TaskBriefSchema,
+  NotificationSchema,
   TodoAckSchema,
   TodoConfirmSchema,
+  TodoWatchSchema,
   assertCleanJson,
   resolveTaskRecord,
 } from '../automation/schema.js'
@@ -420,6 +422,63 @@ test('TODO 确认 schema：记录严格且只收 id，不写 brief', () => {
   assert.equal(TodoConfirmSchema.parse({ id: ack.todoId }).id, ack.todoId)
   assert.throws(() => TodoConfirmSchema.parse({}), '缺少 id 必须被拒')
   assert.throws(() => TodoConfirmSchema.parse({ id: 'x', extra: true }), '未知字段必须被拒')
+})
+
+test('TODO 跟踪 schema：状态、触发证据与人工交接必填，未知字段被拒', () => {
+  const base = {
+    schemaVersion: 1,
+    id: 'tw_x',
+    profileKey: 'p_x',
+    todoId: 'verify|300803.SZ|收盘价站回 44.01',
+    kind: 'verify',
+    status: 'watching',
+    title: '指南针收盘能否站回 44.01',
+    dueAt: '2026-11-07',
+    firstSeenAt: '2026-11-04T00:00:00.000Z',
+    lastSeenAt: '2026-11-04T00:00:00.000Z',
+    createdAt: '2026-11-04T00:00:00.000Z',
+    updatedAt: '2026-11-04T00:00:00.000Z',
+  }
+  assert.equal(TodoWatchSchema.parse(base).status, 'watching')
+  assert.throws(() => TodoWatchSchema.parse({ ...base, status: 'triggered' }), '触发态必须有证据')
+  assert.equal(TodoWatchSchema.parse({
+    ...base,
+    status: 'triggered',
+    checkedAt: '2026-11-04T08:00:00.000Z',
+    verdict: 'triggered',
+    evidence: '收盘 44.55 元，站回 44.01。',
+  }).status, 'triggered')
+  assert.throws(() => TodoWatchSchema.parse({
+    ...base,
+    status: 'needs_human',
+  }), '人工交接必须有原因')
+  assert.equal(TodoWatchSchema.parse({
+    ...base,
+    status: 'needs_human',
+    handoffReason: '只有你知道仓位。',
+  }).status, 'needs_human')
+  assert.equal(TodoWatchSchema.parse({
+    ...base,
+    status: 'resolved',
+    resolvedFrom: 'needs_human',
+  }).resolvedFrom, 'needs_human')
+  assert.throws(() => TodoWatchSchema.parse({ ...base, status: 'resolved', resolvedFrom: 'resolved' }), 'resolvedFrom 不接受自身')
+  assert.throws(() => TodoWatchSchema.parse({ ...base, kind: 'track' }), '跟踪类不进入自动核验')
+  assert.throws(() => TodoWatchSchema.parse({ ...base, dueAt: '2026-02-30' }), '非法日期必须被拒')
+  assert.throws(() => TodoWatchSchema.parse({ ...base, unknown: true }), '未知字段必须被拒')
+
+  const notification = {
+    schemaVersion: 1,
+    id: 'ntf_x',
+    profileKey: 'p_x',
+    kind: 'todo_triggered',
+    title: '已触发：指南针收盘能否站回 44.01',
+    message: '收盘 44.55 元，站回 44.01。',
+    todoId: base.todoId,
+    createdAt: '2026-11-04T08:00:00.000Z',
+  }
+  assert.equal(NotificationSchema.parse(notification).todoId, base.todoId)
+  assert.throws(() => NotificationSchema.parse({ ...notification, kind: 'todo_unknown' }), '通知 kind 是闭集')
 })
 
 test('看板追问 schema：running / ready / failed 三态的必填与禁填字段', () => {

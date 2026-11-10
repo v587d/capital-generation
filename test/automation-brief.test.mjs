@@ -2,13 +2,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  BRIEF_MAX_ANSWER_CHARS,
   BRIEF_PROMPT_VERSION,
   BRIEF_SYSTEM_PROMPT,
   BriefValidationError,
-  clipFinalAnswer,
   createBriefService,
   extractSessionAnswer,
+  normalizeFinalAnswer,
   parseBriefOutput,
 } from '../automation/brief.js'
 import { createAutomationStore } from '../automation/store.js'
@@ -184,11 +183,11 @@ test('会话正文：取最后一条主 assistant 文本和最后一条 request/
   assert.deepEqual(extracted, { text: '最终结论', provider: 'b', model: 'two' })
 })
 
-test('正文超过 12k 取头尾，coverage=partial', () => {
-  const clipped = clipFinalAnswer('字'.repeat(BRIEF_MAX_ANSWER_CHARS + 1))
-  assert.equal(clipped.coverage, 'partial')
-  assert.match(clipped.text, /中间省略/)
-  assert.ok(Array.from(clipped.text).length < BRIEF_MAX_ANSWER_CHARS + 40, '头尾相加再加省略标记')
+test('正文不截断：无论多长都完整交给简报与 TODO 核验', () => {
+  const source = `${'字'.repeat(20_000)}\n尾部标记`
+  const normalized = normalizeFinalAnswer(source)
+  assert.equal(normalized.coverage, 'full')
+  assert.equal(normalized.text, source)
 })
 
 test('固定 system prompt：无 persona、无工具，sessionId 与正文进入 user payload', async () => {
@@ -236,6 +235,43 @@ test('固定 system prompt：无 persona、无工具，sessionId 与正文进入
   assert.equal(brief.promptVersion, BRIEF_PROMPT_VERSION)
   assert.equal(brief.coverage, 'full')
   assert.equal((await store.getRun(run.id)).status, 'succeeded', '简报失败/成功都不能改运行终态')
+})
+
+test('TODO 核验拿到终稿与路由：简报模型失败也不影响入队，正文不按 12k 截断', async () => {
+  const { store, task } = await makeStore()
+  const run = await successRun(store, task)
+  const longAnswer = `${'长'.repeat(13_000)}\n尾部标记`
+  let seen
+  const ctx = {
+    get(name) {
+      if (name === 'sessionQuery') return { readSession: async () => sessionEvents(longAnswer) }
+      if (name === 'llm') {
+        return {
+          async *stream() {
+            throw new Error('brief model down')
+          },
+        }
+      }
+      return undefined
+    },
+  }
+  const service = createBriefService({
+    ctx,
+    store,
+    scheduler: { status: () => ({ state: 'active' }) },
+    now: () => NOW,
+    logger: { warn() {} },
+    onBriefReady: (payload) => { seen = payload },
+  })
+  await service.onRunSucceeded({ run: await store.getRun(run.id), task })
+  const failed = await waitForBrief(store, run.id, 'failed')
+  service.stop()
+  assert.match(failed.error, /brief model down/)
+  assert.ok(seen, '简报失败时 TODO 核验仍必须拿到终稿')
+  assert.ok(seen.text.length > 12_000, 'TODO 核验拿全文，不再复用简报的 12k 截断')
+  assert.match(seen.text, /尾部标记/)
+  assert.deepEqual(seen.route, { provider: 'test-provider', model: 'test-model' })
+  assert.equal(seen.run.id, run.id)
 })
 
 test('模型失败只把简报标失败，不影响运行；失败简报可单条重试', async () => {
