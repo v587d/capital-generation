@@ -8,7 +8,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { createRunRunner, buildRunPrompt, sessionTitleOf } from './runner.js'
-import { createBriefService } from './brief.js'
+import { createBriefService, readSessionAnswer } from './brief.js'
 import { createBoardService } from './board.js'
 import { createTodoWatchService } from './watch.js'
 import { createAskService } from './ask.js'
@@ -73,13 +73,18 @@ export function createAutomationRuntime(options) {
     logger,
   })
   let briefs
+  let watches
   const runner = createRunRunner({
     ctx,
     store,
     settings: getSettings,
     profile: { displayName, runDir },
     workspaces,
-    onRunSucceeded: (payload) => briefs?.onRunSucceeded(payload),
+    onRunSucceeded: (payload) => {
+      if (watches?.isVerifierTask(payload.task) === true) return watches.onVerifierRun(payload)
+      return briefs?.onRunSucceeded(payload)
+    },
+    buildPromptContext: (payload) => watches?.promptContextFor(payload.task),
     now,
     logger,
   })
@@ -89,6 +94,7 @@ export function createAutomationRuntime(options) {
     calendar,
     profile: { ownerDir },
     getSettings,
+    shouldRun: (task) => watches?.hasCandidates(task) ?? true,
     now,
     logger,
   })
@@ -98,13 +104,22 @@ export function createAutomationRuntime(options) {
     asks,
     now,
   })
-  const watches = createTodoWatchService({
-    ctx,
+  watches = createTodoWatchService({
     store,
     board: boardService,
     now,
     logger,
     getSettings,
+    readAnswer: (sessionId) => {
+      let sessionQuery
+      try {
+        sessionQuery = ctx.get('sessionQuery')
+      } catch {
+        sessionQuery = undefined
+      }
+      if (sessionQuery?.readSession === undefined) return Promise.reject(new Error('sessionQuery 不可用'))
+      return readSessionAnswer(sessionQuery, sessionId, { includeToolText: true })
+    },
     isOwner: () => scheduler.status().state === 'active',
   })
   briefs = createBriefService({
@@ -113,7 +128,6 @@ export function createAutomationRuntime(options) {
     scheduler,
     now,
     logger,
-    onBriefReady: (payload) => watches.onBriefReady(payload),
   })
   const service = createAutomationService({
     store,

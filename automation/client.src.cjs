@@ -118,7 +118,7 @@ const zh = {
     statsIssuesToday: '今天运行异常',
     statsBriefsTodayHint: '点击高亮今天的简报卡片',
     statsTodoHint: '点击查看今天的 TODO',
-    statsTodoManualHint: '需要你确认或跟踪的 TODO',
+    statsTodoManualHint: '需要你处理或跟踪的 TODO',
     statsTodoAutoHint: '自动核验中的 TODO',
     statsStockHint: '点击查看个股动态',
     statsGapHint: '点击查看数据能力缺口',
@@ -160,18 +160,26 @@ const zh = {
     stockShowAll: '展开全部 {n} 只',
     stockShowLess: '收起',
     gapsCount: '{n} 个缺口',
-    todoAckTitle: '标记为已确认',
     todoAcked: '已确认',
+    todoMoreTitle: '更多操作',
+    todoActionConfirm: '已确认',
+    todoActionAuto: '转入自动校验',
+    todoActionDefer: '忽略',
+    todoAutoQueued: '已转入自动校验，下一次收盘核验',
+    todoDeferred: '已忽略当前版本',
     watchWatching: '自动核验中',
     watchTriggered: '已触发',
-    watchNeedsHuman: '待人工确认',
+    watchNeedsHuman: '待人工处理',
     watchResolved: '已确认',
-    watchExpired: '已停止核验',
+    watchDeferred: '忽略',
+    watchExpired: '已过期',
     watchTracking: '跟踪',
     watchEvidence: '核验依据',
+    watchSource: '来源',
+    watchDeferredHint: '已忽略当前版本；后续新版本会重新出现',
     watchChecked: '核验于 {time}',
     notificationFallbackTodoTriggered: '条件已触发，查看 TODO 详情。',
-    notificationFallbackTodoNeedsHuman: '自动核验无法确认，需要你确认。',
+    notificationFallbackTodoNeedsHuman: '自动核验无法完成，需要你处理。',
     todoEmptyToday: '今天暂无待办',
     todoEmptyGroup: '暂无「{label}」待办',
     todoFilterLabel: '按日期筛选',
@@ -1075,11 +1083,21 @@ function installStyles() {
     .capital-automation-boardemptyhint { color: var(--ca-caption); font-size: 11.5px !important; line-height: 18px !important; }
     .capital-automation-boardemptyactions { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; margin-top: 6px; }
     .capital-automation-todolist, .capital-automation-stocktodos, .capital-automation-gaplist, .capital-automation-gaprow { list-style: none; margin: 0; padding: 0; }
-    .capital-automation-todoitem { padding: 8px 0; border-top: .5px solid var(--ca-line); }
+    .capital-automation-todoitem { padding: 8px 0; border-top: .5px solid var(--ca-line); transition: opacity .16s ease, padding .18s ease; }
     .capital-automation-todoitem:first-child { border-top: 0; }
+    .capital-automation-todoitem[data-decided="true"], .capital-automation-todoitem[data-archived="true"] { padding: 7px 0; opacity: .72; border-top: 0; }
+    .capital-automation-todoitem:not([data-decided="true"]) + .capital-automation-todoitem[data-decided="true"] { border-top: .5px solid var(--ca-line); }
+    .capital-automation-todoitem[data-decided="true"]:hover, .capital-automation-todoitem[data-archived="true"]:hover { opacity: 1; }
+    .capital-automation-todoitem[data-decided="true"] .capital-automation-todoline, .capital-automation-todoitem[data-archived="true"] .capital-automation-todoline { gap: 0; }
+    .capital-automation-todoitem[data-decided="true"] .capital-automation-todotop, .capital-automation-todoitem[data-archived="true"] .capital-automation-todotop { justify-content: flex-start; gap: 10px; }
+    .capital-automation-todoitem[data-decided="true"] .capital-automation-todotitle, .capital-automation-todoitem[data-archived="true"] .capital-automation-todotitle { flex: 1 1 auto; width: auto; min-width: 0; color: var(--ca-muted); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .capital-automation-todoitem[data-decided="true"] .capital-automation-todotitle { cursor: default; }
+    .capital-automation-todoitem[data-archived="true"] .capital-automation-todotitle { cursor: pointer; }
+    .capital-automation-todoitem[data-decided="true"] .capital-automation-todotitle:hover { color: var(--ca-muted); }
+    .capital-automation-todoitem[data-archived="true"] .capital-automation-todotitle:hover { color: var(--ca-business-text); }
     .capital-automation-todoline { display: flex; flex-direction: column; align-items: stretch; gap: 5px; min-width: 0; }
     .capital-automation-todotop { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
-    .capital-automation-todotags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 5px; min-width: 0; }
+    .capital-automation-todotags { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 4px 5px; min-width: 0; }
     .capital-automation-todotitle { flex: none; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; font: inherit; color: var(--dsw-alias-label-primary); font-size: 13px; line-height: 20px; font-weight: 600; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
     .capital-automation-todotitle:hover, .capital-automation-gaptitle:hover { color: var(--ca-business-text); }
     .capital-automation-todotitle:focus-visible, .capital-automation-gaptitle:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: 2px; border-radius: 4px; }
@@ -1087,20 +1105,19 @@ function installStyles() {
     .capital-automation-todotitle[aria-expanded="true"] .capital-automation-basiscaret, .capital-automation-gaptitle[aria-expanded="true"] .capital-automation-basiscaret { transform: rotate(0deg); }
     .capital-automation-tododesc { margin: 3px 0 0; color: var(--ca-muted); font-size: 12px; line-height: 20px; overflow-wrap: anywhere; }
     .capital-automation-todometa { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 3px; color: var(--ca-caption); font-size: 11px; line-height: 17px; }
+    .capital-automation-todooutcome { color: var(--ca-muted); font-weight: 500; }
     .capital-automation-todowatch { display: inline-flex; flex: none; align-items: center; min-height: 20px; padding: 0 6px; border-radius: 999px; background: var(--dsw-alias-bg-module-platform); color: var(--ca-muted); font-size: 10px; line-height: 20px; white-space: nowrap; }
     .capital-automation-todowatch[data-status="triggered"] { background: color-mix(in srgb, var(--ca-error) 12%, var(--ca-card)); color: var(--ca-error-text); }
     .capital-automation-todowatch[data-status="needs_human"] { background: color-mix(in srgb, var(--ca-warn) 14%, var(--ca-card)); color: var(--ca-warn-text); }
     .capital-automation-todowatch[data-status="watching"] { color: var(--ca-business-text); }
     .capital-automation-todowatch[data-status="resolved"] { background: color-mix(in srgb, var(--ca-success) 14%, var(--ca-card)); color: var(--ca-success-text); }
+    .capital-automation-todowatch[data-status="deferred"] { background: color-mix(in srgb, var(--ca-muted) 12%, var(--ca-card)); color: var(--ca-muted); }
     .capital-automation-todowatch[data-status="tracking"] { color: var(--ca-muted); }
     .capital-automation-todowatch[data-status="expired"] { color: var(--ca-caption); }
-    .capital-automation-todowatchcheck { margin-left: 3px; font-size: 10px; }
-    .capital-automation-todocheck { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: 1.5px solid var(--ca-line); border-radius: 4px; background: var(--ca-card); cursor: pointer; transition: border-color .15s ease, background .15s ease; }
-    .capital-automation-todocheck:hover { border-color: var(--ca-business); background: color-mix(in srgb, var(--ca-business) 8%, var(--ca-card)); }
-    .capital-automation-todocheck:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: 2px; }
-    .capital-automation-todocheck[disabled] { opacity: .55; cursor: default; }
-    .capital-automation-todocheckspin { width: 10px; height: 10px; border: 2px solid var(--ca-line); border-top-color: var(--ca-business); border-radius: 50%; animation: capital-automation-todospin .7s linear infinite; }
-    @keyframes capital-automation-todospin { to { transform: rotate(360deg); } }
+    .capital-automation-todomenu { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--ca-muted); cursor: pointer; transition: background .15s ease, color .15s ease; }
+    .capital-automation-todomenu:hover:not(:disabled) { background: var(--ca-hover); color: var(--dsw-alias-label-primary); }
+    .capital-automation-todomenu:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: 2px; }
+    .capital-automation-todomenu:disabled { opacity: .4; cursor: default; }
     .capital-automation-todowatchmsg { margin: 1px 0 0; padding: 6px 9px; border-left: 2px solid var(--ca-line); border-radius: 0 7px 7px 0; background: var(--ca-field); color: var(--ca-muted); font-size: 11.5px; line-height: 18px; overflow-wrap: anywhere; }
     .capital-automation-todowatchmsg[data-status="triggered"] { border-left-color: var(--ca-error); color: var(--ca-error-text); }
     .capital-automation-tododetail { margin: 6px 0 0; padding: 7px 9px; border-left: 2px solid var(--ca-line); background: var(--ca-field); border-radius: 0 7px 7px 0; }
@@ -1265,6 +1282,7 @@ function createApi() {
     },
     warm,
     confirmTodo: (id) => request('/board/todos/confirm', { method: 'POST', body: { id } }),
+    decideTodo: (id, action) => request('/board/todos/decision', { method: 'POST', body: { id, action } }),
     retryBrief: (runId) => request(`/board/briefs/${encodeURIComponent(runId)}/retry`, { method: 'POST' }),
     askBrief: (runId, question, timeZone) => request(`/board/briefs/${encodeURIComponent(runId)}/ask`, {
       method: 'POST',
@@ -4035,11 +4053,15 @@ function boardCardIsToday(card, today = localDateKey(new Date())) {
 
 function boardTodoPeriod(item, now = new Date()) {
   const today = localDateKey(now)
-  // Triggered or handed-off items stay in today's action list even when dueAt has passed; a
-  // confirmed one only stays there through the day it was acknowledged.
   const watchedStatus = item.watch?.resolvedFrom ?? item.watch?.status
-  const ackedToday = typeof item.ackedAt === 'string' && localDateKey(new Date(item.ackedAt)) === today
-  if ((watchedStatus === 'triggered' || watchedStatus === 'needs_human') && (item.ackedAt === undefined || ackedToday)) return 'today'
+  const decidedAt = typeof item.ackedAt === 'string' ? item.ackedAt : item.deferredAt
+  const decidedToday = typeof decidedAt === 'string' && localDateKey(new Date(decidedAt)) === today
+  // A decision is feedback for the rest of today, then it belongs to the archive.
+  if (decidedAt !== undefined) return decidedToday ? 'today' : 'expired'
+  // A triggered condition is a fact: keep it actionable until the user decides.
+  if (watchedStatus === 'triggered') return 'today'
+  // A stopped watch has reached its lifecycle end, including date-less "尽快" items.
+  if (item.watch?.status === 'expired') return 'expired'
   if (typeof item.dueAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.dueAt)) {
     if (item.dueAt < today) return 'expired'
     if (item.dueAt === today) return 'today'
@@ -4049,7 +4071,11 @@ function boardTodoPeriod(item, now = new Date()) {
   const label = typeof item.dueLabel === 'string' ? item.dueLabel.trim() : ''
   const seen = typeof item.finishedAt === 'string' ? new Date(item.finishedAt) : null
   const seenToday = seen !== null && !Number.isNaN(seen.getTime()) && localDateKey(seen) === today
-  if (['尽快', '马上', '现在'].includes(label)) return seenToday ? 'today' : 'future'
+  if (['尽快', '马上', '现在'].includes(label)) {
+    // A tracked "尽快" item stays actionable through its 72-hour watch window.
+    if (item.watch !== null && item.watch !== undefined) return 'today'
+    return seenToday ? 'today' : 'future'
+  }
   if (['今天', '今日'].includes(label)) return seenToday ? 'today' : 'expired'
   return 'future'
 }
@@ -4062,7 +4088,7 @@ function boardTodoTodaySplit(todos, now = new Date()) {
   const split = { total: 0, manual: 0, auto: 0 }
   for (const item of todos) {
     const status = boardTodoStatus(item)
-    if (status === 'resolved' || boardTodoPeriod(item, now) !== 'today') continue
+    if (status === 'resolved' || status === 'deferred' || boardTodoPeriod(item, now) !== 'today') continue
     split.total += 1
     if (status === 'watching') split.auto += 1
     else split.manual += 1
@@ -4074,6 +4100,162 @@ function boardTodoGroupLabel(period) {
   if (period === 'today') return zh.board.dueToday
   if (period === 'expired') return zh.board.dueExpired
   return zh.board.dueFuture
+}
+
+/**
+ * Today's pending rows stay on top; acknowledged rows collapse to a single line at the bottom so
+ * the next item visibly moves up. The newest confirmation is the last row of the day.
+ */
+function boardTodoEntries(todos, now = new Date()) {
+  const entries = todos.map((item) => {
+    const decidedAt = typeof item.ackedAt === 'string' ? item.ackedAt : item.deferredAt
+    return {
+      item,
+      period: boardTodoPeriod(item, now),
+      decided: typeof decidedAt === 'string' && decidedAt.length > 0,
+      decidedAt,
+    }
+  })
+  entries.sort((left, right) => {
+    const period = BOARD_TODO_PERIODS.indexOf(left.period) - BOARD_TODO_PERIODS.indexOf(right.period)
+    if (period !== 0) return period
+    if (left.period === 'expired') {
+      // Archive order is newest expiry first; undated rows fall to the end.
+      return String(right.item.dueAt ?? '').localeCompare(String(left.item.dueAt ?? ''))
+        || String(right.item.lastSeenAt ?? '').localeCompare(String(left.item.lastSeenAt ?? ''))
+        || String(left.item.id).localeCompare(String(right.item.id))
+    }
+    if (left.period !== 'today') return 0
+    if (left.decided !== right.decided) return left.decided ? 1 : -1
+    if (left.decided && right.decided) return String(left.decidedAt).localeCompare(String(right.decidedAt))
+    return 0
+  })
+  return entries
+}
+
+function boardTodoIsOpen(item) {
+  return typeof item.ackedAt !== 'string' && typeof item.deferredAt !== 'string'
+}
+
+function closeBoardWatch(watch) {
+  if (watch === null || watch === undefined) return watch
+  return {
+    ...watch,
+    status: 'resolved',
+    resolvedFrom: watch.resolvedFrom ?? (watch.status === 'resolved' ? null : watch.status),
+    autoRequestedAt: null,
+    handoffReason: null,
+  }
+}
+
+function reopenBoardWatch(watch, at) {
+  if (watch === null || watch === undefined) return watch
+  return {
+    ...watch,
+    status: 'watching',
+    resolvedFrom: null,
+    autoRequestedAt: at,
+    handoffReason: null,
+  }
+}
+
+/** Applied before the server remembers the decision, and to every board refresh in flight. */
+function applyTodoDecision(current, todoId, action, at) {
+  if (current === null) return current
+  const target = (current.todos ?? []).find((entry) => entry.id === todoId)
+  if (target === undefined) return current
+  const wasOpen = boardTodoIsOpen(target)
+  let next
+  if (action === 'auto') {
+    if (target.watch === null || target.watch === undefined) return current
+    next = {
+      ...target,
+      ackedAt: undefined,
+      deferredAt: undefined,
+      decision: undefined,
+      watch: reopenBoardWatch(target.watch, at),
+    }
+  } else {
+    const decision = action === 'defer' ? 'deferred' : 'confirmed'
+    if (target.decision === decision) return current
+    next = {
+      ...target,
+      ackedAt: decision === 'confirmed' ? at : undefined,
+      deferredAt: decision === 'deferred' ? at : undefined,
+      decision,
+      watch: closeBoardWatch(target.watch),
+    }
+  }
+  const isOpen = boardTodoIsOpen(next)
+  const todos = current.todos.map((entry) => entry.id === todoId ? next : entry)
+  const targetKey = target.symbol === undefined ? undefined : boardEntrySymbolKey(target)
+  let stockDelta = 0
+  if (wasOpen && !isOpen) stockDelta = -1
+  if (!wasOpen && isOpen) stockDelta = 1
+  const stocks = stockDelta === 0
+    ? current.stocks
+    : (current.stocks ?? []).map((stock) => {
+      if (targetKey === undefined || boardEntrySymbolKey(stock) !== targetKey) return stock
+      if (!Array.isArray(stock.items)) {
+        return { ...stock, todoCount: Math.max(0, (stock.todoCount ?? 0) + stockDelta) }
+      }
+      if (stockDelta < 0) {
+        const items = stock.items.filter((entry) => entry.id !== target.id)
+        return { ...stock, items, todoCount: items.length }
+      }
+      if (stock.items.some((entry) => entry.id === todoId)) return stock
+      const items = [...stock.items, { id: target.id, title: target.title, sessionId: target.sessionId ?? null }]
+      return { ...stock, items, todoCount: items.length }
+    })
+  return {
+    ...current,
+    todos,
+    stocks,
+    stats: current.stats === undefined || stockDelta === 0
+      ? current.stats
+      : { ...current.stats, todos: Math.max(0, (current.stats.todos ?? 0) + stockDelta) },
+  }
+}
+
+function restoreBoardTodoState(current, todoId, previous) {
+  if (current === null) return current
+  const target = (current.todos ?? []).find((entry) => entry.id === todoId)
+  if (target === undefined) return current
+  const next = {
+    ...target,
+    ackedAt: previous.ackedAt,
+    deferredAt: previous.deferredAt,
+    decision: previous.decision,
+    watch: previous.watch ?? null,
+  }
+  const wasOpen = boardTodoIsOpen(target)
+  const isOpen = boardTodoIsOpen(next)
+  const stockDelta = wasOpen === isOpen ? 0 : isOpen ? 1 : -1
+  const todos = current.todos.map((entry) => entry.id === todoId ? next : entry)
+  const targetKey = target.symbol === undefined ? undefined : boardEntrySymbolKey(target)
+  const stocks = stockDelta === 0
+    ? current.stocks
+    : (current.stocks ?? []).map((stock) => {
+      if (targetKey === undefined || boardEntrySymbolKey(stock) !== targetKey) return stock
+      if (!Array.isArray(stock.items)) {
+        return { ...stock, todoCount: Math.max(0, (stock.todoCount ?? 0) + stockDelta) }
+      }
+      if (stockDelta < 0) {
+        const items = stock.items.filter((entry) => entry.id !== todoId)
+        return { ...stock, items, todoCount: items.length }
+      }
+      if (stock.items.some((entry) => entry.id === todoId)) return stock
+      const items = [...stock.items, { id: target.id, title: target.title, sessionId: target.sessionId ?? null }]
+      return { ...stock, items, todoCount: items.length }
+    })
+  return {
+    ...current,
+    todos,
+    stocks,
+    stats: current.stats === undefined || stockDelta === 0
+      ? current.stats
+      : { ...current.stats, todos: Math.max(0, (current.stats.todos ?? 0) + stockDelta) },
+  }
 }
 
 function boardTodoFilterOptions() {
@@ -4090,9 +4272,36 @@ function boardTodoDueLabel(item, period) {
   return date || zh.board.dueNoDate
 }
 
-const TODO_CHECKPOINT_IDS = new Set(['midday-snapshot', 'daily-review'])
+const TODO_VERIFIER_IDS = new Set(['todo-verifier-close'])
+
+function boardTodoDecision(item) {
+  if (item.decision === 'confirmed' || item.decision === 'deferred') return item.decision
+  if (typeof item.ackedAt === 'string' && item.ackedAt.length > 0) return 'confirmed'
+  if (typeof item.deferredAt === 'string' && item.deferredAt.length > 0) return 'deferred'
+  return undefined
+}
+
+/** Archived outcome shown after the primary "已过期" label. */
+function boardTodoOutcome(item) {
+  const decision = boardTodoDecision(item)
+  if (decision === 'confirmed') return '已确认'
+  if (decision === 'deferred') return '忽略'
+  const reason = item.watch?.expiredReason
+  if (reason === 'not_triggered') return '到期未触发'
+  if (reason === 'no_data') return '数据不足'
+  if (reason === 'not_verified') return '未完成核验'
+  if (reason === 'not_confirmed') return '未确认'
+  if (reason === 'stale') return '已停止跟踪'
+  if (item.watch?.status === 'needs_human') return '数据不足'
+  if (item.watch?.status === 'watching') return '未完成核验'
+  if (item.kind === 'confirm') return '未确认'
+  if (item.kind === 'verify') return '未完成核验'
+  if (item.kind === 'track') return '跟踪结束'
+  return ''
+}
 
 function boardTodoStatus(item) {
+  if (typeof item.deferredAt === 'string' && item.deferredAt.length > 0) return 'deferred'
   if (typeof item.ackedAt === 'string' && item.ackedAt.length > 0) return 'resolved'
   if (item.watch !== null && item.watch !== undefined && typeof item.watch.status === 'string') return item.watch.status
   // Track items are passive; everything else without a watch is waiting for the user.
@@ -4103,6 +4312,7 @@ function boardTodoWatchLabel(status) {
   if (status === 'triggered') return zh.board.watchTriggered
   if (status === 'needs_human') return zh.board.watchNeedsHuman
   if (status === 'resolved') return zh.board.watchResolved
+  if (status === 'deferred') return zh.board.watchDeferred
   if (status === 'expired') return zh.board.watchExpired
   if (status === 'tracking') return zh.board.watchTracking
   if (status === 'watching') return zh.board.watchWatching
@@ -4112,26 +4322,45 @@ function boardTodoWatchLabel(status) {
 function boardTodoWatchHint(status, checkpointHint) {
   if (status === 'watching') return checkpointHint
   if (status === 'triggered') return '自动核验已确认条件成立'
-  if (status === 'needs_human') return '需要你确认'
+  if (status === 'needs_human') return '需要你处理'
   if (status === 'resolved') return '已确认'
+  if (status === 'deferred') return zh.board.watchDeferredHint
   if (status === 'tracking') return '仅展示，不自动核验'
-  if (status === 'expired') return '连续 3 天没有新运行提到，已停止自动核验'
+  if (status === 'expired') return '已过期；不再核验、提醒或计入待办'
   return ''
 }
 
-function boardTodoCheckpointHint(tasks) {
+function boardTodoVerifierHint(tasks) {
   const names = []
   for (const task of Array.isArray(tasks) ? tasks : []) {
-    if (task?.origin !== 'builtin' || task.state !== 'active' || !TODO_CHECKPOINT_IDS.has(task.sourceBuiltinId)) continue
+    if (task?.origin !== 'builtin' || task.state !== 'active' || !TODO_VERIFIER_IDS.has(task.sourceBuiltinId)) continue
     if (typeof task.title === 'string' && task.title.length > 0 && !names.includes(task.title)) names.push(task.title)
   }
-  if (names.length > 0) return `自动核验跟随 ${names.join('、')} 运行`
-  if (!Array.isArray(tasks) || tasks.length === 0) return '自动核验跟随「午间快照」「每日复盘」运行'
-  return '自动核验检查点任务未启用'
+  if (names.length > 0) return `自动核验由「${names.join('、')}」执行（A/H 收盘）`
+  if (!Array.isArray(tasks) || tasks.length === 0) return '自动核验由「TODO 核验」执行（A/H 收盘）'
+  return 'TODO 核验任务未启用'
 }
 
 function boardTodoCheckable(status) {
   return status === 'needs_human' || status === 'triggered' || status === 'tracking'
+    || status === 'watching' || status === 'resolved' || status === 'deferred'
+}
+
+function boardTodoAutoAvailable(item, status) {
+  if (item.kind !== 'confirm' && item.kind !== 'verify') return false
+  if (item.watch === null || item.watch === undefined) return false
+  if (item.watch.autoEligible !== true) return false
+  return status === 'needs_human' || status === 'resolved' || status === 'deferred'
+}
+
+function boardTodoAutoReason(item, status) {
+  if (item.kind === 'track') return ''
+  if (item.watch === null || item.watch === undefined) return ''
+  if (item.watch.autoEligible === true) return ''
+  if (item.watch.autoIneligibleReason === 'triggered' || status === 'triggered') return '条件已触发'
+  if (item.watch.autoIneligibleReason === 'expired') return '已过期'
+  if (item.watch.autoIneligibleReason === 'us_symbol') return '美股暂不支持'
+  return '暂不支持'
 }
 
 function boardCategoryOptions() {
@@ -4744,9 +4973,6 @@ function BriefCard(props) {
       onClick: () => setAskOpen(true),
     }, h(IconNewChatOutlineRegular, { size: 14 }))
     : null
-  const openLink = openSession
-    ? h('button', { type: 'button', className: 'capital-automation-btn', 'data-size': 'sm', onClick: openSession }, zh.openSession)
-    : null
   const trigger = card.trigger === 'manual' ? zh.triggerManual : zh.triggerScheduled
   const relativeTime = boardRelativeTime(card.finishedAt)
   const exactTime = formatTime(card.finishedAt)
@@ -4766,12 +4992,10 @@ function BriefCard(props) {
           'data-size': 'sm',
           disabled: retrying === true,
           onClick: () => onRetry(card.runId),
-        }, retrying === true ? zh.processing : zh.board.retry),
-        openLink))
+        }, retrying === true ? zh.processing : zh.board.retry)))
   } else if (status === 'skipped') {
     body = h('div', { className: 'capital-automation-briefstate' },
-      h('p', null, zh.board.briefSkipped),
-      h('div', { className: 'capital-automation-briefactions' }, openLink))
+      h('p', null, zh.board.briefSkipped))
   } else {
     body = h('div', { className: 'capital-automation-briefstate' },
       h(SkeletonBlock, { width: '72%', height: 14 }),
@@ -4877,8 +5101,9 @@ function BriefFeed(props) {
 }
 
 function TodoRow(props) {
-  const { item, period, showDue = true, onOpenSession, onAck, acking = false, ackDisabled = false, checkpointHint = '' } = props
+  const { item, period, showDue = true, onOpenSession, onDecide, checkpointHint = '', pending = false } = props
   const [open, setOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
   const quote = item.sourceQuote ?? item.sources?.[0]?.sourceQuote
   const due = showDue === true ? boardTodoDueLabel(item, period) : ''
   const source = {
@@ -4887,46 +5112,118 @@ function TodoRow(props) {
     sessionId: item.sessionId ?? item.sources?.[0]?.sessionId,
   }
   const meta = []
-  if (due) meta.push(h('span', { key: 'due' }, due))
-  if (item.seenCount > 1) meta.push(h('span', { key: 'seen' }, zh.board.seenCount.replace('{n}', String(item.seenCount))))
   const watch = item.watch && typeof item.watch === 'object' ? item.watch : null
-  const status = boardTodoStatus(item)
+  const archived = period === 'expired'
+  const status = archived ? 'expired' : boardTodoStatus(item)
+  const decision = boardTodoDecision(item)
+  const decided = decision !== undefined
+  const compact = decided || archived
   const watchLabel = boardTodoWatchLabel(status)
-  if (watch?.checkedAt && status !== 'resolved' && status !== 'tracking') {
+  if (due) meta.push(h('span', { key: 'due' }, due))
+  if (archived) {
+    const outcome = boardTodoOutcome(item)
+    if (outcome.length > 0) meta.push(h('span', { key: 'outcome', className: 'capital-automation-todooutcome' }, outcome))
+  }
+  if (item.seenCount > 1) meta.push(h('span', { key: 'seen' }, zh.board.seenCount.replace('{n}', String(item.seenCount))))
+  if (watch?.checkedAt && status !== 'resolved' && status !== 'deferred' && status !== 'tracking') {
     meta.push(h('span', { key: 'checked' }, zh.board.watchChecked.replace('{time}', formatShortTime(watch.checkedAt))))
   }
   const watchMessage = status === 'triggered'
-    ? `${zh.board.watchEvidence}：${watch?.evidence ?? ''}`
+    ? `${zh.board.watchEvidence}：${watch?.evidence ?? ''}${watch?.source ? ` · ${zh.board.watchSource}：${watch.source}` : ''}`
     : ''
-  const checkable = boardTodoCheckable(status)
+  const actionable = !archived && boardTodoCheckable(status)
+  const pastDue = typeof item.dueAt === 'string' && item.dueAt < localDateKey(new Date())
+  const autoAvailable = !archived && !pastDue && boardTodoAutoAvailable(item, status)
   const basisAction = open ? zh.board.hideBasis : zh.board.showBasis
   const basisCaret = h('span', { className: 'capital-automation-basiscaret', 'aria-hidden': 'true' }, h(IconChevronDownOutlineRegular, { size: 12 }))
-  return h('li', { className: 'capital-automation-todoitem' },
-    h('div', { className: 'capital-automation-todoline' },
+  const tags = watchLabel.length > 0
+    ? h('div', { className: 'capital-automation-todotags' },
+      h('span', {
+        className: 'capital-automation-todowatch',
+        'data-status': status,
+        title: boardTodoWatchHint(status, checkpointHint),
+      },
+      watchLabel))
+    : null
+  const menuItems = []
+  if (actionable) {
+    menuItems.push({
+      id: 'confirm',
+      label: decision === 'confirmed' ? `${zh.board.todoActionConfirm}（当前）` : zh.board.todoActionConfirm,
+      icon: h(IconChecklistOutlineRegular, { size: 14 }),
+      disabled: pending || decision === 'confirmed',
+    })
+    if (autoAvailable) {
+      menuItems.push({
+        id: 'auto',
+        label: zh.board.todoActionAuto,
+        icon: h(IconSparkleRegular, { size: 14 }),
+        disabled: pending,
+      })
+    } else if (actionable && status !== 'watching') {
+      const autoReason = pastDue && status !== 'triggered' && item.kind !== 'track' ? '已过期' : boardTodoAutoReason(item, status)
+      if (autoReason.length > 0) {
+        menuItems.push({
+          id: 'auto-unavailable',
+          label: `${zh.board.todoActionAuto}（${autoReason}）`,
+          icon: h(IconSparkleRegular, { size: 14 }),
+          disabled: true,
+        })
+      }
+    }
+    menuItems.push({
+      id: 'defer',
+      label: decision === 'deferred' ? `${zh.board.todoActionDefer}（当前）` : zh.board.todoActionDefer,
+      icon: h(IconClockOutlineRegular, { size: 14 }),
+      disabled: pending || decision === 'deferred',
+    })
+  }
+  const menu = actionable
+    ? h(Menu, {
+      open: menuOpen,
+      anchor: h('button', {
+        type: 'button',
+        className: 'capital-automation-todomenu',
+        title: zh.board.todoMoreTitle,
+        'aria-label': `${zh.board.todoMoreTitle}：${item.title}`,
+        'aria-haspopup': 'menu',
+        'aria-expanded': menuOpen ? 'true' : 'false',
+        disabled: pending === true,
+        onClick: () => setMenuOpen((value) => !value),
+      }, h(IconEllipsisOutlineRegular, { size: 16 })),
+      items: menuItems,
+      onSelect: (id) => {
+        setMenuOpen(false)
+        if (id === 'confirm' || id === 'auto' || id === 'defer') onDecide(item, id)
+      },
+      onClose: () => setMenuOpen(false),
+      align: 'end',
+      portal: true,
+    })
+    : null
+  return h('li', {
+    className: 'capital-automation-todoitem',
+    'data-decided': decided ? 'true' : undefined,
+    'data-archived': archived ? 'true' : undefined,
+    'data-decision': decision,
+  },
+  compact
+    ? h('div', { className: 'capital-automation-todoline' },
       h('div', { className: 'capital-automation-todotop' },
-        h('div', { className: 'capital-automation-todotags' },
-          watchLabel.length > 0
-            ? h('span', {
-              className: 'capital-automation-todowatch',
-              'data-status': status,
-              title: boardTodoWatchHint(status, checkpointHint),
-            },
-            watchLabel,
-            status === 'resolved' ? h('span', { className: 'capital-automation-todowatchcheck', 'aria-hidden': 'true' }, '✓') : null)
-            : null),
-        checkable
+        tags,
+        archived
           ? h('button', {
             type: 'button',
-            className: 'capital-automation-todocheck',
-            role: 'checkbox',
-            'aria-checked': 'false',
-            title: zh.board.todoAckTitle,
-            'aria-label': `${zh.board.todoAckTitle}：${item.title}`,
-            'data-busy': acking === true ? 'true' : undefined,
-            disabled: ackDisabled === true,
-            onClick: () => onAck(item),
-          }, acking === true ? h('span', { className: 'capital-automation-todocheckspin', 'aria-hidden': 'true' }) : null)
-          : null),
+            className: 'capital-automation-todotitle',
+            'aria-expanded': open ? 'true' : 'false',
+            'aria-label': `${item.title}，${basisAction}`,
+            title: basisAction,
+            onClick: () => setOpen((value) => !value),
+          }, item.title, basisCaret)
+          : h('span', { className: 'capital-automation-todotitle', title: item.title }, item.title),
+        menu))
+    : h('div', { className: 'capital-automation-todoline' },
+      h('div', { className: 'capital-automation-todotop' }, tags, menu),
       h('button', {
         type: 'button',
         className: 'capital-automation-todotitle',
@@ -4935,29 +5232,34 @@ function TodoRow(props) {
         title: basisAction,
         onClick: () => setOpen((value) => !value),
       }, item.title, basisCaret)),
-    item.detail ? h('p', { className: 'capital-automation-tododesc' }, item.detail) : null,
-    watchMessage.length > 0
-      ? h('p', { className: 'capital-automation-todowatchmsg', 'data-status': status }, watchMessage)
-      : null,
-    meta.length > 0 ? h('div', { className: 'capital-automation-todometa' }, meta) : null,
-    open
-      ? h('div', { className: 'capital-automation-tododetail' },
-        h('blockquote', null, quote),
-        source
-          ? h('div', { className: 'capital-automation-todosource' },
-            h('span', null, `${zh.board.sourceRun}：${source.taskTitle} · ${formatShortTime(source.finishedAt)}`),
-            source.sessionId
-              ? h('button', {
-                type: 'button',
-                className: 'capital-automation-btn',
-                'data-size': 'icon',
-                title: zh.openSession,
-                'aria-label': zh.openSession,
-                onClick: () => onOpenSession(source.sessionId),
-              }, h(IconRightUpOutlineRegular, { size: 14 }))
-              : null)
-          : null)
-      : null)
+  !compact && item.detail ? h('p', { className: 'capital-automation-tododesc' }, item.detail) : null,
+  !compact && watchMessage.length > 0
+    ? h('p', { className: 'capital-automation-todowatchmsg', 'data-status': status }, watchMessage)
+    : null,
+  (archived || !decided) && meta.length > 0 ? h('div', { className: 'capital-automation-todometa' }, meta) : null,
+  (archived || !decided) && open
+    ? h('div', { className: 'capital-automation-tododetail' },
+      archived && item.detail ? h('p', { className: 'capital-automation-tododesc' }, item.detail) : null,
+      archived && watch?.evidence
+        ? h('p', { className: 'capital-automation-todowatchmsg', 'data-status': status },
+          `${zh.board.watchEvidence}：${watch.evidence}${watch.source ? ` · ${zh.board.watchSource}：${watch.source}` : ''}`)
+        : null,
+      h('blockquote', null, quote),
+      source
+        ? h('div', { className: 'capital-automation-todosource' },
+          h('span', null, `${zh.board.sourceRun}：${source.taskTitle} · ${formatShortTime(source.finishedAt)}`),
+          source.sessionId
+            ? h('button', {
+              type: 'button',
+              className: 'capital-automation-btn',
+              'data-size': 'icon',
+              title: zh.openSession,
+              'aria-label': zh.openSession,
+              onClick: () => onOpenSession(source.sessionId),
+            }, h(IconRightUpOutlineRegular, { size: 14 }))
+            : null)
+        : null)
+    : null)
 }
 
 function BoardPanelHead(props) {
@@ -4999,13 +5301,11 @@ function BoardPanel(props) {
 }
 
 function TodoPanel(props) {
-  const { todos, tasks, onOpenSession, onAckTodo, ackingTodoId, open, onToggle } = props
+  const { todos, tasks, onOpenSession, onDecideTodo, pendingTodoIds = new Set(), open, onToggle } = props
   const [filter, setFilter] = useState('today')
-  const now = new Date()
-  const entries = todos.map((item) => ({ item, period: boardTodoPeriod(item, now) }))
-  entries.sort((left, right) => BOARD_TODO_PERIODS.indexOf(left.period) - BOARD_TODO_PERIODS.indexOf(right.period))
+  const entries = boardTodoEntries(todos, new Date())
   const visible = entries.filter((entry) => entry.period === filter)
-  const checkpointHint = boardTodoCheckpointHint(tasks)
+  const checkpointHint = boardTodoVerifierHint(tasks)
   const emptyText = filter === 'today'
     ? zh.board.todoEmptyToday
     : zh.board.todoEmptyGroup.replace('{label}', boardTodoGroupLabel(filter))
@@ -5031,10 +5331,9 @@ function TodoPanel(props) {
       period: entry.period,
       showDue: true,
       onOpenSession,
-      onAck: onAckTodo,
-      acking: ackingTodoId === entry.item.id,
-      ackDisabled: ackingTodoId !== null && ackingTodoId !== undefined,
+      onDecide: onDecideTodo,
       checkpointHint,
+      pending: pendingTodoIds.has(entry.item.id),
     }))))
 }
 
@@ -5072,7 +5371,9 @@ function StockRow(props) {
   const stockKey = boardEntrySymbolKey(stock)
   const related = Array.isArray(stock.items)
     ? stock.items
-    : todos.filter((item) => item.ackedAt === undefined && boardEntrySymbolKey(item) === stockKey)
+    : todos.filter((item) => item.ackedAt === undefined && item.deferredAt === undefined
+      && boardTodoPeriod(item) !== 'expired'
+      && boardEntrySymbolKey(item) === stockKey)
   const followUpCount = Array.isArray(stock.items) ? stock.items.length : (stock.todoCount ?? 0)
   const roleSummary = stock.roles.map((role) => boardRoleTitle(role)).join('；')
   return h('div', { className: 'capital-automation-stockrow' },
@@ -5305,7 +5606,7 @@ function BoardPage(props) {
   const {
     board, tasks, api, loading, error, range, category, onRange, onCategory, onRefresh,
     onOpenSession, onRetryBrief, retryingRunId, onLoadMore, loadingMore, onGoTasks, onNewTask, onGoRuns,
-    onAckTodo, ackingTodoId, hasActiveTasks, storageReady,
+    onDecideTodo, pendingTodoIds, hasActiveTasks, storageReady,
   } = props
   const [railOpen, setRailOpen] = useState(() => readBoardUi().rail !== false)
   const [openPanels, setOpenPanels] = useState(() => boardPanelFlags(readBoardUi().panels))
@@ -5424,8 +5725,8 @@ function BoardPage(props) {
           todos: board?.todos ?? [],
           tasks,
           onOpenSession,
-          onAckTodo,
-          ackingTodoId,
+          onDecideTodo,
+          pendingTodoIds,
           open: openPanels.todo,
           onToggle: () => togglePanel('todo'),
         }),
@@ -5466,7 +5767,6 @@ function AutomationPage(props) {
   const [boardRange, setBoardRange] = useState('14')
   const [boardCategory, setBoardCategory] = useState('all')
   const [retryingBriefId, setRetryingBriefId] = useState(null)
-  const [ackingTodoId, setAckingTodoId] = useState(null)
   const [boardLoadingMore, setBoardLoadingMore] = useState(false)
   const [unread, setUnread] = useState(0)
   const [tasksReady, setTasksReady] = useState(false)
@@ -5483,6 +5783,7 @@ function AutomationPage(props) {
   const [busyTaskId, setBusyTaskId] = useState(null)
   const [inboxBusy, setInboxBusy] = useState(false)
   const [notice, setNotice] = useState('')
+  const [pendingTodoIds, setPendingTodoIds] = useState(() => new Set())
   const [loadError, setLoadError] = useState('')
   const mountedRef = useRef(false)
   const tasksRef = useRef([])
@@ -5497,6 +5798,7 @@ function AutomationPage(props) {
   const refreshSequenceRef = useRef(0)
   const detailSequenceRef = useRef(0)
   const boardSequenceRef = useRef(0)
+  const optimisticDecisionRef = useRef(new Map())
   const scrollRef = useRef(null)
   const mountedAtRef = useRef(typeof performance === 'undefined' ? 0 : performance.now())
   const timingRecordedRef = useRef(false)
@@ -5638,6 +5940,16 @@ function AutomationPage(props) {
     }
   }
 
+  // A decision request and a board poll can cross: keep the optimistic state on every response
+  // until the request settles, then let the next poll read the server truth.
+  function applyOptimisticDecisions(value) {
+    let next = value
+    for (const [id, entry] of optimisticDecisionRef.current) {
+      next = applyTodoDecision(next, id, entry.action, entry.at)
+    }
+    return next
+  }
+
   async function loadBoard(nextRange = boardRange, nextCategory = boardCategory, before = null) {
     const query = boardQueryOf(nextRange, nextCategory, before)
     const snapshot = before === null ? readBoardSnapshot(query) : null
@@ -5647,7 +5959,7 @@ function AutomationPage(props) {
       // A cached board paints immediately; the request below still revalidates it.
       if (snapshot === null) setBoardLoading(true)
       else {
-        setBoard(snapshot)
+        setBoard(applyOptimisticDecisions(snapshot))
         setBoardLoading(false)
       }
     }
@@ -5655,11 +5967,11 @@ function AutomationPage(props) {
       const value = await api.board(query)
       if (!mountedRef.current || requestSequence !== boardSequenceRef.current) return
       if (before === null) {
-        setBoard(value)
+        setBoard(applyOptimisticDecisions(value))
         writeBoardSnapshot(query, value)
-      } else setBoard((current) => current === null
+      } else setBoard((current) => applyOptimisticDecisions(current === null
         ? value
-        : { ...value, cards: [...current.cards, ...value.cards] })
+        : { ...value, cards: [...current.cards, ...value.cards] }))
       setBoardError('')
     } catch (error) {
       if (mountedRef.current && requestSequence === boardSequenceRef.current) {
@@ -5695,55 +6007,51 @@ function AutomationPage(props) {
     }
   }
 
-  async function ackTodo(item) {
-    if (ackingTodoId !== null) return
-    setAckingTodoId(item.id)
-    setBoardError('')
-    try {
-      await api.confirmTodo(item.id)
-      const ackedAt = new Date().toISOString()
-      setBoard((current) => {
-        if (current === null) return current
-        const target = (current.todos ?? []).find((entry) => entry.id === item.id)
-        if (target === undefined) return current
-        const todos = current.todos.map((entry) => entry.id === item.id
-          ? {
-            ...entry,
-            ackedAt,
-            ...(entry.watch === null || entry.watch === undefined
-              ? {}
-              : {
-                watch: {
-                  ...entry.watch,
-                  status: 'resolved',
-                  resolvedFrom: entry.watch.resolvedFrom ?? entry.watch.status,
-                },
-              }),
-          }
-          : entry)
-        const targetKey = target.symbol === undefined ? undefined : boardEntrySymbolKey(target)
-        const stocks = (current.stocks ?? []).map((stock) => {
-          if (targetKey === undefined || boardEntrySymbolKey(stock) !== targetKey) return stock
-          if (!Array.isArray(stock.items)) return { ...stock, todoCount: Math.max(0, (stock.todoCount ?? 0) - 1) }
-          const items = stock.items.filter((entry) => entry.id !== target.id)
-          return { ...stock, items, todoCount: items.length }
-        })
-        return {
-          ...current,
-          todos,
-          stocks,
-          stats: current.stats === undefined
-            ? current.stats
-            : { ...current.stats, todos: Math.max(0, (current.stats.todos ?? 0) - 1) },
-        }
-      })
-      setNotice(zh.board.todoAcked)
-      void loadBoard(boardRange, boardCategory)
-    } catch (error) {
-      setBoardError(error.message ?? zh.errorGeneric)
-    } finally {
-      setAckingTodoId(null)
+  function decideTodo(item, action) {
+    if (typeof item?.id !== 'string') return
+    if (action !== 'confirm' && action !== 'auto' && action !== 'defer') return
+    if (pendingTodoIds.has(item.id) || optimisticDecisionRef.current.has(item.id)) return
+    // Paint the decision first; the write travels in the background and a crossing board poll is
+    // overlaid with the same state.
+    const at = new Date().toISOString()
+    const previous = {
+      ackedAt: item.ackedAt,
+      deferredAt: item.deferredAt,
+      decision: item.decision,
+      watch: item.watch,
     }
+    optimisticDecisionRef.current.set(item.id, { action, at })
+    setPendingTodoIds((current) => {
+      const next = new Set(current)
+      next.add(item.id)
+      return next
+    })
+    setBoard((current) => applyTodoDecision(current, item.id, action, at))
+    setNotice(action === 'confirm'
+      ? zh.board.todoAcked
+      : action === 'defer' ? zh.board.todoDeferred : zh.board.todoAutoQueued)
+    setBoardError('')
+    void api.decideTodo(item.id, action).then(() => {
+      optimisticDecisionRef.current.delete(item.id)
+      // Ignore a poll that started before the server write; the next poll reads the truth.
+      boardSequenceRef.current += 1
+      if (mountedRef.current) setBoardLoading(false)
+    }).catch((error) => {
+      optimisticDecisionRef.current.delete(item.id)
+      boardSequenceRef.current += 1
+      if (!mountedRef.current) return
+      setBoardLoading(false)
+      setBoard((current) => restoreBoardTodoState(current, item.id, previous))
+      setNotice('')
+      setBoardError(error?.message ?? zh.errorGeneric)
+    }).finally(() => {
+      if (!mountedRef.current) return
+      setPendingTodoIds((current) => {
+        const next = new Set(current)
+        next.delete(item.id)
+        return next
+      })
+    })
   }
 
   async function loadDetail(id) {
@@ -6038,8 +6346,8 @@ function AutomationPage(props) {
             onOpenSession: openSession,
             onRetryBrief: (runId) => { void retryBrief(runId) },
             retryingRunId: retryingBriefId,
-            onAckTodo: (item) => { void ackTodo(item) },
-            ackingTodoId,
+            onDecideTodo: (item, action) => { decideTodo(item, action) },
+            pendingTodoIds,
             onLoadMore: () => { void loadMoreBoard() },
             loadingMore: boardLoadingMore,
             onGoTasks: () => switchTab('tasks'),

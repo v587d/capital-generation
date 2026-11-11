@@ -287,6 +287,57 @@ test('个股雷达超过 12 只仍返回完整列表，供前端默认 12 条后
   assert.equal(board.stats.stocks, 15)
 })
 
+test('看板排序：活跃 TODO 永远排在已过期归档之前', async () => {
+  const { store } = await makeStore()
+  const task = await makeTask(store)
+  await addBrief(store, task, {
+    key: 'active-before-expired',
+    items: [
+      {
+        kind: 'verify',
+        title: '已过期的验证条件',
+        symbol: '300803.SZ',
+        trigger: '收盘站回 44.01',
+        dueAt: '2026-11-03',
+        sourceQuote: '过期条件。',
+      },
+      {
+        kind: 'track',
+        title: '还在跟踪的将来事项',
+        dueAt: '2026-11-18',
+        sourceQuote: '将来事项。',
+      },
+    ],
+  })
+  const board = await boardService(store).board({ days: '14', tz: TZ })
+  assert.equal(board.todos.length, 2)
+  assert.equal(board.todos[0].title, '还在跟踪的将来事项', '活跃项不能被过期归档挤到 50 条上限之外')
+  assert.equal(board.todos[1].title, '已过期的验证条件')
+})
+
+test('个股待跟进不计入已过期条目', async () => {
+  const { store } = await makeStore()
+  const task = await makeTask(store)
+  await addBrief(store, task, {
+    key: 'expired-stock',
+    finishedAt: '2026-11-03T00:40:32.876Z',
+    items: [{
+      kind: 'verify',
+      title: '指南针收盘能否站回 44.01',
+      detail: '收盘价站回 44.01 才算修复。',
+      symbol: '300803.SZ',
+      trigger: '收盘价站回 44.01',
+      dueAt: '2026-11-03',
+      sourceQuote: '指南针跌破 44.01 且成交额不低于 12.66 亿，才确认修复。',
+    }],
+    stocks: [{ symbol: '300803.SZ', name: '指南针', roles: ['holding'] }],
+  })
+  const board = await boardService(store).board({ days: '14', tz: TZ })
+  assert.equal(board.todos.length, 1, '过期条目仍保留在 TODO 归档')
+  assert.equal(board.stocks[0].todoCount, 0, '过期条目不计入个股待跟进')
+  assert.equal(board.stocks[0].items.length, 0, '个股展开列表也不显示过期条目')
+})
+
 test('卡片保留任务图标：自定义任务用创建时的选择，内置模板用固定映射', async () => {
   const { store } = await makeStore()
   const custom = await makeTask(store, { title: '深研清单', category: 'research', icon: 'microscope' })

@@ -28,7 +28,8 @@
   把它当 inbox 输入；收尾后还剩一条就会再开一步，完整结论被折叠、短句成为最后一条（真机
   `session-be2c9dd4`：结论 seq 198 后 step 3 又写"任务已完成"）。收尾帧到达时，若该通知的 sender
   在本 exchange 内已有 **admitted** 的 `agent-message`，用 `agent.inbox.remove()` 撤掉；没有消息
-  或消息尚未 admitted 的保留（它可能是唯一结果/失败信号）。人类消息重置 exchange，子 Agent 新
+  或消息尚未 admitted 的保留（它可能是唯一结果/失败信号）。收尾回调必须在**每次纯文本 finish**
+  就武装，不要等根会话 idle：child 仍标记 running、收尾后才 settle 正是会多开一轮的竞争窗口。人类消息重置 exchange，子 Agent 新
   activation 清掉旧 marker。`src/agents/settled-wake.ts` 是唯一实现。
 - **⛔ 交付去重按 exchange，不按 `turn` 是否存在**：同一次 exchange 只写一次
   `deliverables/presented`；收尾帧可能一次带 `turn`、一次不带，用 `turn ?? -1` 当哨兵会让卡片

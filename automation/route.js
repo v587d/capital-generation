@@ -236,6 +236,9 @@ async function dispatch({ req, method, suffix, url, service, requestId }) {
   if (suffix === '/board/todos/confirm' && method === 'POST') {
     return { body: await service.confirmTodo(await readBody(req)) }
   }
+  if (suffix === '/board/todos/decision' && method === 'POST') {
+    return { body: await service.decideTodo(await readBody(req)) }
+  }
   const askCreate = /^\/board\/briefs\/([^/]+)\/ask$/.exec(suffix)
   if (askCreate !== null && method === 'POST') {
     return { body: await service.askBrief(decodeId(askCreate[1]), await readBody(req)), status: 202 }

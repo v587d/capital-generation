@@ -12,7 +12,7 @@ const BASE_INPUT = {
   trigger: { kind: 'schedule', cadence: 'daily', time: '09:00', timezone: 'Asia/Shanghai', tradingDaysOnly: true },
 }
 
-function harness({ owner, calendar = tradingCalendar, now = Date.parse('2026-10-27T00:31:00Z'), runner: runnerOption } = {}) {
+async function harness({ owner, calendar = tradingCalendar, now = Date.parse('2026-10-27T00:31:00Z'), runner: runnerOption, shouldRun } = {}) {
   const fake = createFakeDomain()
   const clock = { value: now }
   const store = createAutomationStore({
@@ -42,14 +42,18 @@ function harness({ owner, calendar = tradingCalendar, now = Date.parse('2026-10-
     calendar,
     profile: { ownerDir: '/tmp/fake-owner' },
     getSettings: () => ({ tickMs: 60_000, catchUpMs: 10 * 60_000, inAppNotifications: true }),
+    shouldRun,
     now: () => clock.value,
     logger: { info() {}, warn() {}, error() {} },
   })
+  // The operational TODO verifier is active by default; these tests own the only task they seed.
+  const verifier = (await store.listTasks()).find((task) => task.sourceBuiltinId === 'todo-verifier-close')
+  if (verifier?.state === 'active') await store.setTaskState(verifier.id, 'paused')
   return { fake, store, scheduler, dispatches, clock }
 }
 
 test('到点任务只 claim 一次，下一次 tick 不重复投递', async () => {
-  const { store, scheduler, dispatches, clock } = harness({ now: Date.parse('2026-10-27T00:29:00Z') })
+  const { store, scheduler, dispatches, clock } = await harness({ now: Date.parse('2026-10-27T00:29:00Z') })
   await store.createTask(BASE_INPUT)
   clock.value = Date.parse('2026-10-27T01:05:00Z')
   await scheduler.tick()
@@ -59,8 +63,26 @@ test('到点任务只 claim 一次，下一次 tick 不重复投递', async () =
   assert.equal(dispatches.length, 1, '同一 occurrence 不能重复')
 })
 
+test('运行前检查拒绝时消费 occurrence，不创建空 run 或 session', async () => {
+  let allow = false
+  const { store, scheduler, dispatches, clock } = await harness({
+    now: Date.parse('2026-10-27T00:29:00Z'),
+    shouldRun: () => allow,
+  })
+  await store.createTask(BASE_INPUT)
+  clock.value = Date.parse('2026-10-27T01:05:00Z')
+  await scheduler.tick()
+  assert.equal(dispatches.length, 0)
+  assert.equal((await store.listRunsPage({ limit: 10 })).runs.length, 0)
+
+  allow = true
+  await scheduler.tick()
+  assert.equal(dispatches.length, 0, '同一 occurrence 已被检查消费，不能下一 tick 补跑')
+  assert.equal((await store.listRunsPage({ limit: 10 })).runs.length, 0)
+})
+
 test('并发手动运行按 scheduler admission 串行，同一任务只创建一个 queued run', async () => {
-  const { store, scheduler } = harness()
+  const { store, scheduler } = await harness()
   const created = await store.createTask(BASE_INPUT)
   const task = await store.getTask(created.id)
   const results = await Promise.all([
@@ -84,7 +106,7 @@ test('创建 queued run 后失去 owner：收口 unknown 且 occurrence 不会�
     async isCurrent() { checks += 1; return checks < 4 },
     async release() { this.held = false },
   }
-  const { store, scheduler, dispatches, clock } = harness({ owner, now: Date.parse('2026-10-27T00:29:00Z') })
+  const { store, scheduler, dispatches, clock } = await harness({ owner, now: Date.parse('2026-10-27T00:29:00Z') })
   const created = await store.createTask(BASE_INPUT)
   clock.value = Date.parse('2026-10-27T01:05:00Z')
   await scheduler.tick()
@@ -98,7 +120,7 @@ test('创建 queued run 后失去 owner：收口 unknown 且 occurrence 不会�
   assert.equal((await store.listRunsPage({ limit: 10 })).runs.length, 1)
 })
 test('时钟回拨不制造重复 occurrence', async () => {
-  const { store, scheduler, dispatches, clock } = harness({ now: Date.parse('2026-10-27T00:29:00Z') })
+  const { store, scheduler, dispatches, clock } = await harness({ now: Date.parse('2026-10-27T00:29:00Z') })
   await store.createTask(BASE_INPUT)
   clock.value = Date.parse('2026-10-27T01:05:00Z')
   await scheduler.tick()
@@ -109,7 +131,7 @@ test('时钟回拨不制造重复 occurrence', async () => {
 })
 
 test('上一运行仍在 running 时，新 occurrence 记为 skipped_overlap', async () => {
-  const { store, scheduler, dispatches, clock } = harness({ now: Date.parse('2026-10-26T00:29:00Z') })
+  const { store, scheduler, dispatches, clock } = await harness({ now: Date.parse('2026-10-26T00:29:00Z') })
   const record = await store.createTask(BASE_INPUT)
   const task = await store.getTask(record.id)
   // First tick performs boot recovery; a run created after it is a live overlap.
@@ -123,7 +145,7 @@ test('上一运行仍在 running 时，新 occurrence 记为 skipped_overlap', a
 })
 
 test('超过 catch-up 窗口的历史 occurrence 记为 missed，不补跑', async () => {
-  const { store, scheduler, dispatches, clock } = harness({ now: Date.parse('2026-10-27T00:00:00Z') })
+  const { store, scheduler, dispatches, clock } = await harness({ now: Date.parse('2026-10-27T00:00:00Z') })
   await store.createTask(BASE_INPUT)
   clock.value = Date.parse('2026-10-27T12:00:00Z')
   await scheduler.tick()
@@ -133,7 +155,7 @@ test('超过 catch-up 窗口的历史 occurrence 记为 missed，不补跑', asy
 })
 
 test('交易日历窗口外 fail-closed：skipped_calendar_unavailable，不按工作日猜', async () => {
-  const { store, scheduler, dispatches } = harness({ now: Date.parse('2027-01-04T02:00:00Z') })
+  const { store, scheduler, dispatches } = await harness({ now: Date.parse('2027-01-04T02:00:00Z') })
   await store.createTask(BASE_INPUT)
   await scheduler.tick()
   assert.equal(dispatches.length, 0)
@@ -148,7 +170,7 @@ test('日历刷新在途时不提前烧掉 occurrence；刷新结束仍未知才
     status: () => ({ available: false, source: 'none' }),
     pendingRefresh: () => refreshing,
   }
-  const { store, scheduler } = harness({ calendar, now: Date.parse('2026-10-27T01:05:00Z') })
+  const { store, scheduler } = await harness({ calendar, now: Date.parse('2026-10-27T01:05:00Z') })
   await store.createTask(BASE_INPUT)
   await scheduler.tick()
   assert.equal((await store.listRunsPage({ limit: 10 })).runs.length, 0, '刷新在途时应下一 tick 重试')
@@ -171,7 +193,7 @@ test('本地 held 但根锁 token 已失效时不允许手动投递', async () =
     async isCurrent() { return false },
     async release() { this.held = false },
   }
-  const { store, scheduler, dispatches } = harness({ owner })
+  const { store, scheduler, dispatches } = await harness({ owner })
   const record = await store.createTask(BASE_INPUT)
   const task = await store.getTask(record.id)
   const result = await scheduler.runNow(task)
@@ -190,14 +212,14 @@ test('standby 时手动运行返回 scheduler_unavailable；取得 owner 后才�
     async renew() { return false },
     async release() { this.held = false },
   }
-  const { store, scheduler } = harness({ owner })
+  const { store, scheduler } = await harness({ owner })
   const record = await store.createTask(BASE_INPUT)
   const task = await store.getTask(record.id)
   const rejected = await scheduler.runNow(task)
   assert.equal(rejected.ok, false)
   assert.equal(rejected.code, 'scheduler_unavailable')
 
-  const free = harness()
+  const free = await harness()
   const freeRecord = await free.store.createTask(BASE_INPUT)
   const freeTask = await free.store.getTask(freeRecord.id)
   const accepted = await free.scheduler.runNow(freeTask)
@@ -216,7 +238,7 @@ test('standby 只更新系统状态，不写任务通知，也不每次 tick 刷
     async renew() { return false },
     async release() { this.held = false },
   }
-  const { store, scheduler } = harness({ owner })
+  const { store, scheduler } = await harness({ owner })
   await scheduler.tick()
   assert.equal((await store.listNotifications()).length, 0, 'standby 不得进入任务通知收件箱')
   assert.equal((await store.listNotifications({ scope: 'system' })).length, 0, 'standby 也不再落通知记录')

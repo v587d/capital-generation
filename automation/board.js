@@ -5,6 +5,7 @@
 import { TaskCategorySchema, isValidTimeZone } from './schema.js'
 import { taskIconId } from './task-icons.js'
 import { addDays, localPartsAt } from './time.js'
+import { isUsSymbol } from './watch.js'
 
 const DAY_VALUES = new Set(['7', '14', '30', 'all'])
 const DEFAULT_DAYS = '14'
@@ -194,21 +195,53 @@ function sourceOf(run, item) {
 }
 
 /** Only the tracking facts belong on the wire; profileKey and storage ids stay server-side. */
-function watchSummary(watch) {
+function watchSummary(watch, today) {
   if (watch === undefined) return null
+  const pastDue = typeof watch.dueAt === 'string' && typeof today === 'string' && watch.dueAt < today
   return {
     status: watch.status,
     resolvedFrom: watch.resolvedFrom ?? null,
     checkedAt: watch.checkedAt ?? null,
     evidence: watch.evidence ?? null,
+    source: watch.source ?? null,
     handoffReason: watch.handoffReason ?? null,
     dueAt: watch.dueAt ?? null,
+    autoRequestedAt: watch.autoRequestedAt ?? null,
+    expiredReason: watch.expiredReason ?? null,
+    autoEligible: watch.status !== 'triggered'
+      && watch.status !== 'expired'
+      && !pastDue
+      && !isUsSymbol(watch.symbol),
+    autoIneligibleReason: watch.status === 'triggered'
+      ? 'triggered'
+      : watch.status === 'expired' || pastDue
+        ? 'expired'
+        : isUsSymbol(watch.symbol) ? 'us_symbol' : null,
   }
 }
 
 function watchRank(item) {
   if (item.watch === null || item.watch === undefined) return 9
   return WATCH_RANK[item.watch.resolvedFrom ?? item.watch.status] ?? 9
+}
+
+/** Expired rows stay in the TODO archive but must not inflate stock follow-up counts. */
+function todoExpired(item, today, timeZone) {
+  const decidedAt = typeof item.ackedAt === 'string' ? item.ackedAt : item.deferredAt
+  if (decidedAt !== undefined) {
+    const decidedDate = dateOf(decidedAt, timeZone)
+    return decidedDate === undefined || decidedDate < today
+  }
+  const watchStatus = item.watch?.resolvedFrom ?? item.watch?.status
+  if (watchStatus === 'triggered') return false
+  if (item.watch?.status === 'expired') return true
+  if (typeof item.dueAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.dueAt)) return item.dueAt < today
+  const label = typeof item.dueLabel === 'string' ? item.dueLabel.trim() : ''
+  if (label === '今天' || label === '今日') {
+    const seen = dateOf(item.lastSeenAt, timeZone)
+    return seen !== undefined && seen < today
+  }
+  return false
 }
 
 function aggregateTodos(entries) {
@@ -555,16 +588,27 @@ export function createBoardService(options) {
     const watchById = new Map(watches.map((watch) => [watch.todoId, watch]))
     const todos = aggregateTodos(entries).map((item) => {
       const ack = ackById.get(item.id)
-      const ackedAt = todoAckCovers(ack, item) ? ack.confirmedAt : undefined
+      const decision = ack !== undefined && todoAckCovers(ack, item) ? (ack.decision ?? 'confirmed') : undefined
+      const decidedAt = decision === undefined ? undefined : ack.confirmedAt
       return {
         ...item,
-        watch: watchSummary(watchById.get(item.id)),
+        watch: watchSummary(watchById.get(item.id), parsed.to),
         ...(item.symbol === undefined ? {} : { symbolKey: stockSymbolKey(item.symbol) }),
-        ...(ackedAt === undefined ? {} : { ackedAt }),
+        ...(decision === 'confirmed' ? { ackedAt: decidedAt } : {}),
+        ...(decision === 'deferred' ? { deferredAt: decidedAt } : {}),
+        ...(decision === undefined ? {} : { decision }),
       }
     })
     const visible = options.includeAcked === true ? todos : todos.filter((item) => item.ackedAt === undefined)
+    const expiredIds = new Set(visible.filter((item) => todoExpired(item, parsed.to, parsed.timeZone)).map((item) => item.id))
     visible.sort((left, right) => {
+      const archive = (expiredIds.has(left.id) ? 1 : 0) - (expiredIds.has(right.id) ? 1 : 0)
+      if (archive !== 0) return archive
+      if (expiredIds.has(left.id)) {
+        return String(right.dueAt ?? '').localeCompare(String(left.dueAt ?? ''))
+          || String(right.lastSeenAt).localeCompare(String(left.lastSeenAt))
+          || String(left.id).localeCompare(String(right.id))
+      }
       const kind = (KIND_RANK[left.kind] ?? 9) - (KIND_RANK[right.kind] ?? 9)
       if (kind !== 0) return kind
       const watch = watchRank(left) - watchRank(right)
@@ -593,9 +637,10 @@ export function createBoardService(options) {
       ? await asks.latestForRuns(pageRunIds)
       : new Map()
     const todos = await todosFor(parsed, entries, { includeAcked: true })
-    const openTodos = todos.filter((item) => item.ackedAt === undefined)
+    const openTodos = todos.filter((item) => item.ackedAt === undefined && item.deferredAt === undefined)
+    const activeTodos = openTodos.filter((item) => !todoExpired(item, parsed.to, parsed.timeZone))
     const firstSeen = firstSeenMaps(historyEntries)
-    const stocks = aggregateStocks(entries, openTodos, firstSeen.stocks)
+    const stocks = aggregateStocks(entries, activeTodos, firstSeen.stocks)
     const gaps = aggregateGaps(entries, firstSeen.gaps)
     const health = healthOf({
       runs: page.runs,
@@ -637,10 +682,77 @@ export function createBoardService(options) {
     return todosFor(parseBoardQuery(query, now))
   }
 
-  async function confirmTodo(todoId) {
-    const record = await store.confirmTodo(todoId)
-    return { id: record.todoId, confirmedAt: record.confirmedAt }
+  async function closeWatch(todoId, at) {
+    const watches = await store.listTodoWatches()
+    const watch = watches.find((entry) => entry.todoId === todoId)
+    if (watch === undefined || watch.status === 'resolved') return
+    const next = {
+      ...watch,
+      status: 'resolved',
+      ...(watch.status === 'resolved' ? {} : { resolvedFrom: watch.status }),
+      updatedAt: at,
+    }
+    delete next.handoffReason
+    delete next.autoRequestedAt
+    delete next.expiredReason
+    await store.putTodoWatch(next)
   }
 
-  return { board, openTodos, confirmTodo }
+  async function promoteTodo(todoId) {
+    const watches = await store.listTodoWatches()
+    const watch = watches.find((entry) => entry.todoId === todoId)
+    if (watch === undefined) {
+      throw new BoardError('todo_not_tracked', '这条 TODO 没有跟踪记录，暂时不能转入自动核验。', 409)
+    }
+    if (watch.kind !== 'confirm' && watch.kind !== 'verify') {
+      throw new BoardError('todo_auto_unsupported', '这条 TODO 暂不支持自动核验。', 409)
+    }
+    if (watch.status === 'expired' || (typeof watch.dueAt === 'string' && watch.dueAt < localPartsAt(now()).date)) {
+      throw new BoardError('todo_expired', '这条 TODO 已过期，不能再转入自动核验。', 409)
+    }
+    if (isUsSymbol(watch.symbol)) {
+      throw new BoardError('todo_auto_unsupported', '美股标的暂不支持自动核验。', 409)
+    }
+    if (watch.status === 'triggered') {
+      throw new BoardError('todo_already_triggered', '这条条件已经触发，请直接确认或忽略。', 409)
+    }
+    const at = iso(now())
+    const next = {
+      ...watch,
+      status: 'watching',
+      autoRequestedAt: at,
+      updatedAt: at,
+    }
+    delete next.resolvedFrom
+    delete next.handoffReason
+    delete next.expiredReason
+    delete next.verdict
+    delete next.evidence
+    delete next.source
+    delete next.evidenceRunId
+    delete next.evidenceSessionId
+    delete next.notifiedAt
+    delete next.notifiedStatus
+    await store.putTodoWatch(next)
+    await store.clearTodoDecision(todoId)
+    return { id: todoId, action: 'auto', status: 'watching', requestedAt: at }
+  }
+
+  async function decideTodo(todoId, action) {
+    if (action === 'auto') return promoteTodo(todoId)
+    if (action !== 'confirm' && action !== 'defer') {
+      throw new BoardError('invalid_action', '未知的 TODO 操作。', 400)
+    }
+    const decision = action === 'defer' ? 'deferred' : 'confirmed'
+    const record = await store.decideTodo(todoId, decision)
+    await closeWatch(todoId, record.confirmedAt)
+    return { id: record.todoId, action, decision, decidedAt: record.confirmedAt }
+  }
+
+  async function confirmTodo(todoId) {
+    const result = await decideTodo(todoId, 'confirm')
+    return { id: result.id, confirmedAt: result.decidedAt }
+  }
+
+  return { board, openTodos, confirmTodo, decideTodo }
 }

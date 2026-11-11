@@ -29,7 +29,7 @@ Auto never fetches data or draws charts directly; every number needs a source an
 
 ## CapGen research automation
 
-Built-in task templates cover news, quotes, reviews, research, portfolios and monitoring; they start a new session on schedule and can also be run manually. Tasks, the board, the run heatmap and notifications live on one page. Board TODOs are checked automatically alongside the Midday Snapshot and Daily Review runs; when a condition triggers or needs your confirmation, it lands in task notifications.
+Built-in task templates cover news, quotes, reviews, research, portfolios and monitoring; they start a new session on schedule and can also be run manually. Tasks, the board, the run heatmap and notifications live on one page. Board TODOs are checked by the default-enabled TODO Verifier after the A/H close; when a condition triggers or needs your confirmation, it lands in task notifications.
 
 See [README CapGen automation](https://github.com/v587d/capital-generation#capgen-automation) for templates, budgets and notifications.
 

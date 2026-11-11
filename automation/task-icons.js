@@ -55,6 +55,7 @@ export const BUILTIN_TASK_ICONS = Object.freeze({
   'post-close-filings': 'inbox',
   'hk-close': 'building-skyscraper',
   'daily-review': 'clipboard-check',
+  'todo-verifier-close': 'clipboard-check',
   'us-premarket': 'clock-play',
   'portfolio-weekly': 'chart-pie',
   'watchlist-weekly': 'star',

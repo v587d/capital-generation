@@ -123,12 +123,14 @@ test('tools/present：present_charts 记录清单，收尾 finish 帧才写官�
       time: 1_700_000_000_105,
       data: { source: { kind: 'user' } },
     })
+    // The child is still marked running when the closing answer lands; the late notice is the
+    // real race (run_bfc87328): if the guard only arms on an idle root, it opens an empty turn.
+    listeners.get('subagent/start')({ id: 'junior-2' })
     sessionEvent(main, {
       type: 'user/message',
       time: 1_700_000_000_110,
       data: { source: { kind: 'agent-message', senderSessionId: 'junior-2' } },
     })
-    // A new relay resets the closing marker; the following finish restores it.
     stream({ agent, frame: { type: 'start', attemptId: 'a2', turn: 5 } })
     stream({ agent, frame: { type: 'chunk', attemptId: 'a2', turn: 5, chunk: { type: 'finish', reason: { kind: 'stop' } } } })
     inbox.nextStep.push(late)

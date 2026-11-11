@@ -9,6 +9,7 @@ import {
   extractSessionAnswer,
   normalizeFinalAnswer,
   parseBriefOutput,
+  readSessionAnswer,
 } from '../automation/brief.js'
 import { createAutomationStore } from '../automation/store.js'
 import { tradingCalendar } from '../automation/calendar.js'
@@ -41,6 +42,7 @@ function sessionEvents(text = ANSWER) {
   return {
     events: [
       { type: 'request/header', data: { header: { config: { provider: 'test-provider', model: 'test-model' } } } },
+      { type: 'tool/result', data: { message: { content: [{ type: 'text', text: '工具原文：收盘 44.55 元。' }] } } },
       { type: 'assistant/message', data: { message: { content: [{ type: 'text', text }] } } },
     ],
   }
@@ -183,6 +185,38 @@ test('会话正文：取最后一条主 assistant 文本和最后一条 request/
   assert.deepEqual(extracted, { text: '最终结论', provider: 'b', model: 'two' })
 })
 
+test('会话正文：结算通知唤醒的短确认不覆盖上一轮完整答复', () => {
+  const extracted = extractSessionAnswer({
+    events: [
+      { type: 'turn/start', data: { turn: 1 } },
+      { type: 'user/message', data: { source: { kind: 'user' } } },
+      { type: 'assistant/message', data: { turn: 1, message: { content: [{ type: 'text', text: '完整晨报：三件事与数据来源。' }] } } },
+      { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+      { type: 'turn/start', data: { turn: 2 } },
+      { type: 'user/message', data: { source: { kind: 'subagent-settled', senderSessionId: 'child-1' } } },
+      { type: 'assistant/message', data: { turn: 2, message: { content: [{ type: 'text', text: '（本轮没有新增信息需要补入。）' }] } } },
+      { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } },
+    ],
+  })
+  assert.match(extracted.text, /完整晨报/, '上一轮完整答复必须进入简报正文')
+  assert.match(extracted.text, /本轮没有新增信息/, '最后一轮确认仍保留，交给简报模型判断哪一段是实质结论')
+})
+
+test('会话正文：最后一轮本身有实质结论时也把上一轮保留为候选', () => {
+  const extracted = extractSessionAnswer({
+    events: [
+      { type: 'turn/start', data: { turn: 1 } },
+      { type: 'user/message', data: { source: { kind: 'user' } } },
+      { type: 'assistant/message', data: { turn: 1, message: { content: [{ type: 'text', text: '旧的中间结论' }] } } },
+      { type: 'turn/start', data: { turn: 2 } },
+      { type: 'user/message', data: { source: { kind: 'subagent-settled', senderSessionId: 'child-1' } } },
+      { type: 'assistant/message', data: { turn: 2, message: { content: [{ type: 'text', text: '结算后补齐的最终结论' }] } } },
+    ],
+  })
+  assert.match(extracted.text, /旧的中间结论/, '上一轮作为候选保留')
+  assert.match(extracted.text, /结算后补齐的最终结论/, '最后一轮实质结论不能被丢掉')
+})
+
 test('正文不截断：无论多长都完整交给简报与 TODO 核验', () => {
   const source = `${'字'.repeat(20_000)}\n尾部标记`
   const normalized = normalizeFinalAnswer(source)
@@ -237,41 +271,15 @@ test('固定 system prompt：无 persona、无工具，sessionId 与正文进入
   assert.equal((await store.getRun(run.id)).status, 'succeeded', '简报失败/成功都不能改运行终态')
 })
 
-test('TODO 核验拿到终稿与路由：简报模型失败也不影响入队，正文不按 12k 截断', async () => {
-  const { store, task } = await makeStore()
-  const run = await successRun(store, task)
+test('读取终稿时同时返回工具原文，正文不按 12k 截断', async () => {
   const longAnswer = `${'长'.repeat(13_000)}\n尾部标记`
-  let seen
-  const ctx = {
-    get(name) {
-      if (name === 'sessionQuery') return { readSession: async () => sessionEvents(longAnswer) }
-      if (name === 'llm') {
-        return {
-          async *stream() {
-            throw new Error('brief model down')
-          },
-        }
-      }
-      return undefined
-    },
-  }
-  const service = createBriefService({
-    ctx,
-    store,
-    scheduler: { status: () => ({ state: 'active' }) },
-    now: () => NOW,
-    logger: { warn() {} },
-    onBriefReady: (payload) => { seen = payload },
-  })
-  await service.onRunSucceeded({ run: await store.getRun(run.id), task })
-  const failed = await waitForBrief(store, run.id, 'failed')
-  service.stop()
-  assert.match(failed.error, /brief model down/)
-  assert.ok(seen, '简报失败时 TODO 核验仍必须拿到终稿')
-  assert.ok(seen.text.length > 12_000, 'TODO 核验拿全文，不再复用简报的 12k 截断')
-  assert.match(seen.text, /尾部标记/)
-  assert.deepEqual(seen.route, { provider: 'test-provider', model: 'test-model' })
-  assert.equal(seen.run.id, run.id)
+  const answer = await readSessionAnswer({
+    readSession: async () => sessionEvents(longAnswer),
+  }, 'session-test-1', { includeToolText: true })
+  assert.ok(answer.text.length > 12_000, '终稿全文不能被 12k 截断')
+  assert.match(answer.text, /尾部标记/)
+  assert.match(answer.toolText, /工具原文：收盘 44\.55 元/)
+  assert.deepEqual({ provider: answer.provider, model: answer.model }, { provider: 'test-provider', model: 'test-model' })
 })
 
 test('模型失败只把简报标失败，不影响运行；失败简报可单条重试', async () => {

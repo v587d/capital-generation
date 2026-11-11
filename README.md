@@ -1,25 +1,11 @@
-<p align="center">
-  <a href="https://github.com/v587d/capital-generation"><img src="https://img.shields.io/badge/Market-CN%20%7C%20HK%20%7C%20US-orange" alt="Market·CN+HK+US"></a>
-  <a href="https://github.com/v587d/capital-generation"><img src="https://img.shields.io/badge/Financial-Agent-red" alt="Financial Agent"></a>
-  <a href="https://github.com/v587d/capital-generation">
-    <img src="https://img.shields.io/badge/%E5%93%81%E7%A7%8D-%E8%82%A1%E7%A5%A8%20%7C%E5%80%BA%E5%88%B8%20%7C%E6%9C%9F%E8%B4%A7%20%7C%E5%95%86%E5%93%81%20%7C%E8%A1%8D%E7%94%9F%E5%93%81-fedcba" alt="股票·债券·期货·商品·衍生品">
-  </a>
-</p>
-<p align="center">
-  <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DeepSeek_Harness-plugin-blue" alt="DSH Plugin"></a>
-  <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DeepSeek_Harness-web-orange" alt="DSH Web"></a>
-  <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DeepSeek_Harness-desktop-brightgreen" alt="DSH Desktop · 已实机验证"></a>
-  <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DSH%20Baseline-0.2.2--rc.1-blue" alt="DSH@0.2.2-rc.1"></a>
-</p>
-<p align="center">
-  <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.20.0-9cf" alt="Version"></a>
-  <a href="https://www.npmjs.com/package/@v587d/capital-generation"><img src="https://img.shields.io/npm/v/%40v587d%2Fcapital-generation" alt="npm version"></a>
-  <a href="https://github.com/deepseek-ai/deepseek-harness"><img src="https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white" alt="powered-by-dsh"></a>
-</p>
-
 # Capital Generation
+<p align="left">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
+  <a href="https://github.com/v587d/capital-generation"><img src="https://img.shields.io/badge/Financial%20Market-CN%20%7C%20HK%20%7C%20US-orange" alt="Market·CN+HK+US"></a>
+  <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DSH%20Baseline-0.2.2--rc.1-blue" alt="DSH@0.2.2-rc.1"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.21.0-9cf" alt="Version"></a>
+  <a href="https://www.npmjs.com/package/@v587d/capital-generation"><img src="https://img.shields.io/npm/v/%40v587d%2Fcapital-generation" alt="npm version"></a>
+</p>
 
 > Next-Gen AI-Driven Capital Generation.
 
@@ -179,7 +165,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 | [Quant Agent Skills](https://github.com/Howard-Jerry/quant-agent-skills) | 1 个跨市场选线 Skill：同一家公司在 A 股与港股、或美股 ADR 与港股各有一条线时该走哪一条——价差、币种与股息税、流动性与通道、披露文件路径各不相同。公司本身只研究一次，便宜的那条线不构成"这家公司更值得买"；A/H 溢价与 ADR 平价没有现成条目，须按两条线同一天的收盘价与当日汇率现算，缺任一项就只报缺的那一项 |
 
 <a id="capgen-automation" name="capgen-automation"></a>
-- **CapGen 投研自动化：** 内置 16 个模板（默认未添加，按需添加），覆盖资讯、行情、复盘、研究、组合与监控：交易日有盘前公告（08:00）、早间资讯（08:30）、午间快照（11:35）、当日公告（16:00）、港股收盘（16:30）与每日复盘（20:00），另有美股收盘（周二至周六 07:00）、美股盘前（周一至周五 20:30）、组合周报、自选股周检、行业周报、研究选题、财报跟踪、下周事件日历、市场周报与组合风险月报；也可新建自己的任务，并从 30 个图标里挑一个；内置模板也有各自的固定图标，看板卡片沿用同一枚。到点自动新建 session 执行，也能手动运行。任务、看板、12 个月运行热力图与任务通知在同一页，可在设置卡把任一已注册工作区设为任务统一使用的默认工作区，支持运行预算、通知和仅交易日触发；看板简报卡右上角的对话入口可直接追问，回答完成后卡片显示最新一轮摘要并可在卡内展开全文，弹窗按时间列出这次运行的全部追问，右上角可打开完整 session。看板 TODO 会随内置「午间快照」与「每日复盘」自动核验待验证条件，待确认或数据不足的条目交给你核对；触发或需要你处理时写入任务通知。
+- **CapGen 投研自动化：** 内置 17 个模板：16 个内容模板默认未添加、按需添加，覆盖资讯、行情、复盘、研究、组合与监控；交易日有盘前公告（08:00）、早间资讯（08:30）、午间快照（11:35）、当日公告（16:00）、港股收盘（16:30）与每日复盘（20:00），另有美股收盘（周二至周六 07:00）、美股盘前（周一至周五 20:30）、组合周报、自选股周检、行业周报、研究选题、财报跟踪、下周事件日历、市场周报与组合风险月报；「TODO 核验」默认启用，交易日 17:00 主动核验看板里的待验证条件。也可新建自己的任务，并从 30 个图标里挑一个；内置模板也有各自的固定图标，看板卡片沿用同一枚。到点自动新建 session 执行，也能手动运行。任务、看板、12 个月运行热力图与任务通知在同一页，可在设置卡把任一已注册工作区设为任务统一使用的默认工作区，支持运行预算、通知和仅交易日触发；看板简报卡右上角的对话入口可直接追问，回答完成后卡片显示最新一轮摘要并可在卡内展开全文，弹窗按时间列出这次运行的全部追问，右上角可打开完整 session。看板 TODO 由「TODO 核验」主动调查触发条件，待确认或数据不足的条目交给你核对；触发或需要你处理时写入任务通知。
 
 <p align="center">
   <a href="assets/capgen-automation-kanban.png">
@@ -198,7 +184,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 - **安装后找不到模式？** 确认插件出现在「插件」→ 已安装列表；Web / CLI profile 安装后要重启该 profile，并在新会话选择模式。选择器里应看到自动模式、行情专家、资讯专员；分析师和绘图专员是自动模式的内部角色，不会出现在这里。
 - **配置在哪？** 打开「插件」→ 已安装的 **Capital Generation**，插件介绍下方就是「数据源 / 投研自动化 / 精选 Skills / 包含的组件」四格，五把密钥都在第一格；第二格可指定任务统一使用的默认工作区，也能改自动检查间隔与最长运行时间等上限；不在 DSH 的普通「设置」页面，也不用点进任何一行组件。保存密钥后新建会话再试。
 - **升级到 2.9.0 后，分析师和绘图专员去哪了？** 这一版把它们收进自动模式内部，不再出现在选择器与预设管理里，避免误开一个没有取数入口的空会话。旧会话仍能按原身份恢复；新任务直接用自动模式提出即可。
-- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.20.0` 或 `@2.20.0`。
+- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.21.0` 或 `@2.21.0`。
 - **刚发布的新版本装不到？** 桌面端取包时会跳过**刚发布不久**的版本（宿主侧包管理器的发布冷却策略，实测会静默装成上一个版本），国内镜像的同步也可能滞后一段时间。急着用最新代码，改用仓库地址安装最直接；但仓库地址安装的是 git 依赖，插件页不显示「版本」检查。
 - **插件页的「版本」段怎么用？** 只有用包名从 npm 安装的版本才有；它只列比当前新的版本。回旧版要先卸载，再安装 `@v587d/capital-generation@版本号`（桌面端地址末尾加 `#v版本号`）；旧版必须匹配当前 DSH 基线，对应关系见 [CHANGELOG 的 Migration](CHANGELOG.md)。
 - **网页抓取失败？** 配置卡片中的「允许启动本地提取网页内容」默认开启：AnySearch 提取失败时可尝试本机直连。关闭后，本机直连的具名来源查询也不可用；请检查该开关和网络连接。

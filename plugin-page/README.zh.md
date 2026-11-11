@@ -29,7 +29,7 @@ Capital Generation 是运行在 [DeepSeek Harness](https://github.com/deepseek-a
 
 ## CapGen 投研自动化
 
-内置多套任务模板，覆盖资讯、行情、复盘、研究、组合与监控；到点自动新建会话执行，也能手动运行。任务、看板、运行热力图与通知在同一页。看板 TODO 会随「午间快照」「每日复盘」自动核验待验证条件，触发或需要你确认时写入任务通知。
+内置多套任务模板，覆盖资讯、行情、复盘、研究、组合与监控；到点自动新建会话执行，也能手动运行。任务、看板、运行热力图与通知在同一页。看板 TODO 由默认启用的「TODO 核验」在收盘后主动核验，触发或需要你确认时写入任务通知。
 
 模板清单、运行预算与通知设置见 [README 的 CapGen 投研自动化](https://github.com/v587d/capital-generation#capgen-automation)。
 

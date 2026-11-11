@@ -14,6 +14,7 @@ import {
   NotificationSchema,
   TodoAckSchema,
   TodoConfirmSchema,
+  TodoDecisionSchema,
   TodoWatchSchema,
   assertCleanJson,
   resolveTaskRecord,
@@ -53,8 +54,8 @@ const record = {
 const MIN_INSTRUCTION_CHARS = 120
 const MAX_INSTRUCTION_CHARS = 260
 
-test('十六个内置模板全部 dormant，指令只写覆盖范围与交付', () => {
-  assert.equal(BUILTIN_DEFINITIONS.length, 16)
+test('十六个内容模板 dormant + 一个 TODO 核验任务 active，指令只写覆盖范围与交付', () => {
+  assert.equal(BUILTIN_DEFINITIONS.length, 17)
   assert.deepEqual(BUILTIN_DEFINITIONS.map((item) => item.id), [
     'us-close',
     'pre-open-filings',
@@ -63,6 +64,7 @@ test('十六个内置模板全部 dormant，指令只写覆盖范围与交付', 
     'post-close-filings',
     'hk-close',
     'daily-review',
+    'todo-verifier-close',
     'us-premarket',
     'portfolio-weekly',
     'watchlist-weekly',
@@ -76,7 +78,7 @@ test('十六个内置模板全部 dormant，指令只写覆盖范围与交付', 
   for (const definition of BUILTIN_DEFINITIONS) {
     const { instruction, description } = definition.defaults
     const length = Array.from(instruction).length
-    assert.equal(definition.defaults.state, 'dormant')
+    assert.equal(definition.defaults.state, definition.id === 'todo-verifier-close' ? 'active' : 'dormant')
     assert.equal(definition.defaults.trigger.kind, 'schedule')
     assert.equal(definition.defaults.trigger.timezone, 'Asia/Shanghai')
     assert.equal(typeof definition.defaults.trigger.tradingDaysOnly, 'boolean', `${definition.id} 必须显式声明是否只看交易日`)
@@ -100,6 +102,7 @@ test('新增模板的日程与职责固定：港美股、组合、监控、研�
   const cases = [
     { id: 'us-close', title: '美股收盘', category: 'market', cadence: 'weekly', time: '07:00', weekdays: [2, 3, 4, 5, 6], tradingDaysOnly: false, matches: [/三大指数/, /盘后异动/, /休市/] },
     { id: 'midday-snapshot', title: '午间快照', category: 'market', cadence: 'daily', time: '11:35', tradingDaysOnly: true, matches: [/11:35/, /涨跌停/, /采集时间/] },
+    { id: 'todo-verifier-close', title: 'TODO 核验', category: 'monitor', cadence: 'daily', time: '17:00', tradingDaysOnly: true, matches: [/候选 TODO/, /insufficient/, /JSON/] },
     { id: 'hk-close', title: '港股收盘', category: 'market', cadence: 'daily', time: '16:30', tradingDaysOnly: true, matches: [/恒生/, /AH 溢价/, /休市/] },
     { id: 'us-premarket', title: '美股盘前', category: 'market', cadence: 'weekly', time: '20:30', weekdays: [1, 2, 3, 4, 5], tradingDaysOnly: false, matches: [/盘前/, /未取到/, /休市/] },
     { id: 'portfolio-weekly', title: '组合周报', category: 'portfolio', cadence: 'weekly', time: '10:00', weekdays: [6], tradingDaysOnly: false, matches: [/标记的持仓/, /集中度/, /不补满 100%/] },
@@ -416,12 +419,17 @@ test('TODO 确认 schema：记录严格且只收 id，不写 brief', () => {
     confirmedAt: '2026-11-07T00:00:00.000Z',
   }
   assert.equal(TodoAckSchema.parse(ack).todoId, ack.todoId)
+  assert.equal(TodoAckSchema.parse({ ...ack, decision: 'deferred' }).decision, 'deferred')
+  assert.throws(() => TodoAckSchema.parse({ ...ack, decision: 'auto' }), '用户决定只能是确认或忽略')
   assert.throws(() => TodoAckSchema.parse({ ...ack, unknown: true }), '未知字段必须被拒')
   assert.throws(() => TodoAckSchema.parse({ ...ack, confirmedAt: '2026-11-07T00:00:00Z' }), '确认时间必须是规范 UTC')
   assert.throws(() => TodoAckSchema.parse({ ...ack, todoId: 'x'.repeat(201) }), 'TODO id 超长必须被拒')
   assert.equal(TodoConfirmSchema.parse({ id: ack.todoId }).id, ack.todoId)
   assert.throws(() => TodoConfirmSchema.parse({}), '缺少 id 必须被拒')
   assert.throws(() => TodoConfirmSchema.parse({ id: 'x', extra: true }), '未知字段必须被拒')
+  assert.equal(TodoDecisionSchema.parse({ id: ack.todoId, action: 'auto' }).action, 'auto')
+  assert.throws(() => TodoDecisionSchema.parse({ id: ack.todoId, action: 'unknown' }), '未知决定必须被拒')
+  assert.throws(() => TodoDecisionSchema.parse({ id: ack.todoId, action: 'auto', extra: true }), '未知字段必须被拒')
 })
 
 test('TODO 跟踪 schema：状态、触发证据与人工交接必填，未知字段被拒', () => {
@@ -440,6 +448,8 @@ test('TODO 跟踪 schema：状态、触发证据与人工交接必填，未知�
     updatedAt: '2026-11-04T00:00:00.000Z',
   }
   assert.equal(TodoWatchSchema.parse(base).status, 'watching')
+  assert.equal(TodoWatchSchema.parse({ ...base, autoRequestedAt: '2026-11-04T02:00:00.000Z' }).autoRequestedAt, '2026-11-04T02:00:00.000Z')
+  assert.throws(() => TodoWatchSchema.parse({ ...base, autoRequestedAt: '2026-11-04T02:00:00Z' }), '自动核验请求时间必须是规范 UTC')
   assert.throws(() => TodoWatchSchema.parse({ ...base, status: 'triggered' }), '触发态必须有证据')
   assert.equal(TodoWatchSchema.parse({
     ...base,
@@ -447,7 +457,8 @@ test('TODO 跟踪 schema：状态、触发证据与人工交接必填，未知�
     checkedAt: '2026-11-04T08:00:00.000Z',
     verdict: 'triggered',
     evidence: '收盘 44.55 元，站回 44.01。',
-  }).status, 'triggered')
+    source: 'eastmoney_quote · 2026-11-04 15:00',
+  }).source, 'eastmoney_quote · 2026-11-04 15:00')
   assert.throws(() => TodoWatchSchema.parse({
     ...base,
     status: 'needs_human',
@@ -462,6 +473,13 @@ test('TODO 跟踪 schema：状态、触发证据与人工交接必填，未知�
     status: 'resolved',
     resolvedFrom: 'needs_human',
   }).resolvedFrom, 'needs_human')
+  assert.equal(TodoWatchSchema.parse({
+    ...base,
+    status: 'expired',
+    expiredReason: 'no_data',
+  }).expiredReason, 'no_data')
+  assert.throws(() => TodoWatchSchema.parse({ ...base, status: 'expired', expiredReason: 'unknown' }), '过期原因必须是闭集')
+  assert.throws(() => TodoWatchSchema.parse({ ...base, status: 'watching', expiredReason: 'no_data' }), '过期原因只能出现在 expired 状态')
   assert.throws(() => TodoWatchSchema.parse({ ...base, status: 'resolved', resolvedFrom: 'resolved' }), 'resolvedFrom 不接受自身')
   assert.throws(() => TodoWatchSchema.parse({ ...base, kind: 'track' }), '跟踪类不进入自动核验')
   assert.throws(() => TodoWatchSchema.parse({ ...base, dueAt: '2026-02-30' }), '非法日期必须被拒')

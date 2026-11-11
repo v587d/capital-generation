@@ -508,6 +508,49 @@ test('TODO 确认：POST /board/todos/confirm 只接受字符串 id', async () =
 })
 
 
+test('TODO 决定：POST /board/todos/decision 只接受三分支与字符串 id', async () => {
+  let seen
+  const boardService = {
+    async decideTodo(id, action) {
+      seen = { id, action }
+      return {
+        id,
+        action,
+        decision: action === 'defer' ? 'deferred' : 'confirmed',
+        decidedAt: '2026-11-07T00:00:00.000Z',
+      }
+    },
+  }
+  const { handler } = harness({ boardService })
+  const id = 'confirm|300803.SZ'
+  for (const action of ['confirm', 'defer', 'auto']) {
+    const response = await call(handler, {
+      method: 'POST',
+      url: '/capital-automation/board/todos/decision',
+      body: { id, action },
+    })
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.json().id, id)
+    assert.equal(seen.action, action)
+  }
+
+  for (const body of [
+    { id: '', action: 'confirm' },
+    { id, action: 'unknown' },
+    { id, action: 'confirm', extra: true },
+    { id: 5, action: 'confirm' },
+    {},
+  ]) {
+    const rejected = await call(handler, {
+      method: 'POST',
+      url: '/capital-automation/board/todos/decision',
+      body,
+    })
+    assert.equal(rejected.statusCode, 400, JSON.stringify(body))
+    assert.equal(rejected.json().code, 'invalid_request')
+  }
+})
+
 test('看板追问：POST 只接受严格 body，GET 按 id 读状态', async () => {
   const seen = []
   const asks = {

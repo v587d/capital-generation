@@ -253,6 +253,8 @@ export const RunRecordSchema = z.strictObject({
   blockedRequiresUser: z.boolean(),
   errors: z.array(RunErrorSchema).max(MAX_ERRORS_PER_RUN),
   summary: z.string().max(2_000).optional(),
+  /** Candidate snapshot handed to a TODO verifier run; keeps late arrivals out of its results. */
+  verificationTodoIds: z.array(z.string().min(1).max(200)).max(40).optional(),
 })
 
 export const AttemptRecordSchema = z.strictObject({
@@ -351,7 +353,7 @@ export const TaskBriefSchema = z.strictObject({
 })
 
 /**
- * User acknowledgement of an aggregated TODO. Briefs stay read-only; the ack only suppresses
+ * User decision on an aggregated TODO. Briefs stay read-only; the decision only suppresses
  * the version the user saw. A later run mentioning the same item produces a newer `lastSeenAt`
  * and the item shows up again.
  */
@@ -359,7 +361,9 @@ export const TodoAckSchema = z.strictObject({
   schemaVersion: z.literal(1),
   profileKey: z.string().min(1).max(80),
   todoId: z.string().min(1).max(200),
+  /** Legacy field name: this is the decision timestamp for both confirmed and deferred. */
   confirmedAt: isoInstant,
+  decision: z.enum(['confirmed', 'deferred']).optional(),
 })
 
 /** Derived tracking state for one TODO item; briefs and acks stay the source of truth. */
@@ -379,8 +383,13 @@ export const TodoWatchSchema = z.strictObject({
   firstSeenAt: isoInstant,
   lastSeenAt: isoInstant,
   checkedAt: isoInstant.optional(),
+  /** Set when the user asks the verifier to try this item again; cleared on the next verdict. */
+  autoRequestedAt: isoInstant.optional(),
+  /** Why the watch ended without a user decision; only valid while status is `expired`. */
+  expiredReason: z.enum(['not_triggered', 'no_data', 'not_verified', 'not_confirmed', 'stale']).optional(),
   verdict: z.enum(['triggered', 'not_triggered', 'insufficient']).optional(),
   evidence: z.string().max(300).optional(),
+  source: z.string().max(300).optional(),
   handoffReason: z.string().max(160).optional(),
   evidenceRunId: z.string().min(1).max(80).optional(),
   evidenceSessionId: z.string().min(1).max(120).optional(),
@@ -394,6 +403,9 @@ export const TodoWatchSchema = z.strictObject({
   }
   if (watch.status === 'needs_human' && watch.handoffReason === undefined) {
     ctx.addIssue({ code: 'custom', path: ['handoffReason'], message: 'needs_human watch requires handoffReason' })
+  }
+  if (watch.expiredReason !== undefined && watch.status !== 'expired') {
+    ctx.addIssue({ code: 'custom', path: ['expiredReason'], message: 'expiredReason is only valid on expired watches' })
   }
 })
 
@@ -468,6 +480,11 @@ export const TodoConfirmSchema = z.strictObject({
   id: z.string().min(1).max(200),
 })
 
+export const TodoDecisionSchema = z.strictObject({
+  id: z.string().min(1).max(200),
+  action: z.enum(['confirm', 'defer', 'auto']),
+})
+
 export const AskCreateSchema = z.strictObject({
   question: z.string().trim().min(1).max(MAX_ASK_QUESTION_CHARS),
   timeZone: timeZone.optional(),
@@ -482,7 +499,8 @@ export const NotificationsReadSchema = z.strictObject({
 })
 
 export const BuiltinDefaultsSchema = z.strictObject({
-  state: z.literal('dormant'),
+  // Content templates ship dormant; the TODO verifier is an operational task and ships active.
+  state: z.enum(['dormant', 'active']),
   category: TaskCategorySchema,
   title: z.string().min(1).max(MAX_TITLE_CHARS),
   description: z.string().max(MAX_DESCRIPTION_CHARS),

@@ -138,18 +138,20 @@ export function createChartDelivery(options: ChartDeliveryOptions): ChartDeliver
   }
 
   const flush = (session: SessionLike, turn: number | undefined, agent: DeliveryAgentLike | undefined): void => {
-    // A later step in the same exchange may omit `turn`; it still must not write a second card.
-    if (flushed) return
     const inbox = options.inboxOf?.(session)
     reconcileSettled(inbox)
-    if (!idle(inbox)) return
     // The wake guard drops notices that would otherwise make the loop open another step after
-    // this answer. Run it even when no chart is selected, and never let it block delivery.
+    // this answer. It must run on every pure-text finish, including when a child is still marked
+    // running: a late settlement notice is exactly the race that adds a "nothing new" turn.
+    // Chart delivery stays gated on `idle` below; a guard failure must not strand a card.
     try {
       options.onClosing?.(session, agent, turn)
     } catch {
       // A guard failure must not strand an already-selected card.
     }
+    // A later step in the same exchange may omit `turn`; it still must not write a second card.
+    if (flushed) return
+    if (!idle(inbox)) return
     const inputs = (explicit.length > 0 ? explicit : autoInputs(session)).slice(0, maxCharts)
     if (inputs.length === 0) return
     let written = false

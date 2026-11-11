@@ -20,6 +20,7 @@ export function createScheduler(options) {
     calendar,
     profile,
     getSettings,
+    shouldRun,
     now = () => Date.now(),
     logger,
     random,
@@ -220,6 +221,17 @@ export function createScheduler(options) {
     if (await store.activeRunForTask(task.id) !== undefined) {
       await createSkipped(task, key, 'skipped_overlap', latest.scheduledFor)
       return
+    }
+    if (typeof shouldRun === 'function') {
+      const allowed = await shouldRun(task).catch((error) => {
+        logger?.warn?.(`capital-automation: 运行前检查失败：${String(error)}`)
+        return true
+      })
+      if (!allowed) {
+        // No work for this occurrence: consume it without creating an empty run/session.
+        await store.setLastHandled(task.id, key, latest.scheduledFor)
+        return
+      }
     }
     if (runner.canDispatch?.() === false) {
       await createSkipped(task, key, 'skipped_overlap', latest.scheduledFor)

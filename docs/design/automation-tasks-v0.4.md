@@ -150,7 +150,7 @@ type Trigger = {
 
 ### 2.2 内置任务
 
-内置任务全部默认 `dormant`，用户明确添加后才会执行。Phase 1 提供十六个只读模板：
+内容模板默认 `dormant`，用户明确添加后才会执行；TODO 核验是默认 `active` 的运营任务（可暂停）。Phase 1 提供十六个只读内容模板，2.21 起另加一个 TODO 核验任务：
 
 | 分类 | 任务 | 默认触发 | 职责 |
 |---|---|---|---|
@@ -258,7 +258,7 @@ workspace registry 不可用时退回受控目录。
 ### 3.1 状态
 
 ```text
-dormant   内置任务在模板区等待添加
+dormant   内置内容模板在模板区等待添加
 active    按计划触发
 paused    保留配置但停止触发
 ```
@@ -784,7 +784,7 @@ Phase 1 只在任务详情和通知中心展示错误，不新增独立的宿主
 - 固定 domain 和 profile 过滤；
 - 单 scheduler owner；
 - daily/weekly/monthly/once 定时任务（once 为单次指定日期）；
-- 十六个内置只读模板；
+- 十六个内置只读内容模板 + 一个默认启用的 TODO 核验任务；
 - custom 任务；
 - 手动运行；
 - 新 session 每次运行；

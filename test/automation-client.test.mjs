@@ -721,7 +721,8 @@ test('看板：默认首页、空态引导手动运行、五个模块与无历�
   const briefCard = clientSource.slice(briefStart, briefEnd)
   assert.match(briefCard, /'data-size': 'icon',\s*title: zh\.openSession,\s*'aria-label': zh\.openSession,/, '卡片右上角只留图标按钮，靠 title / aria-label 交代动作')
   assert.match(briefCard, /h\(IconRightUpOutlineRegular, \{ size: 14 \}\)/, '打开 session 图标沿用外链箭头')
-  assert.match(briefCard, /'data-size': 'sm', onClick: openSession \}, zh\.openSession\)/, '失败 / 跳过态卡内操作仍保留文字按钮')
+  assert.doesNotMatch(briefCard, /onClick: openSession \}, zh\.openSession\)/, '失败 / 跳过态卡内不再保留文字版打开 session')
+  assert.doesNotMatch(briefCard, /openLink/, '简报卡只留右上角图标，不再生成文字版打开 session 按钮')
   assert.match(briefCard, /const identity = typeof card\.icon === 'string' \? card : \(task \?\? card\)/, '旧 /board 载荷没有图标时必须回退到任务列表')
   assert.match(briefCard, /h\(Glyph, \{ task: identity, size: 24, radius: 8, glyphSize: 14 \}\),\s*h\('h3'/, '简报卡标题左侧必须复用任务的身份图标')
   assert.match(clientSource, /task: taskById\.get\(card\.taskId\)/, '简报卡必须按 taskId 关联任务图标')
@@ -812,14 +813,29 @@ test('看板：默认首页、空态引导手动运行、五个模块与无历�
   assert.match(todoRow, /capital-automation-todowatch/, 'TODO 行必须显示自动核验状态')
   assert.doesNotMatch(todoRow, /capital-automation-todokind/, 'TODO 行只保留一个状态标签，不再并列 kind 标签')
   assert.match(todoRow, /capital-automation-todowatchmsg/, '触发必须有独立说明行')
-  assert.doesNotMatch(todoRow, /handoffReason/, '待人工确认不再显示通用交接说明')
-  assert.match(todoRow, /role: 'checkbox'/, '待人工确认用勾选框而不是文字按钮')
+  assert.doesNotMatch(todoRow, /handoffReason/, '待人工处理不再显示通用交接说明')
+  assert.match(todoRow, /className: 'capital-automation-todomenu'/, '待人工处理右侧改为更多操作按钮')
+  assert.match(todoRow, /'aria-haspopup': 'menu'/, '更多操作必须打开菜单')
+  assert.match(todoRow, /id: 'confirm'/, '菜单必须包含已确认')
+  assert.match(todoRow, /const archived = period === 'expired'/, '已过期行必须进入归档展示')
+  assert.match(todoRow, /const status = archived \? 'expired' : boardTodoStatus\(item\)/, '归档行统一显示已过期')
+  assert.match(todoRow, /const actionable = !archived && boardTodoCheckable\(status\)/, '归档行不再提供操作菜单')
+  assert.match(todoRow, /const pastDue = typeof item\.dueAt === 'string' && item\.dueAt < localDateKey\(new Date\(\)\)/, '过期条目不能再转入自动校验')
+  assert.match(todoRow, /const autoAvailable = !archived && !pastDue && boardTodoAutoAvailable\(item, status\)/, '过期条目的自动分支必须禁用')
+  assert.match(todoRow, /'data-archived': archived \? 'true' : undefined/, '归档行必须有独立样式属性')
+  assert.match(todoRow, /capital-automation-todooutcome/, '归档行必须展示过期结果')
+  assert.match(todoRow, /id: 'auto'/, '菜单必须包含转入自动校验')
+  assert.match(todoRow, /id: 'defer'/, '菜单必须包含忽略')
+  assert.doesNotMatch(todoRow, /todoAckTitle|todowatchcheck|'✓'/, '已确认标签不再附带对勾标记')
+  assert.match(todoRow, /id: 'auto-unavailable'/, '不支持自动校验时必须展示禁用原因')
+  assert.doesNotMatch(todoRow, /role: 'checkbox'/, '不再使用单个勾选框收口')
   assert.match(clientSource, /watchTriggered: '已触发'/, '触发态必须有明确标签')
-  assert.match(clientSource, /watchNeedsHuman: '待人工确认'/, '人工交接统一为待人工确认')
+  assert.match(clientSource, /watchNeedsHuman: '待人工处理'/, '人工交接统一为待人工处理')
   assert.match(clientSource, /watchResolved: '已确认'/, '确认后必须显示已确认')
-  assert.match(clientSource, /function boardTodoCheckpointHint\(tasks\)/, '核验状态必须能列出具体检查点任务')
-  assert.match(clientSource, /TODO_CHECKPOINT_IDS = new Set\(\['midday-snapshot', 'daily-review'\]\)/, '检查点集合必须与自动核验一致')
+  assert.match(clientSource, /function boardTodoVerifierHint\(tasks\)/, '核验状态必须能列出具体核验任务')
+  assert.match(clientSource, /TODO_VERIFIER_IDS = new Set\(\['todo-verifier-close'\]\)/, '核验任务集合必须与自动核验一致')
   assert.match(clientSource, /if \(typeof item\.ackedAt === 'string'/, '确认态必须按 ackedAt 收口')
+  assert.match(clientSource, /if \(typeof item\.deferredAt === 'string'/, '忽略态必须按 deferredAt 收口')
   assert.doesNotMatch(clientSource, /todoAttention|capital-automation-todocount/, 'TODO 标题不再提示待处理条数')
   assert.match(clientSource, /item\.todoId !== undefined\s*\?\s*\(\) => onOpenTodo\(item\)/, 'TODO 通知必须直接回到看板')
   assert.match(clientSource, /function openTodoFromNotification\(/, '通知中心必须能处理 TODO 通知')
@@ -857,11 +873,20 @@ test('看板右侧：默认展开，可整体收起，四个面板各自折叠',
   assert.match(clientSource, /className: 'capital-automation-tododesc'/, 'TODO 说明必须全宽显示')
   assert.match(clientSource, /\.capital-automation-todotitle \{[^}]*color: var\(--dsw-alias-label-primary\); font-size: 13px; line-height: 20px; font-weight: 600/, 'TODO 标题必须高对比并加大行高')
   assert.match(clientSource, /\.capital-automation-tododesc \{[^}]*font-size: 12px; line-height: 20px/, 'TODO 说明必须加大行距')
-  assert.match(clientSource, /role: 'checkbox'/, 'TODO 行必须有勾选框')
+  assert.match(clientSource, /className: 'capital-automation-todomenu'/, 'TODO 行必须有更多操作按钮')
   assert.match(clientSource, /todoAcked: '已确认'/, '确认成功后必须给出明确回执')
-  assert.match(clientSource, /api\.confirmTodo\(item\.id\)/, '确认动作必须写回服务端，不能只改本地状态')
-  assert.match(clientSource, /onAckTodo: \(item\) => \{ void ackTodo\(item\) \}/, '看板必须把确认动作接到 TODO 行')
-  assert.match(clientSource, /setBoard\(\(current\) => \{[\s\S]{0,900}ackedAt,/, '确认成功后本地立即显示已确认')
+  assert.match(clientSource, /api\.decideTodo\(item\.id, action\)/, '决定必须写回服务端，不能只改本地状态')
+  assert.match(clientSource, /onDecideTodo: \(item, action\) => \{ decideTodo\(item, action\) \}/, '看板必须把决定动作接到 TODO 行')
+  assert.match(clientSource, /optimisticDecisionRef\.current\.set\(item\.id, \{ action, at \}\)/, '点击后先本地应用决定，不等网络回执')
+  assert.match(clientSource, /setBoard\(\(current\) => applyTodoDecision\(current, item\.id, action, at\)\)/, '决定后本地立即更新看板')
+  assert.doesNotMatch(clientSource, /capital-automation-todocheckspin/, '决定不能等网络回执转圈')
+  assert.match(clientSource, /'data-decided': decided \? 'true' : undefined/, '已决定行必须有收起态属性')
+  assert.match(clientSource, /function boardTodoEntries\(todos, now = new Date\(\)\)/, '今日 TODO 排序必须复用统一归档逻辑')
+  assert.match(clientSource, /\.capital-automation-todoitem\[data-decided="true"\]/, '已决定行必须有收起样式')
+  assert.match(clientSource, /\.capital-automation-todotags \{[^}]*flex: none;/, '标签容器不能被长标题压缩，否则标签和标题会被挤到一起')
+  assert.match(clientSource, /\[data-decided="true"\] \.capital-automation-todotop, \.capital-automation-todoitem\[data-archived="true"\] \.capital-automation-todotop \{ justify-content: flex-start; gap: 10px; \}/, '已决定/归档行的标签与标题间距必须固定，不被 space-between 拉开')
+  assert.match(clientSource, /\[data-decided="true"\], \.capital-automation-todoitem\[data-archived="true"\] \{ padding: 7px 0; opacity: \.72; border-top: 0; \}/, '已决定/归档行之间不再重复画分隔线')
+  assert.match(clientSource, /:not\(\[data-decided="true"\]\) \+ \.capital-automation-todoitem\[data-decided="true"\] \{ border-top: \.5px solid var\(--ca-line\); \}/, '第一条已决定行必须与上面的待处理项分隔')
   assert.match(clientSource, /\.capital-automation-stockname \{[^}]*color: var\(--dsw-alias-label-primary\); font-size: 12\.5px; line-height: 19px; font-weight: 600/, '自选股名称必须高亮')
   assert.match(clientSource, /\.capital-automation-stocknote \{[^}]*font-size: 12px; line-height: 19px/, '自选股说明必须加大行距')
   assert.doesNotMatch(clientSource, /capital-automation-gapmain/, '数据体检也不能保留 54px 左栏')
@@ -934,13 +959,22 @@ test('TODO 日期归并：今天/尽快、将来、已过期，未来日期不�
   assert.equal(boardTodoPeriod({ dueAt: '2026-11-07' }, now), 'today', '当天到期属于今天')
   assert.equal(boardTodoPeriod({ dueAt: '2026-11-06' }, now), 'expired', '过期日期保留')
   assert.equal(boardTodoPeriod({ dueAt: '2026-11-06', watch: { status: 'triggered' } }, now), 'today', '已触发条目即使过期也留在今天待处理')
-  assert.equal(boardTodoPeriod({ dueAt: '2026-11-06', watch: { status: 'needs_human' } }, now), 'today', '待人工条目即使过期也留在今天待处理')
+  assert.equal(boardTodoPeriod({ dueAt: '2026-11-06', watch: { status: 'needs_human' } }, now), 'expired', '待人工条目到期后归档')
+  assert.equal(boardTodoPeriod({ dueAt: '2026-11-06', watch: { status: 'expired' } }, now), 'expired', '已过期条目不回到今天')
   assert.equal(boardTodoPeriod({ dueAt: '2026-11-06', ackedAt: at(7), watch: { status: 'resolved', resolvedFrom: 'needs_human' } }, now), 'today', '确认后的待人工条目仍留在今天显示已确认')
   assert.equal(boardTodoPeriod({ dueAt: '2026-11-06', ackedAt: at(6), watch: { status: 'resolved', resolvedFrom: 'needs_human' } }, now), 'expired', '隔天确认的条目按原日期归档')
+  assert.equal(boardTodoPeriod({ dueAt: '2026-11-06', deferredAt: at(7), watch: { status: 'resolved', resolvedFrom: 'needs_human' } }, now), 'today', '忽略的条目当天仍留在今天')
+  assert.equal(boardTodoPeriod({ dueAt: '2026-11-06', deferredAt: at(7), watch: { status: 'resolved', resolvedFrom: 'watching' } }, now), 'today', '从自动核验转忽略的过期项当天仍留在今天')
+  assert.equal(boardTodoPeriod({ dueAt: '2026-11-06', deferredAt: at(6), watch: { status: 'resolved', resolvedFrom: 'needs_human' } }, now), 'expired', '隔天忽略的条目按原日期归档')
+  assert.equal(boardTodoPeriod({ dueAt: '2026-11-06', watch: { status: 'watching', autoRequestedAt: at(7) } }, now), 'expired', '过期后自动请求不再覆盖到期日')
+  assert.equal(boardTodoPeriod({ dueAt: '2026-11-06', watch: { status: 'watching' } }, now), 'expired', '普通自动核验过期项不强行留在今天')
   assert.equal(boardTodoPeriod({ dueAt: '2026-11-08' }, now), 'future', '明天归入将来')
   assert.equal(boardTodoPeriod({ dueAt: '2026-11-18' }, now), 'future', '更远日期收入将来，到当天才浮到今天')
   assert.equal(boardTodoPeriod({ dueLabel: '尽快', finishedAt: at(7) }, now), 'today', '当天生成的“尽快”归入今天优先队列')
-  assert.equal(boardTodoPeriod({ dueLabel: '尽快', finishedAt: at(6) }, now), 'future', '隔夜的“尽快”不再占据今天，转将来')
+  assert.equal(boardTodoPeriod({ dueLabel: '尽快', finishedAt: at(6), watch: { status: 'watching' } }, now), 'today', '有 watch 的“尽快”在 72 小时内仍留在今天')
+  assert.equal(boardTodoPeriod({ dueLabel: '尽快', finishedAt: at(6), watch: { status: 'expired' } }, now), 'expired', 'watch 已停止的“尽快”归档')
+  assert.equal(boardTodoPeriod({ dueLabel: '尽快', finishedAt: at(6) }, now), 'future', '没有 watch 的旧“尽快”留在将来')
+  assert.equal(boardTodoPeriod({ ackedAt: at(6), dueLabel: '尽快', watch: { status: 'resolved' } }, now), 'expired', '隔天已决定的无日期条目也归档')
   assert.equal(boardTodoPeriod({ dueLabel: '马上', finishedAt: at(7) }, now), 'today', '当天生成的“马上”归入今天优先队列')
   assert.equal(boardTodoPeriod({ dueLabel: '今天', finishedAt: at(7) }, now), 'today', '当天生成的“今天”仍然有效')
   assert.equal(boardTodoPeriod({ dueLabel: '今天', finishedAt: at(6) }, now), 'expired', '隔夜的“今天”必须转为已过期')
@@ -949,7 +983,7 @@ test('TODO 日期归并：今天/尽快、将来、已过期，未来日期不�
   assert.equal(boardTodoPeriod({}, now), 'future', '没有时间点属于将来')
 
   const dueStart = clientSource.indexOf('function boardTodoDueLabel')
-  const dueEnd = clientSource.indexOf('const TODO_CHECKPOINT_IDS', dueStart)
+  const dueEnd = clientSource.indexOf('const TODO_VERIFIER_IDS', dueStart)
   assert.ok(dueStart >= 0 && dueEnd > dueStart, '必须能定位 TODO 行内日期函数')
   const boardTodoDueLabel = new Function('zh', `${clientSource.slice(dueStart, dueEnd)}; return boardTodoDueLabel`)({
     board: { dueToday: '今天', dueAsap: '尽快', dueNoDate: '未定', dueFuture: '将来', dueExpired: '已过期' },
@@ -965,6 +999,130 @@ test('TODO 日期归并：今天/尽快、将来、已过期，未来日期不�
   assert.match(clientSource, /dueFuture: '将来'/, '第二档的筛选项必须叫「将来」')
   assert.doesNotMatch(clientSource, /dueEventDate|dueHint|到这天会自动进入/, '不再保留事件日文案与悬停提示')
   assert.equal(boardTodoDueLabel({ dueAt: '2026-11-06' }, 'expired'), '已过期 · 11-06')
+})
+
+test('TODO 决定：先本地收起，已决定行排到今天最后', () => {
+  const entriesStart = clientSource.indexOf('function boardTodoEntries')
+  const entriesEnd = clientSource.indexOf('function boardTodoIsOpen', entriesStart)
+  assert.ok(entriesStart >= 0 && entriesEnd > entriesStart, '必须能定位 TODO 排序函数')
+  const boardTodoEntries = new Function(
+    'BOARD_TODO_PERIODS',
+    'boardTodoPeriod',
+    `${clientSource.slice(entriesStart, entriesEnd)}; return boardTodoEntries`,
+  )(['today', 'future', 'expired'], (item) => item.period)
+
+  const ordered = boardTodoEntries([
+    { id: 'acked-old', period: 'today', ackedAt: '2026-11-11T01:00:00.000Z' },
+    { id: 'open-1', period: 'today' },
+    { id: 'deferred', period: 'today', deferredAt: '2026-11-11T01:30:00.000Z' },
+    { id: 'acked-new', period: 'today', ackedAt: '2026-11-11T02:00:00.000Z' },
+    { id: 'open-2', period: 'today' },
+    { id: 'expired-old', period: 'expired', dueAt: '2026-11-04' },
+    { id: 'expired-new', period: 'expired', dueAt: '2026-11-10' },
+    { id: 'expired-undated', period: 'expired', lastSeenAt: '2026-11-01T00:00:00.000Z' },
+  ])
+  assert.deepEqual(
+    ordered.filter((entry) => entry.period === 'today').map((entry) => entry.item.id),
+    ['open-1', 'open-2', 'acked-old', 'deferred', 'acked-new'],
+    '未决定项留在上面，已决定项按决定时间排到今天最后',
+  )
+  assert.deepEqual(
+    ordered.filter((entry) => entry.period === 'expired').map((entry) => entry.item.id),
+    ['expired-new', 'expired-old', 'expired-undated'],
+    '已过期按到期日倒序，无日期项排最后',
+  )
+
+  const helperStart = clientSource.indexOf('function boardTodoIsOpen')
+  const helperEnd = clientSource.indexOf('function boardTodoFilterOptions', helperStart)
+  assert.ok(helperStart >= 0 && helperEnd > helperStart, '必须能定位 TODO 决定本地状态函数')
+  const boardEntrySymbolKey = (entry) => entry.symbolKey ?? entry.symbol
+  const helpers = new Function(
+    'boardEntrySymbolKey',
+    `${clientSource.slice(helperStart, helperEnd)}; return { applyTodoDecision, restoreBoardTodoState }`,
+  )(boardEntrySymbolKey)
+
+  const watch = { status: 'needs_human', resolvedFrom: null, checkedAt: null, evidence: '证据', source: '来源' }
+  const before = {
+    todos: [{ id: 'todo-1', symbol: '300803.SZ', symbolKey: '300803.SZ', title: '指南针', sessionId: 'session-1', watch }],
+    stocks: [{ symbolKey: '300803.SZ', items: [{ id: 'todo-1', title: '指南针', sessionId: 'session-1' }], todoCount: 1 }],
+    stats: { todos: 1 },
+  }
+  const at = '2026-11-11T03:00:00.000Z'
+  const confirmed = helpers.applyTodoDecision(before, 'todo-1', 'confirm', at)
+  assert.equal(confirmed.todos[0].ackedAt, at, '点击后必须立即写入本地确认时间')
+  assert.equal(confirmed.todos[0].decision, 'confirmed', '必须记录确认决定')
+  assert.equal(confirmed.todos[0].watch.status, 'resolved', 'watch 必须立即收口为 resolved')
+  assert.equal(confirmed.todos[0].watch.resolvedFrom, 'needs_human', '决定前状态必须留档')
+  assert.equal(confirmed.stocks[0].todoCount, 0, '个股跟进数必须立即扣除')
+  assert.equal(confirmed.stats.todos, 0, '今日 TODO 统计必须立即扣除')
+  assert.equal(helpers.applyTodoDecision(confirmed, 'todo-1', 'confirm', at), confirmed, '重复确认不能再次扣减')
+
+  const deferred = helpers.applyTodoDecision(confirmed, 'todo-1', 'defer', '2026-11-11T03:10:00.000Z')
+  assert.equal(deferred.todos[0].ackedAt, undefined, '改判忽略必须撤掉确认时间')
+  assert.equal(deferred.todos[0].deferredAt, '2026-11-11T03:10:00.000Z', '改判忽略必须写入忽略时间')
+  assert.equal(deferred.todos[0].decision, 'deferred', '改判忽略必须记录决定')
+  assert.equal(deferred.stocks[0].todoCount, 0, '确认改忽略不重复扣减')
+  assert.equal(deferred.stats.todos, 0, '确认改忽略不重复扣减')
+
+  const auto = helpers.applyTodoDecision(deferred, 'todo-1', 'auto', '2026-11-11T03:20:00.000Z')
+  assert.equal(auto.todos[0].decision, undefined, '转自动必须撤掉人工决定')
+  assert.equal(auto.todos[0].ackedAt, undefined, '转自动必须撤掉确认时间')
+  assert.equal(auto.todos[0].deferredAt, undefined, '转自动必须撤掉忽略时间')
+  assert.equal(auto.todos[0].watch.status, 'watching', '转自动必须立即显示自动核验中')
+  assert.equal(auto.todos[0].watch.autoRequestedAt, '2026-11-11T03:20:00.000Z', '转自动必须记录请求时间')
+  assert.equal(auto.stocks[0].todoCount, 1, '转自动必须恢复个股跟进数')
+  assert.equal(auto.stats.todos, 1, '转自动必须恢复今日统计')
+
+  const restored = helpers.restoreBoardTodoState(confirmed, 'todo-1', { ackedAt: undefined, deferredAt: undefined, decision: undefined, watch })
+  assert.equal(restored.todos[0].ackedAt, undefined, '写回失败必须撤回本地决定')
+  assert.equal(restored.todos[0].watch.status, 'needs_human', '写回失败必须恢复原状态')
+  assert.equal(restored.stocks[0].todoCount, 1, '写回失败必须恢复个股跟进数')
+  assert.equal(restored.stats.todos, 1, '写回失败必须恢复今日统计')
+})
+
+test('TODO 决定菜单：track / 已触发 / 美股不提供自动校验', () => {
+  const start = clientSource.indexOf('function boardTodoAutoAvailable')
+  const end = clientSource.indexOf('function boardCategoryOptions', start)
+  assert.ok(start >= 0 && end > start, '必须能定位自动校验可用性函数')
+  const helpers = new Function(`${clientSource.slice(start, end)}; return { boardTodoAutoAvailable, boardTodoAutoReason }`)()
+  const { boardTodoAutoAvailable, boardTodoAutoReason } = helpers
+  assert.equal(boardTodoAutoAvailable({ kind: 'track', watch: null }, 'tracking'), false, 'track 只给确认/忽略')
+  assert.equal(boardTodoAutoAvailable({ kind: 'confirm', watch: { autoEligible: true } }, 'needs_human'), true, 'confirm 可转入自动')
+  assert.equal(boardTodoAutoAvailable({ kind: 'verify', watch: { autoEligible: true } }, 'resolved'), true, '已决定项可改判为自动')
+  assert.equal(boardTodoAutoAvailable({ kind: 'verify', watch: { autoEligible: false } }, 'needs_human'), false, '服务端标记不可自动时不展示')
+  assert.equal(boardTodoAutoAvailable({ kind: 'verify', watch: { autoEligible: true } }, 'triggered'), false, '已触发只给确认/忽略')
+  assert.equal(boardTodoAutoAvailable({ kind: 'verify', watch: { autoEligible: true } }, 'watching'), false, '自动核验中不重复转入')
+  assert.equal(boardTodoAutoReason({ kind: 'track', watch: null }, 'tracking'), '', 'track 不展示自动校验条目')
+  assert.equal(
+    boardTodoAutoReason({ kind: 'verify', watch: { autoEligible: false, autoIneligibleReason: 'us_symbol' } }, 'needs_human'),
+    '美股暂不支持',
+    '美股必须给出禁用原因',
+  )
+  assert.equal(
+    boardTodoAutoReason({ kind: 'verify', watch: { autoEligible: false, autoIneligibleReason: 'triggered' } }, 'triggered'),
+    '条件已触发',
+    '已触发项必须说明原因',
+  )
+  assert.equal(
+    boardTodoAutoReason({ kind: 'verify', watch: { autoEligible: false, autoIneligibleReason: 'expired' } }, 'needs_human'),
+    '已过期',
+    '过期项必须说明原因',
+  )
+})
+
+test('TODO 过期归档：统一标签与结果，不再提供操作菜单', () => {
+  const start = clientSource.indexOf('function boardTodoDecision')
+  const end = clientSource.indexOf('function boardTodoWatchLabel', start)
+  assert.ok(start >= 0 && end > start, '必须能定位 TODO 结果函数')
+  const { boardTodoOutcome } = new Function(`${clientSource.slice(start, end)}; return { boardTodoOutcome }`)()
+  assert.equal(boardTodoOutcome({ decision: 'confirmed', watch: { expiredReason: 'not_triggered' } }), '已确认', '已确认优先于过期原因')
+  assert.equal(boardTodoOutcome({ decision: 'deferred' }), '忽略', '忽略优先于过期原因')
+  assert.equal(boardTodoOutcome({ watch: { expiredReason: 'not_triggered' } }), '到期未触发')
+  assert.equal(boardTodoOutcome({ watch: { expiredReason: 'no_data' } }), '数据不足')
+  assert.equal(boardTodoOutcome({ watch: { expiredReason: 'not_verified' } }), '未完成核验')
+  assert.equal(boardTodoOutcome({ watch: { expiredReason: 'not_confirmed' } }), '未确认')
+  assert.equal(boardTodoOutcome({ watch: { expiredReason: 'stale' } }), '已停止跟踪')
+  assert.equal(boardTodoOutcome({ watch: { status: 'needs_human' } }), '数据不足', '旧数据没有 expiredReason 时按原状态兜底')
 })
 
 test('看板工具栏：去掉标题，筛选靠左、动作靠右', () => {

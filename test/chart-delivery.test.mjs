@@ -110,6 +110,18 @@ test('没有图表也要触发收尾回调：结算通知清理不依赖 present
   assert.equal(batches.length, 0, '没有图表时不能凭空写交付')
 })
 
+test('子 Agent 仍标记运行但已回传时，收尾回调仍要触发，晚到的结算通知才能被撤掉', () => {
+  let closings = 0
+  const { batches, delivery } = harness({ onClosing: () => { closings += 1 } })
+  delivery.acceptSubagentStart({ id: 'junior-1' })
+
+  delivery.acceptStream(MAIN, start())
+  delivery.acceptStream(MAIN, finish(7))
+
+  assert.equal(closings, 1, '纯文本收尾必须先武装 wake guard，不能因为 child 还没 settle 就跳过')
+  assert.equal(batches.length, 0, '等待轮仍不写交付')
+})
+
 test('等待轮不写：子 Agent 在运行或 inbox 有待处理消息时，finish 不能落交付', () => {
   const { registry, batches, delivery } = harness()
   const chart = seed(registry)

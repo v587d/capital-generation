@@ -23,6 +23,7 @@ import {
   TaskCreateSchema,
   TaskPatchSchema,
   TodoConfirmSchema,
+  TodoDecisionSchema,
   parseStrict,
 } from './schema.js'
 import { sanitizeMessage } from './redact.js'
@@ -409,6 +410,19 @@ export function createAutomationService(options) {
     }
   }
 
+  async function decideTodo(input) {
+    if (boardService === undefined || typeof boardService.decideTodo !== 'function') {
+      throw new AutomationError('board_unavailable', '看板服务暂时不可用。', 503)
+    }
+    const parsed = parseStrict(TodoDecisionSchema, input, 'board/todo-decision')
+    try {
+      return await boardService.decideTodo(parsed.id, parsed.action)
+    } catch (error) {
+      if (error?.boardError === true) throw new AutomationError(error.code, error.message, error.status ?? 400)
+      throw error
+    }
+  }
+
   function mapAskError(error) {
     if (error?.askError === true) {
       throw new AutomationError(error.code, error.message, error.status ?? 400, error.extra)
@@ -522,6 +536,7 @@ export function createAutomationService(options) {
     runHistory,
     board,
     confirmTodo,
+    decideTodo,
     retryBrief,
     askBrief,
     askStatus,

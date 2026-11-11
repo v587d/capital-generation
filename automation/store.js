@@ -249,7 +249,7 @@ export function createAutomationStore(options) {
           sourceBuiltinId: definition.id,
           profileKey,
           profileName,
-          state: 'dormant',
+          state: definition.defaults.state,
           definitionVersion: definition.version,
           scheduleAnchorAt: at,
           createdAt: at,
@@ -908,17 +908,28 @@ export function createAutomationStore(options) {
     for (const entry of records.slice(MAX_TODO_ACKS_PER_PROFILE)) await tables.todoAcks.delete(entry.key)
   }
 
-  async function confirmTodo(todoId) {
+  async function decideTodo(todoId, decision = 'confirmed') {
     const tables = await ensure()
     const record = parseStrict(TodoAckSchema, {
       schemaVersion: 1,
       profileKey,
       todoId,
       confirmedAt: iso(now()),
-    }, 'todo ack')
+      ...(decision === 'confirmed' ? {} : { decision }),
+    }, 'todo decision')
     await tables.todoAcks.put(todoAckRecordId(profileKey, todoId), record)
     await retainTodoAcks(tables)
     return record
+  }
+
+  async function confirmTodo(todoId) {
+    return decideTodo(todoId, 'confirmed')
+  }
+
+  /** Changing a confirmed/deferred item back to automatic verification drops the old decision. */
+  async function clearTodoDecision(todoId) {
+    const tables = await ensure()
+    return tables.todoAcks.delete(todoAckRecordId(profileKey, todoId))
   }
 
   async function listTodoWatches() {
@@ -1160,6 +1171,8 @@ export function createAutomationStore(options) {
     deleteAsk,
     listTodoAcks,
     confirmTodo,
+    decideTodo,
+    clearTodoDecision,
     listTodoWatches,
     putTodoWatch,
     updateBrief,
