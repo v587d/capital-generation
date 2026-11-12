@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { createAutomationStore } from '../automation/store.js'
-import { createBoardService, BoardError } from '../automation/board.js'
+import { createBoardService, BoardError, todoEvidenceText, todoSourceText } from '../automation/board.js'
 import { tradingCalendar } from '../automation/calendar.js'
 import { BUILTIN_TASK_ICONS } from '../automation/task-icons.js'
 import { createFakeDomain } from './automation-harness.mjs'
@@ -489,7 +489,8 @@ test('TODO 跟踪状态随 board 返回：触发与待人工的条目排在前�
     lastSeenAt: run.finishedAt,
     checkedAt: '2026-11-04T03:00:00.000Z',
     verdict: 'triggered',
-    evidence: '指南针今日收盘 44.55。',
+    evidence: '指南针今日收盘 44.55（1',
+    source: 'capital-data ds_0baf6502（wind_stock_kline，captured_at 2026-11-04 03:00:00）；as-of 2026-11-04 收盘',
     evidenceRunId: run.id,
     createdAt: '2026-11-04T03:00:00.000Z',
     updatedAt: '2026-11-04T03:00:00.000Z',
@@ -512,7 +513,8 @@ test('TODO 跟踪状态随 board 返回：触发与待人工的条目排在前�
   })
   const after = await board.board({ days: '14', tz: TZ })
   assert.equal(after.todos[0].watch.status, 'triggered')
-  assert.equal(after.todos[0].watch.evidence, '指南针今日收盘 44.55。')
+  assert.equal(after.todos[0].watch.evidence, '指南针今日收盘 44.55', '旧记录截断留下的半个括号要清掉')
+  assert.equal(after.todos[0].watch.source, null, '只有数据集 ID 与采集时间的来源行不展示')
   assert.equal(after.todos[1].watch.status, 'needs_human')
   assert.equal(after.todos[1].watch.handoffReason, '缺少收盘价。')
   assert.equal(after.todos[0].watch.profileKey, undefined, 'watch 摘要不能带 profileKey')
@@ -600,4 +602,20 @@ test('看板卡片带上该 run 的最新追问，不被别的 run 串走', asyn
   assert.equal(board.cards[0].ask.id, 'ask_card')
   assert.equal(board.cards[0].ask.preview, '先看成交量。')
   assert.equal(board.cards[0].ask.sessionId, run.sessionId)
+})
+
+test('TODO 依据：旧记录里的数据集 ID 与 as-of 不进入展示', () => {
+  const evidence = '11-12收盘：000688.SH科创50收1309.84、+0.73%；沪深两市（Xshg+Xshe）上涨838、下跌4320、平盘67，涨跌家数比0.19；涨停家数11-10为95、11-11为84、11-12为37；当日封板率81.55%→51.39%（-30.16pp）；连板留存R1=7/20=35.00%（1'
+  assert.equal(
+    todoEvidenceText(evidence),
+    '11-12收盘：000688.SH科创50收1309.84、+0.73%；沪深两市（Xshg+Xshe）上涨838、下跌4320、平盘67，涨跌家数比0.19；涨停家数11-10为95、11-11为84、11-12为37；当日封板率81.55%→51.39%（-30.16pp）；连板留存R1=7/20=35.00%',
+    '截断留下的半个括号不能出现在依据里',
+  )
+  assert.equal(todoEvidenceText('11-12收43.40；as-of 2026-11-12 收盘'), '11-12收43.40；截至 2026-11-12 收盘')
+  assert.equal(
+    todoSourceText('capital-data ds_0baf6502（wind_stock_kline，captured_at 2026-11-12 17:04:35）+ ds_f8225eab（fuyao history，17:03:57）；as-of 2026-11-12 收盘'),
+    null,
+    '只有数据集 ID 和采集时间的来源行不如不显示',
+  )
+  assert.equal(todoSourceText('Wind 日线，as-of 11-12 收盘'), 'Wind 日线，截至 11-12 收盘')
 })

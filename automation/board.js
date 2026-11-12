@@ -192,6 +192,52 @@ function sourceOf(run, item) {
   }
 }
 
+// The verifier occasionally pastes dataset ids, tool names and capture timestamps into the
+// user-facing evidence/source fields. Strip that plumbing at the read boundary so old records
+// render as cleanly as new ones; the stored value stays untouched for audit.
+const TODO_INTERNAL_MARK = /(?:data_)?ds_[0-9a-z]+|capital-data|captured_at|quote_time|art_code|dataset_id|sourceId/i
+const TODO_ID_RUN = /(?:capital-data[\s_]*)?(?:data_)?ds_[0-9a-z]+(?:\s*[/、,，+]\s*(?:data_)?ds_[0-9a-z]+)*(?:\s*[（(][^）)]*[）)])?/gi
+
+/** Drop a trailing unclosed parenthetical left by the 160-char evidence cap. */
+function trimDanglingTail(text) {
+  let result = text
+  for (;;) {
+    const open = Math.max(result.lastIndexOf('（'), result.lastIndexOf('('))
+    const close = Math.max(result.lastIndexOf('）'), result.lastIndexOf(')'))
+    if (open < 0 || open < close) break
+    const tail = result.slice(open + 1)
+    if (/[。；;]/.test(tail) || tail.length > 40) break
+    result = result.slice(0, open)
+  }
+  return result.replace(/[\s；;，,、+·/]+$/u, '').trim()
+}
+
+export function todoEvidenceText(value) {
+  if (typeof value !== 'string') return null
+  const text = trimDanglingTail(value
+    .replace(/\*\*/g, '')
+    .replace(/`/g, '')
+    .replace(/\bas-of\b/gi, '截至')
+    .replace(/\b(?:captured_at|quote_time)\b\s*[:：]?\s*[0-9][0-9T:.\-–—\s]*(?:Asia\/Shanghai|HKT)?/gi, '')
+    .replace(/\bart_code\s+[A-Za-z0-9]+/gi, '')
+    .replace(TODO_ID_RUN, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim())
+  return text.length > 0 ? text : null
+}
+
+/** A source that only carries dataset ids or capture metadata is noise, not provenance. */
+export function todoSourceText(value) {
+  if (typeof value !== 'string' || TODO_INTERNAL_MARK.test(value)) return null
+  const text = value
+    .replace(/\*\*/g, '')
+    .replace(/`/g, '')
+    .replace(/\bas-of\b/gi, '截至')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+  return text.length > 0 ? text : null
+}
+
 /** Only the tracking facts belong on the wire; profileKey and storage ids stay server-side. */
 function watchSummary(watch, today) {
   if (watch === undefined) return null
@@ -200,8 +246,8 @@ function watchSummary(watch, today) {
     status: watch.status,
     resolvedFrom: watch.resolvedFrom ?? null,
     checkedAt: watch.checkedAt ?? null,
-    evidence: watch.evidence ?? null,
-    source: watch.source ?? null,
+    evidence: todoEvidenceText(watch.evidence),
+    source: todoSourceText(watch.source),
     handoffReason: watch.handoffReason ?? null,
     dueAt: watch.dueAt ?? null,
     autoRequestedAt: watch.autoRequestedAt ?? null,

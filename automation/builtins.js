@@ -176,7 +176,7 @@ export const BUILTIN_DEFINITIONS = [
       title: 'TODO 核验',
       description: '交易日 A/H 收盘后主动核验看板中的待验证 TODO：自选股与跨市场条件、公告和资金数据，触发或数据不足时通知。',
       trigger: { ...SCHEDULE_COMMON, time: '17:00' },
-      instruction: '逐条核验上下文里的候选 TODO：A 股用当日收盘、港股用 16:00 收盘，公告以运行前已披露为准；同标的、同口径、同时点，缺数据、只见到转述或条件有歧义一律判 insufficient。每条候选都必须返回结果，evidence 必须来自工具原文，source 写来源与 as-of。最终按约定 JSON 输出：`brief` 写看板简报（触发了什么、核实线索是什么），`results` 逐条给 verdict 与 evidence；没有触发就直说，不要编造。',
+      instruction: '逐条核验候选 TODO：A 股用当日收盘、港股用 16:00 收盘，公告以运行前已披露为准；同标的、同口径、同时点，缺数据、只见到转述或条件有歧义一律判 insufficient。每条候选都必须返回结果；evidence 必须能在工具结果中找到依据，evidence 与 source 只写用户可读的结论、关键数字与来源/时间口径，不写数据集 ID、工具名、captured_at 或 as-of。最终按约定 JSON 输出 `brief` 与逐条 `results`；没有触发就直说，不要编造。',
       cwdKind: 'profile',
       limits: { ...DEFAULT_LIMITS },
       notifications: { ...DEFAULT_NOTIFICATIONS },
