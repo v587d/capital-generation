@@ -171,23 +171,35 @@ const zh = {
     watchTriggered: '已触发',
     watchNeedsHuman: '待人工处理',
     watchResolved: '已确认',
-    watchDeferred: '忽略',
+    watchDeferred: '已忽略',
     watchExpired: '已过期',
     watchTracking: '跟踪',
     watchEvidence: '核验依据',
     watchSource: '来源',
     watchDeferredHint: '已忽略当前版本；后续新版本会重新出现',
-    watchChecked: '核验于 {time}',
+    watchChecked: '自动核验于 {time}',
     notificationFallbackTodoTriggered: '条件已触发，查看 TODO 详情。',
     notificationFallbackTodoNeedsHuman: '自动核验无法完成，需要你处理。',
     todoEmptyToday: '今天暂无待办',
     todoEmptyGroup: '暂无「{label}」待办',
+    todoEmptyHistory: '{date} 暂无历史 TODO',
     todoFilterLabel: '按日期筛选',
+    todoDateLabel: '选择历史日期',
     dueToday: '今天',
     dueAsap: '尽快',
     dueNoDate: '未定',
     dueFuture: '将来',
-    dueExpired: '已过期',
+    historyTodo: '历史 TODO',
+    historyExpired: '已过期',
+    todoManualConfirm: '手动确认',
+    todoManualDefer: '手动忽略',
+    todoNotTriggered: '未触发',
+    todoInsufficient: '证据不足',
+    todoUnverified: '未完成核验',
+    todoTrackEnded: '跟踪结束',
+    todoStale: '已停止跟踪',
+    todoCheckedAt: '自动核验于 {date}',
+    todoManualAt: '人工处理于 {date}',
     showBasis: '查看依据',
     hideBasis: '收起依据',
     seenCount: '{n} 次运行提到',
@@ -766,6 +778,8 @@ function installStyles() {
     .capital-automation-panelhead h3 { margin: 0; font-size: 13.5px; line-height: 20px; font-weight: 600; }
     .capital-automation-panelhead .capital-automation-btn { margin-left: auto; }
     .capital-automation-panelhead .capital-automation-select { margin-left: auto; }
+    .capital-automation-panelhead .capital-automation-todofilters { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+    .capital-automation-panelhead .capital-automation-todofilters .capital-automation-select { margin-left: 0; }
     .capital-automation-panelhead .capital-automation-btn[data-variant="ghost"] { padding-right: 0; }
     .capital-automation-kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 18px; }
     .capital-automation-kvitem { min-width: 0; }
@@ -1086,7 +1100,7 @@ function installStyles() {
     .capital-automation-todoitem { padding: 8px 0; border-top: .5px solid var(--ca-line); transition: opacity .16s ease, padding .18s ease; }
     .capital-automation-todoitem:first-child { border-top: 0; }
     .capital-automation-todoitem[data-decided="true"], .capital-automation-todoitem[data-archived="true"] { padding: 7px 0; opacity: .72; border-top: 0; }
-    .capital-automation-todoitem:not([data-decided="true"]) + .capital-automation-todoitem[data-decided="true"] { border-top: .5px solid var(--ca-line); }
+    .capital-automation-todoitem:not([data-decided="true"]):not([data-archived="true"]) + .capital-automation-todoitem[data-decided="true"] { border-top: .5px solid var(--ca-line); }
     .capital-automation-todoitem[data-decided="true"]:hover, .capital-automation-todoitem[data-archived="true"]:hover { opacity: 1; }
     .capital-automation-todoitem[data-decided="true"] .capital-automation-todoline, .capital-automation-todoitem[data-archived="true"] .capital-automation-todoline { gap: 0; }
     .capital-automation-todoitem[data-decided="true"] .capital-automation-todotop, .capital-automation-todoitem[data-archived="true"] .capital-automation-todotop { justify-content: flex-start; gap: 10px; }
@@ -1101,11 +1115,31 @@ function installStyles() {
     .capital-automation-todotitle { flex: none; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; font: inherit; color: var(--dsw-alias-label-primary); font-size: 13px; line-height: 20px; font-weight: 600; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
     .capital-automation-todotitle:hover, .capital-automation-gaptitle:hover { color: var(--ca-business-text); }
     .capital-automation-todotitle:focus-visible, .capital-automation-gaptitle:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: 2px; border-radius: 4px; }
-    .capital-automation-basiscaret { display: inline-flex; align-items: center; margin-left: 4px; color: var(--ca-muted); vertical-align: -2px; transform: rotate(-90deg); transition: transform .16s ease; }
-    .capital-automation-todotitle[aria-expanded="true"] .capital-automation-basiscaret, .capital-automation-gaptitle[aria-expanded="true"] .capital-automation-basiscaret { transform: rotate(0deg); }
     .capital-automation-tododesc { margin: 3px 0 0; color: var(--ca-muted); font-size: 12px; line-height: 20px; overflow-wrap: anywhere; }
     .capital-automation-todometa { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 3px; color: var(--ca-caption); font-size: 11px; line-height: 17px; }
-    .capital-automation-todooutcome { color: var(--ca-muted); font-weight: 500; }
+    .capital-automation-todolist[data-period="expired"] > .capital-automation-todoitem { border-top: 0; }
+    .capital-automation-historytitle { width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 13px; line-height: 20px; font-weight: 600; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+    .capital-automation-historytitle:hover { color: var(--ca-business-text); }
+    .capital-automation-historytitle:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: 2px; border-radius: 4px; }
+    .capital-automation-historymeta { margin-top: 4px; }
+    .capital-automation-historyconclusion { display: inline-flex; flex: none; align-items: center; min-height: 20px; padding: 0 7px; border-radius: 999px; background: var(--dsw-alias-bg-module-platform); color: var(--ca-muted); font-size: 10.5px; line-height: 20px; font-weight: 500; white-space: nowrap; }
+    .capital-automation-historyconclusion[data-tone="success"] { background: color-mix(in srgb, var(--ca-success) 14%, var(--ca-card)); color: var(--ca-success-text); }
+    .capital-automation-historyconclusion[data-tone="warn"] { background: color-mix(in srgb, var(--ca-warn) 14%, var(--ca-card)); color: var(--ca-warn-text); }
+    .capital-automation-historyconclusion[data-tone="error"] { background: color-mix(in srgb, var(--ca-error) 12%, var(--ca-card)); color: var(--ca-error-text); }
+    .capital-automation-datepick-menu { box-sizing: border-box; width: 236px; max-width: calc(100vw - 24px); padding: 10px; }
+    .capital-automation-datepick-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px; }
+    .capital-automation-datepick-month { color: var(--dsw-alias-label-primary); font-size: 12px; line-height: 18px; }
+    .capital-automation-datepick-nav { display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--ca-muted); cursor: pointer; }
+    .capital-automation-datepick-nav:hover:not(:disabled) { background: var(--ca-hover); color: var(--dsw-alias-label-primary); }
+    .capital-automation-datepick-nav:disabled { opacity: .35; cursor: default; }
+    .capital-automation-datepick-nav:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: 0; }
+    .capital-automation-datepick-week, .capital-automation-datepick-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+    .capital-automation-datepick-weekday { padding: 2px 0; color: var(--ca-caption); font-size: 10px; line-height: 16px; text-align: center; }
+    .capital-automation-datepick-day { height: 28px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 11.5px; line-height: 28px; cursor: pointer; }
+    .capital-automation-datepick-day:hover:not(:disabled) { background: var(--ca-hover); color: var(--dsw-alias-label-primary); }
+    .capital-automation-datepick-day[data-selected="true"] { background: var(--ca-business); color: #fff; }
+    .capital-automation-datepick-day:disabled { opacity: .3; cursor: default; }
+    .capital-automation-datepick-day:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: 0; }
     .capital-automation-todowatch { display: inline-flex; flex: none; align-items: center; min-height: 20px; padding: 0 6px; border-radius: 999px; background: var(--dsw-alias-bg-module-platform); color: var(--ca-muted); font-size: 10px; line-height: 20px; white-space: nowrap; }
     .capital-automation-todowatch[data-status="triggered"] { background: color-mix(in srgb, var(--ca-error) 12%, var(--ca-card)); color: var(--ca-error-text); }
     .capital-automation-todowatch[data-status="needs_human"] { background: color-mix(in srgb, var(--ca-warn) 14%, var(--ca-card)); color: var(--ca-warn-text); }
@@ -4098,7 +4132,7 @@ function boardTodoTodaySplit(todos, now = new Date()) {
 
 function boardTodoGroupLabel(period) {
   if (period === 'today') return zh.board.dueToday
-  if (period === 'expired') return zh.board.dueExpired
+  if (period === 'expired') return zh.board.historyTodo
   return zh.board.dueFuture
 }
 
@@ -4263,12 +4297,12 @@ function boardTodoFilterOptions() {
 }
 
 function boardTodoDueLabel(item, period) {
+  if (period === 'expired') return ''
   const date = typeof item.dueAt === 'string' && item.dueAt.length >= 10 ? item.dueAt.slice(5) : ''
   if (period === 'today') {
     const label = typeof item.dueLabel === 'string' ? item.dueLabel.trim() : ''
     return ['尽快', '马上', '现在'].includes(label) && date.length === 0 ? zh.board.dueAsap : zh.board.dueToday
   }
-  if (period === 'expired') return date ? `${zh.board.dueExpired} · ${date}` : zh.board.dueExpired
   return date || zh.board.dueNoDate
 }
 
@@ -4281,23 +4315,45 @@ function boardTodoDecision(item) {
   return undefined
 }
 
-/** Archived outcome shown after the primary "已过期" label. */
-function boardTodoOutcome(item) {
+/** Local YYYY-MM-DD for a timestamp; empty when the value cannot be parsed. */
+function dateKeyOfValue(value) {
+  const at = Date.parse(value)
+  return Number.isFinite(at) ? localDateKey(new Date(at)) : ''
+}
+
+function formatMonthDay(value) {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value.slice(5)
+  const key = dateKeyOfValue(value)
+  return key.length > 0 ? key.slice(5) : ''
+}
+
+/**
+ * History is filed by the day the TODO was due; undated items fall back to the decision, the
+ * verification, then the last mention so nothing disappears from the day view.
+ */
+function boardTodoHistoryDate(item) {
+  if (typeof item.dueAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.dueAt)) return item.dueAt
+  const decidedAt = typeof item.ackedAt === 'string' ? item.ackedAt : item.deferredAt
+  const decisionKey = dateKeyOfValue(decidedAt)
+  if (decisionKey.length > 0) return decisionKey
+  const checkedKey = dateKeyOfValue(item.watch?.checkedAt)
+  if (checkedKey.length > 0) return checkedKey
+  return dateKeyOfValue(item.lastSeenAt)
+}
+
+/** One conclusion per history row: verifier verdict, human decision, or the deadline. */
+function boardTodoConclusion(item) {
   const decision = boardTodoDecision(item)
-  if (decision === 'confirmed') return '已确认'
-  if (decision === 'deferred') return '忽略'
+  if (decision === 'confirmed') return { label: zh.board.todoManualConfirm, at: item.ackedAt, kind: 'manual', tone: 'success' }
+  if (decision === 'deferred') return { label: zh.board.todoManualDefer, at: item.deferredAt, kind: 'manual', tone: 'muted' }
+  if (item.kind === 'track') return { label: zh.board.todoTrackEnded, at: undefined, kind: 'track', tone: 'muted' }
+  if (item.watch?.status === 'triggered') return { label: zh.board.watchTriggered, at: item.watch?.checkedAt, kind: 'auto', tone: 'error' }
   const reason = item.watch?.expiredReason
-  if (reason === 'not_triggered') return '到期未触发'
-  if (reason === 'no_data') return '数据不足'
-  if (reason === 'not_verified') return '未完成核验'
-  if (reason === 'not_confirmed') return '未确认'
-  if (reason === 'stale') return '已停止跟踪'
-  if (item.watch?.status === 'needs_human') return '数据不足'
-  if (item.watch?.status === 'watching') return '未完成核验'
-  if (item.kind === 'confirm') return '未确认'
-  if (item.kind === 'verify') return '未完成核验'
-  if (item.kind === 'track') return '跟踪结束'
-  return ''
+  if (reason === 'not_triggered') return { label: zh.board.todoNotTriggered, at: item.watch?.checkedAt, kind: 'auto', tone: 'muted' }
+  if (reason === 'no_data') return { label: zh.board.todoInsufficient, at: item.watch?.checkedAt, kind: 'auto', tone: 'warn' }
+  if (reason === 'not_verified') return { label: zh.board.todoUnverified, at: undefined, kind: 'auto', tone: 'muted' }
+  if (reason === 'stale') return { label: zh.board.todoStale, at: undefined, kind: 'auto', tone: 'muted' }
+  return { label: zh.board.historyExpired, at: undefined, kind: 'expired', tone: 'muted' }
 }
 
 function boardTodoStatus(item) {
@@ -5104,29 +5160,25 @@ function TodoRow(props) {
   const { item, period, showDue = true, onOpenSession, onDecide, checkpointHint = '', pending = false } = props
   const [open, setOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-  const quote = item.sourceQuote ?? item.sources?.[0]?.sourceQuote
+  const sources = Array.isArray(item.sources) && item.sources.length > 0
+    ? item.sources
+    : [{ taskTitle: item.taskTitle, finishedAt: item.finishedAt, sessionId: item.sessionId ?? null }]
+  const quote = item.sourceQuote ?? sources[0]?.sourceQuote
   const due = showDue === true ? boardTodoDueLabel(item, period) : ''
-  const source = {
-    taskTitle: item.taskTitle,
-    finishedAt: item.finishedAt,
-    sessionId: item.sessionId ?? item.sources?.[0]?.sessionId,
-  }
   const meta = []
   const watch = item.watch && typeof item.watch === 'object' ? item.watch : null
   const archived = period === 'expired'
   const status = archived ? 'expired' : boardTodoStatus(item)
   const decision = boardTodoDecision(item)
   const decided = decision !== undefined
-  const compact = decided || archived
+  const compact = decided
   const watchLabel = boardTodoWatchLabel(status)
-  if (due) meta.push(h('span', { key: 'due' }, due))
-  if (archived) {
-    const outcome = boardTodoOutcome(item)
-    if (outcome.length > 0) meta.push(h('span', { key: 'outcome', className: 'capital-automation-todooutcome' }, outcome))
-  }
-  if (item.seenCount > 1) meta.push(h('span', { key: 'seen' }, zh.board.seenCount.replace('{n}', String(item.seenCount))))
-  if (watch?.checkedAt && status !== 'resolved' && status !== 'deferred' && status !== 'tracking') {
-    meta.push(h('span', { key: 'checked' }, zh.board.watchChecked.replace('{time}', formatShortTime(watch.checkedAt))))
+  if (!archived) {
+    if (due) meta.push(h('span', { key: 'due' }, due))
+    if (item.seenCount > 1) meta.push(h('span', { key: 'seen' }, zh.board.seenCount.replace('{n}', String(item.seenCount))))
+    if (watch?.checkedAt && status !== 'resolved' && status !== 'deferred' && status !== 'tracking') {
+      meta.push(h('span', { key: 'checked' }, zh.board.watchChecked.replace('{time}', formatShortTime(watch.checkedAt))))
+    }
   }
   const watchMessage = status === 'triggered'
     ? `${zh.board.watchEvidence}：${watch?.evidence ?? ''}${watch?.source ? ` · ${zh.board.watchSource}：${watch.source}` : ''}`
@@ -5135,8 +5187,7 @@ function TodoRow(props) {
   const pastDue = typeof item.dueAt === 'string' && item.dueAt < localDateKey(new Date())
   const autoAvailable = !archived && !pastDue && boardTodoAutoAvailable(item, status)
   const basisAction = open ? zh.board.hideBasis : zh.board.showBasis
-  const basisCaret = h('span', { className: 'capital-automation-basiscaret', 'aria-hidden': 'true' }, h(IconChevronDownOutlineRegular, { size: 12 }))
-  const tags = watchLabel.length > 0
+  const tags = !archived && watchLabel.length > 0
     ? h('div', { className: 'capital-automation-todotags' },
       h('span', {
         className: 'capital-automation-todowatch',
@@ -5173,7 +5224,7 @@ function TodoRow(props) {
     }
     menuItems.push({
       id: 'defer',
-      label: decision === 'deferred' ? `${zh.board.todoActionDefer}（当前）` : zh.board.todoActionDefer,
+      label: decision === 'deferred' ? `${zh.board.watchDeferred}（当前）` : zh.board.todoActionDefer,
       icon: h(IconClockOutlineRegular, { size: 14 }),
       disabled: pending || decision === 'deferred',
     })
@@ -5201,26 +5252,74 @@ function TodoRow(props) {
       portal: true,
     })
     : null
+  const detailNode = open
+    ? h('div', { className: 'capital-automation-tododetail' },
+      archived && item.detail ? h('p', { className: 'capital-automation-tododesc' }, item.detail) : null,
+      archived && watch?.evidence
+        ? h('p', { className: 'capital-automation-todowatchmsg', 'data-status': status },
+          `${zh.board.watchEvidence}：${watch.evidence}${watch.source ? ` · ${zh.board.watchSource}：${watch.source}` : ''}`)
+        : null,
+      h('blockquote', null, quote),
+      sources.map((entry, index) => h('div', {
+        key: entry.runId ?? `source-${index}`,
+        className: 'capital-automation-todosource',
+      },
+      h('span', null, `${zh.board.sourceRun}：${entry.taskTitle} · ${formatShortTime(entry.finishedAt)}`),
+      entry.sessionId
+        ? h('button', {
+          type: 'button',
+          className: 'capital-automation-btn',
+          'data-size': 'icon',
+          title: zh.openSession,
+          'aria-label': zh.openSession,
+          onClick: () => onOpenSession(entry.sessionId),
+        }, h(IconRightUpOutlineRegular, { size: 14 }))
+        : null)))
+    : null
+  if (archived) {
+    const conclusion = boardTodoConclusion(item)
+    const historyMeta = [
+      h('span', {
+        key: 'conclusion',
+        className: 'capital-automation-historyconclusion',
+        'data-tone': conclusion.tone,
+      }, conclusion.label),
+      conclusion.at
+        ? h('span', { key: 'at' },
+          (conclusion.kind === 'manual' ? zh.board.todoManualAt : zh.board.todoCheckedAt)
+            .replace('{date}', formatMonthDay(conclusion.at)))
+        : null,
+      item.seenCount > 1 ? h('span', { key: 'seen' }, zh.board.seenCount.replace('{n}', String(item.seenCount))) : null,
+    ].filter((node) => node !== null)
+    return h('li', {
+      className: 'capital-automation-todoitem',
+      'data-archived': 'true',
+      'data-decision': decision,
+    },
+    h('div', { className: 'capital-automation-todoline' },
+      h('button', {
+        type: 'button',
+        className: 'capital-automation-historytitle',
+        'aria-expanded': open ? 'true' : 'false',
+        'aria-label': `${item.title}，${basisAction}`,
+        title: basisAction,
+        onClick: () => setOpen((value) => !value),
+      }, item.title),
+      historyMeta.length > 0
+        ? h('div', { className: 'capital-automation-todometa capital-automation-historymeta' }, historyMeta)
+        : null),
+    detailNode)
+  }
   return h('li', {
     className: 'capital-automation-todoitem',
     'data-decided': decided ? 'true' : undefined,
-    'data-archived': archived ? 'true' : undefined,
     'data-decision': decision,
   },
   compact
     ? h('div', { className: 'capital-automation-todoline' },
       h('div', { className: 'capital-automation-todotop' },
         tags,
-        archived
-          ? h('button', {
-            type: 'button',
-            className: 'capital-automation-todotitle',
-            'aria-expanded': open ? 'true' : 'false',
-            'aria-label': `${item.title}，${basisAction}`,
-            title: basisAction,
-            onClick: () => setOpen((value) => !value),
-          }, item.title, basisCaret)
-          : h('span', { className: 'capital-automation-todotitle', title: item.title }, item.title),
+        h('span', { className: 'capital-automation-todotitle', title: item.title }, item.title),
         menu))
     : h('div', { className: 'capital-automation-todoline' },
       h('div', { className: 'capital-automation-todotop' }, tags, menu),
@@ -5231,35 +5330,13 @@ function TodoRow(props) {
         'aria-label': `${item.title}，${basisAction}`,
         title: basisAction,
         onClick: () => setOpen((value) => !value),
-      }, item.title, basisCaret)),
+      }, item.title)),
   !compact && item.detail ? h('p', { className: 'capital-automation-tododesc' }, item.detail) : null,
   !compact && watchMessage.length > 0
     ? h('p', { className: 'capital-automation-todowatchmsg', 'data-status': status }, watchMessage)
     : null,
-  (archived || !decided) && meta.length > 0 ? h('div', { className: 'capital-automation-todometa' }, meta) : null,
-  (archived || !decided) && open
-    ? h('div', { className: 'capital-automation-tododetail' },
-      archived && item.detail ? h('p', { className: 'capital-automation-tododesc' }, item.detail) : null,
-      archived && watch?.evidence
-        ? h('p', { className: 'capital-automation-todowatchmsg', 'data-status': status },
-          `${zh.board.watchEvidence}：${watch.evidence}${watch.source ? ` · ${zh.board.watchSource}：${watch.source}` : ''}`)
-        : null,
-      h('blockquote', null, quote),
-      source
-        ? h('div', { className: 'capital-automation-todosource' },
-          h('span', null, `${zh.board.sourceRun}：${source.taskTitle} · ${formatShortTime(source.finishedAt)}`),
-          source.sessionId
-            ? h('button', {
-              type: 'button',
-              className: 'capital-automation-btn',
-              'data-size': 'icon',
-              title: zh.openSession,
-              'aria-label': zh.openSession,
-              onClick: () => onOpenSession(source.sessionId),
-            }, h(IconRightUpOutlineRegular, { size: 14 }))
-            : null)
-        : null)
-    : null)
+  !decided && meta.length > 0 ? h('div', { className: 'capital-automation-todometa' }, meta) : null,
+  !decided ? detailNode : null)
 }
 
 function BoardPanelHead(props) {
@@ -5300,32 +5377,144 @@ function BoardPanel(props) {
   }, children))
 }
 
+function yesterdayDateKey() {
+  return localDateKey(addLocalDays(new Date(), -1))
+}
+
+function monthKeyOf(dateKey) {
+  return typeof dateKey === 'string' && /^\d{4}-\d{2}/.test(dateKey)
+    ? dateKey.slice(0, 7)
+    : localDateKey(new Date()).slice(0, 7)
+}
+
+function shiftMonthKey(monthKey, delta) {
+  const [year, month] = monthKey.split('-').map(Number)
+  const date = new Date(year, month - 1 + delta, 1)
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`
+}
+
+/** Host-Menu month grid; only days before today are selectable. */
+function HistoryDatePicker(props) {
+  const { value, min, max, onChange } = props
+  const [open, setOpen] = useState(false)
+  const [month, setMonth] = useState(() => monthKeyOf(value))
+  useEffect(() => {
+    if (open) setMonth(monthKeyOf(value))
+  }, [open, value])
+  const [year, monthNumber] = month.split('-').map(Number)
+  const lead = new Date(year, monthNumber - 1, 1).getDay()
+  const total = new Date(year, monthNumber, 0).getDate()
+  const cells = [
+    ...Array.from({ length: lead }, (_, index) => ({ key: `lead-${index}`, day: null })),
+    ...Array.from({ length: total }, (_, index) => ({ key: dateStringFromParts(year, monthNumber, index + 1), day: index + 1 })),
+  ]
+  const nextDisabled = month >= monthKeyOf(max)
+  const prevDisabled = typeof min === 'string' && min.length > 0 && month <= monthKeyOf(min)
+  const trigger = h('button', {
+    type: 'button',
+    className: 'capital-automation-select capital-automation-datepick',
+    'data-size': 'sm',
+    'aria-label': `${zh.board.todoDateLabel}：${formatMonthDay(value)}`,
+    'aria-haspopup': 'menu',
+    'aria-expanded': open ? 'true' : 'false',
+    title: zh.board.todoDateLabel,
+    onClick: () => setOpen((current) => !current),
+  },
+  h('span', { className: 'capital-automation-selectvalue' }, formatMonthDay(value)),
+  h(IconChevronDownOutlineRegular, { size: 12 }))
+  return h(Menu, {
+    open,
+    anchor: trigger,
+    items: [],
+    onClose: () => setOpen(false),
+    align: 'end',
+    portal: true,
+    listClassName: 'capital-automation-datepick-menu',
+  },
+  h('div', { className: 'capital-automation-datepick-head' },
+    h('button', {
+      type: 'button',
+      className: 'capital-automation-datepick-nav',
+      'aria-label': '上个月',
+      disabled: prevDisabled,
+      onClick: () => { if (!prevDisabled) setMonth((current) => shiftMonthKey(current, -1)) },
+    }, h(IconChevronLeftOutlineRegular, { size: 14 })),
+    h('span', { className: 'capital-automation-datepick-month' }, `${year} 年 ${monthNumber} 月`),
+    h('button', {
+      type: 'button',
+      className: 'capital-automation-datepick-nav',
+      'aria-label': '下个月',
+      disabled: nextDisabled,
+      onClick: () => { if (!nextDisabled) setMonth((current) => shiftMonthKey(current, 1)) },
+    }, h(IconChevronRightOutlineRegular, { size: 14 }))),
+  h('div', { className: 'capital-automation-datepick-week' },
+    ['日', '一', '二', '三', '四', '五', '六'].map((label) => h('span', {
+      key: label,
+      className: 'capital-automation-datepick-weekday',
+    }, label))),
+  h('div', { className: 'capital-automation-datepick-grid' },
+    cells.map((cell) => cell.day === null
+      ? h('span', { key: cell.key })
+      : h('button', {
+        key: cell.key,
+        type: 'button',
+        className: 'capital-automation-datepick-day',
+        'data-selected': cell.key === value ? 'true' : undefined,
+        disabled: cell.key > max || (typeof min === 'string' && min.length > 0 && cell.key < min),
+        'aria-label': cell.key,
+        'aria-pressed': cell.key === value ? 'true' : 'false',
+        onClick: () => {
+          onChange(cell.key)
+          setOpen(false)
+        },
+      }, String(cell.day)))))
+}
+
 function TodoPanel(props) {
-  const { todos, tasks, onOpenSession, onDecideTodo, pendingTodoIds = new Set(), open, onToggle } = props
+  const { todos, tasks, minDate = null, onOpenSession, onDecideTodo, pendingTodoIds = new Set(), open, onToggle } = props
   const [filter, setFilter] = useState('today')
+  const [historyDate, setHistoryDate] = useState(yesterdayDateKey)
+  const historyDay = typeof minDate === 'string' && minDate.length > 0 && historyDate < minDate ? minDate : historyDate
   const entries = boardTodoEntries(todos, new Date())
-  const visible = entries.filter((entry) => entry.period === filter)
+  const visible = entries.filter((entry) => entry.period === filter
+    && (filter !== 'expired' || boardTodoHistoryDate(entry.item) === historyDay))
+  if (filter === 'expired') {
+    visible.sort((left, right) => {
+      const leftAt = Date.parse(boardTodoConclusion(left.item).at)
+      const rightAt = Date.parse(boardTodoConclusion(right.item).at)
+      const delta = (Number.isFinite(rightAt) ? rightAt : 0) - (Number.isFinite(leftAt) ? leftAt : 0)
+      if (delta !== 0) return delta
+      return String(right.item.lastSeenAt ?? '').localeCompare(String(left.item.lastSeenAt ?? ''))
+        || String(left.item.title).localeCompare(String(right.item.title))
+    })
+  }
   const checkpointHint = boardTodoVerifierHint(tasks)
   const emptyText = filter === 'today'
     ? zh.board.todoEmptyToday
-    : zh.board.todoEmptyGroup.replace('{label}', boardTodoGroupLabel(filter))
+    : filter === 'expired'
+      ? zh.board.todoEmptyHistory.replace('{date}', formatMonthDay(historyDay))
+      : zh.board.todoEmptyGroup.replace('{label}', boardTodoGroupLabel(filter))
   return h(BoardPanel, {
     id: 'capital-automation-todo',
     title: zh.board.todoTitle,
     open,
     onToggle,
-    action: h(Select, {
-      value: filter,
-      options: boardTodoFilterOptions(),
-      onChange: setFilter,
-      size: 'sm',
-      label: zh.board.todoFilterLabel,
-      align: 'end',
-    }),
+    action: h('div', { className: 'capital-automation-todofilters' },
+      filter === 'expired'
+        ? h(HistoryDatePicker, { value: historyDay, min: minDate, max: yesterdayDateKey(), onChange: setHistoryDate })
+        : null,
+      h(Select, {
+        value: filter,
+        options: boardTodoFilterOptions(),
+        onChange: setFilter,
+        size: 'sm',
+        label: zh.board.todoFilterLabel,
+        align: 'end',
+      })),
   },
   visible.length === 0
     ? h('p', { className: 'capital-automation-hint' }, emptyText)
-    : h('ul', { className: 'capital-automation-todolist' }, visible.map((entry) => h(TodoRow, {
+    : h('ul', { className: 'capital-automation-todolist', 'data-period': filter }, visible.map((entry) => h(TodoRow, {
       key: entry.item.id,
       item: entry.item,
       period: entry.period,
@@ -5490,7 +5679,7 @@ function GapRow(props) {
         'aria-label': `${gap.topic}，${basisAction}`,
         title: basisAction,
         onClick: () => setOpen((value) => !value),
-      }, gap.topic, h('span', { className: 'capital-automation-basiscaret', 'aria-hidden': 'true' }, h(IconChevronDownOutlineRegular, { size: 12 })))),
+      }, gap.topic)),
     h('p', { className: 'capital-automation-gapdesc' }, gap.detail),
     open
       ? h('div', { className: 'capital-automation-tododetail' },
@@ -5724,6 +5913,7 @@ function BoardPage(props) {
         h(TodoPanel, {
           todos: board?.todos ?? [],
           tasks,
+          minDate: board?.range?.from ?? null,
           onOpenSession,
           onDecideTodo,
           pendingTodoIds,

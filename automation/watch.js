@@ -91,11 +91,52 @@ function decisionCovers(decision, lastSeenAt) {
   return seenAt <= decidedAt
 }
 
+function parseObject(text) {
+  try {
+    const value = JSON.parse(text)
+    return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Models occasionally leave a trailing comma before `]`/`}`; JSON.parse then drops the whole
+ * verdict block and every candidate silently falls back to insufficient.
+ */
+function stripTrailingCommas(text) {
+  let output = ''
+  let inString = false
+  let escaped = false
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+    if (inString) {
+      output += char
+      if (escaped) escaped = false
+      else if (char === '\\') escaped = true
+      else if (char === '"') inString = false
+      continue
+    }
+    if (char === '"') {
+      inString = true
+      output += char
+      continue
+    }
+    if (char === ',') {
+      let next = index + 1
+      while (next < text.length && /\s/.test(text[next])) next += 1
+      if (text[next] === ']' || text[next] === '}') continue
+    }
+    output += char
+  }
+  return output
+}
+
 /**
  * Validate the verifier's result block against the evidence text it claims to quote. A quote
  * that exists in neither the tool output nor the final answer is a fabrication and is dropped.
  */
-export function parseWatchOutput(raw, { todos, blocks, sourceText }) {
+function extractJsonObject(raw) {
   let text = String(raw ?? '').trim()
   const fences = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/gi)]
   if (fences.length > 0) {
@@ -106,13 +147,22 @@ export function parseWatchOutput(raw, { todos, blocks, sourceText }) {
     const end = text.lastIndexOf('}')
     if (start >= 0 && end > start) text = text.slice(start, end + 1)
   }
-  let value
-  try {
-    value = JSON.parse(text)
-  } catch {
-    return []
-  }
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return []
+  return parseObject(text) ?? parseObject(stripTrailingCommas(text))
+}
+
+/**
+ * The verifier authors the board card in the same final answer as its verdicts, so the brief
+ * costs no extra model call. Validation and fallback live in `verifierBriefContent`.
+ */
+export function parseVerifierBrief(raw) {
+  const brief = extractJsonObject(raw)?.brief
+  if (brief === null || typeof brief !== 'object' || Array.isArray(brief)) return undefined
+  return { headline: brief.headline, plain: brief.plain }
+}
+
+export function parseWatchOutput(raw, { todos, blocks, sourceText }) {
+  const value = extractJsonObject(raw)
+  if (value === undefined) return []
   const byId = new Map((Array.isArray(todos) ? todos : []).map((todo) => [todo.id, todo]))
   const blockList = Array.isArray(blocks) ? blocks : []
   const results = []
@@ -416,7 +466,7 @@ export function createTodoWatchService(options) {
     ]
     if (candidates.length === 0) {
       return {
-        text: `${header.join('\n')}\n\n本次没有待核验的 TODO。直接返回 {"results":[]}，不要调用工具。`,
+        text: `${header.join('\n')}\n\n本次没有待核验的 TODO。直接返回 {"brief":{"headline":"核验完成：本次无候选","plain":"本次没有待核验的 TODO，核验任务按计划结束。"},"results":[]}，不要调用工具。`,
         candidates: [],
         empty: true,
       }
@@ -427,8 +477,10 @@ export function createTodoWatchService(options) {
         `候选 TODO（共 ${candidates.length} 条，必须逐条返回）：`,
         JSON.stringify(candidates.map(candidatePayload), null, 2),
         '输出要求：先写一句本次核验摘要，再输出一个 ```json 代码块：',
-        '{"results":[{"id":"候选 id","verdict":"triggered|not_triggered|insufficient","confidence":"high|medium|low","evidence":"工具结果中的原文片段","source":"来源 + as-of"}]}',
+        '{"brief":{"headline":"≤24 字","plain":"40–200 字：先写触发了什么，再写核实线索（数据/公告、关键数值、as-of）"},"results":[{"id":"候选 id","verdict":"triggered|not_triggered|insufficient","confidence":"high|medium|low","evidence":"工具结果中的原文片段","source":"来源 + as-of"}]}',
         'triggered / not_triggered 必须有可核验的工具原文；缺数据、只见到媒体转述、口径不一致或条件有歧义一律 insufficient。',
+        'JSON 必须严格合法：不要尾逗号、注释或省略引号；每条候选都要用候选 id 返回一次。',
+        'brief 只写已触发的条目与线索，没有触发就直说；不要写 Markdown、链接或表情，也不要给买卖建议。',
       ].join('\n'),
       candidates: candidates.map(candidatePayload),
       empty: false,
@@ -439,6 +491,7 @@ export function createTodoWatchService(options) {
     if (!owner()) return
     const { run, task, text, toolText } = payload
     if (typeof text !== 'string' || text.trim().length === 0) return
+    const authoredBrief = parseVerifierBrief(text)
     await syncInternal()
     const all = await store.listTodoWatches()
     const acks = await store.listTodoAcks()
@@ -452,7 +505,7 @@ export function createTodoWatchService(options) {
       .sort((left, right) => String(left.todoId).localeCompare(String(right.todoId)))
     if (candidates.length === 0) {
       await notifyPendingInternal()
-      return
+      return { checked: 0, triggered: [], notTriggered: 0, needsHuman: 0, expired: 0, ...(authoredBrief === undefined ? {} : { brief: authoredBrief }) }
     }
     // Subagents keep their raw tool output in child sessions; the main answer is the compiled
     // evidence record. Accept either source rather than rejecting every delegated lookup.
@@ -462,11 +515,15 @@ export function createTodoWatchService(options) {
     const blocks = sourceBlocksOf(evidenceText, Number.POSITIVE_INFINITY)
     const todos = candidates.map(candidatePayload)
     const results = parseWatchOutput(text, { todos, blocks, sourceText: evidenceText })
+    if (results.length === 0 && /"results"\s*:/.test(text)) {
+      logger?.warn?.('capital-automation: 核验结果解析为空，候选按数据不足处理')
+    }
     const resultById = new Map(results.map((result) => [result.id, result]))
     const today = localPartsAt(now(), timeZone).date
     const currentById = new Map((await store.listTodoWatches()).map((watch) => [watch.todoId, watch]))
     const decisionByIdAtApply = new Map((await store.listTodoAcks()).map((ack) => [ack.todoId, ack]))
     const at = iso(now())
+    const summary = { checked: 0, triggered: [], notTriggered: 0, needsHuman: 0, expired: 0 }
     for (const candidate of candidates) {
       const current = currentById.get(candidate.todoId)
       if (current === undefined) continue
@@ -526,8 +583,23 @@ export function createTodoWatchService(options) {
       else next.source = result.source
       if (handoffReason === undefined) delete next.handoffReason
       await store.putTodoWatch(next)
+      summary.checked += 1
+      if (status === 'triggered') {
+        summary.triggered.push({
+          title: current.title,
+          ...(current.symbol === undefined ? {} : { symbol: current.symbol }),
+          ...(result?.evidence === undefined ? {} : { evidence: result.evidence }),
+        })
+      } else if (status === 'watching') {
+        summary.notTriggered += 1
+      } else if (status === 'needs_human') {
+        summary.needsHuman += 1
+      } else if (status === 'expired') {
+        summary.expired += 1
+      }
     }
     await notifyPendingInternal()
+    return { ...summary, ...(authoredBrief === undefined ? {} : { brief: authoredBrief }) }
   }
 
   async function onFinalAnswer(payload) {
@@ -543,7 +615,7 @@ export function createTodoWatchService(options) {
     if (typeof readAnswer !== 'function' || typeof payload.run.sessionId !== 'string') return
     try {
       const answer = await readAnswer(payload.run.sessionId)
-      await onFinalAnswer({ ...payload, text: answer.text, toolText: answer.toolText })
+      return onFinalAnswer({ ...payload, text: answer.text, toolText: answer.toolText })
     } catch (error) {
       logger?.warn?.(`capital-automation: TODO 核验读取 session 失败：${errorText(error)}`)
     }

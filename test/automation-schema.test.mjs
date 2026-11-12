@@ -400,12 +400,21 @@ test('任务简报 schema：ready 必须有 headline/plain，failed 必须有 er
   assert.equal(TaskBriefSchema.parse(base).status, 'pending')
   assert.throws(() => TaskBriefSchema.parse({ ...base, headline: '有内容' }), 'pending 不能带正文')
   assert.throws(() => TaskBriefSchema.parse({ ...base, status: 'ready' }), 'ready 必须有 headline/plain')
-  assert.equal(TaskBriefSchema.parse({
+  const ready = {
     ...base,
     status: 'ready',
     headline: '科技股又跌了，救兵还没到',
     plain: '昨晚美国科技股继续下跌，市场怕的是它们之前涨得太贵。国内出了稳市场的新办法，但真正买股票的钱还没进来。今天开盘先看科技股能不能止跌，不然大盘还会被它们拖着走。',
-  }).status, 'ready')
+  }
+  assert.equal(TaskBriefSchema.parse(ready).status, 'ready')
+  assert.equal(TaskBriefSchema.parse({
+    ...ready,
+    items: Array.from({ length: 9 }, (_, index) => ({ kind: 'track', title: `事项 ${index + 1}`, sourceQuote: `原文 ${index + 1}` })),
+  }).items.length, 9, 'items 不再限制 6 条')
+  assert.equal(TaskBriefSchema.parse({
+    ...ready,
+    gaps: Array.from({ length: 9 }, (_, index) => ({ kind: 'capability', topic: `缺口 ${index + 1}`, detail: '数据源没有该字段。', sourceQuote: '数据源没有该字段' })),
+  }).gaps.length, 9, 'gaps 不再限制 6 条')
   assert.throws(() => TaskBriefSchema.parse({ ...base, status: 'failed' }), 'failed 必须有 error')
   assert.throws(() => TaskBriefSchema.parse({ ...base, status: 'pending', items: [{ kind: 'verify', title: 'x', sourceQuote: 'y', dueAt: '2026-02-30' }] }), '非法日期必须被拒')
   assert.throws(() => TaskBriefSchema.parse({ ...base, unknown: true }), '未知字段必须被拒')

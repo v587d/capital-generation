@@ -80,9 +80,15 @@ export function createAutomationRuntime(options) {
     settings: getSettings,
     profile: { displayName, runDir },
     workspaces,
-    onRunSucceeded: (payload) => {
-      if (watches?.isVerifierTask(payload.task) === true) return watches.onVerifierRun(payload)
-      return briefs?.onRunSucceeded(payload)
+    onRunSucceeded: async (payload) => {
+      if (watches?.isVerifierTask(payload.task) !== true) return briefs?.onRunSucceeded(payload)
+      let summary
+      try {
+        summary = await watches.onVerifierRun(payload)
+      } catch (error) {
+        logger?.warn?.(`capital-automation: TODO 核验结果处理失败：${String(error)}`)
+      }
+      return briefs?.recordVerifierBrief({ ...payload, summary })
     },
     buildPromptContext: (payload) => watches?.promptContextFor(payload.task),
     now,

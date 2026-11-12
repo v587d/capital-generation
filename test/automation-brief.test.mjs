@@ -10,6 +10,7 @@ import {
   normalizeFinalAnswer,
   parseBriefOutput,
   readSessionAnswer,
+  verifierBriefContent,
 } from '../automation/brief.js'
 import { createAutomationStore } from '../automation/store.js'
 import { tradingCalendar } from '../automation/calendar.js'
@@ -95,6 +96,53 @@ test('简报输出：代码围栏、原文引用、股票角色与跳过', () =>
   assert.equal(parsed.stocks[0].roles[0], 'holding')
   assert.deepEqual(parseBriefOutput('{"skip":true}', ANSWER), { skip: true })
   assert.throws(() => parseBriefOutput('not json', ANSWER), BriefValidationError)
+})
+
+test('简报输出：items 不设条数上限，原文列了几条就保留几条', () => {
+  const lines = Array.from({ length: 9 }, (_, index) => {
+    const day = String(10 + index).padStart(2, '0')
+    return `第 ${index + 1} 项：需要在 2026-11-${day} 前确认。`
+  })
+  const source = lines.join('\n')
+  const items = lines.map((_line, index) => ({
+    kind: 'track',
+    title: `待确认事项 ${index + 1}`,
+    detail: '原文明确列出的确认项',
+    dueAt: `2026-11-${String(10 + index).padStart(2, '0')}`,
+    sourceId: index + 1,
+  }))
+  const parsed = parseBriefOutput(JSON.stringify(output({ items })), source)
+  assert.equal(parsed.items.length, 9, '超过 6 条不再被截断')
+  assert.equal(parsed.items.at(-1).title, '待确认事项 9')
+})
+
+test('简报输出：gaps 也不设条数上限，原文列了几条就保留几条', () => {
+  const lines = Array.from({ length: 8 }, (_, index) => `缺口 ${index + 1}：数据源没有该字段。`)
+  const source = lines.join('\n')
+  const gaps = lines.map((_line, index) => ({
+    kind: 'capability',
+    topic: `能力缺口 ${index + 1}`,
+    detail: '数据源没有该字段。',
+    sourceId: index + 1,
+  }))
+  const parsed = parseBriefOutput(JSON.stringify(output({ items: [], gaps })), source)
+  assert.equal(parsed.gaps.length, 8, '超过 6 条不再被截断')
+  assert.equal(parsed.gaps.at(-1).topic, '能力缺口 8')
+})
+
+test('简报 prompt：不再宣告 items 的条数上限', () => {
+  assert.doesNotMatch(BRIEF_SYSTEM_PROMPT, /items 只提取[^\n]*最多\s*6\s*条/)
+  assert.match(BRIEF_SYSTEM_PROMPT, /items 只提取[^\n]*不设条数上限/)
+})
+
+test('简报输出：headline 按字符数计，24 个通过、25 个报出实际长度', () => {
+  const atLimit = `${'港'.repeat(23)}。`
+  const overLimit = `${'港'.repeat(24)}。`
+  assert.equal(parseBriefOutput(JSON.stringify(output({ headline: atLimit })), ANSWER).headline, atLimit)
+  assert.throws(
+    () => parseBriefOutput(JSON.stringify(output({ headline: overLimit })), ANSWER),
+    (error) => error.code === 'headline_length' && error.details?.length === 25 && /当前 25 个/.test(error.message),
+  )
 })
 
 test('简报输出：超长、Markdown 和伪造引用被拒绝或丢弃；内容语气与买卖建议交给用户', () => {
@@ -269,6 +317,146 @@ test('固定 system prompt：无 persona、无工具，sessionId 与正文进入
   assert.equal(brief.promptVersion, BRIEF_PROMPT_VERSION)
   assert.equal(brief.coverage, 'full')
   assert.equal((await store.getRun(run.id)).status, 'succeeded', '简报失败/成功都不能改运行终态')
+})
+
+test('长度校验失败后的修复请求带实际字数，并要求只改 headline', async () => {
+  const { store, task } = await makeStore()
+  const run = await successRun(store, task)
+  const calls = []
+  const ctx = {
+    get(name) {
+      if (name === 'sessionQuery') return { readSession: async () => sessionEvents() }
+      if (name === 'llm') {
+        return {
+          async *stream(options) {
+            calls.push(options)
+            const text = calls.length === 1
+              ? JSON.stringify(output({ headline: `${'港'.repeat(24)}。` }))
+              : JSON.stringify(output())
+            yield { type: 'text-delta', text }
+            yield { type: 'finish', reason: { kind: 'stop' } }
+          },
+        }
+      }
+      return undefined
+    },
+  }
+  const service = createBriefService({
+    ctx,
+    store,
+    scheduler: { status: () => ({ state: 'active' }) },
+    now: () => NOW,
+    logger: { warn() {} },
+  })
+  await service.onRunSucceeded({ run: await store.getRun(run.id), task })
+  const brief = await waitForBrief(store, run.id, 'ready')
+  service.stop()
+  assert.equal(calls.length, 2, '首轮超长后必须发一次修复请求')
+  const repair = JSON.parse(calls[1].messages[0].content[0].text).repair
+  assert.match(repair.issues, /当前 25 个/)
+  assert.match(repair.issues, /只改 headline/)
+  assert.equal(brief.status, 'ready')
+  assert.equal(brief.attempts, 2)
+})
+
+test('核验简报文案：已触发项优先，无触发与无候选也有可读摘要', () => {
+  const hit = verifierBriefContent({
+    checked: 5,
+    triggered: [
+      { title: '指南针收盘站回 44.01', evidence: '收盘 44.55 元' },
+      { title: '腾讯 Q3 财报已披露' },
+    ],
+    notTriggered: 2,
+    needsHuman: 1,
+    expired: 0,
+  })
+  assert.equal(hit.headline, '2 条核验已触发')
+  assert.match(hit.plain, /指南针收盘站回 44\.01/)
+  assert.match(hit.plain, /收盘 44\.55 元/, '没有模型文案时也要带出核实线索')
+  assert.match(hit.plain, /2 条未触发、1 条需要你处理/)
+
+  const authored = {
+    headline: '指南针站回 44.01',
+    plain: '指南针今日收盘 44.55 元，站回 44.01，成交量 1.2 亿，来源 eastmoney_quote，触发条件成立。',
+  }
+  assert.deepEqual(verifierBriefContent({ checked: 1, triggered: [], brief: authored }), authored, '模型写的 brief 优先')
+  assert.equal(
+    verifierBriefContent({ checked: 1, triggered: [{ title: '指南针收盘站回 44.01' }], brief: { headline: '短', plain: '太短' } }).headline,
+    '1 条核验已触发',
+    '不合法的模型 brief 回退到确定性文案',
+  )
+  assert.ok(Array.from(hit.plain).length >= 40 && Array.from(hit.plain).length <= 200)
+
+  const quiet = verifierBriefContent({ checked: 3, triggered: [], notTriggered: 2, needsHuman: 1, expired: 0 })
+  assert.equal(quiet.headline, '核验完成：没有触发')
+  assert.match(quiet.plain, /2 条未成立、1 条需要你处理/)
+
+  const empty = verifierBriefContent({ checked: 0, triggered: [] })
+  assert.equal(empty.headline, '核验完成：本次无候选')
+  assert.ok(Array.from(empty.plain).length >= 40)
+})
+
+test('核验简报落库：模型终稿里的 brief 原样落库，不再二次调用模型', async () => {
+  const { store, task } = await makeStore()
+  const run = await successRun(store, task)
+  const service = createBriefService({
+    ctx: {},
+    store,
+    scheduler: { status: () => ({ state: 'active' }) },
+    now: () => NOW,
+    logger: { warn() {} },
+  })
+  const authored = {
+    headline: '指南针站回 44.01',
+    plain: '指南针今日收盘 44.55 元，站回 44.01，成交量 1.2 亿，来源 eastmoney_quote，触发条件成立。',
+  }
+  const brief = await service.recordVerifierBrief({
+    run: await store.getRun(run.id),
+    task,
+    summary: {
+      checked: 1,
+      triggered: [{ title: '指南针收盘站回 44.01', evidence: '收盘 44.55 元' }],
+      notTriggered: 0,
+      needsHuman: 0,
+      expired: 0,
+      brief: authored,
+    },
+  })
+  service.stop()
+  assert.equal(brief.headline, authored.headline)
+  assert.equal(brief.plain, authored.plain)
+  assert.deepEqual(brief.items, [])
+})
+
+test('核验简报落库：ready 且 items/stocks/gaps 全空，不能变成新的 TODO 来源', async () => {
+  const { store, task } = await makeStore()
+  const run = await successRun(store, task)
+  const service = createBriefService({
+    ctx: {},
+    store,
+    scheduler: { status: () => ({ state: 'active' }) },
+    now: () => NOW,
+    logger: { warn() {} },
+  })
+  const brief = await service.recordVerifierBrief({
+    run: await store.getRun(run.id),
+    task,
+    summary: {
+      checked: 2,
+      triggered: [{ title: '指南针收盘站回 44.01', symbol: '300803.SZ' }],
+      notTriggered: 1,
+      needsHuman: 0,
+      expired: 0,
+    },
+  })
+  service.stop()
+  assert.equal(brief.status, 'ready')
+  assert.equal(brief.headline, '1 条核验已触发')
+  assert.match(brief.plain, /指南针收盘站回 44\.01/)
+  assert.deepEqual(brief.items, [], '核验结果不能回灌成 TODO')
+  assert.deepEqual(brief.stocks, [])
+  assert.deepEqual(brief.gaps, [])
+  assert.equal(brief.promptVersion, BRIEF_PROMPT_VERSION)
 })
 
 test('读取终稿时同时返回工具原文，正文不按 12k 截断', async () => {

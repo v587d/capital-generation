@@ -11,7 +11,6 @@ const DAY_VALUES = new Set(['7', '14', '30', 'all'])
 const DEFAULT_DAYS = '14'
 const DEFAULT_LIMIT = 30
 const MAX_LIMIT = 50
-const MAX_TODOS = 50
 // The client paints 12 rows first and reveals the rest on demand. 200 leaves room for that
 // interaction across a large run window without letting symbol churn inflate one response.
 const MAX_STOCKS = 200
@@ -19,7 +18,6 @@ const MAX_STOCKS = 200
 // even when the page-wide TODO slice is capped. 100 leaves ample room per instrument without
 // duplicating every historical item into the board response.
 const MAX_STOCK_ITEMS = 100
-const MAX_GAPS = 20
 const HEALTH_DAYS = 7
 const RUN_ID_PATTERN = /^[A-Za-z0-9_-]{1,120}$/
 const CATEGORY_VALUES = new Set(TaskCategorySchema.options)
@@ -288,7 +286,7 @@ function aggregateTodos(entries) {
         current.lastSeenAt = at
       }
       if (at < current.firstSeenAt) current.firstSeenAt = at
-      if (!current.sources.some((entry) => entry.runId === run.id) && current.sources.length < 5) {
+      if (!current.sources.some((entry) => entry.runId === run.id)) {
         current.sources.push(source)
       }
     }
@@ -669,15 +667,15 @@ export function createBoardService(options) {
         issuesToday: health.todayIssueCount,
       },
       cards: pageEntries.map((entry) => cardOf(entry.run, entry.brief, entry.task, askByRun.get(entry.run.id))),
-      todos: todos.slice(0, MAX_TODOS),
+      todos,
       stocks: stocks.slice(0, MAX_STOCKS),
-      gaps: gaps.slice(0, MAX_GAPS),
+      gaps,
       health,
       nextBefore: nextBefore ?? null,
     }
   }
 
-  /** Unbounded TODO projection for the watcher; the page still gets MAX_TODOS. */
+  /** Same unbounded projection the page reads; the watcher must not miss a candidate. */
   async function openTodos(query = {}) {
     return todosFor(parseBoardQuery(query, now))
   }

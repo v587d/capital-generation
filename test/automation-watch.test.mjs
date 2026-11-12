@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 
 import { createAutomationStore } from '../automation/store.js'
 import { createBoardService } from '../automation/board.js'
-import { createTodoWatchService, parseWatchOutput } from '../automation/watch.js'
+import { createTodoWatchService, parseVerifierBrief, parseWatchOutput } from '../automation/watch.js'
 import { tradingCalendar } from '../automation/calendar.js'
 import { createFakeDomain } from './automation-harness.mjs'
 
@@ -103,11 +103,19 @@ const CONFIRM_ITEM = {
   sourceQuote: '自选清单里 300803.SZ 指南针标记为持仓、占比 100%',
 }
 
-function verifierAnswer(id, { verdict = 'triggered', evidence = '指南针今日收盘 44.55 元，站回 44.01。', source = 'eastmoney_quote · 2026-11-04 15:00' } = {}) {
+function verifierAnswer(id, { verdict = 'triggered', evidence = '指南针今日收盘 44.55 元，站回 44.01。', source = 'eastmoney_quote · 2026-11-04 15:00', brief } = {}) {
   return `\`\`\`json\n${JSON.stringify({
+    ...(brief === undefined ? {} : { brief }),
     results: [{ id, verdict, confidence: 'high', evidence, source }],
   }, null, 2)}\n\`\`\``
 }
+
+test('TODO 核验：同一终稿里的 brief 直接取用，不再额外请求模型', () => {
+  const brief = { headline: '1 条核验已触发', plain: '指南针今日收盘 44.55 元，站回 44.01，成交量 1.2 亿，来源 eastmoney_quote。' }
+  assert.deepEqual(parseVerifierBrief(verifierAnswer('verify|x|y', { brief })), brief)
+  assert.equal(parseVerifierBrief('{"results":[]}'), undefined)
+  assert.equal(parseVerifierBrief('not json'), undefined)
+})
 
 test('TODO 核验输出：工具原文外的引用、未知 id 与低置信度都不能当成触发', () => {
   const todos = [{ id: 'verify|x|y', kind: 'verify', title: '站回 44.01' }]
@@ -134,6 +142,19 @@ test('TODO 核验输出：工具原文外的引用、未知 id 与低置信度�
     results: [{ id: 'verify|x|y', verdict: 'not_triggered', confidence: 'high', evidence: '收盘 44.55 元', source: 'quote' }],
   })}\n\`\`\`\n`, { todos, blocks, sourceText })
   assert.equal(wrapped.length, 1, 'JSON 前后带说明文字时仍能解析最后一个代码块')
+})
+
+test('TODO 核验输出：模型 JSON 的尾逗号不能把整批结论丢掉', () => {
+  const todos = [{ id: 'verify|x|y', kind: 'verify', title: '站回 44.01' }]
+  const blocks = [{ id: 1, text: TOOL_TEXT }]
+  const raw = `核验完成\n\`\`\`json\n{"brief":{"headline":"1 条核验已触发","plain":"指南针今日收盘 44.55 元，站回 44.01。"},"results":[{"id":"verify|x|y","verdict":"triggered","confidence":"high","evidence":"收盘 44.55 元","source":"quote"},]}\n\`\`\``
+  const parsed = parseWatchOutput(raw, { todos, blocks, sourceText: TOOL_TEXT })
+  assert.equal(parsed.length, 1, '尾逗号不能导致整批 verdict 被丢弃')
+  assert.equal(parsed[0].verdict, 'triggered')
+  assert.deepEqual(parseVerifierBrief(raw), {
+    headline: '1 条核验已触发',
+    plain: '指南针今日收盘 44.55 元，站回 44.01。',
+  })
 })
 
 test('TODO 跟踪：待验证进入 watching，待人工处理直接交给用户并写通知', async () => {
@@ -183,6 +204,7 @@ test('TODO 核验：候选注入只发 A/H 与无标的条目，美股留给后�
   const verifier = await makeVerifierTask(store)
   const context = await watches.promptContextFor(verifier)
   assert.ok(context)
+  assert.match(context.text, /"brief"/, '核验 prompt 要求同一次终稿写出看板简报')
   assert.match(context.text, /300803\.SZ/)
   assert.doesNotMatch(context.text, /NVDA\.OQ/)
   assert.doesNotMatch(context.text, /CRWV/, '无后缀美股代码也不能送进 A/H 核验')
@@ -201,12 +223,20 @@ test('TODO 核验：专用任务给出工具原文证据后标记触发，且只
   await watches.sync()
   const id = await todoIdOf(store)
 
-  await watches.onFinalAnswer({
+  const authored = {
+    headline: '1 条核验已触发',
+    plain: '指南针今日收盘 44.55 元，站回 44.01，成交量 1.2 亿，来源 eastmoney_quote。',
+  }
+  const summary = await watches.onFinalAnswer({
     run,
     task: verifier,
-    text: verifierAnswer(id),
+    text: verifierAnswer(id, { brief: authored }),
     toolText: TOOL_TEXT,
   })
+  assert.deepEqual(summary.brief, authored)
+  assert.equal(summary.checked, 1)
+  assert.deepEqual(summary.triggered.map((entry) => entry.title), [VERIFY_ITEM.title])
+  assert.equal(summary.notTriggered + summary.needsHuman + summary.expired, 0)
   const verify = (await store.listTodoWatches()).find((record) => record.kind === 'verify')
   assert.equal(verify.status, 'triggered')
   assert.equal(verify.verdict, 'triggered')
@@ -243,7 +273,9 @@ test('TODO 核验任务：读取 session 的终稿与工具原文后应用结果
     }),
   })
   await watches.sync()
-  await watches.onVerifierRun({ run, task: verifier })
+  const summary = await watches.onVerifierRun({ run, task: verifier })
+  assert.equal(summary.checked, 1)
+  assert.equal(summary.triggered.length, 1)
   const verify = (await store.listTodoWatches()).find((record) => record.kind === 'verify')
   assert.equal(verify.status, 'triggered')
   assert.match(verify.evidence, /44\.55/)

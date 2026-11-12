@@ -141,6 +141,32 @@ test('卡片只含有 brief 的成功运行；顶部统计/TODO/雷达/缺口都
   })
 })
 
+test('合并 TODO 的来源列表按运行全部保留，不按 5 条截断', async () => {
+  const { store } = await makeStore()
+  const task = await makeTask(store)
+  const item = {
+    kind: 'confirm',
+    title: '指南针持仓标记是否仍有效',
+    symbol: '300803.SZ',
+    dueLabel: '尽快',
+    sourceQuote: '自选清单里 300803.SZ 指南针标记为持仓、占比 100%',
+  }
+  for (let index = 0; index < 6; index += 1) {
+    await addBrief(store, task, {
+      key: `source-${index}`,
+      sessionId: `session-source-${index}`,
+      finishedAt: `2026-11-03T0${index}:40:32.876Z`,
+      items: [item],
+    })
+  }
+  const board = await boardService(store).board({ days: '14', tz: TZ })
+  assert.equal(board.todos.length, 1)
+  assert.equal(board.todos[0].seenCount, 6)
+  assert.equal(board.todos[0].sources.length, 6, '「N 次运行提到」必须与来源行数一致，不能只留 5 条')
+  assert.equal(board.todos[0].sources[0].sessionId, 'session-source-5', '最新一次运行排在最前')
+  assert.equal(board.todos[0].sources[5].sessionId, 'session-source-0')
+})
+
 test('顶部统计区分今天与总量：简报、个股/缺口新增、今日运行异常', async () => {
   const { store } = await makeStore()
   const task = await makeTask(store)
@@ -226,7 +252,7 @@ test('个股雷达合并带与不带交易所后缀的同一代码，跟进条�
   assert.equal(board.stats.stocks, 1)
 })
 
-test('个股跟进数始终等于展开条目数，且不受页面 TODO 50 条上限影响', async () => {
+test('个股跟进数始终等于展开条目数，且 TODO 面板不按条数截断', async () => {
   const { store } = await makeStore()
   const task = await makeTask(store)
   for (let batch = 0; batch < 10; batch += 1) {
@@ -247,10 +273,25 @@ test('个股跟进数始终等于展开条目数，且不受页面 TODO 50 条�
     })
   }
   const board = await boardService(store).board({ days: '14', tz: TZ })
-  assert.equal(board.todos.length, 50, '页面 TODO 面板仍有 50 条上限')
+  assert.equal(board.todos.length, 60, 'TODO 面板回全部条目，不设条数上限')
   assert.equal(board.stocks[0].todoCount, 60, '个股计数覆盖该标的的全部待跟进事项')
-  assert.equal(board.stocks[0].items.length, 60, '个股展开条目与计数一致，不被页面 TODO 上限截断')
+  assert.equal(board.stocks[0].items.length, 60, '个股展开条目与计数一致，覆盖全量')
   assert.ok(board.stocks[0].items.every((item) => typeof item.sessionId === 'string' && item.sessionId.length > 0), '每条都带来源 session')
+})
+
+test('数据缺口不按条数截断，面板拿回全部聚合', async () => {
+  const { store } = await makeStore()
+  const task = await makeTask(store)
+  const gaps = Array.from({ length: 25 }, (_, index) => ({
+    kind: 'capability',
+    topic: `能力缺口 ${index + 1}`,
+    detail: '数据源没有该字段。',
+    sourceQuote: '数据源没有该字段',
+  }))
+  await addBrief(store, task, { key: 'gap-cap', gaps })
+  const board = await boardService(store).board({ days: '14', tz: TZ })
+  assert.equal(board.gaps.length, 25, '服务端不再截到 20 条')
+  assert.equal(board.stats.gaps, 25)
 })
 
 test('个股雷达不把不同市场的同数字代码合并', async () => {
@@ -311,7 +352,7 @@ test('看板排序：活跃 TODO 永远排在已过期归档之前', async () =>
   })
   const board = await boardService(store).board({ days: '14', tz: TZ })
   assert.equal(board.todos.length, 2)
-  assert.equal(board.todos[0].title, '还在跟踪的将来事项', '活跃项不能被过期归档挤到 50 条上限之外')
+  assert.equal(board.todos[0].title, '还在跟踪的将来事项', '活跃项不能被过期归档挤到列表末尾')
   assert.equal(board.todos[1].title, '已过期的验证条件')
 })
 
@@ -476,7 +517,7 @@ test('TODO 跟踪状态随 board 返回：触发与待人工的条目排在前�
   assert.equal(after.todos[1].watch.handoffReason, '缺少收盘价。')
   assert.equal(after.todos[0].watch.profileKey, undefined, 'watch 摘要不能带 profileKey')
   const all = await board.openTodos({ days: '14', tz: TZ })
-  assert.equal(all.length, 2, 'watcher 投影不受页面 50 条上限影响')
+  assert.equal(all.length, 2, 'watcher 与页面读取同一份完整投影')
 })
 
 test('按分类/游标分页，TODO 与统计仍覆盖整个筛选范围', async () => {
