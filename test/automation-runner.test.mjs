@@ -56,7 +56,7 @@ async function harness({ promptFails = false, createFails = false, createPending
     sessionController: controller,
     agents: { list: () => [agent], get: () => agent },
     sessions: { get: (id) => sessions.get(id), flush: async () => {} },
-    subagents: { waitForChildren: async () => false, drainDescendants: async () => {} },
+    subagents: { waitForTreeWork: async () => false, waitForChildren: async () => false, drainDescendants: async () => {} },
   })
   const runner = createRunRunner({
     ctx,

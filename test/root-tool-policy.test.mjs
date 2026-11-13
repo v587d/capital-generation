@@ -4,11 +4,13 @@ import {
   CAPITAL_PRESET_ID,
   FS_WRITE_READ_ONLY,
   FS_WRITE_TOOL_NAMES,
+  HOST_WEB_DENIED_TOOLS,
   OCR_ROOT_URL_DENIED,
   OCR_TOOL_NAME,
   RETRIEVAL_DENIED_TOOLS,
   ROOT_AGENT_DENIED_TOOLS,
   SHELL_TOOL_NAMES,
+  TEAM_DENIED_TOOLS,
   fsWriteGuardReasonFor,
   isCapitalAgent,
   isRootAgent,
@@ -44,6 +46,13 @@ test('ROOT_AGENT_DENIED_TOOLS：2026-10-15 用户决策「开 read、同时保�
   assert.ok(!ROOT_AGENT_DENIED_TOOLS.includes('read_image'), 'read_image 不点名：条件注册 + 只读')
 })
 
+test('TEAM_DENIED_TOOLS：Team 行保留，但四个 Team 工具从 Capital 根拿掉', () => {
+  assert.deepEqual([...TEAM_DENIED_TOOLS], ['team_task_create', 'team_task_list', 'team_task_get', 'team_task_update'])
+  for (const name of TEAM_DENIED_TOOLS) {
+    assert.ok(ROOT_AGENT_DENIED_TOOLS.includes(name), `主 Agent 不得看到 ${name}：Team 任务板不是 Capital 的委派清单`)
+  }
+})
+
 test('RETRIEVAL_DENIED_TOOLS：十五个出网工具全部从根 Agent 拿掉（出网只有一个入口）', () => {
   // External retrieval isolation must be structural; a missing name leaves that source reachable.
   assert.equal(RETRIEVAL_DENIED_TOOLS.length, 15, '检索面 2 + wind 2 + 具名来源 11 = 15')
@@ -51,10 +60,12 @@ test('RETRIEVAL_DENIED_TOOLS：十五个出网工具全部从根 Agent 拿掉（
   for (const name of RETRIEVAL_DENIED_TOOLS) {
     assert.ok(ROOT_AGENT_DENIED_TOOLS.includes(name), `主 Agent 不得看到出网工具 ${name}`)
   }
-  // Host tools currently absent: keeping them would bury real failed denies. Re-add if mounted.
-  for (const name of ['web_search', 'web_fetch']) {
-    assert.ok(!ROOT_AGENT_DENIED_TOOLS.includes(name), `${name} 在当前宿主根作用域里不存在，不该留在名单里`)
+  // Generic host web entries are blocked too; only the named web_retriever surface remains.
+  for (const name of HOST_WEB_DENIED_TOOLS) {
+    assert.ok(ROOT_AGENT_DENIED_TOOLS.includes(name), `主 Agent 不得看到宿主通用出网工具 ${name}`)
   }
+  // Host tools currently absent: keeping them would bury real failed denies. Re-add if mounted.
+  assert.ok(!ROOT_AGENT_DENIED_TOOLS.includes('web_search'), 'web_search 在当前宿主根作用域里不存在，不该留在名单里')
   // OCR is an intentional exception: name-level deny cannot separate local files from external URLs.
   assert.ok(!RETRIEVAL_DENIED_TOOLS.includes('ocr'), 'ocr 不得整名 deny（否则本地 file / doc_id 形态一起没了）')
 })
@@ -143,6 +154,21 @@ test('restrictRootAgentTools：只对根 Agent 逐名 deny，且不带 allow', (
   assert.equal(calls.length, ROOT_AGENT_DENIED_TOOLS.length, '子 Agent 不得被收敛（否则 specialist 拿不到 render_chart）')
 })
 
+test('restrictRootAgentTools：有 view 时只 deny 本作用域可限制的名字', () => {
+  const globals = new Set(['web_fetch', 'anysearch_search', 'write'])
+  const calls = []
+  const tools = {
+    view: () => ({ restrictableNames: globals }),
+    restrict: (filter) => { calls.push(filter); return () => {} },
+  }
+  const record = { denied: [], failed: [] }
+  assert.equal(restrictRootAgentTools(rootAgent(tools), record), 'restricted')
+  assert.deepEqual(calls.map((filter) => filter.deny[0]).sort(), [...globals].sort(),
+    '只尝试本作用域真实存在的全局名：缺席的族行名字不再制造 failed 噪声')
+  assert.deepEqual(record.denied, [...globals].sort())
+  assert.deepEqual(record.failed, [])
+})
+
 test('restrictRootAgentTools：单个名字报错（别的 preset 没有这个工具）只是跳过', () => {
   const calls = []
   const tools = {
@@ -176,8 +202,8 @@ test('registerRootToolPolicy：注册在 Root context 的 agent/created 上（sc
   scoped.root = { on: (event, listener) => { rootListeners.push({ event, listener }); return () => {} } }
   registerRootToolPolicy(scoped)
 
-  assert.deepEqual(rootListeners.map((entry) => entry.event), ['agent/created'],
-    '视图层收敛只需要 created；`ocr` 形态闸门不再按 agent 装（手开模式的身份在 created 之后才选定）')
+  assert.deepEqual(rootListeners.map((entry) => entry.event), ['agent/created', 'agent-preset/selected'],
+    '创建期 + 手开模式选完 preset 后各收敛一次；`ocr` 形态闸门仍不按 agent 装')
   assert.equal(scopedListeners.length, 0, '不得注册在 scoped context 上（那会静默失效）')
   assert.equal(rootListeners[0].event, 'agent/created')
 
@@ -200,6 +226,30 @@ test('registerRootToolPolicy：注册在 Root context 的 agent/created 上（sc
   // Malformed host payloads cannot crash convergence; losing some restriction is safer.
   assert.doesNotThrow(() => rootListeners[0].listener({}))
   assert.doesNotThrow(() => rootListeners[0].listener(undefined))
+})
+
+test('registerRootToolPolicy：手开根模式在 agent-preset/selected 后补收敛', () => {
+  const listeners = []
+  const tools = { restrict: (filter) => { tools.calls.push(filter); return () => {} }, calls: [] }
+  const root = { session: { id: 'manual-root', header: { cwd: '/w' } }, ctx: { tools, preset: CAPITAL_PRESET_ID } }
+  const agents = { get: (id) => id === 'manual-root' ? root : undefined }
+  const ctx = {
+    get: (name) => {
+      if (name === 'agents') return agents
+      if (name === 'agentPresets') return { composedPreset: (agentCtx) => agentCtx?.preset }
+      return undefined
+    },
+    on: () => () => {},
+    effect: (callback) => callback(),
+    logger: { warn() {} },
+  }
+  ctx.root = { on: (event, listener) => { listeners.push({ event, listener }); return () => {} } }
+  registerRootToolPolicy(ctx)
+  const selected = listeners.find((entry) => entry.event === 'agent-preset/selected').listener
+  selected('manual-root', CAPITAL_PRESET_ID)
+  assert.equal(tools.calls.length, ROOT_AGENT_DENIED_TOOLS.length, '手开 Capital 根也要逐名 deny 宿主全局工具')
+  selected('manual-root', CAPITAL_PRESET_ID)
+  assert.equal(tools.calls.length, ROOT_AGENT_DENIED_TOOLS.length, '同一 session 只收敛一次')
 })
 
 test('registerRootToolPolicy：别的 preset 的根 Agent 不动', () => {
@@ -283,7 +333,7 @@ test('registerRootToolPolicy：Root 监听器必须由本 fiber 持有 disposer�
     effect: (callback) => { const dispose = callback(); dispose(); return () => {} },
   }
   registerRootToolPolicy(scoped)
-  assert.deepEqual(disposed, ['agent/created'], 'Root 监听器必须由本 fiber 释放（不释放就是跨实例泄漏）')
+  assert.deepEqual(disposed, ['agent/created', 'agent-preset/selected'], 'Root 监听器必须由本 fiber 释放（不释放就是跨实例泄漏）')
 })
 
 test('isCapitalAgent：按 composedPreset 筛本 preset', () => {

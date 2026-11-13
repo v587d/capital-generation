@@ -86,7 +86,7 @@ const BOARD_UI_KEY = 'capital-automation:board-ui:v3'
 const BOARD_PANEL_KEYS = ['todo', 'stocks', 'gaps', 'health']
 const BOARD_TODO_PERIODS = ['today', 'future', 'expired']
 const BOARD_STOCK_PAGE_SIZE = 12
-const BOARD_STOCK_ROLES = ['holding', 'risk', 'event', 'watch']
+const BOARD_STOCK_ROLES = ['holding', 'risk', 'event', 'watch', 'other']
 const BOARD_BRIEF_HIGHLIGHT_MS = 3_000
 const BOARD_PANEL_IDS = {
   'capital-automation-todo': 'todo',
@@ -212,10 +212,12 @@ const zh = {
     roleWatch: '关注',
     roleEvent: '事件',
     roleRisk: '风险',
+    roleOther: '其他',
     roleHoldingHint: '自选清单里标记为持仓',
     roleWatchHint: '在自选清单里关注，未标记持仓',
     roleEventHint: '近期运行提到需要跟踪的事件或催化',
     roleRiskHint: '近期运行提示存在风险',
+    roleOtherHint: '近期运行提到，不在自选清单里',
     gapEmpty: '最近运行没有报告数据缺口',
     gapSeen: '{n} 次运行',
     gapAll: '查看全部',
@@ -5536,6 +5538,7 @@ function boardRoleLabel(role) {
   if (role === 'holding') return zh.board.roleHolding
   if (role === 'watch') return zh.board.roleWatch
   if (role === 'event') return zh.board.roleEvent
+  if (role === 'other') return zh.board.roleOther
   return zh.board.roleRisk
 }
 
@@ -5543,6 +5546,7 @@ function boardRoleHint(role) {
   if (role === 'holding') return zh.board.roleHoldingHint
   if (role === 'watch') return zh.board.roleWatchHint
   if (role === 'event') return zh.board.roleEventHint
+  if (role === 'other') return zh.board.roleOtherHint
   return zh.board.roleRiskHint
 }
 

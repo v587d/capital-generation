@@ -1,7 +1,8 @@
 /**
  * Root-only `wait_for_agents`: hold one turn across child relays; returns on the first relay, on
- * the tree settling, or after 30s. `waitForChildren` has no abort parameter; the slice races it.
- * Host contract: docs/reference/dsh-surface-ledger.md L36.
+ * the tree settling, or after 30s. Neither wait method has an abort parameter; the slice races it.
+ * rc.2 renamed `waitForChildren` to `waitForTreeWork`; accept both so a rollback does not brick the
+ * turn while rc.2 is the supported baseline. Host contract: docs/reference/dsh-surface-ledger.md L36.
  */
 import type { Context } from '@deepseek-ai/cordis'
 
@@ -29,7 +30,10 @@ export interface WaitDescendantLike {
 }
 
 export interface WaitSubagentsLike {
-  waitForChildren(parent: WaitAgentLike): Promise<boolean>
+  /** rc.2 name. */
+  waitForTreeWork?(root: WaitAgentLike): Promise<boolean>
+  /** rc.1 name; kept as a rollback escape hatch, not a supported baseline. */
+  waitForChildren?(parent: WaitAgentLike): Promise<boolean>
   listDescendants?(rootSessionId: string, signal?: AbortSignal): Promise<readonly WaitDescendantLike[]>
 }
 
@@ -228,8 +232,9 @@ export function waitForAgentsToolDefinition(deps: WaitForAgentsDeps) {
       }
       if (exec.signal.aborted) throw abortReason(exec.signal)
       const service = deps.subagents()
-      if (service?.waitForChildren === undefined) {
-        throw new Error('wait_for_agents 不可用：宿主 subagents 服务未挂载；不要用 list_agents 轮询代替。')
+      const waitTree = service?.waitForTreeWork ?? service?.waitForChildren
+      if (service === undefined || typeof waitTree !== 'function') {
+        throw new Error('wait_for_agents 不可用：宿主未提供 waitForTreeWork/waitForChildren；不要用 list_agents 轮询代替。')
       }
 
       const started = now()
@@ -267,7 +272,7 @@ export function waitForAgentsToolDefinition(deps: WaitForAgentsDeps) {
       let outcome: 'settled' | 'message' | 'user_input' | 'timeout'
       const slice = waitTimer(waitSliceMs, exec.signal)
       try {
-        const wait = Promise.resolve(service.waitForChildren(agent))
+        const wait = Promise.resolve(waitTree.call(service, agent))
         // The loser of the race must not become an unhandled rejection when the slice or a relay wins.
         wait.catch(() => undefined)
         outcome = await Promise.race([

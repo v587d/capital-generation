@@ -86,7 +86,7 @@ description: Use when composing or reading a Capital data message — data_reque
 
 ## 2. 逐份回传（data_collector → 主 Agent）
 
-每次 `request_data` 返回后立即 `send_message`，成功时每条只含**一份** DatasetRef（缓存命中也一样）：
+每次 `request_data` 返回后立即 `send_message({ agent: "lead", ... })`，成功时每条只含**一份** DatasetRef（缓存命中也一样）：
 
 ```json
 {
@@ -149,17 +149,29 @@ description: Use when composing or reading a Capital data message — data_reque
 
 ## 5. 重试纪律
 
-
 | 错误类型 | 例子 | 处理 |
 |----------|------|------|
-| 参数类 | 缺参、格式错、枚举越界 | 对照 `input_schema` 的 enum/description 修正后重试 |
-| 瞬时类 | 限流、上游超时、网络 | 重试 1 次 |
-| 执行超时 | 约 30 秒超时 | 重试 1 次 |
-| 数据源/环境 | 无可用数据源、workspace 只读、落盘失败（`workspace_not_writable`） | 不回退、不假装成功，如实回传 `error`/`code` |
+| 参数类 | 缺参、格式错、枚举越界 | 对照 `input_schema` 修正后重试一次，不占上游预算 |
+| 可重试上游 | 429/4001、`fetch failed`、超时、5xx | 先换等价能力；无替代才重试；同一能力最多 3 次尝试（首发 + 2 次重试） |
+| 终止类 | 2004、套餐 403、凭据缺失、`workspace_not_writable` | 不重试，如实回传 `error`/`code` |
 | 网页获取 | 网络或服务错误 | 最多重试 1 次，仍失败如实回传 |
 
-底线：绝不幻觉填充数据，绝不用编造的来源补位，绝不声称数据已保存；
-同一请求累计最多重试 2 次，仍失败就回传 `failed` 并注明已重试，不再继续。
+**替代表**（先 `describe_capability` 核对字段、单位、代码范围；切换后 `source_label` 写新来源）：
+
+| 需求 | 主能力 | 可替代 |
+|------|--------|--------|
+| 指数快照 | `index_quote` | `tencent_quote`（支持指数，字段名不同） |
+| A 股个股快照 | `quote` / `ftshare_ashare_quote` | `tencent_quote`（仅 SH/SZ）；反向同理 |
+| 日 K / 指数日 K | `history` / `index_history` | `tencent_kline`（无成交额，成交量单位手） |
+| 板块排名 / 市场广度 / 涨跌停池 / 港股美股快照 | 各自能力 | 无等价替代；同源（如东财板块与东财资金流）也不算替代 |
+
+**硬规则**：
+
+- `request_data` 对同一 session + capability 计数（5 分钟窗口）：第 3 次可重试失败返回 `upstream_retry_exhausted`，第 4 次调用直接拒绝；成功一次即清零。
+- 收到 `upstream_retryable_failure` / `upstream_retry_exhausted` 后不要用 `wait_agent` 等上游恢复；它只等消息，长等会触发运行 idle 计时。
+- 没有替代能力时重试到 3 次上限；收到 `upstream_retry_exhausted` 立即发 `data_failed` + `data_collection_completed`，`error` 保留最后一次错误原文与 `attempts`；不要为等一个上游耗尽整轮预算。
+
+底线：绝不幻觉填充数据，绝不用编造的来源补位，绝不声称数据已保存；同一能力达到上限后不再重试。
 
 ## 5. 输出必须披露的字段
 

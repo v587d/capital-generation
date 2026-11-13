@@ -52,9 +52,12 @@
   Agent、后选人设**（`agentPresets.select()` = `recompose(agent.ctx)` 再 `session.append("agent-preset/selected")`，
   账本 L32），created 那一刻读到的还是创建默认值——装在 created 上的身份闸门对**手开模式一次都不触发**
   （症状：手开 Capital 的 `ocr` `url` 形态真的打到了上游，`dc_status` 里连一条拒绝记录都没有）。
-  `tools.guard()` 按 `exec.agent` 判定、与实例绑哪层无关，所以三颗身份闸门（fs 写口 / `ocr` 形态 /
-  兄弟名字 `interrupt_agent`）都**全局装在插件 ctx 上、各一次**；`agent/created` 只剩两处 restrict
-  （根收敛 + 角色兄弟可见性），它们管的是**被委派子会话**那一支（可见性真能减掉，手开那一支减不掉）。
+  `tools.guard()` 按 `exec.agent` 判定、与实例绑哪层无关，所以四颗身份闸门（fs 写口 / `ocr` 形态 /
+  兄弟名字 `interrupt_agent`+`list_agents` / `send_message` 目标）都**全局装在插件 ctx 上、各一次**；
+  `agent/created` 只剩两处 restrict（根收敛 + 角色可见性），它们管的是**被委派子会话**那一支
+  （可见性真能减掉，手开那一支减不掉）。rc.2 允许整棵树任意互发，`send_message` 闸门把 Capital
+  收回到“根只发直系、叶子只发 `lead`、specialist 不发”；目标表在 `src/agents/messaging-policy.ts`
+  的 `ROLE_MESSAGE_TARGETS`，为未来的 `junior → data-analyst` 预留一项。
 - **`visualization_specialist`**：data_junior 的异步子 Agent（0.2.1 起子会话一律异步，one-shot /
   前台模式已随 `backgroundMode` 一起删除），工具表只有 `skill` + `render_chart`；
   spec 由它组装，data_junior 只交"要什么视图"。
@@ -71,9 +74,13 @@
 
 ## 1.4 `data_gap` 与回合语义
 
-- **`data_gap` 不需要插件代码**：data_junior 用 `send_message` 向父 Agent 发**补数据请求**（细则
-  在 persona 与 skill `capital-data-protocol`，两侧都有断言）；框架原生支持 child → direct
-  parent 回程，父 Agent id 由框架注入。
+- **`data_gap` 不需要插件代码**：data_junior 用 `send_message({ agent: "lead" })` 向主 Agent 发
+  **补数据请求**（细则在 persona 与 skill `capital-data-protocol`，两侧都有断言）。rc.2 的树内名字
+  固定 `lead` 指根；子 Agent 不再收到 parent id，`agent_id` / `PARENT` 都是旧词汇。
+- **中继边界**：data_collector 与 data_junior 是兄弟，但互通一律经主 Agent——collector 只把
+  `dataset_ready` / `data_failed` / `data_collection_completed` 回给 `lead`，主 Agent 决定把哪份
+  DatasetRef 转给 junior；junior 的 `data_gap` 也先回 `lead`。rc.2 的树内互发能力不改变这条调度链：
+  全局 `send_message` 目标 guard 会拒掉叶子→兄弟/孙 Agent 的发送。
 - **`analysis_data_request` 与 `data_gap` 同构**：analyst 用 `send_message` 向主 Agent 发补数请求（`{type:'analysis_data_request', task_id, analysis_id, need, blocking, already_have, suggested_query}`，见设计稿 §6.2）。主 Agent 是**范围闸门**：只转交 brief 内的请求，超出范围或目标已满足就拒绝并说明。取回新 refs 后发回**同一个** analyst（continuable 复用、不新建同角色）；`blocking: true` 未决时主 Agent **不得写最终答复**，必须先补数或让 analyst 明确降级 partial。暂不设轮次硬上限，出现“连续 blocking 仍不收敛”的 bad case 再评估。
 - **子 Agent 结束本轮 ≠ 任务完成**：等数据的子 Agent 会先结束回合。委派清单用 `waiting_data`
   标记；收到结算通知不得认定完成、不得新建同角色实例。
@@ -115,26 +122,29 @@
 - **问题**：宿主把根 inbox 的每条消息都当成新的 step；子 Agent 每发一次回传或结算通知，都会把主
   Agent 从收尾步重新唤醒，同一任务因此被拆成多个可见轮次——界面只展示最后一轮，中间结论被折叠。
 - **出口**：根 preset 挂 `tools/orchestration`，只注册 `wait_for_agents`。工具在**一次调用内**等待：
-  先 `ctx.subagents.waitForChildren(root)` 观察整棵子树，同时听根 inbox 的 `agent/inbox/inserted`；
+  先 `ctx.subagents.waitForTreeWork(root)`（rc.2 名字；运行时保留 `waitForChildren` 回滚兜底）观察整棵
+  子树，同时听根 inbox 的 `agent/inbox/inserted`；
   任一可执行消息到达、子树收敛或 30 秒片到期就返回。这样中间回传仍在同一回合内处理，不落成新 turn。
 - **四态**：`all_settled` = 没有在推进的子树，进入逐行对账；`message` = 有 `agent-message`（下一步带上，
   处理后继续等）；`user_input` = 用户插话；`timeout` = 片到期，`running` 列出仍存活的子 Agent；仍有
   `running` 就继续等，无法继续才如实说明。`timeout` 既不是完成也不是失败。
 - **纪律**：委派 / `send_message` 后先等，不以“请稍候”式可见正文结束回合；`wait_for_agents` 是
   ordering barrier（不声明并发安全），不能用 `list_agents` 轮询代替；`data_gap` 仍是工单，处理后发回
-  同一个子 Agent 再等。`waitForChildren` 只等**推进中**的子树；空闲但在等父消息的子 Agent 不算完成，
+  同一个子 Agent 再等。`waitForTreeWork` 只等**推进中**的子树；空闲但在等父消息的子 Agent 不算完成，
   仍按 §1.4 的 `waiting_data` 对账。空的 `all_settled` 只说明生命周期收敛，回传正文仍不构成结算 ✓（§1.4）。
-- **失败面**：`subagents` 服务缺失时工具响亮失败；`waitForChildren` 没有 abort 参数，取消由工具
+- **失败面**：`subagents` 服务缺失或两个方法都不在场时工具响亮失败并点名
+  `waitForTreeWork`/`waitForChildren`；等待方法没有 abort 参数，取消由工具
   自己的 signal 竞速处理，后台观察不会写入 inbox。实现 `src/agents/wait-for-agents.ts`；宿主契约
   账本 L36；回归 `test/wait-for-agents.test.mjs`、`test/persona.test.mjs`。
 
 ## 1.8 角色树
-
 ```text
-main Agent
-  +-- data_collector   外部取数，立即持久化，只回传 DatasetRef
-  +-- data_junior      质量 / 建模 / 统计 / 可视化 gate（PTC `run_code`），只回传 profile_ref / 聚合结果 / chart_ref
-  |     └── visualization_specialist  异步出图，只回传 chart_ref / 小回执
-  +-- data_analyst     Python 分析（仅预留，未启用）
-  +-- web_retriever    网页材料获取（一次一个）
+main Agent (lead)
+  +-- data-collector   外部取数，立即持久化，只回传 DatasetRef
+  +-- data-junior      质量 / 建模 / 统计 / 可视化 gate（PTC `run_code`），只回传 profile_ref / 聚合结果 / chart_ref
+  |     └── chart-<n> (visualization_specialist)  异步出图，只回传 chart_ref / 小回执
+  +-- data-analyst     Python 分析（仅预留，未启用；未来挂在 data-junior 之下）
+  +-- web-retriever    网页材料获取（一次一个）
 ```
+
+会话内名字是树内路径：根固定 `lead`，直系是 `data-collector` / `data-junior` / `web-retriever`，孙 Agent 形如 `data-junior/chart-1`；历史 child 没有 name 时用 session id（不含 `/`）列出。

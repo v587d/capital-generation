@@ -425,8 +425,9 @@ export function createRunRunner(options) {
         try {
           if (entry.finished) return
           const subagents = service(ctx, 'subagents')
-          if (subagents?.waitForChildren !== undefined && entry.agent !== undefined) {
-            const joined = await subagents.waitForChildren(entry.agent).catch(() => true)
+          const waitTree = subagents?.waitForTreeWork ?? subagents?.waitForChildren
+          if (typeof waitTree === 'function' && entry.agent !== undefined) {
+            const joined = await waitTree.call(subagents, entry.agent).catch(() => true)
             if (joined && !entry.finished && entry.cancelRequested === undefined) {
               armIdle(entry)
               return

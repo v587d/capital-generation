@@ -200,6 +200,7 @@ data_junior 在 `run_code` 里调用 `tools.prepare_chart_source(...)`；special
 ## 4. 调用 render_chart
 
 data_junior 只在 `run_code` 程序里用 `tools.subagent_visualization_specialist(...)` 创建 specialist；
+可选的 `name` 用 `chart-<n>`（小写字母/数字/连字符），根不直接寻址它。
 specialist 是 native，照旧直调 `render_chart`。以下步骤属于 specialist。
 
 **并发与重试（硬）**：单次最多同时创建 8 个 specialist；超过就分批，等前一批释放子槽位再发下一批。

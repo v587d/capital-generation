@@ -25,9 +25,9 @@ const FAILURE_STATUSES = new Set(['failed', 'timed_out', 'blocked_requires_user'
 const KIND_RANK = { confirm: 0, verify: 1, track: 2 }
 const WATCH_RANK = { triggered: 0, needs_human: 1, watching: 2, expired: 3, resolved: 4 }
 const GAP_RANK = { capability: 0, conflict: 1, quality: 2, transient: 3 }
-const ROLE_RANK = { holding: 0, risk: 1, event: 2, watch: 3 }
+const ROLE_RANK = { holding: 0, risk: 1, event: 2, watch: 3, other: 4 }
 const A_SHARE_MARKETS = new Set(['SH', 'SZ', 'BJ'])
-const US_MARKETS = new Set(['OQ', 'N', 'US', 'NYSE', 'NASDAQ'])
+const US_MARKETS = new Set(['O', 'OQ', 'N', 'US', 'NYSE', 'NASDAQ'])
 
 function inferredMarket(code) {
   if (/^\d{6}$/.test(code)) {
@@ -56,7 +56,7 @@ export function stockSymbolKey(value) {
   if (/^\d{6}$/.test(base) && (suffix === 'SS' || A_SHARE_MARKETS.has(suffix))) {
     return `${base}.${suffix === 'SS' ? 'SH' : suffix}`
   }
-  if (/^\d{5}$/.test(base) && suffix === 'HK') return `${base}.HK`
+  if (/^\d{1,5}$/.test(base) && suffix === 'HK') return `${base.padStart(5, '0')}.HK`
   if (US_MARKETS.has(suffix)) return base
   return `${base}.${suffix}`
 }
@@ -355,7 +355,52 @@ function aggregateTodos(entries) {
   return result
 }
 
-function aggregateStocks(entries, todos, firstSeenByKey = new Map()) {
+function byRoleRank(left, right) {
+  return (ROLE_RANK[left] ?? 9) - (ROLE_RANK[right] ?? 9)
+}
+
+/**
+ * The watchlist panel order is the user's own order, so the index keeps it. HK indices are
+ * keyed `HSI.HK` in the panel but usually written `HSI` in briefs, so the bare stem is an
+ * alias; numeric A-share stems are not, or `000001` would collapse Shenzhen into Shanghai.
+ */
+function watchlistIndex(rows) {
+  const index = new Map()
+  for (let order = 0; order < rows.length; order += 1) {
+    const row = rows[order]
+    const key = stockSymbolKey(row?.thscode)
+    if (key.length === 0) continue
+    const entry = { held: row?.holding !== undefined, order }
+    index.set(key, entry)
+    if (key.endsWith('.HK') && !/^\d{5}\.HK$/.test(key)) index.set(key.slice(0, -3), entry)
+  }
+  return index
+}
+
+/**
+ * A panel match owns `holding` / `watch`: the brief only guesses whether a symbol is on the
+ * user's list, and the row hints already say the panel is the source. An unmatched stock is
+ * off the list, so a leftover `other` tag is truthful where `watch` would not be.
+ */
+function deriveStockRoles(roles, match) {
+  const rest = roles.filter((role) => role !== 'holding' && role !== 'watch')
+  if (match === undefined) return rest.length === 0 ? ['other'] : rest.sort(byRoleRank)
+  return [match.held ? 'holding' : 'watch', ...rest].sort(byRoleRank)
+}
+
+/**
+ * Tier 0 = held, tier 1 = watched, tier 2 = everything else. Without a readable watchlist the
+ * brief roles stand in (and roles stay untouched, since they cannot be checked).
+ */
+function stockTier(roles, match, hasWatchlist) {
+  if (match !== undefined) return match.held ? 0 : 1
+  if (hasWatchlist) return 2
+  if (roles.includes('holding')) return 0
+  if (roles.includes('watch')) return 1
+  return 2
+}
+
+function aggregateStocks(entries, todos, firstSeenByKey = new Map(), watchlistRows = undefined) {
   const bySymbol = new Map()
   for (const { run, brief } of entries) {
     if (brief.status !== 'ready') continue
@@ -396,27 +441,37 @@ function aggregateStocks(entries, todos, firstSeenByKey = new Map()) {
     items.push({ id: item.id, title: item.title, sessionId: item.sessionId ?? null })
     stockItems.set(key, items)
   }
-  const result = [...bySymbol.values()].map((stock) => {
+  const membership = Array.isArray(watchlistRows) ? watchlistIndex(watchlistRows) : undefined
+  const rows = [...bySymbol.values()].map((stock) => {
     const items = stockItems.get(stock.symbolKey) ?? []
+    const briefRoles = [...stock.roles]
+    const match = membership?.get(stock.symbolKey)
     return {
-      symbol: stock.symbol,
-      symbolKey: stock.symbolKey,
-      name: stock.name,
-      roles: [...stock.roles].sort((left, right) => (ROLE_RANK[left] ?? 9) - (ROLE_RANK[right] ?? 9)),
-      ...(stock.note === undefined ? {} : { note: stock.note }),
-      ...(stock.nextAt === undefined ? {} : { nextAt: stock.nextAt }),
-      todoCount: items.length,
-      items,
-      firstSeenAt: stock.firstSeenAt,
-      lastSeenAt: stock.lastSeenAt,
+      tier: stockTier(briefRoles, match, membership !== undefined),
+      order: match?.order,
+      row: {
+        symbol: stock.symbol,
+        symbolKey: stock.symbolKey,
+        name: stock.name,
+        roles: membership === undefined ? briefRoles.sort(byRoleRank) : deriveStockRoles(briefRoles, match),
+        ...(stock.note === undefined ? {} : { note: stock.note }),
+        ...(stock.nextAt === undefined ? {} : { nextAt: stock.nextAt }),
+        todoCount: items.length,
+        items,
+        firstSeenAt: stock.firstSeenAt,
+        lastSeenAt: stock.lastSeenAt,
+      },
     }
   })
-  result.sort((left, right) => {
-    const role = (ROLE_RANK[left.roles[0]] ?? 9) - (ROLE_RANK[right.roles[0]] ?? 9)
-    if (role !== 0) return role
-    return String(right.lastSeenAt).localeCompare(String(left.lastSeenAt)) || left.symbol.localeCompare(right.symbol)
+  rows.sort((left, right) => {
+    if (left.tier !== right.tier) return left.tier - right.tier
+    if (left.order !== undefined && right.order !== undefined && left.order !== right.order) {
+      return left.order - right.order
+    }
+    return String(right.row.lastSeenAt).localeCompare(String(left.row.lastSeenAt))
+      || left.row.symbol.localeCompare(right.row.symbol)
   })
-  return result
+  return rows.map((entry) => entry.row)
 }
 
 function aggregateGaps(entries, firstSeenByKey = new Map()) {
@@ -606,7 +661,19 @@ function cardOf(run, brief, task, ask) {
 }
 
 export function createBoardService(options) {
-  const { store, scheduler, asks, now = () => Date.now() } = options
+  const { store, scheduler, asks, now = () => Date.now(), loadWatchlist } = options
+
+  /** `undefined` = list unreadable (fall back to brief tags); `[]` = the user has no list. */
+  async function watchlistRows() {
+    if (typeof loadWatchlist !== 'function') return undefined
+    try {
+      const result = await loadWatchlist()
+      if (result?.ok !== true || !Array.isArray(result.items)) return undefined
+      return result.items
+    } catch {
+      return undefined
+    }
+  }
 
   /** Same entries back the page projection and the unbounded watcher projection. */
   async function entriesFor(parsed) {
@@ -691,7 +758,7 @@ export function createBoardService(options) {
     const openTodos = todos.filter((item) => item.ackedAt === undefined && item.deferredAt === undefined)
     const activeTodos = openTodos.filter((item) => !todoExpired(item, parsed.to, parsed.timeZone))
     const firstSeen = firstSeenMaps(historyEntries)
-    const stocks = aggregateStocks(entries, activeTodos, firstSeen.stocks)
+    const stocks = aggregateStocks(entries, activeTodos, firstSeen.stocks, await watchlistRows())
     const gaps = aggregateGaps(entries, firstSeen.gaps)
     const health = healthOf({
       runs: page.runs,

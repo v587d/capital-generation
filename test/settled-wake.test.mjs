@@ -65,6 +65,26 @@ test('收尾帧撤掉冗余结算通知：该 child 已有 admitted 的 agent-me
   assert.deepEqual(guard.admitted(), [], '结算后清掉该 child 的 exchange marker')
 })
 
+test('具名 child 的结算通知仍按 senderSessionId 匹配：有 relay 就丢弃、silent child 保留', () => {
+  const { agent, nextStep, removed } = harness()
+  const guard = createSettledWakeGuard()
+  nextStep.push(notice('data-collector', 'settled-named'))
+
+  // rc.2 adds a tree name; the notice still carries senderSessionId, not the name.
+  guard.acceptUserMessage(MAIN, agentMessage('data-collector'))
+  guard.acceptClosing(agent)
+
+  assert.deepEqual(removed, ['settled-named'], '具名不影响结算通知的关联键')
+  assert.equal(nextStep.length, 0)
+
+  const silent = harness()
+  silent.nextStep.push(notice('web-retriever', 'settled-silent'))
+  const silentGuard = createSettledWakeGuard()
+  silentGuard.acceptUserMessage(MAIN, { kind: 'user' })
+  silentGuard.acceptClosing(silent.agent)
+  assert.deepEqual(silent.removed, [], '没有 relay 的具名 child，其通知是唯一结果信号，必须保留')
+})
+
 test('该 child 从没发过消息：保留通知（它可能是唯一结果/失败信号）', () => {
   const { agent, nextStep, removed } = harness()
   const guard = createSettledWakeGuard()

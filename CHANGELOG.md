@@ -7,6 +7,27 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**、2.9.0 的选择器收敛与质检前置——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [2.22.0] - 2026-11-13
+
+适配 DSH `0.2.2-rc.2`：子 Agent 改为具名协作，单轮编排与数据/图表契约不变。
+
+### Changed
+
+- **具名子 Agent**：创建工具可传 `name`，回执改为 `started subagent <name>`；`list_agents()` 返回整棵树（首行 `lead`），根只复用直系 `name`，历史 child 没有 name 时用 session id。`data-collector` / `data-junior` / `web-retriever` 是固定名字，同名创建由宿主拒绝、不再重试。
+- **控制词汇换代**：`send_message` 的目标参数从 `agent_id` 改为 `agent`；主 Agent 发给直系 name，子 Agent 统一发 `lead`，`visualization_specialist` 不发消息。新增全局目标 guard，把 rc.2 的“树内任意互发”收回到主 Agent 中继；未来 `data-junior → data-analyst` 只需在目标表加一项。
+- **等待后端改名**：`wait_for_agents` 优先调用宿主的 `waitForTreeWork`，保留 `waitForChildren` 作为回滚兜底；两种方法都缺失时错误会点名，不再伪装成“服务未挂载”。投研自动化的无人值守等待同样双后端。
+- **interrupt 开关**：根 control 行显式 `interrupt: true`，角色行 `interrupt: false`；错投补救仍用 `interrupt_agent({ agent })`。
+- **Agent Team**：保留宿主 Team 行（同 profile 其他模式仍可用），Capital 根与所有角色按名 deny 四个 `team_task_*`；`team:policy` 是宿主 prompt section，persona 明确不使用任务板。
+- **取数重试预算**：同一 session + capability 的可重试上游失败（429/4001、`fetch failed`、超时、5xx）最多 3 次尝试；第 3 次返回 `upstream_retry_exhausted`，第 4 次直接拒绝。错误文案点名已核对的等价能力（如 `index_quote → tencent_quote`）与回传指令；无等价替代（东财板块、ftshare 广度、涨跌停池）时直接报缺口，并禁止用 `wait_agent` 等上游恢复。
+- **子 Agent 宿主工具白名单**：data-collector / web-retriever / visualization-specialist 只保留角色需要的宿主全局工具；`web_fetch`、`anysearch_*`（仅 retriever 保留）、`terminal_*`、`session_*`、`ralph`、`wait_agent`、`working_directory` 不再混入。手开角色 preset 在 `agent-preset/selected` 后补装；根侧重新启用 `ROOT_AGENT_DENIED_TOOLS`，并补 deny `web_fetch` / `anysearch_batch_search` / `anysearch_capabilities`。
+- **看板个股动态与自选面板对齐**：标记持仓的排最前，其余自选按面板顺序（置顶在前），不在自选清单的按最近一次被运行提到的时间倒序；「持仓 / 关注」标签取自面板，不在清单的只保留「风险 / 事件」，两者都没有时标「其他」；面板读不到时退回简报标签与「持仓 → 关注 → 其他」排序。
+- **探针与账本**：`check:dsh` 新增 L38（具名控制面）与 L39（Team 面），重写 L35/L36；`shared-*.js` 按哈希模式解析，不再押构建文件名。
+
+### Migration
+
+- 宿主升级到 `0.2.2-rc.2` 并重启；本插件不再承诺 `0.2.2-rc.1`。两个 dsh peer 精确 pin 到 rc.2。
+- 旧会话里的具名 child 仍可用；未命名历史 child 按 session id 复用。模型可见文本已清除 `agent_id` / `scope="children"` / `durable id` 等旧词汇。
+
 ## [2.21.4] - 2026-11-13
 
 简报生成适配长推理：提高输出上限与超时，截断与空正文给出可诊断错误。

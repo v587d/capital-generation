@@ -103,7 +103,8 @@
   替代是「persona 与工具插件改住 Agent Preset，委派行只用 `agentPreset` 选它」——这一条我们做到底：
   本仓当前由 preset 族行暴露的 29 颗模型工具，按族拆成
   `@v587d/capital-generation/tools/<family>` 的 subpath 入口行
-  （`package.json` 的 `exports`），每颗 preset 只挂自己那几族，**不再有运行期名字级 allow 名单**。
+  （`package.json` 的 `exports`），每颗 preset 只挂自己那几族；宿主全局工具另由
+  `role-tool-policy` 的显式白名单收口（**scoped 工具面仍只由族行决定**）。
   行契约（那一行注册哪些名字）只有一份，住 `test/family-rows.mjs`：`test/family-entries.test.mjs`
   拿它实测每个入口注册了什么，`test/persona.test.mjs` 拿它核对 YAML 的组合结果。
   - collector：`tools/collect` + `tools/time`；junior：`tools/dataset-read` + `tools/chart-source` +

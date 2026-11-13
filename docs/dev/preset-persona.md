@@ -97,10 +97,9 @@
 
 ## 8.4 不许改（除非有明确设计决策，并同步测试）
 
-- **persona 只放每轮硬规则**（判据 §8.2）：`list_agents` 每轮预检、按角色映射复用（label 优先，
-  旧标题按 durable id 沿用）、同角色复用不新建、`description` = 角色标签、durable id、委派清单与
-  `waiting_data`、路由表、质检 gate 不以用户提图为触发条件、禁主 Agent 直连数据工具与检索、子 Agent
-  互通经主 Agent 中继、全部 continuable、安全合规底线、叶子边界与「第一步先加载协议」。长协议 / 示例 JSON / 重试表 / 清单格式一律进 `skills/`。
+- **persona 只放每轮硬规则**（判据 §8.2）：`list_agents()` 每轮预检、按直系 `name` 复用（description 兜底，历史 child 无 name 用 session id）、同角色复用不新建、`description` = 角色标签、创建 `name` 固定 `data-collector` / `data-junior` / `web-retriever` + 回执 `started subagent <name>`、委派清单与 `waiting_data`、`wait_agent` 不替代 `wait_for_agents`、不使用 `team_task_*`、路由表、质检 gate 不以用户提图为触发条件、禁主 Agent 直连数据工具与检索、子 Agent 互通经主 Agent 中继（根只发直系、叶子只发 `lead`、specialist 不发）、全部 continuable、安全合规底线、叶子边界与「第一步先加载协议」。
+  control 行四颗工具（`send_message` / `interrupt_agent` / `list_agents` / `wait_agent`）；根 `config.interrupt: true`、角色 `config.interrupt: false`。
+  长协议 / 示例 JSON / 重试表 / 清单格式一律进 `skills/`。
 - **插件代码默认不注册 skill provider**：preset 自带 skills 继续由 `skill-filesystem` / `tool-skill` 组合行承载。唯一例外是用户显式选择的 community `selected-skills`：由 `tools/selected-skills` 行按 `config.role` 挂进根 / `data_junior` / `web_retriever` / 保留的 `data_analyst`，在 `agent/created` 与 `agent-preset/selected` 两条路径确认 **Agent 自己的 composed preset 等于该角色 preset** 后，注册到该 Agent 的 scope；不注册到 preset standing scope 或 Host scope。`data_collector` / `visualization_specialist` 不挂（没有方法集）。配置默认全关、manual 数量不限；provider 只扫描 `catalog.js` 批准的快照目录，`routing.js` 决定角色与触发条件，`list()`/`get()` 用同一道“角色 ∩ 已启用”闸门。开关每轮 `agent/pre-step` 重读并按需失效目录缓存，切换不需要新建会话；随 Agent scope 注销并停止 watcher。catalog 条目的 `experimental` / `watchlist` 仍是用户可见的风险信号。回归 `test/selected-skills-provider.test.mjs`、`test/selected-skill-routing.test.mjs` 与 `test/persona.test.mjs`。
 - **子 Agent 读 skill 的开关**：由该角色 preset 自己挂的 `tool-skill` 行提供（D0 之后每颗角色
   都挂那一行，没有"仍挂单体"的例外了）。restriction 过滤继承层、只豁免本 scope 自注册工具；

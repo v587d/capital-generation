@@ -13,7 +13,7 @@ import {
   roleSiblingGuardReasonFor,
   SIBLING_DENIED_TOOLS,
 } from '../lib/agents/role-tool-policy.js'
-import { resetRootPolicyProbes, rootPolicyProbes } from '../lib/agents/root-tool-policy.js'
+import { resetRootPolicyProbes, rootPolicyProbes, TEAM_DENIED_TOOLS } from '../lib/agents/root-tool-policy.js'
 
 /**
  * Role surface is closed by row composition; this file covers the residual sibling deny.
@@ -22,10 +22,12 @@ import { resetRootPolicyProbes, rootPolicyProbes } from '../lib/agents/root-tool
  */
 
 /** Recording fake tool surface; unknown names throw exactly like restrict(). */
-function fakeTools(known = null) {
+function fakeTools(known = null, globals = known) {
   const calls = []
+  const restrictable = globals === null ? new Set() : new Set(globals)
   return {
     calls,
+    view: () => ({ restrictableNames: restrictable }),
     restrict(filter) {
       const names = [...(filter.allow ?? []), ...(filter.deny ?? [])]
       if (known !== null && names.some((name) => !known.has(name))) throw new Error(`unknown global tool: ${names.join(', ')}`)
@@ -41,7 +43,7 @@ const childAgent = (tools, presetId = ROLE_PRESET_IDS.collector, id = 'child-1')
 })
 
 /** Separate root and standing registries: attaching to the wrong one silently misses events. */
-function fakeCtx(presetOf, { registry = true } = {}) {
+function fakeCtx(presetOf, { registry = true, agents = undefined } = {}) {
   const rootListeners = []
   const standingListeners = []
   const root = {
@@ -54,6 +56,7 @@ function fakeCtx(presetOf, { registry = true } = {}) {
     logger: { warn() {} },
     get(name) {
       if (name === 'agentPresets' && registry) return { composedPreset: (agentCtx) => presetOf?.(agentCtx) }
+      if (name === 'agents') return agents
       return undefined
     },
     on(event, listener) {
@@ -66,26 +69,56 @@ function fakeCtx(presetOf, { registry = true } = {}) {
   return { ctx, root, rootListeners, standingListeners }
 }
 
-test('角色残留面只剩"同行兄弟"：不许出现 allow 清单', () => {
+test('角色残留面：兄弟 deny 与宿主全局白名单分开，不恢复旧的整份 allow', () => {
   assert.deepEqual(Object.values(ROLE_PRESET_IDS).sort(), [...ROLE_PRESET_ID_LIST].sort())
   for (const presetId of ROLE_PRESET_ID_LIST) {
     const surface = ROLE_TOOL_SURFACES[presetId]
     assert.ok(surface, `${presetId} 没有残留面`)
-    assert.equal(surface.allow, undefined, `${presetId} 不许再有整份 allow 名单：工具面由 preset 挂的族行决定`)
+    assert.equal(surface.allow, undefined, `${presetId} 不许恢复旧的整份 allow 名单：scoped 工具面由 preset 挂的族行决定`)
+    for (const name of surface.allowTools ?? []) {
+      assert.equal(typeof name, 'string', `${presetId} 的宿主白名单只能写工具名`)
+    }
     for (const name of surface.denySiblings ?? []) {
       assert.ok(SIBLING_DENIED_TOOLS.includes(name), `${presetId} 的 deny 里出现了不是"同行兄弟”的名字（${name}）——那就是 §6.1 禁止恢复的"继承全部再划掉"形状`)
     }
+    assert.deepEqual([...(surface.denyTeam ?? [])], [...TEAM_DENIED_TOOLS], `${presetId} 必须 deny 宿主 Team 的四个工具（Team 行保留，仅 Capital 工具面不可见）`)
   }
   // Only control-row roles have a sibling name to deny.
   for (const role of [ROLE_PRESET_IDS.collector, ROLE_PRESET_IDS.junior, ROLE_PRESET_IDS.retriever, ROLE_PRESET_IDS.analyst]) {
     assert.deepEqual([...ROLE_TOOL_SURFACES[role].denySiblings], [...SIBLING_DENIED_TOOLS], `${role} 要 send_message，就得减掉焊在一起的 interrupt_agent / list_agents`)
   }
   for (const role of [ROLE_PRESET_IDS.specialist]) {
-    assert.equal(ROLE_TOOL_SURFACES[role].denySiblings, undefined, `${role} 不挂 control 行，不该有清单`)
+    assert.equal(ROLE_TOOL_SURFACES[role].denySiblings, undefined, `${role} 不挂 control 行，不该有兄弟名清单`)
   }
 })
 
-test('组合入口负责的角色不再走 agent/created 的 restrict（specialist 是第一个）', () => {
+test('宿主全局工具白名单：只留角色需要的名字，其余不进入子 Agent', () => {
+  const globals = new Set([
+    'send_message', 'skill', 'get_local_datetime', 'resolve_data_time_range',
+    'anysearch_batch_search', 'anysearch_capabilities', 'anysearch_search',
+    'web_fetch', 'wait_agent', 'terminal_open', 'ralph', 'session_search', 'working_directory',
+  ])
+  const cases = [
+    [ROLE_PRESET_IDS.collector, ['get_local_datetime', 'resolve_data_time_range', 'send_message', 'skill']],
+    [ROLE_PRESET_IDS.retriever, ['anysearch_batch_search', 'anysearch_capabilities', 'anysearch_search', 'get_local_datetime', 'resolve_data_time_range', 'send_message', 'skill']],
+    [ROLE_PRESET_IDS.specialist, ['get_local_datetime', 'resolve_data_time_range', 'skill']],
+  ]
+  for (const [presetId, allowed] of cases) {
+    const tools = fakeTools(globals, globals)
+    const result = restrictRoleAgentTools(childAgent(tools, presetId), ROLE_TOOL_SURFACES[presetId])
+    const allowCall = tools.calls.find((call) => call.allow !== undefined)
+    assert.ok(allowCall, `${presetId} 必须提交宿主全局 allow 名单`)
+    assert.deepEqual([...allowCall.allow].sort(), [...allowed].sort(), `${presetId} 的宿主白名单`)
+    assert.deepEqual(result.allowedGlobals, [...allowed].sort(), `${presetId} 现场记录保留的全局名`)
+    const removed = [...globals].filter((name) => !allowed.includes(name)).sort()
+    assert.deepEqual(result.removedGlobals, removed, `${presetId} 现场记录隐藏的全局名`)
+    for (const name of ['web_fetch', 'wait_agent', 'terminal_open', 'ralph', 'session_search', 'working_directory']) {
+      assert.ok(!allowed.includes(name), `${presetId} 不得保留 ${name}`)
+    }
+  }
+})
+
+test('specialist 不挂 control 行，但仍要减掉宿主 Team 的四个工具', () => {
   resetRolePolicyProbes()
   const { ctx, rootListeners } = fakeCtx((agentCtx) => agentCtx?.presetId)
   registerRoleToolPolicy(ctx)
@@ -93,16 +126,20 @@ test('组合入口负责的角色不再走 agent/created 的 restrict（speciali
 
   const tools = fakeTools()
   created({ agent: childAgent(tools, ROLE_PRESET_IDS.specialist, 'specialist-1') })
-  assert.deepEqual(tools.calls, [], 'specialist 的工具面由 preset 入口决定，不该再提交 restrict')
-  assert.deepEqual(rolePolicyProbes(), [], '没有提交运行期名单就不该产生收敛现场；否则会误导诊断')
+  assert.deepEqual(tools.calls, TEAM_DENIED_TOOLS.map((name) => ({ deny: [name] })), 'specialist 仍看得见宿主 Team，工具面必须减掉')
+  const probes = rolePolicyProbes()
+  assert.equal(probes.length, 1)
+  assert.equal(probes[0].presetId, ROLE_PRESET_IDS.specialist)
+  assert.deepEqual(probes[0].denied, [...TEAM_DENIED_TOOLS])
 })
 
 test('兄弟名字逐个 deny 提交（deny 是并集语义，逐名与整批等价，但失败方向不同）', () => {
   const tools = fakeTools()
   const result = restrictRoleAgentTools(childAgent(tools), ROLE_TOOL_SURFACES[ROLE_PRESET_IDS.junior])
   assert.equal(result.outcome, 'restricted')
-  assert.deepEqual(tools.calls, SIBLING_DENIED_TOOLS.map((name) => ({ deny: [name] })))
-  assert.deepEqual(result.denied, [...SIBLING_DENIED_TOOLS])
+  const expected = [...SIBLING_DENIED_TOOLS, ...TEAM_DENIED_TOOLS]
+  assert.deepEqual(tools.calls, expected.map((name) => ({ deny: [name] })))
+  assert.deepEqual(result.denied, expected)
   assert.equal(tools.calls.filter((call) => call.allow !== undefined).length, 0, '角色侧不再提交 allow')
 })
 
@@ -112,7 +149,7 @@ test('看不见的名字只跳过它自己：其余照常收敛（旧 allow 形�
   const result = restrictRoleAgentTools(childAgent(tools), ROLE_TOOL_SURFACES[ROLE_PRESET_IDS.collector])
   assert.equal(result.outcome, 'restricted')
   assert.deepEqual(result.denied, [])
-  assert.deepEqual(result.failed, [...SIBLING_DENIED_TOOLS], '现场记录点名跳过的名字')
+  assert.deepEqual(result.failed, [...SIBLING_DENIED_TOOLS, ...TEAM_DENIED_TOOLS], '现场记录点名跳过的名字')
 })
 
 test('rolePresetIdOf 只认角色 preset：根 Agent、别的 preset、读不到 registry 都判 undefined', () => {
@@ -132,8 +169,31 @@ test('监听只装未打标签的 root context（standing 上装了收不到事�
   resetRolePolicyProbes()
   const { ctx, rootListeners, standingListeners } = fakeCtx((agentCtx) => agentCtx?.presetId)
   registerRoleToolPolicy(ctx)
-  assert.deepEqual(rootListeners.map((entry) => entry.event), ['agent/created', 'agent/disposed'])
+  assert.deepEqual(rootListeners.map((entry) => entry.event), ['agent/created', 'agent-preset/selected', 'agent/disposed'])
   assert.deepEqual(standingListeners, [], '监听器不许落在打标签的 standing ctx 上')
+})
+
+test('手开角色 preset：选择事件后补装宿主白名单（created 时还不知道身份）', () => {
+  resetRolePolicyProbes()
+  const globals = new Set([
+    'send_message', 'skill', 'get_local_datetime', 'resolve_data_time_range',
+    'anysearch_search', 'web_fetch', 'wait_agent', 'terminal_open', 'ralph', 'session_search',
+  ])
+  const tools = fakeTools(globals, globals)
+  const agent = childAgent(tools, ROLE_PRESET_IDS.retriever, 'manual-retriever')
+  const { ctx, rootListeners } = fakeCtx((agentCtx) => agentCtx?.presetId, { agents: new Map([['manual-retriever', agent]]) })
+  registerRoleToolPolicy(ctx)
+  assert.deepEqual(tools.calls, [], 'created 时读不到角色身份，不提前收敛')
+  const selected = rootListeners.find((entry) => entry.event === 'agent-preset/selected').listener
+  selected('manual-retriever', ROLE_PRESET_IDS.retriever)
+  const allowCall = tools.calls.find((call) => call.allow !== undefined)
+  assert.ok(allowCall, '选择角色 preset 后必须补装 allow')
+  assert.ok(allowCall.allow.includes('anysearch_search'))
+  assert.ok(!allowCall.allow.includes('web_fetch'))
+  assert.ok(!allowCall.allow.includes('wait_agent'))
+  assert.equal(rolePolicyProbes().length, 1)
+  selected('manual-retriever', ROLE_PRESET_IDS.retriever)
+  assert.equal(rolePolicyProbes().length, 1, '同一 session 只收敛一次')
 })
 
 test('agent/created 只收敛角色 child，且同一颗 child 只收敛一次', () => {
@@ -148,26 +208,27 @@ test('agent/created 只收敛角色 child，且同一颗 child 只收敛一次',
   assert.deepEqual(rootTools.calls, [], '主 Agent 不该在这里被收敛')
 
   const tools = fakeTools()
+  const denyCount = SIBLING_DENIED_TOOLS.length + TEAM_DENIED_TOOLS.length
   created(first.rootListeners.find((entry) => entry.event === 'agent/created'))({ agent: childAgent(tools) })
-  assert.equal(tools.calls.length, SIBLING_DENIED_TOOLS.length, '角色 child 的每个兄弟名字各提交一次 deny')
+  assert.equal(tools.calls.length, denyCount, '角色 child 的每个兄弟 / Team 名字各提交一次 deny')
 
   // Two preset listeners may see the same child; convergence must be idempotent.
   const second = fakeCtx((agentCtx) => agentCtx?.presetId)
   registerRoleToolPolicy(second.ctx)
   created(second.rootListeners.find((entry) => entry.event === 'agent/created'))({ agent: childAgent(tools) })
-  assert.equal(tools.calls.length, SIBLING_DENIED_TOOLS.length, '同一颗 child 被两个监听器各收敛一次')
+  assert.equal(tools.calls.length, denyCount, '同一颗 child 被两个监听器各收敛一次')
 
   const probes = rolePolicyProbes()
   assert.equal(probes.length, 1, '现场记录必须去重（否则窗口被同一颗 child 刷满）')
   assert.equal(probes[0].presetId, ROLE_PRESET_IDS.collector)
   assert.equal(probes[0].agentId, 'child-1')
-  assert.deepEqual(probes[0].denied, [...SIBLING_DENIED_TOOLS])
+  assert.deepEqual(probes[0].denied, [...SIBLING_DENIED_TOOLS, ...TEAM_DENIED_TOOLS])
 
   // Release the dedupe key on disposal so a reused id is converged again.
   created(second.rootListeners.find((entry) => entry.event === 'agent/disposed'))({ agent: childAgent(fakeTools()) })
   const redo = fakeTools()
   created(first.rootListeners.find((entry) => entry.event === 'agent/created'))({ agent: childAgent(redo) })
-  assert.equal(redo.calls.length, SIBLING_DENIED_TOOLS.length, '释放后同 id 的 child 必须能重新收敛')
+  assert.equal(redo.calls.length, denyCount, '释放后同 id 的 child 必须能重新收敛')
 })
 
 test('deny 名单只写真存在的兄弟名字：shell 名字不归这里管（在 bash-guard 与 YAML 行里）', () => {
@@ -188,7 +249,7 @@ test('挂在角色 preset 的根会话（用户手选角色 preset 开的会话�
 
   const tools = fakeTools()
   created({ agent: { session: { id: 'root-as-retriever', header: { cwd: '/w' } }, ctx: { tools, presetId: ROLE_PRESET_IDS.retriever } } })
-  assert.deepEqual(tools.calls, SIBLING_DENIED_TOOLS.map((name) => ({ deny: [name] })), '根会话也要收敛（无 parentSession 不是豁免理由）')
+  assert.deepEqual(tools.calls, [...SIBLING_DENIED_TOOLS, ...TEAM_DENIED_TOOLS].map((name) => ({ deny: [name] })), '根会话也要收敛（无 parentSession 不是豁免理由）')
   assert.deepEqual(rolePolicyProbes().map((probe) => probe.agentId), ['root-as-retriever'])
 
   // The main root id remains owned by root-tool-policy.

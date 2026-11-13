@@ -60,7 +60,7 @@ async function addBrief(store, task, options = {}) {
   return store.getRun(run.id)
 }
 
-function boardService(store, asks) {
+function boardService(store, asks, options = {}) {
   return createBoardService({
     store,
     asks,
@@ -69,6 +69,7 @@ function boardService(store, asks) {
       displayNext: (task) => ({ kind: 'occurrence', scheduledFor: '2026-11-05T00:00:00.000Z', taskId: task.id }),
     },
     now: () => NOW,
+    ...options,
   })
 }
 
@@ -326,6 +327,146 @@ test('个股雷达超过 12 只仍返回完整列表，供前端默认 12 条后
   const board = await boardService(store).board({ days: '14', tz: TZ })
   assert.equal(board.stocks.length, 15)
   assert.equal(board.stats.stocks, 15)
+})
+
+test('个股动态按自选面板排序：持仓 → 其余自选（面板顺序）→ 其他（最近提到倒序）', async () => {
+  const { store } = await makeStore()
+  const task = await makeTask(store)
+  await addBrief(store, task, {
+    key: 'tier-old',
+    finishedAt: '2026-11-03T00:40:32.876Z',
+    stocks: [
+      { symbol: '601318.SH', name: '中国平安', roles: ['watch'] },
+      { symbol: '600519.SH', name: '贵州茅台', roles: ['watch'] },
+      { symbol: '300803.SZ', name: '指南针', roles: ['holding'] },
+    ],
+  })
+  await addBrief(store, task, {
+    key: 'tier-new',
+    finishedAt: '2026-11-04T00:40:32.876Z',
+    stocks: [
+      { symbol: '000001.SZ', name: '平安银行', roles: ['risk'] },
+      { symbol: '00700.HK', name: '腾讯控股', roles: ['watch'] },
+      { symbol: '601318.SH', name: '中国平安', roles: ['watch'] },
+    ],
+  })
+  const rows = [
+    { thscode: '600519.SH', name: '贵州茅台' },
+    { thscode: '300803.SZ', name: '指南针', holding: { weight_pct: 40, marked_at: NOW } },
+    { thscode: '00700.HK', name: '腾讯控股' },
+  ]
+  const board = await boardService(store, undefined, {
+    loadWatchlist: async () => ({ ok: true, items: rows }),
+  }).board({ days: '14', tz: TZ })
+
+  assert.deepEqual(
+    board.stocks.map((stock) => stock.symbolKey),
+    ['300803.SZ', '600519.SH', '00700.HK', '000001.SZ', '601318.SH'],
+    '持仓先于其余自选，自选档跟面板顺序，其他个股按最近提到时间倒序',
+  )
+  assert.deepEqual(board.stocks[0].roles, ['holding'], '面板标了持仓就是持仓')
+  assert.deepEqual(board.stocks[1].roles, ['watch'], '面板里未标持仓是关注')
+  assert.deepEqual(board.stocks[3].roles, ['risk'], '不在自选清单但简报提到风险，保留风险标签')
+  assert.deepEqual(board.stocks[4].roles, ['other'], '只被简报说成关注的非自选标的不能再挂关注')
+  assert.equal(board.stats.stocks, 5)
+})
+
+test('个股动态：自选面板读不到时保留简报标签并按简报兜底排序', async () => {
+  const { store } = await makeStore()
+  const task = await makeTask(store)
+  await addBrief(store, task, {
+    key: 'fallback',
+    finishedAt: '2026-11-04T00:40:32.876Z',
+    stocks: [
+      { symbol: '000001.SZ', name: '平安银行', roles: ['event'] },
+      { symbol: '00700.HK', name: '腾讯控股', roles: ['watch'] },
+      { symbol: '300803.SZ', name: '指南针', roles: ['holding'] },
+    ],
+  })
+  const board = await boardService(store, undefined, {
+    loadWatchlist: async () => {
+      throw new Error('store down')
+    },
+  }).board({ days: '14', tz: TZ })
+
+  assert.deepEqual(board.stocks.map((stock) => stock.symbolKey), ['300803.SZ', '00700.HK', '000001.SZ'])
+  assert.deepEqual(board.stocks.map((stock) => stock.roles), [['holding'], ['watch'], ['event']], '读不到清单不改写标签')
+})
+
+test('个股动态：自选清单为空时不冒充关注，全部归入其他档', async () => {
+  const { store } = await makeStore()
+  const task = await makeTask(store)
+  await addBrief(store, task, {
+    key: 'empty-list-old',
+    finishedAt: '2026-11-03T00:40:32.876Z',
+    stocks: [{ symbol: '300803.SZ', name: '指南针', roles: ['holding'] }],
+  })
+  await addBrief(store, task, {
+    key: 'empty-list-new',
+    finishedAt: '2026-11-04T00:40:32.876Z',
+    stocks: [{ symbol: '000001.SZ', name: '平安银行', roles: ['watch'] }],
+  })
+  const board = await boardService(store, undefined, {
+    loadWatchlist: async () => ({ ok: true, items: [], seeded_at: 0, limit: 30 }),
+  }).board({ days: '14', tz: TZ })
+
+  assert.deepEqual(board.stocks.map((stock) => stock.symbolKey), ['000001.SZ', '300803.SZ'], '空清单只按最近提到时间排')
+  assert.deepEqual(board.stocks.map((stock) => stock.roles), [['other'], ['other']], '清单为空时不能挂自选标签')
+})
+
+test('个股动态：港股指数用裸代码也能对上自选面板里的 HSI.HK', async () => {
+  const { store } = await makeStore()
+  const task = await makeTask(store)
+  await addBrief(store, task, {
+    key: 'hk-index',
+    stocks: [
+      { symbol: '000001.SZ', name: '平安银行', roles: ['risk'] },
+      { symbol: 'HSI', name: '恒生指数', roles: ['event'] },
+    ],
+  })
+  const board = await boardService(store, undefined, {
+    loadWatchlist: async () => ({ ok: true, items: [{ thscode: 'HSI.HK', name: '恒生指数' }] }),
+  }).board({ days: '14', tz: TZ })
+
+  assert.deepEqual(board.stocks.map((stock) => stock.symbol), ['HSI', '000001.SZ'], '自选档在风险档之前')
+  assert.deepEqual(board.stocks[0].roles, ['event', 'watch'], '指数在自选清单里就是关注')
+})
+
+test('个股动态：AAPL.O 与自选面板的 AAPL.OQ 是同一只', async () => {
+  const { store } = await makeStore()
+  const task = await makeTask(store)
+  await addBrief(store, task, {
+    key: 'us-suffix',
+    stocks: [
+      { symbol: 'AAPL', name: '苹果', roles: ['event'] },
+      { symbol: 'AAPL.O', name: '苹果', roles: ['risk'] },
+    ],
+  })
+  const board = await boardService(store, undefined, {
+    loadWatchlist: async () => ({ ok: true, items: [{ thscode: 'AAPL.OQ', name: '苹果' }] }),
+  }).board({ days: '14', tz: TZ })
+
+  assert.equal(board.stocks.length, 1, '裸代码、.O 与面板的 .OQ 是同一只')
+  assert.deepEqual(board.stocks[0].roles, ['risk', 'event', 'watch'], '.O 写法也能对上自选面板')
+})
+
+test('个股动态：港股 3 位写法补齐成 5 位后与自选面板合并', async () => {
+  const { store } = await makeStore()
+  const task = await makeTask(store)
+  await addBrief(store, task, {
+    key: 'hk-padding',
+    stocks: [
+      { symbol: '700.HK', name: '腾讯控股', roles: ['event'] },
+      { symbol: '00700.HK', name: '腾讯控股', roles: ['risk'] },
+    ],
+  })
+  const board = await boardService(store, undefined, {
+    loadWatchlist: async () => ({ ok: true, items: [{ thscode: '00700.HK', name: '腾讯控股' }] }),
+  }).board({ days: '14', tz: TZ })
+
+  assert.equal(board.stocks.length, 1, '700.HK 与 00700.HK 是同一只')
+  assert.equal(board.stocks[0].symbolKey, '00700.HK')
+  assert.deepEqual(board.stocks[0].roles, ['risk', 'event', 'watch'], '补齐后对得上自选面板')
 })
 
 test('看板排序：活跃 TODO 永远排在已过期归档之前', async () => {

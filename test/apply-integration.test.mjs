@@ -4,8 +4,8 @@ import { apply, readCapitalSettings, LOCAL_FETCH_DEFAULTS } from '../lib/index.j
 import { apply as applyPolicy } from '../lib/policy-entry.js'
 import { apply as applyRootExtras } from '../lib/root-extras-entry.js'
 import { apply as applySelectedSkills } from '../lib/selected-skills-entry.js'
-import { resetRootPolicyProbes } from '../lib/agents/root-tool-policy.js'
-import { SIBLING_DENIED_TOOLS, resetRolePolicyProbes } from '../lib/agents/role-tool-policy.js'
+import { resetRootPolicyProbes, ROOT_AGENT_DENIED_TOOLS, TEAM_DENIED_TOOLS } from '../lib/agents/root-tool-policy.js'
+import { ROLE_PRESET_IDS, SIBLING_DENIED_TOOLS, resetRolePolicyProbes } from '../lib/agents/role-tool-policy.js'
 import { clearAllSelectedSkillUsage, recordSelectedSkillUsage } from '../lib/agents/skill-usage.js'
 import { collectUndeclaredRequired } from './output-contract.mjs'
 
@@ -466,10 +466,11 @@ test('capital-policy + tools/root-extras：注册根 Agent 工具收敛监听（
         guard: (guard) => { guarded.push(guard); return () => {} },
       },
     }
-    // Root visibility is closed at composition time; no per-name deny for absent tools.
+    // Host-global tools are not closed by preset rows; root must deny them explicitly.
     notifyCreated({ session: { header: { cwd: '/w' } }, ctx: agentCtx })
     notifyCreated({ session: { header: { cwd: '/w', parentSession: 'main-1' } }, ctx: agentCtx })
-    assert.equal(restricted.length, 0, '根可见性在组合期决定；host 不再对不存在的名字提交 deny')
+    assert.deepEqual(restricted, ROOT_AGENT_DENIED_TOOLS.map((name) => ({ deny: [name] })),
+      '根 Agent 仍要逐名 deny 宿主全局工具：web_fetch / anysearch_* 不会因为组合期而消失')
     // Only the shell gate is per agent: identity gates are global because the Agent exists before preset selection.
     const rootBashCall = () => ({ name: 'bash', agent: { session: { header: { cwd: '/w' } } }, arguments: { command: 'date' } })
     const childBashEscalation = () => ({ name: 'bash', agent: { session: { header: { cwd: '/w', parentSession: 'main-1' } } }, arguments: { command: 'date', sandbox_permissions: 'x' } })
@@ -515,10 +516,11 @@ test('apply()：角色会话只减掉焊死的兄弟名字，并原样回到 dc_
     const notify = (agent) => { for (const entry of created) entry.listener({ agent }) }
 
     notify({ session: { id: 'junior-1', header: { cwd: '/w', parentSession: 'main-1' } }, ctx: { ...agentCtx, preset: 'capital-data-junior' } })
-    assert.deepEqual(restricted, SIBLING_DENIED_TOOLS.map((deny) => ({ deny: [deny] })),
-      '角色侧只提交逐名 deny：整份 allow 名单已由 D0 删除，工具面在组合期就封闭了')
+    const expectedDeny = [...SIBLING_DENIED_TOOLS, ...TEAM_DENIED_TOOLS]
+    assert.deepEqual(restricted, expectedDeny.map((deny) => ({ deny: [deny] })),
+      'junior 走 PTC，只提交逐名 deny：兄弟名字 + 宿主 Team 四颗；其余角色的宿主 allow 白名单在 role-tool-policy 用例覆盖')
     assert.equal(restricted.filter((filter) => filter.allow !== undefined).length, 0,
-      '⛔ 不许出现 allow：那是"继承全部再划掉"的形状，§6.1 禁止恢复')
+      '⛔ 不许给 junior 加 allow：run_code 是保留名，PTC 的执行面由 executor 自己关闭')
 
     const before = restricted.length
     notify({ session: { id: 'other-1', header: { cwd: '/w', parentSession: 'main-1' } }, ctx: { ...agentCtx, preset: 'some-other-preset' } })
@@ -528,7 +530,7 @@ test('apply()：角色会话只减掉焊死的兄弟名字，并原样回到 dc_
     assert.deepEqual(status.agent_tool_policy, [
       {
         agent_id: 'junior-1', root: false, preset_id: 'capital-data-junior', outcome: 'restricted',
-        allowed: [], denied: [...SIBLING_DENIED_TOOLS], failed: [],
+        allowed: [], denied: [...SIBLING_DENIED_TOOLS, ...TEAM_DENIED_TOOLS], failed: [],
       },
     ], '角色收敛现场必须由生产装配原样带回会话侧')
   } finally {
@@ -544,8 +546,8 @@ test('capital-policy 行必须把 tools 声明成注入：否则三颗闸门静�
     'capital-policy 必须 export const inject = ["tools"]（host 平面行读服务只有这一条不静默的路）')
 })
 
-test('apply()：三颗身份闸门都装在插件 ctx（各一次），按人设判定且 fail-open', async () => {
-  // Identity gates install once, globally, keyed by preset; other presets fail open.
+test('apply()：四颗身份闸门都装在插件 ctx（各一次），按人设判定且 fail-open', async () => {
+  // Four identity gates install once, globally, keyed by preset; other presets fail open.
   process.env.FUYAO_API_KEY = 'smoke-key'
   try {
     const { ctx, pluginGuards, effectResults } = fakeCtx()
@@ -558,7 +560,8 @@ test('apply()：三颗身份闸门都装在插件 ctx（各一次），按人设
     const junior = { ctx: { preset: 'capital-data-junior' } }
     const writeCall = (agent) => ({ name: 'write', agent, arguments: { file_path: '/w/a.md' } })
     const ocrUrlCall = (agent, arguments_) => ({ name: 'ocr', agent, arguments: arguments_ })
-    const siblingCall = (agent) => ({ name: 'interrupt_agent', agent, arguments: { agent_id: 'x' } })
+    const siblingCall = (agent) => ({ name: 'interrupt_agent', agent, arguments: { agent: 'x' } })
+    const messageCall = (agent, target) => ({ name: 'send_message', agent, arguments: { agent: target, message: 'hi' } })
     const byName = (call) => pluginGuards.filter((guard) => guard(call) !== undefined)
 
     const fsGuards = byName(writeCall(capital))
@@ -567,8 +570,10 @@ test('apply()：三颗身份闸门都装在插件 ctx（各一次），按人设
     assert.equal(fsGuards.length, 1, '全局 fs 写口 guard 只装一次，不走 agent/created')
     assert.equal(ocrGuards.length, 1, '⛔ `ocr` 的 url 形态 guard 只装一次且必须全局：主 Agent 不自己抓外链，本地解析留给它')
     assert.equal(siblingGuards.length, 1, '兄弟名字 guard 只装一次：可见性减不掉的（与 send_message 焊在同一行）只能在调用期拦')
-    assert.equal(pluginGuards.length, 3, `插件 ctx 上的全局闸门就是这三颗，第四颗意味着新增了一份按实例安装的身份判据（收到 ${pluginGuards.length}）`)
-    assert.equal(new Set([fsGuards[0], ocrGuards[0], siblingGuards[0]]).size, 3, '三颗闸门互不冒充：各认自己的工具名')
+    const messageGuards = byName(messageCall(capital, 'lead'))
+    assert.equal(messageGuards.length, 1, 'send_message 目标 guard 只装一次：rc.2 树内互发不能只靠人设')
+    assert.equal(pluginGuards.length, 4, `插件 ctx 上的全局闸门就是这四颗（fs / ocr / 兄弟名字 / send_message），多一颗意味着新增了一份按实例安装的身份判据（收到 ${pluginGuards.length}）`)
+    assert.equal(new Set([fsGuards[0], ocrGuards[0], siblingGuards[0], messageGuards[0]]).size, 4, '四颗闸门互不冒充：各认自己的工具名')
 
     const guard = fsGuards[0]
     assert.notEqual(guard({ name: 'edit', agent: capital }), undefined, '本 preset 的 edit 被拦')
@@ -588,6 +593,15 @@ test('apply()：三颗身份闸门都装在插件 ctx（各一次），按人设
     assert.equal(sibling(siblingCall(capital)), undefined, '主 Agent 保留打断权：它才是决定要不要让别的会话停下来的人')
     assert.equal(sibling(siblingCall({ ctx: { preset: 'standard' } })), undefined, '别的 preset 的 interrupt_agent 放行（fail-open）')
     assert.equal(sibling({ name: 'send_message', agent: junior, arguments: {} }), undefined, 'send_message 是叶子角色的正当出口，不在这颗闸门里')
+
+    const message = messageGuards[0]
+    assert.equal(message(messageCall(capital, 'data-collector')), undefined, '根发直系 name 放行')
+    assert.match(String(message(messageCall(capital, 'lead'))), /直系子 Agent/)
+    assert.match(String(message(messageCall(capital, 'data-junior/chart-1'))), /直系子 Agent/)
+    assert.equal(message(messageCall(junior, 'lead')), undefined, '叶子发 lead 放行')
+    assert.match(String(message(messageCall(junior, 'data-collector'))), /只能发给 `lead`/)
+    assert.equal(message(messageCall({ ctx: { preset: ROLE_PRESET_IDS.specialist } }, 'lead')), 'visualization_specialist 不直接发消息：把图表结果作为最终答复返回 data_junior，由它汇总。')
+    assert.equal(message(messageCall({ ctx: { preset: 'standard' } }, 'anyone')), undefined, '别的 preset fail-open')
     assert.doesNotThrow(() => fakeCtx().pluginGuards)
     // Clear denial records so later deepEqual probe assertions start clean.
     resetRootPolicyProbes()

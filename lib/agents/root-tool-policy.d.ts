@@ -4,6 +4,8 @@
  */
 /** Outbound tools (search 2 + wind 2 + named sources 11); `ocr` is excluded because only its url form is restricted. */
 export declare const RETRIEVAL_DENIED_TOOLS: readonly ["anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "eastmoney_announcements", "eastmoney_announcement_body", "sina_reports", "ths_eps_forecast"];
+/** Generic host web entry points; the only outbound surface is web_retriever's named tools. */
+export declare const HOST_WEB_DENIED_TOOLS: readonly ["web_fetch", "anysearch_batch_search", "anysearch_capabilities"];
 export declare const OCR_TOOL_NAME = "ocr";
 /** Name-level deny cannot express the form distinction; this is a call-level guard. */
 export declare const OCR_ROOT_URL_DENIED: string;
@@ -12,16 +14,25 @@ export declare function ocrUrlFormRequested(exec: GuardedExecution | undefined):
 export declare function ocrFormGuardReasonFor(ctx: PolicyContext): (exec: GuardedExecution | undefined) => string | undefined;
 /** Mounted as a platform pair; recognize both everywhere or the other platform's gate is dead. */
 export declare const SHELL_TOOL_NAMES: readonly ["bash", "pwsh"];
-export declare const ROOT_AGENT_DENIED_TOOLS: readonly ["render_chart", "prepare_chart_source", "anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "eastmoney_announcements", "eastmoney_announcement_body", "sina_reports", "ths_eps_forecast", "write", "edit"];
+/** dsh-base mounts Agent Team globally. We keep the rows (other modes may use them) and deny the
+ * four tools on every Capital agent; the `team:policy` prompt section is host-owned and cannot be
+ * removed by a name deny, so Capital intentionally ignores that text. */
+export declare const TEAM_DENIED_TOOLS: readonly ["team_task_create", "team_task_list", "team_task_get", "team_task_update"];
+export declare const ROOT_AGENT_DENIED_TOOLS: readonly ["render_chart", "prepare_chart_source", "team_task_create", "team_task_list", "team_task_get", "team_task_update", "anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "eastmoney_announcements", "eastmoney_announcement_body", "sina_reports", "ths_eps_forecast", "web_fetch", "anysearch_batch_search", "anysearch_capabilities", "write", "edit"];
 export declare const CAPITAL_PRESET_ID = "capital-generation";
 interface ToolRestriction {
     allow?: readonly string[];
     deny?: readonly string[];
 }
+interface ToolViewLike {
+    readonly restrictableNames?: ReadonlySet<string>;
+}
 /** `guard` only returns a deny string, so listener order can never turn a deny into an allow. */
 interface RestrictedToolRuntime {
     restrict?(filter: ToolRestriction): unknown;
     guard?(guard: (execution: GuardedExecution) => string | undefined): unknown;
+    /** Runtime view of inherited global/ancestor tools; used to skip names absent from this scope. */
+    view?(scope?: unknown): ToolViewLike | undefined;
 }
 export interface GuardedExecution {
     readonly name?: string;
@@ -87,7 +98,7 @@ export declare const FS_WRITE_READ_ONLY: string;
 export declare function fsWriteGuardReasonFor(ctx: PolicyContext): (execution: GuardedExecution) => string | undefined;
 export declare function registerFsWriteGuard(ctx: PolicyContext): void;
 export interface RootToolPolicyOptions {
-    /** Host policy passes false: family rows already close the surface, so record only. */
+    /** false = record only. Host policy now keeps deny on: host-global tools are not closed by rows. */
     deny?: boolean;
 }
 export declare function registerRootToolPolicy(ctx: PolicyContext, options?: RootToolPolicyOptions): void;

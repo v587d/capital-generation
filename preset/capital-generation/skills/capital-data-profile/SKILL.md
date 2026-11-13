@@ -155,8 +155,8 @@ data_junior 发现「问题需要的那份数据还没取」时（不是「数�
 }
 ```
 
-PTC 下发送是 `await tools.send_message({ agent_id: PARENT, message: JSON.stringify(payload) })`；
-payload 的 JSON 形状不变，父 Agent id 仍来自系统提示。
+PTC 下发送是 `await tools.send_message({ agent: "lead", message: JSON.stringify(payload) })`；
+payload 的 JSON 形状不变。
 
 | 字段 | 规则 |
 |------|------|

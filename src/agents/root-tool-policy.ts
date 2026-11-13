@@ -16,6 +16,9 @@ export const RETRIEVAL_DENIED_TOOLS = [
   'sina_reports', 'ths_eps_forecast',
 ] as const
 
+/** Generic host web entry points; the only outbound surface is web_retriever's named tools. */
+export const HOST_WEB_DENIED_TOOLS = ['web_fetch', 'anysearch_batch_search', 'anysearch_capabilities'] as const
+
 export const OCR_TOOL_NAME = 'ocr'
 
 /** Name-level deny cannot express the form distinction; this is a call-level guard. */
@@ -47,11 +50,24 @@ export function ocrFormGuardReasonFor(ctx: PolicyContext): (exec: GuardedExecuti
 /** Mounted as a platform pair; recognize both everywhere or the other platform's gate is dead. */
 export const SHELL_TOOL_NAMES = ['bash', 'pwsh'] as const
 
+/** dsh-base mounts Agent Team globally. We keep the rows (other modes may use them) and deny the
+ * four tools on every Capital agent; the `team:policy` prompt section is host-owned and cannot be
+ * removed by a name deny, so Capital intentionally ignores that text. */
+export const TEAM_DENIED_TOOLS = [
+  'team_task_create',
+  'team_task_list',
+  'team_task_get',
+  'team_task_update',
+] as const
+
 export const ROOT_AGENT_DENIED_TOOLS = [
   /** Charts only flow through junior -> visualization_specialist. */
   'render_chart',
   'prepare_chart_source',
+  /** Team stays mounted but is not Capital's delegation board. */
+  ...TEAM_DENIED_TOOLS,
   ...RETRIEVAL_DENIED_TOOLS,
+  ...HOST_WEB_DENIED_TOOLS,
   /** Not a boundary (the host global layer registers them); the call-level fs guard is the real block. */
   'write',
   'edit',
@@ -61,10 +77,13 @@ export const ROOT_AGENT_DENIED_TOOLS = [
 
 export const CAPITAL_PRESET_ID = ROOT_PRESET_ID
 interface ToolRestriction { allow?: readonly string[]; deny?: readonly string[] }
+interface ToolViewLike { readonly restrictableNames?: ReadonlySet<string> }
 /** `guard` only returns a deny string, so listener order can never turn a deny into an allow. */
 interface RestrictedToolRuntime {
   restrict?(filter: ToolRestriction): unknown
   guard?(guard: (execution: GuardedExecution) => string | undefined): unknown
+  /** Runtime view of inherited global/ancestor tools; used to skip names absent from this scope. */
+  view?(scope?: unknown): ToolViewLike | undefined
 }
 
 export interface GuardedExecution {
@@ -169,7 +188,16 @@ export function restrictRootAgentTools(agent: AgentLike | undefined, record?: { 
     return 'unavailable'
   }
   if (tools === undefined || typeof tools.restrict !== 'function') return 'unavailable'
+  let restrictable: Set<string> | undefined
+  try {
+    const names = tools.view?.(agent)?.restrictableNames
+    if (names !== undefined) restrictable = new Set<string>(names)
+  } catch {
+    restrictable = undefined
+  }
   for (const name of ROOT_AGENT_DENIED_TOOLS) {
+    // Family-row tools live in another scope; only inherited names are restrictable here.
+    if (restrictable !== undefined && !restrictable.has(name)) continue
     try {
       tools.restrict({ deny: [name] })
       record?.denied.push(name)
@@ -290,7 +318,7 @@ export function registerFsWriteGuard(ctx: PolicyContext): void {
 }
 
 export interface RootToolPolicyOptions {
-  /** Host policy passes false: family rows already close the surface, so record only. */
+  /** false = record only. Host policy now keeps deny on: host-global tools are not closed by rows. */
   deny?: boolean
 }
 
@@ -300,38 +328,61 @@ export function registerRootToolPolicy(ctx: PolicyContext, options: RootToolPoli
   if (installedPolicyRoots.has(listenCtx)) return
   installedPolicyRoots.add(listenCtx)
   const install = () => {
+    const converged = new Set<string>()
+    const seenAgents = new Map<string, AgentLike>()
+    const converge = (agent: AgentLike | undefined) => {
+      const id = agentSessionId(agent)
+      if (id !== undefined && converged.has(id)) return
+      const isRoot = isRootAgent(agent)
+      // Root only: children always have a parentSession and would crowd the 8-entry window.
+      const probe: RootPolicyProbe | undefined = isRoot
+        ? { agentId: id, root: true, presetId: presetIdOf(ctx, agent), outcome: 'pending', denied: [], failed: [] }
+        : undefined
+      if (probe !== undefined) {
+        probes.push(probe)
+        if (probes.length > MAX_PROBES) probes.shift()
+      }
+      if (!isCapitalAgent(ctx, agent)) {
+        if (probe !== undefined) probe.outcome = 'not-capital'
+        return
+      }
+      if (id !== undefined) converged.add(id)
+      if (options.deny === false) {
+        // Composition already removed data/web/chart; per-name deny would only add `failed` noise.
+        if (probe !== undefined) probe.outcome = 'skipped'
+      } else {
+        const outcome = restrictRootAgentTools(agent, probe)
+        if (probe !== undefined) probe.outcome = outcome
+        if (outcome === 'unavailable') {
+          ctx.logger?.warn(`capital-generation: 根 Agent 工具收敛未生效（${outcome}）：主 Agent 仍会看到 ${ROOT_AGENT_DENIED_TOOLS.join(' / ')}`)
+        }
+      }
+    }
     const stopCreated = listenCtx.on?.('agent/created', (payload: { agent?: AgentLike }) => {
       try {
         const agent = payload?.agent
-        const isRoot = isRootAgent(agent)
-        // Root only: children always have a parentSession and would crowd the 8-entry window.
-        const probe: RootPolicyProbe | undefined = isRoot
-          ? { agentId: agentSessionId(agent), root: true, presetId: presetIdOf(ctx, agent), outcome: 'pending', denied: [], failed: [] }
-          : undefined
-        if (probe !== undefined) {
-          probes.push(probe)
-          if (probes.length > MAX_PROBES) probes.shift()
-        }
-        if (!isCapitalAgent(ctx, agent)) {
-          if (probe !== undefined) probe.outcome = 'not-capital'
-          return
-        }
-        if (options.deny === false) {
-          // Composition already removed data/web/chart; per-name deny would only add `failed` noise.
-          if (probe !== undefined) probe.outcome = 'skipped'
-        } else {
-          const outcome = restrictRootAgentTools(agent, probe)
-          if (probe !== undefined) probe.outcome = outcome
-          if (outcome === 'unavailable') {
-            ctx.logger?.warn(`capital-generation: 根 Agent 工具收敛未生效（${outcome}）：主 Agent 仍会看到 ${ROOT_AGENT_DENIED_TOOLS.join(' / ')}`)
-          }
-        }
+        const id = agentSessionId(agent)
+        if (id !== undefined) seenAgents.set(id, agent as AgentLike)
+        converge(agent)
       } catch (error) {
         ctx.logger?.warn(`capital-generation: 根 Agent 工具收敛异常：${error instanceof Error ? error.message : String(error)}`)
       }
     })
+    // Manually opened root mode: preset is selected after agent/created, same as role presets.
+    const onAny = listenCtx.on as unknown as ((event: string, listener: (...args: unknown[]) => void) => unknown) | undefined
+    const stopPreset = onAny?.('agent-preset/selected', (sessionId: unknown, presetId: unknown) => {
+      if (typeof sessionId !== 'string' || presetId !== CAPITAL_PRESET_ID) return
+      try {
+        const agents = ctx.get?.('agents') as { get?(id: string): AgentLike | undefined } | undefined
+        const agent = seenAgents.get(sessionId) ?? agents?.get?.(sessionId)
+        if (agent !== undefined) converge(agent)
+      } catch (error) {
+        ctx.logger?.warn(`capital-generation: 根 preset 选择后收敛异常：${error instanceof Error ? error.message : String(error)}`)
+      }
+    })
     return () => {
       try { if (typeof stopCreated === 'function') stopCreated() } catch { /* ignore */ }
+      try { if (typeof stopPreset === 'function') stopPreset() } catch { /* ignore */ }
     }
   }
   if (typeof ctx.effect === 'function') {

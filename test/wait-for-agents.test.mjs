@@ -20,7 +20,7 @@ const relay = (childId = 'child-1') => ({
 })
 const human = (id = 'user-1') => ({ id, source: { kind: 'user' } })
 
-function harness({ waitForChildren = async () => false, listDescendants = async () => [], waitSliceMs = 1_000, agents } = {}) {
+function harness({ waitForTreeWork, waitForChildren, listDescendants = async () => [], waitSliceMs = 1_000, agents, service } = {}) {
   const nextTurn = []
   const nextStep = []
   const agent = { session: MAIN, inbox: { nextTurn, nextStep } }
@@ -31,20 +31,35 @@ function harness({ waitForChildren = async () => false, listDescendants = async 
       return () => { if (listeners.get(name) === listener) listeners.delete(name) }
     },
   }
-  const waits = { calls: 0 }
+  const waits = { tree: 0, children: 0 }
+  const methods = service ?? {}
+  if (waitForTreeWork !== undefined) {
+    methods.waitForTreeWork = async (root) => {
+      waits.tree += 1
+      return waitForTreeWork(root)
+    }
+  }
+  if (waitForChildren !== undefined) {
+    methods.waitForChildren = async (parent) => {
+      waits.children += 1
+      return waitForChildren(parent)
+    }
+  }
+  // Default to the rc.2 method; tests that pass only waitForChildren exercise the rollback path.
+  if (waitForTreeWork === undefined && waitForChildren === undefined && service === undefined) {
+    methods.waitForTreeWork = async () => {
+      waits.tree += 1
+      return false
+    }
+  }
+  methods.listDescendants = listDescendants
   const definition = waitForAgentsToolDefinition({
     waitSliceMs,
     events,
     agents,
-    subagents: () => ({
-      waitForChildren(parent) {
-        waits.calls += 1
-        return waitForChildren(parent)
-      },
-      listDescendants,
-    }),
+    subagents: () => methods,
   })
-  return { agent, nextTurn, nextStep, events, listeners, waits, definition }
+  return { agent, nextTurn, nextStep, events, listeners, waits, definition, methods }
 }
 
 const exec = (agent, signal = new AbortController().signal) => ({ agent, signal })
@@ -135,7 +150,7 @@ test('调用前已有 relay：不启动等待，直接返回 message', async () 
 
   const result = await definition.execute({}, exec(agent))
   assert.equal(result.status, 'message')
-  assert.equal(waits.calls, 0, '已有可执行消息时不应先等 30 秒')
+  assert.equal(waits.tree + waits.children, 0, '已有可执行消息时不应先等 30 秒')
 })
 
 test('子 Agent 调用被拒绝：只允许主 Agent 等待自己的子树', async () => {
@@ -153,11 +168,47 @@ test('用户 fork / branch（有 parentSession、无 subagent origin）仍被当
   assert.equal(result.status, 'all_settled')
 })
 
-test('缺少 subagents 服务：响亮失败，不静默返回 all_settled', async () => {
+test('缺少 subagents 服务：响亮失败并点名两个方法，不静默返回 all_settled', async () => {
   const definition = waitForAgentsToolDefinition({ subagents: () => undefined })
   await assert.rejects(
     () => definition.execute({}, exec({ session: MAIN, inbox: { nextTurn: [], nextStep: [] } })),
-    /subagents 服务未挂载/,
+    /未提供 waitForTreeWork\/waitForChildren/,
+  )
+})
+
+test('rc.2 只提供 waitForTreeWork：优先新后端，不再调用旧名字', async () => {
+  const { agent, waits, definition } = harness({ waitForTreeWork: async () => false })
+  const result = await definition.execute({}, exec(agent))
+  assert.equal(result.status, 'all_settled')
+  assert.equal(waits.tree, 1)
+  assert.equal(waits.children, 0)
+})
+
+test('两个后端同时存在：优先 waitForTreeWork（旧名字只作回滚兜底）', async () => {
+  let oldCalled = false
+  const { agent, waits, definition } = harness({
+    waitForTreeWork: async () => false,
+    waitForChildren: async () => { oldCalled = true; return false },
+  })
+  await definition.execute({}, exec(agent))
+  assert.equal(waits.tree, 1)
+  assert.equal(waits.children, 0)
+  assert.equal(oldCalled, false, '新方法可用时不得回退到 waitForChildren')
+})
+
+test('只有旧 waitForChildren：仍可等待（回滚兼容，不承诺 rc.1 基线）', async () => {
+  const { agent, waits, definition } = harness({ waitForChildren: async () => false })
+  const result = await definition.execute({}, exec(agent))
+  assert.equal(result.status, 'all_settled')
+  assert.equal(waits.tree, 0)
+  assert.equal(waits.children, 1)
+})
+
+test('两个等待方法都不在：名字化报错，不冒充服务未挂载', async () => {
+  const definition = waitForAgentsToolDefinition({ subagents: () => ({ listDescendants: async () => [] }) })
+  await assert.rejects(
+    () => definition.execute({}, exec({ session: MAIN, inbox: { nextTurn: [], nextStep: [] } })),
+    /宿主未提供 waitForTreeWork\/waitForChildren/,
   )
 })
 
@@ -183,7 +234,7 @@ test('tools/orchestration 入口：把 ctx 的 inbox 插入事件接到等待工
     get(name) {
       if (name === 'tools') return { register(definition) { tools.push(definition); return () => {} } }
       if (name === 'subagents') {
-        return { waitForChildren: () => new Promise(() => {}), listDescendants: async () => [] }
+        return { waitForTreeWork: () => new Promise(() => {}), listDescendants: async () => [] }
       }
       return undefined
     },

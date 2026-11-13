@@ -3,7 +3,7 @@
  * Probes the installed dsh against docs/reference/dsh-surface-ledger.md, turning upstream drift into
  * a named failure instead of a silent runtime break. DSH_PACKAGE_DIR overrides the install location.
  */
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { locateDshPackage } from './lib/run-tool.mjs'
@@ -170,7 +170,7 @@ const probes = [
         // 0.2.2 drops the `file.seq < owner.seq` filter: the card covers the whole turn, including
         // deliveries written after the closing reply. Our pre-message write still lands in the turn.
         ['交付卡片重放整轮：presentedForClosing 不再按 seq 截断',
-          /function presentedForClosing\(owner\)[\s\S]{0,400}?for \(const file of owner\.turn\.data\.get\("deliverables"\)\?\.presented \?\? \[\]\) files\.set\(file\.path, file\)/, deliverables, deliverablesFile],
+          /function presentedForClosing\(owner\)[\s\S]{0,200}?for\s*\(const file of owner\.turn\.data\.get\([^)]*deliverables[^)]*\)\?\.presented\s*\?\?\s*\[\]\)\s*files\.set\(file\.path,\s*file\)/, deliverables, deliverablesFile],
       ]
       const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
       return missing.length === 0
@@ -180,12 +180,13 @@ const probes = [
   },
   {
     id: 'L12',
-    title: 'agent/created（Scoped<Agent>）+ agent.ctx + tools.restrict 的 scoped 语义（根侧 deny / 角色侧逐名兄弟 deny）',
+    title: 'agent/created（Scoped<Agent>）+ agent.ctx + tools.restrict 的 scoped 语义（根侧 deny / 角色侧宿主白名单 + 兄弟 deny）',
     why: '根 Agent 的出图入口、以及 0.2.1 起每颗角色残留的那一格（D0 之后工具面由 preset 挂的行组合表达，'
       + '运行期只剩 `tool-subagent-control` 焊进来的 `interrupt_agent` 要靠 restrict 减掉），都只能靠"在它自己的'
       + ' agent scope 上 restrict"来实现；事件消失、agent.ctx 不可用、restrict 变成 context-global，'
       + '或"restriction 只过滤继承层"这条语义反转，都会让主 Agent 重新拿到出图工具、或让那一次 deny 静默不生效'
-      + '（角色看得见本该减掉的名字）。'
+      + '（角色看得见本该减掉的名字）。角色侧还依赖 `definitions()` 的 global 视图 + `restrict({ allow })` 收口宿主全局工具，'
+      + '手开角色会话则依赖 `agent-preset/selected` 在选完 preset 后补装。'
       + '同一颗探针还断言委派行**不再**接受 `persona` / `toolFilter`——0.2.1 起"按名字划工具面"在装配层没有格子，'
       + '这正是 D0 把工具面搬到行组合、只保留这一格残留的理由。',
     run() {
@@ -198,6 +199,9 @@ const probes = [
       const toolsFile = join(PKG('dsh-tools'), 'lib/index.js')
       const tools = readIfPresent(toolsFile)
       if (tools === undefined) return { status: FAIL, detail: `读不到 ${toolsFile}` }
+      const presetRegistryFile = join(PKG('dsh-agent-preset-registry'), 'lib/index.js')
+      const presetRegistry = readIfPresent(presetRegistryFile)
+      if (presetRegistry === undefined) return { status: FAIL, detail: `读不到 ${presetRegistryFile}` }
       const subagentFile = join(PKG('dsh-tool-subagent'), 'lib/index.js')
       const subagent = readIfPresent(subagentFile)
       if (subagent === undefined) return { status: FAIL, detail: `读不到 ${subagentFile}` }
@@ -212,11 +216,15 @@ const probes = [
         ['restriction 只过滤继承的 global / ancestor 工具，本层自注册豁免（逐名 deny 不误伤本行注册工具的前提）',
           /Restrictions across the\s+\*\s+scope chain intersect over inherited global and ancestor tools; the viewing\s+\*\s+scope's own registrations remain exempt/, tools, toolsFile],
         ['restrict 的公开面仍写明 "scoped registrations remain visible"', /intersect; scoped registrations remain visible\./, tools, toolsFile],
+        ['restrict 仍接受 allow 过滤（宿主全局白名单）', /const allow = filter\.allow;/, tools, toolsFile],
+        ['view() 仍暴露 restrictableNames（角色/根白名单的交集来源）', /restrictableNames/, tools, toolsFile],
+        ['view(scope) 仍是 scoped service 的 runtime 方法（d.ts 私有，探针盯 JS）', /view\(scope\)/, tools, toolsFile],
+        ['agent-preset/selected 在选完 preset 后发出（手开角色补装白名单）', /ctx\.emit\("agent-preset\/selected", session\.id, event\.data\.agentPreset\)/, presetRegistry, presetRegistryFile],
         ['0.2.1 起委派行拒绝 persona / toolFilter（名字级收敛只剩 agent scope 这一格）', /const field of \["persona", "toolFilter"\][\s\S]{0,200}is no longer supported/, subagent, subagentFile],
       ]
       const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
       return missing.length === 0
-        ? { status: PASS, detail: 'agent/created + agent.ctx + scoped restrict 仍可用（根收敛与角色那格兄弟 deny 共用这一格，委派行已不接受 toolFilter）' }
+        ? { status: PASS, detail: 'agent/created + agent.ctx + scoped restrict 仍可用（根 deny、角色宿主白名单与兄弟 deny 共用这一格，委派行已不接受 toolFilter）' }
         : { status: FAIL, detail: `工具面收敛机制的接口变了：${missing.join(' / ')}（见账本 L12）` }
     },
   },
@@ -444,8 +452,9 @@ const probes = [
     run() {
       const pipeline = readIfPresent(join(PKG('dsh-tools'), 'lib/pipeline.js'))
       if (pipeline === undefined) return { status: FAIL, detail: `读不到 ${join(PKG('dsh-tools'), 'lib/pipeline.js')}（0.2.2 把 invoke pipeline 拆出了 index.js）` }
-      const shared = readIfPresent(join(PKG('dsh-tools'), 'lib/shared-DTdn5dXO.js'))
-      if (shared === undefined) return { status: FAIL, detail: `读不到 ${join(PKG('dsh-tools'), 'lib/shared-DTdn5dXO.js')}` }
+      const sharedFile = join(PKG('dsh-tools'), 'lib', readdirSync(join(PKG('dsh-tools'), 'lib')).find((name) => /^shared-.*\.js$/.test(name)) ?? 'shared-missing.js')
+      const shared = readIfPresent(sharedFile)
+      if (shared === undefined) return { status: FAIL, detail: `读不到 dsh-tools 的 shared-*.js（0.2.2 把共享校验拆进带哈希的 chunk）` }
       const jsonSchema = readIfPresent(join(PKG('dsh-tools'), 'lib/types/json-schema.js'))
       if (jsonSchema === undefined) return { status: FAIL, detail: `读不到 ${join(PKG('dsh-tools'), 'lib/types/json-schema.js')}` }
       const checks = [
@@ -453,9 +462,9 @@ const probes = [
         ['返回值 snapshot 后按 output.schema 校验',
           /snapshotToolValue\(tool\.name, candidate\)[\s\S]{0,200}validateJsonSchemaValue\(tool\.output\.schema, detached, "value"\)/, pipeline, 'pipeline.js'],
         ['违反声明抛 ToolOutputError（INVALID_TOOL_OUTPUT）',
-          /ToolOutputError = class[\s\S]{0,400}INVALID_TOOL_OUTPUT/, shared, 'shared chunk'],
+          /ToolOutputError = class[\s\S]{0,400}INVALID_TOOL_OUTPUT/, shared, sharedFile],
         ['required 缺失判据是"不存在或 undefined"', /missing required property/, jsonSchema, 'json-schema.js'],
-        ['additionalProperties: false 拒绝未声明字段', /additionalProperties === false[\s\S]{0,240}is not a declared property \(additionalProperties: false\)/, shared, 'shared chunk'],
+        ['additionalProperties: false 拒绝未声明字段', /additionalProperties === false[\s\S]{0,240}is not a declared property \(additionalProperties: false\)/, shared, sharedFile],
       ]
       const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
       return missing.length === 0
@@ -768,7 +777,7 @@ const probes = [
         ['locale 入口仍是 `<specifier>/locale/en.json`（en 缺失 = 整个目录都不读）', /optionalResourcePath\(`\$\{specifier\}\/locale\/en\.json`, parentURL\)/, boot, bootFile],
         ['语言文件里取的仍是 `meta.title` / `meta.description`', /title: textOf\(meta\?\.title/, boot, bootFile],
         ['bundle 侧按**包名** + 包根 package.json 调用', /readPluginMeta\(info\.name \?\? name, pathToFileURL\(join\(dir, "package\.json"\)\)\.href\)/, pm, pmFile],
-        ['卡片标题的回落链仍是 `meta.title ?? 包名`', /title: pkg\.meta\?\.title === void 0 \? pkg\.name : resolveText\(pkg\.meta\.title\)/, page, pageFile],
+        ['卡片标题的回落链仍是 `meta.title ?? 包名`', /title:\s*pkg\.meta\?\.title\s*===\s*void 0\s*\?\s*pkg\.name\s*:\s*resolveText\(pkg\.meta\.title\)/, page, pageFile],
         ['`PluginLocalizedMeta.title` 仍是 LocalizedText', /readonly title\?: LocalizedText;/, manifestTypes, manifestTypesFile],
       ]
       const missing = checks.filter(([, pattern, text]) => !pattern.test(text)).map(([label, , , file]) => `${label}（${file}）`)
@@ -1099,8 +1108,8 @@ const probes = [
       + 'executor 行按 preset scope 选最近的一层，runtime 必须由宿主提供。executor 被改成 composition-wide、'
       + 'runtime 行被移出 dsh-base、run_code 名字/并发池/绑定 agent 任一处漂移，症状都不是报错，'
       + '而是 junior 拿不到 run_code、或嵌套工具调用绕过原有授权与并发语义。'
-      + 'tool-skill 的 canonical value 与 subagent 的 parent id 提示也必须仍按当前形状：PTC 程序拿到的是对象，'
-      + '不是原生 render 出来的 <skill_content>。',
+      + 'tool-skill 的 canonical value 仍必须是对象（PTC 程序拿到的是对象，不是原生 render 出来的 <skill_content>）；'
+      + '子 Agent 的具名身份与 send_message 词汇由 L38 单独探测。',
     run() {
       const ptcFile = join(PKG('dsh-tool-executor-ptc'), 'lib/index.js')
       const ptc = readIfPresent(ptcFile)
@@ -1114,18 +1123,15 @@ const probes = [
       const toolsFile = join(PKG('dsh-tools'), 'lib/index.js')
       const tools = readIfPresent(toolsFile)
       if (tools === undefined) return { status: FAIL, detail: `读不到 ${toolsFile}` }
-      const sharedFile = join(PKG('dsh-tools'), 'lib/shared-DTdn5dXO.js')
+      const sharedFile = join(PKG('dsh-tools'), 'lib', readdirSync(join(PKG('dsh-tools'), 'lib')).find((name) => /^shared-.*\.js$/.test(name)) ?? 'shared-missing.js')
       const shared = readIfPresent(sharedFile)
-      if (shared === undefined) return { status: FAIL, detail: `读不到 ${sharedFile}` }
+      if (shared === undefined) return { status: FAIL, detail: `读不到 dsh-tools 的 shared-*.js（0.2.2 把共享校验拆进带哈希的 chunk）` }
       const selectorManifestFile = join(PKG('dsh-agent-tool-presentation'), 'package.json')
       const selectorManifest = readIfPresent(selectorManifestFile)
       if (selectorManifest === undefined) return { status: FAIL, detail: `读不到 ${selectorManifestFile}` }
       const skillFile = join(PKG('dsh-tool-skill'), 'lib/index.js')
       const skill = readIfPresent(skillFile)
       if (skill === undefined) return { status: FAIL, detail: `读不到 ${skillFile}` }
-      const subagentFile = join(PKG('dsh-subagent'), 'lib/index.js')
-      const subagent = readIfPresent(subagentFile)
-      if (subagent === undefined) return { status: FAIL, detail: `读不到 ${subagentFile}` }
       const checks = [
         ['executor 行仍等 tools / systemPrompt / ptcRuntime 三个服务', /const inject = \[\s*"tools",\s*"systemPrompt",\s*"ptcRuntime"\s*\];/, ptc, ptcFile],
         ['0.2.2 起由 ctx.tools.setExecutor 选执行面', /ctx\.tools\.setExecutor\(new PtcExecutor\(ctx, config\)\)/, ptc, ptcFile],
@@ -1141,22 +1147,21 @@ const probes = [
         ['可见 bash 时才注入 tools.bash 示例', /renderBashExample\(sorted, programFormat\)/, ptc, ptcFile],
         ['skill 的 canonical value 仍有 content', /content: skill\.content/, skill, skillFile],
         ['skill 的 native render 仍是 renderSkillContent', /text: renderSkillContent\(value\)/, skill, skillFile],
-        ['subagent 仍注入 parent agent id 提示', /Your parent agent id is \$\{encodedParentId\}/, subagent, subagentFile],
-        ['提示仍是原生 send_message 写法', /send_message\(\{ agent_id: \$\{encodedParentId\}/, subagent, subagentFile],
       ]
       const missing = checks.filter(([, pattern, source]) => !pattern.test(source))
         .map(([label, , , source]) => `${label}（${source}）`)
       return missing.length === 0
-        ? { status: PASS, detail: 'executor 行按 preset、runtime 在宿主、run_code/SDK/skill/parent id 契约未变' }
+        ? { status: PASS, detail: 'executor 行按 preset、runtime 在宿主、run_code/SDK/skill 契约未变' }
         : { status: FAIL, detail: `PTC 契约漂移：${missing.join(' / ')}（见账本 L35；先重判 junior 的执行面，再动 preset）` }
     },
   },
   {
     id: 'L36',
-    title: '子 Agent 等待面：waitForChildren + live inbox / status + agent/inbox/inserted',
+    title: '子 Agent 等待面：waitForTreeWork + live inbox / status + agent/inbox/inserted',
     why: 'wait_for_agents 在工具调用里等整棵子树，同时靠 inbox 插入事件提前处理 relay；'
-      + 'waitForChildren 改名、inbox/status 投影改名、或 agent-message / subagent-settled 源类型合并，'
-      + '症状都不是报错：工具会退回“每条回执各开一轮”，或把结算通知当成新消息唤醒。',
+      + '0.2.2 把 waitForChildren 改名为 waitForTreeWork，inbox/status 投影或 agent-message / '
+      + 'subagent-settled 源类型任一改名，症状都不是报错：工具会退回“每条回执各开一轮”，'
+      + '或把结算通知当成新消息唤醒。',
     run() {
       const subTypesFile = join(PKG('dsh-subagent'), 'lib/types/index.d.ts')
       const subTypes = readIfPresent(subTypesFile)
@@ -1171,8 +1176,8 @@ const probes = [
       const continuation = readIfPresent(continuationFile)
       if (continuation === undefined) return { status: FAIL, detail: `读不到 ${continuationFile}` }
       const checks = [
-        ['waitForChildren(parent: Agent): Promise<boolean>', /waitForChildren\(parent: Agent\): Promise<boolean>;/, subTypes, subTypesFile],
-        ['waitForChildren 仍对 local child 调 whenIdle', /async waitForChildren\(parent\)[\s\S]{0,900}?item\.handle\.agent\.whenIdle\(\)/, subJs, subJsFile],
+        ['waitForTreeWork(root: Agent): Promise<boolean>', /waitForTreeWork\(root: Agent\): Promise<boolean>;/, subTypes, subTypesFile],
+        ['waitForTreeWork 仍对 local child 调 whenIdle', /async waitForTreeWork\(root\)[\s\S]{0,900}?item\.handle\.agent\.whenIdle\(\)/, subJs, subJsFile],
         ['空闲子树的 result / poke 仍被等待', /Promise\.race\(\[item\.result\.promise\.catch[\s\S]{0,160}?item\.poke\.promise/, subJs, subJsFile],
         ['Agent.inbox 仍在', /readonly inbox: Inbox;/, agentTypes, agentTypesFile],
         ['Agent.inbox.nextTurn 仍在', /readonly nextTurn: readonly UserMessage\[\];/, agentTypes, agentTypesFile],
@@ -1185,7 +1190,7 @@ const probes = [
       const missing = checks.filter(([, pattern, source]) => !pattern.test(source))
         .map(([label, , , source]) => `${label}（${source}）`)
       return missing.length === 0
-        ? { status: PASS, detail: 'waitForChildren / live inbox / status / relay 与结算源类型都还在' }
+        ? { status: PASS, detail: 'waitForTreeWork / live inbox / status / relay 与结算源类型都还在' }
         : { status: FAIL, detail: `子 Agent 等待面变了：${missing.join(' / ')}（见账本 L36；先改 wait_for_agents，不要改探针）` }
     },
   },
@@ -1230,6 +1235,78 @@ const probes = [
       return missing.length === 0
         ? { status: PASS, detail: 'profileContext 三字段、sessionController 四方法、workspaceRegistry 选择面、drainDescendants 与 agents.list 都仍在' }
         : { status: FAIL, detail: `投研自动化执行面变了：${missing.join(' / ')}（见账本 L37；先改 automation/，不要改探针）` }
+    },
+  },
+  {
+    id: 'L38',
+    title: '具名控制面：list_agents 整树 / send_message.agent / 创建 name / interrupt 开关 / wait_agent',
+    why: '0.2.2 把控制词汇从 session id 换成树内名字：list_agents 无参返回整棵树，send_message 必填 agent，'
+      + '创建工具回执是 name，interrupt_agent 由 Config.interrupt 控制，wait_agent 只返回 { timedOut }。'
+      + '旧 agent_id / scope=children 不会报错，只会被静默忽略并返回错形状——模型随后按旧词汇派发，'
+      + '每一次 send_message 都失败。',
+    run() {
+      const controlFile = join(PKG('dsh-tool-subagent-control'), 'lib/index.js')
+      const control = readIfPresent(controlFile)
+      if (control === undefined) return { status: FAIL, detail: `读不到 ${controlFile}` }
+      const creationFile = join(PKG('dsh-tool-subagent'), 'lib/index.js')
+      const creation = readIfPresent(creationFile)
+      if (creation === undefined) return { status: FAIL, detail: `读不到 ${creationFile}` }
+      const checks = [
+        ['list_agents 仍无参数', /name: \"list_agents\"[\s\S]{0,5000}?parameters: \{\}/, control, controlFile],
+        ['list_agents 行含 name / status / description', /name: \{[\s\S]{0,240}?status: \{[\s\S]{0,240}?description:/, control, controlFile],
+        ['send_message 必填 agent', /name: "send_message"[\s\S]{0,900}?agent: \{[\s\S]{0,120}?required: true/, control, controlFile],
+        ['send_message 输出 messageId', /messageId: \{[\s\S]{0,80}?required: true/, control, controlFile],
+        ['interrupt_agent 由 Config.interrupt 控制', /interrupt: z\.boolean\(\)\.default\(true\)/, control, controlFile],
+        ['wait_agent 收 timeout_ms、回 { timedOut }', /name: "wait_agent"[\s\S]{0,900}?timeout_ms:[\s\S]{0,900}?timedOut/, control, controlFile],
+        ['身份提示仍给 root = lead', /The root agent of your collaboration tree is[\s\S]{0,120}?ROOT_AGENT_NAME/, control, controlFile],
+        ['身份提示仍写 send_message({ agent })', /send_message\(\{ agent: \\\"<agent-name>\\\", message: \\\"\.\.\.\\\" \}\)/, control, controlFile],
+        ['身份提示仍写 list_agents({})', /list_agents\(\{\}\)/, control, controlFile],
+        ['创建工具接受可选 name', /name: \{[\s\S]{0,220}?Optional short name for the subagent/, creation, creationFile],
+        ['创建回执是 activation + name', /kind: "activation"[\s\S]{0,120}?name:/, creation, creationFile],
+        ['创建渲染文本是 started subagent', /started subagent/, creation, creationFile],
+      ]
+      const missing = checks.filter(([, pattern, source]) => !pattern.test(source))
+        .map(([label, , , source]) => `${label}（${source}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: 'list_agents 整树 / send_message.agent / 创建 name / interrupt / wait_agent 词汇都仍在' }
+        : { status: FAIL, detail: `子 Agent 控制词汇变了：${missing.join(' / ')}（见账本 L38；先改 persona/skill 与控制面，不要改探针）` }
+    },
+  },
+  {
+    id: 'L39',
+    title: 'Team 面：dsh-base 默认挂 agent-team / tool-agent-team；Capital 保留行、deny 四个 team_task_*',
+    why: '0.2.2 把 Agent Team 变成 dsh-base 的默认行，默认关闭但会话可开关。Capital 的委派清单建模的是'
+      + ' DatasetRef / profile_ref / chart_ref / task_id，不是 Team 任务板；Team 工具一旦进入根或角色工具面，'
+      + '模型会把 team_task_* 当成第二套委派清单。我们保留 host 行（别的模式可用），在 Capital 根与所有角色上'
+      + '按名 deny。注意 team:policy 是宿主的 prompt section，name deny 去不掉；Capital 字样与纪律明确忽略它。',
+    run() {
+      const basePatchFile = join(PKG('dsh-base'), 'cordis.patch.yml')
+      const basePatch = readIfPresent(basePatchFile)
+      if (basePatch === undefined) return { status: FAIL, detail: `读不到 ${basePatchFile}` }
+      const teamFile = join(PKG('dsh-agent-team'), 'lib/index.js')
+      const team = readIfPresent(teamFile)
+      if (team === undefined) return { status: FAIL, detail: `读不到 ${teamFile}` }
+      const toolTeamFile = join(PKG('dsh-tool-agent-team'), 'lib/index.js')
+      const toolTeam = readIfPresent(toolTeamFile)
+      if (toolTeam === undefined) return { status: FAIL, detail: `读不到 ${toolTeamFile}` }
+      const rootPolicy = readIfPresent(join(ROOT, 'src', 'agents', 'root-tool-policy.ts'))
+      if (rootPolicy === undefined) return { status: FAIL, detail: '读不到 src/agents/root-tool-policy.ts' }
+      const rolePolicy = readIfPresent(join(ROOT, 'src', 'agents', 'role-tool-policy.ts'))
+      if (rolePolicy === undefined) return { status: FAIL, detail: '读不到 src/agents/role-tool-policy.ts' }
+      const checks = [
+        ['dsh-base 仍挂 agent-team 行', /- id: agent-team[\s\S]{0,160}?name: '@deepseek-ai\/dsh-agent-team'/, basePatch, basePatchFile],
+        ['dsh-base 仍挂 tool-agent-team 行', /- id: tool-agent-team[\s\S]{0,160}?name: '@deepseek-ai\/dsh-tool-agent-team'/, basePatch, basePatchFile],
+        ['Team 默认关闭', /defaultEnabled: z\.boolean\(\)\.default\(false\)/, team, teamFile],
+        ['四个 team_task_* 仍在', /team_task_create[\s\S]{0,4000}?team_task_update/, toolTeam, toolTeamFile],
+        ['team:policy 仍是宿主 prompt section', /name: "team:policy"/, toolTeam, toolTeamFile],
+        ['Capital 根 deny 四个 Team 工具', /TEAM_DENIED_TOOLS[\s\S]{0,400}?team_task_create[\s\S]{0,200}?team_task_update/, rootPolicy, 'src/agents/root-tool-policy.ts'],
+        ['Capital 角色同样 deny Team 工具', /denyTeam:\s*TEAM_DENIED_TOOLS/, rolePolicy, 'src/agents/role-tool-policy.ts'],
+      ]
+      const missing = checks.filter(([, pattern, source]) => !pattern.test(source))
+        .map(([label, , , source]) => `${label}（${source}）`)
+      return missing.length === 0
+        ? { status: PASS, detail: 'Team 行仍由 dsh-base 挂载且默认关闭；Capital 根与角色都按名 deny 四颗任务工具' }
+        : { status: FAIL, detail: `Team 面变了：${missing.join(' / ')}（见账本 L39；先确认 Team 行/deny 防线，再动探针）` }
     },
   },
 ]

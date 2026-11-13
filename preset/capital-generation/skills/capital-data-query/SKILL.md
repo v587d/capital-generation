@@ -37,8 +37,8 @@ return { pct: ((b - a) / a) * 100, from: a, to: b }
   `query_dataset` 串行，不要混进同一批。某份可能失败时用 `Promise.allSettled`。
 - 一次程序只做一段事：先 `console.log(s.content)` 读协议，再 describe/算数，最后回传；
   不要把整份 profile 或多个工具结果 `return` 回去（外层结果会过 8192 剪枝）。
-- 回传与 `data_gap` 用 `await tools.send_message({ agent_id, message })`；它返回 `{messageId}`，
-  不结束本轮。`agent_id` 取系统提示里的 parent agent id。
+- 回传与 `data_gap` 用 `await tools.send_message({ agent: "lead", message })`；它返回 `{messageId}`，
+  不结束本轮。根 Agent 的树内名字固定是 `lead`。
 
 **不许做的**（这是纪律，不是沙箱限制——沙箱只拦写，不拦读与网络）：
 

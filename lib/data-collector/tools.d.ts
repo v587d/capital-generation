@@ -9,7 +9,7 @@ export interface DataCollectorDiagnostics {
     }>;
     /**
        * Tool-surface restriction snapshot (root/role policies), restated locally so this layer does
-       * not depend on the agents layer. `allowed` stays empty now that allow-lists are gone.
+       * not depend on the agents layer. `allowed` stays empty: host-global allow-lists are not model-visible.
        */
     rootPolicy?: () => Array<{
         agentId: string | undefined;

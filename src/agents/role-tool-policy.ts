@@ -1,11 +1,11 @@
 /**
- * Role tool surfaces by mounted role preset. `toolFilter` was removed upstream, so tools come
- * from family rows (composition) and there is no allow-list here. Restricting the agent scope
- * filters preset contributions; identity is the preset id, not root/child. Listeners on `ctx.root`.
+ * Role tool surfaces by mounted role preset. Family rows define scoped tools; host-global tools
+ * are intersected with an explicit allow-list so a new dsh-base tool cannot leak into a leaf.
+ * Identity is the preset id, not root/child. Listeners live on `ctx.root`.
  */
 
 import type { AgentLike, GuardedExecution, PolicyContext } from './root-tool-policy.js'
-import { agentSessionId, isRootAgent, recordGuardDecision } from './root-tool-policy.js'
+import { agentSessionId, isRootAgent, OCR_TOOL_NAME, recordGuardDecision, RETRIEVAL_DENIED_TOOLS, TEAM_DENIED_TOOLS } from './root-tool-policy.js'
 import { readPresetClaim } from '../preset-claim.js'
 import { ROLE_PRESET_ID_LIST, ROLE_PRESET_IDS, type RolePresetId } from '../preset-ids.js'
 
@@ -15,25 +15,56 @@ export { ROLE_PRESET_IDS, ROLE_PRESET_ID_LIST, type RolePresetId } from '../pres
  * 0.2.2 moved `list_agents` into the same main entry, so the welded set grew from one to two names. */
 export const SIBLING_DENIED_TOOLS = ['interrupt_agent', 'list_agents'] as const
 
-/** Residual surface; no allow list: family rows define the tool surface. */
+/** Shared leaf capabilities that are host-global in rc.2, not preset-scoped. */
+const ROLE_MESSAGING_TOOLS = ['send_message', 'skill'] as const
+const ROLE_TIME_TOOLS = ['get_local_datetime', 'resolve_data_time_range'] as const
+
+/** Full intended surface; only names that resolve as host-global are enforced by the allow-list.
+ * Scoped family-row tools stay visible regardless; they must remain in this list for review. */
+export const COLLECTOR_ROLE_TOOLS = [
+  ...ROLE_MESSAGING_TOOLS, ...ROLE_TIME_TOOLS,
+  'request_data', 'list_capabilities', 'describe_capability', 'dc_status',
+] as const
+
+export const RETRIEVER_ROLE_TOOLS = [
+  ...ROLE_MESSAGING_TOOLS, ...ROLE_TIME_TOOLS, ...RETRIEVAL_DENIED_TOOLS,
+  OCR_TOOL_NAME, 'anysearch_batch_search', 'anysearch_capabilities',
+] as const
+
+export const SPECIALIST_ROLE_TOOLS = [
+  ...ROLE_TIME_TOOLS, 'skill', 'render_chart',
+] as const
+
+/** Host-global allow-list plus residual per-name denies. */
 export interface RoleSurface {
+  /** Intended tools; the host-global subset is enforced as `restrict({ allow })`. */
+  readonly allowTools?: readonly string[]
   /** Sibling names welded into a needed row that this persona must not have. */
   readonly denySiblings?: readonly string[]
+  /** Host-global Team tools; denied on every Capital role because the rows stay mounted. */
+  readonly denyTeam?: readonly string[]
 }
 
-/** Leaf roles need `send_message`, so they inherit the welded `interrupt_agent` / `list_agents`;
- * specialist mounts no control row. Tolerant per-name deny records misses without failing open. */
+/** Every role denies Team tools. Only control-row roles also deny the welded sibling names. */
+const DENY_TEAM = { denyTeam: TEAM_DENIED_TOOLS } as const
+
+/** Leaf roles need `send_message`, so they inherit the welded `interrupt_agent` / `list_agents`.
+ * Junior runs only through PTC (run_code is reserved and cannot be named by restrict), so its
+ * surface is already narrowed by the executor and no allow-list is applied. */
 export const ROLE_TOOL_SURFACES: Record<RolePresetId, RoleSurface> = {
-  [ROLE_PRESET_IDS.collector]: { denySiblings: SIBLING_DENIED_TOOLS },
-  [ROLE_PRESET_IDS.junior]: { denySiblings: SIBLING_DENIED_TOOLS },
-  [ROLE_PRESET_IDS.retriever]: { denySiblings: SIBLING_DENIED_TOOLS },
-  [ROLE_PRESET_IDS.specialist]: {},
-  [ROLE_PRESET_IDS.analyst]: { denySiblings: SIBLING_DENIED_TOOLS },
+  [ROLE_PRESET_IDS.collector]: { allowTools: COLLECTOR_ROLE_TOOLS, denySiblings: SIBLING_DENIED_TOOLS, ...DENY_TEAM },
+  [ROLE_PRESET_IDS.junior]: { denySiblings: SIBLING_DENIED_TOOLS, ...DENY_TEAM },
+  [ROLE_PRESET_IDS.retriever]: { allowTools: RETRIEVER_ROLE_TOOLS, denySiblings: SIBLING_DENIED_TOOLS, ...DENY_TEAM },
+  [ROLE_PRESET_IDS.specialist]: { allowTools: SPECIALIST_ROLE_TOOLS, ...DENY_TEAM },
+  [ROLE_PRESET_IDS.analyst]: { denySiblings: SIBLING_DENIED_TOOLS, ...DENY_TEAM },
 }
 
 interface ToolRestriction { allow?: readonly string[]; deny?: readonly string[] }
+interface ToolViewLike { readonly restrictableNames?: ReadonlySet<string> }
 interface RestrictedToolRuntime {
   restrict?(filter: ToolRestriction): unknown
+  /** Runtime view of inherited global/ancestor tools; the only source of restrictable names. */
+  view?(scope?: unknown): ToolViewLike | undefined
 }
 
 /** Role preset id only, undefined for root and other presets; failure means "do not converge". */
@@ -56,6 +87,12 @@ export interface RolePolicyResult {
   denied: string[]
   /** Names invisible here and skipped harmlessly (their row is not mounted). */
   failed: string[]
+  /** Global tools kept by the allow-list; omitted when the surface has no allow-list. */
+  allowedGlobals?: string[]
+  /** Global tools hidden by the allow-list; omitted when the surface has no allow-list. */
+  removedGlobals?: string[]
+  /** True when the allow-list could not be applied (no definitions view or restrict rejected it). */
+  allowFailed?: boolean
 }
 
 const probes: RolePolicyProbe[] = []
@@ -72,7 +109,13 @@ interface GuardRuntime {
 }
 
 export function rolePolicyProbes(): RolePolicyProbe[] {
-  return probes.map((probe) => ({ ...probe, denied: [...probe.denied], failed: [...probe.failed] }))
+  return probes.map((probe) => ({
+    ...probe,
+    denied: [...probe.denied],
+    failed: [...probe.failed],
+    ...(probe.allowedGlobals === undefined ? {} : { allowedGlobals: [...probe.allowedGlobals] }),
+    ...(probe.removedGlobals === undefined ? {} : { removedGlobals: [...probe.removedGlobals] }),
+  }))
 }
 
 /** Test-only: clears records and the dedupe table. */
@@ -81,7 +124,7 @@ export function resetRolePolicyProbes(): void {
   handled.clear()
 }
 
-/** Tolerant per-name deny: invisible names are recorded, never thrown; called on agent creation. */
+/** Tolerant deny plus host-global allow-list: invisible names are recorded, never thrown. */
 export function restrictRoleAgentTools(agent: AgentLike | undefined, surface: RoleSurface): RolePolicyResult {
   const denied: string[] = []
   const failed: string[] = []
@@ -94,7 +137,29 @@ export function restrictRoleAgentTools(agent: AgentLike | undefined, surface: Ro
   if (tools === undefined || typeof tools.restrict !== 'function') {
     return { outcome: 'unavailable', denied, failed }
   }
-  for (const name of surface.denySiblings ?? []) {
+
+  let allowedGlobals: string[] | undefined
+  let removedGlobals: string[] | undefined
+  let allowFailed = false
+  if (surface.allowTools !== undefined) {
+    try {
+      const restrictable = tools.view?.(agent)?.restrictableNames
+      if (restrictable === undefined) {
+        // Without the pre-restriction view we cannot tell inherited tools from the role's own
+        // scoped rows; an allow-list built from the global view would hide send_message.
+        allowFailed = true
+      } else {
+        const names = new Set<string>(restrictable)
+        allowedGlobals = [...new Set<string>(surface.allowTools)].filter((name) => names.has(name)).sort()
+        removedGlobals = [...names].filter((name) => !allowedGlobals!.includes(name)).sort()
+        if (names.size > 0) tools.restrict({ allow: allowedGlobals })
+      }
+    } catch {
+      allowFailed = true
+    }
+  }
+
+  for (const name of [...(surface.denySiblings ?? []), ...(surface.denyTeam ?? [])]) {
     try {
       tools.restrict({ deny: [name] })
       denied.push(name)
@@ -102,7 +167,14 @@ export function restrictRoleAgentTools(agent: AgentLike | undefined, surface: Ro
       failed.push(name)
     }
   }
-  return { outcome: 'restricted', denied, failed }
+  return {
+    outcome: 'restricted',
+    denied,
+    failed,
+    ...(allowedGlobals === undefined ? {} : { allowedGlobals }),
+    ...(removedGlobals === undefined ? {} : { removedGlobals }),
+    ...(allowFailed ? { allowFailed } : {}),
+  }
 }
 
 /** Call-level residual guard: created-time restrict misses manually opened role modes, so
@@ -172,35 +244,57 @@ export function registerRoleToolPolicy(ctx: PolicyContext): void {
   if (installedRoots.has(listenCtx)) return
   installedRoots.add(listenCtx)
   const install = () => {
+    const seenAgents = new Map<string, AgentLike>()
+    const converge = (agent: AgentLike | undefined, presetId: RolePresetId) => {
+      const id = typeof agent?.session?.id === 'string' ? agent.session.id : undefined
+      if (id !== undefined && handled.has(id)) return
+      const surface = ROLE_TOOL_SURFACES[presetId]
+      const result = restrictRoleAgentTools(agent, surface)
+      if (id !== undefined) handled.add(id)
+      probes.push({ agentId: id, root: isRootAgent(agent), presetId, ...result })
+      if (probes.length > MAX_PROBES) probes.shift()
+      if (result.outcome === 'unavailable') {
+        ctx.logger?.warn(`capital-generation: 角色 ${presetId} 的工具收敛没装上（restrict 面不可用）：该 child 仍看得见 ${[...SIBLING_DENIED_TOOLS, ...TEAM_DENIED_TOOLS].join(' / ')}`)
+      } else if (result.allowFailed) {
+        ctx.logger?.warn(`capital-generation: 角色 ${presetId} 的宿主全局工具白名单没装上（definitions/allow 面不可用）：该 child 仍可能看到未授权的宿主工具`)
+      }
+    }
     const stopCreated = listenCtx.on?.('agent/created', (payload: { agent?: AgentLike }) => {
       try {
         const agent = payload?.agent
         const id = typeof agent?.session?.id === 'string' ? agent.session.id : undefined
-        if (id !== undefined && handled.has(id)) return
+        if (id !== undefined) seenAgents.set(id, agent as AgentLike)
         const presetId = rolePresetIdOf(ctx, agent)
         if (presetId === undefined) return
-        const surface = ROLE_TOOL_SURFACES[presetId]
-        if (surface.denySiblings === undefined || surface.denySiblings.length === 0) {
-          if (id !== undefined) handled.add(id)
-          return
-        }
-        const result = restrictRoleAgentTools(agent, surface)
-        if (id !== undefined) handled.add(id)
-        probes.push({ agentId: id, root: isRootAgent(agent), presetId, ...result })
-        if (probes.length > MAX_PROBES) probes.shift()
-        if (result.outcome === 'unavailable') {
-          ctx.logger?.warn(`capital-generation: 角色 ${presetId} 的兄弟名字收敛没装上（restrict 面不可用）：该 child 仍看得见 ${SIBLING_DENIED_TOOLS.join(' / ')}`)
-        }
+        converge(agent, presetId)
       } catch (error) {
         ctx.logger?.warn(`capital-generation: 角色工具面收敛异常：${error instanceof Error ? error.message : String(error)}`)
       }
     })
+    // Manually opened role presets are selected after agent/created; the preset event is the
+    // only point where the agent exists and the role identity is known.
+    const onAny = listenCtx.on as unknown as ((event: string, listener: (...args: unknown[]) => void) => unknown) | undefined
+    const stopPreset = onAny?.('agent-preset/selected', (sessionId: unknown, presetId: unknown) => {
+      if (typeof sessionId !== 'string' || typeof presetId !== 'string') return
+      if (!ROLE_PRESET_ID_LIST.includes(presetId)) return
+      try {
+        const agents = ctx.get?.('agents') as { get?(id: string): AgentLike | undefined } | undefined
+        const agent = seenAgents.get(sessionId) ?? agents?.get?.(sessionId)
+        if (agent !== undefined) converge(agent, presetId as RolePresetId)
+      } catch (error) {
+        ctx.logger?.warn(`capital-generation: 角色 preset 选择后收敛异常：${error instanceof Error ? error.message : String(error)}`)
+      }
+    })
     const stopDisposed = listenCtx.on?.('agent/disposed', (payload: { agent?: AgentLike }) => {
       const id = typeof payload?.agent?.session?.id === 'string' ? payload.agent.session.id : undefined
-      if (id !== undefined) handled.delete(id)
+      if (id !== undefined) {
+        handled.delete(id)
+        seenAgents.delete(id)
+      }
     })
     return () => {
       try { if (typeof stopCreated === 'function') stopCreated() } catch { /* ignore */ }
+      try { if (typeof stopPreset === 'function') stopPreset() } catch { /* ignore */ }
       try { if (typeof stopDisposed === 'function') stopDisposed() } catch { /* ignore */ }
     }
   }

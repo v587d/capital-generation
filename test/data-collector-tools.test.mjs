@@ -436,3 +436,78 @@ test('tools 缺失：ctx.get(tools) 为空时不注册也不抛', () => {
   registerDataCollectorTools(ctx, hub)
   assert.equal(ctx.effects, undefined)
 })
+
+test('request_data：可重试上游连续 3 次失败即终止，第 4 次不再访问上游', async () => {
+  const { hub, toolRuntime } = makeHubAndTools()
+  let calls = 0
+  hub.registerSource({
+    schema: {
+      capability: 'index_quote',
+      name: 'src_index_quote',
+      source: 'api:test',
+      data_key: 'test.index_quote',
+      input_schema: { type: 'object' },
+    },
+    execute: async () => {
+      calls += 1
+      throw new Error('Eastmoney request failed for sector rotation: eastmoney request failed: fetch failed')
+    },
+  })
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    await assert.rejects(
+      () => runTool(toolRuntime, 'request_data', { capability: 'index_quote', params: {}, task_id: 'task-1' }, exec(delegatedSession())),
+      (error) => {
+        assert.equal(error.code, 'upstream_retryable_failure')
+        assert.match(error.message, new RegExp(`第 ${attempt}/3 次`))
+        assert.match(error.message, /wait_agent/)
+        assert.match(error.message, /tencent_quote/)
+        return true
+      },
+    )
+  }
+  await assert.rejects(
+    () => runTool(toolRuntime, 'request_data', { capability: 'index_quote', params: {}, task_id: 'task-1' }, exec(delegatedSession())),
+    (error) => {
+      assert.equal(error.code, 'upstream_retry_exhausted')
+      assert.match(error.message, /已连续 3 次/)
+      assert.match(error.message, /data_failed/)
+      assert.match(error.message, /data_collection_completed/)
+      return true
+    },
+  )
+  assert.equal(calls, 3)
+  await assert.rejects(
+    () => runTool(toolRuntime, 'request_data', { capability: 'index_quote', params: {}, task_id: 'task-1' }, exec(delegatedSession())),
+    /upstream_retry_exhausted/,
+  )
+  assert.equal(calls, 3, '第 4 次调用必须被预算拦住，不能再打上游')
+})
+
+test('request_data：成功一次即清零，后续失败重新从第 1 次计数', async () => {
+  const { hub, toolRuntime } = makeHubAndTools()
+  let calls = 0
+  hub.registerSource({
+    schema: {
+      capability: 'quote',
+      name: 'src_quote',
+      source: 'api:test',
+      data_key: 'test.quote',
+      input_schema: { type: 'object' },
+    },
+    execute: async () => {
+      calls += 1
+      if (calls === 1 || calls === 2 || calls === 4) throw new Error('fetch failed')
+      return { data: { ok: 1 } }
+    },
+  })
+  const call = () => runTool(toolRuntime, 'request_data', { capability: 'quote', params: {}, task_id: 'task-1' }, exec(delegatedSession()))
+  await assert.rejects(call, /upstream_retryable_failure.*第 1\/3 次/s)
+  await assert.rejects(call, /upstream_retryable_failure.*第 2\/3 次/s)
+  const ref = await call()
+  assert.equal(ref.capability, 'quote')
+  await assert.rejects(call, (error) => {
+    assert.equal(error.code, 'upstream_retryable_failure', '成功应清零，不能直接进终止态')
+    assert.match(error.message, /第 1\/3 次/)
+    return true
+  })
+})

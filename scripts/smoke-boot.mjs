@@ -35,6 +35,8 @@ const SETTINGS_ENTRY_ID = 'capital-config'
 const PACKAGE_NAME = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).name
 /** Fresh scratch profile: every code-defined builtin is seeded once, by id, in dormant state. */
 const BUILTIN_IDS = BUILTIN_DEFINITIONS.map((definition) => definition.id).sort()
+/** Defaults are per definition: 16 content templates are dormant, the TODO verifier is active. */
+const BUILTIN_STATES = new Map(BUILTIN_DEFINITIONS.map((definition) => [definition.id, definition.defaults?.state ?? 'dormant']))
 /**
  * Family rows come from agent.patch.yml via test/preset-rows.mjs; only fiberState is checked. A
  * drifted row logs one warn and silently drops a whole tool family for that role.
@@ -187,7 +189,7 @@ async function automationMetaProbe(url, cookie) {
 /** The scratch profile is fresh: builtin ids must equal the code definitions, all dormant. */
 function automationTasksMatch(tasks) {
   if (!Array.isArray(tasks) || tasks.length !== BUILTIN_IDS.length) return false
-  if (!tasks.every((task) => task.origin === 'builtin' && task.state === 'dormant')) return false
+  if (!tasks.every((task) => task.origin === 'builtin' && task.state === BUILTIN_STATES.get(task.sourceBuiltinId))) return false
   const ids = tasks.map((task) => task.sourceBuiltinId).sort()
   return JSON.stringify(ids) === JSON.stringify(BUILTIN_IDS)
 }
@@ -267,7 +269,7 @@ function probeSource() {
     `}`,
     ``,
     `async function attempt(ctx) {`,
-    `  const result = { preset: null, broken: null, entry: null, localFetchEnabled: null, rows: null, presetRows: null, rolePresets: null, remoteRoster: null, familyRows: null, ptcRow: null, ptcRuntime: null, hostRuntime: null, identityGuards: null, problems: [] }`,
+    `  const result = { preset: null, broken: null, entry: null, localFetchEnabled: null, rows: null, presetRows: null, rolePresets: null, remoteRoster: null, familyRows: null, ptcRow: null, ptcRuntime: null, hostRuntime: null, identityGuards: null, hostView: null, problems: [] }`,
     `  try {`,
     `    const agentPresets = ctx.get('agentPresets')`,
     `    if (!agentPresets) result.problems.push('agentPresets 服务未提供')`,
@@ -344,7 +346,11 @@ function probeSource() {
     // 0.2.2 split guards into their own ScopedLayers (`tools.guards`); `tools.layers` now holds tools only.
     `      const guards = tools?.guards?.global ? [...tools.guards.global.guards.values()] : []`,
     `      result.identityGuards = guards.filter((guard) => /recordGuardDecision/.test(String(guard))).length`,
-    `      if (result.identityGuards < 3) result.problems.push('宿主 global guard 层里只有 ' + result.identityGuards + '/3 颗本仓身份闸门（fs 写口 / ocr 形态 / 兄弟名字）：guard 面没拿到，闸门静默不装')`,
+    `      if (result.identityGuards < 4) result.problems.push('宿主 global guard 层里只有 ' + result.identityGuards + '/4 颗本仓身份闸门（fs 写口 / ocr 形态 / 兄弟名字 / send_message 目标）：guard 面没拿到，闸门静默不装')`,
+    `      // 角色/根的宿主白名单依赖 tools.view(scope).restrictableNames（d.ts 私有，JS runtime 可读）。`,
+    `      const view = tools?.view?.()`,
+    `      result.hostView = typeof view?.restrictableNames?.size === 'number' ? view.restrictableNames.size : null`,
+    `      if (!result.hostView) result.problems.push('tools.view().restrictableNames 读不到：角色宿主白名单无法求交集，叶子会重新混入宿主全局工具')`,
     `    } catch (error) {`,
     `      result.problems.push('读不到 tools.guards.global.guards：' + String(error && error.message || error))`,
     `    }`,
@@ -610,7 +616,8 @@ try {
       console.log(`smoke-boot: ${familyRows.length === expectedFamilyRows && familyBad.length === 0 ? '✅' : '❌'} 族行装配（共 ${familyRows.length}/${expectedFamilyRows} 行）${familyBad.length === 0 ? '' : '，未激活：' + familyBad.map((row) => row.preset + '/' + row.rowId + '=' + row.state).join(', ')}`)
       console.log(`smoke-boot: ${probe.hostRuntime === true ? '✅' : '❌'} host runtime capitalChartRuntime（${probe.hostRuntime === true ? 'present' : 'absent'}）`)
       console.log(`smoke-boot: ${probe.ptcRow === 2 && probe.ptcRuntime === true ? '✅' : '❌'} data_junior PTC：tool-presentation fiberState=${probe.ptcRow ?? '读不到'}，ptcRuntime=${probe.ptcRuntime === true ? 'present' : 'absent'}`)
-      console.log(`smoke-boot: ${probe.identityGuards === 3 ? '✅' : '❌'} 身份闸门在宿主 global guard 层：${probe.identityGuards ?? '读不到'} / 3 颗（fs 写口 + ocr 形态 + 兄弟名字）`)
+      console.log(`smoke-boot: ${probe.identityGuards === 4 ? '✅' : '❌'} 身份闸门在宿主 global guard 层：${probe.identityGuards ?? '读不到'} / 4 颗（fs 写口 + ocr 形态 + 兄弟名字 + send_message 目标）`)
+      console.log(`smoke-boot: ${typeof probe.hostView === 'number' && probe.hostView > 0 ? '✅' : '❌'} 宿主 tools.view() 可读：global restrictableNames=${probe.hostView ?? '读不到'}（角色在 agent scope 上取同一属性）`)
       console.log(`smoke-boot: ${probe.presetRows?.every((row) => row.state === 2) ? '✅' : '❌'} 关键预设行：${JSON.stringify(probe.presetRows ?? [])}`)
       console.log(`smoke-boot: ${probe.entry === 'present' && typeof probe.localFetchEnabled === 'boolean' ? '✅' : '❌'} settings 条目 ${SETTINGS_ENTRY_ID}：${probe.entry}，retriever.localFetch.enabled=${probe.localFetchEnabled}`)
       // The card sits on its bundle's own page; the row count equals the card's "contained components".

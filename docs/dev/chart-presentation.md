@@ -15,7 +15,7 @@
   本身，挂 standing scope 上的监听器**收不到且不报错**；挂 `ctx.root` 后必须用
   `agentPresets.composedPreset()` 筛出本 preset。回归 `test/root-tool-policy.test.mjs`。
   **但按人设的调用级闸门（`tools.guard()`）不挂 created**：宿主先建 Agent、后选人设，那条时机上身份
-  还没落定（§1.1 → `data-roles.md`，账本 L32），三颗身份闸门因此全局装在插件 ctx 上、各一次。
+  还没落定（§1.1 → `data-roles.md`，账本 L32），四颗身份闸门因此全局装在插件 ctx 上、各一次。
 - **⛔ 委派出口只有专用角色那几颗，角色工具面由 preset 挂的**族行**表达**：2026-10-18 用户决策
   删掉通用 `subagent` 行（没有明确场景就不该有「其他」）；2026-10-19 D0 把本仓模型工具按族拆成
   `@v587d/capital-generation/tools/*` 独立入口行，"谁能用什么"从此只写在 `agent.patch.yml` 的行

@@ -141,7 +141,7 @@ const PLUGIN_TOOLS = [
   'sina_reports', 'ths_eps_forecast',
 ]
 const PRESET_TOOLS = [
-  'send_message', 'interrupt_agent', 'list_agents',
+  'send_message', 'interrupt_agent', 'list_agents', 'wait_agent',
   // Only the four specialized delegation rows; the removed generic row must not reappear.
   'subagent_data_collector', 'subagent_data_junior', 'subagent_web_retriever', 'subagent_visualization_specialist',
   'ask_user_question', 'todo_write', 'skill',
@@ -736,16 +736,23 @@ test('主 persona：每轮先查 direct children，按角色标签复用，确�
   for (const tool of ['subagent_data_collector', 'subagent_data_junior', 'subagent_web_retriever']) {
     assertRule(MAIN_PERSONA, new RegExp(tool), `主 persona 应点名委派工具 ${tool}`)
   }
-  assertRule(MAIN_PERSONA, /list_agents\(scope="children"\)/)
+  assertRule(MAIN_PERSONA, /list_agents\(\)/)
   assertRule(MAIN_PERSONA, /上一轮空?的?列表不能代替本轮/)
   assertRule(MAIN_PERSONA, /data_collector、data_junior、web_retriever/)
-  // agent_id is copied from a fresh list_agents output, never recalled from context.
-  assertRule(MAIN_PERSONA, /agent_id.*从最近一次 list_agents.*复制/)
-  assertRule(MAIN_PERSONA, /发送前核对 id、label.*三者对应/)
+  // name is copied from a fresh list_agents output, never recalled from context.
+  assertRule(MAIN_PERSONA, /name.*从最近一次 list_agents.*复制/)
+  assertRule(MAIN_PERSONA, /发送前核对 name、description.*三者对应/)
   assertRuleAny(MAIN_PERSONA, [/description 必须原样使用对应角色标签/, /description 必须等于角色标签/], '主 persona 应要求 description 用角色标签')
-  assertRuleAny(MAIN_PERSONA, [/历史 child 的 label 即使仍?是旧(任务)?标题/], '主 persona 应说明历史 child 的 label 可沿用')
+  assertRuleAny(MAIN_PERSONA, [/历史 child 没有 name 时用 session id/], '主 persona 应说明历史 child 没有 name 时用 session id')
   assertRule(MAIN_PERSONA, /必须沿用/)
-  assertRule(MAIN_PERSONA, /不得因(为)? ?label 非标准而新建/)
+  assertRule(MAIN_PERSONA, /不得因为 description 是旧任务标题而新建/)
+  assertRule(MAIN_PERSONA, /name 固定为 data-collector \/ data-junior \/ web-retriever/)
+  assertRule(MAIN_PERSONA, /DUPLICATE_AGENT_NAME/)
+  assertRule(MAIN_PERSONA, /INVALID_AGENT_NAME|下划线非法/)
+  assertRule(MAIN_PERSONA, /根只发无 `\/` 且不是 `lead` 的直系名/)
+  assertRule(MAIN_PERSONA, /子 Agent 只回 `lead`/)
+  assertRule(MAIN_PERSONA, /wait_agent 只返回 timedOut/)
+  assertRule(MAIN_PERSONA, /不使用 Team 任务板工具/)
   // list_agents reports only running / inactive; idle and ready are states the model could never match.
   assertRule(MAIN_PERSONA, /running 或 inactive.*立即 ?send_message/, '主 persona 的复用判据要跟随两态词汇')
   assertNoRule(MAIN_PERSONA, /\bidle\b|\bready\b/, '主 persona 不得再写 0.2.0 的 idle / ready 状态名')
@@ -754,7 +761,7 @@ test('主 persona：每轮先查 direct children，按角色标签复用，确�
   assertRuleAny(MAIN_PERSONA, [/(只有|仅当)本轮 list_agents 明确(没有|无)该角色/], '主 persona 应把创建限定为"本轮查无该角色"')
   assertRule(MAIN_PERSONA, /subagent_data_collector \/ subagent_data_junior \/ subagent_web_retriever/)
   assertRule(MAIN_PERSONA, /没有通用委派出口/, '主 persona 必须写明只有专用委派出口（通用 subagent 已随通用 child 删除）')
-  assertRule(MAIN_PERSONA, /durable (id|subagentId)/)
+  assertRule(MAIN_PERSONA, /创建回执是 `started subagent <name>`/)
   assertRule(MAIN_PERSONA, /结算通知/)
   assertNoRule(MAIN_PERSONA, /创建前不需要先查 list_agents/)
   assertNoRule(MAIN_PERSONA, /首查非空是正常情况/)
@@ -984,7 +991,9 @@ test('data_collector persona：覆盖 Phase 1 数据集协议全部必须要点'
   assertRule(COLLECTOR_PERSONA, /source_label|fuyao/)
   assertRule(COLLECTOR_PERSONA, /绝不覆盖旧文件/)
   assertRule(COLLECTOR_PERSONA, /重试纪律/, 'dc 需含重试纪律')
-  assertRule(COLLECTOR_PERSONA, /重试 2 次/, '重试上限需显式')
+  assertRule(COLLECTOR_PERSONA, /3 次尝试/, '重试上限需显式')
+  assertRule(COLLECTOR_PERSONA, /upstream_retry_exhausted/, 'dc 需识别终止错误')
+  assertRule(COLLECTOR_PERSONA, /wait_agent/, 'dc 不得用 wait_agent 长等上游')
   assertNoRule(COLLECTOR_PERSONA, /get_request_status/, 'dc persona 不应再引用已删除的 get_request_status')
   assertRule(COLLECTOR_PERSONA, /阻塞/, 'dc persona 应说明 request_data 阻塞等待执行')
   assertRule(COLLECTOR_PERSONA, /30 秒|超时/, 'dc persona 应说明执行超时报错')
@@ -999,6 +1008,11 @@ test('data_collector persona：覆盖 Phase 1 数据集协议全部必须要点'
   assertRule(dataProtocol, /一个任务只调一次/, 'skill 必须限定 list_capabilities 一个任务只调一次')
   assertRule(dataProtocol, /只描述一次/, 'skill 必须限定同一个能力只描述一次')
   assertRule(dataProtocol, /一次只传一个名字|不传逗号|一次只传一个 capability/, 'skill 必须限定 describe_capability 一次一个名字')
+  assertRule(dataProtocol, /upstream_retry_exhausted/, 'skill 必须说明重试预算的终止错误')
+  assertRule(dataProtocol, /fetch failed/, 'skill 必须把 fetch failed 纳入可重试上游')
+  assertRule(dataProtocol, /wait_agent/, 'skill 必须禁止用 wait_agent 等上游恢复')
+  assertRule(dataProtocol, /tencent_quote/, 'skill 必须给出指数快照的等价替代')
+  assertRule(dataProtocol, /没有等价替代|没有替代能力/, 'skill 必须说明无替代时停止并回传')
   // Concurrent discovery means several describe_capability calls leave in one message, never N serial round trips.
   assertRule(dataProtocol, /同一条消息里一次发出\s*\n?.*describe_capability|describe_capability[^\n]*同一条消息/, 'skill 必须要求多个 describe_capability 调用在同一条消息里一次发出')
   for (const code of ['capability_required', 'capability_invalid', 'capability_unknown', 'capability_catalog_empty']) {
@@ -1343,7 +1357,7 @@ test('data_collector persona：叶子边界——不得创建/指挥 data_junior
 
 test('skill 内容：编排 skill 覆盖预检异常与清单，数据 skill 覆盖三种载荷', () => {
   const orchestration = readFileSync(`${SKILL_DIR}capital-orchestration/SKILL.md`, 'utf8')
-  for (const pattern of [/list_agents\(scope="children"\)/, /running/, /inactive/, /只报两态/, /diagnostic/, /委派清单/, /data_collector/, /data_junior/, /web_retriever/, /capital-data-protocol/, /Wind 能力暂不可用/, /dataset_session_mismatch/, /分钟级/, /ID 纪律/, /投错对象/, /waiting_data/, /data_gap/, /中途消息是工单/, /结算通知 ≠ 任务完成/, /Canonical task_id/, /中间隔了长回传/, /回传到达后集中核对/]) {
+  for (const pattern of [/list_agents\(\)/, /running/, /inactive/, /corrupt/, /unsupported/, /unavailable/, /委派清单/, /data-collector/, /data-junior/, /web-retriever/, /capital-data-protocol/, /Wind 能力暂不可用/, /dataset_session_mismatch/, /分钟级/, /名字纪律/, /DUPLICATE_AGENT_NAME/, /INVALID_AGENT_NAME/, /started subagent/, /投错对象/, /waiting_data/, /data_gap/, /中途消息是工单/, /结算通知 ≠ 任务完成/, /Canonical task_id/, /中间隔了长回传/, /回传到达后集中核对/]) {
     assertMatches(orchestration, pattern, `capital-orchestration 缺少要点: ${pattern}`)
   }
   // Status vocabulary is a closed set (running / inactive): idle and ready are criteria the model can never satisfy.
@@ -1354,6 +1368,19 @@ test('skill 内容：编排 skill 覆盖预检异常与清单，数据 skill 覆
   }
   // Internal routing key names must stay out of every model-visible text.
   for (const text of [orchestration, protocol]) assertNotMatches(text, /data_key|list_schemas|get_latest|from_cache/)
+})
+
+test('模型可见文本：不再出现 rc.1 的 id / scope=children / kind=child / durable id 词汇', () => {
+  const texts = [
+    ...allPersonaTexts().map((entry) => ({ label: entry.presetId, text: entry.persona })),
+    ...readdirSync(SKILL_DIR, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && existsSync(`${SKILL_DIR}${entry.name}/SKILL.md`))
+      .map((entry) => ({ label: `skill:${entry.name}`, text: skillVolume(entry.name) })),
+  ]
+  const legacy = /agent_id|scope="children"|kind=child|durable id|subagentId/
+  for (const { label, text } of texts) {
+    assertNoRule(text, legacy, `${label} 仍含 rc.1 控制词汇：宿主会静默忽略，模型会照旧写错`)
+  }
 })
 
 test('resolveUserCustomizationSection：独立 section，不能覆盖核心约束', () => {

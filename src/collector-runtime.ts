@@ -59,8 +59,8 @@ function diagnosticsFor(ctx: Context, config: CollectorConfig): DataCollectorDia
         root: probe.root,
         presetId: probe.presetId,
         outcome: probe.outcome,
-        // Roles have no allow-list (family rows define the surface); report sibling
-        // denials and call-level guard rejections.
+        // Scoped tools come from family rows; host-global tools are gated by the
+        // role allow-list (not model-visible). `allowed` stays empty in this readout.
         allowed: [] as string[],
         denied: probe.denied,
         failed: probe.failed,

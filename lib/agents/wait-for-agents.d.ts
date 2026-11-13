@@ -1,7 +1,8 @@
 /**
  * Root-only `wait_for_agents`: hold one turn across child relays; returns on the first relay, on
- * the tree settling, or after 30s. `waitForChildren` has no abort parameter; the slice races it.
- * Host contract: docs/reference/dsh-surface-ledger.md L36.
+ * the tree settling, or after 30s. Neither wait method has an abort parameter; the slice races it.
+ * rc.2 renamed `waitForChildren` to `waitForTreeWork`; accept both so a rollback does not brick the
+ * turn while rc.2 is the supported baseline. Host contract: docs/reference/dsh-surface-ledger.md L36.
  */
 import type { Context } from '@deepseek-ai/cordis';
 export interface WaitInboxLike {
@@ -26,7 +27,10 @@ export interface WaitDescendantLike {
     readonly activity?: string;
 }
 export interface WaitSubagentsLike {
-    waitForChildren(parent: WaitAgentLike): Promise<boolean>;
+    /** rc.2 name. */
+    waitForTreeWork?(root: WaitAgentLike): Promise<boolean>;
+    /** rc.1 name; kept as a rollback escape hatch, not a supported baseline. */
+    waitForChildren?(parent: WaitAgentLike): Promise<boolean>;
     listDescendants?(rootSessionId: string, signal?: AbortSignal): Promise<readonly WaitDescendantLike[]>;
 }
 interface AgentsLike {

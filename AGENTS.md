@@ -35,7 +35,7 @@
 - **§1.6** bash / `run_code` 闸门不是安全边界（沙箱只拦写），别把它写成边界；guard 刻意不解析命令或程序内容。
 - **§5.1** 可编辑配置只坐 `plugins.bundle.config`（key = 组合包名）一处，不开行级座位：每深一跳就多一次"设置里没这个插件"。
 - **§6.1** 根收敛监听挂 `ctx.root`（standing 层收不到）；身份闸门全局装、调用期现读
-  （created 时人设未定）。委派出口只有专用角色，工具面 = preset 挂的族行（allow 清单禁恢复）。
+  （created 时人设未定）。委派出口只有专用角色，工具面 = preset 族行 + 宿主全局白名单。
 - **§6.1** `/capital-charts` 序列旁路必须接 `connection.requestRejection`，否则是无认证端点。
 - **§6.3** 会话事件词汇表是闭集，交付必须走 first-party `deliverables/presented`；cordis ctx 不能用
   `{ ...ctx }` 展开；队列按 owner 归档；auto 模式在收尾流 finish 帧写交付（L34），回合钩子会落空。
@@ -46,8 +46,8 @@
 角色树与逐角色边界见 `docs/dev/data-roles.md`（§1.1–§1.8）。
 
 一句话版：**原始 rows 永不出工具层**，Agent 间只传引用与聚合；主 Agent 一律委派、自己不出图；
-角色是叶子，互通经主 Agent；data_junior 只跑 PTC `run_code`，程序只调度工具与算术；委派后
-`wait_for_agents` 等子树收敛，不以等待行结束回合。
+角色是叶子，互通经主 Agent；data_junior
+只跑 PTC `run_code`，程序只调度工具与算术；委派后 `wait_for_agents` 等子树收敛，不以等待行结束回合。
 ## 2. 项目结构
 ```text
 capital-generation/

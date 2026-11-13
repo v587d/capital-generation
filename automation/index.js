@@ -109,6 +109,7 @@ export function createAutomationRuntime(options) {
     scheduler,
     asks,
     now,
+    loadWatchlist: watchlistLoader(ctx, logger),
   })
   watches = createTodoWatchService({
     store,
@@ -156,6 +157,40 @@ export function createAutomationRuntime(options) {
     })
   }
   return { store, runner, scheduler, briefs, watches, asks, service, calendar, workspaces, profile: { displayName, runDir, ownerDir } }
+}
+
+/**
+ * Radar tiering reads the user's watchlist panel. The watchlist row may settle after this
+ * one, so only a successful lookup is cached; a failed read retries next time and the
+ * radar falls back to brief tags instead of claiming an empty list.
+ */
+function watchlistLoader(ctx, logger) {
+  let service
+  let warned = false
+  return async () => {
+    if (service === undefined) {
+      try {
+        const candidate = ctx.get('capitalWatchlist')
+        if (typeof candidate?.list === 'function') service = candidate
+      } catch {
+        service = undefined
+      }
+      if (service === undefined && !warned) {
+        warned = true
+        logger?.warn?.('capital-automation: 自选股服务不可用，个股动态按简报标签排序')
+      }
+    }
+    if (service === undefined) return undefined
+    try {
+      return await service.list()
+    } catch (error) {
+      if (!warned) {
+        warned = true
+        logger?.warn?.(`capital-automation: 自选股清单读取失败，个股动态按简报标签排序（${sanitizeMessage(String(error))}）`)
+      }
+      return undefined
+    }
+  }
 }
 
 function authorizeFactory(ctx) {
