@@ -358,6 +358,8 @@ function cardProps(injected) {
     toggleSelectedSkill: injected.toggleSelectedSkill,
     ensureBundleRows: injected.ensureBundleRows,
     ensureWorkspaces: injected.ensureWorkspaces,
+    ensureStorage: injected.ensureStorage,
+    clearStorage: injected.clearStorage,
     writeAutomationWorkspace: injected.writeAutomationWorkspace,
   }
 }
@@ -550,7 +552,18 @@ test('capital-config Client：精选 Skills 以名称开原文，标签与适用
     'automationInvalid', 'automationUnitMs', 'automationUnitMinutes', 'automationUnitSteps', 'automationUnitCalls',
     'automationDefaultWorkspace',
     'automationWorkspacePath', 'automationWorkspaceMissing', 'automationWorkspaceLoading',
-    'automationWorkspaceUnavailable', 'automationWorkspaceFallback']) {
+    'automationWorkspaceUnavailable', 'automationWorkspaceFallback',
+    'automationStorageGroup', 'automationStorageWorkspace', 'automationStorageCache',
+    'automationStorageAnalysis', 'automationStorageRetained', 'automationStorageSessions',
+    'automationStorageSessionsHint', 'automationStorageUnavailable', 'automationStorageRetry',
+    'automationStorageStale', 'automationStorageEmpty', 'automationStorageClear',
+    'automationStorageClearing', 'automationStorageConfirmTitle', 'automationStorageConfirmBody',
+    'automationStorageConfirm', 'automationStorageCancel', 'automationStorageCleared',
+    'automationStorageClearedPartial', 'automationStorageClearFailed', 'automationStorageRunInProgress',
+    'automationStorageActiveHint', 'automationStorageUnsafe', 'automationStorageDatasets',
+    'automationStorageProfiles', 'automationStorageOcr', 'automationStorageCharts',
+    'automationStorageRuns', 'automationStorageOther', 'automationStorageSessionCount',
+    'automationStorageUnreadable']) {
     assert.equal(typeof dict.zh[key], 'string', `投研自动化那格缺 ${key} 的中文文案`)
     assert.equal(typeof dict.en[key], 'string', `投研自动化那格缺 ${key} 的英文文案`)
   }
@@ -558,6 +571,7 @@ test('capital-config Client：精选 Skills 以名称开原文，标签与适用
   assert.equal(dict.zh.automationWorkspacePath, '默认位置：{path}', '路径提示带插值，不能写死一个目录')
   assert.equal(dict.zh.automationDefaultWorkspaceHint, undefined, '说明句已删：控件旁边的默认位置已经说清用途')
   assert.equal(dict.zh.automationWorkspaceGroup, undefined, '单个字段不再套一层「工作区」组标题')
+  assert.equal(dict.zh.automationStorageAnalysisHint, undefined, '保留说明换成徽章：不再单独占一行小字')
   assert.equal(dict.zh.selectedSkillsTitle, '精选 Skills')
   assert.equal(dict.zh.selectedSkillsHint, undefined, '已移除整段精选 Skills 说明')
   assert.equal(dict.zh.selectedSkillsModeLabel, '智能装载 Skills')
@@ -1251,6 +1265,142 @@ test('capital-config Client：默认工作区读 /capital-automation/workspaces�
     '默认工作区也走 volatile 叶子路径')
   assert.equal(store.getSnapshot().workspace.selectedId, 'ws_project')
   assert.equal(store.getSnapshot().workspace.current.path, '~/project', '路径跟着选中的工作区换')
+})
+
+test('capital-config Client：投研自动化展示工作区缓存/分析结果/会话，清理只 POST 确认体', async () => {
+  const scope = readyScope()
+  let clearCalls = 0
+  const { mod, docRequests } = loadClient({
+    scope,
+    fetchImpl: async (url, init) => {
+      if (String(url) === '/capital-automation/storage') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            storage: {
+              workspace: { id: 'ws-1', title: 'CapGen 投研自动化（web）', displayPath: '~/web', scope: 'dedicated' },
+              cache: {
+                bytes: 1_572_864,
+                files: 2,
+                categories: {
+                  datasets: { bytes: 1_048_576, files: 1 },
+                  profiles: { bytes: 524_288, files: 1 },
+                  ocr: { bytes: 0, files: 0 },
+                  other: { bytes: 0, files: 0 },
+                },
+                truncated: false,
+                unreadable: 0,
+                unsafe: false,
+              },
+              analysis: {
+                bytes: 524_288,
+                files: 1,
+                categories: {
+                  charts: { bytes: 524_288, files: 1 },
+                  runs: { bytes: 0, files: 0 },
+                  other: { bytes: 0, files: 0 },
+                },
+                truncated: false,
+                unreadable: 0,
+                unsafe: false,
+              },
+              sessions: { available: true, bytes: 2_097_152, count: 3 },
+              activeRuns: 0,
+              canClear: true,
+            },
+          }),
+        }
+      }
+      if (String(url) === '/capital-automation/storage/clear') {
+        clearCalls += 1
+        assert.equal(init?.method, 'POST')
+        assert.deepEqual(JSON.parse(init?.body), { confirm: true })
+        return { ok: true, status: 200, json: async () => ({ ok: true, cleared: { bytes: 1_572_864, files: 2, failed: [] } }) }
+      }
+      return { ok: true, status: 200, json: async () => ({}) }
+    },
+  })
+  const { ctx, registrations } = fakeCtx({ scope })
+  mod.apply(ctx)
+  const { injected, render } = cardRenderer(registrations)
+  await injected.ensureStorage()
+  const card = render()
+  assert.equal(docRequests[0].url, '/capital-automation/storage')
+  const amounts = collect(card, 'span')
+    .filter((node) => node.props.className === 'capital-config-storage-amount')
+    .map((node) => node.children.filter((child) => typeof child === 'string').join(''))
+  assert.deepEqual(amounts, ['2.0 MB', '1.5 MB', '512.0 KB', '2.0 MB'], '工作区合计、可清理缓存、分析结果、运行会话各一行')
+  const button = collect(card, 'button').find((node) => node.props.className === 'capital-config-cache-button')
+  assert.ok(button, '存储组必须有清理入口')
+  assert.equal(button.props.disabled, false, '有缓存且没有活动运行时可点')
+  assert.equal(button.props['data-variant'], 'danger', '清理入口用错误色，和普通操作分开')
+  const chips = collect(card, 'span')
+    .filter((node) => node.props.className === 'capital-config-storage-chip')
+    .map((node) => node.children.filter((child) => typeof child === 'string').join(''))
+  assert.deepEqual(chips, ['automationStorageDatasets 1.0 MB', 'automationStorageProfiles 512.0 KB', 'automationStorageCharts 512.0 KB'],
+    '分类尺寸收成胶囊（沙箱 t 原样回键，故比键名+尺寸）；零值分类不出现')
+  const badge = collect(card, 'span').find((node) => node.props.className === 'capital-config-storage-badge')
+  assert.ok(badge, '分析结果行带保留徽章，安全边界一眼可见')
+
+  const result = await injected.clearStorage()
+  assert.equal(result, 'cleared')
+  assert.equal(clearCalls, 1, '只提交一次')
+  assert.equal(injected.hooks.capitalCard.getSnapshot().storage.clearedBytes, 1_572_864)
+  assert.equal(docRequests.filter((request) => request.url === '/capital-automation/storage').length, 2, '清理后重取尺寸')
+})
+
+test('capital-config Client：清理被运行挡下时保留错误，不落成“已释放”', async () => {
+  const scope = readyScope()
+  const { mod } = loadClient({
+    scope,
+    fetchImpl: async (url) => {
+      if (String(url) === '/capital-automation/storage') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            storage: {
+              workspace: { displayPath: '~/web' },
+              cache: { bytes: 10, files: 1, categories: {}, truncated: false, unreadable: 0, unsafe: false },
+              analysis: { bytes: 0, files: 0, categories: {}, truncated: false, unreadable: 0, unsafe: false },
+              sessions: { available: true, bytes: 0, count: 0 },
+              activeRuns: 0,
+              canClear: true,
+            },
+          }),
+        }
+      }
+      if (String(url) === '/capital-automation/storage/clear') {
+        return { ok: false, status: 409, json: async () => ({ ok: false, code: 'run_in_progress' }) }
+      }
+      return { ok: true, status: 200, json: async () => ({}) }
+    },
+  })
+  const { ctx, registrations } = fakeCtx({ scope })
+  mod.apply(ctx)
+  const { injected } = cardRenderer(registrations)
+  await injected.ensureStorage()
+  const result = await injected.clearStorage()
+  assert.equal(result, 'failed')
+  const state = injected.hooks.capitalCard.getSnapshot().storage
+  assert.equal(state.error, 'run_in_progress')
+  assert.equal(state.clearedBytes, null)
+})
+
+test('capital-config Client：存储清理的路由、确认体与危险态样式都在源码里钉住', () => {
+  const source = readFileSync(CLIENT_SRC, 'utf8')
+  assert.match(source, /const STORAGE_ROUTE = '\/capital-automation\/storage'/)
+  assert.match(source, /const STORAGE_CLEAR_ROUTE = '\/capital-automation\/storage\/clear'/)
+  assert.match(source, /body: JSON\.stringify\(\{ confirm: true \}\)/, '确认体必须逐字为 confirm:true')
+  assert.match(source, /\.capital-config-cache-button\[data-variant="danger"\]/, '清理按钮必须与普通按钮区分')
+  assert.match(source, /\.capital-config-storage \{[^}]*border-radius: 10px/, '存储组是带圆角和描边的面板，不再是一堆散装行')
+  assert.match(source, /\.capital-config-storage-chip \{[^}]*border-radius: 999px/, '分类尺寸用胶囊呈现')
+  assert.match(source, /\.capital-config-storage-badge \{[^}]*state-success/, '保留徽章用成功色，安全边界不靠小字说明')
+  assert.doesNotMatch(source, /capital-config-storage-breakdown|capital-config-storage-note|capital-config-storage-actions/, '旧的散装小字行样式必须删干净')
+  assert.match(source, /div\.capital-config-cache-modal \{ width: min\(480px, 100%\)/, '确认框宽度要覆盖官方 380px 默认值')
+  assert.match(source, /automationStorageConfirmBody: '将删除 \{path\} 中 \{size\}/, '确认文案必须带路径与释放量')
+  assert.doesNotMatch(codeOnly(source), /<select/, '存储组不得引入原生下拉')
 })
 
 test('capital-config Client：selected skill 开关只写允许的 volatile 路径且默认关闭', async () => {

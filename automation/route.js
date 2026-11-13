@@ -230,6 +230,14 @@ async function dispatch({ req, method, suffix, url, service, requestId }) {
   if (suffix === WORKSPACES_SUFFIX && method === 'GET') {
     return { body: await service.workspaceCatalog() }
   }
+  if (suffix === '/storage') {
+    if (method !== 'GET') throw new AutomationError('method_not_allowed', '只支持 GET。', 405)
+    return { body: await service.storage() }
+  }
+  if (suffix === '/storage/clear') {
+    if (method !== 'POST') throw new AutomationError('method_not_allowed', '只支持 POST。', 405)
+    return { body: await service.clearStorage(await readBody(req)) }
+  }
   if (suffix === '/board' && method === 'GET') {
     return { body: await service.board(queryOf(url, new Set(['days', 'tz', 'limit', 'before', 'category']), 5)) }
   }

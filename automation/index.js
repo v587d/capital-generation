@@ -20,6 +20,7 @@ import { resolveAutomationSettings } from './settings.js'
 import { installAutomationPolicy } from './policy.js'
 import { createCalendarSource } from './calendar-source.js'
 import { createWorkspaceCatalog, defaultWorkspacePath } from './workspaces.js'
+import { createStorageService } from './storage.js'
 import { sanitizeMessage } from './redact.js'
 
 export const name = 'capital-automation'
@@ -57,6 +58,13 @@ export function createAutomationRuntime(options) {
     runDir,
     displayHome: homedir(),
     getDefaultWorkspaceId: () => getSettings()?.defaultWorkspaceId,
+    logger,
+  })
+  const storage = createStorageService({
+    ctx,
+    workspaces,
+    profile: { runDir, displayName },
+    now,
     logger,
   })
   const store = createAutomationStore({
@@ -148,6 +156,7 @@ export function createAutomationRuntime(options) {
     briefs,
     asks,
     boardService,
+    storage,
     now,
   })
   runner.installListeners()
@@ -156,7 +165,7 @@ export function createAutomationRuntime(options) {
       installAutomationPolicy({ ctx: toolsCtx, runner, logger })
     })
   }
-  return { store, runner, scheduler, briefs, watches, asks, service, calendar, workspaces, profile: { displayName, runDir, ownerDir } }
+  return { store, runner, scheduler, briefs, watches, asks, service, calendar, workspaces, storage, profile: { displayName, runDir, ownerDir } }
 }
 
 /**

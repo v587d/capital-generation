@@ -19,6 +19,7 @@ import {
 import {
   AskCreateSchema,
   NotificationsReadSchema,
+  StorageClearSchema,
   TaskCategorySchema,
   TaskCreateSchema,
   TaskPatchSchema,
@@ -107,13 +108,36 @@ export class AutomationError extends Error {
 }
 
 export function createAutomationService(options) {
-  const { store, scheduler, runner, calendar, profile, workspaces, version, settings, briefs, asks, boardService, now = () => Date.now() } = options
+  const { store, scheduler, runner, calendar, profile, workspaces, version, settings, briefs, asks, boardService, storage, now = () => Date.now() } = options
   let chain = Promise.resolve()
 
   function serialize(operation) {
     const next = chain.then(operation, operation)
     chain = next.then(() => {}, () => {})
     return next
+  }
+
+  function storageMissing() {
+    return new AutomationError('storage_unavailable', '工作区存储服务尚未就绪。', 503)
+  }
+
+  function storageFailure(error) {
+    if (error instanceof AutomationError) return error
+    if (error?.code === 'cache_root_unsafe') {
+      return new AutomationError('cache_root_unsafe', '缓存目录不是普通目录，已停止清理。', 409)
+    }
+    if (error?.code === 'workspace_unavailable') {
+      return new AutomationError('workspace_unavailable', '工作区目录暂时不可用。', 503)
+    }
+    if (error?.code === 'clear_failed') {
+      return new AutomationError('clear_failed', '清理失败，请稍后再试。', 500)
+    }
+    return new AutomationError('storage_unavailable', '工作区存储暂时不可用。', 503)
+  }
+
+  async function activeRuns() {
+    const page = await store.listRunsPage({ limit: 2_000 })
+    return page.runs.filter((run) => ACTIVE_STATUSES.has(run.status))
   }
 
   async function withTask(id) {
@@ -222,6 +246,43 @@ export function createAutomationService(options) {
     } catch (error) {
       throw new AutomationError('workspace_unavailable', sanitizeMessage(String(error?.message ?? error)), 503)
     }
+  }
+
+  async function storageStats() {
+    if (storage === undefined) throw storageMissing()
+    let stats
+    try {
+      stats = await storage.stats()
+    } catch (error) {
+      throw storageFailure(error)
+    }
+    const active = await activeRuns()
+    return {
+      storage: {
+        ...stats,
+        activeRuns: active.length,
+        canClear: active.length === 0 && stats.cache?.unsafe !== true,
+      },
+    }
+  }
+
+  async function clearStorage(input) {
+    const parsed = parseStrict(StorageClearSchema, input, 'storage/clear')
+    if (parsed.confirm !== true) throw new AutomationError('invalid_request', '确认清理后才能删除缓存。', 400)
+    if (storage === undefined) throw storageMissing()
+    return serialize(async () => {
+      const active = await activeRuns()
+      if (active.length > 0) {
+        throw new AutomationError('run_in_progress', '有运行正在进行，请等运行结束后再清理。', 409, { runId: active[0].id })
+      }
+      let cleared
+      try {
+        cleared = await storage.clear()
+      } catch (error) {
+        throw storageFailure(error)
+      }
+      return { cleared }
+    })
   }
 
   async function createTask(input) {
@@ -522,6 +583,8 @@ export function createAutomationService(options) {
     serialize,
     meta,
     workspaceCatalog,
+    storage: storageStats,
+    clearStorage,
     listTasks,
     taskDetail,
     createTask,

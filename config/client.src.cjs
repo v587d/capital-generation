@@ -56,6 +56,9 @@ const PADDLE_OCR_DEFAULT_REF = 'PADDLE_OCR_TOKEN'
 const TABS_ID = 'capital-config-tabs'
 /** Must match `SKILL_DOC_ROUTE` in `config/index.js`; drift = details never load. */
 const SKILL_DOC_ROUTE = '/capital-skills'
+/** Automation host routes; same auth plane as the workspace dropdown. */
+const STORAGE_ROUTE = '/capital-automation/storage'
+const STORAGE_CLEAR_ROUTE = '/capital-automation/storage/clear'
 const DOC_URLS = {
   fuyao: 'https://fuyao.aicubes.cn/docs/',
   ftshare: 'https://market.ft.tech/gateway/doc/p/pb8eizu3',
@@ -84,6 +87,14 @@ const AUTOMATION_RANGES = {
   idleTimeoutMinutes: { min: 1, max: 30, unit: 'automationUnitMinutes' },
   maxSteps: { min: 100, max: 2_000, unit: 'automationUnitSteps' },
   maxToolCalls: { min: 100, max: 5_000, unit: 'automationUnitCalls' },
+}
+const STORAGE_CATEGORY_LABELS = {
+  datasets: 'automationStorageDatasets',
+  profiles: 'automationStorageProfiles',
+  ocr: 'automationStorageOcr',
+  charts: 'automationStorageCharts',
+  runs: 'automationStorageRuns',
+  other: 'automationStorageOther',
 }
 const SELECTED_SKILL_FIELDS = SELECTED_SKILL_CATALOG.map(({ key }) => key)
 // Stable orders: facet counts change with the other dimension, but chips must not jump under the cursor.
@@ -136,6 +147,37 @@ const zh = {
   automationWorkspaceLoading: '工作区列表读取中…',
   automationWorkspaceUnavailable: '工作区列表暂时读不到；任务仍会使用默认工作区，切回本格会重试。',
   automationWorkspaceFallback: '专属默认工作区',
+  automationStorageGroup: '存储',
+  automationStorageWorkspace: '工作区数据',
+  automationStorageCache: '可清理缓存',
+  automationStorageAnalysis: '分析结果',
+  automationStorageRetained: '保留',
+  automationStorageSessions: '运行会话',
+  automationStorageSessionsHint: '由 DSH 管理，不随「清除数据缓存」删除',
+  automationStorageUnavailable: '占用读取失败；切回本格会重试。',
+  automationStorageRetry: '重试',
+  automationStorageStale: '刷新失败，显示上次结果。',
+  automationStorageEmpty: '暂无可清理缓存',
+  automationStorageClear: '清除数据缓存',
+  automationStorageClearing: '清除中…',
+  automationStorageConfirmTitle: '清除数据缓存',
+  automationStorageConfirmBody: '将删除 {path} 中 {size} 的 capital-data 缓存（含数据集、数据档案与 OCR）。capital-analysis 中的分析结果、任务、运行记录、简报、通知和运行会话都会保留。',
+  automationStorageConfirm: '清除 {size}',
+  automationStorageCancel: '取消',
+  automationStorageCleared: '已释放 {size}。',
+  automationStorageClearedPartial: '已释放 {size}，另有 {failed} 个文件未能删除。',
+  automationStorageClearFailed: '清理失败，请稍后再试。',
+  automationStorageRunInProgress: '有运行正在进行，请结束后再清理。',
+  automationStorageActiveHint: '有运行正在进行，结束后可清理。',
+  automationStorageUnsafe: '缓存目录不是普通目录，已停止清理。',
+  automationStorageDatasets: '数据集',
+  automationStorageProfiles: '数据档案',
+  automationStorageOcr: 'OCR',
+  automationStorageCharts: '图表',
+  automationStorageRuns: '分析产物',
+  automationStorageOther: '其他',
+  automationStorageSessionCount: '{count} 个',
+  automationStorageUnreadable: '部分文件读不到，显示的是可读部分。',
   windLabel: 'Wind Alice API Key',
   windHint: 'Wind 金融信披类文档检索接口。保存后新自动模式会话生效。',
   paddleocrLabel: 'PaddleOCR 文档解析 Token',
@@ -207,6 +249,37 @@ const en = {
   automationWorkspaceLoading: 'Loading workspaces…',
   automationWorkspaceUnavailable: 'The workspace list is unavailable; runs still use the default workspace. Re-entering this tab retries.',
   automationWorkspaceFallback: 'Dedicated default workspace',
+  automationStorageGroup: 'Storage',
+  automationStorageWorkspace: 'Workspace data',
+  automationStorageCache: 'Clearable cache',
+  automationStorageAnalysis: 'Analysis results',
+  automationStorageRetained: 'Retained',
+  automationStorageSessions: 'Run sessions',
+  automationStorageSessionsHint: 'Managed by DSH; not removed by “Clear data cache”',
+  automationStorageUnavailable: 'Could not read usage; re-enter this tab to retry.',
+  automationStorageRetry: 'Retry',
+  automationStorageStale: 'Refresh failed; showing the previous result.',
+  automationStorageEmpty: 'No cache to clear',
+  automationStorageClear: 'Clear data cache',
+  automationStorageClearing: 'Clearing…',
+  automationStorageConfirmTitle: 'Clear data cache',
+  automationStorageConfirmBody: 'Delete {size} of capital-data cache from {path} (datasets, profiles, and OCR). Analysis results in capital-analysis, tasks, run records, briefs, notifications, and run sessions are kept.',
+  automationStorageConfirm: 'Clear {size}',
+  automationStorageCancel: 'Cancel',
+  automationStorageCleared: 'Freed {size}.',
+  automationStorageClearedPartial: 'Freed {size}; {failed} file(s) could not be removed.',
+  automationStorageClearFailed: 'Cleanup failed. Please try again.',
+  automationStorageRunInProgress: 'A run is in progress. Try again after it ends.',
+  automationStorageActiveHint: 'A run is in progress; cleanup is available after it ends.',
+  automationStorageUnsafe: 'The cache directory is not a regular directory; cleanup was stopped.',
+  automationStorageDatasets: 'Datasets',
+  automationStorageProfiles: 'Data profiles',
+  automationStorageOcr: 'OCR',
+  automationStorageCharts: 'Charts',
+  automationStorageRuns: 'Runs',
+  automationStorageOther: 'Other',
+  automationStorageSessionCount: '{count} sessions',
+  automationStorageUnreadable: 'Some files could not be read; showing readable data.',
   windLabel: 'Wind Alice API Key',
   windHint: 'Wind financial disclosure document retrieval interface. Takes effect in new Auto mode sessions.',
   paddleocrLabel: 'PaddleOCR document token',
@@ -279,6 +352,37 @@ function installStyles() {
     .capital-config-automation-group > .capital-config-group-label { color: var(--dsw-alias-label-secondary); font-size: 12px; font-weight: 500; line-height: 18px; }
     .capital-config-number { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
     .capital-config-workspace { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .capital-config-storage { display: flex; flex-direction: column; min-width: 0; border: .5px solid var(--dsw-alias-border-l1); border-radius: 10px; background: var(--dsw-alias-bg-layer-2); }
+    .capital-config-storage-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 10px 14px; }
+    .capital-config-storage-head > .capital-config-storage-label { font-size: 12px; }
+    .capital-config-storage-head > .capital-config-storage-amount { font-size: 15px; font-weight: 600; line-height: 22px; }
+    .capital-config-storage-item { display: flex; flex-direction: column; gap: 6px; padding: 10px 14px; border-top: .5px solid var(--dsw-alias-border-l2); }
+    .capital-config-storage-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; }
+    .capital-config-storage-value { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+    .capital-config-storage-label { color: var(--dsw-alias-label-secondary); font-size: 12.5px; line-height: 20px; }
+    .capital-config-storage-amount { display: inline-flex; align-items: baseline; gap: 6px; color: var(--dsw-alias-label-primary); font-size: 13px; font-weight: 500; line-height: 20px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .capital-config-storage-count { color: var(--dsw-alias-label-tertiary); font-size: 11.5px; font-weight: 400; }
+    .capital-config-storage-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+    .capital-config-storage-chip { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 16px; white-space: nowrap; }
+    .capital-config-storage-badge { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--dsw-alias-state-success-tertiary); color: var(--dsw-alias-state-success-primary); font-size: 11px; font-weight: 500; line-height: 16px; white-space: nowrap; }
+    .capital-config-storage-meta { margin: 0; color: var(--dsw-alias-label-tertiary); font-size: 11.5px; line-height: 17px; overflow-wrap: anywhere; }
+    .capital-config-storage-meta[data-tone="warn"] { color: var(--dsw-alias-state-warn-primary); }
+    .capital-config-storage-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 10px 14px; border-top: .5px solid var(--dsw-alias-border-l2); }
+    .capital-config-storage-status { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-left: auto; min-width: 0; }
+    .capital-config-storage-retry { padding: 0; border: 0; background: transparent; color: var(--dsw-alias-brand-primary); font: inherit; font-size: 12px; line-height: 18px; cursor: pointer; }
+    .capital-config-storage-retry:hover { text-decoration: underline; }
+    .capital-config-storage-retry:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-brand-primary)); outline-offset: 2px; }
+    .capital-config-storage-result { margin: 0; color: var(--dsw-alias-state-success-primary); font-size: 12px; line-height: 18px; }
+    .capital-config-cache-button { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; height: 32px; padding: 0 14px; border: .5px solid var(--dsw-alias-border-l1); border-radius: 999px; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 12.5px; line-height: 20px; cursor: pointer; transition: background .15s, border-color .15s, opacity .15s; }
+    .capital-config-cache-button:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+    .capital-config-cache-button[data-variant="danger"] { border-color: var(--dsw-alias-state-error-primary); color: var(--dsw-alias-state-error-primary); }
+    .capital-config-cache-button[data-variant="danger"]:hover:not(:disabled) { background: var(--dsw-alias-state-error-primary); color: var(--dsw-alias-bg-base); }
+    .capital-config-cache-button:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-brand-primary)); outline-offset: 0; }
+    .capital-config-cache-button:disabled { opacity: .5; cursor: not-allowed; }
+    div.capital-config-cache-modal { width: min(480px, 100%); }
+    .capital-config-cache-modal-content { min-height: 0; overflow: auto; }
+    .capital-config-cache-modal-body { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 12.5px; line-height: 20px; }
+    .capital-config-cache-actions { display: flex; justify-content: flex-end; gap: 8px; }
     .capital-config-number-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
     .capital-config-number-head .capital-config-write-failed { font-size: 11px; line-height: 16px; }
     .capital-config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
@@ -449,6 +553,15 @@ class CapitalCardController {
     this.workspaceDetails = null
     this.workspacesInFlight = false
     this.workspacesFailed = false
+    this.storage = null
+    this.storageInFlight = false
+    this.storageQueued = false
+    this.storageFailed = false
+    this.storageClearing = false
+    this.storageClearError = null
+    this.storageClearedBytes = null
+    this.storageClearedFailed = 0
+    this.storageRequestId = 0
     // Row count is external: null = unknown, never 0; fetch only after the card is shown.
     this.bundleRows = null
     this.rowsRequested = false
@@ -511,6 +624,17 @@ class CapitalCardController {
         writing: this.workspaceWriting,
         failed: this.workspaceFailed,
       }),
+      storage: {
+        data: this.storage,
+        loading: this.storageInFlight || (this.storage === null && this.storageFailed !== true),
+        failed: this.storageFailed,
+        unavailable: this.storageFailed && this.storage === null,
+        stale: this.storageFailed && this.storage !== null,
+        clearing: this.storageClearing,
+        error: this.storageClearError,
+        clearedBytes: this.storageClearedBytes,
+        clearedFailed: this.storageClearedFailed,
+      },
       // `count === null` means unknown, not zero: the card decides whether to draw it.
       components: { count: this.bundleRows },
     }
@@ -725,6 +849,81 @@ class CapitalCardController {
     this.store.set(this.projection())
   }
 
+  /**
+   * Workspace usage is read from the automation route. Dirty cache is harmless: the
+   * server caps the scan and the card still allows a retry. A forced read merges with
+   * an in-flight one so a workspace switch cannot race an older response.
+   */
+  async ensureStorage(force = false) {
+    if (this.storageInFlight) {
+      if (force) this.storageQueued = true
+      return
+    }
+    if (!force && this.storage !== null && !this.storageFailed) return
+    const requestId = (this.storageRequestId += 1)
+    this.storageInFlight = true
+    this.storageFailed = false
+    this.store.set(this.projection())
+    try {
+      if (typeof fetch !== 'function') throw new Error('fetch_unavailable')
+      const response = await fetch(STORAGE_ROUTE, { method: 'GET', cache: 'no-store', credentials: 'same-origin' })
+      if (!response?.ok) throw new Error(`http_${response?.status ?? 0}`)
+      const payload = await response.json()
+      const storage = payload?.storage
+      if (storage === null || typeof storage !== 'object' || Array.isArray(storage)) throw new Error('invalid_payload')
+      if (requestId === this.storageRequestId) {
+        this.storage = storage
+        this.storageFailed = false
+      }
+    } catch {
+      if (requestId === this.storageRequestId) this.storageFailed = true
+    } finally {
+      if (requestId === this.storageRequestId) this.storageInFlight = false
+      this.store.set(this.projection())
+      if (this.storageQueued) {
+        this.storageQueued = false
+        void this.ensureStorage(true)
+      }
+    }
+  }
+
+  async clearStorage() {
+    if (this.storageClearing) return 'ignored'
+    this.storageClearing = true
+    this.storageClearError = null
+    this.storageClearedBytes = null
+    this.storageClearedFailed = 0
+    this.store.set(this.projection())
+    try {
+      if (typeof fetch !== 'function') throw new Error('fetch_unavailable')
+      const response = await fetch(STORAGE_CLEAR_ROUTE, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirm: true }),
+        credentials: 'same-origin',
+      })
+      const payload = await response.json().catch(() => null)
+      if (!response?.ok || payload?.ok !== true) {
+        const code = payload?.code
+        this.storageClearError = code === 'run_in_progress'
+          ? 'run_in_progress'
+          : code === 'cache_root_unsafe' ? 'unsafe' : 'failed'
+        return 'failed'
+      }
+      const cleared = payload?.cleared
+      if (Number.isSafeInteger(cleared?.bytes) && cleared.bytes >= 0) this.storageClearedBytes = cleared.bytes
+      if (Array.isArray(cleared?.failed)) this.storageClearedFailed = cleared.failed.length
+      await this.ensureStorage(true)
+      return 'cleared'
+    } catch {
+      this.storageClearError = 'failed'
+      return 'failed'
+    } finally {
+      this.storageClearing = false
+      this.store.set(this.projection())
+    }
+  }
+
   async writeAutomationWorkspace(value) {
     if (this.workspaceWriting) return 'ignored'
     const snapshot = this.scope.getSnapshot()
@@ -742,6 +941,15 @@ class CapitalCardController {
     const landed = (this.scope.getSnapshot().value?.automation?.[AUTOMATION_WORKSPACE_FIELD] ?? '') === next
     if (!landed) this.workspaceFailed = true
     this.store.set(this.projection())
+    if (landed) {
+      // A different workspace has a different cache; drop the old numbers before refetching.
+      this.storage = null
+      this.storageFailed = false
+      this.storageClearError = null
+      this.storageClearedBytes = null
+      this.storageClearedFailed = 0
+      void this.ensureStorage(true)
+    }
     return landed ? 'saved' : 'failed'
   }
 
@@ -758,6 +966,8 @@ class CapitalCardController {
       toggleSelectedSkillsMode: (auto) => this.toggleSelectedSkillsMode(auto),
       ensureBundleRows: () => this.ensureBundleRows(),
       ensureWorkspaces: () => this.ensureWorkspaces(),
+      ensureStorage: (force) => this.ensureStorage(force),
+      clearStorage: () => this.clearStorage(),
       writeAutomationWorkspace: (value) => this.writeAutomationWorkspace(value),
     }
   }
@@ -956,6 +1166,53 @@ function SelectedSkillRow({ entry, state, disabled, onChange, t }) {
  * `data-capital-config-tab`, so when unavailable we draw neither tabs nor that
  * attribute and the host list stays visible.
  */
+function formatBytes(value) {
+  const bytes = typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
+  if (bytes < 1024) return `${Math.round(bytes)} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let size = bytes
+  let unit = -1
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024
+    unit += 1
+  }
+  return `${size.toFixed(1)} ${units[unit]}`
+}
+
+function ClearCacheModal({ open, bytes, displayPath, clearing, error, onCancel, onConfirm, t }) {
+  const size = formatBytes(bytes)
+  const errorText = error === 'run_in_progress'
+    ? t('automationStorageRunInProgress')
+    : error === 'unsafe' ? t('automationStorageUnsafe') : error === 'failed' ? t('automationStorageClearFailed') : null
+  return h(Modal, {
+    open,
+    onClose: () => { if (!clearing) onCancel() },
+    title: t('automationStorageConfirmTitle'),
+    closeLabel: t('automationStorageCancel'),
+    className: 'capital-config-cache-modal',
+    contentClassName: 'capital-config-cache-modal-content',
+    footer: h('div', { className: 'capital-config-cache-actions' },
+      h('button', {
+        type: 'button',
+        className: 'capital-config-cache-button',
+        disabled: clearing,
+        onClick: onCancel,
+      }, t('automationStorageCancel')),
+      h('button', {
+        type: 'button',
+        className: 'capital-config-cache-button',
+        'data-variant': 'danger',
+        'aria-busy': clearing ? 'true' : undefined,
+        disabled: clearing,
+        onClick: onConfirm,
+      }, clearing ? t('automationStorageClearing') : t('automationStorageConfirm', { size })),
+    ),
+  },
+  h('p', { className: 'capital-config-cache-modal-body' },
+    t('automationStorageConfirmBody', { size, path: displayPath || t('automationStorageWorkspace') })),
+  errorText ? h('p', { role: 'alert', className: 'capital-config-write-failed' }, errorText) : null)
+}
+
 function CapitalCard(props) {
   const t = props.t
   const state = props.useCapitalCard((snapshot) => snapshot)
@@ -963,13 +1220,16 @@ function CapitalCard(props) {
   const autoMode = state.selectedSkillsMode?.auto === true
   const locale = skillLocale()
   const [tab, setTab] = useState('sources')
+  const [clearCacheOpen, setClearCacheOpen] = useState(false)
   const [traitFilter, setTraitFilter] = useState(SELECTED_SKILL_FILTER_ALL)
   const [presetFilter, setPresetFilter] = useState(SELECTED_SKILL_FILTER_ALL)
   // Fetch on mount: tab labels carry numbers; hooks must precede the unavailable return.
   useEffect(() => { props.ensureBundleRows() }, [])
-  // The workspace list lives behind the automation route; fetch when its tab first opens.
+  // The workspace list and storage usage live behind the automation route; fetch when its tab opens.
   useEffect(() => {
-    if (tab === 'automation') props.ensureWorkspaces()
+    if (tab !== 'automation') return
+    props.ensureWorkspaces()
+    props.ensureStorage()
   }, [tab])
   // Pinned order is snapshotted on tab entry so rows never move under the cursor.
   const enabledKeys = () => new Set(SELECTED_SKILL_CATALOG
@@ -1108,6 +1368,118 @@ function CapitalCard(props) {
             ? h('p', { id: workspacePathId, className: 'capital-config-hint' }, t('automationWorkspacePath', { path: workspaceState.current.path }))
             : null,
   )
+  const storageState = state.storage ?? {
+    data: null,
+    loading: false,
+    failed: false,
+    unavailable: false,
+    stale: false,
+    clearing: false,
+    error: null,
+    clearedBytes: null,
+    clearedFailed: 0,
+  }
+  const storageData = storageState.data
+  const cacheBytes = Number.isSafeInteger(storageData?.cache?.bytes) ? storageData.cache.bytes : 0
+  const analysisBytes = Number.isSafeInteger(storageData?.analysis?.bytes) ? storageData.analysis.bytes : 0
+  const workspaceBytes = cacheBytes + analysisBytes
+  const sessions = storageData?.sessions
+  const sessionBytes = Number.isSafeInteger(sessions?.bytes) ? sessions.bytes : 0
+  const sessionCount = Number.isSafeInteger(sessions?.count) ? sessions.count : 0
+  const storageAmount = (value, truncated) => `${truncated === true ? '≥ ' : ''}${formatBytes(value)}`
+  const chipsOf = (categories, ids) => ids
+    .map((id) => ({ id, value: Number.isSafeInteger(categories?.[id]?.bytes) ? categories[id].bytes : 0 }))
+    .filter((item) => item.value > 0)
+    .map((item) => h('span', { key: item.id, className: 'capital-config-storage-chip' }, `${t(STORAGE_CATEGORY_LABELS[item.id])} ${formatBytes(item.value)}`))
+  const cacheChips = storageData === null ? [] : chipsOf(storageData.cache?.categories, ['datasets', 'profiles', 'ocr', 'other'])
+  const analysisChips = storageData === null ? [] : chipsOf(storageData.analysis?.categories, ['charts', 'runs', 'other'])
+  const cacheBlocked = storageData?.canClear === false
+  const canClearCache = cacheBytes > 0 && !cacheBlocked && storageState.loading !== true && storageState.clearing !== true
+  const clearError = storageState.error === 'run_in_progress'
+    ? t('automationStorageRunInProgress')
+    : storageState.error === 'unsafe' ? t('automationStorageUnsafe')
+      : storageState.error === 'failed' ? t('automationStorageClearFailed') : null
+  const cacheMetaTone = storageData?.cache?.unsafe === true || (storageData?.activeRuns ?? 0) > 0 ? 'warn' : undefined
+  const cacheMeta = storageState.loading || storageState.unavailable || storageState.stale
+    ? null
+    : storageData?.cache?.unsafe === true ? t('automationStorageUnsafe')
+      : (storageData?.activeRuns ?? 0) > 0 ? t('automationStorageActiveHint')
+        : cacheBytes === 0 ? t('automationStorageEmpty')
+          : storageData?.cache?.unreadable > 0 ? t('automationStorageUnreadable') : null
+  const footNote = storageState.unavailable ? t('automationStorageUnavailable') : storageState.stale ? t('automationStorageStale') : null
+  const clearedHint = storageState.clearedBytes === null
+    ? null
+    : storageState.clearedFailed > 0
+      ? t('automationStorageClearedPartial', { size: formatBytes(storageState.clearedBytes), failed: storageState.clearedFailed })
+      : t('automationStorageCleared', { size: formatBytes(storageState.clearedBytes) })
+  const storageSection = automationGroup('automationStorageGroup', [
+    h('div', { className: 'capital-config-storage' },
+      h('div', { className: 'capital-config-storage-head' },
+        h('span', { className: 'capital-config-storage-label' }, t('automationStorageWorkspace')),
+        h('span', { className: 'capital-config-storage-amount' }, storageData === null
+          ? '—'
+          : storageAmount(workspaceBytes, storageData?.cache?.truncated === true || storageData?.analysis?.truncated === true)),
+      ),
+      h('div', { className: 'capital-config-storage-item' },
+        h('div', { className: 'capital-config-storage-row' },
+          h('span', { className: 'capital-config-storage-label' }, t('automationStorageCache')),
+          h('span', { className: 'capital-config-storage-amount' }, storageData === null
+            ? '—'
+            : storageAmount(cacheBytes, storageData?.cache?.truncated === true)),
+        ),
+        cacheChips.length > 0 ? h('div', { className: 'capital-config-storage-chips' }, ...cacheChips) : null,
+        cacheMeta ? h('p', { className: 'capital-config-storage-meta', 'data-tone': cacheMetaTone }, cacheMeta) : null,
+      ),
+      h('div', { className: 'capital-config-storage-item' },
+        h('div', { className: 'capital-config-storage-row' },
+          h('span', { className: 'capital-config-storage-label' }, t('automationStorageAnalysis')),
+          h('span', { className: 'capital-config-storage-value' },
+            h('span', { className: 'capital-config-storage-amount' }, storageData === null
+              ? '—'
+              : storageAmount(analysisBytes, storageData?.analysis?.truncated === true)),
+            storageData === null ? null : h('span', { className: 'capital-config-storage-badge' }, t('automationStorageRetained')),
+          ),
+        ),
+        analysisChips.length > 0 ? h('div', { className: 'capital-config-storage-chips' }, ...analysisChips) : null,
+      ),
+      h('div', { className: 'capital-config-storage-item' },
+        h('div', { className: 'capital-config-storage-row' },
+          h('span', { className: 'capital-config-storage-label' }, t('automationStorageSessions')),
+          h('span', { className: 'capital-config-storage-value' },
+            h('span', { className: 'capital-config-storage-amount' },
+              storageData === null || sessions?.available === false ? '—' : formatBytes(sessionBytes),
+            ),
+            storageData === null || sessions?.available === false
+              ? null
+              : h('span', { className: 'capital-config-storage-count' }, t('automationStorageSessionCount', { count: sessionCount })),
+          ),
+        ),
+        h('p', { className: 'capital-config-storage-meta' }, t('automationStorageSessionsHint')),
+      ),
+      h('div', { className: 'capital-config-storage-foot' },
+        h('button', {
+          type: 'button',
+          className: 'capital-config-cache-button',
+          'data-variant': 'danger',
+          'aria-busy': storageState.clearing ? 'true' : undefined,
+          disabled: !canClearCache,
+          onClick: () => setClearCacheOpen(true),
+        }, storageState.clearing ? t('automationStorageClearing') : t('automationStorageClear')),
+        h('div', { className: 'capital-config-storage-status' },
+          clearedHint ? h('p', { role: 'status', className: 'capital-config-storage-result' }, clearedHint) : null,
+          clearError && storageState.clearing !== true ? h('p', { role: 'alert', className: 'capital-config-write-failed' }, clearError) : null,
+          footNote ? h('p', { className: 'capital-config-storage-meta' }, footNote) : null,
+          storageState.unavailable || storageState.stale
+            ? h('button', {
+              type: 'button',
+              className: 'capital-config-storage-retry',
+              onClick: () => props.ensureStorage(true),
+            }, t('automationStorageRetry'))
+            : null,
+        ),
+      ),
+    ),
+  ])
   const automationSection = h('div', { className: 'capital-config-automation' },
     workspaceSection,
     automationGroup('automationScheduleGroup', [
@@ -1138,6 +1510,7 @@ function CapitalCard(props) {
       ),
       state.automation?.inAppNotifications?.failed ? h('p', { role: 'status', className: 'capital-config-write-failed' }, t('saveFailed')) : null,
     ]),
+    storageSection,
   )
   const modeSection = h('div', { className: 'capital-config-selected-mode' },
     h('div', { className: 'capital-config-switch-row' },
@@ -1245,6 +1618,20 @@ function CapitalCard(props) {
       )]),
     // The panel is the host's rows list; keep the aria-controls target non-empty via sr-only.
     panel('components', [h('span', { className: 'capital-config-sr-only' }, t('componentsHint'))]),
+    clearCacheOpen ? h(ClearCacheModal, {
+      open: true,
+      bytes: cacheBytes,
+      displayPath: storageData?.workspace?.displayPath ?? workspaceState.current?.path ?? '',
+      clearing: storageState.clearing,
+      error: storageState.error,
+      onCancel: () => { if (!storageState.clearing) setClearCacheOpen(false) },
+      onConfirm: () => {
+        Promise.resolve(props.clearStorage()).then((result) => {
+          if (result === 'cleared') setClearCacheOpen(false)
+        })
+      },
+      t,
+    }) : null,
   )
 }
 

@@ -64,6 +64,7 @@ test('打包闸门：vendored 图表库与构建产物都在发布清单里', (t
     'automation/task-icons.js',
     'automation/TABLER-ICONS-LICENSE',
     'automation/workspaces.js',
+    'automation/storage.js',
     'preset/capital-generation/agent.patch.yml',
     'preset/capital-generation/skills/capital-chart-protocol/SKILL.md',
     // Persona duty lines load skills by name, so every protocol book is named individually here.

@@ -35,6 +35,7 @@ function harness(options = {}) {
     briefs: options.briefs,
     asks: options.asks,
     boardService: options.boardService,
+    storage: options.storage,
     now: () => NOW,
   })
   const handler = createAutomationRouteHandler(service, { authorize: options.authorize ?? (() => undefined) })
@@ -655,4 +656,104 @@ test('失败简报重试：只走单条 POST，状态码与错误码稳定', asy
   assert.equal(rejected.json().code, 'brief_not_retryable')
   const noBackfill = await call(handler, { method: 'POST', url: '/capital-automation/board/backfill' })
   assert.equal(noBackfill.statusCode, 404)
+})
+
+test('存储：GET /storage 返回缓存/分析/会话三段，响应 no-store', async () => {
+  const storage = {
+    async stats() {
+      return {
+        workspace: { id: 'ws-1', title: 'CapGen 投研自动化（web）', displayPath: '~/T', scope: 'dedicated' },
+        cache: { bytes: 123, files: 2, categories: { datasets: { bytes: 123, files: 2 }, profiles: { bytes: 0, files: 0 }, ocr: { bytes: 0, files: 0 }, other: { bytes: 0, files: 0 } }, truncated: false, unreadable: 0, unsafe: false },
+        analysis: { bytes: 456, files: 1, categories: { charts: { bytes: 456, files: 1 }, runs: { bytes: 0, files: 0 }, other: { bytes: 0, files: 0 } }, truncated: false, unreadable: 0, unsafe: false },
+        sessions: { available: true, bytes: 789, count: 3 },
+      }
+    },
+    async clear() { throw new Error('must not clear on GET') },
+  }
+  const { handler } = harness({ storage })
+  const response = await call(handler, { method: 'GET', url: '/capital-automation/storage' })
+  assert.equal(response.statusCode, 200)
+  assert.equal(response.headers['cache-control'], 'no-store')
+  const body = response.json().storage
+  assert.equal(body.workspace.id, 'ws-1')
+  assert.equal(body.cache.bytes, 123)
+  assert.equal(body.analysis.bytes, 456)
+  assert.deepEqual(body.sessions, { available: true, bytes: 789, count: 3 })
+  assert.equal(body.canClear, true)
+  assert.equal(body.activeRuns, 0)
+})
+
+test('存储：活动运行存在时 GET /storage 标 canClear=false', async () => {
+  const storage = {
+    async stats() {
+      return {
+        workspace: { displayPath: '~/T' },
+        cache: { bytes: 10, files: 1, categories: {}, truncated: false, unreadable: 0, unsafe: false },
+        analysis: { bytes: 0, files: 0, categories: {}, truncated: false, unreadable: 0, unsafe: false },
+        sessions: { available: true, bytes: 0, count: 0 },
+      }
+    },
+    async clear() { throw new Error('must not clear on GET') },
+  }
+  const { store, handler } = harness({ storage })
+  await store.createRun({ taskId: 't1', taskTitle: 'T', trigger: 'manual', occurrenceKey: 'manual-t1', status: 'running' })
+  const response = await call(handler, { method: 'GET', url: '/capital-automation/storage' })
+  assert.equal(response.statusCode, 200)
+  assert.equal(response.json().storage.activeRuns, 1)
+  assert.equal(response.json().storage.canClear, false)
+})
+
+test('存储：POST /storage/clear 只接受 {confirm:true}，成功返回释放量', async () => {
+  let calls = 0
+  const storage = {
+    async stats() { return { workspace: {}, cache: {}, analysis: {}, sessions: {} } },
+    async clear() {
+      calls += 1
+      return { bytes: 123, files: 2, categories: { datasets: { bytes: 123, files: 2 } }, failed: [] }
+    },
+  }
+  const { handler } = harness({ storage })
+  const cleared = await call(handler, { method: 'POST', url: '/capital-automation/storage/clear', body: { confirm: true } })
+  assert.equal(cleared.statusCode, 200)
+  assert.equal(cleared.json().cleared.bytes, 123)
+  assert.equal(calls, 1)
+
+  for (const body of [{}, { confirm: false }, { confirm: true, extra: 1 }]) {
+    const rejected = await call(handler, { method: 'POST', url: '/capital-automation/storage/clear', body })
+    assert.equal(rejected.statusCode, 400, JSON.stringify(body))
+    assert.equal(rejected.json().code, 'invalid_request')
+  }
+  assert.equal(calls, 1, '校验失败不能进入删除')
+  const wrongMethod = await call(handler, { method: 'GET', url: '/capital-automation/storage/clear' })
+  assert.equal(wrongMethod.statusCode, 405)
+  const wrongGet = await call(handler, { method: 'POST', url: '/capital-automation/storage', body: { confirm: true } })
+  assert.equal(wrongGet.statusCode, 405)
+})
+
+test('存储：活动运行存在时 409，且 storage.clear 一次都不调用', async () => {
+  let calls = 0
+  const storage = {
+    async stats() { return { workspace: {}, cache: {}, analysis: {}, sessions: {} } },
+    async clear() { calls += 1; return { bytes: 0, files: 0, failed: [] } },
+  }
+  const { store, handler } = harness({ storage })
+  await store.createRun({ taskId: 't1', taskTitle: 'T', trigger: 'manual', occurrenceKey: 'manual-t1', status: 'queued' })
+  const response = await call(handler, { method: 'POST', url: '/capital-automation/storage/clear', body: { confirm: true } })
+  assert.equal(response.statusCode, 409)
+  assert.equal(response.json().code, 'run_in_progress')
+  assert.equal(calls, 0)
+})
+
+test('存储：未认证请求在读取 body 与存储前 401', async () => {
+  let touched = 0
+  const storage = {
+    async stats() { touched += 1; return {} },
+    async clear() { touched += 1; return {} },
+  }
+  const { handler } = harness({ storage, authorize: () => 401 })
+  const get = await call(handler, { method: 'GET', url: '/capital-automation/storage' })
+  assert.equal(get.statusCode, 401)
+  const post = await call(handler, { method: 'POST', url: '/capital-automation/storage/clear', body: { confirm: true } })
+  assert.equal(post.statusCode, 401)
+  assert.equal(touched, 0)
 })

@@ -485,6 +485,10 @@ export const TodoDecisionSchema = z.strictObject({
   action: z.enum(['confirm', 'defer', 'auto']),
 })
 
+export const StorageClearSchema = z.strictObject({
+  confirm: z.literal(true),
+})
+
 export const AskCreateSchema = z.strictObject({
   question: z.string().trim().min(1).max(MAX_ASK_QUESTION_CHARS),
   timeZone: timeZone.optional(),
