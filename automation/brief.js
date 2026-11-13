@@ -6,6 +6,7 @@
  */
 import { createHash } from 'node:crypto'
 
+import { extractJsonText, parseJsonValue } from './json-text.js'
 import {
   BriefGapSchema,
   BriefItemSchema,
@@ -17,9 +18,11 @@ import { sanitizeMessage } from './redact.js'
 export const BRIEF_PROMPT_VERSION = 11
 export const BRIEF_PENDING_STALE_MS = 10 * 60_000
 export const BRIEF_MAX_ATTEMPTS = 5
-export const BRIEF_TIMEOUT_MS = 90_000
-// Reasoning models spend 1.5–2.5k thinking tokens before the JSON; 2.4k finishes at `length`.
-const BRIEF_MAX_TOKENS = 8_000
+// Reasoning runs a long time before the first JSON token; the cap must outlast it.
+export const BRIEF_TIMEOUT_MS = 180_000
+// Reasoning tokens share this cap with the JSON, and the model thinks before answering even
+// without an explicit effort. A cap that only covers the JSON can end with empty content.
+const BRIEF_MAX_TOKENS = 32_000
 const BRIEF_MAX_ACTIVE_PER_PROFILE = 2
 const BRIEF_MAX_ACTIVE_GLOBAL = 3
 const BRIEF_RECOVERY_INTERVAL_MS = 60_000
@@ -482,13 +485,12 @@ function dedupeBy(list, keyOf) {
 }
 
 export function parseBriefOutput(raw, source, blocks = sourceBlocksOf(source)) {
-  let text = String(raw ?? '').trim()
-  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(text)
-  if (fenced !== null) text = fenced[1].trim()
-  let value
-  try {
-    value = JSON.parse(text)
-  } catch {
+  const text = String(raw ?? '').trim()
+  if (text.length === 0) {
+    throw new BriefValidationError('empty_output', '模型没有返回正文')
+  }
+  const value = parseJsonValue(extractJsonText(text))
+  if (value === undefined) {
     throw new BriefValidationError('invalid_json', '模型输出不是合法 JSON')
   }
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -554,26 +556,35 @@ export async function readSessionAnswer(sessionQuery, sessionId, { includeToolTe
 export async function streamText(llm, options) {
   const stream = llm.stream(options)
   let text = ''
+  let finish
+  let usage
   for await (const chunk of stream) {
-    if (chunk?.type === 'text-delta' && typeof chunk.text === 'string') text += chunk.text
-    if (chunk?.type === 'finish') {
-      const kind = chunk.reason?.kind
-      if (kind === 'error' || kind === 'aborted') {
-        const failure = chunk.reason?.failure ?? chunk.reason?.reason ?? {}
-        const code = typeof failure.code === 'string' ? failure.code : undefined
-        const status = Number.isFinite(failure.status) ? failure.status : undefined
-        const message = typeof failure.message === 'string' ? failure.message : undefined
-        const detail = [
-          code === undefined ? null : `code=${code}`,
-          status === undefined ? null : `status=${status}`,
-          message === undefined ? null : `message=${message}`,
-        ].filter(Boolean).join(' · ')
-        throw new Error(`模型请求结束：${kind}${detail ? `（${detail}）` : ''}`)
-      }
-      break
+    if (chunk?.type === 'text-delta' && typeof chunk.text === 'string') {
+      text += chunk.text
+      continue
     }
+    if (chunk?.type === 'usage' && chunk.usage !== undefined) {
+      usage = chunk.usage
+      continue
+    }
+    if (chunk?.type !== 'finish') continue
+    const kind = chunk.reason?.kind
+    if (kind === 'error' || kind === 'aborted') {
+      const failure = chunk.reason?.failure ?? chunk.reason?.reason ?? {}
+      const code = typeof failure.code === 'string' ? failure.code : undefined
+      const status = Number.isFinite(failure.status) ? failure.status : undefined
+      const message = typeof failure.message === 'string' ? failure.message : undefined
+      const detail = [
+        code === undefined ? null : `code=${code}`,
+        status === undefined ? null : `status=${status}`,
+        message === undefined ? null : `message=${message}`,
+      ].filter(Boolean).join(' · ')
+      throw new Error(`模型请求结束：${kind}${detail ? `（${detail}）` : ''}`)
+    }
+    finish = chunk.reason
+    break
   }
-  return text.trim()
+  return { text: text.trim(), finish, usage }
 }
 
 function fallbackModelRoute(ctx) {
@@ -589,6 +600,14 @@ function routeLabel(route) {
 function errorText(error) {
   const text = sanitizeMessage(String(error?.message ?? error)).slice(0, 300)
   return text.length > 0 ? text : '任务简报生成失败'
+}
+
+/** Name the spend that starved the answer; pi-ai folds reasoning into output. */
+function reasoningNote(usage) {
+  const reasoning = usage?.reasoningTokens
+  if (Number.isFinite(reasoning) && reasoning > 0) return `（推理已用 ${reasoning} token）`
+  const output = usage?.outputTokens
+  return Number.isFinite(output) && output > 0 ? `（本次输出 ${output} token）` : ''
 }
 
 export function createBriefService(options) {
@@ -634,7 +653,7 @@ export function createBriefService(options) {
     const timeout = setTimeout(() => controller.abort(), BRIEF_TIMEOUT_MS)
     timeout.unref?.()
     try {
-      return await streamText(llm, {
+      const result = await streamText(llm, {
         provider: route.provider,
         model: route.model,
         // opencode-go rejects requests without x-opencode-session; this is its header source.
@@ -645,6 +664,19 @@ export function createBriefService(options) {
         maxTokens: BRIEF_MAX_TOKENS,
         signal: controller.signal,
       })
+      const note = reasoningNote(result.usage)
+      // A truncated reply is usually all reasoning: retry instead of asking the model to
+      // repair text it never finished. Keep it when the object closed before the cut.
+      if (result.finish?.kind === 'max-tokens' && parseJsonValue(extractJsonText(result.text)) === undefined) {
+        throw new BriefValidationError(
+          'output_truncated',
+          `模型输出达到 ${BRIEF_MAX_TOKENS} token 上限被截断${note}，没有留下完整 JSON`,
+        )
+      }
+      if (result.text.length === 0) {
+        throw new BriefValidationError('empty_output', `模型没有返回正文${note}`)
+      }
+      return result.text
     } finally {
       clearTimeout(timeout)
       controllers.delete(runId)

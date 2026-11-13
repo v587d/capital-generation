@@ -98,6 +98,16 @@ test('简报输出：代码围栏、原文引用、股票角色与跳过', () =>
   assert.throws(() => parseBriefOutput('not json', ANSWER), BriefValidationError)
 })
 
+test('简报输出：前言、后记与字符串外尾逗号也能解析，空正文报空正文', () => {
+  const body = JSON.stringify(output()).replace(/\}$/, ',\n}')
+  assert.equal(parseBriefOutput(`以下是简报：\n\n${body}\n\n以上。`, ANSWER).headline, HEADLINE)
+  assert.equal(parseBriefOutput(`说明\n\`\`\`json\n${JSON.stringify(output())}\n\`\`\`\n`, ANSWER).headline, HEADLINE)
+  assert.throws(
+    () => parseBriefOutput('  \n ', ANSWER),
+    (error) => error.code === 'empty_output' && /模型没有返回正文/.test(error.message),
+  )
+})
+
 test('简报输出：items 不设条数上限，原文列了几条就保留几条', () => {
   const lines = Array.from({ length: 9 }, (_, index) => {
     const day = String(10 + index).padStart(2, '0')
@@ -305,7 +315,7 @@ test('固定 system prompt：无 persona、无工具，sessionId 与正文进入
   assert.equal(captured.sessionId, 'session-test-1', 'opencode-go 需要会话头，否则 400 MissingSessionID')
   assert.equal(captured.tools, undefined)
   assert.equal(captured.temperature, 0)
-  assert.equal(captured.maxTokens, 8_000, '推理模型会先消耗 thinking token，2400 会直接 length')
+  assert.equal(captured.maxTokens, 32_000, '推理 token 与正文共享 maxTokens，8k 会被推理吃光')
   const payload = JSON.parse(captured.messages[0].content[0].text)
   assert.equal(payload.sessionId, 'session-test-1')
   assert.match(payload.sourceBlocks.map((block) => block.text).join('\n'), /指南针/)
@@ -510,6 +520,107 @@ test('模型失败只把简报标失败，不影响运行；失败简报可单�
   assert.equal(ready.attempts, 3, '首次模型调用失败会内部重试一次，手动重试再成功')
   assert.match(ready.lastError, /model down/, '成功记录保留上一次失败原因')
   assert.ok(ready.lastErrorAt, '保留上一次失败时间')
+})
+
+test('输出达到 max-tokens 被截断：按截断重试并写清推理消耗，不报 JSON 格式错误', async () => {
+  const { store, task } = await makeStore()
+  const run = await successRun(store, task)
+  let calls = 0
+  const ctx = {
+    get(name) {
+      if (name === 'sessionQuery') return { readSession: async () => sessionEvents() }
+      if (name === 'llm') {
+        return {
+          async *stream() {
+            calls += 1
+            yield { type: 'usage', usage: { inputTokens: 7_000, outputTokens: 32_000 } }
+            yield { type: 'finish', reason: { kind: 'max-tokens' } }
+          },
+        }
+      }
+      return undefined
+    },
+  }
+  const service = createBriefService({
+    ctx,
+    store,
+    scheduler: { status: () => ({ state: 'active' }) },
+    now: () => NOW,
+    logger: { warn() {} },
+  })
+  await service.onRunSucceeded({ run: await store.getRun(run.id), task })
+  const failed = await waitForBrief(store, run.id, 'failed')
+  service.stop()
+  assert.equal(calls, 2, '截断走模型调用重试，不再发修复请求')
+  assert.match(failed.error, /32000 token 上限被截断/)
+  assert.match(failed.error, /本次输出 32000 token/, 'pi-ai 把推理折进 output，报输出总数')
+  assert.doesNotMatch(failed.error, /不是合法 JSON/)
+  assert.equal(failed.attempts, 2)
+})
+
+test('max-tokens 但对象已闭合：保留可用输出，不因截断标记重试', async () => {
+  const { store, task } = await makeStore()
+  const run = await successRun(store, task)
+  let calls = 0
+  const ctx = {
+    get(name) {
+      if (name === 'sessionQuery') return { readSession: async () => sessionEvents() }
+      if (name === 'llm') {
+        return {
+          async *stream() {
+            calls += 1
+            yield { type: 'text-delta', text: JSON.stringify(output()) }
+            yield { type: 'finish', reason: { kind: 'max-tokens' } }
+          },
+        }
+      }
+      return undefined
+    },
+  }
+  const service = createBriefService({
+    ctx,
+    store,
+    scheduler: { status: () => ({ state: 'active' }) },
+    now: () => NOW,
+    logger: { warn() {} },
+  })
+  await service.onRunSucceeded({ run: await store.getRun(run.id), task })
+  const brief = await waitForBrief(store, run.id, 'ready')
+  service.stop()
+  assert.equal(calls, 1)
+  assert.equal(brief.headline, HEADLINE)
+})
+
+test('模型只返回空白：报空正文并带推理消耗，不报 JSON 格式错误', async () => {
+  const { store, task } = await makeStore()
+  const run = await successRun(store, task)
+  const ctx = {
+    get(name) {
+      if (name === 'sessionQuery') return { readSession: async () => sessionEvents() }
+      if (name === 'llm') {
+        return {
+          async *stream() {
+            yield { type: 'text-delta', text: '  \n ' }
+            yield { type: 'usage', usage: { inputTokens: 7_000, outputTokens: 6_000, reasoningTokens: 5_900 } }
+            yield { type: 'finish', reason: { kind: 'stop' } }
+          },
+        }
+      }
+      return undefined
+    },
+  }
+  const service = createBriefService({
+    ctx,
+    store,
+    scheduler: { status: () => ({ state: 'active' }) },
+    now: () => NOW,
+    logger: { warn() {} },
+  })
+  await service.onRunSucceeded({ run: await store.getRun(run.id), task })
+  const failed = await waitForBrief(store, run.id, 'failed')
+  service.stop()
+  assert.match(failed.error, /模型没有返回正文（推理已用 5900 token）/)
+  assert.doesNotMatch(failed.error, /不是合法 JSON/)
 })
 
 test('重试：旧 prompt 版本重置尝试次数，新版本仍受上限约束', async () => {

@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 
 import { includesQuote, sourceBlocksOf } from './brief.js'
+import { extractJsonObject } from './json-text.js'
 import { sanitizeMessage } from './redact.js'
 import { localPartsAt } from './time.js'
 
@@ -89,65 +90,6 @@ function decisionCovers(decision, lastSeenAt) {
   const seenAt = Date.parse(lastSeenAt)
   if (!Number.isFinite(decidedAt) || !Number.isFinite(seenAt)) return true
   return seenAt <= decidedAt
-}
-
-function parseObject(text) {
-  try {
-    const value = JSON.parse(text)
-    return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : undefined
-  } catch {
-    return undefined
-  }
-}
-
-/**
- * Models occasionally leave a trailing comma before `]`/`}`; JSON.parse then drops the whole
- * verdict block and every candidate silently falls back to insufficient.
- */
-function stripTrailingCommas(text) {
-  let output = ''
-  let inString = false
-  let escaped = false
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index]
-    if (inString) {
-      output += char
-      if (escaped) escaped = false
-      else if (char === '\\') escaped = true
-      else if (char === '"') inString = false
-      continue
-    }
-    if (char === '"') {
-      inString = true
-      output += char
-      continue
-    }
-    if (char === ',') {
-      let next = index + 1
-      while (next < text.length && /\s/.test(text[next])) next += 1
-      if (text[next] === ']' || text[next] === '}') continue
-    }
-    output += char
-  }
-  return output
-}
-
-/**
- * Validate the verifier's result block against the evidence text it claims to quote. A quote
- * that exists in neither the tool output nor the final answer is a fabrication and is dropped.
- */
-function extractJsonObject(raw) {
-  let text = String(raw ?? '').trim()
-  const fences = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/gi)]
-  if (fences.length > 0) {
-    text = fences.at(-1)[1].trim()
-  } else {
-    // A verifier may wrap the JSON in a short prose preamble; keep the outermost object.
-    const start = text.indexOf('{')
-    const end = text.lastIndexOf('}')
-    if (start >= 0 && end > start) text = text.slice(start, end + 1)
-  }
-  return parseObject(text) ?? parseObject(stripTrailingCommas(text))
 }
 
 /**
