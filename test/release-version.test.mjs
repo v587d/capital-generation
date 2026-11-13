@@ -60,6 +60,18 @@ test('发版闸门：DSH 基线版本在 README 徽章 / README 正文 / CONTRIB
   assert.equal(devSetup[1], decodeShieldsLabel(badge[1]), `CONTRIBUTING 说的基线（${devSetup[1]}）与 README 徽章不一致——升级 DSH 后三处要一起改`)
 })
 
+test('发版闸门：CI 安装的 dsh 版本必须与 README 基线一致', () => {
+  // The Ubuntu ledger job installs its own dsh; pinning an older rc there makes every probe fail
+  // with an upstream-surface error that has nothing to do with the release under test.
+  const readme = readFileSync(join(ROOT, 'README.md'), 'utf8')
+  const workflow = readFileSync(join(ROOT, '.github/workflows/test.yml'), 'utf8')
+  const badge = readme.match(/badge\/DSH%20Baseline-(.+?)-blue/)
+  const pin = workflow.match(/npm install -g @deepseek-ai\/dsh@([^\s]+)/)
+  assert.ok(badge, 'README 顶部缺少 DSH Baseline 徽章')
+  assert.ok(pin, 'test.yml 里找不到 npm install -g @deepseek-ai/dsh@…')
+  assert.equal(pin[1], decodeShieldsLabel(badge[1]), `CI 装的 dsh（${pin[1]}）与 README 基线（${decodeShieldsLabel(badge[1])}）不一致：账本会在 Ubuntu 上整片红`)
+})
+
 test('发版闸门：README 引用的截图都在 assets/ 里（换图改名不许留空引用）', () => {
   const readme = readFileSync(join(ROOT, 'README.md'), 'utf8')
   const refs = [...new Set([...readme.matchAll(/assets\/[^\s")]+?\.(?:png|jpe?g|gif|svg|webp)/g)].map((match) => match[0]))]
