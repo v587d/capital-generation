@@ -1088,7 +1088,7 @@ function installStyles() {
     .capital-automation-paneltoggle:hover { color: var(--dsw-alias-label-primary); }
     .capital-automation-paneltoggle:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--ca-business)); outline-offset: 3px; border-radius: 4px; }
     .capital-automation-panelchevron { flex: none; color: var(--ca-caption); transition: transform .15s; }
-    .capital-automation-panelchevron[data-open="false"] { transform: rotate(-90deg); }
+    .capital-automation-paneltoggle[aria-expanded="false"] .capital-automation-panelchevron { transform: rotate(-90deg); }
     .capital-automation-panelbody[hidden] { display: none; }
     .capital-automation-boardempty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; min-height: min(440px, calc(100dvh - 260px)); padding: 44px 24px; border: .5px dashed var(--ca-line); border-radius: 20px; background: var(--ca-card); color: var(--ca-muted); text-align: center; }
     .capital-automation-boardemptyicon { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 14px; background: color-mix(in srgb, var(--ca-business) 12%, var(--ca-card)); color: var(--ca-business-text); }
@@ -4092,8 +4092,15 @@ function boardTodoPeriod(item, now = new Date()) {
   const decidedToday = typeof decidedAt === 'string' && localDateKey(new Date(decidedAt)) === today
   // A decision is feedback for the rest of today, then it belongs to the archive.
   if (decidedAt !== undefined) return decidedToday ? 'today' : 'expired'
-  // A triggered condition is a fact: keep it actionable until the user decides.
-  if (watchedStatus === 'triggered') return 'today'
+  // A triggered condition stays actionable through the day it fired (or was due); the next
+  // day it joins the archive like any other settled TODO.
+  if (watchedStatus === 'triggered') {
+    const due = typeof item.dueAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.dueAt) ? item.dueAt : ''
+    const at = Date.parse(item.watch?.checkedAt)
+    const checked = Number.isFinite(at) ? localDateKey(new Date(at)) : ''
+    const latest = due > checked ? due : checked
+    return latest.length > 0 && latest < today ? 'expired' : 'today'
+  }
   // A stopped watch has reached its lifecycle end, including date-less "尽快" items.
   if (item.watch?.status === 'expired') return 'expired'
   if (typeof item.dueAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.dueAt)) {
@@ -5356,7 +5363,6 @@ function BoardPanelHead(props) {
       h(IconChevronDownOutlineRegular, {
         size: 14,
         className: 'capital-automation-panelchevron',
-        'data-open': open === true ? 'true' : 'false',
       }))),
     meta ?? null,
     action ?? null)

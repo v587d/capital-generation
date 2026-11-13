@@ -277,7 +277,14 @@ function todoExpired(item, today, timeZone) {
     return decidedDate === undefined || decidedDate < today
   }
   const watchStatus = item.watch?.resolvedFrom ?? item.watch?.status
-  if (watchStatus === 'triggered') return false
+  // A triggered condition is a fact, but it only belongs to "today" through the day it fired
+  // (or was due). From the next day it is history, like any other settled TODO.
+  if (watchStatus === 'triggered') {
+    const due = typeof item.dueAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.dueAt) ? item.dueAt : ''
+    const checked = dateOf(item.watch?.checkedAt, timeZone) ?? ''
+    const latest = due > checked ? due : checked
+    return latest.length > 0 && latest < today
+  }
   if (item.watch?.status === 'expired') return true
   if (typeof item.dueAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.dueAt)) return item.dueAt < today
   const label = typeof item.dueLabel === 'string' ? item.dueLabel.trim() : ''

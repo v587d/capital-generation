@@ -379,6 +379,51 @@ test('个股待跟进不计入已过期条目', async () => {
   assert.equal(board.stocks[0].items.length, 0, '个股展开列表也不显示过期条目')
 })
 
+test('个股待跟进不计入隔天已触发的条目', async () => {
+  const { store } = await makeStore()
+  const task = await makeTask(store)
+  const run = await addBrief(store, task, {
+    key: 'triggered-stock',
+    finishedAt: '2026-11-03T00:40:32.876Z',
+    items: [{
+      kind: 'verify',
+      title: '指南针方向选择看两个价位',
+      detail: '放量突破 45.45 或失守 44.16 才算方向信号。',
+      symbol: '300803.SZ',
+      trigger: '放量突破 45.45 或失守 44.16',
+      dueAt: '2026-11-03',
+      sourceQuote: '放量突破 45.45 或失守 44.16 才算方向信号。',
+    }],
+    stocks: [{ symbol: '300803.SZ', name: '指南针', roles: ['holding'] }],
+  })
+  const [item] = await boardService(store).openTodos({ days: '14', tz: TZ })
+  await store.putTodoWatch({
+    schemaVersion: 1,
+    id: 'tw_triggered_stock',
+    profileKey: store.profileKey,
+    todoId: item.id,
+    kind: 'verify',
+    status: 'triggered',
+    title: item.title,
+    trigger: item.trigger,
+    dueAt: item.dueAt,
+    firstSeenAt: run.finishedAt,
+    lastSeenAt: run.finishedAt,
+    checkedAt: '2026-11-03T09:14:53.640Z',
+    verdict: 'triggered',
+    evidence: '收盘 43.40，失守 44.16。',
+    evidenceRunId: run.id,
+    notifiedAt: '2026-11-03T09:14:53.640Z',
+    notifiedStatus: 'triggered',
+    createdAt: '2026-11-03T09:14:53.640Z',
+    updatedAt: '2026-11-03T09:14:53.640Z',
+  })
+  const board = await boardService(store).board({ days: '14', tz: TZ })
+  assert.equal(board.todos[0].watch.status, 'triggered', '触发状态保留在历史里')
+  assert.equal(board.stocks[0].todoCount, 0, '隔天已触发的条目不再计入个股待跟进')
+  assert.equal(board.stocks[0].items.length, 0, '个股展开列表也不显示隔天触发项')
+})
+
 test('卡片保留任务图标：自定义任务用创建时的选择，内置模板用固定映射', async () => {
   const { store } = await makeStore()
   const custom = await makeTask(store, { title: '深研清单', category: 'research', icon: 'microscope' })
