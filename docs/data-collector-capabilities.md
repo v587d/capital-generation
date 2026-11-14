@@ -11,7 +11,7 @@
 data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，主 Agent 与用户都不直接接触原始数据：
 
 1. 主 Agent 通过 `subagent_data_collector` 委派需求（只传需求与参数，不传原始数据）。
-2. data_collector 按问题涉及的事实选能力，不设单回合数量上限；先调一次 `list_capabilities` 取回精简目录（一行一条 `capability|summary|paginated`），再逐个 `describe_capability` 核对 `input_schema` 与返回字段的逐行字典 `output_fields`，用 `request_data` 逐份取数。
+2. data_collector 按问题涉及的事实选能力，不设单回合数量上限；先调一次 `list_capabilities()` 取九行主题索引（`topic|中文|条数|码点|例子`），再按需调 `list_capabilities({ topic })` 取该主题的 `capability|summary|paginated` 行，然后逐个 `describe_capability` 核对 `input_schema` 与返回字段的逐行字典 `output_fields`，用 `request_data` 逐份取数。
 3. 宿主把上游原始数据**立即持久化**为不可变 Dataset（workspace 内、默认保留 7 天）；每份 DatasetRef（含缓存命中、分页的每页）由 collector 立即通知主 Agent，全部请求结束另发终结消息。原始行永不进入任何 Agent 的上下文；主 Agent 可在取下一份期间把已到的数据交给 data_junior。
 4. 需要看数据内容或基础统计时，由兄弟子 Agent `data_junior` 用 `describe_dataset` 完成 profile 与受控 query，回传 `profile_ref`。
 
@@ -43,223 +43,223 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 
 ## 元数据（代码表与消歧）
 
-| capability | 端点 | 主要参数 | 分页 | 用途 |
-|---|---|---|---|---|
-| `ticker_search` | `/api/meta/tickers/search` | `q`\* `exchange` `asset_type` `limit` | 否 | 名称或代码检索消歧为完整 thscode |
-| `ticker_list` | `/api/meta/tickers/list` | `asset_type` `limit` `offset` | 是 | 按资产类型分页拉取标的代码表 |
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `ticker_search` | `meta` | `/api/meta/tickers/search` | `q`\* `exchange` `asset_type` `limit` | 否 | 名称或代码检索消歧为完整 thscode |
+| `ticker_list` | `meta` | `/api/meta/tickers/list` | `asset_type` `limit` `offset` | 是 | 按资产类型分页拉取标的代码表 |
 
 ## A 股行情与公司行为
 
-| capability | 端点 | 主要参数 | 分页 | 用途 |
-|---|---|---|---|---|
-| `quote` | `/api/a-share/prices/snapshot` | `thscodes` `limit` `offset` | 是 | A 股行情快照（指定标的或全市场分页） |
-| `history` | `/api/a-share/prices/historical` | `thscode`\* `interval`\* `start`\* `end`\* `adjust` `offset` | 是 | 单只标的日 K 线（可复权，窗口 ≤10 年） |
-| `trading_calendar` | `/api/a-share/calendar/trading-days` | 无参数 | 否 | 近一年 A 股交易日历 |
-| `corporate_actions` | `/api/a-share/corporate-actions/adjustment-factors` | `thscode`\* `from` `to` | 否 | 单只标的除复权事件流（分红/送转） |
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `quote` | `quote` | `/api/a-share/prices/snapshot` | `thscodes` `limit` `offset` | 是 | A 股行情快照（指定标的或全市场分页） |
+| `history` | `quote` | `/api/a-share/prices/historical` | `thscode`\* `interval`\* `start`\* `end`\* `adjust` `offset` | 是 | 单只标的日 K 线（可复权，窗口 ≤10 年） |
+| `trading_calendar` | `meta` | `/api/a-share/calendar/trading-days` | 无参数 | 否 | 近一年 A 股交易日历 |
+| `corporate_actions` | `events` | `/api/a-share/corporate-actions/adjustment-factors` | `thscode`\* `from` `to` | 否 | 单只标的除复权事件流（分红/送转） |
 
 ## A 股财务
 
-| capability | 端点 | 主要参数 | 分页 | 用途 |
-|---|---|---|---|---|
-| `income_statement` | `/api/a-share/financials/income-statements` | `thscode`\* `period`\* `limit` `start` `end` | 否 | 合并利润表多期序列 |
-| `balance_sheet` | `/api/a-share/financials/balance-sheets` | `thscode`\* `period`\* `limit` `start` `end` | 否 | 合并资产负债表多期序列 |
-| `cash_flow` | `/api/a-share/financials/cash-flow-statements` | `thscode`\* `period`\* `limit` `start` `end` | 否 | 合并现金流量表多期序列 |
-| `financial_indicators` | `/api/a-share/financials/indicators` | `thscode`\* `report`\* | 否 | 单期五类财务指标（成长/盈利/偿债/营运/现金流） |
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `income_statement` | `financials` | `/api/a-share/financials/income-statements` | `thscode`\* `period`\* `limit` `start` `end` | 否 | 合并利润表多期序列 |
+| `balance_sheet` | `financials` | `/api/a-share/financials/balance-sheets` | `thscode`\* `period`\* `limit` `start` `end` | 否 | 合并资产负债表多期序列 |
+| `cash_flow` | `financials` | `/api/a-share/financials/cash-flow-statements` | `thscode`\* `period`\* `limit` `start` `end` | 否 | 合并现金流量表多期序列 |
+| `financial_indicators` | `financials` | `/api/a-share/financials/indicators` | `thscode`\* `report`\* | 否 | 单期五类财务指标（成长/盈利/偿债/营运/现金流） |
 
 ## 估值与集合竞价
 
-| capability | 端点 | 主要参数 | 分页 | 用途 |
-|---|---|---|---|---|
-| `valuation` | `/api/a-share/valuations/snapshot` | `thscodes`\* | 否 | 批量估值快照（PE/PB/PS/PCF） |
-| `auction` | `/api/a-share/auction/snapshot` | `thscodes`\* `stage` | 否 | 集合竞价快照（实时盘口或终态） |
-| `auction_benchmark` | `/api/a-share/auction/short-term-benchmark` | `date` | 否 | 短线风向标竞价基准（带标签的精选池） |
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `valuation` | `financials` | `/api/a-share/valuations/snapshot` | `thscodes`\* | 否 | 批量估值快照（PE/PB/PS/PCF） |
+| `auction` | `quote` | `/api/a-share/auction/snapshot` | `thscodes`\* `stage` | 否 | 集合竞价快照（实时盘口或终态） |
+| `auction_benchmark` | `flow` | `/api/a-share/auction/short-term-benchmark` | `date` | 否 | 短线风向标竞价基准（带标签的精选池） |
 
 ## 盘面特色数据
 
-| capability | 端点 | 主要参数 | 分页 | 用途 |
-|---|---|---|---|---|
-| `limit_up_pool` | `/api/a-share/special-data/limit-up-pool` | `date_ms` `page` `size` `sort_field` `sort_dir` | 是 | 按交易日分页的涨停/连板股票池 |
-| `limit_up_ladder` | `/api/a-share/special-data/limit-up-ladder` | 无参数 | 否 | 近 30 日连板天梯矩阵 |
-| `limit_down_pool` | `/api/a-share/special-data/limit-down-pool` | `date_ms` `page` `size` `sort_field` `sort_dir` | 是 | 按交易日分页的跌停股票池 |
-| `limit_break_pool` | `/api/a-share/special-data/limit-break-pool` | `date_ms` `page` `size` `sort_field` `sort_dir` | 是 | 按交易日分页的炸板（涨停破板）股票池 |
-| `skyrocket_list` | `/api/a-share/special-data/skyrocket-list` | `period` | 否 | A 股热度飙升榜 Top30（日榜/小时榜） |
-| `hot_stock_list` | `/api/a-share/special-data/hot-stock-list` | `period` | 否 | A 股热股榜 Top30（24 小时/小时级） |
-| `hot_stock_history` | `/api/a-share/special-data/hot-stock-list-history` | `date`\* | 否 | 按自然日的历史热股榜排行（最多 30 条） |
-| `hot_stock_rank_trend` | `/api/a-share/special-data/hot-stock-rank-trend` | `thscode`\* `start_date`\* `end_date`\* | 否 | 单只 A 股的热榜排名走势（日线点位） |
-| `anomaly_list` | `/api/a-share/special-data/anomaly-analysis-list` | `tag_codes` | 否 | 当日个股异动原因列表（可按标签过滤） |
-| `anomaly_stock` | `/api/a-share/special-data/anomaly-analysis-stock` | `thscodes`\* | 否 | 按股票批量查询当日异动原因 |
-| `dragon_tiger` | `/api/a-share/special-data/dragon-tiger-list` | `board_type` `date` | 否 | A 股龙虎榜（全部/机构榜/游资榜，不分页） |
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `limit_up_pool` | `flow` | `/api/a-share/special-data/limit-up-pool` | `date_ms` `page` `size` `sort_field` `sort_dir` | 是 | 按交易日分页的涨停/连板股票池 |
+| `limit_up_ladder` | `flow` | `/api/a-share/special-data/limit-up-ladder` | 无参数 | 否 | 近 30 日连板天梯矩阵 |
+| `limit_down_pool` | `flow` | `/api/a-share/special-data/limit-down-pool` | `date_ms` `page` `size` `sort_field` `sort_dir` | 是 | 按交易日分页的跌停股票池 |
+| `limit_break_pool` | `flow` | `/api/a-share/special-data/limit-break-pool` | `date_ms` `page` `size` `sort_field` `sort_dir` | 是 | 按交易日分页的炸板（涨停破板）股票池 |
+| `skyrocket_list` | `flow` | `/api/a-share/special-data/skyrocket-list` | `period` | 否 | A 股热度飙升榜 Top30（日榜/小时榜） |
+| `hot_stock_list` | `flow` | `/api/a-share/special-data/hot-stock-list` | `period` | 否 | A 股热股榜 Top30（24 小时/小时级） |
+| `hot_stock_history` | `flow` | `/api/a-share/special-data/hot-stock-list-history` | `date`\* | 否 | 按自然日的历史热股榜排行（最多 30 条） |
+| `hot_stock_rank_trend` | `flow` | `/api/a-share/special-data/hot-stock-rank-trend` | `thscode`\* `start_date`\* `end_date`\* | 否 | 单只 A 股的热榜排名走势（日线点位） |
+| `anomaly_list` | `flow` | `/api/a-share/special-data/anomaly-analysis-list` | `tag_codes` | 否 | 当日个股异动原因列表（可按标签过滤） |
+| `anomaly_stock` | `flow` | `/api/a-share/special-data/anomaly-analysis-stock` | `thscodes`\* | 否 | 按股票批量查询当日异动原因 |
+| `dragon_tiger` | `flow` | `/api/a-share/special-data/dragon-tiger-list` | `board_type` `date` | 否 | A 股龙虎榜（全部/机构榜/游资榜，不分页） |
 
 ## 指数
 
-| capability | 端点 | 主要参数 | 分页 | 用途 |
-|---|---|---|---|---|
-| `index_catalog` | `/api/a-share-index/catalog/ths-index-list` | `tag` | 否 | 同花顺指数目录（概念/区域/特色/行业） |
-| `index_constituents` | `/api/a-share-index/constituents/ths-stock-list` | `thscode`\* | 否 | 单个指数的成分股清单 |
-| `index_quote` | `/api/a-share-index/prices/snapshot` | `thscodes`\* | 否 | 指数行情快照（批量） |
-| `index_history` | `/api/a-share-index/prices/historical` | `thscode`\* `interval`\* `start`\* `end`\* | 否 | 单只指数日 K 线（窗口 ≤10 年） |
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `index_catalog` | `meta` | `/api/a-share-index/catalog/ths-index-list` | `tag` | 否 | 同花顺指数目录（概念/区域/特色/行业） |
+| `index_constituents` | `meta` | `/api/a-share-index/constituents/ths-stock-list` | `thscode`\* | 否 | 单个指数的成分股清单 |
+| `index_quote` | `quote` | `/api/a-share-index/prices/snapshot` | `thscodes`\* | 否 | 指数行情快照（批量） |
+| `index_history` | `quote` | `/api/a-share-index/prices/historical` | `thscode`\* `interval`\* `start`\* `end`\* | 否 | 单只指数日 K 线（窗口 ≤10 年） |
 
 ## 基金 · 基本资料与场内行情
 
-| capability | 端点 | 主要参数 | 分页 | 用途 |
-|---|---|---|---|---|
-| `fund_profile` | `/api/fund/profile/detail` | `thscode`\* | 否 | 基金基本资料（规模/净值/经理/费率） |
-| `fund_quote` | `/api/fund/market/snapshot` | `thscode`\* | 否 | 场内基金（ETF）行情快照 |
-| `fund_history` | `/api/fund/market/historical` | `thscode`\* `interval` `start`\* `end`\* | 否 | 场内基金（ETF）历史日 K 线 |
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `fund_profile` | `fund` | `/api/fund/profile/detail` | `thscode`\* | 否 | 基金基本资料（规模/净值/经理/费率） |
+| `fund_quote` | `fund` | `/api/fund/market/snapshot` | `thscode`\* | 否 | 场内基金（ETF）行情快照 |
+| `fund_history` | `fund` | `/api/fund/market/historical` | `thscode`\* `interval` `start`\* `end`\* | 否 | 场内基金（ETF）历史日 K 线 |
 
 ## 基金 · 业绩与净值
 
-| capability | 端点 | 主要参数 | 分页 | 用途 |
-|---|---|---|---|---|
-| `fund_nav` | `/api/fund/performance/nav` | `thscode`\* `range` `nav_type` | 否 | 基金历史净值（单位/复权，按区间） |
-| `fund_returns` | `/api/fund/performance/returns` | `thscode`\* | 否 | 基金阶段收益与同类排名 |
-| `fund_drawdowns` | `/api/fund/performance/drawdowns` | `thscode`\* | 否 | 基金各区间最大回撤 |
-| `fund_performance_history` | `/api/fund/performance/indicators-historical` | `thscode`\* `start`\* `end`\* | 否 | 基金净值指标历史（RSI/唐奇安/估值分位） |
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `fund_nav` | `fund` | `/api/fund/performance/nav` | `thscode`\* `range` `nav_type` | 否 | 基金历史净值（单位/复权，按区间） |
+| `fund_returns` | `fund` | `/api/fund/performance/returns` | `thscode`\* | 否 | 基金阶段收益与同类排名 |
+| `fund_drawdowns` | `fund` | `/api/fund/performance/drawdowns` | `thscode`\* | 否 | 基金各区间最大回撤 |
+| `fund_performance_history` | `fund` | `/api/fund/performance/indicators-historical` | `thscode`\* `start`\* `end`\* | 否 | 基金净值指标历史（RSI/唐奇安/估值分位） |
 
 ## 基金 · 持仓与配置
 
-| capability | 端点 | 主要参数 | 分页 | 用途 |
-|---|---|---|---|---|
-| `fund_holdings` | `/api/fund/portfolio/holdings` | `thscode`\* | 否 | 基金重仓持仓（定期披露，非实时） |
-| `fund_asset_allocation` | `/api/fund/portfolio/asset-allocation` | `thscode`\* | 否 | 基金资产配置比例（按报告期） |
-| `fund_industry_allocation` | `/api/fund/portfolio/industry-allocation` | `thscode`\* | 否 | 基金行业配置比例（按报告期） |
-| `fund_stock_history` | `/api/fund/portfolio/stock-history` | `thscode`\* `report_type`\* `end_date`\* | 否 | 基金历史股票持仓（按报告期与截止日） |
-| `fund_bond_history` | `/api/fund/portfolio/bond-history` | `thscode`\* `report_type`\* `end_date`\* | 否 | 基金历史债券持仓（按报告期） |
-| `fund_stock_report_dates` | `/api/fund/portfolio/stock-report-dates` | `thscode`\* `report_type` | 否 | 基金股票持仓的可用报告期清单 |
-| `fund_bond_report_dates` | `/api/fund/portfolio/bond-report-dates` | `thscode`\* `report_type` | 否 | 基金债券持仓的可用报告期清单 |
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `fund_holdings` | `fund` | `/api/fund/portfolio/holdings` | `thscode`\* | 否 | 基金重仓持仓（定期披露，非实时） |
+| `fund_asset_allocation` | `fund` | `/api/fund/portfolio/asset-allocation` | `thscode`\* | 否 | 基金资产配置比例（按报告期） |
+| `fund_industry_allocation` | `fund` | `/api/fund/portfolio/industry-allocation` | `thscode`\* | 否 | 基金行业配置比例（按报告期） |
+| `fund_stock_history` | `fund` | `/api/fund/portfolio/stock-history` | `thscode`\* `report_type`\* `end_date`\* | 否 | 基金历史股票持仓（按报告期与截止日） |
+| `fund_bond_history` | `fund` | `/api/fund/portfolio/bond-history` | `thscode`\* `report_type`\* `end_date`\* | 否 | 基金历史债券持仓（按报告期） |
+| `fund_stock_report_dates` | `fund` | `/api/fund/portfolio/stock-report-dates` | `thscode`\* `report_type` | 否 | 基金股票持仓的可用报告期清单 |
+| `fund_bond_report_dates` | `fund` | `/api/fund/portfolio/bond-report-dates` | `thscode`\* `report_type` | 否 | 基金债券持仓的可用报告期清单 |
 
 ## 基金 · 持有人与管理人
 
-| capability | 端点 | 主要参数 | 分页 | 用途 |
-|---|---|---|---|---|
-| `fund_holders` | `/api/fund/holders/detail` | `thscode`\* `merge_scope` | 否 | 基金持有人结构（机构/个人/员工占比） |
-| `fund_top_holders` | `/api/fund/holders/top` | `thscode`\* `limit` | 否 | 基金前十大持有人（含多报告期） |
-| `fund_manager` | `/api/fund/managers/detail` | `manager_id`\* | 否 | 基金经理详情（履历/年化/雷达对比） |
-| `fund_company` | `/api/fund/companies/detail` | `company_id`\* | 否 | 基金公司详情（规模/基金只数） |
-| `fund_manager_experience` | `/api/fund/managers/experience` | `manager_id`\* | 否 | 基金经理获奖、重仓与从业经历 |
-| `fund_manager_style` | `/api/fund/managers/investment-style` | `manager_id`\* | 否 | 基金经理投资风格（理念/行业偏好） |
-| `fund_manager_performance` | `/api/fund/managers/performance` | `manager_id`\* `range`\* | 否 | 基金经理区间收益与同类/基准对比 |
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `fund_holders` | `fund` | `/api/fund/holders/detail` | `thscode`\* `merge_scope` | 否 | 基金持有人结构（机构/个人/员工占比） |
+| `fund_top_holders` | `fund` | `/api/fund/holders/top` | `thscode`\* `limit` | 否 | 基金前十大持有人（含多报告期） |
+| `fund_manager` | `fund` | `/api/fund/managers/detail` | `manager_id`\* | 否 | 基金经理详情（履历/年化/雷达对比） |
+| `fund_company` | `fund` | `/api/fund/companies/detail` | `company_id`\* | 否 | 基金公司详情（规模/基金只数） |
+| `fund_manager_experience` | `fund` | `/api/fund/managers/experience` | `manager_id`\* | 否 | 基金经理获奖、重仓与从业经历 |
+| `fund_manager_style` | `fund` | `/api/fund/managers/investment-style` | `manager_id`\* | 否 | 基金经理投资风格（理念/行业偏好） |
+| `fund_manager_performance` | `fund` | `/api/fund/managers/performance` | `manager_id`\* `range`\* | 否 | 基金经理区间收益与同类/基准对比 |
 
 ## 基金 · 财务、指标与诊断
 
-| capability | 端点 | 主要参数 | 分页 | 用途 |
-|---|---|---|---|---|
-| `fund_income` | `/api/fund/financials/income-statements` | `thscode`\* | 否 | 基金利润表（按报告期） |
-| `fund_balance` | `/api/fund/financials/balance-sheets` | `thscode`\* | 否 | 基金资产负债表（按报告期） |
-| `fund_financial_indicators` | `/api/fund/financials/indicators` | `thscode`\* | 否 | 基金财务指标（净值/利润/增长率） |
-| `fund_indicator_line` | `/api/fund/indicators/line` | `indexes`\* `time_range`\* | 否 | 基金指标画线序列（多指标多标的） |
-| `fund_indicator_table` | `/api/fund/indicators/table` | `code_selectors` `indexes` `page_info` `sort` | 是 | 基金指标表格查询（分页/排序） |
-| `fund_diagnostics` | `/api/fund/diagnostics/detail` | `thscode`\* | 否 | 基金诊断（多维画像与同类对比） |
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `fund_income` | `fund` | `/api/fund/financials/income-statements` | `thscode`\* | 否 | 基金利润表（按报告期） |
+| `fund_balance` | `fund` | `/api/fund/financials/balance-sheets` | `thscode`\* | 否 | 基金资产负债表（按报告期） |
+| `fund_financial_indicators` | `fund` | `/api/fund/financials/indicators` | `thscode`\* | 否 | 基金财务指标（净值/利润/增长率） |
+| `fund_indicator_line` | `fund` | `/api/fund/indicators/line` | `indexes`\* `time_range`\* | 否 | 基金指标画线序列（多指标多标的） |
+| `fund_indicator_table` | `fund` | `/api/fund/indicators/table` | `code_selectors` `indexes` `page_info` `sort` | 是 | 基金指标表格查询（分页/排序） |
+| `fund_diagnostics` | `fund` | `/api/fund/diagnostics/detail` | `thscode`\* | 否 | 基金诊断（多维画像与同类对比） |
 
 ## 基金 · 分红、募集与额度
 
-| capability | 端点 | 主要参数 | 分页 | 用途 |
-|---|---|---|---|---|
-| `fund_dividends` | `/api/fund/corporate-actions/dividends` | `thscode`\* | 否 | 基金分红记录（每 10 份口径） |
-| `fund_offerings` | `/api/fund/offerings/list` | `subscribe`\* | 否 | 基金募集列表（当前/即将募集） |
-| `fund_quota_list` | `/api/fund/quota/list` | `tab`\* `buy` | 否 | QDII 额度分类与基金明细（三层嵌套） |
-| `fund_quota_summary` | `/api/fund/quota/summary` | `tab`\* | 否 | QDII 额度分类汇总 |
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `fund_dividends` | `fund` | `/api/fund/corporate-actions/dividends` | `thscode`\* | 否 | 基金分红记录（每 10 份口径） |
+| `fund_offerings` | `fund` | `/api/fund/offerings/list` | `subscribe`\* | 否 | 基金募集列表（当前/即将募集） |
+| `fund_quota_list` | `fund` | `/api/fund/quota/list` | `tab`\* `buy` | 否 | QDII 额度分类与基金明细（三层嵌套） |
+| `fund_quota_summary` | `fund` | `/api/fund/quota/summary` | `tab`\* | 否 | QDII 额度分类汇总 |
 
 ## 基金 · 在线回测
 
-| capability | 端点 | 主要参数 | 分页 | 用途 |
-|---|---|---|---|---|
-| `fund_backtest` | `/api/fund/backtest/result` | `thscode`\* `buy_conditions`\* `sell_conditions`\* `buy_frequency_type`\* `max_buy_times`\* `per_buy_amount`\* | 否 | 基金在线回测（策略/基准/曲线） |
-| `fund_backtest_indicators` | `/api/fund/backtest/indicators` | 无参数 | 否 | 回测可用指标清单（无参数） |
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `fund_backtest` | `fund` | `/api/fund/backtest/result` | `thscode`\* `buy_conditions`\* `sell_conditions`\* `buy_frequency_type`\* `max_buy_times`\* `per_buy_amount`\* | 否 | 基金在线回测（策略/基准/曲线） |
+| `fund_backtest_indicators` | `fund` | `/api/fund/backtest/indicators` | 无参数 | 否 | 回测可用指标清单（无参数） |
 
 ## 腾讯公开 HTTP（fallback）
 
-| capability | 端点 | 主要参数 | 分页 | 用途 |
-|---|---|---|---|---|
-| `tencent_quote` | `/tencent/quote` | `codes`\* | 否 | 腾讯实时行情、估值、涨跌停和 ETF 快照 |
-| `tencent_kline` | `/tencent/kline` | `code`\* `period` `adjust` `start` `end` `count` | 否 | 腾讯日周月复权和分钟 K 线 |
-| `tencent_ticks` | `/tencent/ticks` | `code`\* | 否 | 腾讯最近交易日分笔成交明细 |
-| `tencent_hk_quote` | `/tencent/hk_quote` | `codes`\* | 否 | 腾讯港股实时快照（港元，无涨跌停） |
-| `tencent_us_quote` | `/tencent/us_quote` | `codes`\* | 否 | 腾讯美股快照（美元，交易所当地时间） |
-| `tencent_hk_index_quote` | `/tencent/hk_index_quote` | `codes`\* | 否 | 腾讯港股指数实时点位（无量纲，不含成交与市值） |
-| `tencent_us_index_quote` | `/tencent/us_index_quote` | `codes`\* | 否 | 腾讯美股指数点位（无量纲，收盘值为真值） |
-| `tencent_hk_kline` | `/tencent/hk_kline` | `code`\* `period` `adjust` `count` | 否 | 腾讯港股日周月 K 线（成交量以股计） |
-| `tencent_us_kline` | `/tencent/us_kline` | `code`\* `period` `adjust` `count` | 否 | 腾讯美股日周月 K 线（前复权或不复权） |
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `tencent_quote` | `quote` | `/tencent/quote` | `codes`\* | 否 | 腾讯实时行情、估值、涨跌停和 ETF 快照 |
+| `tencent_kline` | `quote` | `/tencent/kline` | `code`\* `period` `adjust` `start` `end` `count` | 否 | 腾讯日周月复权和分钟 K 线 |
+| `tencent_ticks` | `quote` | `/tencent/ticks` | `code`\* | 否 | 腾讯最近交易日分笔成交明细 |
+| `tencent_hk_quote` | `quote` | `/tencent/hk_quote` | `codes`\* | 否 | 腾讯港股实时快照（港元，无涨跌停） |
+| `tencent_us_quote` | `quote` | `/tencent/us_quote` | `codes`\* | 否 | 腾讯美股快照（美元，交易所当地时间） |
+| `tencent_hk_index_quote` | `quote` | `/tencent/hk_index_quote` | `codes`\* | 否 | 腾讯港股指数实时点位（无量纲，不含成交与市值） |
+| `tencent_us_index_quote` | `quote` | `/tencent/us_index_quote` | `codes`\* | 否 | 腾讯美股指数点位（无量纲，收盘值为真值） |
+| `tencent_hk_kline` | `quote` | `/tencent/hk_kline` | `code`\* `period` `adjust` `count` | 否 | 腾讯港股日周月 K 线（成交量以股计） |
+| `tencent_us_kline` | `quote` | `/tencent/us_kline` | `code`\* `period` `adjust` `count` | 否 | 腾讯美股日周月 K 线（前复权或不复权） |
 
 ## 东方财富 HTTP（沪深港通）
 
-| capability | 端点 | 主要参数 | 分页 | 用途 |
-|---|---|---|---|---|
-| `eastmoney_mutual_flow` | `/eastmoney/mutual_flow` | `start_date`\* `end_date`\* `channel` `page` `size` | 是 | 沪深港通成交额与额度状态（按渠道日频） |
-| `eastmoney_mutual_quota` | `/eastmoney/mutual_quota` | 无参数 | 否 | 北上南下当日额度与休市状态快照 |
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `eastmoney_mutual_flow` | `cross` | `/eastmoney/mutual_flow` | `start_date`\* `end_date`\* `channel` `page` `size` | 是 | 沪深港通成交额与额度状态（按渠道日频） |
+| `eastmoney_mutual_quota` | `cross` | `/eastmoney/mutual_quota` | 无参数 | 否 | 北上南下当日额度与休市状态快照 |
 
 ## 东方财富 HTTP（宏观指标）
 
-| capability | 端点 | 主要参数 | 分页 | 用途 |
-|---|---|---|---|---|
-| `eastmoney_cpi` | `/eastmoney/cpi` | `start_date`\* `end_date`\* `page` `size` | 是 | CPI 居民消费价格指数（月度，全国/城市/农村） |
-| `eastmoney_ppi` | `/eastmoney/ppi` | `start_date`\* `end_date`\* `page` `size` | 是 | PPI 工业生产者出厂价格指数（月度） |
-| `eastmoney_gdp` | `/eastmoney/gdp` | `start_date`\* `end_date`\* `page` `size` | 是 | GDP 国内生产总值与三次产业（季度累计） |
-| `eastmoney_pmi` | `/eastmoney/pmi` | `start_date`\* `end_date`\* `page` `size` | 是 | PMI 采购经理人指数（制造业与非制造业） |
-| `eastmoney_money_supply` | `/eastmoney/money_supply` | `start_date`\* `end_date`\* `page` `size` | 是 | M0/M1/M2 货币供应量（月度） |
-| `eastmoney_rmb_loan` | `/eastmoney/rmb_loan` | `start_date`\* `end_date`\* `page` `size` | 是 | 新增人民币贷款（月度，含负值） |
-| `eastmoney_customs_trade` | `/eastmoney/customs_trade` | `start_date`\* `end_date`\* `page` `size` | 是 | 海关进出口金额与同比环比（月度） |
-| `eastmoney_retail_sales` | `/eastmoney/retail_sales` | `start_date`\* `end_date`\* `page` `size` | 是 | 社会消费品零售总额（月度） |
-| `eastmoney_deposit_reserve` | `/eastmoney/deposit_reserve` | `start_date`\* `end_date`\* `page` `size` | 是 | 存款准备金率调整事件（历次） |
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `eastmoney_cpi` | `macro` | `/eastmoney/cpi` | `start_date`\* `end_date`\* `page` `size` | 是 | CPI 居民消费价格指数（月度，全国/城市/农村） |
+| `eastmoney_ppi` | `macro` | `/eastmoney/ppi` | `start_date`\* `end_date`\* `page` `size` | 是 | PPI 工业生产者出厂价格指数（月度） |
+| `eastmoney_gdp` | `macro` | `/eastmoney/gdp` | `start_date`\* `end_date`\* `page` `size` | 是 | GDP 国内生产总值与三次产业（季度累计） |
+| `eastmoney_pmi` | `macro` | `/eastmoney/pmi` | `start_date`\* `end_date`\* `page` `size` | 是 | PMI 采购经理人指数（制造业与非制造业） |
+| `eastmoney_money_supply` | `macro` | `/eastmoney/money_supply` | `start_date`\* `end_date`\* `page` `size` | 是 | M0/M1/M2 货币供应量（月度） |
+| `eastmoney_rmb_loan` | `macro` | `/eastmoney/rmb_loan` | `start_date`\* `end_date`\* `page` `size` | 是 | 新增人民币贷款（月度，含负值） |
+| `eastmoney_customs_trade` | `macro` | `/eastmoney/customs_trade` | `start_date`\* `end_date`\* `page` `size` | 是 | 海关进出口金额与同比环比（月度） |
+| `eastmoney_retail_sales` | `macro` | `/eastmoney/retail_sales` | `start_date`\* `end_date`\* `page` `size` | 是 | 社会消费品零售总额（月度） |
+| `eastmoney_deposit_reserve` | `macro` | `/eastmoney/deposit_reserve` | `start_date`\* `end_date`\* `page` `size` | 是 | 存款准备金率调整事件（历次） |
 
 ## 东方财富 HTTP（资金与筹码）
 
-| capability | 端点 | 主要参数 | 分页 | 用途 |
-|---|---|---|---|---|
-| `eastmoney_top_buy_sell_market` | `/eastmoney/top_buy_sell_market` | `start_date`\* `end_date`\* `page` `size` | 是 | 东财全市场龙虎榜汇总 |
-| `eastmoney_top_buy_sell_ticker` | `/eastmoney/top_buy_sell_ticker` | `ticker`\* `start_date`\* `end_date`\* `page` `size` | 是 | 东财单票龙虎榜汇总 |
-| `eastmoney_lockup_expiry` | `/eastmoney/lockup_expiry` | `start_date`\* `end_date`\* `page` `size` | 是 | 东财限售解禁日历 |
-| `eastmoney_sector_rotation` | `/eastmoney/sector_rotation` | `board_type` `sort_field` `page` `size` | 是 | 东财板块行情排名快照 |
-| `eastmoney_cashflow_rotation` | `/eastmoney/cashflow_rotation` | `board_type` `page` `size` | 是 | 东财板块资金流快照 |
-| `eastmoney_main_capital_snapshot` | `/eastmoney/main_capital_snapshot` | `ticker` `sort_field` `sort_order` `page` `size` | 是 | 东财个股主力资金快照（仅最近交易日） |
-| `eastmoney_dividend_plan` | `/eastmoney/dividend_plan` | `ticker`\* `start_date`\* `end_date`\* `page` `size` | 是 | 东财分红送配方案明细（按个股与除权日） |
-| `eastmoney_holder_number_snapshot` | `/eastmoney/holder_number_snapshot` | `ticker` `sort_field` `sort_order` `page` `size` | 是 | 东财股东户数最新一期截面 |
-| `eastmoney_margin_trading` | `/eastmoney/margin_trading` | `ticker`\* `start_date`\* `end_date`\* `page` `size` | 是 | 个股融资融券明细（按票与交易日） |
-| `eastmoney_convertible_bond_list` | `/eastmoney/convertible_bond_list` | `start_date`\* `end_date`\* `bond_code` `stock_code` `page` `size` | 是 | 东财可转债发行清单与条款要素（按起息日） |
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `eastmoney_top_buy_sell_market` | `flow` | `/eastmoney/top_buy_sell_market` | `start_date`\* `end_date`\* `page` `size` | 是 | 东财全市场龙虎榜汇总 |
+| `eastmoney_top_buy_sell_ticker` | `flow` | `/eastmoney/top_buy_sell_ticker` | `ticker`\* `start_date`\* `end_date`\* `page` `size` | 是 | 东财单票龙虎榜汇总 |
+| `eastmoney_lockup_expiry` | `events` | `/eastmoney/lockup_expiry` | `start_date`\* `end_date`\* `page` `size` | 是 | 东财限售解禁日历 |
+| `eastmoney_sector_rotation` | `quote` | `/eastmoney/sector_rotation` | `board_type` `sort_field` `page` `size` | 是 | 东财板块行情排名快照 |
+| `eastmoney_cashflow_rotation` | `flow` | `/eastmoney/cashflow_rotation` | `board_type` `page` `size` | 是 | 东财板块资金流快照 |
+| `eastmoney_main_capital_snapshot` | `flow` | `/eastmoney/main_capital_snapshot` | `ticker` `sort_field` `sort_order` `page` `size` | 是 | 东财个股主力资金快照（仅最近交易日） |
+| `eastmoney_dividend_plan` | `events` | `/eastmoney/dividend_plan` | `ticker`\* `start_date`\* `end_date`\* `page` `size` | 是 | 东财分红送配方案明细（按个股与除权日） |
+| `eastmoney_holder_number_snapshot` | `flow` | `/eastmoney/holder_number_snapshot` | `ticker` `sort_field` `sort_order` `page` `size` | 是 | 东财股东户数最新一期截面 |
+| `eastmoney_margin_trading` | `flow` | `/eastmoney/margin_trading` | `ticker`\* `start_date`\* `end_date`\* `page` `size` | 是 | 个股融资融券明细（按票与交易日） |
+| `eastmoney_convertible_bond_list` | `financials` | `/eastmoney/convertible_bond_list` | `start_date`\* `end_date`\* `bond_code` `stock_code` `page` `size` | 是 | 东财可转债发行清单与条款要素（按起息日） |
 
 ## Wind 金融数据服务（MCP）
 
-| capability | 端点 | 主要参数 | 分页 | 用途 |
-|---|---|---|---|---|
-| `wind_edb_search` | `/wind/edb_search` | `question`\* | 否 | [计费] Wind EDB 宏观/行业/汇率指标检索（只找码不取数） |
-| `wind_edb_query` | `/wind/edb_query` | `indicator`\* `start_date`\* `end_date`\* | 否 | [计费] Wind EDB 指标时间序列（宏观/行业/汇率，按日期区间） |
-| `wind_stock_kline` | `/wind/stock_kline` | `code`\* `start_date`\* `end_date`\* `period` `adjust` | 否 | [计费] Wind 日周月与 1–30 分钟 K 线（按日期区间，A股+港股+美股） |
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `wind_edb_search` | `macro` | `/wind/edb_search` | `question`\* | 否 | [计费] Wind EDB 宏观/行业/汇率指标检索（只找码不取数） |
+| `wind_edb_query` | `macro` | `/wind/edb_query` | `indicator`\* `start_date`\* `end_date`\* | 否 | [计费] Wind EDB 指标时间序列（宏观/行业/汇率，按日期区间） |
+| `wind_stock_kline` | `cross` | `/wind/stock_kline` | `code`\* `start_date`\* `end_date`\* `period` `adjust` | 否 | [计费] Wind 日周月与 1–30 分钟 K 线（按日期区间，A股+港股+美股） |
 
 ## FTShare（资金流 + 行情与日 K 截面 + 快照与日历 + 大宗交易、业绩预告/快报、申万行业 + 涨跌停价、龙虎榜席位、股东人数、指数权重、可转债 K 线，plan B）
 
-| capability | 端点 | 主要参数 | 分页 | 用途 |
-|---|---|---|---|---|
-| `ftshare_stock_daily_flow` | `/ftshare/stock_daily_flow` | `start_date`\* `end_date`\* `page` `size` `code` | 是 | 同花顺个股日度资金流（近 45 交易日，亿元） |
-| `ftshare_industry_daily_flow` | `/ftshare/industry_daily_flow` | `start_date`\* `end_date`\* `page` `size` `board_name` | 是 | 同花顺行业板块日度资金流（近 45 交易日，亿元） |
-| `ftshare_concept_daily_flow` | `/ftshare/concept_daily_flow` | `start_date`\* `end_date`\* `page` `size` `board_name` | 是 | 同花顺概念板块日度资金流（近 45 交易日，亿元） |
-| `ftshare_main_capital_flow` | `/ftshare/main_capital_flow` | `date` `time` `page` `size` | 是 | 个股主力资金五档（15 分钟切片，元） |
-| `ftshare_ashare_quote` | `/ftshare/ashare_quote` | `board` `code` `sort_field` `sort_order` `page` `size` | 是 | A 股实时行情截面（沪深北全市场，含 ST 与停牌） |
-| `ftshare_market_breadth` | `/ftshare/market_breadth` | `scope` | 否 | 全市场成交额与涨跌分布（九档家数） |
-| `ftshare_daily_kline_snapshot` | `/ftshare/daily_kline_snapshot` | `trade_date`\* `page` `size` | 是 | 全市场某交易日日 K 截面（含北交所） |
-| `ftshare_prev_close` | `/ftshare/prev_close` | `code`\* `start_date`\* `end_date`\* | 否 | 单只标的逐日昨收价序列（校验复权与涨跌停） |
-| `ftshare_trading_calendar` | `/ftshare/trading_calendar` | `market` `start_date`\* `end_date`\* | 否 | 交易日历（沪北深与港股，按日期区间） |
-| `ftshare_block_trades` | `/ftshare/block_trades` | `date` `page` `size` | 是 | 大宗交易明细（按交易日，一笔一行） |
-| `ftshare_performance_forecast` | `/ftshare/performance_forecast` | `code` `year` `report_type` `page` `size` | 是 | A 股业绩预告（按报告期或单票，含北证） |
-| `ftshare_performance_express` | `/ftshare/performance_express` | `code` `year` `report_type` `page` `size` | 是 | A 股业绩快报（按报告期或单票，含更正） |
-| `ftshare_sw_industry_overview` | `/ftshare/sw_industry_overview` | `date`\* `level` `page` `size` | 是 | 申万行业估值快照（全部层级，按交易日） |
-| `ftshare_sw_industry_metrics` | `/ftshare/sw_industry_metrics` | `industry_code`\* `start_date`\* `end_date`\* `page` `size` | 是 | 申万单行业日度估值与量价序列（2021-05-31 起） |
-| `ftshare_limit_price` | `/ftshare/limit_price` | `date` `code` `start_date` `end_date` `instrument_type` `page` `size` | 是 | 每日涨跌停价与昨收（含北证，按日或单票区间） |
-| `ftshare_dragon_tiger_seats` | `/ftshare/dragon_tiger_seats` | `date`\* `page` `size` | 是 | 龙虎榜前五买入/卖出席位（按交易日，含北证） |
-| `ftshare_holder_number` | `/ftshare/holder_number` | `code` `is_last` `page` `size` | 是 | 股东人数历史（单票全期）与全市场最新一期 |
-| `ftshare_index_weight` | `/ftshare/index_weight` | `index_code`\* `date` `page` `size` | 是 | 中证系列指数成分权重（按采集期，百分数） |
-| `ftshare_convertible_bond_kline` | `/ftshare/convertible_bond_kline` | `code`\* `period` `adjust` `start_date`\* `end_date`\* `limit` | 否 | 可转债历史 K 线（日/周/月/年，单只，元） |
-| `ftshare_lpr` | `/ftshare/lpr` | 无参数 | 否 | LPR 贷款市场报价利率全历史（百分数，无参数） |
-| `ftshare_chinabond_yield` | `/ftshare/chinabond_yield` | `start_date`\* `end_date`\* `curve_name` `page` `size` | 是 | 中债收益率曲线日度（国债/AAA 票据，八档期限） |
-| `ftshare_shibor` | `/ftshare/shibor` | `start_date`\* `end_date`\* `page` `size` | 是 | SHIBOR 日度八档（2006-10 起，百分数） |
-| `ftshare_hibor` | `/ftshare/hibor` | `start_date`\* `end_date`\* `page` `size` | 是 | HIBOR 日度十五档（七档实测整列 null） |
-| `ftshare_financial_calendar` | `/ftshare/financial_calendar` | `start_date`\* `end_date`\* `page` `size` | 是 | 全球财经日历（≤3 天窗口，含发布时刻与前值） |
-| `ftshare_futures_contracts` | `/ftshare/futures_contracts` | `trade_date` | 否 | 期货合约清单（按交易日快照，含银行间） |
-| `ftshare_futures_contract_detail` | `/ftshare/futures_contract_detail` | `trade_date` `symbol` | 否 | 期货合约要素（乘数/单位/交割/上市摘牌日） |
-| `ftshare_futures_kline` | `/ftshare/futures_kline` | `symbol`\* `interval` `start_date` `end_date` `limit` | 否 | 期货合约历史 K 线（日/周/月/季，单合约） |
-| `ftshare_futures_limit_price` | `/ftshare/futures_limit_price` | `exchange`\* `trade_date` `start_date` `end_date` `ts_code` `cont` `page` `size` | 是 | 期货合约每日涨跌停价（按交易所，含最低保证金原值） |
-| `ftshare_futures_settle` | `/ftshare/futures_settle` | `exchange`\* `trade_date` `start_date` `end_date` `ts_code` `page` `size` | 是 | 期货每日结算参数（结算价/保证金率/手续费） |
-| `ftshare_futures_warrant` | `/ftshare/futures_warrant` | `trade_date` `start_date` `end_date` `symbol` `exchange` `page` `size` | 是 | 期货仓单日报（分交易所，数量单位随行而变） |
-| `ftshare_futures_weekly` | `/ftshare/futures_weekly` | `week` `start_week` `end_week` `prd` `exchange` `page` `size` | 是 | 期货主要品种交易周报（周码 YYYYWW，成交额亿元） |
-| `ftshare_futures_index_kline` | `/ftshare/futures_index_kline` | `code` `trade_date` `start_date` `end_date` `page` `size` | 是 | 南华期货商品指数日 K 线（按指数代码） |
-| `ftshare_futures_member_rank` | `/ftshare/futures_member_rank` | `exchange` `variety_code` `contract_code` `member_name_abbr` `trade_date` `start_date` `end_date` `page` `size` | 是 | 东财期货会员成交持仓排名（按合约×会员） |
-| `ftshare_bullion_price` | `/ftshare/bullion_price` | `symbol`\* `start_date`\* `end_date`\* `page` `size` | 是 | 贵金属价格（AU9999 / XAUUSD，单位未披露） |
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `ftshare_stock_daily_flow` | `flow` | `/ftshare/stock_daily_flow` | `start_date`\* `end_date`\* `page` `size` `code` | 是 | 同花顺个股日度资金流（近 45 交易日，亿元） |
+| `ftshare_industry_daily_flow` | `flow` | `/ftshare/industry_daily_flow` | `start_date`\* `end_date`\* `page` `size` `board_name` | 是 | 同花顺行业板块日度资金流（近 45 交易日，亿元） |
+| `ftshare_concept_daily_flow` | `flow` | `/ftshare/concept_daily_flow` | `start_date`\* `end_date`\* `page` `size` `board_name` | 是 | 同花顺概念板块日度资金流（近 45 交易日，亿元） |
+| `ftshare_main_capital_flow` | `flow` | `/ftshare/main_capital_flow` | `date` `time` `page` `size` | 是 | 个股主力资金五档（15 分钟切片，元） |
+| `ftshare_ashare_quote` | `quote` | `/ftshare/ashare_quote` | `board` `code` `sort_field` `sort_order` `page` `size` | 是 | A 股实时行情截面（沪深北全市场，含 ST 与停牌） |
+| `ftshare_market_breadth` | `quote` | `/ftshare/market_breadth` | `scope` | 否 | 全市场成交额与涨跌分布（九档家数） |
+| `ftshare_daily_kline_snapshot` | `quote` | `/ftshare/daily_kline_snapshot` | `trade_date`\* `page` `size` | 是 | 全市场某交易日日 K 截面（含北交所） |
+| `ftshare_prev_close` | `quote` | `/ftshare/prev_close` | `code`\* `start_date`\* `end_date`\* | 否 | 单只标的逐日昨收价序列（校验复权与涨跌停） |
+| `ftshare_trading_calendar` | `cross` | `/ftshare/trading_calendar` | `market` `start_date`\* `end_date`\* | 否 | 交易日历（沪北深与港股，按日期区间） |
+| `ftshare_block_trades` | `flow` | `/ftshare/block_trades` | `date` `page` `size` | 是 | 大宗交易明细（按交易日，一笔一行） |
+| `ftshare_performance_forecast` | `financials` | `/ftshare/performance_forecast` | `code` `year` `report_type` `page` `size` | 是 | A 股业绩预告（按报告期或单票，含北证） |
+| `ftshare_performance_express` | `financials` | `/ftshare/performance_express` | `code` `year` `report_type` `page` `size` | 是 | A 股业绩快报（按报告期或单票，含更正） |
+| `ftshare_sw_industry_overview` | `financials` | `/ftshare/sw_industry_overview` | `date`\* `level` `page` `size` | 是 | 申万行业估值快照（全部层级，按交易日） |
+| `ftshare_sw_industry_metrics` | `financials` | `/ftshare/sw_industry_metrics` | `industry_code`\* `start_date`\* `end_date`\* `page` `size` | 是 | 申万单行业日度估值与量价序列（2021-05-31 起） |
+| `ftshare_limit_price` | `quote` | `/ftshare/limit_price` | `date` `code` `start_date` `end_date` `instrument_type` `page` `size` | 是 | 每日涨跌停价与昨收（含北证，按日或单票区间） |
+| `ftshare_dragon_tiger_seats` | `flow` | `/ftshare/dragon_tiger_seats` | `date`\* `page` `size` | 是 | 龙虎榜前五买入/卖出席位（按交易日，含北证） |
+| `ftshare_holder_number` | `flow` | `/ftshare/holder_number` | `code` `is_last` `page` `size` | 是 | 股东人数历史（单票全期）与全市场最新一期 |
+| `ftshare_index_weight` | `meta` | `/ftshare/index_weight` | `index_code`\* `date` `page` `size` | 是 | 中证系列指数成分权重（按采集期，百分数） |
+| `ftshare_convertible_bond_kline` | `quote` | `/ftshare/convertible_bond_kline` | `code`\* `period` `adjust` `start_date`\* `end_date`\* `limit` | 否 | 可转债历史 K 线（日/周/月/年，单只，元） |
+| `ftshare_lpr` | `macro` | `/ftshare/lpr` | 无参数 | 否 | LPR 贷款市场报价利率全历史（百分数，无参数） |
+| `ftshare_chinabond_yield` | `macro` | `/ftshare/chinabond_yield` | `start_date`\* `end_date`\* `curve_name` `page` `size` | 是 | 中债收益率曲线日度（国债/AAA 票据，八档期限） |
+| `ftshare_shibor` | `macro` | `/ftshare/shibor` | `start_date`\* `end_date`\* `page` `size` | 是 | SHIBOR 日度八档（2006-10 起，百分数） |
+| `ftshare_hibor` | `macro` | `/ftshare/hibor` | `start_date`\* `end_date`\* `page` `size` | 是 | HIBOR 日度十五档（七档实测整列 null） |
+| `ftshare_financial_calendar` | `cross` | `/ftshare/financial_calendar` | `start_date`\* `end_date`\* `page` `size` | 是 | 全球财经日历（≤3 天窗口，含发布时刻与前值） |
+| `ftshare_futures_contracts` | `futures` | `/ftshare/futures_contracts` | `trade_date` | 否 | 期货合约清单（按交易日快照，含银行间） |
+| `ftshare_futures_contract_detail` | `futures` | `/ftshare/futures_contract_detail` | `trade_date` `symbol` | 否 | 期货合约要素（乘数/单位/交割/上市摘牌日） |
+| `ftshare_futures_kline` | `futures` | `/ftshare/futures_kline` | `symbol`\* `interval` `start_date` `end_date` `limit` | 否 | 期货合约历史 K 线（日/周/月/季，单合约） |
+| `ftshare_futures_limit_price` | `futures` | `/ftshare/futures_limit_price` | `exchange`\* `trade_date` `start_date` `end_date` `ts_code` `cont` `page` `size` | 是 | 期货合约每日涨跌停价（按交易所，含最低保证金原值） |
+| `ftshare_futures_settle` | `futures` | `/ftshare/futures_settle` | `exchange`\* `trade_date` `start_date` `end_date` `ts_code` `page` `size` | 是 | 期货每日结算参数（结算价/保证金率/手续费） |
+| `ftshare_futures_warrant` | `futures` | `/ftshare/futures_warrant` | `trade_date` `start_date` `end_date` `symbol` `exchange` `page` `size` | 是 | 期货仓单日报（分交易所，数量单位随行而变） |
+| `ftshare_futures_weekly` | `futures` | `/ftshare/futures_weekly` | `week` `start_week` `end_week` `prd` `exchange` `page` `size` | 是 | 期货主要品种交易周报（周码 YYYYWW，成交额亿元） |
+| `ftshare_futures_index_kline` | `futures` | `/ftshare/futures_index_kline` | `code` `trade_date` `start_date` `end_date` `page` `size` | 是 | 南华期货商品指数日 K 线（按指数代码） |
+| `ftshare_futures_member_rank` | `futures` | `/ftshare/futures_member_rank` | `exchange` `variety_code` `contract_code` `member_name_abbr` `trade_date` `start_date` `end_date` `page` `size` | 是 | 东财期货会员成交持仓排名（按合约×会员） |
+| `ftshare_bullion_price` | `futures` | `/ftshare/bullion_price` | `symbol`\* `start_date`\* `end_date`\* `page` `size` | 是 | 贵金属价格（AU9999 / XAUUSD，单位未披露） |

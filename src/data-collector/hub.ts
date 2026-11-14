@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { DataTimeContract } from '../time/tools.js'
 import { summarizeTimeCoverage } from './time-axis.js'
 import type { DatasetRef, SaveDatasetInput, SessionLike } from './store.js'
+import { CATALOG_TOPICS, CATALOG_TOPIC_LABELS, topicOf, type CatalogTopic } from './catalog-taxonomy.js'
 
 /** Normalize an internal data_key token; data_key is host-only and never model-visible. */
 export function normalizeKeyToken(value: string): string {
@@ -54,6 +55,15 @@ export interface CapabilitySummary {
   paginated: boolean
 }
 
+/** One shard header for the discovery index; chars is the exact size of that shard's catalog text. */
+export interface CatalogTopicSummary {
+  topic: CatalogTopic
+  label: string
+  count: number
+  chars: number
+  examples: string[]
+}
+
 /** Full contract for one capability; must be read before calling. */
 export interface CapabilityDetail extends CapabilitySummary {
   description: string
@@ -77,6 +87,16 @@ function encodeDirectoryField(value: string): string {
     .replace(/\r\n?/g, '\\n')
     .replace(/\n/g, '\\n')
     .replace(/\t/g, '\\t')
+}
+
+/** One model-visible catalog line; keep this the only encoder so index and shard lines cannot drift. */
+function formatCapabilityLine(entry: CapabilitySummary): string {
+  return `${encodeDirectoryField(entry.capability)}|${encodeDirectoryField(entry.summary)}|${entry.paginated ? 1 : 0}`
+}
+
+/** Host pruner measures Unicode code points, not UTF-16 units; shard sizes use the same denominator. */
+function codePointLength(value: string): number {
+  return Array.from(value).length
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -359,23 +379,49 @@ export class DataCollectorHub {
   }
 
 /** Catalog: capability, one-line summary, paginated only. Full schemas would be pruned; details come from describeCapability. */
-  listCapabilities(): CapabilitySummary[] {
-    return [...this.sources.values()].map((source) => ({
+  listCapabilities(topic?: CatalogTopic): CapabilitySummary[] {
+    const entries = [...this.sources.values()].map((source) => ({
       capability: source.schema.capability,
       summary: summarize(source.schema),
       paginated: source.schema.paginated === true,
     }))
+    return topic === undefined ? entries : entries.filter((entry) => topicOf(entry.capability) === topic)
   }
 
   capabilityNames(): string[] {
     return [...this.sources.keys()]
   }
 
-/** Model-visible catalog: one `capability|summary|paginated` line each; JSON costs about twice the tokens. */
-  capabilityDirectory(): string {
-    return this.listCapabilities()
-      .map((entry) => `${encodeDirectoryField(entry.capability)}|${encodeDirectoryField(entry.summary)}|${entry.paginated ? 1 : 0}`)
+/** One row per non-empty topic; chars is the exact size of the shard text the model will receive. */
+  catalogTopicEntries(): CatalogTopicSummary[] {
+    const result: CatalogTopicSummary[] = []
+    for (const topic of CATALOG_TOPICS) {
+      const entries = this.listCapabilities(topic)
+      if (entries.length === 0) continue
+      const chars = codePointLength(entries.map(formatCapabilityLine).join('\n'))
+      result.push({
+        topic,
+        label: CATALOG_TOPIC_LABELS[topic],
+        count: entries.length,
+        chars,
+        examples: entries.slice(0, 2).map((entry) => entry.capability),
+      })
+    }
+    return result
+  }
+
+/** Discovery index: `topic|label|count|chars|examples`, one row per non-empty shard. */
+  catalogIndex(): string {
+    return this.catalogTopicEntries()
+      .map((entry) => [entry.topic, entry.label, String(entry.count), String(entry.chars), entry.examples.join(',')]
+        .map(encodeDirectoryField)
+        .join('|'))
       .join('\n')
+  }
+
+/** Full catalog is internal aggregation only; the model receives catalogIndex() or one topic shard. */
+  capabilityDirectory(topic?: CatalogTopic): string {
+    return this.listCapabilities(topic).map(formatCapabilityLine).join('\n')
   }
 
 /** Single capability contract; undefined for unknown names (the tool layer classifies it). */

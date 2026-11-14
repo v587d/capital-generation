@@ -13,6 +13,7 @@ import { createEastmoneySources } from '../lib/sources/eastmoney-http.js'
 import { createWindSources } from '../lib/sources/wind-mcp.js'
 import { createFtshareSources } from '../lib/sources/ftshare-rest.js'
 import { DataCollectorHub } from '../lib/data-collector/hub.js'
+import { topicOf } from '../lib/data-collector/catalog-taxonomy.js'
 
 const OUTPUT = fileURLToPath(new URL('../docs/data-collector-capabilities.md', import.meta.url))
 
@@ -84,7 +85,7 @@ L.push('')
 L.push('data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，主 Agent 与用户都不直接接触原始数据：')
 L.push('')
 L.push('1. 主 Agent 通过 `subagent_data_collector` 委派需求（只传需求与参数，不传原始数据）。')
-L.push('2. data_collector 按问题涉及的事实选能力，不设单回合数量上限；先调一次 `list_capabilities` 取回精简目录（一行一条 `capability|summary|paginated`），再逐个 `describe_capability` 核对 `input_schema` 与返回字段的逐行字典 `output_fields`，用 `request_data` 逐份取数。')
+L.push('2. data_collector 按问题涉及的事实选能力，不设单回合数量上限；先调一次 `list_capabilities()` 取九行主题索引（`topic|中文|条数|码点|例子`），再按需调 `list_capabilities({ topic })` 取该主题的 `capability|summary|paginated` 行，然后逐个 `describe_capability` 核对 `input_schema` 与返回字段的逐行字典 `output_fields`，用 `request_data` 逐份取数。')
 L.push('3. 宿主把上游原始数据**立即持久化**为不可变 Dataset（workspace 内、默认保留 7 天）；每份 DatasetRef（含缓存命中、分页的每页）由 collector 立即通知主 Agent，全部请求结束另发终结消息。原始行永不进入任何 Agent 的上下文；主 Agent 可在取下一份期间把已到的数据交给 data_junior。')
 L.push('4. 需要看数据内容或基础统计时，由兄弟子 Agent `data_junior` 用 `describe_dataset` 完成 profile 与受控 query，回传 `profile_ref`。')
 L.push('')
@@ -120,11 +121,11 @@ for (const [title, match] of GROUPS) {
   if (group.length === 0) continue
   L.push('## ' + title)
   L.push('')
-  L.push('| capability | 端点 | 主要参数 | 分页 | 用途 |')
-  L.push('|---|---|---|---|---|')
+  L.push('| capability | topic | 端点 | 主要参数 | 分页 | 用途 |')
+  L.push('|---|---|---|---|---|---|')
   for (const source of group) {
     const detail = hub.describeCapability(source.schema.capability)
-    L.push('| `' + source.schema.capability + '` | `' + pathOf(source) + '` | ' + paramsOf(source) + ' | ' + (source.schema.paginated ? '是' : '否') + ' | ' + detail.summary + ' |')
+    L.push('| `' + source.schema.capability + '` | `' + topicOf(source.schema.capability) + '` | `' + pathOf(source) + '` | ' + paramsOf(source) + ' | ' + (source.schema.paginated ? '是' : '否') + ' | ' + detail.summary + ' |')
   }
   L.push('')
 }

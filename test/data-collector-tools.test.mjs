@@ -239,7 +239,7 @@ test('render 回归：渲染的是返回值而非入参（此前 bug 恒为 {}�
   assert.equal(blocks[0].text, JSON.stringify('quote|行情快照|0'), '必须渲染 value 而不是 args')
 })
 
-test('list_capabilities：一行一条 capability|summary|paginated，不含内部字段与 schema', async () => {
+test('list_capabilities：无参数返回主题索引，带 topic 返回一行一条 capability|summary|paginated', async () => {
   const { hub, toolRuntime } = makeHubAndTools()
   hub.registerSource({
     schema: {
@@ -256,10 +256,18 @@ test('list_capabilities：一行一条 capability|summary|paginated，不含内�
     },
     execute: async () => ({ data: {} }),
   })
-  const directory = await runTool(toolRuntime, 'list_capabilities', {}, exec(delegatedSession()))
   const definition = toolRuntime.definitions.find((d) => d.name === 'list_capabilities')
-  assert.equal(directory, 'quote|行情快照|1')
+  const index = await runTool(toolRuntime, 'list_capabilities', {}, exec(delegatedSession()))
+  assert.match(index, /^quote\|行情与指数\|1\|\d+\|quote$/, '索引只给 topic 头、条数、码点与例子')
   assert.deepEqual(definition.output.schema, { type: 'string' })
+  assertToolOutput(definition, index)
+  assert.equal(definition.parameters.required.length, 0, 'topic 必须可选：无参数是索引入口')
+  assert.ok(Array.isArray(definition.parameters.properties.topic.enum) && definition.parameters.properties.topic.enum.includes('quote'))
+  assert.equal(definition.parameters.properties.topic.enum.length, 9, 'enum 必须是九个主题')
+  assert.ok(!definition.parameters.properties.topic.enum.includes('all'), '不提供 topic=all：那会重新制造单条全目录')
+
+  const directory = await runTool(toolRuntime, 'list_capabilities', { topic: 'quote' }, exec(delegatedSession()))
+  assert.equal(directory, 'quote|行情快照|1')
   assertToolOutput(definition, directory)
   // The directory only helps pick a capability; with schema it would be ~23KB and get truncated mid-way.
   for (const forbidden of ['data_key', 'source_label', 'api:fuyao', 'get_a_share_prices_snapshot', 'input_schema']) {
@@ -280,7 +288,7 @@ test('list_capabilities：摘要撞上行分隔符仍保持"一行 = 一条能�
     },
     execute: async () => ({ data: {} }),
   })
-  const directory = await runTool(toolRuntime, 'list_capabilities', {}, exec(delegatedSession()))
+  const directory = await runTool(toolRuntime, 'list_capabilities', { topic: 'meta' }, exec(delegatedSession()))
   assert.equal(directory, 'odd|含竖线 \\| 、反斜杠 \\\\ 与换行\\n的摘要|0')
   assert.equal(directory.split('\n').length, 1, '转义失效的后果是一条能力被读成两条，目录行数必须等于注册数')
   assertToolOutput(toolRuntime.definitions.find((d) => d.name === 'list_capabilities'), directory)
@@ -299,8 +307,27 @@ test('list_capabilities：无 summary 时退回描述首句（第三方数据源
     },
     execute: async () => ({ data: {} }),
   })
-  const directory = await runTool(toolRuntime, 'list_capabilities', {}, exec(delegatedSession()))
+  const directory = await runTool(toolRuntime, 'list_capabilities', { topic: 'meta' }, exec(delegatedSession()))
   assert.equal(directory, 'legacy|第一句用途|0')
+})
+
+test('list_capabilities：索引按主题分片，未知 topic 响亮失败而不是空结果', async () => {
+  const { hub, toolRuntime } = makeHubAndTools()
+  hub.registerSource(source('quote'))
+  hub.registerSource(source('odd'))
+  const index = await runTool(toolRuntime, 'list_capabilities', {}, exec(delegatedSession()))
+  assert.equal(index.split('\n').length, 2, '只列有能力的主题')
+  assert.match(index, /^quote\|行情与指数\|1\|\d+\|quote$/m)
+  assert.match(index, /^meta\|日历与元数据\|1\|\d+\|odd$/m)
+  await assert.rejects(
+    () => runTool(toolRuntime, 'list_capabilities', { topic: 'flow' }, exec(delegatedSession())),
+    /capability_scope_invalid: 未知 topic "flow".*quote\(行情与指数,1条\).*meta\(日历与元数据,1条\)/,
+    '空片必须报错并列出可用主题，不能返回空字符串让模型以为没有能力',
+  )
+  await assert.rejects(
+    () => runTool(toolRuntime, 'list_capabilities', { topic: ['quote'] }, exec(delegatedSession())),
+    /capability_scope_invalid: topic 必须是字符串/,
+  )
 })
 
 test('describe_capability：返回单个能力的完整契约，一次一个', async () => {
@@ -345,11 +372,13 @@ test('describe_capability：四类错误都有稳定 code 与恢复指引', asyn
   await assert.rejects(() => run({ capability: 'a'.repeat(300) }), /capability_invalid/)
   await assert.rejects(() => run({ capability: 'quote,history' }), /capability_invalid/)
 
-  // Unknown name: must list all candidate names so the model can self-correct.
+  // Unknown name: point back to the nine-line index, never dump every capability name.
   await assert.rejects(() => run({ capability: 'kline' }), (error) => {
     assert.match(error.message, /capability_unknown/)
-    assert.match(error.message, /quote/, '未知名字的错误必须列出可用能力')
+    assert.match(error.message, /quote/, '未知名字的错误回索引，索引里的例子要能看到')
+    assert.match(error.message, /topic/, '错误必须指回分片路径')
     assert.match(error.message, /原样复制|不要自行编造/)
+    assert.ok(error.message.length < 2048, '错误信息不能把全量目录重新倒出来')
     return true
   })
 
@@ -390,7 +419,7 @@ test('describe_capability：与 list_capabilities 一致地只暴露模型可见
   }
 })
 
-test('dc_status：上报 registered_capabilities 而非内部 source 名，不泄露密钥值', async () => {
+test('dc_status：只报注册规模与主题计数，不返回完整能力名清单', async () => {
   const { hub, toolRuntime } = makeHubAndTools({
     diagnostics: { probeApiKey: async () => ({ present: true, source: 'file' }) },
   })
@@ -398,7 +427,10 @@ test('dc_status：上报 registered_capabilities 而非内部 source 名，不�
   const status = await runTool(toolRuntime, 'dc_status', {}, exec(delegatedSession()))
   assert.equal(status.api_key.present, true)
   assert.equal(status.api_key.source, 'file')
-  assert.deepEqual(status.registered_capabilities, ['quote'])
+  assert.equal(status.registered_capability_count, 1)
+  assert.deepEqual(status.registered_topics, [{ topic: 'quote', label: '行情与指数', count: 1 }])
+  assert.equal('registered_capabilities' in status, false, '完整名字清单会绕过分片，不能再从诊断口出去')
+  assert.ok(JSON.stringify(status).length < 2048, '诊断回执不随目录条数线性增长')
   assert.equal('registration_error' in status, false, '注册不再以凭据为门槛，回执里不留这条自相矛盾的字段')
   assert.equal('agent_tool_policy' in status, false, '没注入收敛现场时不许凭空造出这个字段（output.schema 要如实）')
 })

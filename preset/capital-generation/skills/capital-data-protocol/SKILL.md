@@ -1,6 +1,6 @@
 ---
 name: capital-data-protocol
-description: Use when composing or reading a Capital data message — data_request, per-Dataset dataset_ready / data_failed / data_collection_completed, the two-step capability discovery, retry discipline and disclosure fields. Volume 1 of the Capital data protocol; reading a Dataset back lives in capital-data-profile, QuerySpec and derived arithmetic in capital-data-query.
+description: Use when composing or reading a Capital data message — data_request, per-Dataset dataset_ready / data_failed / data_collection_completed, the three-step capability discovery, retry discipline and disclosure fields. Volume 1 of the Capital data protocol; reading a Dataset back lives in capital-data-profile, QuerySpec and derived arithmetic in capital-data-query.
 ---
 
 # Capital 数据协议 · 第一册：委派与逐份回传
@@ -19,7 +19,7 @@ description: Use when composing or reading a Capital data message — data_reque
 | 角色 | 需要 | 说明 |
 |---|---|---|
 | 主 Agent | §1、§3、§4、§5 | 发请求、收回传、输出披露字段（§3 / §3.1 / §3.2 在 `capital-data-profile`，§3.3 / §4 在 `capital-data-query`） |
-| `data_collector` | §1、§1.1、§2、§5 | 收请求、能力发现两步、回传载荷、重试纪律（本册即够） |
+| `data_collector` | §1、§1.1、§2、§5 | 收请求、能力发现三步、回传载荷、重试纪律（本册即够） |
 | `data_junior` | §3、§3.1、§4、§5 | 质检回传、数据缺口、受控查询、重试纪律（§3 系在 `capital-data-profile`，§3.3 / §4 在 `capital-data-query`，§5 在本册） |
 
 ## 1. 数据请求（主 Agent → data_collector）
@@ -40,7 +40,7 @@ description: Use when composing or reading a Capital data message — data_reque
 | `type` | 固定 `data_request` |
 | `task_id` | 同一任务复用同一个值，便于回传对账 |
 | `description` | 用自然语言写清要什么数据；也可含标的、区间、频率 |
-| `capability` | 可选。明确知道能力名时才指定；省略时由 `data_collector` 走下面 §1.1 的两步发现 |
+| `capability` | 可选。明确知道能力名时才指定；省略时由 `data_collector` 走下面 §1.1 的三步发现 |
 | `params` | 按该 capability 的 `input_schema` 填写；标的使用完整代码（如 `600519.SH`），不自行拼接交易所后缀。腾讯 fallback 使用 `tencent_quote` / `tencent_kline`，不要改写成已有 `quote` / `history` |
 | `force_refresh` | `false`/省略：宿主可复用当前 session 内未过期且满足该能力缓存新鲜度的 Dataset；`true`：强制重新取数并生成新的不可变 Dataset，**绝不覆盖旧文件**。用户要求“现在/最新”的快照时传 `true`；保留 7 天不代表行情仍是最新 |
 
@@ -54,34 +54,33 @@ description: Use when composing or reading a Capital data message — data_reque
 - 含义相近的能力不自动互换：例如 Fuyao `history` 仅日线，腾讯 `tencent_kline` 支持近期分钟线；按 `describe_capability` 核对粒度、字段与单位，来源切换须写进回传。
 - `task_id` 由主 Agent 在本轮首次委派前确定；同一用户任务的 data_collector、data_junior 与 visualization 必须原样复用。data_collector 不得自行生成或改写 task_id，缺失时应拒绝请求并回告主 Agent。
 
-## 1.1 能力发现（data_collector 侧：两步，且各只做一次）
+## 1.1 能力发现（data_collector 侧：索引 → 分片 → 详情）
 
 | 步 | 工具 | 得到什么 | 调用纪律 |
 |----|------|----------|----------|
-| ① | `list_capabilities()` | 纯文本能力目录：**一行一条** `capability\|summary\|paginated`（1=分页、0=不分页） | **一个任务只调一次**；目录已在本 session 历史里，重复调用只会白占上下文 |
-| ② | `describe_capability({ capability })` | 该能力的完整 `description` / `input_schema` / `output_fields`（逐行字段字典） | 一次只传**一个**名字、**不传逗号**；同一个能力描述一次即可；要几个能力就在**同一条消息里一次发出多个调用**（纯读、可并发），不要一份一份等 |
+| ① | `list_capabilities()` | 九行主题索引：`topic\|中文\|条数\|码点\|例子` | **一个任务只调一次索引**；重复调用白占上下文 |
+| ② | `list_capabilities({ topic })` | 该主题的 `capability\|summary\|paginated` 行 | **每个 topic 只调一次**；按问题需要取片，不设片数上限：需要几片取几片，复杂/跨资产问题可以九片全取；多个 topic 同一条消息并发发出 |
+| ③ | `describe_capability({ capability })` | 完整 `description` / `input_schema` / `output_fields`（逐行字段字典） | 一次只传**一个**名字、**不传逗号**；同一个能力只描述一次；多个描述同一条消息并发发出 |
 
-- 读目录时**按行切**：一行就是一条能力，取第一个 `|` 前面的部分当 `capability` 原样复制；摘要里出现的
-  `\|`、`\n` 是转义字符，不是分隔符。
-- `output_fields` 每行是 `字段路径:类型[:说明]`：后缀 `?` 表示上游可能给 `null`，`[].` 表示该字段在数组
-  元素上（`item[].thscode`），说明段写 `取值 a/b` 时该字段只允许这几个值。按它写 `query_dataset` 的
-  `select` / `filters` 列名，大小写与下划线原样照抄。
-- 目录刻意不含参数与输出结构：全量 schema 约 23KB，会被工具结果剪枝器（阈值 8192）截断中间
-  部分，导致排在中间的能力在发现阶段不可见。目录只负责"选哪个"，详情负责"怎么填"。
-- **一个任务只调一次 `list_capabilities`**；**同一个能力只描述一次**，重复调用只会白占上下文。
-- `list_capabilities` 与 `describe_capability` 都是**纯读**：本轮要看几个能力，就在**同一条消息里一次发出
-  这几个 `describe_capability` 调用**，它们在框架并发池里并行执行、在同一个下一步一起返回；一份一份等
-  等于把一次往返付成 N 次。这不改变上一条"每个能力只描述一次"，也不改变"一次只传一个名字"。
-- 不查 `input_schema` 就填 `params` 属于违规；`params` 的取值与约束一律以 `describe_capability` 为准。
+- **先看索引再选片**：复杂/跨资产问题第一步九片全取；单一资产按需取。
+- **片数是结果不是配额**：按需取片，不要为省片数漏能力。单片 <2048 是体积预算；九片合起来仍是全目录，不会触发单条剪枝。
+- **九片全取用九个独立调用**：不要 `topic=all`，那会合成一条 10k 结果，剪枝按单条算；分开取。
+- 读分片**按行切**：第一个 `|` 前是 capability；`\|`、`\n` 是转义。索引行五个字段，分片行三个。
+- `output_fields` 每行 `字段路径:类型[:说明]`：`?` = 上游可能给 `null`，`[].` = 数组元素字段；按它写 `query_dataset` 的 `select` / `filters` 列名，原样照抄。
+- 目录刻意不带 schema（全量约 23KB 会被剪枝）；分片只解决目录总量，详情仍逐个取。
+- **一个任务只调一次索引；每个 topic 只调一次；同一个能力只描述一次**。
+- 两者都是**纯读**：多个调用放同一条消息并发发出，不要一份一份等；这不改变上面的去重规则。
+- 不查 `input_schema` 就填 `params` 属于违规；参数一律以 `describe_capability` 为准。
 
 `describe_capability` 的错误按 code 处置，不要盲目重试：
 
 | code | 含义 | 正确动作 |
 |------|------|----------|
-| `capability_required` | 没给名字（缺失或空白） | 先调一次 `list_capabilities`，把目录里的名字原样传入 |
+| `capability_required` | 没给名字（缺失或空白） | 先取一次索引，再取对应 topic 的分片，把名字原样传入 |
 | `capability_invalid` | 不是字符串 / 超长 / 含逗号 | 改成单个字符串名字后重试一次；多个能力分多次调用 |
-| `capability_unknown` | 名字不在目录里（错误信息会列出全部可用名字） | 从列出的名字里原文复制重来；不编造、不缩写、不改写 |
-| `capability_catalog_empty` | 当前没有任何已注册能力（数据源注册没生效；**缺凭据不会让目录变空**，只会在取数那一刻点名凭据失败） | **不要重试**（此刻任何名字都会失败）；用 `dc_status` 核对 `registered_capabilities` 与 `api_key`，如实回告主 Agent |
+| `capability_unknown` | 名字不在目录里（错误信息会回九行索引，不再列全量名字） | 从错误里的索引选 topic，取分片后原文复制名字；不编造、不缩写、不改写 |
+| `capability_scope_invalid` | `list_capabilities` 的 topic 不在当前索引里 | 按错误列出的主题重选一个；不要重试同一个 topic。需要全量就九片分别取，不要用 `all` |
+| `capability_catalog_empty` | 当前没有任何已注册能力（数据源注册没生效；**缺凭据不会让目录变空**，只会在取数那一刻点名凭据失败） | **不要重试**（此刻任何名字都会失败）；用 `dc_status` 核对 `registered_capability_count` / `registered_topics` 与 `api_key`，如实回告主 Agent |
 | `request_params_invalid` | `request_data` 的 `params` 不符合该能力契约（错误会保留具体字段原因） | 先按错误中的 capability 调 `describe_capability({"capability":"..."})`，重新读取 `input_schema`，修正后只重试一次；不要凭记忆猜参数。网络、超时、落盘错误不要走这条路径 |
 
 ## 2. 逐份回传（data_collector → 主 Agent）

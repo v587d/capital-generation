@@ -7,6 +7,34 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**、2.9.0 的选择器收敛与质检前置——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [2.24.0] - 2026-11-14
+
+数据能力目录改为九主题分片：`list_capabilities()` 先给索引，按 topic 取片，需要全量时可九片全取；目录不再受单条 6,144 / 8,192 字符约束，同时收紧诊断口，避免全量名字绕过协议。
+
+### Added
+
+- **九主题能力目录**：新增 `catalog-taxonomy.ts`，128 个 capability 显式落到 `quote / flow / financials / fund / events / macro / futures / cross / meta` 九片；缺项、孤儿项由测试点名。`list_capabilities()` 无参数返回九行索引（`topic|中文|条数|码点|例子`，当前 545 字符），`list_capabilities({ topic })` 返回该片 `capability|summary|paginated` 行；当前单片最大 1,182 码点（原始回执 1,216 字符）。
+- **按问题取片，不设片数上限**：复杂/跨资产问题可在同一条消息里九片全取（九个独立调用、框架并发），单一资产按需取；`topic=all` 仍不提供，避免把九片合成一条 10k 结果触发剪枝。
+- **能力总表加 topic 列**：`docs/data-collector-capabilities.md` 与生成脚本同步；新增能力忘登记 topic 时测试直接失败。
+
+### Changed
+
+- **`list_capabilities` 行为变更**：无参数不再返回 128 行全目录，而是九行索引；旧调用方需先取索引，再按 topic 取片。协议 skill、data_collector persona 与 `docs/dev/data-roles.md` 已同步。
+- **目录预算重划**：`thresholdChars` 仍为 8192；索引 <1024、单片 <2048 软目标 / 4096 硬上限、单能力详情 <4096。6,144 不再是能力总数的上限，也不再作为 CI 的目录闸门。
+- **能力发现改为三步**：索引 → 主题分片 → `describe_capability` 详情；同一个 topic 只取一次，同一个能力只描述一次。
+
+### Fixed
+
+- **诊断口泄漏全量目录**：`dc_status` 原先返回 128 个 capability 名字的 4,160 字符清单，模型可据此跳过主题分片，10k 时会把分片打回原形；现在只返回 `registered_capability_count` 与九片 `registered_topics` 计数。
+- **`capability_unknown` 回流全量名字**：未知能力原先 `join` 全部可用名字，现在回九行索引，按 topic 取片后原样复制；错误长度不再随目录条数增长。
+- **索引体积旧数**：设计文档里的 477 码点更新为实测 545（含例子），测试仍以实测索引与分片计数为准。
+
+### Migration
+
+- data_collector 或脚本若依赖 `list_capabilities()` 一次拿全目录：改为先取索引，再按 topic 分片取；需要全量就九片分别取，不要新增 `topic=all`。
+- `dc_status` 的 `registered_capabilities: string[]` 改为 `registered_capability_count: number` + `registered_topics: { topic, label, count }[]`；排障看计数与片汇总，名字从分片取。
+- 无配置项变更；升级后重启 dsh 进程生效。
+
 ## [2.23.0] - 2026-11-13
 
 投研自动化设置新增「存储」面板：工作区占用一眼可见，缓存一键清理，清理边界只碰 `capital-data`。

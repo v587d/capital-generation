@@ -100,22 +100,22 @@
 ## 1.5 capability 发现与体积预算
 
 - `data_key` 是宿主内部路由字段，不进模型协议；模型侧只用短小全局唯一的 capability 名。
-- **两级发现**：`list_capabilities()` 是**纯文本目录，一行一条** `capability|summary|paginated`
-  （1/0；`|` 与换行由生产者转义——分隔符撞车的后果是一条能力被读成两条），`describe_capability` 给
-  `description` / `input_schema` / `output_fields`。目录**刻意不带 schema**（全量曾达 23KB 被剪枝截断中间，
-  中间能力发现阶段不可见）。新增 Fuyao 端点必须同时写 `summary` 与 `description`（单位、null
-  语义、时间与分页口径）。
+- **三级发现（索引 → 分片 → 详情）**：`list_capabilities()` 返回九行主题索引
+  `topic|中文|条数|码点|例子`；带 `topic` 返回该片 `capability|summary|paginated` 行；
+  `describe_capability` 给 `description` / `input_schema` / `output_fields`。三段都不带 schema。
+  新增 Fuyao 端点必须同时写 `summary` 与 `description`，并在 `catalog-taxonomy.ts` 登记
+  topic；缺登记由 `test/data-collector-hub.test.mjs` 点名。
 - **`output_fields` 只是 `output_schema` 的投影**：一行一字段 `路径:类型[:说明]`，`?` = 上游可能给
   `null`，`[].` = 数组元素的字段。改成投影是因为逐列 JSON Schema 让详情体积按**列数**增长（每列 ~55
   字符，72 列 = 4699 字符，第一次注册就打穿 4096）；字典每列 ~15 字符。**权威声明仍住
   `output_schema`**，护栏与 §9.6 的返回值校验照旧按 schema 走，字典不构成第二份真相。
 - **行数组位置由数据源声明**：`guard.itemKey` → `rowShape`，存储层不靠 `data.item` 猜（实测龙虎榜
   在 `stock_items`）。**新增端点若行数组不叫 `item`，必须在 guard 写明 `itemKey`**。
-- **目录体积真实上限** = pruner 的 `thresholdChars`（preset 配 8192，超过则中间被剪枝）；该阈值
-  **不能按 Agent 区分**（全仓只有 pruner 一个包持有它，主 / 子共用 standing composition）。由
-  **测试**先失败而非运行时静默截断（`test/data-collector-hub.test.mjs`）：**目录 < 6144、单能力
-  详情 < 4096**（2026-10-05 实测 69 条：目录 2435 = 40%、最大详情 2771 = 68%；编码前的 JSON 数组
-  是 5530 = 90%，58% 的字节是键名和标点）；`test/data-collector-capabilities.test.mjs` 断言能力总表与实现一致。
+- **分片预算**：pruner 的 `thresholdChars` 仍是宿主真实上限（8192，且不能按 Agent 区分）；模型侧
+  按条送：索引 <1024、单片 <2048 软目标 / 4096 硬上限、单能力详情 <4096。全目录不合成单条结果；
+  需要时可九片全取，片数按问题定、不设上限。
+  能力总数增长先由 `catalog-taxonomy.ts` 落到某一片，片内超预算才失败，不再直接撞 6144；
+  `test/data-collector-hub.test.mjs` 先失败。
 
 ## 1.7 单轮等待：`wait_for_agents`
 

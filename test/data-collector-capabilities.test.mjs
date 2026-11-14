@@ -42,14 +42,15 @@ test('能力总表：每个 capability 都带端点路径、参数列与非空�
     const row = table.split('\n').find((line) => line.startsWith(`| \`${capability}\` |`))
     assert.ok(row, `${capability} 缺少表格行`)
     const cells = row.split('|').map((cell) => cell.trim())
-    assert.ok(cells[2].startsWith('`/api/') || cells[2].startsWith('`/tencent/') || cells[2].startsWith('`/eastmoney/') || cells[2].startsWith('`/wind/') || cells[2].startsWith('`/ftshare/'), `${capability} 的端点列应为 Fuyao、Tencent、Eastmoney、Wind 或 FTShare 路径`)
-    assert.ok(cells[3].length > 0, `${capability} 的参数列不应为空（无参数写「无参数」）`)
-    assert.equal(cells[4], hub.describeCapability(capability).paginated ? '是' : '否', `${capability} 的分页列与实现不一致`)
-    assert.ok(cells[5].length > 0, `${capability} 的用途列不应为空`)
+    assert.match(cells[2], /^`[a-z]+`$/, `${capability} 的 topic 列必须是反引号包裹的主题名`)
+    assert.ok(cells[3].startsWith('`/api/') || cells[3].startsWith('`/tencent/') || cells[3].startsWith('`/eastmoney/') || cells[3].startsWith('`/wind/') || cells[3].startsWith('`/ftshare/'), `${capability} 的端点列应为 Fuyao、Tencent、Eastmoney、Wind 或 FTShare 路径`)
+    assert.ok(cells[4].length > 0, `${capability} 的参数列不应为空（无参数写「无参数」）`)
+    assert.equal(cells[5], hub.describeCapability(capability).paginated ? '是' : '否', `${capability} 的分页列与实现不一致`)
+    assert.ok(cells[6].length > 0, `${capability} 的用途列不应为空`)
     // Required params must carry a * marker so readers do not assume all are optional.
     const required = hub.describeCapability(capability).input_schema.required ?? []
     for (const name of required) {
-      assert.ok(cells[3].includes(`\`${name}\`\\*`), `${capability} 的必填参数 ${name} 在表里缺少 * 标记`)
+      assert.ok(cells[4].includes(`\`${name}\`\\*`), `${capability} 的必填参数 ${name} 在表里缺少 * 标记`)
     }
   }
 })

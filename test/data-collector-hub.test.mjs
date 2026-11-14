@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { DataCollectorHub, buildDataKey, normalizeKeyToken } from '../lib/data-collector/hub.js'
+import { CATALOG_TAXONOMY } from '../lib/data-collector/catalog-taxonomy.js'
 import { DatasetStoreError } from '../lib/data-collector/store.js'
 import { createFuyaoRestSources } from '../lib/sources/fuyao-rest.js'
 import { createTencentSources } from '../lib/sources/tencent-http.js'
@@ -393,20 +394,35 @@ test('describeCapability：返回单个能力详情，未知名字返回 undefin
   }
 })
 
-test('能力目录体积预算：必须留在 DSH 剪枝阈值（8192）以内，否则中间能力会被截断', async () => {
+test('能力目录分片：taxonomy 完整、索引与单片预算各自成立，不靠单份全目录', async () => {
   const { hub } = makeHub()
   for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources(), ...createWindSources(async () => 'key'), ...createFtshareSources(async () => 'key')]) hub.registerSource(dataSource)
-  const directory = hub.capabilityDirectory()
-  assert.equal(hub.capabilityNames().length, 128, '端点数量回归：目录预算断言必须覆盖 Fuyao、Tencent、Eastmoney、Wind 与 FTShare 全部已注册能力')
+  const names = hub.capabilityNames()
+  assert.equal(names.length, 128, '端点数量回归：分片断言必须覆盖 Fuyao、Tencent、Eastmoney、Wind 与 FTShare 全部已注册能力')
 
-  // CI guard only, no runtime size check: the host pruner rewrites oversized results
-  // after the fact, so keep the directory under 6144 of its 8192-codepoint threshold.
-  const DIRECTORY_BUDGET = 6144
-  const directoryChars = codePoints(directory)
-  assert.ok(directoryChars < DIRECTORY_BUDGET, `能力目录已达 ${directoryChars} 码点（预算 ${DIRECTORY_BUDGET}，剪枝阈值 8192）：请精简 summary，或按设计文档 §2.3 / §2.5 讨论发现形态`)
-  assert.ok(directoryChars < 8192, '目录绝不允许越过剪枝阈值')
-  // One line per capability: line count equals registration count.
-  assert.equal(directory.split('\n').length, hub.capabilityNames().length)
+  // A missing production entry would fall into `meta`; stale entries would never be visible.
+  assert.deepEqual(names.filter((name) => !Object.hasOwn(CATALOG_TAXONOMY, name)), [], '每个生产能力都必须在 catalog-taxonomy 里有 topic')
+  assert.deepEqual(Object.keys(CATALOG_TAXONOMY).filter((name) => !names.includes(name)), [], 'taxonomy 不得留下已删除能力的孤儿项')
+
+  const index = hub.catalogIndex()
+  assert.ok(codePoints(index) < 1024, `主题索引 ${codePoints(index)} 码点超过 1024：索引只放 topic 头，不放能力行`)
+  assert.equal(index.split('\n').length, 9, '索引必须覆盖九个主题')
+  for (const line of index.split('\n')) assert.equal(line.split('|').length, 5, `索引行不是 topic|label|count|chars|examples：${line}`)
+
+  const entries = hub.catalogTopicEntries()
+  assert.equal(entries.length, 9)
+  assert.equal(entries.reduce((sum, entry) => sum + entry.count, 0), names.length, '九片条数之和必须等于注册数')
+  for (const entry of entries) {
+    const shard = hub.capabilityDirectory(entry.topic)
+    assert.equal(shard.split('\n').length, entry.count, `${entry.topic} 的行数与索引头不一致`)
+    assert.equal(codePoints(shard), entry.chars, `${entry.topic} 的 chars 必须是模型实际收到的码点数`)
+    assert.ok(entry.chars < 2048, `${entry.topic} 单片 ${entry.chars} 码点超过 2048 软目标`)
+    assert.ok(entry.chars < 4096, `${entry.topic} 单片 ${entry.chars} 码点超过 4096 硬上限`)
+  }
+
+  // The full directory is internal only (docs/tests); shards must partition it with no loss or duplicate.
+  const sharded = entries.flatMap((entry) => hub.capabilityDirectory(entry.topic).split('\n')).sort()
+  assert.deepEqual(sharded, hub.capabilityDirectory().split('\n').sort(), '九片必须恰好覆盖全目录，不能丢能力或重复')
 })
 
 test('宽表详情预算：字段字典让 72 列的能力留在预算内（直发 output_schema 必爆）', () => {

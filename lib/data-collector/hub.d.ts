@@ -1,6 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { DataTimeContract } from '../time/tools.js';
 import type { DatasetRef, SaveDatasetInput, SessionLike } from './store.js';
+import { type CatalogTopic } from './catalog-taxonomy.js';
 /** Normalize an internal data_key token; data_key is host-only and never model-visible. */
 export declare function normalizeKeyToken(value: string): string;
 export declare function buildDataKey(provider: string, kind: string, resource: string): string;
@@ -39,6 +40,14 @@ export interface CapabilitySummary {
     capability: string;
     summary: string;
     paginated: boolean;
+}
+/** One shard header for the discovery index; chars is the exact size of that shard's catalog text. */
+export interface CatalogTopicSummary {
+    topic: CatalogTopic;
+    label: string;
+    count: number;
+    chars: number;
+    examples: string[];
 }
 /** Full contract for one capability; must be read before calling. */
 export interface CapabilityDetail extends CapabilitySummary {
@@ -113,10 +122,14 @@ export declare class DataCollectorHub {
     private awaitSettlement;
     private settleWaiter;
     /** Catalog: capability, one-line summary, paginated only. Full schemas would be pruned; details come from describeCapability. */
-    listCapabilities(): CapabilitySummary[];
+    listCapabilities(topic?: CatalogTopic): CapabilitySummary[];
     capabilityNames(): string[];
-    /** Model-visible catalog: one `capability|summary|paginated` line each; JSON costs about twice the tokens. */
-    capabilityDirectory(): string;
+    /** One row per non-empty topic; chars is the exact size of the shard text the model will receive. */
+    catalogTopicEntries(): CatalogTopicSummary[];
+    /** Discovery index: `topic|label|count|chars|examples`, one row per non-empty shard. */
+    catalogIndex(): string;
+    /** Full catalog is internal aggregation only; the model receives catalogIndex() or one topic shard. */
+    capabilityDirectory(topic?: CatalogTopic): string;
     /** Single capability contract; undefined for unknown names (the tool layer classifies it). */
     describeCapability(capability: string): CapabilityDetail | undefined;
     private processNext;
