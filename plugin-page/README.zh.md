@@ -1,13 +1,6 @@
-[![npm version](https://img.shields.io/npm/v/%40v587d%2Fcapital-generation)](https://www.npmjs.com/package/@v587d/capital-generation)
-[![Market](https://img.shields.io/badge/Market-CN%20%7C%20HK%20%7C%20US-orange)](https://github.com/v587d/capital-generation)
-[![Financial Agent](https://img.shields.io/badge/Financial-Agent-red)](https://github.com/v587d/capital-generation)
-[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek_Harness-plugin-blue)](https://github.com/deepseek-ai/deepseek-harness)
-[![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/v587d/capital-generation/blob/main/LICENSE)
-[![powered by dsh](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
+> **注意**：本项目仍在探索中，不提供代交易服务，不保证数据完整、及时或准确，也不承诺投资回报。请自行核对来源并承担投资风险。
 
 Capital Generation 是运行在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 里的证券研究插件，面向关注 A 股、港股、美股与期货等品种的个体投资者。安装后，新会话里会多出 **自动模式**、**行情专家**、**资讯专员** 三个模式。
-
-> **注意**：本项目仍在探索中，不提供代交易服务，不保证数据完整、及时或准确，也不承诺投资回报。请自行核对来源并承担投资风险。
 
 ## 第一次使用
 

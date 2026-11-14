@@ -221,8 +221,6 @@ test('插件显示名：根包 locale meta 必须能被宿主读到，且 README
     const localImages = images.filter((src) => !/^https?:\/\//u.test(src))
     assert.deepEqual(localImages, [],
       `${meta.detail} 不放本地图片；截图留在 README，徽章走绝对 HTTPS`)
-    assert.ok(images.some((src) => src.includes('img.shields.io/npm/v/')),
-      `${meta.detail} 缺少 npm 动态版本徽章：版本要跟着 npm 自动变`)
     assert.ok(doc.split('\n').length <= 80, `${meta.detail} 超过 80 行：它是索引页，不是 README 副本`)
     assert.ok(Buffer.byteLength(doc, 'utf8') <= 6 * 1024, `${meta.detail} 超过 6 KB：它是索引页，不是 README 副本`)
   }

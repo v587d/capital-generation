@@ -20,7 +20,7 @@
 ## 14.3 格式与图片
 
 - 只写 Markdown；禁 raw HTML（`<img>`、`<p>`、`<details>`、`<a>`、`<table>` 等）——宿主按 `omitHtml` 渲染，HTML 会被整段省略。
-- 插件页不放本地图片；徽章用绝对 HTTPS（至少一张 npm 动态版本徽章），截图与示意图留在 README，避免随 UI 过期和包体膨胀。
+- 插件页不放本地图片；徽章是**可选**的，如使用必须走绝对 HTTPS 并带 alt；截图与示意图留在 README，避免随 UI 过期和包体膨胀。
 - 徽章是外部资源，不进 `files`；文档 ≤1 MB；建议 ≤80 行 / ≤6 KB，详情文档显示在配置卡上方，过长会把配置推远。
 - 不写 `width` / `align`；徽章必须有 alt。
 
@@ -33,6 +33,6 @@
 
 ## 14.5 回归与验收
 
-- `test/packaging.test.mjs`：`meta.detail` 在包里、文档无 raw HTML、只引用绝对 HTTPS 徽章、至少一张 npm 动态版本徽章、不放本地图片、locale 路径合法。
+- `test/packaging.test.mjs`：`meta.detail` 在包里、文档无 raw HTML、只引用绝对 HTTPS 徽章（如有）、不放本地图片、locale 路径合法。
 - `test/readme-prose.test.mjs`：插件页文档同样不写 §编号、`docs/dev/`、`ctx.*`、仓内源码路径。
-- 真机用 npm 安装（不是 `link:`）打开插件页：徽章、zh/en 切换、配置卡位置、版本段。
+- 真机用 npm 安装（不是 `link:`）打开插件页：zh/en 切换、配置卡位置、版本段；徽章不是必需项。

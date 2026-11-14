@@ -1,13 +1,7 @@
-[![npm version](https://img.shields.io/npm/v/%40v587d%2Fcapital-generation)](https://www.npmjs.com/package/@v587d/capital-generation)
-[![Market](https://img.shields.io/badge/Market-CN%20%7C%20HK%20%7C%20US-orange)](https://github.com/v587d/capital-generation)
-[![Financial Agent](https://img.shields.io/badge/Financial-Agent-red)](https://github.com/v587d/capital-generation)
-[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek_Harness-plugin-blue)](https://github.com/deepseek-ai/deepseek-harness)
-[![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/v587d/capital-generation/blob/main/LICENSE)
-[![powered by dsh](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
+> **Note**: This project is exploratory. It does not provide trading services, does not guarantee data completeness, timeliness or accuracy, and does not promise investment returns. Verify sources and accept market risk yourself.
 
 Capital Generation is a securities research plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), built for individual investors following A-shares, Hong Kong, US markets and futures. After installation, new sessions offer **Auto**, **Market Expert**, and **News Specialist** modes.
 
-> **Note**: This project is exploratory. It does not provide trading services, does not guarantee data completeness, timeliness or accuracy, and does not promise investment returns. Verify sources and accept market risk yourself.
 
 ## First use
 
