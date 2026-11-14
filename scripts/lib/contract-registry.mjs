@@ -172,6 +172,9 @@ const EM = [
   ds('eastmoney', 'eastmoney_holder_number_snapshot', 'daily', { page: 1, size: 3 }),
   ds('eastmoney', 'eastmoney_mutual_quota', 'daily', {}, { note: '无参数；closed_reason 非空表示休市，是合法结果' }),
   ds('eastmoney', 'eastmoney_margin_trading', 'daily', { ticker: A_SHARE, start_date: dayShift(-30), end_date: dayShift(-1), page: 1, size: 3 }),
+  ds('eastmoney', 'eastmoney_global_quote', 'daily', { symbols: ['SPX', 'NDX', 'HSI', 'HSAHP'] }, { expect: { minRows: 1 }, note: '指数 amount 为 0 时输出 null；部分符号未回是合法行，不是空结果' }),
+  ds('eastmoney', 'eastmoney_global_kline', 'daily', { symbol: 'NDX', start_date: dayShift(-30), end_date: dayShift(-1) }, { expect: { minRows: 1 } }),
+  ds('eastmoney', 'eastmoney_margin_total', 'daily', { start_date: dayShift(-30), end_date: dayShift(-1), page: 1, size: 3 }, { expect: { minRows: 1 }, note: '深/京 T+1，最近一天可能只有沪市一行' }),
   ds('eastmoney', 'eastmoney_convertible_bond_list', 'daily', { start_date: dayShift(-180), end_date: dayShift(-1), page: 1, size: 3 }),
 ]
 
@@ -182,6 +185,8 @@ const TX = [
   ds('tencent', 'tencent_ticks', 'daily', { code: '000001.SZ' }, { budgetMs: 30_000 }),
   ds('tencent', 'tencent_hk_quote', 'daily', { codes: ['00700'] }, { expect: { minRows: 1 } }),
   ds('tencent', 'tencent_us_quote', 'daily', { codes: ['AAPL'] }, { expect: { minRows: 1 } }),
+  // `pandata` 只在延长时段出现；盘中同一请求会回 available=false，但行仍在，所以 minRows=1 仍是稳定契约。
+  ds('tencent', 'tencent_us_prepost_quote', 'daily', { codes: ['AAPL'] }, { expect: { minRows: 1 }, note: '盘中无 pandata 时回 available=false 的行，不是空结果' }),
   ds('tencent', 'tencent_hk_index_quote', 'daily', { codes: ['HSI'] }, { expect: { minRows: 1 } }),
   ds('tencent', 'tencent_us_index_quote', 'daily', { codes: ['usDJI'] }, { expect: { minRows: 1, identity: { field: 'tencent_symbol', value: 'usDJI' } } }),
   ds('tencent', 'tencent_hk_kline', 'daily', { code: '00700', period: 'day', count: 5 }, { expect: { minRows: 1 } }),
@@ -197,6 +202,7 @@ const WIND_DATA = [
 const RETRIEVER = [
   pr('retriever', 'cls_telegraph', 'daily', { params: { limit: 3 }, expect: { minRows: 1 } }),
   pr('retriever', 'wscn_lives', 'daily', { params: { channel: 'global-channel', limit: 3 }, expect: { minRows: 1 }, budgetMs: 30_000, note: '实测 2.8 s，离群但不算失败' }),
+  pr('retriever', 'cninfo_announcements', 'daily', { params: { date: dayShift(-1), page: 1, page_size: 5 }, expect: { minRows: 0 }, note: '巨潮单日全市场清单；周末/节假日可能 0 条，空是合法结果；只验清单，不抓 PDF' }),
   pr('retriever', 'cninfo_irm', 'daily', { params: { code: '000001', pageSize: 3, pageNum: 1 }, expect: { minRows: 0 }, note: '只覆盖深市；样本必须用 000001，用 600519 会合法 NOT_FOUND' }),
   pr('retriever', 'eastmoney_724', 'daily', { params: { limit: 3 }, expect: { minRows: 1 } }),
   pr('retriever', 'eastmoney_stock_news', 'daily', { params: { code: '600519', limit: 3 }, expect: { minRows: 1 }, note: '上游被间歇风控时会整个丢掉 cmsArticleWebOld 键——那是 UPSTREAM 不是空结果' }),

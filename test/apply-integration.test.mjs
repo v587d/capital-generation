@@ -83,7 +83,7 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
     const hub = services.get('dataCollectorHub')
     assert.ok(hub, 'apply 必须提供 dataCollectorHub 服务')
     assert.ok(services.get('datasetStore'), 'apply 必须提供 datasetStore 服务')
-    assert.equal(hub.capabilityNames().length, 128, '装配后应注册 61 个 Fuyao、9 个 Tencent、21 个 Eastmoney、3 个 Wind 与 34 个 FTShare capability')
+    assert.equal(hub.capabilityNames().length, 132, '装配后应注册 61 个 Fuyao、10 个 Tencent、24 个 Eastmoney、3 个 Wind 与 34 个 FTShare capability')
 
     for (const name of ['request_data', 'list_capabilities', 'describe_capability', 'dc_status', 'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'prepare_chart_source', 'get_local_datetime', 'resolve_data_time_range', 'get_watchlist', 'anysearch_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'ocr', 'render_chart']) {
       assert.ok(toolNamed(tools, name), `装配后应注册工具 ${name}`)
@@ -95,8 +95,8 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
     const status = await toolNamed(tools, 'dc_status').execute({}, exec(delegated))
     assert.equal(status.api_key.present, true)
     assert.equal(status.api_key.source, 'env(FUYAO_API_KEY)')
-    assert.equal(status.registered_capability_count, 128)
-    assert.equal(status.registered_topics.reduce((sum, topic) => sum + topic.count, 0), 128, '主题计数之和必须等于注册数')
+    assert.equal(status.registered_capability_count, 132)
+    assert.equal(status.registered_topics.reduce((sum, topic) => sum + topic.count, 0), 132, '主题计数之和必须等于注册数')
     // dc_status policy diagnostics come from production wiring and cover child roles too.
     assert.ok(Array.isArray(status.agent_tool_policy), 'apply() 必须把收敛现场注入 dc_status')
     assert.deepEqual(status.agent_tool_policy, [], '假装配里没有 agent 被创建，记录应为空数组而不是缺字段')
@@ -106,7 +106,7 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
     const indexLines = directory.split('\n')
     assert.equal(indexLines.length, 9, '无参数必须返回九行主题索引，而不是一份全目录')
     assert.ok(indexLines.every((line) => line.split('|').length === 5), '每行都是 topic|label|count|chars|examples')
-    assert.equal(indexLines.reduce((sum, line) => sum + Number(line.split('|')[2]), 0), 128, '索引条数之和必须等于注册数')
+    assert.equal(indexLines.reduce((sum, line) => sum + Number(line.split('|')[2]), 0), 132, '索引条数之和必须等于注册数')
     const quoteLine = indexLines.find((line) => line.startsWith('quote|'))
     assert.ok(quoteLine, '索引必须包含 quote 主题')
     const quoteShard = await toolNamed(tools, 'list_capabilities').execute({ topic: 'quote' }, exec(delegated))
@@ -115,8 +115,8 @@ test('apply()：有 Key 时注册全部数据源，并暴露完整工具表', as
     const topics = indexLines.map((line) => line.split('|')[0])
     const shards = await Promise.all(topics.map((topic) => toolNamed(tools, 'list_capabilities').execute({ topic }, exec(delegated))))
     const shardLines = shards.flatMap((shard) => shard.split('\n'))
-    assert.equal(shardLines.length, 128, '九片可以全取，合起来就是全目录')
-    assert.equal(new Set(shardLines).size, 128, '九片之间不能重复或丢能力')
+    assert.equal(shardLines.length, 132, '九片可以全取，合起来就是全目录')
+    assert.equal(new Set(shardLines).size, 132, '九片之间不能重复或丢能力')
     const detail = await toolNamed(tools, 'describe_capability').execute({ capability: 'quote' }, exec(delegated))
     assert.equal(detail.capability, 'quote')
     assert.ok(typeof detail.output_fields === 'string' && detail.output_fields.includes('item[].'), '详情必须给出字段字典（宽表靠它才不爆预算）')
@@ -142,7 +142,7 @@ test('apply()：装配期凭据尚未装载时同花顺源照常注册，失败�
     await Promise.all(effectResults)
 
     const hub = services.get('dataCollectorHub')
-    assert.equal(hub.capabilityNames().length, 128,
+    assert.equal(hub.capabilityNames().length, 132,
       '⛔ 61 个同花顺能力不得因"装配期没读到 key"缺席（桌面端实测：整场进程只剩 8 项且无重试）；FTShare 那 34 条同理，也不得因装配期没有 FTSHARE_API_KEY 而缺席')
 
     const unloaded = await toolNamed(tools, 'dc_status').execute({}, exec(delegated))

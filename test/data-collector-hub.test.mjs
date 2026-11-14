@@ -398,7 +398,7 @@ test('能力目录分片：taxonomy 完整、索引与单片预算各自成立�
   const { hub } = makeHub()
   for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources(), ...createWindSources(async () => 'key'), ...createFtshareSources(async () => 'key')]) hub.registerSource(dataSource)
   const names = hub.capabilityNames()
-  assert.equal(names.length, 128, '端点数量回归：分片断言必须覆盖 Fuyao、Tencent、Eastmoney、Wind 与 FTShare 全部已注册能力')
+  assert.equal(names.length, 132, '端点数量回归：分片断言必须覆盖 Fuyao、Tencent、Eastmoney、Wind 与 FTShare 全部已注册能力')
 
   // A missing production entry would fall into `meta`; stale entries would never be visible.
   assert.deepEqual(names.filter((name) => !Object.hasOwn(CATALOG_TAXONOMY, name)), [], '每个生产能力都必须在 catalog-taxonomy 里有 topic')

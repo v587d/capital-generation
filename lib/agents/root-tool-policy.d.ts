@@ -2,8 +2,8 @@
  * Root Agent tool convergence on the root's own scope: preset-level deny would also hit
  * children. Listeners must live on `ctx.root`; tagged standing-scope listeners miss agent/created.
  */
-/** Outbound tools (search 2 + wind 2 + named sources 11); `ocr` is excluded because only its url form is restricted. */
-export declare const RETRIEVAL_DENIED_TOOLS: readonly ["anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "eastmoney_announcements", "eastmoney_announcement_body", "sina_reports", "ths_eps_forecast"];
+/** Outbound tools (search 2 + wind 2 + named sources 12); `ocr` is excluded because only its url form is restricted. */
+export declare const RETRIEVAL_DENIED_TOOLS: readonly ["anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "cninfo_announcements", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "eastmoney_announcements", "eastmoney_announcement_body", "sina_reports", "ths_eps_forecast"];
 /** Generic host web entry points; the only outbound surface is web_retriever's named tools. */
 export declare const HOST_WEB_DENIED_TOOLS: readonly ["web_fetch", "anysearch_batch_search", "anysearch_capabilities"];
 export declare const OCR_TOOL_NAME = "ocr";
@@ -18,7 +18,7 @@ export declare const SHELL_TOOL_NAMES: readonly ["bash", "pwsh"];
  * four tools on every Capital agent; the `team:policy` prompt section is host-owned and cannot be
  * removed by a name deny, so Capital intentionally ignores that text. */
 export declare const TEAM_DENIED_TOOLS: readonly ["team_task_create", "team_task_list", "team_task_get", "team_task_update"];
-export declare const ROOT_AGENT_DENIED_TOOLS: readonly ["render_chart", "prepare_chart_source", "team_task_create", "team_task_list", "team_task_get", "team_task_update", "anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "eastmoney_announcements", "eastmoney_announcement_body", "sina_reports", "ths_eps_forecast", "web_fetch", "anysearch_batch_search", "anysearch_capabilities", "write", "edit"];
+export declare const ROOT_AGENT_DENIED_TOOLS: readonly ["render_chart", "prepare_chart_source", "team_task_create", "team_task_list", "team_task_get", "team_task_update", "anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "cninfo_announcements", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "eastmoney_announcements", "eastmoney_announcement_body", "sina_reports", "ths_eps_forecast", "web_fetch", "anysearch_batch_search", "anysearch_capabilities", "write", "edit"];
 export declare const CAPITAL_PRESET_ID = "capital-generation";
 interface ToolRestriction {
     allow?: readonly string[];

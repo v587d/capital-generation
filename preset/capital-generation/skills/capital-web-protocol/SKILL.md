@@ -9,7 +9,7 @@ description: Use in Capital mode when retrieving external material — the annou
 > 任务同时命中且该方法在本角色目录中可用时，按名加载对应 Skill（如 `10k-digest` / `earnings-call-analysis` / `fact-check`）；
 > 协议与方法正交：不要用本协议替代方法，也不要用方法改写本协议的来源纪律。
 `web_retriever` 子 Agent 的工作细则；主 Agent 呈现检索结论时同样按 `capital-web-evidence` §5 的回传格式保留来源标注。
-persona 只保留硬规则（先定来源再动手、只用这十六个工具、一次一个 URL、无来源不作证据）；
+persona 只保留硬规则（先定来源再动手、只用这十七个工具、一次一个 URL、无来源不作证据）；
 本文件是其余细节。
 
 本协议共两册，§编号跨册连续：**本册**管"去哪取、怎么调"（§1 来源边界 / §2 收敛 / §3 Wind 三要素 /
@@ -17,15 +17,16 @@ persona 只保留硬规则（先定来源再动手、只用这十六个工具、
 §7 抓取与失败处置 / §8 文档解析 `ocr`）。要给出编号证据、判定 `verified_official`、处理抓取失败或
 解析 PDF，加载 `capital-web-evidence`。
 
-## 1. 来源边界（两个搜索 provider + 十一个具名来源工具 + 文档解析）
+## 1. 来源边界（两个搜索 provider + 十二个具名来源工具 + 文档解析）
 
 **三类工作面，别混**：`search` / `fetch` 是**检索**（先发现候选，再按 URL 取正文）；
-下面十一个工具是**来源查询**（具名来源 + 业务参数 → 确定、有序、可翻页、同参可复现的结果集）；
+下面十二个工具是**来源查询**（具名来源 + 业务参数 → 确定、有序、可翻页、同参可复现的结果集）；
 `ocr` 是**文档解析**（PDF / 图片 → markdown 正文，见 `capital-web-evidence` §8——它是这批工具里**唯一要 token** 的）。
 
 | 来源 | 工具 | 性格 | 用途 |
 |---|---|---|---|
 | `eastmoney 公告` | `eastmoney_announcements` / `eastmoney_announcement_body` | 公告清单（零 key，A/H/US） | 公司公告列表与分页正文；**公告清单默认第一选择**，正文/PDF 可作权威引用（`authoritative_reprint`），官方域名核验另走巨潮/发行人 |
+| `cninfo 公告` | `cninfo_announcements` | 来源查询（巨潮，全市场按日） | 单日全市场 A 股公告**清单**；只回标题/代码/时间/文档链接，**禁止读取/解析 document_url 的正文**；按 market/keyword/page 收窄 |
 | `wind_docs` | `wind_docs_announcements` / `wind_docs_news` | 语义深研（`public_document`，**计费**） | 按语义找公告/新闻段落；**不是公告清单的可靠来源**（实测会漏最新、混入关联方） |
 | `anysearch` | `anysearch_search` / `web_retriever_fetch` | 广度 | 候选探索与线索、官方页面归属核验、Wind 覆盖之外的内容（监管政策原文、境外或非上市主体、市场传闻） |
 | `cls` | `cls_telegraph` | 来源查询（媒体） | 财联社 7×24 全市场快讯 |
@@ -46,6 +47,11 @@ persona 只保留硬规则（先定来源再动手、只用这十六个工具、
   自然语言检索会漏掉最新公告、把关联方/别家公司的文件排进来；东财列表是发行人限定的完整列表。
   东财列表只给标题/时间/`art_code`/链接，正文用 `eastmoney_announcement_body` 按 `page` + `offset`
   读完（每页约 5,000 字符，单次最多 4,000 字符）。
+- **全市场按日公告用 `cninfo_announcements`**：巨潮单日全市场清单（1,400+ 条是常态），
+  只回标题/代码/时间/`document_url`，**本工具不读取也不解析链接内容**。需要正文必须由用户点名
+  单条，再走 `ocr` 或 `eastmoney_announcement_body`；禁止把清单里的链接批量交给
+  `web_retriever_fetch`/`ocr`，否则上下文会被 PDF 正文撑爆。按代码跟踪公告仍用
+  `eastmoney_announcements`（它按 `codes` 限定发行人；两者是不同查询轴，不要互相替代）。
 - **东财公告是权威转载**：正文/PDF 可作公告事实的权威引用，标
   「公告原文（东财转载，`authoritative_reprint`）」；`verified_official` 仍只给官方域名核验，
   不因换源放宽。正文 `is_ai_summary=0` 且 `done=true` 才叫全文，否则标部分正文/摘要。
@@ -98,7 +104,7 @@ persona 只保留硬规则（先定来源再动手、只用这十六个工具、
   `web_retriever_fetch`。
 - **`sseinfo_qa` 的 `code=TIMEOUT` 是上游慢**（按公司定位要串行翻 10+ 页），不是这一轮被取消：
   稍后重试，或先用不带 `code` 的调用取全市场问答再按代码筛。
-- 这十一个工具的失败是**工具错误**（`isError`），不是"正常返回的失败信封"；`code` 取值见回执
+- 这十二个工具的失败是**工具错误**（`isError`），不是"正常返回的失败信封"；`code` 取值见回执
   （`UPSTREAM` 上游报错 / `INVALID_RESPONSE` 上游结构变了 / `NOT_FOUND` 标的不存在 /
   `NETWORK` 网络失败 / `TIMEOUT` 上游慢到超过总时限）。**结构变更类错误不要重试**，如实回传。
 

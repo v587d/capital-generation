@@ -47,6 +47,8 @@ docs/design/*
 !docs/design/data-capability-expansion.md
 # 能力目录分片的协议、容量模型与两次实机读数只在这份里有，data-capability-expansion.md 指向它，随代码入库。
 !docs/design/capability-catalog-sharding.md
+# U1 的实现依据（腾讯 pandata 真报文、prev_close 口径、零账户取舍）只在这份里有。
+!docs/design/us-prepost-quote.md
 # Wind 接入同例：真报文结论（七处上游漂移、参数面的每一项依据）只在这份里有，实现按它落地就必须能对照它。
 !docs/design/wind-market-source.md
 !docs/design/external-skill-intake.md

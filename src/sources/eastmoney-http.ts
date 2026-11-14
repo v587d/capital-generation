@@ -16,6 +16,42 @@ type BoardType = typeof BOARD_TYPES[number]
 const BOARD_FS: Record<BoardType, string> = { industry: 'm:90+t:2', concept: 'm:90+t:3', region: 'm:90+t:1' }
 const SORT_FIELDS: Record<string, string> = { change_pct: 'f3', main_net_inflow: 'f62', amount: 'f6' }
 
+/** Stable symbols, not Eastmoney secids: the model never guesses a market id. */
+interface GlobalSymbol {
+  secid: string
+  name: string
+  market: string
+  currency: string | null
+  unit: string
+  timeZone: string
+  volumeUnit: 'shares' | 'contracts' | null
+  amountUnit: 'HKD' | null
+}
+const GLOBAL_SYMBOLS: Record<string, GlobalSymbol> = {
+  SPX: { secid: '100.SPX', name: '标普500', market: 'us', currency: 'USD', unit: 'index_points', timeZone: 'America/New_York', volumeUnit: 'shares', amountUnit: null },
+  NDX: { secid: '100.NDX', name: '纳斯达克100', market: 'us', currency: 'USD', unit: 'index_points', timeZone: 'America/New_York', volumeUnit: 'shares', amountUnit: null },
+  DJIA: { secid: '100.DJIA', name: '道琼斯', market: 'us', currency: 'USD', unit: 'index_points', timeZone: 'America/New_York', volumeUnit: 'shares', amountUnit: null },
+  HSI: { secid: '100.HSI', name: '恒生指数', market: 'hk', currency: 'HKD', unit: 'index_points', timeZone: 'Asia/Hong_Kong', volumeUnit: 'shares', amountUnit: 'HKD' },
+  HSCEI: { secid: '100.HSCEI', name: '国企指数', market: 'hk', currency: 'HKD', unit: 'index_points', timeZone: 'Asia/Hong_Kong', volumeUnit: 'shares', amountUnit: 'HKD' },
+  N225: { secid: '100.N225', name: '日经225', market: 'jp', currency: 'JPY', unit: 'index_points', timeZone: 'Asia/Tokyo', volumeUnit: 'shares', amountUnit: null },
+  SXXP: { secid: '100.SXXP', name: '欧洲斯托克600', market: 'eu', currency: 'EUR', unit: 'index_points', timeZone: 'Europe/London', volumeUnit: 'shares', amountUnit: null },
+  FCHI: { secid: '100.FCHI', name: '法国CAC40', market: 'eu', currency: 'EUR', unit: 'index_points', timeZone: 'Europe/Paris', volumeUnit: 'shares', amountUnit: null },
+  FTSE: { secid: '100.FTSE', name: '英国富时100', market: 'eu', currency: 'GBP', unit: 'index_points', timeZone: 'Europe/London', volumeUnit: 'shares', amountUnit: null },
+  AS51: { secid: '100.AS51', name: '澳大利亚标普200', market: 'au', currency: 'AUD', unit: 'index_points', timeZone: 'Australia/Sydney', volumeUnit: 'shares', amountUnit: null },
+  HSAHP: { secid: '100.HSAHP', name: 'AH股溢价', market: 'cross', currency: null, unit: 'index_points', timeZone: 'Asia/Hong_Kong', volumeUnit: 'shares', amountUnit: null },
+  UDI: { secid: '100.UDI', name: '美元指数', market: 'fx', currency: null, unit: 'index_points', timeZone: 'America/New_York', volumeUnit: null, amountUnit: null },
+  USDCNH: { secid: '133.USDCNH', name: '美元兑离岸人民币', market: 'fx', currency: 'CNH', unit: 'CNH_per_USD', timeZone: 'Asia/Shanghai', volumeUnit: null, amountUnit: null },
+  US10Y: { secid: '171.US10Y', name: '美国10年期国债收益率', market: 'rates', currency: null, unit: 'percent', timeZone: 'America/New_York', volumeUnit: null, amountUnit: null },
+  US2Y: { secid: '171.US2Y', name: '美国2年期国债收益率', market: 'rates', currency: null, unit: 'percent', timeZone: 'America/New_York', volumeUnit: null, amountUnit: null },
+  CL00Y: { secid: '102.CL00Y', name: 'NYMEX原油', market: 'commodity', currency: 'USD', unit: 'USD_per_bbl', timeZone: 'America/New_York', volumeUnit: 'contracts', amountUnit: null },
+  GC00Y: { secid: '101.GC00Y', name: 'COMEX黄金', market: 'commodity', currency: 'USD', unit: 'USD_per_oz', timeZone: 'America/New_York', volumeUnit: 'contracts', amountUnit: null },
+  HG00Y: { secid: '101.HG00Y', name: 'COMEX铜', market: 'commodity', currency: 'USD', unit: 'USD_per_lb', timeZone: 'America/New_York', volumeUnit: 'contracts', amountUnit: null },
+}
+const GLOBAL_SYMBOL_NAMES = Object.keys(GLOBAL_SYMBOLS)
+const GLOBAL_PERIODS: Record<string, number> = { day: 101, week: 102, month: 103 }
+const MARKET_MARGIN_FILTER: Record<string, string> = { sse: '(SCDM="007")', szse: '(SCDM="001")', bse: '(SCDM="002")' }
+const MARKET_MARGIN_CODE: Record<string, string> = { '007': 'sse', '001': 'szse', '002': 'bse' }
+
 const topBuySellRow = {
   type: 'object',
   properties: {
@@ -46,6 +82,52 @@ const datacenterOutput = (row: object) => ({
   required: ['item', 'pagination'],
   additionalProperties: true,
 })
+
+const nullableNumber = { oneOf: [{ type: 'number' }, { type: 'null' }] }
+const nullableString = { oneOf: [{ type: 'string' }, { type: 'null' }] }
+
+const globalQuoteRow = {
+  type: 'object',
+  properties: {
+    symbol: { type: 'string' }, eastmoney_code: nullableString, eastmoney_market: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    name: { type: 'string' }, market: { type: 'string' }, currency: nullableString, unit: { type: 'string' },
+    price: nullableNumber, prev_close: nullableNumber, change_amt: nullableNumber, change_pct: nullableNumber,
+    open: nullableNumber, high: nullableNumber, low: nullableNumber,
+    volume: nullableNumber, volume_unit: nullableString, amount: nullableNumber, amount_unit: nullableString,
+    quote_time: nullableString, quote_time_utc: nullableString, quote_time_ms: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    quote_time_zone: { type: 'string' }, is_delayed: { oneOf: [{ type: 'boolean' }, { type: 'null' }] },
+    available: { type: 'boolean' }, reason: nullableString, source: { type: 'string' },
+  },
+  required: ['symbol', 'name', 'market', 'unit', 'quote_time_zone', 'available', 'source'],
+  additionalProperties: false,
+}
+
+const globalKlineRow = {
+  type: 'object',
+  properties: {
+    symbol: { type: 'string' }, name: { type: 'string' }, market: { type: 'string' }, currency: nullableString, unit: { type: 'string' },
+    trade_date: { type: 'string' }, open: { type: 'number' }, high: { type: 'number' }, low: { type: 'number' }, close: { type: 'number' },
+    volume: nullableNumber, volume_unit: nullableString, amount: nullableNumber, amount_unit: nullableString,
+    change_pct: nullableNumber, amplitude_pct: nullableNumber, source: { type: 'string' },
+  },
+  required: ['symbol', 'name', 'market', 'unit', 'trade_date', 'open', 'high', 'low', 'close', 'source'],
+  additionalProperties: false,
+}
+
+const marketMarginRow = {
+  type: 'object',
+  properties: {
+    trade_date: { type: 'string' }, trade_date_ms: { type: 'integer' },
+    market: { type: 'string' }, market_label: nullableString, eastmoney_market_code: { type: 'string' },
+    margin_balance: nullableNumber, short_balance: nullableNumber, total_balance: nullableNumber,
+    margin_buy: nullableNumber, margin_repay: nullableNumber, margin_net_buy: nullableNumber,
+    short_balance_volume: nullableNumber, short_sell_volume: nullableNumber,
+    short_repay_volume: nullableNumber, short_net_buy_volume: nullableNumber,
+    float_market_cap: nullableNumber, margin_balance_pct: nullableNumber, source: { type: 'string' },
+  },
+  required: ['trade_date', 'market', 'source'],
+  additionalProperties: false,
+}
 
 const lockupRow = {
   type: 'object',
@@ -90,6 +172,10 @@ function numberOrNull(value: unknown): number | null {
   if (value === undefined || value === null || value === '') return null
   const parsed = typeof value === 'number' ? value : Number(String(value).replaceAll(',', '').trim())
   return Number.isFinite(parsed) ? parsed : null
+}
+function rounded(value: number, digits = 4): number {
+  const factor = 10 ** digits
+  return Math.round(value * factor) / factor
 }
 function integer(value: unknown, name: string, min: number, max: number): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min || value > max) throw new Error(`${name} must be an integer from ${min} to ${max}`)
@@ -193,6 +279,219 @@ function topFilter(params: Params, ticker?: string): string {
   const code = ticker?.replace(/\.(SH|SZ|BJ)$/i, '')
   return code ? `${base}(SECURITY_CODE="${code}")` : base
 }
+
+function normalizeGlobalSymbol(value: unknown, name = 'symbol'): string {
+  if (typeof value !== 'string') throw new Error(`${name} must be a string`)
+  const symbol = value.trim().toUpperCase()
+  if (!GLOBAL_SYMBOLS[symbol]) throw new Error(`${name} must be one of ${GLOBAL_SYMBOL_NAMES.join(', ')}`)
+  return symbol
+}
+
+function normalizeGlobalSymbols(params: Params): Params {
+  assertKnown(params, ['symbols'])
+  if (!Array.isArray(params.symbols) || params.symbols.length === 0) throw new Error('symbols must be a non-empty array')
+  if (params.symbols.length > GLOBAL_SYMBOL_NAMES.length) throw new Error(`symbols exceeds maximum ${GLOBAL_SYMBOL_NAMES.length}`)
+  return { symbols: [...new Set(params.symbols.map((value) => normalizeGlobalSymbol(value, 'symbols[]')))] }
+}
+
+function formatQuoteTime(ms: number, timeZone: string): string {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(ms)).map((part) => [part.type, part.value]))
+  const hour = parts.hour === '24' ? '00' : parts.hour
+  return `${parts.year}-${parts.month}-${parts.day} ${hour}:${parts.minute}:${parts.second}`
+}
+
+function emptyGlobalQuoteRow(symbol: string, spec: GlobalSymbol, reason: string): JsonRecord {
+  return {
+    symbol, eastmoney_code: null, eastmoney_market: null, name: spec.name, market: spec.market,
+    currency: spec.currency, unit: spec.unit,
+    price: null, prev_close: null, change_amt: null, change_pct: null, open: null, high: null, low: null,
+    volume: null, volume_unit: spec.volumeUnit, amount: null, amount_unit: spec.amountUnit,
+    quote_time: null, quote_time_utc: null, quote_time_ms: null, quote_time_zone: spec.timeZone,
+    is_delayed: null, available: false, reason, source: 'eastmoney',
+  }
+}
+
+function parseGlobalQuoteRow(raw: JsonRecord, symbol: string, spec: GlobalSymbol): JsonRecord {
+  const price = numberOrNull(raw.f2)
+  const seconds = numberOrNull(raw.f124)
+  const quoteMs = seconds !== null && seconds > 0 ? Math.round(seconds * 1000) : null
+  const marketId = Number(raw.f13)
+  const volume = numberOrNull(raw.f5)
+  const amount = numberOrNull(raw.f6)
+  return {
+    symbol,
+    eastmoney_code: textOrNull(raw.f12),
+    eastmoney_market: Number.isSafeInteger(marketId) ? marketId : null,
+    name: textOrNull(raw.f14) ?? spec.name,
+    market: spec.market, currency: spec.currency, unit: spec.unit,
+    price,
+    prev_close: numberOrNull(raw.f18),
+    change_amt: numberOrNull(raw.f4),
+    change_pct: numberOrNull(raw.f3),
+    open: numberOrNull(raw.f17),
+    high: numberOrNull(raw.f15),
+    low: numberOrNull(raw.f16),
+    volume: spec.volumeUnit && volume !== null && volume > 0 ? volume : null,
+    volume_unit: spec.volumeUnit,
+    amount: spec.amountUnit && amount !== null && amount > 0 ? amount : null,
+    amount_unit: spec.amountUnit,
+    quote_time: quoteMs === null ? null : formatQuoteTime(quoteMs, spec.timeZone),
+    quote_time_utc: quoteMs === null ? null : new Date(quoteMs).toISOString(),
+    quote_time_ms: quoteMs,
+    quote_time_zone: spec.timeZone,
+    is_delayed: null,
+    available: price !== null,
+    reason: price === null ? 'no_price' : null,
+    source: 'eastmoney',
+  }
+}
+
+async function executeGlobalQuote(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
+  const symbols = params.symbols as string[]
+  const url = new URL('https://push2.eastmoney.com/api/qt/ulist.np/get')
+  url.searchParams.set('fltt', '2')
+  url.searchParams.set('secids', symbols.map((symbol) => GLOBAL_SYMBOLS[symbol].secid).join(','))
+  url.searchParams.set('fields', 'f12,f13,f14,f2,f3,f4,f5,f6,f15,f16,f17,f18,f124')
+  const payload = await getJson(url.toString(), signal, 'global quote')
+  if (Number(payload.rc) !== 0 || !isRecord(payload.data) || !Array.isArray(payload.data.diff) || !payload.data.diff.every(isRecord)) {
+    throw sourceError('Eastmoney global quote returned a non-list response', 'eastmoney_invalid_response')
+  }
+  const bySecid = new Map<string, JsonRecord>()
+  for (const raw of payload.data.diff) bySecid.set(`${String(raw.f13 ?? '')}.${String(raw.f12 ?? '')}`, raw)
+  const rows = symbols.map((symbol) => {
+    const spec = GLOBAL_SYMBOLS[symbol]
+    const raw = bySecid.get(spec.secid)
+    return raw ? parseGlobalQuoteRow(raw, symbol, spec) : emptyGlobalQuoteRow(symbol, spec, 'symbol_not_returned')
+  })
+  if (!rows.some((row) => row.available === true)) {
+    throw sourceError('Eastmoney global quote returned none of the requested symbols', 'eastmoney_invalid_response')
+  }
+  return { data: rows, schema: globalQuoteRow }
+}
+
+function normalizeGlobalKline(params: Params): Params {
+  assertKnown(params, ['symbol', 'period', 'start_date', 'end_date'])
+  const symbol = normalizeGlobalSymbol(params.symbol)
+  const period = params.period === undefined ? 'day' : String(params.period).toLowerCase()
+  if (!(period in GLOBAL_PERIODS)) throw new Error(`period must be one of ${Object.keys(GLOBAL_PERIODS).join(', ')}`)
+  const start_date = date(params.start_date, 'start_date')
+  const end_date = date(params.end_date, 'end_date')
+  if (start_date > end_date) throw new Error('start_date must not be later than end_date')
+  return { symbol, period, start_date, end_date }
+}
+
+function parseGlobalKlineRow(line: string, symbol: string, spec: GlobalSymbol, name: string, previousClose: number | null): JsonRecord {
+  const columns = line.split(',')
+  if (columns.length !== 8) throw sourceError(`Eastmoney global kline row has ${columns.length} columns, expected 8`, 'eastmoney_invalid_response')
+  const tradeDate = dayValue(columns[0])
+  if (tradeDate === null) throw sourceError(`Eastmoney global kline row has invalid date ${columns[0]}`, 'eastmoney_invalid_response')
+  const [open, close, high, low, volume, amount, amplitude] = columns.slice(1).map(numberOrNull)
+  if ([open, close, high, low].some((value) => value === null)) {
+    throw sourceError(`Eastmoney global kline row has invalid OHLC for ${tradeDate}`, 'eastmoney_invalid_response')
+  }
+  const change = previousClose !== null && previousClose > 0
+    ? rounded(((close! - previousClose) / previousClose) * 100, 4)
+    : null
+  return {
+    symbol, name, market: spec.market, currency: spec.currency, unit: spec.unit, trade_date: tradeDate,
+    open: open!, high: high!, low: low!, close: close!,
+    volume: spec.volumeUnit && volume !== null && volume > 0 ? volume : null,
+    volume_unit: spec.volumeUnit,
+    amount: spec.amountUnit && amount !== null && amount > 0 ? amount : null,
+    amount_unit: spec.amountUnit,
+    change_pct: change,
+    amplitude_pct: amplitude,
+    source: 'eastmoney',
+  }
+}
+
+async function executeGlobalKline(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
+  const spec = GLOBAL_SYMBOLS[String(params.symbol)]
+  const url = new URL('https://push2his.eastmoney.com/api/qt/stock/kline/get')
+  url.searchParams.set('secid', spec.secid)
+  url.searchParams.set('klt', String(GLOBAL_PERIODS[String(params.period)]))
+  url.searchParams.set('fqt', '1')
+  url.searchParams.set('beg', String(params.start_date).replaceAll('-', ''))
+  url.searchParams.set('end', String(params.end_date).replaceAll('-', ''))
+  url.searchParams.set('fields1', 'f1,f2,f3,f4,f5,f6')
+  url.searchParams.set('fields2', 'f51,f52,f53,f54,f55,f56,f57,f58')
+  const payload = await getJson(url.toString(), signal, 'global kline')
+  if (Number(payload.rc) !== 0 || !isRecord(payload.data) || !Array.isArray(payload.data.klines)) {
+    throw sourceError('Eastmoney global kline returned a non-list response', 'eastmoney_invalid_response')
+  }
+  if (!payload.data.klines.every((line) => typeof line === 'string')) {
+    throw sourceError('Eastmoney global kline contains a non-string row', 'eastmoney_invalid_response')
+  }
+  const preKPrice = numberOrNull(payload.data.preKPrice)
+  const name = textOrNull(payload.data.name) ?? spec.name
+  let previousClose = preKPrice
+  const rows = payload.data.klines.map((line) => {
+    const row = parseGlobalKlineRow(line, String(params.symbol), spec, name, previousClose)
+    previousClose = Number(row.close)
+    return row
+  })
+  return { data: rows, schema: globalKlineRow }
+}
+
+function normalizeMarketMargin(params: Params): Params {
+  assertKnown(params, ['start_date', 'end_date', 'market', 'page', 'size'])
+  const normalized = normalizeDateRange(params, ['start_date', 'end_date', 'market', 'page', 'size'])
+  const market = params.market === undefined ? 'all' : String(params.market).toLowerCase()
+  if (market !== 'all' && !(market in MARKET_MARGIN_FILTER)) throw new Error(`market must be one of all, ${Object.keys(MARKET_MARGIN_FILTER).join(', ')}`)
+  return { ...normalized, market }
+}
+
+function parseMarketMarginRow(raw: JsonRecord): JsonRecord {
+  const tradeDate = dayValue(raw.DIM_DATE)
+  if (tradeDate === null) throw sourceError('Eastmoney market margin row has invalid DIM_DATE', 'eastmoney_invalid_response')
+  const code = String(raw.SCDM ?? '')
+  const market = MARKET_MARGIN_CODE[code]
+  if (!market) throw sourceError(`Eastmoney market margin row has unknown SCDM ${code || '(empty)'}`, 'eastmoney_invalid_response')
+  return {
+    trade_date: tradeDate,
+    trade_date_ms: dateMs(tradeDate),
+    market,
+    market_label: textOrNull(raw.XOB_MARKET_0001),
+    eastmoney_market_code: code,
+    margin_balance: numberOrNull(raw.RZYE),
+    short_balance: numberOrNull(raw.RQYE),
+    total_balance: numberOrNull(raw.RZRQYE),
+    margin_buy: numberOrNull(raw.RZMRE),
+    margin_repay: numberOrNull(raw.RZCHE),
+    margin_net_buy: numberOrNull(raw.RZJME),
+    short_balance_volume: numberOrNull(raw.RQYL),
+    short_sell_volume: numberOrNull(raw.RQMCL),
+    short_repay_volume: numberOrNull(raw.RQCHL),
+    short_net_buy_volume: numberOrNull(raw.RQJMG),
+    float_market_cap: numberOrNull(raw.LTSZ),
+    margin_balance_pct: numberOrNull(raw.RZYEZB),
+    source: 'eastmoney',
+  }
+}
+
+async function executeMarketMargin(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
+  const marketFilter = params.market === 'all' ? '' : MARKET_MARGIN_FILTER[String(params.market)]
+  const url = new URL(DATACENTER_URL)
+  url.searchParams.set('reportName', 'RPTA_WEB_RZRQ_LSSH')
+  url.searchParams.set('columns', 'ALL')
+  url.searchParams.set('source', 'WEB')
+  url.searchParams.set('client', 'WEB')
+  url.searchParams.set('sortColumns', 'DIM_DATE')
+  url.searchParams.set('sortTypes', '-1')
+  url.searchParams.set('pageNumber', String(params.page))
+  url.searchParams.set('pageSize', String(params.size))
+  url.searchParams.set('filter', `(DIM_DATE>='${String(params.start_date)}')(DIM_DATE<='${String(params.end_date)}')${marketFilter}`)
+  const result = requireDatacenterResult(await getJson(url.toString(), signal, 'market margin'), 'market margin')
+  const parsed = requireRows(result, 'market margin')
+  return {
+    data: { item: parsed.rows.map(parseMarketMarginRow), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) },
+    schema: datacenterOutput(marketMarginRow),
+  }
+}
+
 function parseTopRow(raw: JsonRecord): JsonRecord {
   // MARKET is free text and redundant when SECUCODE has a suffix; only require it for bare codes,
   // otherwise a whitelist rejects valid billboard pages. Keep the raw `market` field.
@@ -1076,10 +1375,11 @@ async function executeBondList(params: Params, signal: AbortSignal): Promise<{ d
   return { data: { item: parsed.rows.map(parseBondRow), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(bondRow) }
 }
 
-function createSource(options: { capability: string; name: string; summary: string; description: string; inputSchema: object; outputSchema: object; paginated?: boolean; cacheMaxAgeMs?: number; rowShape: SchemaDescriptor['rowShape']; allowed: string[]; normalize: (params: Params) => Params; execute: (params: Params, signal: AbortSignal) => Promise<{ data: unknown; schema: object }> }): DataSource {
+function createSource(options: { capability: string; name: string; summary: string; description: string; inputSchema: object; outputSchema: object; paginated?: boolean; cacheMaxAgeMs?: number; rowShape: SchemaDescriptor['rowShape']; allowed: string[]; normalize: (params: Params) => Params; validateOutput?: (data: unknown) => boolean; execute: (params: Params, signal: AbortSignal) => Promise<{ data: unknown; schema: object }> }): DataSource {
   const schema: SchemaDescriptor = { capability: options.capability, time_contract: getDataTimeContract(options.capability), name: options.name, source: `http:eastmoney.${options.capability}`, data_key: buildDataKey('eastmoney', 'http', options.capability), source_label: 'eastmoney', paginated: options.paginated === true, cacheMaxAgeMs: options.cacheMaxAgeMs, rowShape: options.rowShape, summary: options.summary, description: options.description, input_schema: options.inputSchema, output_schema: options.outputSchema }
   const normalize = (params: Record<string, unknown>): Params => options.normalize(params)
-  return { schema, normalizeParams: normalize, validateOutput: (data) => isRecord(data) && Array.isArray(data.item) && isRecord(data.pagination), execute: async (request: DataRequest, signal: AbortSignal) => options.execute(normalize(request.params), signal) }
+  const validateOutput = options.validateOutput ?? ((data: unknown) => isRecord(data) && Array.isArray(data.item) && isRecord(data.pagination))
+  return { schema, normalizeParams: normalize, validateOutput, execute: async (request: DataRequest, signal: AbortSignal) => options.execute(normalize(request.params), signal) }
 }
 
 const dateRangeInput = {
@@ -1156,6 +1456,44 @@ const bondListInput = {
   additionalProperties: false,
 }
 
+const globalQuoteInput = {
+  type: 'object',
+  properties: {
+    symbols: {
+      type: 'array', minItems: 1, maxItems: GLOBAL_SYMBOL_NAMES.length,
+      items: { type: 'string', enum: GLOBAL_SYMBOL_NAMES },
+      description: '稳定符号；未知符号在参数层拒绝。可用：SPX/NDX/DJIA/HSI/HSCEI/N225/SXXP/FCHI/FTSE/AS51/HSAHP/UDI/USDCNH/US10Y/US2Y/CL00Y/GC00Y/HG00Y',
+    },
+  },
+  required: ['symbols'],
+  additionalProperties: false,
+}
+
+const globalKlineInput = {
+  type: 'object',
+  properties: {
+    symbol: { type: 'string', enum: GLOBAL_SYMBOL_NAMES, description: '稳定符号，与 eastmoney_global_quote 同一注册表' },
+    period: { type: 'string', enum: Object.keys(GLOBAL_PERIODS), description: '默认 day；只支持日/周/月，没有分钟线' },
+    start_date: { type: 'string', description: '起始自然日 YYYY-MM-DD' },
+    end_date: { type: 'string', description: '截止自然日 YYYY-MM-DD' },
+  },
+  required: ['symbol', 'start_date', 'end_date'],
+  additionalProperties: false,
+}
+
+const marketMarginInput = {
+  type: 'object',
+  properties: {
+    start_date: { type: 'string', description: '起始自然日 YYYY-MM-DD' },
+    end_date: { type: 'string', description: '截止自然日 YYYY-MM-DD' },
+    market: { type: 'string', enum: ['all', 'sse', 'szse', 'bse'], description: '默认 all；sse 沪市 / szse 深市 / bse 北交所' },
+    page: { type: 'integer', minimum: 1 },
+    size: { type: 'integer', minimum: 1, maximum: MAX_PAGE_SIZE },
+  },
+  required: ['start_date', 'end_date'],
+  additionalProperties: false,
+}
+
 export function createEastmoneySources(): DataSource[] {
   return [
     createSource({ capability: 'eastmoney_top_buy_sell_market', name: 'get_eastmoney_top_buy_sell_market', summary: '东财全市场龙虎榜汇总', description: '按交易日区间分页获取东方财富龙虎榜上榜股票汇总。金额字段单位为元，CHANGE_RATE/TURNOVERRATE/DEAL_*_RATIO 为东财百分数原值；同一股票同日可能因多个上榜原因返回多行，不去重。上游 HTTP 200 但 success=false、code 非 0 或 result 缺失均视为失败，不转换为空数组。', inputSchema: dateRangeInput, outputSchema: datacenterOutput(topBuySellRow), paginated: true, rowShape: { rowKey: 'item' }, allowed: ['start_date', 'end_date', 'page', 'size'], normalize: (params) => normalizeDateRange(params, ['start_date', 'end_date', 'page', 'size']), execute: (params, signal) => executeBillboard(params, signal) }),
@@ -1212,6 +1550,33 @@ export function createEastmoneySources(): DataSource[] {
       description: '按起息日区间分页获取东方财富可转债发行清单（RPT_BOND_CB_LIST，实测全库 1059 只、起息日 2007-07-02 至今，含已摘牌债与老三板退市债）。⛔ **本表不含行情**：转债现价、正股现价、最新转股价、回售/赎回触发价、PBV 一类列实测 1059/1059 恒为 null，转股溢价率恒为占位值 100——东财页面上那些数是另一条行情接口现算的；要现价或溢价率走别的来源，不要把那些 null 当成取数失败。区间过滤的是**起息日**（实测与网上申购日 1059/1059 相同，所以只留 value_date 一列），不是上市日：实测 8 只「已发行未上市」的 listing_date 为 null，按上市日过滤会把它们静默吞掉。行主体是**债券**——thscode / ticker / name 是转债本身（如 110059.SH），正股在 stock_ticker / stock_name / stock_thscode，两者不要混用。⛔ 正股市场只取上游 TRADE_MARKET（CNSESH=沪、CNSESZ=深），**不许按代码首位推**：实测 15 只 2007-2009 沪市老债代码是 126 开头；老三板退市债（TRADE_MARKET=STAS00，如 404005.NQ，正股 400266）与任何未知市场都不给 stock_thscode（该列为 null）。量纲：issue_scale_yi 是发行规模**亿元**（实测浦发转债 500、南药转债 10.81491 精确到元）；面值与发行价恒为 100 元/张，故不收录；initial_transfer_price 与 first_preplace_per_share_yuan（原股东**每股**可获配的债券面值，元/股）单位是元；coupon_rate_pct 与 online_lottery_ratio_pct（网上发行中签率）是**百分数原值**，0.2 就读作 0.2%。⏱ 随查询日移动的一组：coupon_rate_pct 是**当前计息年度**的票面利率（实测所有非空行的计息区间都跨过查询日，且与阶梯原文逐年对得上——起息 2023-07-18 的福蓉转债给 1.5，正对应「第四年1.50%」），interest_year_start_date / interest_year_end_date / next_cashflow_date 是这个计息年度的起止与付息日；已到期或退市的债这四处实测 467/1059 为 null。完整利率阶梯读 interest_rate_explain——它是上游原文，可能是逐年阶梯，也可能是发行前尚未定案的「预设区间」（实测 126 段老债就是这种），别当成交利率用。bond_expire_years 是**实际存续年数**（等于 expire_date 减 value_date；提前赎回的债按实际终止日算——豫光转债合同 6 年、实测 1.3534），不是合同期限。日期列分职：cease_date 停止交易日、expire_date 到期或终止日、delist_date 摘牌日（null=尚未摘牌；实测 4 条是**将来**日期，即已公告待摘牌）、listing_date 上市日、transfer_start_date / transfer_end_date 转股期起止；cease_date 与 transfer_end_date 实测 180/1059 不一致，故两列都保留。实测 15 只 2007-2009 老债（14 只 126 段沪债加 115003.SZ）没有转股期：transfer_start_date / transfer_end_date / initial_transfer_price / in_conversion_period **同批**为 null，那是产品形态（分离交易可转债）或上游未披露，不是取数失败。in_conversion_period 有值时是上游原文「是/否」，含义是**当前是否处于转股期**（未开始或已结束都给「否」，实测 是:270 / 否:774）。rating 是东财列示的评级原文（实测只有 AAA/AA+/AA/AA-/A+/A 六档，未标明主体还是债项、未标明评级时点，不要当风险结论用），rating_agency 是评级机构名。区间内没有发行就是空结果（上游 code 9201），不要重试。未收录：回售/赎回条款正文（每行数百字符，读条款去看募集说明书）、网上申购上限、ISSUE_TYPE / REDEEM_TYPE / PARAM_NAME / BOND_COMBINE_CODE 等内部编码、FIRST_PROFIT（实测 -898~26946，口径推不出）、TRANSFER_VALUE（与 initial_transfer_price 实测相同却多 8 个 null）。',
       inputSchema: bondListInput, outputSchema: datacenterOutput(bondRow), paginated: true, rowShape: { rowKey: 'item' }, cacheMaxAgeMs: 3_600_000,
       allowed: ['start_date', 'end_date', 'bond_code', 'stock_code', 'page', 'size'], normalize: normalizeBondList, execute: executeBondList,
+    }),
+    createSource({
+      capability: 'eastmoney_global_quote', cacheMaxAgeMs: 60_000, name: 'get_eastmoney_global_quote',
+      summary: '东财全球指数/商品/汇率/美债快照',
+      description: '批量获取全球指数、商品、汇率、美债收益率、美元指数与 AH 溢价的查询时点快照（东财 push2 ulist，零 key）。symbols 使用稳定符号，未知符号在参数层拒绝，不静默丢行；返回 price / change / open / high / low / prev_close / volume / amount / quote_time / quote_time_utc。⛔ 多数指数、汇率、利率的 amount 实测为 0，输出 null 而不是 0（HSI/HSCEI 例外，带港元成交额）；volume 只在注册表声明可用的符号上给（股票指数为股数、商品为合约张数、汇率/利率为 null）。⛔ VIX / SOX / RUT / DAX / HSTECH / USDJPY 实测无数据，不在承诺范围；免费公开源不承诺实时，is_delayed 留 null。f124=0 时 quote_time 为 null；部分符号未回时逐行 available=false + reason=symbol_not_returned。',
+      inputSchema: globalQuoteInput,
+      outputSchema: { type: 'array', items: globalQuoteRow },
+      paginated: false, rowShape: { rootArray: true },
+      allowed: ['symbols'], normalize: normalizeGlobalSymbols, validateOutput: (data) => Array.isArray(data), execute: executeGlobalQuote,
+    }),
+    createSource({
+      capability: 'eastmoney_global_kline', cacheMaxAgeMs: 60_000, name: 'get_eastmoney_global_kline',
+      summary: '东财全球指数/商品/汇率/美债日周月 K 线',
+      description: '按稳定符号与日期区间获取全球指数、商品、汇率、美债收益率与 AH 溢价的日/周/月 K 线（东财 push2his，零 key）。⛔ 上游第 8 列是振幅 amplitude_pct，不是涨跌幅；change_pct 由前收计算，首根用 preKPrice，preKPrice=0 时首根为 null。指数、汇率、利率的 amount 实测为 0，输出 null；HSI/HSCEI 的 amount 是港元成交额，其余 amount_unit=null。volume 只在注册表声明可用的符号上给。没有分钟线；HSTECH / DAX / VIX 等无数据，不在承诺范围。空区间返回 []，不是取数失败。',
+      inputSchema: globalKlineInput,
+      outputSchema: { type: 'array', items: globalKlineRow },
+      paginated: false, rowShape: { rootArray: true },
+      allowed: ['symbol', 'period', 'start_date', 'end_date'], normalize: normalizeGlobalKline, validateOutput: (data) => Array.isArray(data), execute: executeGlobalKline,
+    }),
+    createSource({
+      capability: 'eastmoney_margin_total', name: 'get_eastmoney_margin_total',
+      summary: '东财市场级两融合计（按交易所日频）',
+      description: '按交易日区间与市场获取 A 股市场级两融汇总（RPTA_WEB_RZRQ_LSSH，实测 8,983 行、2010-03 起）。金额字段单位为元：margin_balance 融资余额、short_balance 融券余额、total_balance 两融合计、margin_buy 融资买入、margin_repay 融资偿还、margin_net_buy 融资净买入；融券量为股数，不能与金额相加。⛔ 深市/北交所披露 T+1：实测同一日期可能只有沪市有行，不能把不完整日期加总；按 market 取单市场或 all 原样返回，缺哪个市场由行本身表达。market 枚举 sse/szse/bse；market_label 是上游原文（融资融券_沪证 / 深证 / 京证）。',
+      inputSchema: marketMarginInput,
+      outputSchema: datacenterOutput(marketMarginRow),
+      paginated: true, rowShape: { rowKey: 'item' },
+      allowed: ['start_date', 'end_date', 'market', 'page', 'size'], normalize: normalizeMarketMargin, execute: executeMarketMargin,
     }),
   ]
 }

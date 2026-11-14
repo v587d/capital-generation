@@ -6,7 +6,7 @@ import { OCR_TOOL_NAME, RETRIEVAL_DENIED_TOOLS } from '../lib/agents/root-tool-p
 
 // The capability doc drifts unless pinned: a stale row means the user asks for a tool name that no
 // longer exists. Name truth is src/agents/root-tool-policy.ts (RETRIEVAL_DENIED_TOOLS + OCR_TOOL_NAME
-// = 16); preset, doc and this test all read from that one table.
+// = 17); preset, doc and this test all read from that one table.
 const DOC = fileURLToPath(new URL('../docs/web-retriever-capabilities.md', import.meta.url))
 const doc = readFileSync(DOC, 'utf8')
 
@@ -40,7 +40,7 @@ test('web_retriever 能力表：每个工具都带上游、密钥口径与非空
 test('web_retriever 能力表：README 必须链接到它，写了工具总数就得与实现一致', () => {
   const readme = readFileSync(fileURLToPath(new URL('../README.md', import.meta.url)), 'utf8')
   assert.ok(readme.includes('docs/web-retriever-capabilities.md'), 'README 必须链接 docs/web-retriever-capabilities.md')
-  // README's 「共计 16 个网页检索能力」 count drifts with tool changes; checked only when present.
+  // README's 「共计 17 个网页检索能力」 count drifts with tool changes; checked only when present.
   const stated = readme.match(/(\d+)[\s*]*个\s*网页检索能力/)
   if (stated === null) return
   assert.equal(Number(stated[1]), registered.length,

@@ -53,10 +53,10 @@ test('TEAM_DENIED_TOOLS：Team 行保留，但四个 Team 工具从 Capital 根�
   }
 })
 
-test('RETRIEVAL_DENIED_TOOLS：十五个出网工具全部从根 Agent 拿掉（出网只有一个入口）', () => {
+test('RETRIEVAL_DENIED_TOOLS：十六个出网工具全部从根 Agent 拿掉（出网只有一个入口）', () => {
   // External retrieval isolation must be structural; a missing name leaves that source reachable.
-  assert.equal(RETRIEVAL_DENIED_TOOLS.length, 15, '检索面 2 + wind 2 + 具名来源 11 = 15')
-  assert.equal(new Set(RETRIEVAL_DENIED_TOOLS).size, 15, '出网名单不得有重名')
+  assert.equal(RETRIEVAL_DENIED_TOOLS.length, 16, '检索面 2 + wind 2 + 具名来源 12 = 16')
+  assert.equal(new Set(RETRIEVAL_DENIED_TOOLS).size, 16, '出网名单不得有重名')
   for (const name of RETRIEVAL_DENIED_TOOLS) {
     assert.ok(ROOT_AGENT_DENIED_TOOLS.includes(name), `主 Agent 不得看到出网工具 ${name}`)
   }

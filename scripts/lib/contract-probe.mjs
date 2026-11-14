@@ -12,7 +12,7 @@ import { createEastmoneySources } from '../../lib/sources/eastmoney-http.js'
 import { createTencentSources } from '../../lib/sources/tencent-http.js'
 import {
   createSourceTransport, createGatedEastmoneyTransport,
-  clsTelegraph, wscnLives, cninfoIrm, sseinfoQa,
+  clsTelegraph, wscnLives, cninfoAnnouncements, cninfoIrm, sseinfoQa,
   eastmoneyFastNews, eastmoneyStockNews, eastmoneyReports, sinaReports, thsEpsForecast,
 } from '../../lib/web-retriever/sources.js'
 import { createAnySearchClient } from '../../lib/web-retriever/engines.js'
@@ -129,6 +129,7 @@ function buildProbeTable() {
   return {
     cls_telegraph: () => clsTelegraph(transport, { limit: 3, signal: abortSignal() }),
     wscn_lives: (p) => wscnLives(transport, { ...p, signal: abortSignal() }),
+    cninfo_announcements: (p) => cninfoAnnouncements(transport, { date: p.date, page: p.page, pageSize: p.page_size, signal: abortSignal() }),
     cninfo_irm: (p) => cninfoIrm(transport, { ...p, signal: abortSignal() }),
     sseinfo_qa: (p) => sseinfoQa(transport, { ...p, signal: abortSignal() }),
     sseinfo_qa_company: (p) => sseinfoQa(transport, { ...p, signal: abortSignal() }),

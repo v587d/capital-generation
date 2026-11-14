@@ -58,23 +58,23 @@ test('security code normalization preserves exchange and rejects ambiguous bare 
   assert.deepEqual(normalizeSecurityCodes(['600519.SH', '600519.XSHG', '000001.SZ']).map((code) => code.canonical), ['600519.SH', '000001.SZ'])
 })
 
-test('Tencent source registry uses nine non-conflicting capabilities and source label', () => {
+test('Tencent source registry uses ten non-conflicting capabilities and source label', () => {
   const sources = createTencentSources()
   assert.deepEqual(sources.map((source) => source.schema.capability), [
     'tencent_quote', 'tencent_kline', 'tencent_ticks',
     'tencent_hk_quote', 'tencent_us_quote',
     'tencent_hk_index_quote', 'tencent_us_index_quote',
-    'tencent_hk_kline', 'tencent_us_kline',
+    'tencent_hk_kline', 'tencent_us_kline', 'tencent_us_prepost_quote',
   ])
   assert.deepEqual(new Set(sources.map((source) => source.schema.source_label)), new Set(['tencent']))
-  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 9)
+  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 10)
   for (const source of sources) {
     assert.ok(source.schema.input_schema)
     assert.ok(source.schema.output_schema)
     assert.match(source.schema.description, /腾讯/)
   }
-  // HK/US are separate capabilities: six tools, each with its own column layout.
-  assert.equal(sources.filter((source) => /_(hk|us)_/.test(source.schema.capability)).length, 6)
+  // HK/US are separate capabilities: seven tools, each with its own column layout.
+  assert.equal(sources.filter((source) => /_(hk|us)_/.test(source.schema.capability)).length, 7)
 })
 
 /** HK snapshot positions come from live data; derived values preserve upstream arithmetic so column errors cannot hide. */
@@ -349,6 +349,90 @@ test('tencent_us_kline：交易所后缀先由快照解析，hfq 一律拒绝（
   await assert.rejects(() => execute(sources.tencent_us_kline, { code: 'AAPL', adjust: 'hfq' }), /adjust must be qfq or none for US/)
   await assert.rejects(() => execute(sources.tencent_us_kline, { code: 'AAPL', period: 'm1' }), /day, week or month/)
   await assert.rejects(() => execute(sources.tencent_us_kline, { code: 'AAPL', start: '2026-01-01' }), /start\/end are not supported/)
+})
+
+
+test('tencent_us_prepost_quote：只取 pandata 的延长时段，prev_close 用 netchange 反推而不是昨收', async () => {
+  const sources = sourceMap()
+  const originalFetch = globalThis.fetch
+  const urls = []
+  let payload
+  const fields = usQuoteText('usAAPL', { code: 'AAPL.OQ' }).match(/"([^"]*)"/)[1].split('~')
+  fields[0] = 'delay'
+  fields[1] = '苹果'
+  fields[2] = 'AAPL.OQ'
+  fields[3] = '356.27'
+  fields[4] = '354.88'
+  fields[30] = '2026-11-13 16:00:01'
+  fields[35] = 'USD'
+  const node = (pandata) => ({
+    qfqday: [['2026-11-13', '357.96', '356.27', '360.83', '355.75', '40027467']],
+    qt: { 'usAAPL.OQ': fields },
+    ...(pandata === undefined ? {} : { pandata }),
+  })
+  globalThis.fetch = async (url) => {
+    const parsed = new URL(url)
+    urls.push(parsed)
+    if (parsed.pathname === '/q=usAAPL') return response(usQuoteText('usAAPL', { code: 'AAPL.OQ' }))
+    return response(JSON.stringify({ code: 0, data: { 'usAAPL.OQ': payload } }))
+  }
+  try {
+    payload = node({
+      last: '355.40', volume: '40027467', pct: '-0.24', netchange: '-0.87',
+      time: '2026-11-13 20:15:00', tag: 'after', season: 'EST',
+    })
+    const result = await execute(sources.tencent_us_prepost_quote, { codes: ['aapl', 'AAPL.OQ'] })
+    assert.deepEqual(urls.map((url) => url.pathname), ['/q=usAAPL', '/appstock/app/usfqkline/get'])
+    assert.equal(decodeURIComponent(urls[1].searchParams.get('param')), 'usAAPL.OQ,day,,,10,qfq')
+    const [row] = result.data
+    assert.equal(row.session, 'after')
+    assert.equal(row.price, 355.4)
+    assert.equal(row.prev_close, 356.27, '盘后的涨跌基准是当日正规收盘 356.27，不是 qt 的昨收 354.88')
+    assert.equal(row.regular_prev_close, 354.88)
+    assert.equal(row.regular_price, 356.27)
+    assert.equal(row.change_pct, -0.24)
+    assert.equal(row.volume_shares, 40027467)
+    assert.equal(row.session_time, '2026-11-13 20:15:00')
+    assert.equal(row.quote_time_utc, '2026-11-14T01:15:00.000Z')
+    assert.equal(row.delay, true)
+    assert.equal(row.available, true)
+    assert.equal(sources.tencent_us_prepost_quote.validateOutput(result.data), true)
+
+    payload = node({
+      last: '355.00', volume: '1000', pct: '-0.14', netchange: '-0.50',
+      time: '2026-11-13 08:00:00', tag: 'pre', season: 'EST',
+    })
+    const [pre] = (await execute(sources.tencent_us_prepost_quote, { codes: ['AAPL'] })).data
+    assert.equal(pre.session, 'pre')
+    assert.equal(pre.prev_close, 355.5)
+    assert.equal(pre.quote_time_utc, '2026-11-13T13:00:00.000Z')
+
+    payload = node(undefined)
+    const [empty] = (await execute(sources.tencent_us_prepost_quote, { codes: ['AAPL'] })).data
+    assert.equal(empty.available, false)
+    assert.equal(empty.reason, 'no_extended_session')
+    assert.equal(empty.price, null, '没有延长成交时不能拿 regular_price 冒充')
+
+    payload = node({ last: '355.40', volume: '1', pct: '-0.24', netchange: '-0.87', time: '2026-11-13 20:15:00', tag: 'overnight', season: 'EST' })
+    await assert.rejects(
+      () => execute(sources.tencent_us_prepost_quote, { codes: ['AAPL'] }),
+      (error) => error?.code === 'tencent_invalid_response',
+      '未实测的 tag 必须响亮失败，不能把 overnight 标成 after',
+    )
+
+    payload = node({ last: '355.40', volume: '1', pct: '-0.24', netchange: '-0.87', time: 'not-a-time', tag: 'after', season: 'EST' })
+    await assert.rejects(() => execute(sources.tencent_us_prepost_quote, { codes: ['AAPL'] }), /unreadable session time/)
+
+    globalThis.fetch = async () => response('v_pv_none_match="";')
+    const [unknown] = (await execute(sources.tencent_us_prepost_quote, { codes: ['ZZZZZZ'] })).data
+    assert.equal(unknown.available, false)
+    assert.equal(unknown.reason, 'ticker_not_found')
+    assert.equal(unknown.tencent_symbol, null)
+  } finally { globalThis.fetch = originalFetch }
+
+  for (const bad of [[], [''], Array.from({ length: 21 }, (_, index) => `T${index}`)]) {
+    await assert.rejects(() => execute(sources.tencent_us_prepost_quote, { codes: bad }), /codes/)
+  }
 })
 
 test('港美股与 A 股快照不共用字段表：同一位序在两个市场是不同含义', () => {

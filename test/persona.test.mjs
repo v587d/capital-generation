@@ -135,7 +135,7 @@ const PLUGIN_TOOLS = [
   'anysearch_search', 'web_retriever_fetch', 'ocr',
   'wind_docs_announcements', 'wind_docs_news',
   // Named source query tools must resolve against real registrations; a phantom name hides the tool.
-  'cls_telegraph', 'wscn_lives', 'cninfo_irm', 'sseinfo_qa',
+  'cls_telegraph', 'wscn_lives', 'cninfo_irm', 'cninfo_announcements', 'sseinfo_qa',
   'eastmoney_724', 'eastmoney_stock_news', 'eastmoney_reports',
   'eastmoney_announcements', 'eastmoney_announcement_body',
   'sina_reports', 'ths_eps_forecast',
@@ -668,7 +668,7 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
   assertDelegationRowShape(retrieverRow, 'subagent_web_retriever', ROLE_PRESET_IDS.retriever)
   // Retriever surface: search tools, named sources, OCR, time tools.
   assert.deepEqual(capitalFace(ROLE_PRESET_IDS.retriever), [
-    'anysearch_search', 'cls_telegraph', 'cninfo_irm', 'eastmoney_724', 'eastmoney_announcement_body',
+    'anysearch_search', 'cls_telegraph', 'cninfo_announcements', 'cninfo_irm', 'eastmoney_724', 'eastmoney_announcement_body',
     'eastmoney_announcements', 'eastmoney_reports', 'eastmoney_stock_news',
     'get_local_datetime', 'ocr', 'resolve_data_time_range', 'sina_reports', 'sseinfo_qa', 'ths_eps_forecast',
     'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news', 'wscn_lives',
@@ -677,9 +677,9 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
   for (const pattern of [/金融信息检索专员（web_retriever）/, /anysearch_search/, /web_retriever_fetch/, /先定来源再动手/, /不要等 anysearch 空转后才想起/, /禁止把搜索结果全部 fetch/, /一次只能提交一个 URL/, /search_engine_provider/, /Wind 三要素/, /public_document/, /wind_docs_announcements/, /wind_docs_news/, /recent_retrievals/, /provider_tally/, /不得重试 wind/, /每条证据都要有来源/, /不得编造链接/, /无来源的信息不得作为证据/, /verified_official 只能来自/, /verified_official/, /unverified/, /not_verified/, /宿主若暴露 web_search \/ web_fetch 等其他检索工具/, /不索取或保存.*API Key/, /resolve_data_time_range/, /skill capital-web-protocol/]) {
     assertRule(RETRIEVER_PERSONA, pattern, `web_retriever persona 缺少要点: ${pattern}`)
   }
-  // Named-source hard rules: all eleven tool names, plus reproducibility, paging-to-empty and the SSE/SZSE split.
+  // Named-source hard rules: all twelve tool names, plus reproducibility, paging-to-empty and the SSE/SZSE split.
   for (const pattern of [
-    /cls_telegraph/, /wscn_lives/, /cninfo_irm/, /sseinfo_qa/,
+    /cls_telegraph/, /wscn_lives/, /cninfo_irm/, /cninfo_announcements/, /sseinfo_qa/,
     /eastmoney_724/, /eastmoney_stock_news/, /eastmoney_reports/,
     /eastmoney_announcements/, /eastmoney_announcement_body/,
     /sina_reports/, /ths_eps_forecast/,
@@ -702,7 +702,7 @@ test('subagent_web_retriever 行：只允许核心网页工具并包含官方域
     /已核验官方白名单/, /候选\/未核验域名/, /verified_official/, /unverified/, /not_verified/,
     /不得重试 wind/, /recent_retrievals/, /provider_tally/, /public_document/,
     // Named-source protocol: the two work surfaces, empty results, paging, status/note/truncation wording.
-    /cls_telegraph/, /wscn_lives/, /cninfo_irm/, /sseinfo_qa/,
+    /cls_telegraph/, /wscn_lives/, /cninfo_irm/, /cninfo_announcements/, /sseinfo_qa/,
     /eastmoney_announcements/, /eastmoney_announcement_body/, /display_time/, /公告原文（东财转载/, /authoritative_reprint/,
     /来源查询/, /该翻页就翻到没有/, /空结果是真事实/, /深沪不可互换/, /北交所两个平台都没有/,
     /status.*answered.*unanswered/, /回执 `note` 必须读/, /1200 字符/, /INVALID_RESPONSE/, /NOT_FOUND/,
@@ -870,7 +870,7 @@ test('行组合指认得出真东西：行名都在行契约里，且没有一�
   }
   for (const preset of allPresets()) {
     assert.ok(!allRowsOf(preset.config.id).some((row) => row?.name === '@v587d/capital-generation'),
-      `${preset.config.id} 仍挂单体入口：那一行一次带出全部工具（连 hub 与 128 个数据源一起建），工具面就不再是行组合说的算了`)
+      `${preset.config.id} 仍挂单体入口：那一行一次带出全部工具（连 hub 与 132 个数据源一起建），工具面就不再是行组合说的算了`)
   }
 })
 
@@ -1251,7 +1251,7 @@ test('data_collector preset：hub / store 仍住 isolate realm，realm 里只有
   assert.equal(scope.isolate?.datasetStore, true)
   const custom = (scope.config ?? []).filter((row) => typeof row?.name === 'string' && row.name.startsWith('@v587d/capital-generation'))
   assert.deepEqual(custom.map((row) => row.name), ['@v587d/capital-generation/tools/collect'],
-    'realm 里只许挂 tools/collect：hub 与 128 个数据源只能由它建，别挂进来就会跨 preset 重名')
+    'realm 里只许挂 tools/collect：hub 与 132 个数据源只能由它建，别挂进来就会跨 preset 重名')
 })
 
 test('data_junior preset：PTC executor 与出图委派仍是 YAML 框架行，不靠运行期名单', () => {

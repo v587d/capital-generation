@@ -287,7 +287,7 @@ export async function resolveUsKlineSymbol(ticker: string, signal: AbortSignal):
     if (!/^[A-Z][A-Z.]{0,9}\.[A-Z]{1,3}$/.test(code)) throw sourceError(`Tencent returned an unreadable US code ${JSON.stringify(code)}`, 'tencent_invalid_response')
     return `us${code}`
   }
-  throw new Error(`Tencent does not recognize US ticker ${ticker}; no spelling of it returned a snapshot to resolve an exchange`)
+  throw sourceError(`Tencent does not recognize US ticker ${ticker}; no spelling of it returned a snapshot to resolve an exchange`, 'tencent_unknown_ticker')
 }
 
 /** smartbox `v_hint="market~code~name~pinyin~type^…"` (~10); no hit or invalid `t` both return `N`. */

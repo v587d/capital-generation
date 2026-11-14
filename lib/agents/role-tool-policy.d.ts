@@ -12,7 +12,7 @@ export declare const SIBLING_DENIED_TOOLS: readonly ["interrupt_agent", "list_ag
 /** Full intended surface; only names that resolve as host-global are enforced by the allow-list.
  * Scoped family-row tools stay visible regardless; they must remain in this list for review. */
 export declare const COLLECTOR_ROLE_TOOLS: readonly ["send_message", "skill", "get_local_datetime", "resolve_data_time_range", "request_data", "list_capabilities", "describe_capability", "dc_status"];
-export declare const RETRIEVER_ROLE_TOOLS: readonly ["send_message", "skill", "get_local_datetime", "resolve_data_time_range", "anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "eastmoney_announcements", "eastmoney_announcement_body", "sina_reports", "ths_eps_forecast", "ocr", "anysearch_batch_search", "anysearch_capabilities"];
+export declare const RETRIEVER_ROLE_TOOLS: readonly ["send_message", "skill", "get_local_datetime", "resolve_data_time_range", "anysearch_search", "web_retriever_fetch", "wind_docs_announcements", "wind_docs_news", "cls_telegraph", "wscn_lives", "cninfo_irm", "cninfo_announcements", "sseinfo_qa", "eastmoney_724", "eastmoney_stock_news", "eastmoney_reports", "eastmoney_announcements", "eastmoney_announcement_body", "sina_reports", "ths_eps_forecast", "ocr", "anysearch_batch_search", "anysearch_capabilities"];
 export declare const SPECIALIST_ROLE_TOOLS: readonly ["get_local_datetime", "resolve_data_time_range", "skill", "render_chart"];
 /** Host-global allow-list plus residual per-name denies. */
 export interface RoleSurface {

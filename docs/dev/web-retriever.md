@@ -1,6 +1,6 @@
 # web_retriever 纪律
 
-> 索引见仓库根 `AGENTS.md` §4。改 `src/web-retriever/`、`src/ocr/`、`src/net/` 或十一个具名来源之前读这里。
+> 索引见仓库根 `AGENTS.md` §4。改 `src/web-retriever/`、`src/ocr/`、`src/net/` 或十二个具名来源之前读这里。
 > §编号沿用 `AGENTS.md` 的全局命名空间。
 
 ## 4.1 工作面与分工
@@ -10,12 +10,12 @@
   搜索摘要只是候选、`verified_official` 授予条件、Wind 三要素、5 次收敛、回传引用、双向
   fallback、官方域名核验清单）。本节只留**维护者结构事实**。
 - **三类工作面**：**检索** = `anysearch_search` / `wind_docs_*` / `web_retriever_fetch`；
-  **来源查询** = 十一个具名工具（`cls_telegraph` / `wscn_lives` / `cninfo_irm` / `sseinfo_qa` /
+  **来源查询** = 十二个具名工具（`cls_telegraph` / `wscn_lives` / `cninfo_irm` / `cninfo_announcements` / `sseinfo_qa` /
   `eastmoney_724` / `eastmoney_stock_news` / `eastmoney_reports` / `eastmoney_announcements` /
   `eastmoney_announcement_body` / `sina_reports` / `ths_eps_forecast`）——全部公开端点、零 key、
   本机直连出网。实现 `src/web-retriever/sources.ts`，
   验收记录 `docs/design/web-retriever-source-expansion.md`。**新增来源只改一处名单**
-  （`RETRIEVAL_DENIED_TOOLS`，§8.4 → `preset-persona.md`）就要进这十一个的注册面。
+  （`RETRIEVAL_DENIED_TOOLS`，§8.4 → `preset-persona.md`）就要进这十二个的注册面。
   **文档解析** = `ocr`（§4.3）：与前两面的关键差别是它**要 token**（`PADDLE_OCR_TOKEN`），
   所以"零 key、装好即可用"那句话对它不成立。
 
@@ -24,7 +24,7 @@
 - **触发**：AnySearch **明确失败**且"值得换路"且**回退开关开启**时，工具内部**自动**本机直连同
   一页面（HTML → GFM markdown）——**不是模型要做的第二次调用**，不占"最多重试一次"额度。开关 =
   设置卡片「允许启动本地提取网页内容」（默认开启，写入路径与 `applies:'restart'` 见 §5.2 →
-  `settings-config.md`）；**同时支配十一个具名来源**：关闭时工具仍在注册面但每次响亮失败
+  `settings-config.md`）；**同时支配十二个具名来源**：关闭时工具仍在注册面但每次响亮失败
   （`DISABLED`）。
 - **不回退的三类**：`INVALID_URL` / `UNSUPPORTED_CONTENT` / `ABORTED`（调用方取消**原样抛出，
   绝不降级成失败信封**；回退前另有 `signal` 已取消即不发请求的硬闸门）。
@@ -110,7 +110,7 @@
 - **不受 `localFetch.enabled` 支配**（与 anysearch / wind 同侧）：那个开关的文案是"允许启动
   本地提取网页内容"，管的是 HTML 回退；把 `ocr` 挂上去等于违背用户同意时划下的边界。
   缺 token 只让调用响亮失败（`NO_CREDENTIAL`，指明卡片位置），工具**无条件注册**——
-  少一个 key 就少十六个工具名，而"按配置少注册"正是 2026-09-30 桌面端那个事故的形状（整场进程
+  少一个 key 就少十七个工具名，而"按配置少注册"正是 2026-09-30 桌面端那个事故的形状（整场进程
   少一整族、不重试）。D0 之后这一族由 `tools/retrieve-search` / `tools/retrieve-sources` /
   `tools/ocr` 三行带出来：注册只看行，开关只看调用期。
 - **根侧收敛的例外**：`ocr` **不进** `RETRIEVAL_DENIED_TOOLS`（主 Agent 要能解析用户

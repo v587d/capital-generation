@@ -75,6 +75,8 @@ const DATA_TIME_CONTRACTS: Record<string, DataTimeContract> = {
   eastmoney_mutual_flow: { kind: 'date_range', fields: ['start_date', 'end_date'] },
   eastmoney_dividend_plan: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: '区间过滤的是**除权除息日**，不是报告期' },
   eastmoney_margin_trading: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: '两融披露沪市比深市快一个交易日：跨市场同日比较前先对齐到共同日期' },
+  eastmoney_margin_total: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: '市场级两融同样按交易所分别披露：深市/北交所 T+1，同一日期可能只有沪市有行，不能把不完整日期加总' },
+  eastmoney_global_kline: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: '全球指数/商品/汇率的历史长度不一，早于各符号起点的日期返回空数组，不是取数失败' },
   eastmoney_convertible_bond_list: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: '区间过滤的是**起息日**（实测与网上申购日恒等），不是上市日也不是摘牌日' },
   auction_benchmark: { kind: 'date', fields: ['date'], warning: '显式日期必须是交易日；工具不会自动回退到最近交易日' },
   limit_up_pool: { kind: 'date_ms', fields: ['date_ms'], warning: 'date_ms 必须对应交易日；工具不会自动回退到最近交易日' },

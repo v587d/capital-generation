@@ -5,7 +5,9 @@ import {
   MAX_ITEMS,
   SourceError,
   clsTelegraph,
+  cninfoAnnouncements,
   cninfoIrm,
+  CNINFO_PAGE_SIZE_MAX,
   createGatedEastmoneyTransport,
   createSourceTransport,
   eastmoneyAnnouncementBody,
@@ -998,6 +1000,7 @@ function sourceOutput(
       operation: outcome.operation,
       ok: true as const,
       count: items.length,
+      ...(outcome.meta ?? {}),
       ...(nextCursor !== undefined ? { next_cursor: nextCursor } : {}),
       ...(notes.length > 0 ? { note: notes.join('；') } : {}),
       items,
@@ -1224,6 +1227,45 @@ export function registerSourceTools(ctx: Context, localFetchOptions: LocalFetchO
         const pageNo = integer(args.page, 'page', 1, 1000) ?? 1
         return run(exec, 'eastmoney', 'reports', `code=${code} page=${pageNo}`, () =>
           eastmoneyReports(eastmoneyClient, { code, pageSize, pageNo, signal: exec.signal }))
+      },
+    },
+    {
+      name: 'cninfo_announcements',
+      description: '按披露日获取巨潮资讯网全市场 A 股公告清单（确定性来源查询，零 key；一次一个披露日）。date 必填 YYYY-MM-DD；market 默认 all，可收窄 sz/sh/bj；keyword 是标题关键词（上游 searchkey，不是分类枚举）；page/page_size 翻页，page_size 上游硬上限 30、默认 20。回执给 total/page/page_size/pages/truncated/next_page 与 items（code/name/title/date/published_at/published_at_precision/market/exchange/announcement_id/document_type/document_url/source）。⛔ 本工具**只返回公告清单**，不读取也不解析 document_url 的 PDF/HTML 正文；禁止把清单里的链接批量交给 web_retriever_fetch/ocr。单日全市场可达 1,400+ 条，先按 market/keyword 收窄；全市场按日扫描用本工具，按代码跟踪仍用 eastmoney_announcements。',
+      parameters: jsonObject({
+        date: { type: 'string', description: '披露日 YYYY-MM-DD（单日；不做跨日窗口）' },
+        market: { type: 'string', enum: ['all', 'sz', 'sh', 'bj'], description: '可选，默认 all；sz 深市 / sh 沪市 / bj 北交所' },
+        keyword: { type: 'string', description: '可选，标题关键词（上游 searchkey；不是分类枚举）' },
+        page: { type: 'integer', description: '可选，页码从 1 开始，默认 1' },
+        page_size: { type: 'integer', description: `可选，每页 1~${CNINFO_PAGE_SIZE_MAX}，默认 20` },
+      }, ['date']),
+      output: {
+        schema: envelope({
+          total: { type: 'integer' },
+          page: { type: 'integer' },
+          page_size: { type: 'integer' },
+          pages: { type: 'integer' },
+          truncated: { type: 'boolean' },
+          next_page: { type: 'integer' },
+        }),
+        render,
+      },
+      async execute(args: Record<string, unknown>, exec: ToolExecLike) {
+        const date = strictCalendarDate(args.date, 'date')
+        const market = args.market === undefined ? 'all' : String(args.market)
+        if (!['all', 'sz', 'sh', 'bj'].includes(market)) throw new Error("market must be 'all', 'sz', 'sh' or 'bj'")
+        const keyword = args.keyword === undefined ? undefined : requiredString(args.keyword, 'keyword', 50)
+        const page = integer(args.page, 'page', 1, 1000) ?? 1
+        const pageSize = integer(args.page_size, 'page_size', 1, CNINFO_PAGE_SIZE_MAX) ?? 20
+        return run(exec, 'cninfo', 'announcements', `date=${date} market=${market} page=${page}`, () =>
+          cninfoAnnouncements(transport, {
+            date,
+            market: market as 'all' | 'sz' | 'sh' | 'bj',
+            ...(keyword === undefined ? {} : { keyword }),
+            page,
+            pageSize,
+            signal: exec.signal,
+          }))
       },
     },
     {

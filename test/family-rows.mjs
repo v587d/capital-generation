@@ -12,7 +12,7 @@ export const CAPITAL_ROW_TOOLS = {
   '@v587d/capital-generation/tools/chart-render': ['render_chart'],
   '@v587d/capital-generation/tools/retrieve-search': ['anysearch_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news'],
   '@v587d/capital-generation/tools/retrieve-sources': [
-    'cls_telegraph', 'wscn_lives', 'cninfo_irm', 'sseinfo_qa',
+    'cls_telegraph', 'wscn_lives', 'cninfo_irm', 'cninfo_announcements', 'sseinfo_qa',
     'eastmoney_724', 'eastmoney_stock_news', 'eastmoney_reports',
     'eastmoney_announcements', 'eastmoney_announcement_body',
     'sina_reports', 'ths_eps_forecast',

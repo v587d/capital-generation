@@ -37,6 +37,8 @@ export const CATALOG_TOPIC_LABELS: Record<CatalogTopic, string> = {
 export const CATALOG_TAXONOMY: Record<string, CatalogTopic> = {
   // quote
   'auction': 'quote',
+  'eastmoney_global_kline': 'quote',
+  'eastmoney_global_quote': 'quote',
   'eastmoney_sector_rotation': 'quote',
   'ftshare_ashare_quote': 'quote',
   'ftshare_convertible_bond_kline': 'quote',
@@ -56,6 +58,7 @@ export const CATALOG_TAXONOMY: Record<string, CatalogTopic> = {
   'tencent_ticks': 'quote',
   'tencent_us_index_quote': 'quote',
   'tencent_us_kline': 'quote',
+  'tencent_us_prepost_quote': 'quote',
   'tencent_us_quote': 'quote',
   // flow
   'anomaly_list': 'flow',
@@ -65,6 +68,7 @@ export const CATALOG_TAXONOMY: Record<string, CatalogTopic> = {
   'eastmoney_cashflow_rotation': 'flow',
   'eastmoney_holder_number_snapshot': 'flow',
   'eastmoney_main_capital_snapshot': 'flow',
+  'eastmoney_margin_total': 'flow',
   'eastmoney_margin_trading': 'flow',
   'eastmoney_top_buy_sell_market': 'flow',
   'eastmoney_top_buy_sell_ticker': 'flow',

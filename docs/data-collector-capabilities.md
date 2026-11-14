@@ -2,7 +2,7 @@
 
 > 本表由 `npm run docs:capabilities` 从 Fuyao、Tencent、Eastmoney、Wind 与 FTShare source 定义生成，并由 `test/data-collector-capabilities.test.mjs` 断言与实现同步：新增端点若忘了重新生成，测试会失败。
 
-当前共 **128 个 capability**：同花顺 Fuyao 61 个，腾讯公开 HTTP 9 个，东方财富 HTTP 21 个，Wind 金融数据服务 3 个，FTShare（非凸科技）34 个。参数后带 **\*** 表示必填。
+当前共 **132 个 capability**：同花顺 Fuyao 61 个，腾讯公开 HTTP 10 个，东方财富 HTTP 24 个，Wind 金融数据服务 3 个，FTShare（非凸科技）34 个。参数后带 **\*** 表示必填。
 
 **复核方式**：Fuyao 能力可用 `npm run smoke:fuyao` 真实复核；Tencent 能力使用最小 smoke fixture 或按需真实请求复核；Eastmoney 能力使用固定 fixture，并按需执行公开网页 JSON smoke；Wind 能力用 `npm run smoke:wind` 真实复核（需要 `WIND_API_KEY`，**按次消耗上游积分**）。FTShare 那几条走 `npm run contract:probe` 的 daily 档巡检（需要 `FTSHARE_API_KEY`；**免费档限流 10 QPS / burst 20**，取数一律经本模块的进程级节流链）。
 
@@ -180,6 +180,7 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 | `tencent_us_index_quote` | `quote` | `/tencent/us_index_quote` | `codes`\* | 否 | 腾讯美股指数点位（无量纲，收盘值为真值） |
 | `tencent_hk_kline` | `quote` | `/tencent/hk_kline` | `code`\* `period` `adjust` `count` | 否 | 腾讯港股日周月 K 线（成交量以股计） |
 | `tencent_us_kline` | `quote` | `/tencent/us_kline` | `code`\* `period` `adjust` `count` | 否 | 腾讯美股日周月 K 线（前复权或不复权） |
+| `tencent_us_prepost_quote` | `quote` | `/tencent/us_prepost_quote` | `codes`\* | 否 | 腾讯美股盘前/盘后最近成交（美东时间，含延迟标记） |
 
 ## 东方财富 HTTP（沪深港通）
 
@@ -216,6 +217,9 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 | `eastmoney_holder_number_snapshot` | `flow` | `/eastmoney/holder_number_snapshot` | `ticker` `sort_field` `sort_order` `page` `size` | 是 | 东财股东户数最新一期截面 |
 | `eastmoney_margin_trading` | `flow` | `/eastmoney/margin_trading` | `ticker`\* `start_date`\* `end_date`\* `page` `size` | 是 | 个股融资融券明细（按票与交易日） |
 | `eastmoney_convertible_bond_list` | `financials` | `/eastmoney/convertible_bond_list` | `start_date`\* `end_date`\* `bond_code` `stock_code` `page` `size` | 是 | 东财可转债发行清单与条款要素（按起息日） |
+| `eastmoney_global_quote` | `quote` | `/eastmoney/global_quote` | `symbols`\* | 否 | 东财全球指数/商品/汇率/美债快照 |
+| `eastmoney_global_kline` | `quote` | `/eastmoney/global_kline` | `symbol`\* `period` `start_date`\* `end_date`\* | 否 | 东财全球指数/商品/汇率/美债日周月 K 线 |
+| `eastmoney_margin_total` | `flow` | `/eastmoney/margin_total` | `start_date`\* `end_date`\* `market` `page` `size` | 是 | 东财市场级两融合计（按交易所日频） |
 
 ## Wind 金融数据服务（MCP）
 

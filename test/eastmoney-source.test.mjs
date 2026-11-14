@@ -37,18 +37,19 @@ const MACRO_CAPABILITIES = [
   'eastmoney_cpi', 'eastmoney_ppi', 'eastmoney_gdp', 'eastmoney_pmi', 'eastmoney_money_supply',
   'eastmoney_rmb_loan', 'eastmoney_customs_trade', 'eastmoney_retail_sales', 'eastmoney_deposit_reserve',
 ]
-const SNAKE_CASE_CAPABILITIES = [...MACRO_CAPABILITIES, 'eastmoney_mutual_flow', 'eastmoney_mutual_quota', 'eastmoney_main_capital_snapshot', 'eastmoney_dividend_plan', 'eastmoney_holder_number_snapshot', 'eastmoney_margin_trading', 'eastmoney_convertible_bond_list']
+const SNAKE_CASE_CAPABILITIES = [...MACRO_CAPABILITIES, 'eastmoney_mutual_flow', 'eastmoney_mutual_quota', 'eastmoney_main_capital_snapshot', 'eastmoney_dividend_plan', 'eastmoney_holder_number_snapshot', 'eastmoney_margin_trading', 'eastmoney_margin_total', 'eastmoney_convertible_bond_list']
+const ARRAY_CAPABILITIES = ['eastmoney_global_quote', 'eastmoney_global_kline']
 
-test('Eastmoney source：注册二十一个 capability 与内部身份', () => {
+test('Eastmoney source：注册二十四个 capability 与内部身份', () => {
   const sources = createEastmoneySources()
   assert.deepEqual(sources.map((source) => source.schema.capability), [
     'eastmoney_top_buy_sell_market', 'eastmoney_top_buy_sell_ticker', 'eastmoney_lockup_expiry',
     'eastmoney_sector_rotation', 'eastmoney_cashflow_rotation', ...MACRO_CAPABILITIES,
     'eastmoney_mutual_flow', 'eastmoney_main_capital_snapshot',
     'eastmoney_dividend_plan', 'eastmoney_holder_number_snapshot', 'eastmoney_mutual_quota', 'eastmoney_margin_trading',
-    'eastmoney_convertible_bond_list',
+    'eastmoney_convertible_bond_list', 'eastmoney_global_quote', 'eastmoney_global_kline', 'eastmoney_margin_total',
   ])
-  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 21)
+  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 24)
   for (const source of sources) {
     assert.equal(source.schema.source_label, 'eastmoney')
     assert.match(source.schema.data_key, /^eastmoney\.http\./)
@@ -58,18 +59,28 @@ test('Eastmoney source：注册二十一个 capability 与内部身份', () => {
 })
 
 test('Eastmoney 宏观表：行键名一律 ASCII snake_case（§10.6 不许透传上游缩写）', () => {
-  for (const capability of SNAKE_CASE_CAPABILITIES) {
+  for (const capability of [...SNAKE_CASE_CAPABILITIES, ...ARRAY_CAPABILITIES]) {
     const source = sourceMap()[capability]
     assert.ok(source, `${capability} 必须已注册`)
-    const declared = Object.keys(source.schema.output_schema.properties.item.items.properties)
+    const schema = source.schema.output_schema
+    const rowSchema = schema.type === 'array' ? schema.items : schema.properties.item.items
+    const declared = Object.keys(rowSchema.properties)
     assert.ok(declared.length > 0, `${capability} 必须声明行字段`)
     for (const key of declared) {
       assert.match(key, /^[a-z][a-z0-9_]*$/, `${capability} 的行键 ${key} 不是 ASCII snake_case：全半角或中文键名会让 query_dataset 匹配零行`)
     }
     // Map every upstream key; raw capitalized field names must not leak into rows.
     for (const key of declared) assert.ok(!/^[A-Z]/.test(key), `${capability} 透传了上游键名 ${key}`)
+  }
+  for (const capability of SNAKE_CASE_CAPABILITIES) {
+    const source = sourceMap()[capability]
     assert.equal(source.schema.paginated, capability === 'eastmoney_mutual_quota' ? false : true, '额度表是当日四条快照，不分页')
     assert.deepEqual(source.schema.rowShape, { rowKey: 'item' })
+  }
+  for (const capability of ARRAY_CAPABILITIES) {
+    const source = sourceMap()[capability]
+    assert.equal(source.schema.paginated, false, '全球行情是数组，不是分页 datacenter 形状')
+    assert.deepEqual(source.schema.rowShape, { rootArray: true })
   }
 })
 
@@ -728,5 +739,223 @@ test('Eastmoney source：success=false 不得静默返回空数组', async () =>
   try {
     const source = sourceMap().eastmoney_lockup_expiry
     await assert.rejects(() => source.execute({ capability: source.schema.capability, params: { start_date: '2026-01-01', end_date: '2026-01-31' }, session }, signal), /报表配置不存在/)
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_global_quote：稳定符号批量快照，缺失符号逐行说明而不是静默丢行', async () => {
+  const originalFetch = globalThis.fetch
+  let requested
+  const spx = {
+    f12: 'SPX', f13: 100, f14: '标普500', f2: 7561.67, f3: -0.4, f4: -30.73,
+    f5: 2720390592, f6: 0, f15: 7621.78, f16: 7499.4, f17: 7616.85, f18: 7592.4, f124: 1794603585,
+  }
+  const hsi = {
+    f12: 'HSI', f13: 100, f14: '恒生指数', f2: 23637.6, f3: -1.55, f4: -370.95,
+    f5: 11534337280, f6: 195857006592, f15: 23930.13, f16: 23595.36, f17: 23871.91, f18: 24008.55, f124: 1794557320,
+  }
+  globalThis.fetch = async (url) => {
+    requested = new URL(url)
+    return response({ rc: 0, data: { total: 2, diff: [spx, hsi] } })
+  }
+  try {
+    const source = sourceMap().eastmoney_global_quote
+    const result = await source.execute({ capability: 'eastmoney_global_quote', params: { symbols: ['spx', 'HSI', 'NDX'] }, session }, signal)
+    assert.equal(requested.searchParams.get('secids'), '100.SPX,100.HSI,100.NDX', '按请求顺序发 secid，不按上游返回顺序')
+    assert.equal(requested.searchParams.get('fltt'), '2')
+    const [a, h, missing] = result.data
+    assert.equal(a.symbol, 'SPX')
+    assert.equal(a.price, 7561.67)
+    assert.equal(a.amount, null, '指数 amount=0 是上游不提供，输出 null')
+    assert.equal(a.volume, 2720390592)
+    assert.equal(a.volume_unit, 'shares')
+    assert.equal(a.amount_unit, null)
+    assert.equal(a.quote_time_utc, new Date(1794603585 * 1000).toISOString())
+    assert.match(a.quote_time, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)
+    assert.equal(a.quote_time_zone, 'America/New_York')
+    assert.equal(h.amount, 195857006592, 'HSI 的 amount 有值，保留港元成交额')
+    assert.equal(h.amount_unit, 'HKD')
+    assert.equal(missing.symbol, 'NDX')
+    assert.equal(missing.available, false)
+    assert.equal(missing.reason, 'symbol_not_returned')
+    assert.equal(result.data.length, 3)
+    // f124=0 的合法行：价格可用，但时刻留 null。
+    globalThis.fetch = async () => response({ rc: 0, data: { total: 1, diff: [{ ...spx, f124: 0 }] } })
+    const noTime = await source.execute({ capability: 'eastmoney_global_quote', params: { symbols: ['SPX'] }, session }, signal)
+    assert.equal(noTime.data[0].available, true)
+    assert.equal(noTime.data[0].quote_time, null)
+    assert.equal(noTime.data[0].quote_time_utc, null)
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_global_quote：未知符号、超量与全缺失都在出网前或出网后响亮失败', async () => {
+  const originalFetch = globalThis.fetch
+  let requested
+  globalThis.fetch = async (url) => { requested = new URL(url); return response({ rc: 0, data: { total: 0, diff: [] } }) }
+  try {
+    const source = sourceMap().eastmoney_global_quote
+    requested = undefined
+    await assert.rejects(
+      () => source.execute({ capability: 'eastmoney_global_quote', params: { symbols: ['SPX', 'VIX'] }, session }, signal),
+      /symbols\[\].*must be one of/,
+    )
+    assert.equal(requested, undefined, '未知符号不得发请求')
+    await assert.rejects(
+      () => source.execute({ capability: 'eastmoney_global_quote', params: { symbols: Array.from({ length: 19 }, () => 'SPX') }, session }, signal),
+      /symbols exceeds maximum 18/,
+    )
+    await assert.rejects(
+      () => source.execute({ capability: 'eastmoney_global_quote', params: { symbols: ['SPX'] }, session }, signal),
+      (error) => error?.code === 'eastmoney_invalid_response',
+      '全部符号都没回行时不能返回一批 available=false 假装成功',
+    )
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_global_kline：OHLCV 映射、首根用 preKPrice 算涨跌幅、振幅与 amount 口径分列', async () => {
+  const originalFetch = globalThis.fetch
+  let requested
+  globalThis.fetch = async (url) => {
+    requested = new URL(url)
+    return response({ rc: 0, data: {
+      code: 'NDX', market: 100, name: '纳斯达克100', decimal: 2, dktotal: 8876, preKPrice: 26861.06,
+      klines: [
+        '2026-11-12,25092.11,25366.09,25597.23,25068.28,8857475072,0.00,2.08',
+        '2026-11-13,25408.00,25136.27,25423.09,24872.41,7740442368,0.00,2.17',
+      ],
+    } })
+  }
+  try {
+    const source = sourceMap().eastmoney_global_kline
+    const result = await source.execute({ capability: 'eastmoney_global_kline', params: { symbol: 'NDX', start_date: '2026-11-12', end_date: '2026-11-13' }, session }, signal)
+    assert.equal(requested.searchParams.get('secid'), '100.NDX')
+    assert.equal(requested.searchParams.get('klt'), '101')
+    assert.equal(requested.searchParams.get('beg'), '20261112')
+    assert.equal(requested.searchParams.get('end'), '20261113')
+    const [first, second] = result.data
+    assert.equal(first.trade_date, '2026-11-12')
+    assert.equal(first.open, 25092.11)
+    assert.equal(first.close, 25366.09)
+    assert.equal(first.high, 25597.23)
+    assert.equal(first.low, 25068.28)
+    assert.equal(first.amplitude_pct, 2.08)
+    assert.equal(first.amount, null, '指数 amount=0 输出 null')
+    assert.equal(first.volume, 8857475072)
+    assert.equal(first.volume_unit, 'shares')
+    assert.equal(first.change_pct, -5.5656, '首根涨跌幅以 preKPrice 为前收')
+    assert.equal(second.change_pct, -0.906, '后续根以前一根收盘为前收')
+    assert.equal(second.amount, null)
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_global_kline：HSI amount 保留港元、空区间返回空数组、参数畸形在出网前拒绝', async () => {
+  const originalFetch = globalThis.fetch
+  let requested
+  globalThis.fetch = async (url) => {
+    requested = new URL(url)
+    return response({ rc: 0, data: {
+      code: 'HSI', market: 100, name: '恒生指数', preKPrice: 0,
+      klines: ['2026-11-13,23871.91,23637.60,23930.13,23595.36,11534337280,195857006592.00,1.39'],
+    } })
+  }
+  try {
+    const source = sourceMap().eastmoney_global_kline
+    const hsi = await source.execute({ capability: 'eastmoney_global_kline', params: { symbol: 'hsi', period: 'day', start_date: '2026-11-13', end_date: '2026-11-13' }, session }, signal)
+    assert.equal(hsi.data[0].amount, 195857006592)
+    assert.equal(hsi.data[0].amount_unit, 'HKD')
+    assert.equal(hsi.data[0].change_pct, null, 'preKPrice=0 时首根不编涨跌幅')
+    globalThis.fetch = async () => response({ rc: 0, data: { code: 'NDX', preKPrice: 0, klines: [] } })
+    const empty = await source.execute({ capability: 'eastmoney_global_kline', params: { symbol: 'NDX', start_date: '2030-01-01', end_date: '2030-01-10' }, session }, signal)
+    assert.deepEqual(empty.data, [])
+    requested = undefined
+    for (const params of [
+      { symbol: 'VIX', start_date: '2026-11-01', end_date: '2026-11-13' },
+      { symbol: 'NDX', period: 'm5', start_date: '2026-11-01', end_date: '2026-11-13' },
+      { symbol: 'NDX', start_date: '2026-11-13', end_date: '2026-11-01' },
+      { symbol: 'NDX', start_date: '2026-11-01' },
+    ]) {
+      await assert.rejects(() => source.execute({ capability: 'eastmoney_global_kline', params }, session, signal), undefined)
+      assert.equal(requested, undefined, '参数畸形必须在上网之前拒绝')
+    }
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_global_kline：行宽不为 8 或 OHLC 畸形时判 invalid_response', async () => {
+  const originalFetch = globalThis.fetch
+  try {
+    const source = sourceMap().eastmoney_global_kline
+    for (const line of [
+      '2026-11-13,1,2,3,4,5,6',
+      '2026-11-13,abc,2,3,4,5,6,7',
+      'not-a-date,1,2,3,4,5,6,7',
+    ]) {
+      globalThis.fetch = async () => response({ rc: 0, data: { code: 'NDX', preKPrice: 1, klines: [line] } })
+      await assert.rejects(
+        () => source.execute({ capability: 'eastmoney_global_kline', params: { symbol: 'NDX', start_date: '2026-11-01', end_date: '2026-11-13' }, session }, signal),
+        (error) => error?.code === 'eastmoney_invalid_response',
+        line,
+      )
+    }
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_margin_total：市场级两融按交易所返回，单市场过滤与金额/股数分列', async () => {
+  const originalFetch = globalThis.fetch
+  let requested
+  const sse = {
+    DIM_DATE: '2026-11-13 00:00:00', XOB_MARKET_0001: '融资融券_沪证', SCDM: '007',
+    RZYE: 1169263907994, RQYE: 18956484180, RZRQYE: 1188220392174,
+    RZMRE: 73820243959, RZCHE: 82492029916, RZJME: -8671785957,
+    RQYL: 3280877896, RQMCL: 131775250, RQCHL: 57399332, RQJMG: 74375918,
+    LTSZ: 57290290000000, RZYEZB: 2.04094605,
+  }
+  const szse = { ...sse, DIM_DATE: '2026-11-12 00:00:00', XOB_MARKET_0001: '融资融券_深证', SCDM: '001' }
+  globalThis.fetch = async (url) => {
+    requested = new URL(url)
+    return response({ success: true, code: 0, result: { pages: 1, count: 2, data: [sse, szse] } })
+  }
+  try {
+    const source = sourceMap().eastmoney_margin_total
+    const result = await source.execute({ capability: 'eastmoney_margin_total', params: { start_date: '2026-11-12', end_date: '2026-11-13', market: 'sse', page: 1, size: 20 }, session }, signal)
+    assert.equal(requested.searchParams.get('reportName'), 'RPTA_WEB_RZRQ_LSSH')
+    assert.equal(requested.searchParams.get('filter'), `(DIM_DATE>='2026-11-12')(DIM_DATE<='2026-11-13')(SCDM="007")`)
+    const [row] = result.data.item
+    assert.equal(row.market, 'sse')
+    assert.equal(row.market_label, '融资融券_沪证')
+    assert.equal(row.margin_balance, 1169263907994)
+    assert.equal(row.short_balance, 18956484180)
+    assert.equal(row.total_balance, 1188220392174)
+    assert.equal(row.margin_net_buy, -8671785957)
+    assert.equal(row.short_sell_volume, 131775250, '融券量是股数')
+    assert.equal(row.float_market_cap, 57290290000000)
+    assert.equal(row.margin_balance_pct, 2.04094605)
+    assert.equal(result.data.pagination.total, 2)
+    // market=all 不拼 SCDM 过滤。
+    await source.execute({ capability: 'eastmoney_margin_total', params: { start_date: '2026-11-12', end_date: '2026-11-13' }, session }, signal)
+    assert.equal(requested.searchParams.get('filter'), `(DIM_DATE>='2026-11-12')(DIM_DATE<='2026-11-13')`)
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_margin_total：未知市场/未知 SCDM 与空结果的处理', async () => {
+  const originalFetch = globalThis.fetch
+  let requested
+  globalThis.fetch = async (url) => {
+    requested = new URL(url)
+    return response({ success: true, code: 0, result: { pages: 1, count: 1, data: [{ DIM_DATE: '2026-11-13 00:00:00', XOB_MARKET_0001: '融资融券_未知', SCDM: '999' }] } })
+  }
+  try {
+    const source = sourceMap().eastmoney_margin_total
+    requested = undefined
+    await assert.rejects(
+      () => source.execute({ capability: 'eastmoney_margin_total', params: { start_date: '2026-11-12', end_date: '2026-11-13', market: 'sh' }, session }, signal),
+      /market must be one of/,
+    )
+    assert.equal(requested, undefined)
+    await assert.rejects(
+      () => source.execute({ capability: 'eastmoney_margin_total', params: { start_date: '2026-11-12', end_date: '2026-11-13' }, session }, signal),
+      (error) => error?.code === 'eastmoney_invalid_response',
+    )
+    globalThis.fetch = async () => response({ success: false, code: 9201, message: '返回数据为空' })
+    const empty = await source.execute({ capability: 'eastmoney_margin_total', params: { start_date: '2026-11-12', end_date: '2026-11-13' }, session }, signal)
+    assert.deepEqual([empty.data.item, empty.data.pagination.total], [[], 0])
   } finally { globalThis.fetch = originalFetch }
 })

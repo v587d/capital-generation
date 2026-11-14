@@ -10,9 +10,9 @@ import type { EastmoneyClient, EastmoneyTransport } from '../net/eastmoney-clien
 import type { LocalFetchOptions } from './local-fetch.js'
 
 /** Upstream name used in error envelopes and as the `provider_tally` key. */
-export type SourceId = 'cls' | 'wscn' | 'cninfo_irm' | 'sseinfo' | 'eastmoney' | 'ths' | 'sina'
+export type SourceId = 'cls' | 'wscn' | 'cninfo_irm' | 'cninfo' | 'sseinfo' | 'eastmoney' | 'ths' | 'sina'
 
-export const SOURCE_IDS: readonly SourceId[] = ['cls', 'wscn', 'cninfo_irm', 'sseinfo', 'eastmoney', 'ths', 'sina']
+export const SOURCE_IDS: readonly SourceId[] = ['cls', 'wscn', 'cninfo_irm', 'cninfo', 'sseinfo', 'eastmoney', 'ths', 'sina']
 
 /** Per-item text cap; item count is capped separately by each tool's limit. */
 export const MAX_ITEM_CHARS = 1200
@@ -32,6 +32,8 @@ export interface SourceOutcome {
   next_cursor?: string
   /** Record upstream scope / known gaps so an empty result is not read as fact. */
   note?: string
+  /** Extra envelope fields (total/page/pages/truncated) for list sources; never item data. */
+  meta?: Record<string, unknown>
 }
 
 export class SourceError extends Error {
@@ -354,6 +356,134 @@ export async function cninfoIrm(
     operation: 'questions',
     items: clipItems(items),
     note: `深市专用：互动易对沪市公司返回 0 条，沪市问答请用 sseinfo_qa${total === undefined ? '' : `；公司累计问答 ${total} 条`}`,
+  }
+}
+
+
+const CNINFO_ANNOUNCEMENT_URL = 'https://www.cninfo.com.cn/new/hisAnnouncement/query'
+const CNINFO_REFERER = 'https://www.cninfo.com.cn/new/commonUrl?url=disclosure/list/notice'
+export const CNINFO_PAGE_SIZE_MAX = 30
+
+/** CNINFO often encodes a date-only disclosure as Beijing midnight; keep that precision instead of inventing a time. */
+function cninfoStamp(ms: number, fallbackDate: string): { date: string; publishedAt: string | null; precision: 'date' | 'minute' | null; ms: number | null } {
+  if (!Number.isFinite(ms) || ms <= 0) return { date: fallbackDate, publishedAt: null, precision: null, ms: null }
+  const stamp = Math.round(ms)
+  const iso = new Date(stamp + 8 * 3600 * 1000).toISOString()
+  const date = iso.slice(0, 10)
+  const time = iso.slice(11, 19)
+  // SH/BJ often encode a date-only disclosure as Beijing midnight; keep that precision explicit.
+  if (time === '00:00:00') return { date, publishedAt: date, precision: 'date', ms: stamp }
+  return { date, publishedAt: `${date} ${time}`, precision: 'minute', ms: stamp }
+}
+
+function cninfoMarket(pageColumn: unknown): 'sz' | 'sh' | 'bj' | null {
+  const value = typeof pageColumn === 'string' ? pageColumn.trim().toUpperCase() : ''
+  if (value.startsWith('SH')) return 'sh'
+  if (value.startsWith('SZ')) return 'sz'
+  if (value.startsWith('BJ')) return 'bj'
+  return null
+}
+
+function cninfoDocumentUrl(adjunctUrl: unknown): string | null {
+  const raw = typeof adjunctUrl === 'string' ? adjunctUrl.trim() : ''
+  if (raw.length === 0) return null
+  const full = /^https?:\/\//iu.test(raw) ? raw : `https://static.cninfo.com.cn/${raw.replace(/^\/+/u, '')}`
+  const safe = itemUrl(full)
+  return safe.length === 0 ? null : safe
+}
+
+/**
+ * Day-scoped all-market list from CNINFO (the official A-share disclosure platform).
+ * Returns metadata only: the caller must not fetch/parse `document_url` in bulk.
+ */
+export async function cninfoAnnouncements(
+  transport: Requester,
+  input: { date: string; market?: 'all' | 'sz' | 'sh' | 'bj'; keyword?: string; page: number; pageSize: number; signal?: AbortSignal },
+): Promise<SourceOutcome> {
+  const date = announcementDate(input.date, 'date')
+  const market = input.market ?? 'all'
+  if (!['all', 'sz', 'sh', 'bj'].includes(market)) throw new Error("parameter market must be 'all', 'sz', 'sh' or 'bj'")
+  if (!Number.isSafeInteger(input.page) || input.page < 1) throw new Error('parameter page must be a positive integer')
+  if (!Number.isSafeInteger(input.pageSize) || input.pageSize < 1 || input.pageSize > CNINFO_PAGE_SIZE_MAX) {
+    throw new Error(`parameter page_size must be an integer from 1 to ${CNINFO_PAGE_SIZE_MAX}`)
+  }
+  const keyword = input.keyword?.trim() ?? ''
+  if (keyword.length > 50) throw new Error('parameter keyword exceeds 50 characters')
+  const body = new URLSearchParams({
+    pageNum: String(input.page),
+    pageSize: String(input.pageSize),
+    column: 'szse',
+    tabName: 'fulltext',
+    plate: market === 'all' ? 'sz;sh;bj' : market,
+    stock: '',
+    searchkey: keyword,
+    secid: '',
+    category: '',
+    trade: '',
+    seDate: `${date}~${date}`,
+    sortName: '',
+    sortType: '',
+    isHLtitle: 'true',
+  })
+  const response = await transport.request({
+    url: CNINFO_ANNOUNCEMENT_URL,
+    method: 'POST',
+    body: body.toString(),
+    headers: { referer: CNINFO_REFERER, 'x-requested-with': 'XMLHttpRequest' },
+  }, input.signal)
+  const payload = asRecord(parseJson(response.text, 'cninfo', '巨潮公告列表响应', response.truncated))
+  if (!payload) throw new SourceError('cninfo', 'INVALID_RESPONSE', '巨潮公告列表响应不是对象')
+  const total = payload.totalAnnouncement
+  if (typeof total !== 'number' || !Number.isFinite(total) || total < 0) {
+    throw new SourceError('cninfo', 'INVALID_RESPONSE', '巨潮公告列表缺少 totalAnnouncement')
+  }
+  const rows = payload.announcements
+  if (rows !== null && rows !== undefined && !Array.isArray(rows)) {
+    throw new SourceError('cninfo', 'INVALID_RESPONSE', '巨潮公告列表 announcements 不是数组')
+  }
+  const items: SourceItem[] = []
+  for (const raw of Array.isArray(rows) ? rows : []) {
+    const row = asRecord(raw)
+    if (!row) throw new SourceError('cninfo', 'INVALID_RESPONSE', '巨潮公告条目不是对象')
+    const code = typeof row.secCode === 'string' ? row.secCode.trim() : ''
+    if (!/^\d{6}$/u.test(code)) throw new SourceError('cninfo', 'INVALID_RESPONSE', `巨潮公告条目 secCode 非法：${JSON.stringify(code)}`)
+    const announcementId = typeof row.announcementId === 'string' ? row.announcementId.trim() : ''
+    if (announcementId.length === 0) throw new SourceError('cninfo', 'INVALID_RESPONSE', '巨潮公告条目缺少 announcementId')
+    const stamp = typeof row.announcementTime === 'number' ? row.announcementTime : 0
+    const published = cninfoStamp(stamp, date)
+    const title = clip(stripHtml(typeof row.announcementTitle === 'string' ? row.announcementTitle : ''))
+    const name = clip(typeof row.secName === 'string' ? row.secName : '')
+    const pageColumn = typeof row.pageColumn === 'string' ? row.pageColumn : ''
+    items.push({
+      code,
+      name,
+      title,
+      date: published.date,
+      published_at: published.publishedAt,
+      published_at_precision: published.precision,
+      announcement_time_ms: published.ms,
+      market: cninfoMarket(pageColumn),
+      exchange: pageColumn,
+      announcement_id: announcementId,
+      document_type: clip(typeof row.adjunctType === 'string' ? row.adjunctType : ''),
+      document_url: cninfoDocumentUrl(row.adjunctUrl),
+      source: 'cninfo',
+    })
+  }
+  const pages = total === 0 ? 0 : Math.ceil(total / input.pageSize)
+  return {
+    source: 'cninfo',
+    operation: 'announcements',
+    items: clipItems(items),
+    meta: {
+      total,
+      page: input.page,
+      page_size: input.pageSize,
+      pages,
+      truncated: input.page * input.pageSize < total,
+      ...(input.page < pages ? { next_page: input.page + 1 } : {}),
+    },
+    note: `巨潮按披露日列全市场 A 股公告；本工具只返回清单，不读取也不解析 document_url 的 PDF/HTML 正文，禁止把清单链接批量交给 web_retriever_fetch/ocr；单日全市场可达 1,400+ 条，按 market/keyword/page_size 收窄。当前 page_size=${input.pageSize}，共 ${total} 条。`,
   }
 }
 

@@ -1,4 +1,4 @@
-// Nine named-source tools regression on live-shaped fixtures: cninfo IRM needs
+// Twelve named-source tools regression on live-shaped fixtures: cninfo IRM needs
 // POST on both steps, and sseinfo type=10 can return another company's rows.
 
 import { test } from 'node:test'
@@ -9,6 +9,7 @@ import { createEastmoneyClient } from '../lib/net/eastmoney-client.js'
 import {
   clsSign,
   clsTelegraph,
+  cninfoAnnouncements,
   cninfoIrm,
   createSourceTransport,
   eastmoneyAnnouncementBody,
@@ -479,12 +480,12 @@ function registerSources() {
   return definitions
 }
 
-test('工具注册：十一个来源工具 named provider_operation，且参数根为 object', () => {
+test('工具注册：十二个来源工具 named provider_operation，且参数根为 object', () => {
   const definitions = registerSources()
   assert.deepEqual(definitions.map((definition) => definition.name), [
     'cls_telegraph', 'wscn_lives', 'cninfo_irm', 'sseinfo_qa',
     'eastmoney_724', 'eastmoney_stock_news', 'eastmoney_reports',
-    'eastmoney_announcements', 'eastmoney_announcement_body',
+    'cninfo_announcements', 'eastmoney_announcements', 'eastmoney_announcement_body',
     'sina_reports', 'ths_eps_forecast',
   ])
   for (const definition of definitions) {
@@ -558,7 +559,7 @@ test('工具输出：调用方取消必须原样抛出，不得降级成 ok:fals
   )
 })
 
-test('同意开关：enabled:false 时十一个来源工具响亮失败（DISABLED），且一次本机 HTTP 都不发起', async () => {
+test('同意开关：enabled:false 时十二个来源工具响亮失败（DISABLED），且一次本机 HTTP 都不发起', async () => {
   const definitions = []
   const runtime = { register: (definition) => { definitions.push(definition); return () => {} } }
   registerSourceTools({ get: (name) => (name === 'tools' ? runtime : undefined), effect: (fn) => fn() },
@@ -567,7 +568,7 @@ test('同意开关：enabled:false 时十一个来源工具响亮失败（DISABL
   try {
     const byName = new Map(definitions.map((definition) => [definition.name, definition]))
     const exec = { signal: new AbortController().signal, agent: { session: { id: 'source-disabled' } } }
-    // One direct-source and one shared-client tool; the switch covers all eleven.
+    // One direct-source and one shared-client tool; the switch covers all twelve.
     for (const name of ['cls_telegraph', 'eastmoney_724']) {
       await assert.rejects(byName.get(name).execute({}, exec), (error) => {
         const payload = JSON.parse(error.message)
@@ -1224,6 +1225,106 @@ test('工具层：公告列表被输出预算裁剪时，next_cursor 必须指�
       codes: ['600519'], start_date: '2026-11-03', end_date: '2026-11-03', page_size: 10, cursor: first.next_cursor,
     }, exec)
     assert.equal(second.items[0].art_code, rows[first.count].art_code, '第二页必须从第一条被省略的条目开始，不能跳过')
+  } finally {
+    restore.restore()
+  }
+})
+
+
+const CNINFO_LIST = {
+  totalAnnouncement: 2,
+  totalRecordNum: 2,
+  announcements: [
+    {
+      secCode: '300570', secName: '太辰光', announcementId: '1225671871',
+      announcementTitle: '<em>关于</em>取得金融机构回购专项贷款承诺函的公告',
+      announcementTime: 1794567267000, adjunctUrl: 'finalpage/2026-11-13/1225671871.PDF',
+      adjunctType: 'PDF', pageColumn: 'SZCY',
+    },
+    {
+      secCode: '601969', secName: '海南矿业', announcementId: '1225670011',
+      announcementTitle: '关于发行股份及支付现金购买资产并募集配套资金暨关联交易事项经上海证券交易所并购重组审核委员会审议结果的公告',
+      announcementTime: 1794499200000, adjunctUrl: 'finalpage/2026-11-13/1225670011.PDF',
+      adjunctType: 'PDF', pageColumn: 'SHZB',
+    },
+  ],
+}
+
+test('cninfo_announcements：按披露日 POST 全市场清单，按市场/关键词/分页收窄', async () => {
+  const restore = installFetch(async (url) => {
+    assert.match(url, /hisAnnouncement\/query/)
+    return json(CNINFO_LIST)
+  })
+  try {
+    const outcome = await cninfoAnnouncements(makeTransport(), {
+      date: '2026-11-13', market: 'all', keyword: '回购', page: 1, pageSize: 2,
+    })
+    const request = restore.requests[0]
+    assert.equal(request.init.method, 'POST')
+    assert.match(String(request.init.headers?.['content-type']), /application\/x-www-form-urlencoded/)
+    const form = new URLSearchParams(String(request.init.body))
+    assert.equal(form.get('seDate'), '2026-11-13~2026-11-13')
+    assert.equal(form.get('plate'), 'sz;sh;bj')
+    assert.equal(form.get('searchkey'), '回购')
+    assert.equal(form.get('pageNum'), '1')
+    assert.equal(form.get('pageSize'), '2')
+    assert.deepEqual(outcome.meta, { total: 2, page: 1, page_size: 2, pages: 1, truncated: false })
+    assert.equal(outcome.items.length, 2)
+    assert.equal(outcome.items[0].published_at_precision, 'minute')
+    assert.equal(outcome.items[0].published_at, '2026-11-13 18:54:27')
+    assert.equal(outcome.items[1].published_at_precision, 'date', 'SH 的 00:00 是日期精度，不编时分')
+    assert.equal(outcome.items[1].published_at, '2026-11-13')
+    assert.equal(outcome.items[0].document_url, 'https://static.cninfo.com.cn/finalpage/2026-11-13/1225671871.PDF')
+    assert.equal(outcome.items[0].market, 'sz')
+    assert.equal(outcome.items[1].market, 'sh')
+    assert.ok(!('content' in outcome.items[0]), '清单条目不得带正文')
+    assert.match(String(outcome.note), /只返回清单.*不读取.*document_url/su)
+  } finally {
+    restore.restore()
+  }
+})
+
+test('cninfo_announcements：空列表是合法空结果；上游缺字段/坏代码响亮失败', async () => {
+  const restore = installFetch(async () => json({ totalAnnouncement: 0, announcements: null }))
+  try {
+    const empty = await cninfoAnnouncements(makeTransport(), { date: '2026-11-13', market: 'sz', page: 1, pageSize: 20 })
+    assert.deepEqual(empty.items, [])
+    assert.deepEqual(empty.meta, { total: 0, page: 1, page_size: 20, pages: 0, truncated: false })
+    await assert.rejects(
+      () => cninfoAnnouncements(makeTransport(), { date: '2026-11-13', market: 'all', page: 1, pageSize: 31 }),
+      /page_size must be an integer from 1 to 30/,
+    )
+    restore.restore()
+    const restoreBad = installFetch(async () => json({ totalAnnouncement: 1, announcements: [{ secCode: '12345', secName: '坏代码', announcementId: '1', announcementTitle: 'x', announcementTime: 1, adjunctUrl: '', pageColumn: 'SZCY' }] }))
+    try {
+      await assert.rejects(
+        () => cninfoAnnouncements(makeTransport(), { date: '2026-11-13', market: 'all', page: 1, pageSize: 20 }),
+        (error) => error?.code === 'INVALID_RESPONSE',
+      )
+    } finally { restoreBad.restore() }
+  } finally { restore.restore() }
+})
+
+test('cninfo_announcements 工具：只发一次列表请求，不回正文，输出满足 schema', async () => {
+  const restore = installFetch(async (url) => {
+    assert.match(url, /hisAnnouncement\/query/)
+    return json(CNINFO_LIST)
+  })
+  try {
+    const definitions = registerSources()
+    const tool = definitions.find((definition) => definition.name === 'cninfo_announcements')
+    assert.ok(tool, 'cninfo_announcements 必须注册')
+    assert.match(tool.description, /只返回公告清单/u)
+    assert.match(tool.description, /不读取/u)
+    const exec = { signal: new AbortController().signal, agent: { session: { id: 'cninfo-tool' } } }
+    const out = await tool.execute({ date: '2026-11-13', market: 'all', page_size: 2 }, exec)
+    assert.equal(out.provider, 'cninfo')
+    assert.equal(out.ok, true)
+    assert.equal(out.total, 2)
+    assert.equal(out.items.length, 2)
+    assert.equal(restore.requests.length, 1, '清单工具不得自行抓取任何 PDF/URL 正文')
+    assert.equal(out.provider_tally.cninfo, 1)
+    assertToolOutput(tool, out)
   } finally {
     restore.restore()
   }

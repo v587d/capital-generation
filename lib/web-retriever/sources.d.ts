@@ -7,7 +7,7 @@ import { createHttpRequester } from './local-fetch.js';
 import type { EastmoneyClient, EastmoneyTransport } from '../net/eastmoney-client.js';
 import type { LocalFetchOptions } from './local-fetch.js';
 /** Upstream name used in error envelopes and as the `provider_tally` key. */
-export type SourceId = 'cls' | 'wscn' | 'cninfo_irm' | 'sseinfo' | 'eastmoney' | 'ths' | 'sina';
+export type SourceId = 'cls' | 'wscn' | 'cninfo_irm' | 'cninfo' | 'sseinfo' | 'eastmoney' | 'ths' | 'sina';
 export declare const SOURCE_IDS: readonly SourceId[];
 /** Per-item text cap; item count is capped separately by each tool's limit. */
 export declare const MAX_ITEM_CHARS = 1200;
@@ -24,6 +24,8 @@ export interface SourceOutcome {
     next_cursor?: string;
     /** Record upstream scope / known gaps so an empty result is not read as fact. */
     note?: string;
+    /** Extra envelope fields (total/page/pages/truncated) for list sources; never item data. */
+    meta?: Record<string, unknown>;
 }
 export declare class SourceError extends Error {
     readonly source: SourceId;
@@ -62,6 +64,19 @@ export declare function cninfoIrm(transport: Requester, input: {
     code: string;
     pageSize: number;
     pageNum: number;
+    signal?: AbortSignal;
+}): Promise<SourceOutcome>;
+export declare const CNINFO_PAGE_SIZE_MAX = 30;
+/**
+ * Day-scoped all-market list from CNINFO (the official A-share disclosure platform).
+ * Returns metadata only: the caller must not fetch/parse `document_url` in bulk.
+ */
+export declare function cninfoAnnouncements(transport: Requester, input: {
+    date: string;
+    market?: 'all' | 'sz' | 'sh' | 'bj';
+    keyword?: string;
+    page: number;
+    pageSize: number;
     signal?: AbortSignal;
 }): Promise<SourceOutcome>;
 /**

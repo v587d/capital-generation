@@ -14,9 +14,11 @@ import {
   normalizeOffshoreIndexCode,
   normalizeUsCode,
   numberOrNull,
+  offshoreQuoteTime,
   requiredNumber,
   resolveUsKlineSymbol,
   sourceError,
+  US_QUOTE_FIELDS,
   tencentGetText as getText,
   type JsonRecord,
 } from './tencent-public-core.js'
@@ -588,6 +590,236 @@ async function executeOffshoreKline(params: Params, signal: AbortSignal, market:
   return { data: parseOffshoreKlineRows(items, canonical, tencentSymbol, period, adjust, market), schema: market === 'hk' ? hkKlineOutput : usKlineOutput }
 }
 
+
+const US_PREPOST_MAX_CODES = 20
+/** The K-line endpoint only attaches `pandata` when a recent bar is requested; 10 is a stable floor. */
+const US_PREPOST_BARS = 10
+
+function normalizeUsPrepostCodes(params: unknown): Params {
+  if (!isRecord(params)) throw new Error('params must be an object')
+  assertKnown(params, ['codes'])
+  const rawValues = Array.isArray(params.codes)
+    ? params.codes
+    : typeof params.codes === 'string'
+      ? params.codes.split(',').map((item) => item.trim()).filter(Boolean)
+      : undefined
+  if (!rawValues || rawValues.length === 0) throw new Error('parameter codes must contain at least one US ticker')
+  if (rawValues.length > US_PREPOST_MAX_CODES) throw new Error(`parameter codes accepts at most ${US_PREPOST_MAX_CODES} tickers`)
+  const codes: string[] = []
+  for (const item of rawValues) {
+    const code = normalizeUsCode(item, 'codes')
+    if (!codes.includes(code)) codes.push(code)
+  }
+  return { codes }
+}
+
+function textOrNull(value: unknown): string | null {
+  if (value === undefined || value === null) return null
+  const text = String(value).trim()
+  return text.length === 0 ? null : text
+}
+
+function roundPrice(value: number): number {
+  return Number(value.toFixed(4))
+}
+
+/**
+ * Exchange wall clock -> UTC. `pandata.time` is ET but `season` is only a display label
+ * (`EST` even when DST is in force elsewhere); resolve DST through Intl instead of trusting it.
+ */
+function exchangeTimeToUtcMs(local: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(local)
+  if (match === null) return null
+  const [year, month, day, hour, minute, second] = match.slice(1).map(Number)
+  const target = Date.UTC(year, month - 1, day, hour, minute, second)
+  if (!Number.isFinite(target)) return null
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  })
+  let guess = target
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const parts = Object.fromEntries(formatter.formatToParts(new Date(guess)).map((part) => [part.type, part.value]))
+    const rendered = Date.UTC(
+      Number(parts.year), Number(parts.month) - 1, Number(parts.day),
+      Number(parts.hour), Number(parts.minute), Number(parts.second),
+    )
+    const delta = target - rendered
+    if (delta === 0) return guess
+    guess += delta
+  }
+  return guess
+}
+
+function emptyUsPrepostRow(code: string, reason: string): JsonRecord {
+  return {
+    code,
+    tencent_symbol: null,
+    name: null,
+    currency: null,
+    session: null,
+    price: null,
+    prev_close: null,
+    change_amt: null,
+    change_pct: null,
+    volume_shares: null,
+    session_time: null,
+    session_time_zone: null,
+    exchange_time_zone: null,
+    quote_time_utc: null,
+    regular_price: null,
+    regular_prev_close: null,
+    regular_quote_time: null,
+    delay: false,
+    available: false,
+    reason,
+    source: 'tencent',
+  }
+}
+
+function parseUsPrepostRow(data: JsonRecord, symbol: string, requested: string): JsonRecord {
+  const node = data[symbol]
+  if (!isRecord(node)) throw sourceError(`Tencent pre/post ${symbol} response has no symbol node`, 'tencent_invalid_response')
+  const qt = node.qt
+  if (!isRecord(qt)) throw sourceError(`Tencent pre/post ${symbol} response has no qt node`, 'tencent_invalid_response')
+  const fields = qt[symbol]
+  if (!Array.isArray(fields) || fields.length < US_QUOTE_FIELDS) {
+    throw sourceError(`Tencent pre/post ${symbol} quote row changed (${Array.isArray(fields) ? fields.length : 'non-array'} fields)`, 'tencent_invalid_response')
+  }
+  const regularQuoteTime = offshoreQuoteTime(fields[30])
+  if (regularQuoteTime === null) throw sourceError(`Tencent pre/post ${symbol} has an unreadable regular timestamp`, 'tencent_invalid_response')
+  const code = textOrNull(fields[2]) ?? requested
+  const base: JsonRecord = {
+    code,
+    tencent_symbol: symbol,
+    name: textOrNull(fields[1]),
+    currency: textOrNull(fields[35]),
+    regular_price: numberOrNull(fields[3]),
+    regular_prev_close: numberOrNull(fields[4]),
+    regular_quote_time: regularQuoteTime,
+    delay: fields[0] === 'delay',
+    source: 'tencent',
+  }
+  const pandata = node.pandata
+  if (pandata !== undefined && pandata !== null && !isRecord(pandata)) {
+    throw sourceError(`Tencent pre/post ${symbol} pandata is ${typeof pandata}, expected an object`, 'tencent_invalid_response')
+  }
+  if (!isRecord(pandata)) {
+    return {
+      ...base,
+      session: null,
+      price: null,
+      prev_close: null,
+      change_amt: null,
+      change_pct: null,
+      volume_shares: null,
+      session_time: null,
+      session_time_zone: null,
+      exchange_time_zone: null,
+      quote_time_utc: null,
+      available: false,
+      reason: 'no_extended_session',
+    }
+  }
+  const tag = textOrNull(pandata.tag)?.toLowerCase()
+  if (tag !== 'pre' && tag !== 'after') {
+    throw sourceError(`Tencent pre/post ${symbol} returned an unknown session tag ${JSON.stringify(pandata.tag ?? null)}`, 'tencent_invalid_response')
+  }
+  const sessionTime = textOrNull(pandata.time)
+  if (sessionTime === null) throw sourceError(`Tencent pre/post ${symbol} has an empty session time`, 'tencent_invalid_response')
+  const utcMs = exchangeTimeToUtcMs(sessionTime)
+  if (utcMs === null) throw sourceError(`Tencent pre/post ${symbol} has an unreadable session time ${JSON.stringify(sessionTime)}`, 'tencent_invalid_response')
+  const last = numberOrNull(pandata.last)
+  if (last !== null && last <= 0) throw sourceError(`Tencent pre/post ${symbol} returned a non-positive price`, 'tencent_invalid_response')
+  const netChange = numberOrNull(pandata.netchange)
+  const pct = numberOrNull(pandata.pct)
+  const volume = numberOrNull(pandata.volume)
+  if (volume !== null && (!Number.isSafeInteger(volume) || volume < 0)) {
+    throw sourceError(`Tencent pre/post ${symbol} returned an invalid volume ${JSON.stringify(pandata.volume)}`, 'tencent_invalid_response')
+  }
+  return {
+    ...base,
+    session: tag,
+    price: last,
+    // `netchange` is quoted against the regular-session close, not necessarily yesterday's close.
+    prev_close: last !== null && netChange !== null ? roundPrice(last - netChange) : null,
+    change_amt: netChange,
+    change_pct: pct,
+    volume_shares: volume,
+    session_time: sessionTime,
+    session_time_zone: textOrNull(pandata.season),
+    exchange_time_zone: 'America/New_York',
+    quote_time_utc: new Date(utcMs).toISOString(),
+    available: last !== null,
+    reason: last === null ? 'empty_extended_price' : null,
+  }
+}
+
+async function fetchUsPrepostRow(ticker: string, signal: AbortSignal): Promise<JsonRecord> {
+  const symbol = await resolveUsKlineSymbol(ticker, signal)
+  const data = await callKlineHosts({
+    path: '/appstock/app/usfqkline/get',
+    param: `${symbol},day,,,${US_PREPOST_BARS},qfq`,
+    label: `${symbol} pre/post`,
+    isEmpty: (payload) => {
+      const node = payload[symbol]
+      return !isRecord(node) || !isRecord(node.qt)
+    },
+    isParamRejection: (payload) => /param/i.test(String(payload.msg ?? '')) || Number(payload.code) === 1 || Number(payload.code) === 11,
+  }, signal)
+  return parseUsPrepostRow(data, symbol, ticker)
+}
+
+async function executeUsPrepost(params: Params, signal: AbortSignal): Promise<{ data: JsonRecord[]; schema: object }> {
+  const rows: JsonRecord[] = []
+  for (const ticker of params.codes as string[]) {
+    try {
+      rows.push(await fetchUsPrepostRow(ticker, signal))
+    } catch (error) {
+      // An unknown ticker is one bad row, not a broken batch; transport/shape errors still fail loudly.
+      if ((error as Error & { code?: string }).code === 'tencent_unknown_ticker') {
+        rows.push(emptyUsPrepostRow(ticker, 'ticker_not_found'))
+        continue
+      }
+      throw error
+    }
+  }
+  if (rows.length === 0) throw sourceError('Tencent pre/post returned no rows', 'tencent_empty_response')
+  return { data: rows, schema: usPrepostOutput }
+}
+
+const usPrepostOutput = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      code: { type: 'string' },
+      tencent_symbol: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+      name: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+      currency: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+      session: { oneOf: [{ enum: ['pre', 'after'] }, { type: 'null' }] },
+      price: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+      prev_close: { oneOf: [{ type: 'number' }, { type: 'null' }], description: '盘前/盘后的涨跌基准（last − netchange），盘后时是当日正规收盘，不等于昨收' },
+      change_amt: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+      change_pct: { oneOf: [{ type: 'number' }, { type: 'null' }], description: '百分数原值（-0.24 表示 -0.24%）' },
+      volume_shares: { oneOf: [{ type: 'number' }, { type: 'null' }], description: '延长时段成交量（股）' },
+      session_time: { oneOf: [{ type: 'string' }, { type: 'null' }], description: '延长时段最后成交时间（美东当地时间）' },
+      session_time_zone: { oneOf: [{ type: 'string' }, { type: 'null' }], description: '上游 season 原值（EST/EDT），只作展示；换算用 exchange_time_zone' },
+      exchange_time_zone: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+      quote_time_utc: { oneOf: [{ type: 'string' }, { type: 'null' }], description: '由美东墙钟换算的 UTC ISO 时刻' },
+      regular_price: { oneOf: [{ type: 'number' }, { type: 'null' }], description: '最近正规时段成交价，用于对照' },
+      regular_prev_close: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+      regular_quote_time: { oneOf: [{ type: 'string' }, { type: 'null' }], description: '正规时段最后成交时间（美东当地时间）' },
+      delay: { type: 'boolean' },
+      available: { type: 'boolean', description: '是否有延长时段成交；false 时 price 为 null，不补 0' },
+      reason: { oneOf: [{ type: 'string' }, { type: 'null' }] },
+      source: { type: 'string' },
+    },
+    additionalProperties: true,
+  },
+}
+
 const hkQuoteOutput = {
   type: 'array',
   items: {
@@ -810,7 +1042,7 @@ export function createTencentSources(): DataSource[] {
       cacheMaxAgeMs: 60_000,
       name: 'get_tencent_us_quote',
       summary: '腾讯美股快照（美元，交易所当地时间）',
-      description: '批量获取美股与在美上市 ADR 的腾讯快照（一次最多 50 只）。代码是字母 ticker（BRK.B 这类带点的级别码可用）。⛔ 写法上有两点是实测出来的：腾讯**快照只认不带交易所后缀的形式**（`usBABA.N` 整行不回、`usBABA` 回），所以两位以上的尾段（.OQ/.AM/.NS）在参数层直接剥掉；**单字母尾段分不清是级别码还是交易所码**（BRK.B 与 BABA.N 都是真实写法），就照原样先问一次、没回行再剥一段重问——猜错只多一轮请求，猜错第二次才是把数据挂到别的标的上。currency 回 USD，price / amount_usd 是**美元（元级）**，float_market_cap_yi_usd 与 market_cap_yi_usd 是**亿美元**（实测两列分别等于流通股本 / 总股本 × 现价 ÷ 1e8：苹果 14,585,108,878 → 48,669.05、14,594,180,000 → 48,699.32）。code 回上游给的带后缀身份（AAPL.OQ / BABA.N），exchange_code 单列后缀（实测只出现 OQ 与 N，是腾讯自有交易所编码，本表不翻译）。⛔ **这不是实时撮合价**：实测 2026-10-05（周一）北京清早取到的最新成交时间是 2026-10-02 16:00:01，收盘后不给新数；腾讯在 K 线响应内嵌的行情节点 0 号位标 `delay`。quote_time 是**交易所当地时间（美东）**，与北京时间差 12/13 小时，跨市场同日比较前先对齐。turnover_pct 的分母是**总股本**（实测 GOOGL 给 0.19 = 23,772,148 ÷ 12,229,934,831，BRK.B 给 0.20 = 4,193,461 ÷ 2,140,709,794；按流通股本算是 0.41 与 0.34，对不上——多级股票类别下两个分母能差一倍，苹果与阿里因为两者接近所以看不出区别）。avg_price = amount_usd ÷ volume_shares（实测 11,087,245,013 / 33,278,552 = 333.16 相符）。美股无涨跌停，不提供相关列。52 周高低两列口径与日线序列对不上（实测苹果 345.34/242.76，近 252 个交易日是 345.34/243.42），**不收录**；PE/PB 一类列因口径未核验同样不收录。盘前盘后行情本表不透出（实测只出现在 K 线响应的 pandata 节点）。不认识的 ticker 被上游静默丢弃，行数少于请求数即那几个代码无效。成交额为 0 且现价等于昨收时标 is_stale=true。',
+      description: '批量获取美股与在美上市 ADR 的腾讯快照（一次最多 50 只）。代码是字母 ticker（BRK.B 这类带点的级别码可用）。⛔ 写法上有两点是实测出来的：腾讯**快照只认不带交易所后缀的形式**（`usBABA.N` 整行不回、`usBABA` 回），所以两位以上的尾段（.OQ/.AM/.NS）在参数层直接剥掉；**单字母尾段分不清是级别码还是交易所码**（BRK.B 与 BABA.N 都是真实写法），就照原样先问一次、没回行再剥一段重问——猜错只多一轮请求，猜错第二次才是把数据挂到别的标的上。currency 回 USD，price / amount_usd 是**美元（元级）**，float_market_cap_yi_usd 与 market_cap_yi_usd 是**亿美元**（实测两列分别等于流通股本 / 总股本 × 现价 ÷ 1e8：苹果 14,585,108,878 → 48,669.05、14,594,180,000 → 48,699.32）。code 回上游给的带后缀身份（AAPL.OQ / BABA.N），exchange_code 单列后缀（实测只出现 OQ 与 N，是腾讯自有交易所编码，本表不翻译）。⛔ **这不是实时撮合价**：实测 2026-10-05（周一）北京清早取到的最新成交时间是 2026-10-02 16:00:01，收盘后不给新数；腾讯在 K 线响应内嵌的行情节点 0 号位标 `delay`。quote_time 是**交易所当地时间（美东）**，与北京时间差 12/13 小时，跨市场同日比较前先对齐。turnover_pct 的分母是**总股本**（实测 GOOGL 给 0.19 = 23,772,148 ÷ 12,229,934,831，BRK.B 给 0.20 = 4,193,461 ÷ 2,140,709,794；按流通股本算是 0.41 与 0.34，对不上——多级股票类别下两个分母能差一倍，苹果与阿里因为两者接近所以看不出区别）。avg_price = amount_usd ÷ volume_shares（实测 11,087,245,013 / 33,278,552 = 333.16 相符）。美股无涨跌停，不提供相关列。52 周高低两列口径与日线序列对不上（实测苹果 345.34/242.76，近 252 个交易日是 345.34/243.42），**不收录**；PE/PB 一类列因口径未核验同样不收录。盘前盘后行情本表不透出（实测只出现在 K 线响应的 pandata 节点）；需要延长时段请用 `tencent_us_prepost_quote`。不认识的 ticker 被上游静默丢弃，行数少于请求数即那几个代码无效。成交额为 0 且现价等于昨收时标 is_stale=true。',
       inputSchema: { type: 'object', properties: { codes: { type: 'array', minItems: 1, maxItems: 50, items: { type: 'string', description: '美股 ticker，如 AAPL 或 BRK.B' } } }, required: ['codes'], additionalProperties: false },
       outputSchema: usQuoteOutput,
       paginated: false,
@@ -874,6 +1106,20 @@ export function createTencentSources(): DataSource[] {
       allowed: ['code', 'period', 'adjust', 'count', 'start', 'end'],
       normalize: (params) => normalizeOffshoreKline(params, 'us'),
       execute: (params, signal) => executeOffshoreKline(params, signal, 'us'),
+    }),
+    createSource({
+      capability: 'tencent_us_prepost_quote',
+      cacheMaxAgeMs: 30_000,
+      name: 'get_tencent_us_prepost_quote',
+      summary: '腾讯美股盘前/盘后最近成交（美东时间，含延迟标记）',
+      description: '批量获取美股/ETF/ADR 的**盘前或盘后最近一笔成交**（一次最多 20 只；数据来自腾讯美股 K 线响应内嵌的 `pandata` 节点，普通的 `tencent_us_quote` 快照不透出延长时段）。返回 `session`（实测为 `pre` / `after`）、`price`、`change_amt`、`change_pct`、`volume_shares`、`session_time`（美东墙钟）与 `quote_time_utc`。⛔ **`prev_close` 不是昨收**：它是 `last − netchange` 得到的涨跌基准，盘后时等于当日正规收盘；昨收另在 `regular_prev_close`，正规时段最后价在 `regular_price`。⛔ **只保留最近一段延长时段**：上游一次只给一个 `pandata`，不能同时承诺盘前和盘后；没有延长成交（例如盘中）时返回 `available=false` + `reason=no_extended_session`，**不拿正规时段价格冒充**。⛔ 没有 high/low、没有盘前盘后成交量以外的明细；`pct` 是百分数原值（-0.24 表示 -0.24%），不是比例。`delay` 直接取腾讯快照第 0 位（`delay`），免费公开源**不承诺实时**。未知 ticker 返回单行 `available=false` + `reason=ticker_not_found`，不静默丢行；网络/形状错误仍整批失败。交易所后缀先由快照解析，再打 K 线，`tencent_symbol` 回显解析结果。',
+      inputSchema: { type: 'object', properties: { codes: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'string', description: '美股 ticker，如 AAPL、BRK.B 或 BABA.N' } } }, required: ['codes'], additionalProperties: false },
+      outputSchema: usPrepostOutput,
+      paginated: false,
+      rowShape: { rootArray: true },
+      allowed: ['codes'],
+      normalize: normalizeUsPrepostCodes,
+      execute: executeUsPrepost,
     }),
   ]
 }
