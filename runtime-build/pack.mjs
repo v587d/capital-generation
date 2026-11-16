@@ -54,6 +54,10 @@ export function packageJsonFor(manifest, kind, target, version) {
     version,
     description: `Capital Generation private Python runtime (${kind}, ${target})`,
     license: 'SEE LICENSE IN THIRD_PARTY_NOTICES.md',
+    // npm Trusted Publishing requires this to match the GitHub repository exactly. A missing
+    // repository field makes the OIDC publish fail with a 404 that looks like a missing package.
+    repository: { type: 'git', url: 'git+https://github.com/v587d/capital-generation.git' },
+    homepage: 'https://github.com/v587d/capital-generation#readme',
     os: [platform],
     cpu: [arch],
     ...(platform === 'linux' ? { libc: ['glibc'] } : {}),

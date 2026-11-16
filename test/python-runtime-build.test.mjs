@@ -32,6 +32,10 @@ test('runtime build: every manifest target produces the platform package shape',
     assert.ok(!('scripts' in pkg), '运行时包不许带 install/postinstall 脚本')
     assert.ok(pkg.files.includes('runtime-pack.json'))
     assert.ok(pkg.files.includes('licenses'))
+    assert.deepEqual(pkg.repository, {
+      type: 'git',
+      url: 'git+https://github.com/v587d/capital-generation.git',
+    }, 'npm Trusted Publishing 要求 repository.url 与 GitHub 仓库完全一致')
 
     const runtime = runtimePackFor(manifest, 'base', target)
     assert.equal(runtime.kind, 'base')
@@ -112,6 +116,13 @@ test('runtime build: platform scripts read versions from the manifest instead of
   assert.match(posix, /pack\.mjs/)
   assert.match(posix, /CPYTHON-LICENSE\.txt/)
   assert.doesNotMatch(posix, /-maxdepth/, 'macOS 的 BSD find 没有 -maxdepth；Linux 能跑不等于 macOS 能跑')
+  const bootstrap = await readFile(join(ROOT, 'runtime-build', 'bootstrap-publish.mjs'), 'utf8')
+  assert.match(bootstrap, /runtime\/manifest\.json/, 'bootstrap 的包名必须来自 manifest')
+  assert.match(bootstrap, /'0\.0\.0'/, '占位版本必须远离真实 1.0.0')
+  assert.match(bootstrap, /'bootstrap'/, '占位包只能挂在 bootstrap tag，不能占 latest')
+  assert.match(bootstrap, /--dry-run/, '发布前必须能预览')
+  assert.match(bootstrap, /findNpmCli/, 'npm 必须通过 npm-cli.js 调用')
+  assert.doesNotMatch(bootstrap, /@v587d\/cg-py-base-|@v587d\/cg-py-parquet-/, '包名不许手抄')
   assert.match(windows, /runtime\\manifest\.json/)
   assert.match(windows, /embed-amd64\.zip/)
   assert.match(windows, /pack\.mjs/)
