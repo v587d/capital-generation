@@ -181,7 +181,9 @@ jobs:
             exit 1
           fi
           for tgz in "${tgzs[@]}"; do
-            read -r name version < <(tar -xOf "$tgz" package/package.json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const p=JSON.parse(s);process.stdout.write(p.name+' '+p.version)})")
+            # The trailing newline matters: `read` returns 1 at EOF without a delimiter, and
+            # `set -e` would abort the publish job before the first `npm publish`.
+            read -r name version < <(tar -xOf "$tgz" package/package.json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const p=JSON.parse(s);process.stdout.write(p.name+' '+p.version+'\n')})")
             if npm view "${name}@${version}" version >/dev/null 2>&1; then
               echo "::notice::${name}@${version} 已发布，跳过"
               continue

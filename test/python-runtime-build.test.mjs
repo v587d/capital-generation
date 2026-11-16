@@ -100,6 +100,8 @@ test('runtime build: CI matrix and publish gates match the manifest contract', a
   assert.match(workflow, /runtime-build\/build-posix\.sh/, 'POSIX 构建脚本必须真的被 CI 调用')
   assert.match(workflow, /runtime-build\/build-windows\.ps1/, 'Windows 构建脚本必须真的被 CI 调用')
   assert.match(workflow, /runtime-build\/verify-pack\.mjs/, '只解包不算验证：必须跑 worker + pandas')
+  assert.match(workflow, /process\.stdout\.write\(p\.name\+' '\+p\.version\+'\\n'\)/,
+    'read 需要换行符；否则 EOF 返回 1，set -e 会在第一次 publish 前退出')
   assert.match(workflow, /npm run build/, 'CLI 从 lib/ 导入，验证前必须先构建')
   assert.doesNotMatch(workflow, /NPM_TOKEN|NODE_AUTH_TOKEN/, '仓库不存 npm token；发布走 OIDC')
 })
