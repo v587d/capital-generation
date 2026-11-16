@@ -62,9 +62,12 @@ rm -rf "$OUT/python/include" "$OUT/python/share" "$OUT/python/lib/pkgconfig" \
   "$OUT/python/lib/python3.13/ensurepip" "$OUT/python/lib/python3.13/venv" \
   "$OUT/python/lib/python3.13/lib2to3" "$OUT/python/lib/python3.13/site-packages" \
   "$OUT/python/lib/python3.13/config-"*
-find "$OUT/python/bin" -maxdepth 1 \( -name 'pip*' -o -name 'idle*' -o -name 'pydoc*' -o -name '2to3*' \) -delete
+rm -f "$OUT/python/bin"/pip* "$OUT/python/bin"/idle* "$OUT/python/bin"/pydoc* "$OUT/python/bin"/2to3*
 find "$OUT/site-packages" -type d \( -name tests -o -name __pycache__ \) -prune -exec rm -rf {} +
-find "$OUT/site-packages" -maxdepth 2 -type d -name bin -exec rm -rf {} +
+# BSD find (macOS) lacks GNU's depth-limit option; a top-level glob is portable for entry scripts.
+for dir in "$OUT/site-packages"/*/bin; do
+  if [[ -d "$dir" ]]; then rm -rf "$dir"; fi
+done
 find "$OUT/python" "$OUT/site-packages" \( -name '*.a' -o -name '*.lib' -o -name '*.pyc' \) -delete
 # python-build-standalone ships `python/.gitignore` containing `*`, which makes npm skip the tree.
 rm -f "$OUT/python/.gitignore" "$OUT/python/.lock" "$OUT/site-packages/.lock"

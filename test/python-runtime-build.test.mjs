@@ -111,6 +111,7 @@ test('runtime build: platform scripts read versions from the manifest instead of
   assert.match(posix, /python-build-standalone/)
   assert.match(posix, /pack\.mjs/)
   assert.match(posix, /CPYTHON-LICENSE\.txt/)
+  assert.doesNotMatch(posix, /-maxdepth/, 'macOS 的 BSD find 没有 -maxdepth；Linux 能跑不等于 macOS 能跑')
   assert.match(windows, /runtime\\manifest\.json/)
   assert.match(windows, /embed-amd64\.zip/)
   assert.match(windows, /pack\.mjs/)
