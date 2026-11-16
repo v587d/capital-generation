@@ -46,19 +46,19 @@ function npmView(npmCli, name) {
   }).status === 0
 }
 
-/** Run npm with inherited stdin (2FA prompts) but captured output for idempotency checks. */
+/**
+ * Run npm with inherited stdin/stdout so npm still sees a TTY and prompts for OTP. Stderr is
+ * echoed and captured for the E409 idempotency check; piping stdout makes npm fall back to a
+ * web-auth URL and fail immediately with EOTP in a non-interactive context.
+ */
 function npm(npmCli, args, cwd) {
   return new Promise((resolvePromise) => {
     const child = spawn(process.execPath, [npmCli, ...args], {
       cwd,
-      stdio: ['inherit', 'pipe', 'pipe'],
+      stdio: ['inherit', 'inherit', 'pipe'],
       env: process.env,
     })
     let output = ''
-    child.stdout.on('data', (chunk) => {
-      output += chunk.toString('utf8')
-      process.stdout.write(chunk)
-    })
     child.stderr.on('data', (chunk) => {
       output += chunk.toString('utf8')
       process.stderr.write(chunk)
