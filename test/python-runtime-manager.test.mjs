@@ -66,6 +66,10 @@ async function fakeProbe(options) {
   }
 }
 
+function assertDone(job) {
+  assert.equal(job.state, 'done', `${job.error?.code ?? job.state}: ${job.error?.message ?? job.message}`)
+}
+
 async function makeManager(overrides = {}) {
   const home = await mkdtemp(join(tmpdir(), 'cg-runtime-'))
   const manager = new PythonRuntimeManager({
@@ -84,7 +88,7 @@ test('manager: prepare -> ready -> resolve, then remove', async () => {
   const { manager } = await makeManager()
   const job = manager.prepare(['base'])
   const finished = await manager.waitForJob(job.id)
-  assert.equal(finished.state, 'done')
+  assertDone(finished)
   const status = await manager.status()
   assert.equal(status.base.state, 'ready')
   assert.equal(status.parquet.state, 'not-installed')
@@ -102,7 +106,7 @@ test('manager: parquet requires base and resolves both site-packages', async () 
   const job = manager.prepare(['parquet'])
   assert.deepEqual(job.packs, ['base', 'parquet'])
   const finished = await manager.waitForJob(job.id)
-  assert.equal(finished.state, 'done')
+  assertDone(finished)
   const status = await manager.status()
   assert.equal(status.base.state, 'ready')
   assert.equal(status.parquet.state, 'ready')
