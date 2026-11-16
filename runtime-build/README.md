@@ -119,6 +119,8 @@ package that already exists. From a maintainer machine:
 npm login
 node runtime-build/bootstrap-publish.mjs --dry-run --trust
 node runtime-build/bootstrap-publish.mjs --trust
+# If npm's web-auth callback returns E404 on /-/v1/done, pass the authenticator code directly:
+node runtime-build/bootstrap-publish.mjs --trust --otp=123456
 ```
 
 The bootstrap script publishes `0.0.0` placeholders under the `bootstrap`

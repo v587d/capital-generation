@@ -89,6 +89,8 @@ async function waitForPackages(npmCli, names) {
 async function main() {
   const dryRun = process.argv.includes('--dry-run')
   const withTrust = process.argv.includes('--trust')
+  // npm's web-auth fallback can 404 on /-/v1/done; --otp=<code> uses the authenticator directly.
+  const otpArg = process.argv.find((arg) => arg.startsWith('--otp=')) ?? ''
   const manifest = JSON.parse(await readFile(MANIFEST, 'utf8'))
   const npmCli = findNpmCli()
   const packages = packageNames(manifest)
@@ -125,7 +127,10 @@ async function main() {
           console.log(`dry-run publish: ${item.name}@${VERSION} (${TAG})`)
         } else {
           console.log(`publish: ${item.name}@${VERSION} (${TAG})`)
-          const result = await npm(npmCli, ['publish', '.', '--access', 'public', '--tag', TAG], dir)
+          const result = await npm(npmCli, [
+            'publish', '.', '--access', 'public', '--tag', TAG,
+            ...(otpArg === '' ? [] : [otpArg]),
+          ], dir)
           if (isAlreadyThere(result.code, result.output)) {
             console.log(`skip publish: ${item.name}@${VERSION} 已存在`)
           } else if (result.code !== 0) {
@@ -150,6 +155,7 @@ async function main() {
             '--file', 'python-runtime-packs.yml',
             '--repo', 'v587d/capital-generation',
             '--allow-publish', '--yes',
+            ...(otpArg === '' ? [] : [otpArg]),
           ], dirFor(item))
           if (isAlreadyThere(result.code, result.output)) {
             console.log(`skip trust: ${item.name} 已配置`)
