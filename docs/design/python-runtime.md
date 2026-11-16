@@ -321,8 +321,12 @@ CI 原生验证（PR #18，run 43811721333）：`darwin-arm64` 55s、`linux-x64`
 tarball → manager `prepare` → `verify --pack parquet` → worker `run` +
 pandas/时区/Parquet 回环。本地没有 Windows/macOS 真机，这一步以 CI 为准。
 
+**1.0.0 已发布（2026-11-16）**：`python-runtime-v1.0.0` tag 的 publish job 用 OIDC +
+provenance 发布八个包；`latest` 指向 `1.0.0`，`bootstrap` tag 保留 `0.0.0` 占位包。
+在 Linux x64 干净 DSH home 上从 registry（不带 `--tarball`）实测 `prepare base` →
+`prepare parquet` → `verify --pack parquet` → worker/Parquet 回环全部通过。
+
 待办：
 
-- Windows/macOS CI 首次跑通并发布 1.0.0 运行时包；为八个包配置 npm Trusted Publisher。
 - `run_analysis` 的角色授权、脚本路径校验、产物上限（M5）。
 - AGENTS 索引（待 AGENTS 体积闸门腾出空间后补；当前以本文件作为运行时实现依据）。

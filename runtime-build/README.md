@@ -96,7 +96,9 @@ runs only on a `python-runtime-v<version>` tag or a manual dispatch with
 
 First full matrix run (PR #18, 2026-11-16): `darwin-arm64`, `darwin-x64`,
 `linux-x64` and `win32-x64` all passed, including the install + worker +
-Parquet round-trip step.
+Parquet round-trip step. `python-runtime-v1.0.0` then published all eight packs
+with OIDC + provenance; a clean Linux DSH home installed base/parquet from the
+registry without `--tarball` and passed `verify-pack.mjs`.
 
 ## Release order
 

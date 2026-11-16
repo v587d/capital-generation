@@ -134,6 +134,21 @@ test('manager: concurrent prepare joins the same job', async () => {
   assert.equal((await manager.status()).base.state, 'ready')
 })
 
+test('manager: registry installs use a bare version range, not name@version', async () => {
+  let dependency = ''
+  const { manager } = await makeManager({
+    runPnpm: async (...args) => {
+      const installDir = args[1][args[1].indexOf('--dir') + 1]
+      const project = JSON.parse(await readFile(join(installDir, 'package.json'), 'utf8'))
+      dependency = Object.values(project.dependencies)[0]
+      return fakePnpm(...args)
+    },
+  })
+  const job = manager.prepare(['base'])
+  await manager.waitForJob(job.id)
+  assert.equal(dependency, '1.0.0', 'package.json 的值必须是版本范围；name@version 会被 pnpm 当成目录')
+})
+
 test('manager: local tarball sources become file:// URLs, not Windows-brittle file: paths', async () => {
   let dependency = ''
   const { manager } = await makeManager({

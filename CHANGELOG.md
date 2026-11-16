@@ -24,6 +24,7 @@
 ### Notes
 
 - 首次 prepare 需要联网下载约 55–60 MB（Linux base 实测 53.6 MB）；安装后可离线运行。主包保持约 5–6 MB。
+- 八个平台运行时包 `1.0.0` 已于 2026-11-16 发布到 npm（OIDC + provenance）；干净 Linux DSH home 从 registry 安装、probe 与 Parquet 回环已通过。
 - 支持 Windows 10+ x64、macOS 12+（arm64/x64）、Linux x64（glibc 2.28+，含 WSL2 Ubuntu 20.04+）；Linux ARM64 / Windows ARM64 后续。
 - `data_analyst` 与 `run_analysis` 仍未启用；运行时就绪不等于任意代码执行面开放。
 

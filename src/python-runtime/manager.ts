@@ -346,8 +346,9 @@ export class PythonRuntimeManager {
       try {
         await mkdir(staging, { recursive: true, mode: 0o700 })
         const source = this.packSources[pack]
-        // file:// URL: a bare Windows `file:C:\...` spec is not portable across pnpm versions.
-        const dependency = source === undefined ? `${spec.package}@${spec.version}` : pathToFileURL(resolve(source)).href
+        // A package.json dependency value is a range or a file URL, never `name@version`:
+        // pnpm treats the latter as a relative directory and installs nothing.
+        const dependency = source === undefined ? spec.version : pathToFileURL(resolve(source)).href
         await writeInstallProject(installDir, spec.package, dependency, this.registry)
         job.stage = 'installing'
         job.message = source === undefined ? `下载并安装 ${pack}（约 ${Math.ceil(spec.bytes / 1048576)} MB）…` : `安装本地 ${pack} 包…`
