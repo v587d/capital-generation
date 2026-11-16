@@ -338,6 +338,8 @@ function probeSource() {
     `    }`,
     `    result.hostRuntime = Boolean(ctx.get('capitalChartRuntime'))`,
     `    if (!result.hostRuntime) result.problems.push('capital-runtime 未提供 capitalChartRuntime（chart source token 无法跨 preset 共享）')`,
+    `    result.pythonRuntime = Boolean(ctx.get('pythonRuntime'))`,
+    `    if (!result.pythonRuntime) result.problems.push('python-runtime 未提供 pythonRuntime（分析环境无法准备/探测）')`,
     `    // 身份闸门必须真的落在宿主的 global guard 层：capital-policy 行不声明 inject 时`,
     `    // ctx.get('tools') 在 boot 期解析成 undefined（不抛错），三颗闸门就静默不装`,
     `    //（2026-10-15 起的 fs 写口 guard 一直是这个形状，被 tool-fs 的行级开关掩护住）。`,
@@ -615,6 +617,7 @@ try {
       const expectedFamilyRows = Object.values(FAMILY_ROWS_BY_PRESET).reduce((sum, ids) => sum + ids.length, 0)
       console.log(`smoke-boot: ${familyRows.length === expectedFamilyRows && familyBad.length === 0 ? '✅' : '❌'} 族行装配（共 ${familyRows.length}/${expectedFamilyRows} 行）${familyBad.length === 0 ? '' : '，未激活：' + familyBad.map((row) => row.preset + '/' + row.rowId + '=' + row.state).join(', ')}`)
       console.log(`smoke-boot: ${probe.hostRuntime === true ? '✅' : '❌'} host runtime capitalChartRuntime（${probe.hostRuntime === true ? 'present' : 'absent'}）`)
+      console.log(`smoke-boot: ${probe.pythonRuntime === true ? '✅' : '❌'} host runtime pythonRuntime（${probe.pythonRuntime === true ? 'present' : 'absent'}）`)
       console.log(`smoke-boot: ${probe.ptcRow === 2 && probe.ptcRuntime === true ? '✅' : '❌'} data_junior PTC：tool-presentation fiberState=${probe.ptcRow ?? '读不到'}，ptcRuntime=${probe.ptcRuntime === true ? 'present' : 'absent'}`)
       console.log(`smoke-boot: ${probe.identityGuards === 4 ? '✅' : '❌'} 身份闸门在宿主 global guard 层：${probe.identityGuards ?? '读不到'} / 4 颗（fs 写口 + ocr 形态 + 兄弟名字 + send_message 目标）`)
       console.log(`smoke-boot: ${typeof probe.hostView === 'number' && probe.hostView > 0 ? '✅' : '❌'} 宿主 tools.view() 可读：global restrictableNames=${probe.hostView ?? '读不到'}（角色在 agent scope 上取同一属性）`)

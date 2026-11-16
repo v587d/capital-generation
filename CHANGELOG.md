@@ -7,6 +7,26 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**、2.9.0 的选择器收敛与质检前置——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [Unreleased]
+
+插件私有 Python 运行时 `python-runtime`：主包不携带解释器，首次在「分析环境」点准备时按平台安装固定版本运行时；不依赖系统 Python，也不使用 DSH Desktop primary runtime。
+
+### Added
+
+- **`python-runtime` host 行**：提供 `pythonRuntime` 服务与 `/python-runtime/*` 本地路由；运行时缓存目录为 `$DSH_HOME/cache/cg/python-runtime/`。
+- **固定版本 base 包**：Python 3.13.17、numpy 2.4.6、pandas 3.0.6、python-dateutil 2.9.0.post0、six 1.17.0、tzdata 2026.6。
+- **可选 parquet 包**：pyarrow 25.0.1，单独安装；不要求所有用户为 Parquet 多下约 155 MB。
+- **CLI**：`node scripts/python-runtime.mjs status|prepare|verify|remove|import`，供 headless、WSL 和离线导入使用；`verify --pack parquet` 会一并校验 pyarrow。
+- **设置页第五格「分析环境」**：只读状态、准备/修复/取消/移除、Parquet 可选安装；状态不写 settings，避免把运行时状态混进用户配置。
+- **原子安装与自检**：staging + 目录锁 + `ready.json` + 包内 Python probe；失败不覆盖旧环境。
+- **运行时包构建与发布**：`runtime-build/` 生成 Windows/macOS/Linux 四目标 base/parquet 包；GitHub Actions 原生矩阵安装 tarball 后跑 worker + pandas/时区/Parquet 验证，`python-runtime-v<version>` tag 经 npm Trusted Publishing 发布。
+
+### Notes
+
+- 首次 prepare 需要联网下载约 55–60 MB（Linux base 实测 53.6 MB）；安装后可离线运行。主包保持约 5–6 MB。
+- 支持 Windows 10+ x64、macOS 12+（arm64/x64）、Linux x64（glibc 2.28+，含 WSL2 Ubuntu 20.04+）；Linux ARM64 / Windows ARM64 后续。
+- `data_analyst` 与 `run_analysis` 仍未启用；运行时就绪不等于任意代码执行面开放。
+
 ## [2.24.0] - 2026-11-14
 
 数据能力目录改为九主题分片：`list_capabilities()` 先给索引，按 topic 取片，需要全量时可九片全取；目录不再受单条 6,144 / 8,192 字符约束，同时收紧诊断口，避免全量名字绕过协议。

@@ -83,6 +83,26 @@ git-only、不随包、任何角色都不执行，文件头写明来源与"不�
 查原 skill 的索引。它们留在这里只为将来升级公式或移植到宿主的计算面；skill 正文只写"把算式写进答复、
 需要算力时委派 `data_junior`"，不指向这些文件。
 
+## 按需安装的 Python 运行时包（不随主包）
+
+主 npm 包不携带解释器。用户首次点「准备分析环境」时，插件从 npm 安装对应的平台运行时包到
+DSH home 的 cache/cg/python-runtime 目录；这些包不声明 `dsh.bundle`，不是 DSH 插件。每个运行时包
+在自己的 `THIRD_PARTY_NOTICES.md` / `LICENSE` 中携带完整许可文本。
+
+| 组件 | 版本 | 许可证 | 原始仓库 | 用在哪里 |
+|---|---|---|---|---|
+| CPython | 3.13.17 | PSF-2.0 | <https://www.python.org/> | 私有解释器与标准库；Windows 使用官方 embeddable，macOS/Linux 使用 python-build-standalone 构建 |
+| python-build-standalone | 20261021 | MPL-2.0 | <https://github.com/astral-sh/python-build-standalone> | macOS/Linux 的可重定位 CPython 构建；只作为构建来源，不随主包分发 |
+| NumPy | 2.4.6 | BSD-3-Clause | <https://github.com/numpy/numpy> | 数值数组、矩阵与线性代数 |
+| pandas | 3.0.6 | BSD-3-Clause | <https://github.com/pandas-dev/pandas> | DataFrame / 时间序列分析 |
+| python-dateutil | 2.9.0.post0 | Apache-2.0 OR BSD-3-Clause | <https://github.com/dateutil/dateutil> | 日期解析与相对日期偏移 |
+| six | 1.17.0 | MIT | <https://github.com/benjaminp/six> | dateutil 的 Python 2/3 兼容垫片；不直接调用 |
+| tzdata | 2026.6 | Apache-2.0 | <https://github.com/python/tzdata> | IANA 时区数据库；保证 Windows 与跨平台时区一致 |
+| pyarrow（可选 parquet 包） | 25.0.1 | Apache-2.0 | <https://github.com/apache/arrow> | Parquet 列式文件读写 |
+
+运行时包还包含 CPython 自身携带的 OpenSSL、libffi、bzip2、xz、zlib、SQLite 等原生依赖；
+其许可以对应运行时包内的许可文件为准。主包只分发上表所列名称与版本信息，不分发这些二进制。
+
 ## npm 运行时依赖
 
 | 包 | 声明版本 | 许可证 | 用途 |

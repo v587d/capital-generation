@@ -27,6 +27,11 @@
       "import": "./lib/runtime-entry.js",
       "default": "./lib/runtime-entry.js"
     },
+    "./python-runtime": {
+      "types": "./lib/python-runtime-entry.d.ts",
+      "import": "./lib/python-runtime-entry.js",
+      "default": "./lib/python-runtime-entry.js"
+    },
     "./policy": {
       "types": "./lib/policy-entry.d.ts",
       "import": "./lib/policy-entry.js",
@@ -103,6 +108,9 @@
   "files": [
     "lib",
     "locale",
+    "python",
+    "runtime",
+    "scripts/python-runtime.mjs",
     "chart-ui",
     "config",
     "watchlist",
@@ -149,6 +157,9 @@
     "demo:chart": "npm run build && node scripts/chart-demo.mjs",
     "smoke:boot": "node scripts/smoke-boot.mjs",
     "test": "npm run build && node --test test/*.test.mjs",
+    "python:status": "node scripts/python-runtime.mjs status",
+    "python:prepare": "node scripts/python-runtime.mjs prepare",
+    "python:verify": "node scripts/python-runtime.mjs verify",
     "prepublishOnly": "npm run build",
     "smoke:fuyao": "node scripts/smoke-fuyao.mjs",
     "smoke:wind": "node scripts/smoke-wind.mjs",
@@ -172,6 +183,7 @@
     "@deepseek-ai/dsh-skill-filesystem": "^0.2.2-rc.2",
     "@deepseek-ai/dsh-system-prompt": "^0.2.2-rc.2",
     "@deepseek-ai/schemastery": "^3.19.0",
+    "@types/node": "^24.19.2",
     "esbuild": "^0.28.2",
     "js-yaml": "^5.4.1",
     "lightweight-charts": "5.2.1",
