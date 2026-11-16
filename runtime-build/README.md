@@ -117,25 +117,24 @@ package that already exists. From a maintainer machine:
 
 ```bash
 npm login
-node runtime-build/bootstrap-publish.mjs --dry-run
-node runtime-build/bootstrap-publish.mjs
-
-for pkg in \
-  @v587d/cg-py-base-linux-x64 @v587d/cg-py-base-darwin-arm64 \
-  @v587d/cg-py-base-darwin-x64 @v587d/cg-py-base-win32-x64 \
-  @v587d/cg-py-parquet-linux-x64 @v587d/cg-py-parquet-darwin-arm64 \
-  @v587d/cg-py-parquet-darwin-x64 @v587d/cg-py-parquet-win32-x64; do
-  npm trust github "$pkg" --file python-runtime-packs.yml \
-    --repo v587d/capital-generation --allow-publish --yes
-done
+node runtime-build/bootstrap-publish.mjs --dry-run --trust
+node runtime-build/bootstrap-publish.mjs --trust
 ```
 
 The bootstrap script publishes `0.0.0` placeholders under the `bootstrap`
-dist-tag, never `latest`; the real `1.0.0` still comes from the tag workflow
-with OIDC + provenance. `npm trust` requires account-level 2FA and an existing
-package. A new trusted-publisher configuration expires if its first successful
-publish does not happen within 2 days, so push `python-runtime-v1.0.0` right
-after configuring all eight packages.
+dist-tag, never `latest`, then runs:
+
+```bash
+npm trust github <package> --file python-runtime-packs.yml \
+  --repo v587d/capital-generation --allow-publish --yes
+```
+
+for each package. The real `1.0.0` still comes from the tag workflow with OIDC
++ provenance. `npm trust` requires account-level 2FA and an existing package,
+so both phases prompt for a one-time code; run this in your own terminal. A new
+trusted-publisher configuration expires if its first successful publish does not
+happen within 2 days, so push `python-runtime-v1.0.0` right after configuring
+all eight packages.
 
 The tarball's `package.json` must also carry a `repository` field whose URL
 matches `git+https://github.com/v587d/capital-generation.git`. Without it, OIDC

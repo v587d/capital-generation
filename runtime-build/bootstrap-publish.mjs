@@ -9,10 +9,10 @@
  *
  *   npm login
  *   node runtime-build/bootstrap-publish.mjs --dry-run
- *   node runtime-build/bootstrap-publish.mjs
+ *   node runtime-build/bootstrap-publish.mjs --trust
  *
- * Run `npm trust github <name> --file python-runtime-packs.yml --repo ... --allow-publish`
- * for each package after this completes; see runtime-build/README.md.
+ * `--trust` also runs `npm trust github` for each package, which requires an existing package.
+ * Both phases prompt for the account's 2FA code; run this in your own terminal, not CI.
  */
 import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
@@ -53,6 +53,7 @@ function alreadyExists(npmCli, name) {
 
 async function main() {
   const dryRun = process.argv.includes('--dry-run')
+  const withTrust = process.argv.includes('--trust')
   const manifest = await readManifest()
   const npmCli = findNpmCli()
   const packages = packageNames(manifest)
@@ -61,35 +62,50 @@ async function main() {
   const staging = await mkdtemp(join(tmpdir(), 'cg-py-bootstrap-'))
   try {
     for (const item of packages) {
-      if (alreadyExists(npmCli, item.name)) {
+      const exists = alreadyExists(npmCli, item.name)
+      if (exists) {
         console.log(`skip: ${item.name}@${VERSION} 已存在`)
-        continue
+      } else {
+        const { platform, arch } = targetParts(item.target)
+        const dir = join(staging, item.name.replace(/^@/u, '').replace(/\//gu, '__'))
+        await mkdir(dir, { recursive: true })
+        await writeFile(join(dir, 'package.json'), `${JSON.stringify({
+          name: item.name,
+          version: VERSION,
+          description: `Bootstrap placeholder for the Capital Generation private Python runtime (${item.kind}, ${item.target}); the real pack is published from python-runtime-packs.yml via trusted publishing.`,
+          license: 'MIT',
+          repository: { type: 'git', url: REPOSITORY },
+          homepage: 'https://github.com/v587d/capital-generation#readme',
+          os: [platform],
+          cpu: [arch],
+          ...(platform === 'linux' ? { libc: ['glibc'] } : {}),
+          files: [],
+          publishConfig: { access: 'public' },
+        }, null, 2)}\n`, 'utf8')
+        await writeFile(join(dir, 'README.md'),
+          'Bootstrap placeholder for npm Trusted Publishing. Do not install; the real runtime pack is published by the capital-generation workflow.\n', 'utf8')
+        const args = [npmCli, 'publish', dir, '--access', 'public', '--tag', TAG]
+        if (dryRun) {
+          console.log(`dry-run: ${item.name}@${VERSION} (${TAG})`)
+        } else {
+          console.log(`publish: ${item.name}@${VERSION} (${TAG})`)
+          execFileSync(process.execPath, args, { stdio: 'inherit', cwd: dir })
+        }
       }
-      const { platform, arch } = targetParts(item.target)
-      const dir = join(staging, item.name.replace(/^@/u, '').replace(/\//gu, '__'))
-      await mkdir(dir, { recursive: true })
-      await writeFile(join(dir, 'package.json'), `${JSON.stringify({
-        name: item.name,
-        version: VERSION,
-        description: `Bootstrap placeholder for the Capital Generation private Python runtime (${item.kind}, ${item.target}); the real pack is published from python-runtime-packs.yml via trusted publishing.`,
-        license: 'MIT',
-        repository: { type: 'git', url: REPOSITORY },
-        homepage: 'https://github.com/v587d/capital-generation#readme',
-        os: [platform],
-        cpu: [arch],
-        ...(platform === 'linux' ? { libc: ['glibc'] } : {}),
-        files: [],
-        publishConfig: { access: 'public' },
-      }, null, 2)}\n`, 'utf8')
-      await writeFile(join(dir, 'README.md'),
-        'Bootstrap placeholder for npm Trusted Publishing. Do not install; the real runtime pack is published by the capital-generation workflow.\n', 'utf8')
-      const args = [npmCli, 'publish', dir, '--access', 'public', '--tag', TAG]
-      if (dryRun) {
-        console.log(`dry-run: ${item.name}@${VERSION} (${TAG})`)
-        continue
+      if (withTrust) {
+        const trustArgs = [
+          npmCli, 'trust', 'github', item.name,
+          '--file', 'python-runtime-packs.yml',
+          '--repo', 'v587d/capital-generation',
+          '--allow-publish', '--yes',
+        ]
+        if (dryRun) {
+          console.log(`dry-run trust: ${item.name}`)
+        } else {
+          console.log(`trust: ${item.name} -> v587d/capital-generation / python-runtime-packs.yml`)
+          execFileSync(process.execPath, trustArgs, { stdio: 'inherit', cwd: dir })
+        }
       }
-      console.log(`publish: ${item.name}@${VERSION} (${TAG})`)
-      execFileSync(process.execPath, args, { stdio: 'inherit', cwd: dir })
     }
   } finally {
     await rm(staging, { recursive: true, force: true })
