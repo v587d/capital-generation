@@ -75,18 +75,15 @@ function isAlreadyThere(code, output) {
 const sleep = (ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms))
 
 /** A successful publish is a 202; registry metadata can take minutes to appear. */
-async function waitForPackage(npmCli, name) {
+async function waitForPackages(npmCli, names) {
   const deadline = Date.now() + 10 * 60 * 1000
-  let announced = false
-  while (Date.now() < deadline) {
-    if (npmView(npmCli, name)) return true
-    if (!announced) {
-      console.log(`waiting for registry metadata: ${name} (publish returns 202 before it is readable)`)
-      announced = true
-    }
+  let unseen = new Set(names)
+  while (unseen.size > 0 && Date.now() < deadline) {
+    console.log(`waiting for registry metadata: ${[...unseen].join(', ')} (publish returns 202 before it is readable)`)
     await sleep(5_000)
+    unseen = new Set([...unseen].filter((name) => !npmView(npmCli, name)))
   }
-  return false
+  return unseen.size === 0
 }
 
 async function main() {
@@ -98,10 +95,12 @@ async function main() {
   if (packages.length !== 8) throw new Error(`预期 8 个运行时包，实际 ${packages.length}`)
 
   const staging = await mkdtemp(join(tmpdir(), 'cg-py-bootstrap-'))
+  const dirFor = (item) => join(staging, item.name.replace(/^@/u, '').replace(/\//gu, '__'))
   try {
+    // Phase 1: publish all placeholders. They are independent, so do not wait between them.
     for (const item of packages) {
       const { platform, arch } = targetParts(item.target)
-      const dir = join(staging, item.name.replace(/^@/u, '').replace(/\//gu, '__'))
+      const dir = dirFor(item)
       await mkdir(dir, { recursive: true })
 
       if (npmView(npmCli, item.name)) {
@@ -134,21 +133,24 @@ async function main() {
           }
         }
       }
+    }
 
-      if (withTrust) {
-        if (dryRun) {
-          console.log(`dry-run trust: ${item.name}`)
-        } else {
-          if (!await waitForPackage(npmCli, item.name)) {
-            throw new Error(`registry 10 分钟内仍未出现 ${item.name}；稍后重跑本脚本补 trust`)
-          }
+    // Phase 2: one propagation wait for all names, then configure each trusted publisher.
+    if (withTrust) {
+      if (dryRun) {
+        for (const item of packages) console.log(`dry-run trust: ${item.name}`)
+      } else {
+        if (!await waitForPackages(npmCli, packages.map((item) => item.name))) {
+          throw new Error('registry 10 分钟内仍有包不可读；稍后重跑本脚本只补 trust')
+        }
+        for (const item of packages) {
           console.log(`trust: ${item.name} -> v587d/capital-generation / python-runtime-packs.yml`)
           const result = await npm(npmCli, [
             'trust', 'github', item.name,
             '--file', 'python-runtime-packs.yml',
             '--repo', 'v587d/capital-generation',
             '--allow-publish', '--yes',
-          ], dir)
+          ], dirFor(item))
           if (isAlreadyThere(result.code, result.output)) {
             console.log(`skip trust: ${item.name} 已配置`)
           } else if (result.code !== 0) {
