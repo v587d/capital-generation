@@ -72,6 +72,23 @@ function isAlreadyThere(code, output) {
   return code !== 0 && /(?:E409|previously published|already exists|conflict)/iu.test(output)
 }
 
+const sleep = (ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms))
+
+/** A successful publish is a 202; registry metadata can take minutes to appear. */
+async function waitForPackage(npmCli, name) {
+  const deadline = Date.now() + 10 * 60 * 1000
+  let announced = false
+  while (Date.now() < deadline) {
+    if (npmView(npmCli, name)) return true
+    if (!announced) {
+      console.log(`waiting for registry metadata: ${name} (publish returns 202 before it is readable)`)
+      announced = true
+    }
+    await sleep(5_000)
+  }
+  return false
+}
+
 async function main() {
   const dryRun = process.argv.includes('--dry-run')
   const withTrust = process.argv.includes('--trust')
@@ -122,6 +139,9 @@ async function main() {
         if (dryRun) {
           console.log(`dry-run trust: ${item.name}`)
         } else {
+          if (!await waitForPackage(npmCli, item.name)) {
+            throw new Error(`registry 10 分钟内仍未出现 ${item.name}；稍后重跑本脚本补 trust`)
+          }
           console.log(`trust: ${item.name} -> v587d/capital-generation / python-runtime-packs.yml`)
           const result = await npm(npmCli, [
             'trust', 'github', item.name,
