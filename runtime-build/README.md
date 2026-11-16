@@ -113,10 +113,33 @@ Parquet round-trip step.
    may still pin.
 
 **First release bootstrap:** npm only exposes Trusted Publisher settings for a
-package that already exists. Publish `1.0.0` of all eight tarballs once from a
-maintainer machine with `npm login` (`npm publish <tgz> --access public`), then
-configure each package's trusted publisher in npm settings. After that, the tag
-workflow is the only release path.
+package that already exists. From a maintainer machine:
+
+```bash
+npm login
+node runtime-build/bootstrap-publish.mjs --dry-run --trust
+node runtime-build/bootstrap-publish.mjs --trust
+```
+
+The bootstrap script publishes `0.0.0` placeholders under the `bootstrap`
+dist-tag, never `latest`, then runs:
+
+```bash
+npm trust github <package> --file python-runtime-packs.yml \
+  --repo v587d/capital-generation --allow-publish --yes
+```
+
+for each package. The real `1.0.0` still comes from the tag workflow with OIDC
++ provenance. `npm trust` requires account-level 2FA and an existing package,
+so both phases prompt for a one-time code; run this in your own terminal. A new
+trusted-publisher configuration expires if its first successful publish does not
+happen within 2 days, so push `python-runtime-v1.0.0` right after configuring
+all eight packages.
+
+The tarball's `package.json` must also carry a `repository` field whose URL
+matches `git+https://github.com/v587d/capital-generation.git`. Without it, OIDC
+publishing fails with a 404 that looks like a missing package; `pack.mjs` emits
+it for every runtime pack.
 
 The publish job is idempotent: a package version already on the registry is
 skipped, so re-running a failed matrix does not produce `E409`.
