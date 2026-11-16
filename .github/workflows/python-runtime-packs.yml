@@ -73,6 +73,8 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           version: ${{ env.UV_VERSION }}
+          # Wheel versions are pinned in the manifest; invalidate the uv cache when they move.
+          cache-dependency-glob: 'runtime/manifest.json'
 
       - run: npm ci
       - run: npm run build

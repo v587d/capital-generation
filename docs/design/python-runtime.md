@@ -314,8 +314,12 @@ capital-analysis/runs/<run_id>/
 - WSL 实测：本地 base/parquet tarball → pnpm → flatten → probe → worker → 缓存搬运后仍可运行。
 
 实测体积（Linux x64，2026-11-16）：base `53.6 MB` tgz / `162.7 MB` 解压；
-parquet `49.9 MB` tgz / `154.7 MB` 解压。Windows/macOS 包由 CI 原生 runner 构建，
-本地尚未真机验证。
+parquet `49.9 MB` tgz / `154.7 MB` 解压。
+
+CI 原生验证（PR #18，run 43811721333）：`darwin-arm64` 55s、`linux-x64` 1m3s、
+`win32-x64` 1m40s、`darwin-x64` 2m11s 全部通过。每个平台都走完整链路：
+tarball → manager `prepare` → `verify --pack parquet` → worker `run` +
+pandas/时区/Parquet 回环。本地没有 Windows/macOS 真机，这一步以 CI 为准。
 
 待办：
 

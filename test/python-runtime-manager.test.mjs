@@ -98,7 +98,7 @@ test('manager: prepare -> ready -> resolve, then remove', async () => {
   assert.equal(handle.pythonVersion, '3.13.17')
   assert.deepEqual(handle.packages.numpy, '2.4.6')
   assert.deepEqual(handle.packs, { base: '1.0.0' })
-  assert.ok(handle.python.endsWith('payload/python/bin/python3.13'))
+  assert.ok(handle.python.endsWith(join('payload', 'python', 'bin', 'python3.13')))
   await manager.remove('base')
   assert.equal((await manager.status()).base.state, 'not-installed')
 })

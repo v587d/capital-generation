@@ -94,6 +94,10 @@ Pull requests touching the runtime paths run the same matrix. The publish job
 runs only on a `python-runtime-v<version>` tag or a manual dispatch with
 `publish=true`.
 
+First full matrix run (PR #18, 2026-11-16): `darwin-arm64`, `darwin-x64`,
+`linux-x64` and `win32-x64` all passed, including the install + worker +
+Parquet round-trip step.
+
 ## Release order
 
 1. Bump the exact versions in `runtime/manifest.json` (all eight targets).
