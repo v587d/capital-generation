@@ -77,6 +77,8 @@ async function makeManager(overrides = {}) {
     dshHome: home,
     workerPath: '/tmp/worker.py',
     target: detectPlatform({ platform: 'linux', arch: 'x64', release: '6.8.0', glibc: '2.31' }),
+    // CI has no pnpm; the injected runPnpm ignores the invocation, but getPnpm() must not throw.
+    packageManager: { command: process.execPath, args: ['/tmp/cg-fake-pnpm.cjs'] },
     runPnpm: fakePnpm,
     probePython: fakeProbe,
     ...overrides,
