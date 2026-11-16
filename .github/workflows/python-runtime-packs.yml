@@ -189,7 +189,9 @@ jobs:
               continue
             fi
             echo "publishing ${name}@${version} from ${tgz}"
-            npm publish "$tgz" --access public --provenance
+            # The ./ prefix matters: npm treats a bare "dist/foo.tgz" as a git spec and tries
+            # ssh://git@github.com/dist/foo.tgz.git, failing with permission denied.
+            npm publish "./$tgz" --access public --provenance
           done
 
       # Mirror sync is best-effort: the official registry already has the release.

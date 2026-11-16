@@ -95,7 +95,8 @@ test('runtime build: CI matrix and publish gates match the manifest contract', a
   }, 'macOS 14 已退休；Intel 包必须用 macos-15-intel')
   assert.match(workflow, /tags:\s*\n\s*- 'python-runtime-v\*'/, 'tag 必须独立于主插件的 v*')
   assert.match(workflow, /id-token:\s*write/, 'npm Trusted Publishing 需要 OIDC')
-  assert.match(workflow, /npm publish "\$tgz" --access public --provenance/, '发布必须带 provenance')
+  assert.match(workflow, /npm publish "\.\/\$tgz" --access public --provenance/,
+    '发布必须带 provenance；tarball 路径必须带 ./，否则 npm 当成 git URL')
   assert.match(workflow, /astral-sh\/setup-uv@v6/, 'uv 是 macOS/Linux/Windows 的构建工具，必须 pin')
   assert.match(workflow, /runtime-build\/build-posix\.sh/, 'POSIX 构建脚本必须真的被 CI 调用')
   assert.match(workflow, /runtime-build\/build-windows\.ps1/, 'Windows 构建脚本必须真的被 CI 调用')
