@@ -1,0 +1,202 @@
+# Builds the plugin-private Python runtime packs on the four supported targets, verifies each
+# tarball through the real installer (`pnpm` -> staging -> probe -> worker run), and publishes
+# them on `python-runtime-v<version>` tags (or a manual dispatch with publish=true).
+#
+# Runtime packs are ordinary npm packages, not DSH plugins: no `dsh` field, no install scripts.
+# Publishing uses npm Trusted Publishing (OIDC), like the main package. Each of the eight package
+# names must have this repository + workflow configured as its trusted publisher in npm settings;
+# the repo stores no npm token.
+name: Python runtime packs
+
+on:
+  push:
+    tags:
+      - 'python-runtime-v*'
+  pull_request:
+    paths:
+      - 'runtime/**'
+      - 'runtime-build/**'
+      - 'src/python-runtime/**'
+      - 'src/python-runtime-entry.ts'
+      - 'python/**'
+      - 'scripts/python-runtime.mjs'
+      - 'test/python-runtime-*.test.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/python-runtime-packs.yml'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the built packs to npm (requires npm trusted publishing)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-runtime-packs-${{ github.ref }}
+  # PRs may be cancelled by a newer push; tags must finish (a half-published version is permanent).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_VERSION: '24'
+  PNPM_VERSION: '11.7.0'
+  UV_VERSION: '0.11.28'
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # glibc 2.28+ is the contract; build on 22.04 rather than the newest Ubuntu.
+          - target: linux-x64
+            os: ubuntu-22.04
+          # macOS 15 is the current arm64 image; the Intel image is the maintained x64 runner.
+          - target: darwin-arm64
+            os: macos-15
+          - target: darwin-x64
+            os: macos-15-intel
+          - target: win32-x64
+            os: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - run: npm ci
+      - run: npm run build
+      - name: Install pnpm
+        run: npm install -g pnpm@${{ env.PNPM_VERSION }}
+
+      - name: Build packs (POSIX)
+        if: runner.os != 'Windows'
+        run: bash runtime-build/build-posix.sh '${{ matrix.target }}' "$RUNNER_TEMP/cg-py-pack"
+
+      - name: Build packs (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./runtime-build/build-windows.ps1 -Out "$env:RUNNER_TEMP\cg-py-pack"
+
+      # This is the real acceptance test: install the tarball through the same manager the plugin
+      # uses, then run the worker against pandas/zoneinfo/Parquet. A pack that merely unpacks is
+      # not enough — Windows embeddable and macOS relocatable builds fail in different ways.
+      - name: Install and verify (POSIX)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=$(ls "$RUNNER_TEMP"/cg-py-pack/*cg-py-base*.tgz)
+          parquet=$(ls "$RUNNER_TEMP"/cg-py-pack/*cg-py-parquet*.tgz)
+          pnpm_cli="$(npm root -g)/pnpm/bin/pnpm.cjs"
+          node scripts/python-runtime.mjs prepare --pack base --tarball "$base" \
+            --dsh-home "$RUNNER_TEMP/cg-dsh" --pnpm-cli "$pnpm_cli"
+          node scripts/python-runtime.mjs prepare --pack parquet --tarball "$parquet" \
+            --dsh-home "$RUNNER_TEMP/cg-dsh" --pnpm-cli "$pnpm_cli"
+          node scripts/python-runtime.mjs verify --pack parquet --dsh-home "$RUNNER_TEMP/cg-dsh" --json
+          node runtime-build/verify-pack.mjs --dsh-home "$RUNNER_TEMP/cg-dsh" --parquet
+
+      - name: Install and verify (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $base = (Get-ChildItem "$env:RUNNER_TEMP\cg-py-pack\*cg-py-base*.tgz").FullName
+          $parquet = (Get-ChildItem "$env:RUNNER_TEMP\cg-py-pack\*cg-py-parquet*.tgz").FullName
+          $npmRoot = (npm root -g | Out-String).Trim()
+          $pnpmCli = Join-Path $npmRoot 'pnpm/bin/pnpm.cjs'
+          node scripts/python-runtime.mjs prepare --pack base --tarball $base `
+            --dsh-home "$env:RUNNER_TEMP\cg-dsh" --pnpm-cli $pnpmCli
+          if ($LASTEXITCODE -ne 0) { throw 'base prepare 失败' }
+          node scripts/python-runtime.mjs prepare --pack parquet --tarball $parquet `
+            --dsh-home "$env:RUNNER_TEMP\cg-dsh" --pnpm-cli $pnpmCli
+          if ($LASTEXITCODE -ne 0) { throw 'parquet prepare 失败' }
+          node scripts/python-runtime.mjs verify --pack parquet `
+            --dsh-home "$env:RUNNER_TEMP\cg-dsh" --json
+          if ($LASTEXITCODE -ne 0) { throw 'verify 失败' }
+          node runtime-build/verify-pack.mjs --dsh-home "$env:RUNNER_TEMP\cg-dsh" --parquet
+          if ($LASTEXITCODE -ne 0) { throw 'worker 验证失败' }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cg-py-packs-${{ matrix.target }}
+          path: ${{ runner.temp }}/cg-py-pack/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: publish packs
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/python-runtime-v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # The tag is an assertion about all eight package versions. Refuse to publish a partial or
+      # mismatched release: older plugins pin exact versions, so a wrong tag is not recoverable.
+      - name: Version gate
+        run: |
+          set -euo pipefail
+          version=$(node -e "const m=JSON.parse(require('fs').readFileSync('runtime/manifest.json','utf8')); const v=new Set([...Object.values(m.packs.base.targets),...Object.values(m.packs.parquet.targets)].map(t=>t.version)); if(v.size!==1) { console.error('manifest 里运行时包版本不一致：'+[...v].join(', ')); process.exit(1) } process.stdout.write([...v][0])")
+          if [[ "${GITHUB_REF_NAME}" == python-runtime-v* ]]; then
+            tag="${GITHUB_REF_NAME#python-runtime-v}"
+            if [[ "$tag" != "$version" ]]; then
+              echo "::error::tag 是 python-runtime-v${tag}，runtime/manifest.json 是 ${version}——先对齐两边再发"
+              exit 1
+            fi
+          fi
+          echo "发布运行时包 ${version}"
+
+      - name: Publish tarballs
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          tgzs=(dist/*.tgz)
+          if [[ ${#tgzs[@]} -ne 8 ]]; then
+            echo "::error::应有 8 个运行时包，实际 ${#tgzs[@]} 个——不要发半个平台矩阵"
+            exit 1
+          fi
+          for tgz in "${tgzs[@]}"; do
+            read -r name version < <(tar -xOf "$tgz" package/package.json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const p=JSON.parse(s);process.stdout.write(p.name+' '+p.version)})")
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "::notice::${name}@${version} 已发布，跳过"
+              continue
+            fi
+            echo "publishing ${name}@${version} from ${tgz}"
+            npm publish "$tgz" --access public --provenance
+          done
+
+      # Mirror sync is best-effort: the official registry already has the release.
+      - name: Notify npmmirror
+        if: success()
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for tgz in dist/*.tgz; do
+            name=$(tar -xOf "$tgz" package/package.json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s).name))")
+            escaped="${name//\//%2f}"
+            curl -fsS -m 30 -X PUT "https://registry.npmmirror.com/${escaped}/sync" >/dev/null || true
+          done

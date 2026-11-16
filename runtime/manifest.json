@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "python": "3.13.17",
+  "cacheRoot": "cache/cg/python-runtime",
+  "packs": {
+    "base": {
+      "kind": "base",
+      "packages": {
+        "numpy": "2.4.6",
+        "pandas": "3.0.6",
+        "python-dateutil": "2.9.0.post0",
+        "six": "1.17.0",
+        "tzdata": "2026.6"
+      },
+      "targets": {
+        "win32-x64": {
+          "package": "@v587d/cg-py-base-win32-x64",
+          "version": "1.0.0",
+          "bytes": 62914560
+        },
+        "darwin-arm64": {
+          "package": "@v587d/cg-py-base-darwin-arm64",
+          "version": "1.0.0",
+          "bytes": 62914560
+        },
+        "darwin-x64": {
+          "package": "@v587d/cg-py-base-darwin-x64",
+          "version": "1.0.0",
+          "bytes": 62914560
+        },
+        "linux-x64": {
+          "package": "@v587d/cg-py-base-linux-x64",
+          "version": "1.0.0",
+          "bytes": 62914560
+        }
+      }
+    },
+    "parquet": {
+      "kind": "lib",
+      "requires": {
+        "base": "1.0.0"
+      },
+      "packages": {
+        "pyarrow": "25.0.1"
+      },
+      "targets": {
+        "win32-x64": {
+          "package": "@v587d/cg-py-parquet-win32-x64",
+          "version": "1.0.0",
+          "bytes": 52428800
+        },
+        "darwin-arm64": {
+          "package": "@v587d/cg-py-parquet-darwin-arm64",
+          "version": "1.0.0",
+          "bytes": 52428800
+        },
+        "darwin-x64": {
+          "package": "@v587d/cg-py-parquet-darwin-x64",
+          "version": "1.0.0",
+          "bytes": 52428800
+        },
+        "linux-x64": {
+          "package": "@v587d/cg-py-parquet-linux-x64",
+          "version": "1.0.0",
+          "bytes": 52428800
+        }
+      }
+    }
+  },
+  "limits": {
+    "minFreeBytes": 805306368,
+    "installTimeoutMs": 900000,
+    "probeTimeoutMs": 60000
+  }
+}

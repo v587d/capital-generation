@@ -35,9 +35,18 @@ test('跨平台闸门确实扫到了源码（扫描范围失效就等于没有�
 })
 
 // Runs one rule line by line, skipping comments that quote the banned shape.
-function find(check) {
+/** Runtime plumbing owns executable spawning and PATH interpretation; no other module may. */
+const PLATFORM_OWNER = 'src/python-runtime/platform.ts'
+const SPAWN_OWNERS = new Set([
+  'src/python-runtime/platform.ts',
+  'src/python-runtime/pnpm.ts',
+  'src/python-runtime/probe.ts',
+])
+
+function find(check, options = {}) {
   const found = []
   for (const [rel, text] of sources) {
+    if (options.allowSpawnOwner === true && SPAWN_OWNERS.has(rel)) continue
     const lines = text.split(/\r?\n/)
     for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i]
@@ -65,7 +74,7 @@ test('URL 的 pathname 不是文件路径', () => {
 test('起子进程不许按命令名起 Node CLI', () => {
   // `npm` / `dsh` are `.cmd` shims: spawnSync('npm') gives ENOENT, 'npm.cmd' gives EINVAL. Only
   // `spawn(process.execPath, …)` works; shell args are DEP0190 (unescaped).
-  const NATIVE_EXE = new Set(['git'])
+  const NATIVE_EXE = new Set(['git', 'taskkill'])
   const found = find((line) => {
     if (/\bshell:\s*true\b/.test(line)) return '不许把参数交给 shell 拼接（DEP0190 弃用形态，参数不转义）'
     const out = []
@@ -77,7 +86,7 @@ test('起子进程不许按命令名起 Node CLI', () => {
       out.push(`第一实参是 ${first}：只允许 process.execPath 或白名单里的真 exe（${[...NATIVE_EXE].join(' / ')}）`)
     }
     return out.length > 0 ? out.join('；') : undefined
-  })
+  }, { allowSpawnOwner: true })
   assert.deepEqual(found, [], '裸命令名起不了 Node CLI：\n' + found.join('\n'))
   // An unexamined allowlist rots into "anything passes".
   for (const name of NATIVE_EXE) {
@@ -91,8 +100,8 @@ test('PATH 与 HOME 不许各处自己解释', () => {
   // relative and "checked 0 sessions" still reports ok.
   const PATH_OWNER = 'scripts/lib/run-tool.mjs'
   const bad = find((line, rel) => {
-    if (rel === PATH_OWNER) return undefined
-    if (/process\.env\.PATH\b/.test(line)) return `读 PATH 要走 pathDirs()（唯一实现在 ${PATH_OWNER}），自己拆会漏掉 Windows 的 \`;\``
+    if (rel === PATH_OWNER || rel === PLATFORM_OWNER) return undefined
+    if (/process\.env\.PATH\b/.test(line)) return `读 PATH 要走 pathDirs()（${PATH_OWNER} / ${PLATFORM_OWNER}），自己拆会漏掉 Windows 的 \`;\``
     if (/process\.env\.HOME\b/.test(line)) return '用 node:os 的 homedir()：Windows 上没有 HOME'
     return undefined
   })
@@ -119,8 +128,8 @@ test('src 与 scripts 里不许有平台分支', () => {
   // A platform branch means one half was never tested; preset rows (bash/pwsh slots) are assembly
   // syntax and out of scope.
   const bad = find((line, rel) =>
-    (rel.startsWith('src/') || rel.startsWith('scripts/')) && /process\.platform\b/.test(line)
-      ? '平台分支：改成 delimiter / 候选名清单 / execPath，让同一份代码两端都跑得通'
+    (rel.startsWith('src/') || rel.startsWith('scripts/')) && rel !== PLATFORM_OWNER && /process\.platform\b/.test(line)
+      ? `平台分支：改成 delimiter / 候选名清单 / execPath；唯一例外是 ${PLATFORM_OWNER}`
       : undefined)
   assert.deepEqual(bad, [], '出现平台分支：\n' + bad.join('\n'))
 })

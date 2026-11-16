@@ -388,15 +388,16 @@ test('capital-config Client：五个密钥按序渲染，本机回退与 selecte
   assert.equal(tabs.props.id, 'capital-config-tabs')
   assert.equal(tabs.props.value, 'sources', '默认停在数据源')
   assert.equal(tabs.props.label, 'tabsLabel', 'tablist 的名字走字典')
-  assert.deepEqual(Array.from(tabs.props.options, (option) => option.value), ['sources', 'automation', 'skills', 'components'])
+  assert.deepEqual(Array.from(tabs.props.options, (option) => option.value), ['sources', 'automation', 'skills', 'components', 'analysis'])
   assert.equal(tabs.props.options[0].label, 'title', '第一格文案仍走卡片字典，不硬编码')
   assert.equal(tabs.props.options[1].label, 'automationTitle', '投研自动化与数据源平级，自己占一格')
   assert.equal(tabs.props.options[2].label, 'selectedSkillsTitle',
     '第三格只写「精选 Skills」：自动 / 已开启数都不进 tab，数字搬到列表上方的筛选条')
+  assert.equal(tabs.props.options[4].label, 'pythonTitle', '分析环境是最后一格，不挤占组件格的既有位置')
   assert.deepEqual(
     collect(card, 'section').filter((node) => node.props.role === 'tabpanel').map((node) => node.props.hidden),
-    [false, true, true, true],
-    '⛔ 四块面板**全部挂载**，不在屏的只是 hidden：SettingsForm 卸载即丢草稿，只渲染活动格会吃掉用户填的密钥',
+    [false, true, true, true, true],
+    '⛔ 五块面板**全部挂载**，不在屏的只是 hidden：SettingsForm 卸载即丢草稿，只渲染活动格会吃掉用户填的密钥',
   )
   const [page] = collect(card, 'SettingsForm')
   assert.ok(page, '表单必须走官方框（自带只读提示与保存控件）')
@@ -587,6 +588,9 @@ test('capital-config Client：精选 Skills 以名称开原文，标签与适用
   // Must match the host's partsLabel, or the tab and section names diverge.
   assert.equal(dict.zh.componentsTitle, '包含的组件')
   assert.equal(dict.en.componentsTitle, 'Components')
+  assert.equal(dict.zh.pythonTitle, '分析环境')
+  assert.equal(dict.en.pythonTitle, 'Analysis environment')
+  assert.equal(typeof dict.zh.pythonHint, 'string', '分析环境要说明插件私有运行时与首次下载')
   assert.equal(typeof dict.zh.tabsLabel, 'string')
   assert.equal(typeof dict.zh.componentsHint, 'string', '那句"清单在下方"仍在字典里：它只是从画面上挪到了读屏侧')
   assert.equal(typeof dict.zh.selectedSkillsDocFailed, 'string', '原文取不到时要有一句人话')
@@ -756,8 +760,8 @@ test('capital-config Client：Host 不服务该条目时不注册卡片', () => 
     '外链不进 whileServed：它是插件的属性，与配置条目有没有被服务无关')
 })
 
-// SegmentedControl always emits aria-controls, so all four panels must exist; a dangling id fails silently.
-test('capital-config Client：四块面板各有 tabpanel 身份，第四块也真的存在', () => {
+// SegmentedControl always emits aria-controls, so every panel must exist; a dangling id fails silently.
+test('capital-config Client：五块面板各有 tabpanel 身份，组件与分析环境面板也真的存在', () => {
   const scope = readyScope()
   const { mod } = loadClient({ scope })
   const { ctx, registrations } = fakeCtx({ scope })
@@ -770,17 +774,19 @@ test('capital-config Client：四块面板各有 tabpanel 身份，第四块也�
     'capital-config-tabs-automation-panel',
     'capital-config-tabs-skills-panel',
     'capital-config-tabs-components-panel',
+    'capital-config-tabs-analysis-panel',
   ], '面板 id 必须逐字跟着官方 <id>-<value>-panel 方案')
   assert.deepEqual(panels.map((node) => node.props['aria-labelledby']), [
     'capital-config-tabs-sources',
     'capital-config-tabs-automation',
     'capital-config-tabs-skills',
     'capital-config-tabs-components',
+    'capital-config-tabs-analysis',
   ], '面板的名字就是 tab 上那几个字')
   const root = card
   assert.equal(root.props['data-capital-config-tab'], 'sources', '收起/放行宿主段落的判据挂在卡片根上')
-  assert.deepEqual(panels.map((node) => node.props['data-capital-config-panel']), ['sources', 'automation', 'skills', 'components'],
-    '样式表按这一格挂的属性摆间距（第四格那句 padding 认的就是它）')
+  assert.deepEqual(panels.map((node) => node.props['data-capital-config-panel']), ['sources', 'automation', 'skills', 'components', 'analysis'],
+    '样式表按这一格挂的属性摆间距（组件格那句 padding 认的就是它）')
   const componentsPanel = panels[3]
   assert.equal(collect(componentsPanel, 'p').length, 0,
     '第四格画面里没有那行"清单由 DSH 绘制"——点这一格看到的就是清单，多余的一行字只是噪音')
@@ -944,12 +950,12 @@ test('capital-config Client：宿主组件段的收起规则只认自家 tab，�
   const css = styles.map((node) => String(node.textContent)).join('\n').replace(/\/\*[\s\S]*?\*\//g, '')
   const bundleName = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).name
   const hideRules = Array.from(css.matchAll(/^[ \t]*\[data-plugin-detail="([^"]+)"\][^\n]*$/gm), (match) => match[0])
-  assert.equal(hideRules.length, 3, '三条收起规则：数据源 / 投研自动化 / 精选 Skills 各一条，一条都不许多')
+  assert.equal(hideRules.length, 4, '四条收起规则：数据源 / 投研自动化 / 精选 Skills / 分析环境各一条')
   for (const rule of hideRules) {
     assert.ok(rule.includes(`[data-plugin-detail="${bundleName}"]`),
       '规则必须限定在**我们这个包**的详情页里：插在别的包页面上 = 在别人的页面藏宿主的段落')
-    assert.match(rule, /:has\(\.capital-config-card\[data-capital-config-tab="(?:sources|automation|skills)"\]\)/,
-      '只从**正面**认出"我们的卡片 + 这三个 tab"才动手')
+    assert.match(rule, /:has\(\.capital-config-card\[data-capital-config-tab="(?:sources|automation|skills|analysis)"\]\)/,
+      '只从**正面**认出"我们的卡片 + 这四个 tab"才动手')
     assert.match(rule, /section\[data-plugin-rows\]\s*\{\s*display: none/, '动的只有宿主那一格')
     assert.ok(!rule.includes(':not('), '否定式收起 = 一个拼错的属性值就把用户数据藏了起来')
   }
@@ -1570,4 +1576,14 @@ test('capital-config 包清单：声明运行期 schemastery 依赖，且客户�
   assert.ok(inject.includes('@deepseek-ai/dsh-api-remotes'),
     'remote.pluginManager 的半边在 remotes 模块表里：缺它 inject 就是装配期报错，整个 web profile 起不来')
   assert.ok(!inject.includes('@deepseek-ai/dsh-client-ui-settings-plugins'), '0.1.7 的插件页归 plugin-manager 所有')
+})
+
+test('capital-config Client：分析环境只读 status，准备按钮才 POST /python-runtime/prepare', () => {
+  const source = readFileSync(CLIENT_SRC, 'utf8')
+  assert.match(source, /const PYTHON_RUNTIME_ROUTE = '\/python-runtime'/, '路由前缀必须与 host 行一致')
+  assert.match(source, /fetch\(`\$\{PYTHON_RUNTIME_ROUTE\}\/status`/, '打开分析环境只读 status')
+  assert.match(source, /post\('\/prepare', \{ packs \}\)/, '只有点准备/安装按钮才发起安装')
+  assert.match(source, /post\('\/cancel', \{ jobId: job\.id \}\)/, '准备中必须能取消')
+  assert.match(source, /post\('\/remove', \{ pack, confirm: true \}\)/, '移除必须带显式 confirm')
+  assert.match(source, /pythonTitle/, '新格文案走双语字典')
 })

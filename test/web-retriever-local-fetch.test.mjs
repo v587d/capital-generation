@@ -530,7 +530,7 @@ test('safeUrl：只有能安全展示给用户的 http(s) 链接才留下', () =
   assert.equal(safeUrl(`https://a.example/x?p=${'y'.repeat(200)}`, 100), '', '超出显式上限就丢')
 })
 
-test('src/web-retriever 不使用静态 node: 导入，依赖不引入 @types/node', async () => {
+test('src/web-retriever 不使用静态 node: 导入，@types/node 只留在开发期', async () => {
   const sourceDir = join(ROOT, 'src', 'web-retriever')
   const entries = await (await import('node:fs/promises')).readdir(sourceDir)
   for (const entry of entries.filter((name) => name.endsWith('.ts'))) {
@@ -538,6 +538,7 @@ test('src/web-retriever 不使用静态 node: 导入，依赖不引入 @types/no
     assert.doesNotMatch(source, /from\s+['"]node:/u, entry)
   }
   const packageJson = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8'))
-  assert.ok(!('@types/node' in packageJson.dependencies))
-  assert.ok(!('@types/node' in packageJson.devDependencies))
+  // Host-plane python-runtime needs Node types; they must remain dev-only and never become a
+  // runtime dependency that browser-facing code could resolve.
+  assert.ok(!('@types/node' in (packageJson.dependencies ?? {})))
 })

@@ -37,6 +37,11 @@ test('打包闸门：vendored 图表库与构建产物都在发布清单里', (t
 
   for (const required of [
     'lib/index.js',
+    'lib/python-runtime-entry.js',
+    'lib/python-runtime/manager.js',
+    'python/worker.py',
+    'runtime/manifest.json',
+    'scripts/python-runtime.mjs',
     'lib/chart/tool.js',
     'lib/chart/runtime.js',
     'lib/chart/vendor/lightweight-charts.standalone.production.js',

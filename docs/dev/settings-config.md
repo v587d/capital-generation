@@ -34,7 +34,7 @@
 - **「包含的组件」是宿主的格子，我们没有能替换它的座位**：包页在 `div.detailSections` 里连着画
   两格——`section[data-plugin-config]`（我们的卡片）与 `section[data-plugin-rows]`（宿主的行清单，
   行开关 / 状态点 / 「共 N 个 · 运行 N」都在它那里，`plugins.detail.section` 只能在它**之后**追加）。
-  卡片顶上的第四格 tab 不重画那份清单，只切它的可见性：见 §5.3 的三条 `:has()` 与方向性纪律。
+  卡片顶上的第四格 tab 不重画那份清单，只切它的可见性：见 §5.3 的四条 `:has()` 与方向性纪律。
 
 ## 5.2 存储边界：密钥、选用开关、两处 schema 一致
 
@@ -49,15 +49,15 @@
   取到值再用自己的 `Config(...)` 过一遍——**两处 schema 默认值必须逐字一致**。回归：`test/capital-config.test.mjs`（deepEqual + 按上游 `plainConfig` 摊平取值单元）与 `test/apply-integration.test.mjs`（三级读取、服务晚到、条目值真的驱动装配）。
 - **文案与排布口径**（改动要有对应用户诉求，别顺手加回）：五个 Key **一律不写"必填 / 选填"**——本项目
   不依赖任何单一数据源；每条 Key 提示都点名"新自动模式会话生效"；本机直连与 PaddleOCR 的说明
-  各不超过两句；文档链接只写"官方文档"＋右上角斜上箭头，落在标签右边同一行。**排布是四格 tab**
-  （`数据源` / `投研自动化` / `精选 Skills` / `包含的组件`，默认落 `数据源`）：tab 条**取代**当年
+  各不超过两句；文档链接只写"官方文档"＋右上角斜上箭头，落在标签右边同一行。**排布是五格 tab**
+  （`数据源` / `投研自动化` / `精选 Skills` / `包含的组件` / `分析环境`，默认落 `数据源`）：tab 条**取代**当年
   `h4 数据源` + `h5 精选 Skills` 那两级标题（h5 挂在 h4 底下会把平级的两块说成父子），格内顺序仍照旧——
   五个密钥 → 保存 → 回退开关；第二格顶部是「默认工作区」下拉（宿主 `Menu` 触发器，空 = 专属默认工作区，选项来自
   `/capital-automation/workspaces`；路径按家目录缩写成 `~`），其后是调度器与无人值守运行的六个默认值（自动检查间隔、最长运行时间、空闲、步骤、工具调用、通知），整组排成「调度 / 单次运行上限 / 通知」三组，数字框只收整数，清空或
   越界在标题右侧红字点名允许范围、失焦回填已保存值且不写回（重新聚焦收起），格内不再重复 tab 承担的标题。底部「存储」组读 `/capital-automation/storage`：工作区数据 = 可清理的 `capital-data` + 保留的 `capital-analysis`；运行会话只读；「清除数据缓存」二次确认后 POST `/capital-automation/storage/clear`（严格 `{ confirm: true }`），只删 `capital-data` 的直接子项，有活动运行或缓存目录异常时按钮禁用。标题体系之外只有**一个计数**：第四格是行数（唯一来源 `remote.pluginManager.listBundles()`，
   **读不到就只写标题、绝不画 0**，失败不缓存、切格即重试——AGENTS.md §9.7 ⑤ 那条）。第三格 tab **只写「精选 Skills」**，不再拼已开启数或「自动」；数量改由上方筛选条逐格给出（按另一维度的当前选择现算）。密钥草稿活在 DOM
   里而保存按钮可能在看不见的格子里，所以草稿在场时第一格改口「数据源 未保存」。
-  ⛔ **四格的「tab 条 → 首行文字」必须等距**（2026-10-10 实测那一档是 24px；第二格靠 `.capital-config-automation`
+  ⛔ **五格的「tab 条 → 首行文字」必须等距**（2026-10-10 实测那一档是 24px；第二格靠 `.capital-config-automation`
   的 12px padding-top 补足面板 gap，第四格靠一条负 margin 顶到同一档）：不等距就是每切一格跳一次；**面板只有一个子元素时 flex `gap` 不发生作用**，那 24px 得自己补。
   第四格画面上不写「组件清单在下方」那句（点这一格看到的就是清单），句子改挂 `.capital-config-sr-only`——
   `aria-controls` 指的这块面板不许是空的。回归 `test/capital-config.test.mjs` 的文案、两维筛选与计数、渲染顺序、tab/计数、上方筛选布局与样式表形状断言；等距那个数只能在浏览器里量（见账本当日行）。
@@ -68,7 +68,7 @@
   `Modal` / `writeClipboard` / `IconRightUpOutlineRegular`（`@deepseek-ai/dsh-client-ui-primitives`），
   服务面是 `ctx.configForms` 的 `get(条目 id)` + `whileServed([条目 id], register)`。`SettingsForm` 在卸载时自行丢弃草稿（没有
   discard 控件）。
-- **⛔ 四块面板全部挂载，不在屏的用 `hidden` 收起，不是不渲染**：`SettingsForm` 卸载即丢草稿
+- **⛔ 五块面板全部挂载，不在屏的用 `hidden` 收起，不是不渲染**：`SettingsForm` 卸载即丢草稿
   （`dsh-client-ui-primitives/lib/index.js` 里那个 unmount `discard.current()`），只渲染活动格的话
   用户填了密钥瞄一眼另一格回来就没了。面板类**不许声明裸 `display`**——作者 `display` 会盖掉 UA 的
   `[hidden]{display:none}`，等于 hidden 失效：35 颗开关与密钥输入框看不见却仍在 Tab 序里，控件对
@@ -76,7 +76,7 @@
 - **tab 条不自造**：`SegmentedControl` 是**完全受控**件，自带 `role=tablist`/`role=tab`、roving
   `tabIndex`、←→↑↓/Home/End 走位与焦点跟随，卡片一律不补 `onKeyDown`（补了就是双重选择）。它按
   `` `${id}-${option.value}-panel` `` 发 `aria-controls`（写在它的 `.d.ts` 注释里，是文档化契约），
-  所以四块面板的 `id` 必须逐字跟着这两个模板长——**包括第四块**：第四块的内容是宿主那段清单（在下方
+  所以五块面板的 `id` 必须逐字跟着这两个模板长——**包括第四块**：第四块的内容是宿主那段清单（在下方
   显形），面板本身只留一句读屏侧的话（`.capital-config-sr-only`，`position: absolute` ⇒ 零布局贡献），
   `aria-controls` 指的正是这块。悬空 id 与空面板都不报错，只有读屏用户付账。入账本 **L28**。
 - **点技能名打开的是官方 `Modal`（非 headless），原文走一条自注册的本机路由**：header、标题、关闭按钮、Esc、
@@ -133,10 +133,10 @@ Key + 本机直连回退）；第二格 **投研自动化**——先是「默认
 统一默认，空 = 专属默认工作区；列表来自 `/capital-automation/workspaces`），其下是调度器与无人值守运行的默认上限，分「调度 / 单次运行上限 / 通知」三组，单个任务里的设置优先；底部「存储」组显示当前工作区的 `capital-data` 可清理尺寸、`capital-analysis` 保留尺寸与运行会话尺寸，并提供「清除数据缓存」（只删 `capital-data`）；第三格 **精选 Skills**——顶部一颗「智能装载 Skills」开关（默认关），
 关着时下面才是两行筛选条（Skill 特点 / 适用预设，各带「全部」与"点它会显示几行"）加清单；打开后筛选条与
 清单一起收起。点**技能名**打开 `SKILL.md` 原文，名字右边是特点标签与适用预设标签，已开启的行排在清单最前；
-第四格 **包含的组件**（带行数）——那一格的内容就是页面下方宿主自己画的行清单，切过去它才显形（§5.1 / §5.3）。
+第四格 **包含的组件**（带行数）——那一格的内容就是页面下方宿主自己画的行清单，切过去它才显形（§5.1 / §5.3）；第五格 **分析环境**——只读 `python-runtime` 的 status，用户点按钮才安装 base/parquet；运行时状态不写 settings 文档。
 
-「包含的组件」里的五行（`capital-config` / `capital-charts` / `capital-watchlist` /
-`capital-automation` / `preset-capital-generation`）本身**没有**行级配置控件——可编辑面只有卡片这一份，
+「包含的组件」里的六行（`capital-config` / `capital-charts` / `capital-watchlist` /
+`capital-automation` / `python-runtime` / `preset-capital-generation`）本身**没有**行级配置控件——可编辑面只有卡片这一份，
 不在行详情页里，这是设计而非故障。`capital-config` 那一行仍在：它是 settings 命名空间的来源（§5.1），
 只是不再充当座位；它同时是第四格那个数字的来路（`pluginManager.listBundles()` 里我们这个包的
 `rows.length`），也是 `/capital-skills` 那条原文旁路的宿主（§5.3）。

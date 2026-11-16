@@ -59,6 +59,8 @@ const SKILL_DOC_ROUTE = '/capital-skills'
 /** Automation host routes; same auth plane as the workspace dropdown. */
 const STORAGE_ROUTE = '/capital-automation/storage'
 const STORAGE_CLEAR_ROUTE = '/capital-automation/storage/clear'
+/** Host-plane python-runtime row; status is read-only until the user clicks prepare. */
+const PYTHON_RUNTIME_ROUTE = '/python-runtime'
 const DOC_URLS = {
   fuyao: 'https://fuyao.aicubes.cn/docs/',
   ftshare: 'https://market.ft.tech/gateway/doc/p/pb8eizu3',
@@ -117,6 +119,33 @@ const zh = {
   titleUnsaved: '数据源 未保存',
   componentsTitle: '包含的组件',
   componentsHint: '组件清单由 DSH 绘制，显示在下方。',
+  pythonTitle: '分析环境',
+  pythonLoading: '读取分析环境…',
+  pythonHint: 'Python 运行时由本插件独立管理，不修改系统 Python，也不使用 DSH 桌面端运行时。首次准备需要联网下载约 55–60 MB，安装后可离线使用。',
+  pythonNotInstalled: '尚未准备',
+  pythonReady: '已就绪',
+  pythonBroken: '需要修复',
+  pythonInstalling: '准备中…',
+  pythonUnsupported: '当前平台不支持：{reason}',
+  pythonBase: '基础环境',
+  pythonParquet: 'Parquet 支持',
+  pythonPrepare: '准备分析环境',
+  pythonInstallParquet: '安装 Parquet 支持',
+  pythonRepair: '修复分析环境',
+  pythonCancel: '取消',
+  pythonVerify: '重新检测',
+  pythonVerifyOk: '自检通过。',
+  pythonRemove: '移除',
+  pythonRemoveConfirm: '移除后需要重新下载，确定移除？',
+  pythonRemoveYes: '确定移除',
+  pythonNotInstalledShort: '未安装',
+  pythonVersions: 'Python {python} · numpy {numpy} · pandas {pandas}',
+  pythonPath: '位置：{path}',
+  pythonParquetHint: '全市场 Parquet 数据需要 pyarrow；额外约 50 MB 下载、155 MB 磁盘。',
+  pythonLoadFailed: '读取分析环境状态失败；稍后重试。',
+  pythonPrepareFailed: '准备失败：{message}',
+  pythonJob: '{stage}：{message}',
+  pythonParquetReady: 'Parquet 支持已就绪。',
   fuyaoLabel: 'Fuyao API Key',
   fuyaoHint: '同花顺 Fuyao 结构化数据接口。保存后新自动模式会话生效。',
   ftshareLabel: 'FTShare API Key',
@@ -219,6 +248,33 @@ const en = {
   titleUnsaved: 'Data Sources unsaved',
   componentsTitle: 'Components',
   componentsHint: 'The component list is drawn by DSH and appears below.',
+  pythonTitle: 'Analysis environment',
+  pythonLoading: 'Reading the analysis environment…',
+  pythonHint: 'The Python runtime is private to this plugin. It does not modify system Python or use the DSH Desktop runtime. The first prepare downloads about 55–60 MB; after that it works offline.',
+  pythonNotInstalled: 'Not prepared',
+  pythonReady: 'Ready',
+  pythonBroken: 'Repair needed',
+  pythonInstalling: 'Preparing…',
+  pythonUnsupported: 'This platform is not supported: {reason}',
+  pythonBase: 'Base environment',
+  pythonParquet: 'Parquet support',
+  pythonPrepare: 'Prepare analysis environment',
+  pythonInstallParquet: 'Install Parquet support',
+  pythonRepair: 'Repair analysis environment',
+  pythonCancel: 'Cancel',
+  pythonVerify: 'Re-check',
+  pythonVerifyOk: 'Self-check passed.',
+  pythonRemove: 'Remove',
+  pythonRemoveConfirm: 'Removing means downloading it again. Remove?',
+  pythonRemoveYes: 'Remove',
+  pythonNotInstalledShort: 'Not installed',
+  pythonVersions: 'Python {python} · numpy {numpy} · pandas {pandas}',
+  pythonPath: 'Location: {path}',
+  pythonParquetHint: 'Market-wide Parquet data needs pyarrow; about 50 MB download and 155 MB on disk.',
+  pythonLoadFailed: 'Could not read the analysis environment state; try again shortly.',
+  pythonPrepareFailed: 'Prepare failed: {message}',
+  pythonJob: '{stage}: {message}',
+  pythonParquetReady: 'Parquet support is ready.',
   fuyaoLabel: 'Fuyao API Key',
   fuyaoHint: 'Tonghuashun Fuyao structured-data API. Takes effect in new Auto mode sessions.',
   ftshareLabel: 'FTShare API Key',
@@ -339,6 +395,7 @@ function installStyles() {
     [data-plugin-detail="${BUNDLE_NAME}"]:has(.capital-config-card[data-capital-config-tab="sources"]) section[data-plugin-rows] { display: none; }
     [data-plugin-detail="${BUNDLE_NAME}"]:has(.capital-config-card[data-capital-config-tab="automation"]) section[data-plugin-rows] { display: none; }
     [data-plugin-detail="${BUNDLE_NAME}"]:has(.capital-config-card[data-capital-config-tab="skills"]) section[data-plugin-rows] { display: none; }
+    [data-plugin-detail="${BUNDLE_NAME}"]:has(.capital-config-card[data-capital-config-tab="analysis"]) section[data-plugin-rows] { display: none; }
     /* Internal roles must stay declared for delegation; hide their user-selectable cards in Settings. */
     [data-agent-preset-id="capital-data-junior"],
     [data-agent-preset-id="capital-visualization-specialist"] { display: none !important; }
@@ -379,6 +436,21 @@ function installStyles() {
     .capital-config-cache-button[data-variant="danger"]:hover:not(:disabled) { background: var(--dsw-alias-state-error-primary); color: var(--dsw-alias-bg-base); }
     .capital-config-cache-button:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-brand-primary)); outline-offset: 0; }
     .capital-config-cache-button:disabled { opacity: .5; cursor: not-allowed; }
+    .capital-config-runtime { display: flex; flex-direction: column; gap: 12px; padding-top: 12px; }
+    .capital-config-runtime-head { display: flex; flex-direction: column; gap: 4px; }
+    .capital-config-runtime-title { display: flex; align-items: center; gap: 8px; color: var(--dsw-alias-label-primary); font-size: 13px; font-weight: 500; line-height: 20px; }
+    .capital-config-runtime-state { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-secondary); font-size: 11px; font-weight: 500; line-height: 16px; }
+    .capital-config-runtime-state[data-tone="ready"] { background: var(--dsw-alias-state-success-tertiary); color: var(--dsw-alias-state-success-primary); }
+    .capital-config-runtime-state[data-tone="warn"] { background: var(--dsw-alias-state-warn-tertiary); color: var(--dsw-alias-state-warn-primary); }
+    .capital-config-runtime-state[data-tone="error"] { background: var(--dsw-alias-state-error-tertiary); color: var(--dsw-alias-state-error-primary); }
+    .capital-config-runtime-copy { margin: 0; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
+    .capital-config-runtime-card { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px; border: .5px solid var(--dsw-alias-border-l1); border-radius: 10px; background: var(--dsw-alias-bg-layer-2); }
+    .capital-config-runtime-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; }
+    .capital-config-runtime-label { color: var(--dsw-alias-label-secondary); font-size: 12.5px; line-height: 20px; }
+    .capital-config-runtime-meta { color: var(--dsw-alias-label-tertiary); font-size: 11.5px; line-height: 17px; overflow-wrap: anywhere; }
+    .capital-config-runtime-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .capital-config-runtime-notice { margin: 0; color: var(--dsw-alias-state-success-primary); font-size: 12px; line-height: 18px; }
+    .capital-config-runtime-error { margin: 0; color: var(--dsw-alias-state-error-primary); font-size: 12px; line-height: 18px; }
     div.capital-config-cache-modal { width: min(480px, 100%); }
     .capital-config-cache-modal-content { min-height: 0; overflow: auto; }
     .capital-config-cache-modal-body { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 12.5px; line-height: 20px; }
@@ -1213,6 +1285,196 @@ function ClearCacheModal({ open, bytes, displayPath, clearing, error, onCancel, 
   errorText ? h('p', { role: 'alert', className: 'capital-config-write-failed' }, errorText) : null)
 }
 
+function PythonRuntimeSection({ t }) {
+  const [status, setStatus] = useState(null)
+  const [job, setJob] = useState(null)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [removePack, setRemovePack] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const load = async () => {
+    try {
+      const response = await fetch(`${PYTHON_RUNTIME_ROUTE}/status`, { method: 'GET', cache: 'no-store', credentials: 'same-origin' })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data?.error?.message || t('pythonLoadFailed'))
+      setStatus(data)
+      if (data.activeJob?.state === 'running') setJob(data.activeJob)
+      setError('')
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : t('pythonLoadFailed'))
+    }
+  }
+
+  useEffect(() => { load() }, [])
+  useEffect(() => {
+    if (job === null || job.state !== 'running') return undefined
+    let cancelled = false
+    const timer = setInterval(async () => {
+      try {
+        const response = await fetch(`${PYTHON_RUNTIME_ROUTE}/jobs/${encodeURIComponent(job.id)}`, { method: 'GET', cache: 'no-store', credentials: 'same-origin' })
+        const data = await response.json().catch(() => ({}))
+        if (cancelled || !response.ok || !data.job) return
+        setJob(data.job)
+        if (data.job.state !== 'running') {
+          setJob(null)
+          await load()
+        }
+      } catch {
+        // Status polling is best-effort; the next tick retries.
+      }
+    }, 800)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [job?.id, job?.state])
+
+  const post = async (suffix, body) => {
+    const response = await fetch(`${PYTHON_RUNTIME_ROUTE}${suffix}`, {
+      method: 'POST',
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(data?.error?.message || t('pythonLoadFailed'))
+    return data
+  }
+
+  const prepare = async (packs) => {
+    setBusy(true); setError(''); setNotice('')
+    try {
+      const data = await post('/prepare', { packs })
+      if (data.job) setJob(data.job)
+    } catch (failure) {
+      setError(t('pythonPrepareFailed', { message: failure instanceof Error ? failure.message : String(failure) }))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const cancel = async () => {
+    if (job === null) return
+    try {
+      await post('/cancel', { jobId: job.id })
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure))
+    }
+  }
+
+  const verify = async () => {
+    setBusy(true); setError(''); setNotice('')
+    try {
+      await post('/verify', {})
+      setNotice(t('pythonVerifyOk'))
+      await load()
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async (pack) => {
+    setBusy(true); setError(''); setNotice('')
+    try {
+      if (pack === 'base' && status?.parquet?.state === 'ready') await post('/remove', { pack: 'parquet', confirm: true })
+      await post('/remove', { pack, confirm: true })
+      setRemovePack('')
+      await load()
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (status === null) {
+    return h('section', { className: 'capital-config-runtime' },
+      h('p', { className: 'capital-config-runtime-copy' }, error === '' ? t('pythonLoading') : error))
+  }
+
+  const supported = status.supported !== false
+  const baseState = status.base?.state ?? 'not-installed'
+  const parquetState = status.parquet?.state ?? 'not-installed'
+  const baseReady = baseState === 'ready'
+  const parquetReady = parquetState === 'ready'
+  const baseTone = baseState === 'ready' ? 'ready' : baseState === 'broken' ? 'error' : baseState === 'installing' ? 'warn' : undefined
+  const baseLabel = baseState === 'ready' ? t('pythonReady')
+    : baseState === 'broken' ? t('pythonBroken')
+      : baseState === 'installing' ? t('pythonInstalling') : t('pythonNotInstalled')
+  const parquetLabel = parquetState === 'ready' ? t('pythonReady')
+    : parquetState === 'broken' ? t('pythonBroken')
+      : parquetState === 'installing' ? t('pythonInstalling') : t('pythonNotInstalledShort')
+
+  const button = (label, onClick, options = {}) => h('button', {
+    type: 'button',
+    className: 'capital-config-cache-button',
+    disabled: busy || options.disabled === true,
+    ...(options.danger === true ? { 'data-variant': 'danger' } : {}),
+    onClick,
+  }, label)
+
+  return h('section', { className: 'capital-config-runtime' },
+    h('div', { className: 'capital-config-runtime-head' },
+      h('div', { className: 'capital-config-runtime-title' },
+        t('pythonTitle'),
+        h('span', { className: 'capital-config-runtime-state', 'data-tone': baseTone }, baseLabel),
+      ),
+      h('p', { className: 'capital-config-runtime-copy' }, t('pythonHint')),
+    ),
+    supported ? null : h('p', { className: 'capital-config-runtime-error' }, t('pythonUnsupported', { reason: status.reason ?? '' })),
+    h('div', { className: 'capital-config-runtime-card' },
+      h('div', { className: 'capital-config-runtime-row' },
+        h('span', { className: 'capital-config-runtime-label' }, t('pythonBase')),
+        h('span', { className: 'capital-config-runtime-state', 'data-tone': baseTone }, baseLabel),
+      ),
+      baseReady
+        ? h('p', { className: 'capital-config-runtime-copy' }, t('pythonVersions', {
+          python: status.python,
+          numpy: status.base?.packages?.numpy ?? '—',
+          pandas: status.base?.packages?.pandas ?? '—',
+        }))
+        : h('p', { className: 'capital-config-runtime-copy' }, t('pythonPath', { path: status.cacheRoot })),
+      h('div', { className: 'capital-config-runtime-actions' },
+        !baseReady && supported ? button(baseState === 'broken' ? t('pythonRepair') : t('pythonPrepare'), () => prepare(['base']), { disabled: job?.state === 'running' }) : null,
+        baseReady ? button(t('pythonVerify'), verify, { disabled: job?.state === 'running' }) : null,
+        removePack === 'base'
+          ? h('span', { className: 'capital-config-runtime-actions' },
+            h('span', { className: 'capital-config-runtime-copy' }, t('pythonRemoveConfirm')),
+            button(t('pythonRemoveYes'), () => remove('base'), { danger: true, disabled: busy }),
+            button(t('pythonCancel'), () => setRemovePack(''), { disabled: busy }),
+          )
+          : baseReady ? button(t('pythonRemove'), () => setRemovePack('base'), { disabled: busy || job?.state === 'running' }) : null,
+      ),
+    ),
+    h('div', { className: 'capital-config-runtime-card' },
+      h('div', { className: 'capital-config-runtime-row' },
+        h('span', { className: 'capital-config-runtime-label' }, t('pythonParquet')),
+        h('span', { className: 'capital-config-runtime-state', 'data-tone': parquetReady ? 'ready' : undefined }, parquetLabel),
+      ),
+      h('p', { className: 'capital-config-runtime-copy' }, parquetReady ? t('pythonParquetReady') : t('pythonParquetHint')),
+      h('div', { className: 'capital-config-runtime-actions' },
+        baseReady && supported && !parquetReady
+          ? button(t('pythonInstallParquet'), () => prepare(['parquet']), { disabled: job?.state === 'running' })
+          : null,
+        removePack === 'parquet'
+          ? h('span', { className: 'capital-config-runtime-actions' },
+            h('span', { className: 'capital-config-runtime-copy' }, t('pythonRemoveConfirm')),
+            button(t('pythonRemoveYes'), () => remove('parquet'), { danger: true, disabled: busy }),
+            button(t('pythonCancel'), () => setRemovePack(''), { disabled: busy }),
+          )
+          : parquetReady ? button(t('pythonRemove'), () => setRemovePack('parquet'), { disabled: busy || job?.state === 'running' }) : null,
+      ),
+    ),
+    error === '' ? null : h('p', { className: 'capital-config-runtime-error', role: 'alert' }, error),
+    notice === '' ? null : h('p', { className: 'capital-config-runtime-notice', role: 'status' }, notice),
+    job === null ? null : h('div', { className: 'capital-config-runtime-card' },
+      h('p', { className: 'capital-config-runtime-copy', role: 'status' }, t('pythonJob', { stage: job.stage, message: job.message })),
+      job.state === 'running' ? h('div', { className: 'capital-config-runtime-actions' }, button(t('pythonCancel'), cancel, { disabled: busy })) : null,
+    ),
+  )
+}
+
 function CapitalCard(props) {
   const t = props.t
   const state = props.useCapitalCard((snapshot) => snapshot)
@@ -1583,6 +1845,7 @@ function CapitalCard(props) {
     { value: 'automation', label: t('automationTitle') },
     { value: 'skills', label: t('selectedSkillsTitle') },
     { value: 'components', label: withCount(t('componentsTitle'), state.components?.count) },
+    { value: 'analysis', label: t('pythonTitle') },
   ]
   const panel = (value, children) => h('section', {
     id: `${TABS_ID}-${value}-panel`,
@@ -1618,6 +1881,7 @@ function CapitalCard(props) {
       )]),
     // The panel is the host's rows list; keep the aria-controls target non-empty via sr-only.
     panel('components', [h('span', { className: 'capital-config-sr-only' }, t('componentsHint'))]),
+    panel('analysis', [h(PythonRuntimeSection, { t })]),
     clearCacheOpen ? h(ClearCacheModal, {
       open: true,
       bytes: cacheBytes,

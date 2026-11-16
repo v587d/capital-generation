@@ -66,12 +66,19 @@
 # Root and role presets mount separately, so apply() runs several times per process. Shared state
 # (chart source tokens, chart artifacts) and the agent/created listeners (root convergence, shell
 # and fs guards) must exist exactly once, which only a host-plane provide gives.
-# These two rows use package subpath entries (@v587d/capital-generation/runtime and /policy): they
-# are server-side, so the literal-path rule above doesn't apply — DSH composes its own
+# These rows use package subpath entries (/runtime, /python-runtime and /policy): they are
+# server-side, so the literal-path rule above doesn't apply — DSH composes its own
 # @deepseek-ai/dsh-tool-subagent-control rows the same way.
 - insert:
     - id: capital-runtime
       name: '@v587d/capital-generation/runtime'
+
+# Plugin-private Python runtime. The row only provides the service and its local HTTP routes;
+# the interpreter and third-party libraries live under the DSH home cache and are installed on
+# demand. Never point this row at the host's dsh-primary-runtime.
+- insert:
+    - id: python-runtime
+      name: '@v587d/capital-generation/python-runtime'
 
 - insert:
     - id: capital-policy
