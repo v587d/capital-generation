@@ -15,7 +15,7 @@ import {
 } from './schema.js'
 import { sanitizeMessage } from './redact.js'
 
-export const BRIEF_PROMPT_VERSION = 11
+export const BRIEF_PROMPT_VERSION = 12
 export const BRIEF_PENDING_STALE_MS = 10 * 60_000
 export const BRIEF_MAX_ATTEMPTS = 5
 // Reasoning runs a long time before the first JSON token; the cap must outlast it.
@@ -38,6 +38,7 @@ export const BRIEF_SYSTEM_PROMPT = `你是 CapGen 投研自动化的任务简报
 短句，具体，有信息量。可以有一点态度，但不夸张、不恐吓、不标题党。
 
 只使用用户消息里的 sourceBlocks。不要补充外部知识，不要把“可能”写成“一定”，
+也不要把原文只覆盖的自选股/持仓扩写成全市场或大盘；原文写“未取到”就保留这个缺口。
 不要替用户下交易结论。流程对账（子 Agent 已结算、数据已收齐）、数据来源表、方法附录
 不要写进简报。sessionId 只用于追溯，不要写进文案。
 
@@ -84,10 +85,11 @@ sourceBlocks 可能同时包含上一轮完整答复和最后一轮短确认。�
 
 sourceId 必须是 sourceBlocks 中某个 block 的 id（从 1 开始），且该 block 包含这条结论的关键标的或数字；不要选章节标题或空泛行，也不要自己写 sourceQuote。找不到依据就少写一条，不要编造。
 
-items 只提取 sourceBlocks 明确要求用户确认、验证或跟踪的事项，不设条数上限：原文明确提到几条就写几条，
-不要合并、不要省略，也不要为了凑数把普通陈述改写成待办。
+items 只提取 sourceBlocks 明确要求用户确认、验证、跟踪或执行的事项（含「开盘前要做的动作」「次日必须处理」），不设条数上限：原文明确提到几条就写几条，
+不要合并、不要省略，也不要为了凑数把普通陈述或纯行情读数改写成待办。
+分级词（如开盘前必看/只需知晓、次日必须处理/只需知晓、需优先复核/继续跟踪）只用来决定 items 的取舍与排序，不要写进 title；属于只需知晓/继续跟踪但没有动作的，不要硬塞进 items。
 dueAt 只填 sourceBlocks 能确定的日期；dueLabel 只写今天或尽快，不要写明天、本周或以后。
-stocks 只列明确出现的标的，最多 8 个；roles 取 1-3 个。
+stocks 只列明确出现的个股（A/H/美股），不要把指数、板块、ETF 当个股；最多 8 个，roles 取 1-3 个。
 gaps 只列明确写出的数据缺口/口径冲突/质量问题，同样不设条数上限：原文提到几条就写几条，不要合并或省略；没有就留空数组。
 如果 sourceBlocks 没有实质结论（只有流程对账或“已完成”），返回 {"skip":true}。`
 
@@ -137,23 +139,21 @@ function textOfMessage(message) {
 /**
  * The last assistant text is not always the deliverable: a settlement notice can wake the root
  * after its complete answer, and the model may still write a short "nothing new" confirmation.
- * Keep the previous non-notice answer alongside it and let the brief model pick the substantive
- * one. `---` is stripped from sourceBlocks, so the two texts stay one flat candidate list.
+ * Keep the previous answer alongside it and let the brief model pick the substantive one; the
+ * wake kinds must be tracked per answer because one turn can carry both relays and settlements.
+ * `---` is stripped from sourceBlocks, so the two texts stay one flat candidate list.
  */
-function noticeOnlyTurn(kinds) {
+const NOTICE_ONLY_KINDS = new Set(['subagent-settled', 'repeat-tool-reminder'])
+
+function noticeOnlyWake(kinds) {
   if (kinds === undefined || kinds.size === 0) return false
-  return [...kinds].every((kind) => kind === 'subagent-settled')
+  return [...kinds].every((kind) => NOTICE_ONLY_KINDS.has(kind))
 }
 
-function previousDeliverableAnswer(answers, turnKinds) {
+function previousDeliverableAnswer(answers) {
   const last = answers.at(-1)
-  if (last === undefined || !noticeOnlyTurn(turnKinds.get(last.turn))) return undefined
-  for (let index = answers.length - 2; index >= 0; index -= 1) {
-    const candidate = answers[index]
-    if (candidate.turn === last.turn) continue
-    if (!noticeOnlyTurn(turnKinds.get(candidate.turn))) return candidate
-  }
-  return undefined
+  if (last === undefined || !noticeOnlyWake(last.wakeKinds)) return undefined
+  return answers.at(-2)
 }
 
 /** Extract the last main-assistant text and the last request route from one session snapshot. */
@@ -163,7 +163,7 @@ export function extractSessionAnswer(snapshot) {
   let provider
   let model
   let turn = 0
-  const turnKinds = new Map()
+  let pendingKinds = new Set()
   const answers = []
   for (const event of events) {
     if (event === null || typeof event !== 'object') continue
@@ -183,11 +183,7 @@ export function extractSessionAnswer(snapshot) {
     }
     if (event.type === 'user/message') {
       const kind = data?.source?.kind
-      if (typeof kind === 'string') {
-        const kinds = turnKinds.get(turn) ?? new Set()
-        kinds.add(kind)
-        turnKinds.set(turn, kinds)
-      }
+      if (typeof kind === 'string') pendingKinds.add(kind)
       continue
     }
     if (event.type !== 'assistant/message') continue
@@ -195,9 +191,10 @@ export function extractSessionAnswer(snapshot) {
     if (next.length === 0) continue
     text = next
     const answerTurn = Number.isInteger(data?.turn) ? data.turn : turn
-    answers.push({ turn: answerTurn, text: next })
+    answers.push({ turn: answerTurn, text: next, wakeKinds: pendingKinds })
+    pendingKinds = new Set()
   }
-  const previous = previousDeliverableAnswer(answers, turnKinds)
+  const previous = previousDeliverableAnswer(answers)
   return {
     text: previous === undefined ? text : `${previous.text}\n\n---\n\n${text}`,
     provider,

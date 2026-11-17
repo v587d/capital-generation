@@ -5,7 +5,7 @@
  * fetches while closed. No turn-tail slot and no custom session events (closed
  * vocabulary, AGENTS.md §7). Only the search debounce is a timer.
  */
-const { createElement: h, useEffect, useState } = require('react')
+const { createElement: h, useEffect, useRef, useState } = require('react')
 const { createSnapshotStore } = require('@deepseek-ai/dsh-client-store')
 // Official icons only; the set has no wallet/pie/coin glyph, so stepper keys use text −/+.
 // `MenuItemButton` gives the remove row official geometry and its separator line.
@@ -111,6 +111,48 @@ const zh = {
   'partial.a-share': 'A 股检索不可用：',
   'partial.hk': '港股检索不可用：',
   'partial.us': '美股检索不可用：',
+  /* 行情工作台（左侧栏入口 + 主面板）；只读现有报价，不新增数据源。 */
+  'desk.panel': '自选股',
+  'desk.title': '自选股行情工作台',
+  'desk.refresh': '刷新行情',
+  'desk.refreshing': '刷新中…',
+  'desk.loading': '正在读取自选股…',
+  'desk.lastUpdate': '最近更新',
+  'desk.notRefreshed': '未刷新',
+  'desk.filter': '筛选标的',
+  'desk.filterPlaceholder': '名称或代码',
+  'desk.group': '分组',
+  'desk.allGroups': '全部',
+  'desk.newGroup': '分组名称',
+  'desk.createGroup': '新建',
+  'desk.deleteGroup': '删除分组',
+  'desk.noGroup': '未分组',
+  'desk.more': '更多操作',
+  'desk.noGroupYet': '还没有分组',
+  'desk.pin': '置顶',
+  'desk.remove': '移除',
+  'desk.removeHint': '再点一次删除按钮确认移除',
+  'desk.cancel': '取消',
+  'desk.empty': '还没有自选股',
+  'desk.emptyHint': '用输入框的「自选股」面板添加标的，这里会同步显示。',
+  'desk.noMatch': '没有匹配的标的',
+  'desk.noMatchHint': '换个关键词，或切回「全部」分组。',
+  'desk.selectHint': '选择一只标的查看详情',
+  'desk.selectHintBody': '左侧列表按分组筛选；选中后这里显示报价、分时与成交量。',
+  'desk.intraday': '当日分时',
+  'desk.intradayEmpty': '当前行情接口只返回最新快照',
+  'desk.intradayEmptyHint': '接入分时序列后，这里直接绘制当日走势。',
+  'desk.volume': '成交量',
+  'desk.volumeEmpty': '暂无成交量数据',
+  'desk.capturedAt': '快照时间',
+  'desk.sourceTime': '交易所时间',
+  'desk.groupsOf': '所属分组',
+  'desk.kind': '标的类型',
+  'desk.colName': '名称',
+  'desk.colPrice': '最新',
+  'desk.colChange': '涨跌',
+  'desk.colAction': '操作',
+  'desk.loadFailed': '自选股服务暂不可用',
 }
 
 const en = {
@@ -190,6 +232,48 @@ const en = {
   'partial.a-share': 'A-share search unavailable: ',
   'partial.hk': 'HK search unavailable: ',
   'partial.us': 'US search unavailable: ',
+  /* Market desk (sidebar entry + main panel); reads the existing quotes, no new data source. */
+  'desk.panel': 'Watchlist',
+  'desk.title': 'Watchlist market desk',
+  'desk.refresh': 'Refresh quotes',
+  'desk.refreshing': 'Refreshing…',
+  'desk.loading': 'Loading watchlist…',
+  'desk.lastUpdate': 'Last update',
+  'desk.notRefreshed': 'Not refreshed',
+  'desk.filter': 'Filter symbols',
+  'desk.filterPlaceholder': 'Name or code',
+  'desk.group': 'Group',
+  'desk.allGroups': 'All',
+  'desk.newGroup': 'Group name',
+  'desk.createGroup': 'Create',
+  'desk.deleteGroup': 'Delete group',
+  'desk.noGroup': 'Ungrouped',
+  'desk.more': 'More actions',
+  'desk.noGroupYet': 'No groups yet',
+  'desk.pin': 'Pin',
+  'desk.remove': 'Remove',
+  'desk.removeHint': 'Press remove again to confirm',
+  'desk.cancel': 'Cancel',
+  'desk.empty': 'No symbols yet',
+  'desk.emptyHint': 'Add symbols from the watchlist panel in the composer; they appear here.',
+  'desk.noMatch': 'No symbols match',
+  'desk.noMatchHint': 'Try another term, or switch back to All.',
+  'desk.selectHint': 'Select a symbol',
+  'desk.selectHintBody': 'The left list filters by group; the quote, intraday and volume panels follow the selection.',
+  'desk.intraday': 'Intraday',
+  'desk.intradayEmpty': 'The quote endpoint returns a snapshot only',
+  'desk.intradayEmptyHint': 'Once an intraday series is available, the same-session trend draws here.',
+  'desk.volume': 'Volume',
+  'desk.volumeEmpty': 'No volume data',
+  'desk.capturedAt': 'Captured',
+  'desk.sourceTime': 'Exchange time',
+  'desk.groupsOf': 'Groups',
+  'desk.kind': 'Instrument',
+  'desk.colName': 'Symbol',
+  'desk.colPrice': 'Last',
+  'desk.colChange': 'Change',
+  'desk.colAction': 'Actions',
+  'desk.loadFailed': 'Watchlist service unavailable',
 }
 
 /**
@@ -386,6 +470,86 @@ const CSS = `
 .capital-watchlist-rows { width: 256px; }
 /* Theme has no global border-box reset; the official item padding would overflow the list. */
 .capital-watchlist-rows button { box-sizing: border-box; }
+/* --- 行情工作台：左侧栏入口 + main 面板。卡片走发丝线，浮层交给官方 Menu。 --- */
+.cwd-page { height: 100%; min-height: 0; overflow-y: auto; --cwd-body-h: clamp(520px, 78vh, 860px); background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); --cwd-card: var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-layer-1)); --capital-watchlist-up: #d1493f; --capital-watchlist-down: #17a063; }
+.cwd-inner { max-width: 1180px; margin: 0 auto; padding: 28px 32px 44px; }
+.cwd-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.cwd-title { margin: 0; font-size: 26px; line-height: 32px; font-weight: 650; letter-spacing: -.2px; }
+.cwd-headactions { display: flex; align-items: center; gap: 14px; flex: none; }
+.cwd-updated { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cwd-refresh { display: inline-flex; align-items: center; gap: 6px; flex: none; height: 34px; padding: 0 14px; border: .5px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 25%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent); color: var(--dsw-alias-state-business-primary); font-family: inherit; font-size: 13px; line-height: 20px; font-weight: 500; cursor: pointer; }
+.cwd-refresh:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 20%, transparent); }
+.cwd-refresh:disabled { opacity: .45; cursor: not-allowed; }
+.cwd-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(430px, 1.35fr); gap: 22px; align-items: stretch; height: var(--cwd-body-h); }
+.cwd-card { display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; border: .5px solid var(--dsw-alias-border-l1); border-radius: 14px; background: var(--cwd-card); overflow: hidden; }
+.cwd-toolbar { display: flex; flex: none; align-items: center; gap: 8px; flex-wrap: wrap; padding: 12px 14px; border-bottom: .5px solid var(--dsw-alias-border-l2); }
+.cwd-field { display: flex; align-items: center; gap: 6px; flex: 1 1 170px; min-width: 0; height: 34px; padding: 0 10px; border-radius: 10px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-tertiary); }
+.cwd-field input { flex: 1 1 auto; min-width: 0; height: 100%; padding: 0; border: none; outline: none; background: transparent; color: var(--dsw-alias-label-primary); font-family: inherit; font-size: 13px; }
+.cwd-field input::placeholder { color: var(--dsw-alias-label-tertiary); }
+.cwd-pill { display: inline-flex; align-items: center; gap: 6px; flex: none; max-width: 160px; height: 34px; padding: 0 12px; border: none; border-radius: 10px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-secondary); font-family: inherit; font-size: 12.5px; line-height: 20px; cursor: pointer; }
+.cwd-pill:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover-accent); color: var(--dsw-alias-label-primary); }
+.cwd-pill:disabled { opacity: .45; cursor: not-allowed; }
+.cwd-pill span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cwd-groupcreate { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.cwd-groupcreate input { width: 104px; height: 34px; padding: 0 10px; border: .5px solid var(--dsw-alias-border-l1); border-radius: 10px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font-family: inherit; font-size: 12.5px; }
+.cwd-thead, .cwd-row { display: grid; grid-template-columns: minmax(0, 1.6fr) 92px 84px 40px; gap: 10px; align-items: center; }
+.cwd-thead { flex: none; padding: 8px 14px; border-bottom: .5px solid var(--dsw-alias-border-l2); font-size: 11px; line-height: 16px; letter-spacing: .2px; color: var(--dsw-alias-label-tertiary); white-space: nowrap; }
+.cwd-right { text-align: right; }
+.cwd-tablebody { flex: 1; min-height: 0; overflow-y: auto; border-bottom: .5px solid var(--dsw-alias-border-l2); }
+.cwd-row { padding: 9px 14px; border-bottom: .5px solid var(--dsw-alias-border-l2); transition: background .15s var(--ds-ease-in-out); }
+.cwd-row:last-of-type { border-bottom: none; }
+.cwd-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.cwd-row[aria-current="true"] { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent); }
+.cwd-nameline { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cwd-cellname { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 0; border: none; background: transparent; color: inherit; font-family: inherit; text-align: left; cursor: pointer; }
+.cwd-nametext { flex: 0 1 auto; min-width: 0; font-size: 14px; line-height: 19px; font-weight: 500; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cwd-codeline { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 11px; line-height: 15px; color: var(--dsw-alias-label-tertiary); }
+.cwd-code { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cwd-price { text-align: right; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cwd-pct { text-align: right; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cwd-up { color: var(--capital-watchlist-up); }
+.cwd-down { color: var(--capital-watchlist-down); }
+.cwd-flat { color: var(--dsw-alias-label-secondary); }
+.cwd-stale { color: var(--dsw-alias-label-secondary); }
+.cwd-rowactions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 2px; }
+.cwd-iconbtn { flex: none; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; }
+.cwd-iconbtn:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover-accent); color: var(--dsw-alias-label-primary); }
+.cwd-iconbtn:disabled { opacity: .45; cursor: not-allowed; }
+.cwd-detail { display: flex; flex: 1; flex-direction: column; gap: 14px; min-height: 0; padding: 16px; overflow-y: auto; }
+.cwd-detailhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; min-width: 0; }
+.cwd-detailname { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 16px; line-height: 22px; font-weight: 600; }
+.cwd-detailtext { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cwd-detailcode { margin-top: 3px; font-size: 12px; line-height: 17px; color: var(--dsw-alias-label-tertiary); }
+.cwd-bigquote { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; }
+.cwd-bigprice { font-size: 34px; line-height: 40px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.cwd-bigpct { font-size: 14px; line-height: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cwd-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+.cwd-metaitem { min-width: 0; }
+.cwd-metalabel { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+.cwd-metavalue { font-size: 12.5px; line-height: 18px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cwd-block { flex: none; padding-top: 12px; border-top: .5px solid var(--dsw-alias-border-l2); }
+.cwd-block-chart { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.cwd-blockhead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.cwd-blocktitle { font-size: 12.5px; line-height: 18px; font-weight: 600; }
+.cwd-blocknote { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+.cwd-chart { flex: 1; min-height: 150px; display: grid; place-items: center; padding: 12px; border: 1px dashed var(--dsw-alias-border-l2); border-radius: 10px; background: repeating-linear-gradient(180deg, color-mix(in srgb, var(--dsw-alias-border-l2) 60%, transparent) 0 1px, transparent 1px 36px), var(--dsw-alias-bg-module-platform); text-align: center; }
+.cwd-charttext { font-size: 12.5px; line-height: 18px; font-weight: 500; color: var(--dsw-alias-label-secondary); }
+.cwd-charthint { margin-top: 4px; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+.cwd-volume { height: 92px; display: grid; place-items: center; border: 1px dashed var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-module-platform); border-radius: 10px; font-size: 12px; color: var(--dsw-alias-label-tertiary); }
+.cwd-empty { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 34px 18px; text-align: center; }
+.cwd-emptytitle { font-size: 14px; line-height: 20px; font-weight: 600; }
+.cwd-emptyhint { margin: 6px 0 0; font-size: 12.5px; line-height: 19px; color: var(--dsw-alias-label-tertiary); }
+.cwd-notice { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 14px; border-bottom: .5px solid var(--dsw-alias-border-l2); font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }
+.cwd-notice-danger { color: var(--dsw-alias-state-error-primary); }
+.cwd-error { flex: none; padding: 8px 14px; border-bottom: .5px solid var(--dsw-alias-border-l2); font-size: 12px; line-height: 18px; color: var(--dsw-alias-state-error-primary); }
+.cwd-menuhint { padding: 6px 10px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); }
+.cwd-menulist { width: 208px; }
+.cwd-menulist button { box-sizing: border-box; }
+.cwd-field:focus-within { outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: 1px; }
+.cwd-page button:focus-visible, .cwd-groupcreate input:focus-visible { outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: 1px; }
+.cwd-skeleton { display: block; height: 12px; border-radius: 6px; background: var(--dsw-alias-bg-skeleton); }
+@media (max-width: 1040px) { .cwd-body { grid-template-columns: minmax(0, 1fr); gap: 16px; height: auto; } .cwd-card { height: auto; } .cwd-tablebody { flex: none; max-height: 60vh; } .cwd-chart { flex: none; height: 200px; } }
+@media (max-width: 720px) { .cwd-inner { padding: 20px 16px 32px; } .cwd-thead, .cwd-row { grid-template-columns: minmax(0, 1.5fr) 78px 72px 36px; gap: 8px; } .cwd-thead { padding: 8px 10px; } .cwd-row { padding: 9px 10px; } }
 `
 
 function installStyles() {
@@ -1231,6 +1395,389 @@ function WatchlistDialog({ useDialog, surface, t, inputActions }) {
   )
 }
 
+/* ---------------------------------------------------------------------------
+ * 行情工作台：左侧栏「自选股」入口 + main 面板。
+ * 报价仍只走 /capital-watchlist（同一 host 路由、同一套失败码）；分组只落本机。
+ * 分时与成交量目前没有数据源，画占位并写明原因，不补造走势。
+ * ------------------------------------------------------------------------ */
+const DESK_PANEL_ID = `${ENTRY_NAME}:desk`
+const DESK_GROUPS_KEY = 'capital.watchlist.desk.groups.v1'
+const DESK_ALL = '__all__'
+
+function readDeskGroups() {
+  const empty = { names: [], assignments: {} }
+  try {
+    const parsed = JSON.parse(localStorage.getItem(DESK_GROUPS_KEY) ?? '{}')
+    if (parsed === null || typeof parsed !== 'object') return empty
+    if (!Array.isArray(parsed.names)) return empty
+    if (parsed.assignments === null || typeof parsed.assignments !== 'object') return empty
+    return {
+      names: parsed.names.filter((name) => typeof name === 'string' && name.length > 0).slice(0, 20),
+      assignments: parsed.assignments,
+    }
+  } catch {
+    return empty
+  }
+}
+
+function writeDeskGroups(value) {
+  try {
+    localStorage.setItem(DESK_GROUPS_KEY, JSON.stringify(value))
+  } catch {
+    // Private mode: groups stay in memory for this page.
+  }
+}
+
+const deskGroupsOf = (groups, thscode) => {
+  const names = groups.assignments[thscode]
+  return Array.isArray(names) ? names : []
+}
+
+/** Missing change is missing (holiday / halted), never 0.00%. */
+const deskPctOf = (quote) => (quote !== null && quote !== undefined && typeof quote.change_pct === 'number' && Number.isFinite(quote.change_pct) ? quote.change_pct : null)
+const deskToneOf = (value) => (value === null ? 'cwd-flat' : value > 0 ? 'cwd-up' : value < 0 ? 'cwd-down' : 'cwd-flat')
+const deskPctText = (value) => (value === null ? '—' : `${value > 0 ? '+' : ''}${value.toFixed(2)}%`)
+/** Comma grouping is the market convention here, so it does not follow the UI locale. */
+const deskPriceFormat = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const deskPriceText = (quote) => (quote !== null && quote !== undefined && typeof quote.price === 'number' && Number.isFinite(quote.price) ? deskPriceFormat.format(quote.price) : '—')
+
+/** Sidebar glyph: an axis plus a rising line reads as quotes without inventing a wallet/pie shape. */
+function WatchlistDeskIcon({ size = 18 }) {
+  return h('svg', {
+    width: size,
+    height: size,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    'aria-hidden': 'true',
+  },
+    h('path', { d: 'M4 19V5' }),
+    h('path', { d: 'M4 19h16' }),
+    h('path', { d: 'm7 15 3-4 3 2 5-7' }),
+    h('circle', { cx: 18, cy: 6, r: 1.4, fill: 'currentColor', stroke: 'none' }))
+}
+
+function WatchlistDeskPage({ t }) {
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshedAt, setRefreshedAt] = useState(null)
+  const [failures, setFailures] = useState({})
+  const [error, setError] = useState(null)
+  const [groups, setGroups] = useState(readDeskGroups)
+  const [activeGroup, setActiveGroup] = useState(DESK_ALL)
+  const [groupOpen, setGroupOpen] = useState(false)
+  const [newGroup, setNewGroup] = useState('')
+  const [query, setQuery] = useState('')
+  const [selected, setSelected] = useState(null)
+  const [pendingRemove, setPendingRemove] = useState(null)
+  const [rowMenu, setRowMenu] = useState(null)
+  const alive = useRef(true)
+
+  useEffect(() => {
+    alive.current = true
+    return () => { alive.current = false }
+  }, [])
+  useEffect(() => { writeDeskGroups(groups) }, [groups])
+
+  /** One refresh reply feeds the list, per-row failure marks and the footer time. */
+  const applyRefresh = (payload) => {
+    const landed = cleanRows(payload.items)
+    if (Array.isArray(landed)) setItems(landed)
+    const next = {}
+    for (const item of payload.failures ?? []) {
+      if (item !== null && typeof item === 'object' && typeof item.thscode === 'string') next[item.thscode] = item.code
+    }
+    setFailures(next)
+    if (typeof payload.refreshed_at === 'number') setRefreshedAt(payload.refreshed_at)
+    setError(payload.error !== undefined && payload.error !== null && typeof payload.error.code === 'string' ? payload.error.code : null)
+  }
+
+  // Opening the panel is the user request: read the list, then quote it once. No polling.
+  useEffect(() => {
+    let cancelled = false
+    const boot = async () => {
+      try {
+        const listed = await call('/list')
+        if (cancelled) return
+        const landed = cleanRows(listed.items) ?? []
+        setItems(landed)
+        // The detail panel is the main area: start on the first symbol instead of an empty aside.
+        setSelected((value) => (value !== null ? value : (typeof landed[0]?.thscode === 'string' ? landed[0].thscode : null)))
+      } catch (failure) {
+        if (!cancelled) setError(failure.code ?? 'load_failed')
+        return
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+      try {
+        const payload = await call('/refresh', { body: {} })
+        if (!cancelled) applyRefresh(payload)
+      } catch (failure) {
+        if (!cancelled) setError(failure.code ?? 'fuyao_unavailable')
+      }
+    }
+    void boot()
+    return () => { cancelled = true }
+  }, [])
+
+  const refresh = async () => {
+    if (refreshing) return
+    setRefreshing(true)
+    try {
+      const payload = await call('/refresh', { body: {} })
+      if (alive.current) applyRefresh(payload)
+    } catch (failure) {
+      if (alive.current) setError(failure.code ?? 'fuyao_unavailable')
+    } finally {
+      if (alive.current) setRefreshing(false)
+    }
+  }
+
+  const removeRow = async (thscode) => {
+    const before = items
+    setPendingRemove(null)
+    setItems(before.filter((row) => row.thscode !== thscode))
+    if (selected === thscode) setSelected(null)
+    try {
+      await call('/remove', { body: { thscode } })
+    } catch {
+      // Put the row back exactly where it was; the host never confirmed the removal.
+      if (alive.current) setItems(before)
+    }
+  }
+
+  const pinRow = async (thscode) => {
+    const before = items
+    const target = before.find((row) => row.thscode === thscode)
+    if (target === undefined) return
+    setItems([target, ...before.filter((row) => row.thscode !== thscode)])
+    try {
+      const payload = await call('/pin', { body: { thscode } })
+      if (Array.isArray(payload.items) && alive.current) setItems(cleanRows(payload.items))
+    } catch {
+      if (alive.current) setItems(before)
+    }
+  }
+
+  const createGroup = () => {
+    const name = newGroup.trim()
+    if (name.length === 0 || name === DESK_ALL || groups.names.includes(name)) return
+    setGroups({ names: [...groups.names, name], assignments: groups.assignments })
+    setNewGroup('')
+    setActiveGroup(name)
+  }
+
+  const deleteGroup = (name) => {
+    if (name === DESK_ALL) return
+    const assignments = {}
+    for (const [thscode, names] of Object.entries(groups.assignments)) {
+      const kept = (Array.isArray(names) ? names : []).filter((entry) => entry !== name)
+      if (kept.length > 0) assignments[thscode] = kept
+    }
+    setGroups({ names: groups.names.filter((entry) => entry !== name), assignments })
+    setActiveGroup(DESK_ALL)
+    setGroupOpen(false)
+  }
+
+  const toggleGroup = (thscode, name) => {
+    const current = deskGroupsOf(groups, thscode)
+    const next = current.includes(name) ? current.filter((entry) => entry !== name) : [...current, name]
+    const assignments = { ...groups.assignments }
+    if (next.length === 0) delete assignments[thscode]
+    else assignments[thscode] = next
+    setGroups({ names: groups.names, assignments })
+  }
+
+  const term = query.trim().toLowerCase()
+  const visible = items.filter((item) => {
+    if (activeGroup !== DESK_ALL && !deskGroupsOf(groups, item.thscode).includes(activeGroup)) return false
+    if (term.length === 0) return true
+    return [item.name, item.thscode, item.ticker].some((value) => typeof value === 'string' && value.toLowerCase().includes(term))
+  })
+  const current = selected === null ? null : (items.find((item) => item.thscode === selected) ?? null)
+
+  const groupMenuItems = [{ id: DESK_ALL, label: t('desk.allGroups'), icon: activeGroup === DESK_ALL ? h(IconChecklistOutlineRegular, { size: 14 }) : undefined }]
+    .concat(groups.names.map((name) => ({ id: name, label: name, icon: activeGroup === name ? h(IconChecklistOutlineRegular, { size: 14 }) : undefined })))
+
+  const rows = visible.map((item, index) => {
+    const pct = deskPctOf(item.quote)
+    const failure = failures[item.thscode]
+    const names = deskGroupsOf(groups, item.thscode)
+    const isSelected = selected === item.thscode
+    const quoteTitle = failure === undefined ? undefined : t(`error.${failure}`)
+    const menuOpen = rowMenu === item.thscode
+    return h('div', {
+      key: item.thscode,
+      className: 'cwd-row',
+      role: 'listitem',
+      'aria-current': isSelected ? 'true' : undefined,
+      onClick: (event) => { if (event.target.closest('.cwd-rowactions') === null) setSelected(item.thscode) },
+    },
+      h('button', {
+        type: 'button',
+        className: 'cwd-cellname',
+        'aria-pressed': isSelected,
+        onClick: () => setSelected(item.thscode),
+      },
+        h('span', { className: 'cwd-nameline' },
+          h('span', { className: 'cwd-nametext', title: item.name }, scrubInvisible(item.name)),
+          h(TypeTag, { assetType: item.asset_type, t })),
+        h('span', { className: 'cwd-codeline' }, h('span', { className: 'cwd-code' }, item.thscode))),
+      h('div', { className: failure === undefined ? 'cwd-price' : 'cwd-price cwd-stale', title: quoteTitle }, deskPriceText(item.quote)),
+      h('div', { className: `cwd-pct ${deskToneOf(pct)}`, title: quoteTitle }, deskPctText(pct)),
+      // One trigger per row: pin, group checkboxes and remove live in the official Menu.
+      h('div', { className: 'cwd-rowactions' },
+        h(Menu, {
+          open: menuOpen,
+          anchor: h('button', {
+            type: 'button',
+            className: 'cwd-iconbtn',
+            title: t('desk.more'),
+            'aria-label': `${t('desk.more')} ${item.name}`,
+            'aria-haspopup': 'menu',
+            'aria-expanded': menuOpen,
+            onClick: () => { setPendingRemove(null); setRowMenu(menuOpen ? null : item.thscode) },
+          }, h(IconEllipsisOutlineRegular, { size: 16 })),
+          items: [{ id: 'pin', label: t('desk.pin'), icon: h(IconPinOutlineRegular, { size: 14 }), disabled: index === 0 }],
+          children: [
+            ...(groups.names.length === 0
+              ? [h('div', { key: 'no-group', className: 'cwd-menuhint' }, t('desk.noGroupYet'))]
+              : groups.names.map((name) => h(MenuItemButton, {
+                key: `group:${name}`,
+                icon: names.includes(name) ? h(IconChecklistOutlineRegular, { size: 14 }) : undefined,
+                onSelect: () => toggleGroup(item.thscode, name),
+              }, name))),
+            h(MenuItemButton, {
+              key: 'remove',
+              danger: true,
+              separatorBefore: true,
+              icon: h(IconTrashOutlineRegular, { size: 14 }),
+              onSelect: () => { setRowMenu(null); setPendingRemove(item) },
+            }, t('desk.remove')),
+          ],
+          onSelect: (id) => {
+            if (id !== 'pin') return
+            setRowMenu(null)
+            void pinRow(item.thscode)
+          },
+          onClose: () => setRowMenu(null),
+          align: 'end',
+          portal: true,
+          listClassName: 'cwd-menulist',
+        }))
+    )
+  })
+
+  const listBody = loading
+    ? h('div', { className: 'cwd-empty' }, h('div', { className: 'cwd-emptytitle' }, t('desk.loading')))
+    : items.length === 0
+      ? h('div', { className: 'cwd-empty' }, h('div', { className: 'cwd-emptytitle' }, t('desk.empty')), h('p', { className: 'cwd-emptyhint' }, t('desk.emptyHint')))
+      : visible.length === 0
+        ? h('div', { className: 'cwd-empty' }, h('div', { className: 'cwd-emptytitle' }, t('desk.noMatch')), h('p', { className: 'cwd-emptyhint' }, t('desk.noMatchHint')))
+        : h('div', { className: 'cwd-tablebody', role: 'list', 'aria-label': t('desk.title') }, rows)
+
+  const detailNames = current === null ? [] : deskGroupsOf(groups, current.thscode)
+  const detailPct = current === null ? null : deskPctOf(current.quote)
+  const detail = current === null
+    ? h('div', { className: 'cwd-card' }, h('div', { className: 'cwd-empty' },
+      h('div', { className: 'cwd-emptytitle' }, t('desk.selectHint')),
+      h('p', { className: 'cwd-emptyhint' }, t('desk.selectHintBody'))))
+    : h('div', { className: 'cwd-card' }, h('div', { className: 'cwd-detail' },
+      h('div', { className: 'cwd-detailhead' },
+        h('div', { style: { minWidth: 0 } },
+          h('div', { className: 'cwd-detailname' },
+            h('span', { className: 'cwd-detailtext', title: current.name }, scrubInvisible(current.name)),
+            h(TypeTag, { assetType: current.asset_type, t })),
+          h('div', { className: 'cwd-detailcode' }, current.thscode))),
+      h('div', { className: 'cwd-bigquote' },
+        h('span', { className: 'cwd-bigprice' }, deskPriceText(current.quote)),
+        h('span', { className: `cwd-bigpct ${deskToneOf(detailPct)}` }, deskPctText(detailPct))),
+      h('div', { className: 'cwd-meta' },
+        h('div', { className: 'cwd-metaitem' }, h('div', { className: 'cwd-metalabel' }, t('desk.capturedAt')), h('div', { className: 'cwd-metavalue' }, current.quote === null || current.quote === undefined ? t('desk.notRefreshed') : (formatTime(current.quote.captured_at) || t('desk.notRefreshed')))),
+        h('div', { className: 'cwd-metaitem' }, h('div', { className: 'cwd-metalabel' }, t('desk.sourceTime')), h('div', { className: 'cwd-metavalue' }, typeof current.quote?.source_time === 'string' && current.quote.source_time.length > 0 ? current.quote.source_time : '—')),
+        h('div', { className: 'cwd-metaitem' }, h('div', { className: 'cwd-metalabel' }, t('desk.groupsOf')), h('div', { className: 'cwd-metavalue' }, detailNames.length === 0 ? t('desk.noGroup') : detailNames.join(' / '))),
+        h('div', { className: 'cwd-metaitem' }, h('div', { className: 'cwd-metalabel' }, t('desk.kind')), h('div', { className: 'cwd-metavalue' }, typeLabel(current.asset_type, t)))),
+      h('div', { className: 'cwd-block cwd-block-chart' },
+        h('div', { className: 'cwd-blockhead' },
+          h('span', { className: 'cwd-blocktitle' }, t('desk.intraday')),
+          h('span', { className: 'cwd-blocknote' }, refreshedAt === null ? t('desk.notRefreshed') : formatTime(refreshedAt))),
+        h('div', { className: 'cwd-chart' },
+          h('div', null,
+            h('div', { className: 'cwd-charttext' }, t('desk.intradayEmpty')),
+            h('div', { className: 'cwd-charthint' }, t('desk.intradayEmptyHint'))))),
+      h('div', { className: 'cwd-block' },
+        h('div', { className: 'cwd-blockhead' }, h('span', { className: 'cwd-blocktitle' }, t('desk.volume'))),
+        h('div', { className: 'cwd-volume' }, t('desk.volumeEmpty')))))
+
+  return h('div', { className: 'cwd-page' },
+    h('div', { className: 'cwd-inner' },
+      h('header', { className: 'cwd-head' },
+        h('h1', { className: 'cwd-title' }, t('desk.title')),
+        h('div', { className: 'cwd-headactions' },
+          h('span', { className: 'cwd-updated' },
+            `${t('desk.lastUpdate')} ${refreshedAt === null ? t('desk.notRefreshed') : formatTime(refreshedAt)}`),
+          h('button', { type: 'button', className: 'cwd-refresh', disabled: refreshing, onClick: () => { void refresh() } },
+            h(IconRefreshOutlineRegular, { size: 14 }),
+            refreshing ? t('desk.refreshing') : t('desk.refresh')))),
+      h('div', { className: 'cwd-body' },
+        h('section', { className: 'cwd-card' },
+          h('div', { className: 'cwd-toolbar' },
+            h('label', { className: 'cwd-field' },
+              h(IconSearchOutlineRegular, { size: 14 }),
+              h('input', { type: 'text', value: query, placeholder: t('desk.filterPlaceholder'), 'aria-label': t('desk.filter'), onChange: (event) => setQuery(event.target.value) })),
+            h(Menu, {
+              open: groupOpen,
+              anchor: h('button', {
+                type: 'button',
+                className: 'cwd-pill',
+                'aria-haspopup': 'menu',
+                'aria-expanded': groupOpen,
+                'aria-label': t('desk.group'),
+                onClick: () => setGroupOpen(!groupOpen),
+              }, h(IconGoalOutlineRegular, { size: 14 }), h('span', null, activeGroup === DESK_ALL ? t('desk.allGroups') : activeGroup)),
+              items: groupMenuItems,
+              children: activeGroup === DESK_ALL ? [] : [h(MenuItemButton, {
+                key: 'delete-group',
+                danger: true,
+                separatorBefore: true,
+                icon: h(IconTrashOutlineRegular, { size: 14 }),
+                onSelect: () => deleteGroup(activeGroup),
+              }, t('desk.deleteGroup'))],
+              onSelect: (id) => { setGroupOpen(false); setActiveGroup(id) },
+              onClose: () => setGroupOpen(false),
+              align: 'start',
+              portal: true,
+              listClassName: 'cwd-menulist',
+            }),
+            h('div', { className: 'cwd-groupcreate' },
+              h('input', {
+                type: 'text',
+                value: newGroup,
+                maxLength: 20,
+                placeholder: t('desk.newGroup'),
+                'aria-label': t('desk.newGroup'),
+                onChange: (event) => setNewGroup(event.target.value),
+                onKeyDown: (event) => { if (event.key === 'Enter') createGroup() },
+              }),
+              h('button', { type: 'button', className: 'cwd-pill', disabled: newGroup.trim().length === 0, onClick: createGroup }, t('desk.createGroup')))),
+          error === null ? null : h('div', { className: 'cwd-error', role: 'alert' }, error === 'load_failed' ? t('desk.loadFailed') : t(`error.${error}`)),
+          pendingRemove === null ? null : h('div', { className: 'cwd-notice cwd-notice-danger' },
+            h('span', null, `${t('desk.removeHint')} · ${scrubInvisible(pendingRemove.name)}`),
+            h('button', { type: 'button', className: 'cwd-pill', onClick: () => setPendingRemove(null) }, t('desk.cancel'))),
+          h('div', { className: 'cwd-thead', role: 'row' },
+            h('span', null, t('desk.colName')),
+            h('span', { className: 'cwd-right' }, t('desk.colPrice')),
+            h('span', { className: 'cwd-right' }, t('desk.colChange')),
+            h('span', { className: 'cwd-right' }, t('desk.colAction'))),
+          listBody),
+        h('aside', null, detail)),
+    ))
+}
+
 function apply(ctx) {
   ctx.effect(installStyles, `${ENTRY_NAME}: styles`)
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), `${ENTRY_NAME}: dictionaries`)
@@ -1279,6 +1826,23 @@ function apply(ctx) {
       }
     },
   }, WatchlistDialog))
+
+  // Desk shell: one sidebar entry + its main panel. Quotes still come from the host
+  // route the dialog uses; the page never fetches anything the dialog would not.
+  // Registered after the overlay so the dialog stays the first seat this plugin adds.
+  const deskT = ctx.locale.bind(NS)
+  ctx.slots.inject('main', () => ctx.slots.register({
+    name: 'main',
+    key: DESK_PANEL_ID,
+    locale: NS,
+  }, WatchlistDeskPage))
+  ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
+    name: 'sidebar.panellist',
+    id: DESK_PANEL_ID,
+    order: 12,
+    locale: NS,
+    label: () => deskT('desk.panel'),
+  }, WatchlistDeskIcon))
 
   ctx.inject(['commandUi'], (scope) => {
     const t = ctx.locale.bind(NS)

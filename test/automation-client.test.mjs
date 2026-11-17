@@ -80,7 +80,7 @@ function factoryRequire(name, createElement) {
       'IconInfoOutlineRegular',
       'IconPauseOutlineRegular', 'IconPlayOutlineRegular',
       'IconPlusOutlineRegular', 'IconRefreshOutlineRegular', 'IconRightUpOutlineRegular', 'IconSearchOutlineRegular',
-      'IconSparkleRegular', 'IconTrashOutlineRegular', 'IconWarningOutlineRegular',
+      'IconSlidersTwoOutlineRegular', 'IconSparkleRegular', 'IconTrashOutlineRegular', 'IconWarningOutlineRegular',
       'Menu', 'MenuItemButton', 'Modal', 'Switch',
     ]
     return Object.fromEntries(names.map((key) => [key, empty]))
@@ -310,6 +310,36 @@ test('下拉统一为宿主设置同款：胶囊按钮 + Menu，不再渲染原�
   assert.equal((clientSource.match(/h\(SelectField, \{/g) ?? []).length, 2, '两个表单整行下拉使用 SelectField')
   assert.match(clientSource, /\.capital-automation-select \{[^}]*background: var\(--ca-field\)/, '下拉按钮必须用宿主设置同款的填充胶囊')
   assert.match(clientSource, /\.capital-automation-select:hover:not\(:disabled\)/, '胶囊必须有 hover 反馈')
+})
+
+test('任务分类筛选收进下拉：胶囊触发器 + 宿主 Menu，工具栏不再铺一排 chip', () => {
+  const start = clientSource.indexOf('function TaskFilterMenu(props)')
+  const end = clientSource.indexOf('function TaskTags(props)', start)
+  assert.ok(start >= 0 && end > start, '必须有独立的任务筛选下拉组件')
+  const block = clientSource.slice(start, end)
+  assert.match(block, /h\(Menu, \{/, '筛选必须复用宿主 Menu 浮层')
+  assert.match(block, /h\(MenuItemButton, \{/, '每个筛选项必须是宿主菜单项')
+  assert.match(block, /selected: option\.value === value/, '菜单必须用 MenuItemButton 的 selected 标出当前项')
+  assert.match(block, /'aria-haspopup': 'menu'/, '触发器必须声明弹出菜单')
+  assert.match(block, /'aria-expanded': open \? 'true' : 'false'/, '触发器必须暴露展开状态')
+  assert.match(block, /triggerRef\.current\?\.focus\?\.\(\{ preventScroll: true \}\)/, '选择后焦点必须回到触发器')
+  assert.match(block, /capital-automation-filtercount/, '展开后仍要显示各分类的圆圈计数')
+  assert.match(block, /listClassName: 'capital-automation-taskfiltermenu'/, 'portal 菜单必须能单独定宽')
+
+  const dashboardStart = clientSource.indexOf('function TaskDashboard(props)')
+  const dashboardEnd = clientSource.indexOf('function WeekdaySelect(props)', dashboardStart)
+  assert.ok(dashboardStart >= 0 && dashboardEnd > dashboardStart, '必须能定位任务页')
+  const dashboard = clientSource.slice(dashboardStart, dashboardEnd)
+  assert.match(dashboard, /h\(TaskFilterMenu, \{/, '任务页必须用下拉筛选')
+  assert.doesNotMatch(dashboard, /h\(FilterButton, \{/, '任务页不再把八个分类铺成 chip')
+  assert.doesNotMatch(dashboard, /capital-automation-filters/, '任务页工具栏不再保留 chip 容器')
+  assert.match(dashboard, /const filters = \['all', 'custom', 'news', 'market', 'review', 'research', 'portfolio', 'monitor'\]/, '下拉选项仍需覆盖全部分类')
+  assert.match(dashboard, /label: value === 'all' \? zh\.filterAll : value === 'custom' \? zh\.filterCustom : categoryLabel\(value\)/, '下拉选项文案必须与计数口径一致')
+  assert.match(clientSource, /\.capital-automation-select\.capital-automation-taskfilter \{[^}]*height: 30px/, '筛选触发器必须与搜索框同高')
+  assert.match(clientSource, /\.capital-automation-select\.capital-automation-taskfilter \{[^}]*border-radius: 999px/, '筛选触发器必须是胶囊，与搜索框同款')
+  assert.match(clientSource, /\.capital-automation-taskfiltermenu \{ min-width: 176px; \}/, '菜单需要稳定的最小宽度，计数不能挤成换行')
+  assert.match(clientSource, /\.capital-automation-taskfilteroption \{[^}]*justify-content: flex-start/, '菜单项计数必须紧挨分类文字，不能推到行尾')
+  assert.match(clientSource, /h\(RunFilters, \{ value: filter, counts, onChange: setFilter \}\)/, '运行页的分类筛选保持原样，不受任务页改动影响')
 })
 
 test('任务详情按状态收敛：头部去重、状态化卡片、配置页字段内联校验', () => {

@@ -48,13 +48,13 @@ const record = {
   updatedAt: '2026-10-27T00:00:00.000Z',
 }
 
-// Coverage and deliverable belong in the template; category shape, data discipline and the
-// unattended policy belong to the runner. Too short drifts into "生成一份复盘", too long starts
-// duplicating the prompt the runner already builds.
+// The template owns the scan boundary, window and deliverable; category shape, data discipline
+// and the unattended policy belong to the runner. Too short drifts into "生成一份复盘", too long
+// starts duplicating the prompt the runner already builds.
 const MIN_INSTRUCTION_CHARS = 120
 const MAX_INSTRUCTION_CHARS = 260
 
-test('十六个内容模板 dormant + 一个 TODO 核验任务 active，指令只写覆盖范围与交付', () => {
+test('十六个内容模板 dormant + 一个 TODO 核验任务 active，指令写清边界、窗口与交付', () => {
   assert.equal(BUILTIN_DEFINITIONS.length, 17)
   assert.deepEqual(BUILTIN_DEFINITIONS.map((item) => item.id), [
     'us-close',
@@ -84,11 +84,16 @@ test('十六个内容模板 dormant + 一个 TODO 核验任务 active，指令�
     assert.equal(typeof definition.defaults.trigger.tradingDaysOnly, 'boolean', `${definition.id} 必须显式声明是否只看交易日`)
     assert.equal(definition.defaults.cwdKind, 'profile')
     assert.equal('mode' in definition.defaults, false, '输出侧重已并入任务分类，内置定义不能保留 mode')
-    assert.ok(length >= MIN_INSTRUCTION_CHARS, `${definition.id} 的指令只有 ${length} 字：覆盖范围与交付要写清，不能只留主题句`)
+    assert.ok(length >= MIN_INSTRUCTION_CHARS, `${definition.id} 的指令只有 ${length} 字：边界、覆盖范围与交付要写清，不能只留主题句`)
     assert.ok(length <= MAX_INSTRUCTION_CHARS, `${definition.id} 的指令 ${length} 字过长：数据纪律与运行策略由 runner 提供，不要复制`)
     assert.doesNotMatch(instruction, /数据与来源纪律/, `${definition.id} 不应再复制自动模式的数据纪律`)
     assert.doesNotMatch(instruction, /无人值守执行策略/, `${definition.id} 不应再复制运行策略`)
     assert.doesNotMatch(instruction, /get_watchlist|anysearch|web_retriever|data_collector|data_junior/, `${definition.id} 不应点名工具或角色：工具面由运行模式决定`)
+    assert.match(instruction, /^只/, `${definition.id} 的指令要以「只」开头，先收紧扫描与交付范围`)
+    assert.match(instruction, /自选股|候选 TODO/, `${definition.id} 必须点明扫描主体是自选股或候选 TODO`)
+    assert.doesNotMatch(instruction, /全市场|权重股|行业龙头|所有行业|全部行业|活跃股/, `${definition.id} 不能要求全市场或非自选股的扫描`)
+    assert.doesNotMatch(description, /全市场|权重股|行业龙头|所有行业|全部行业|活跃股/, `${definition.id} 的模板说明不能承诺全市场覆盖`)
+    assert.match(instruction, /不写|不做|不扫|不重复|不展开|不补|不列|不猜|不硬凑|不拿|不单独成节|不要编造/, `${definition.id} 要写清不做什么，任务之间靠边界区分`)
     assert.match(description, /自选股/, `${definition.id} 的模板说明要点名自选股`)
     assert.ok(Array.from(description).length <= 100, `${definition.id} 的模板说明超过 100 字，页面会截断`)
   }
@@ -100,19 +105,19 @@ test('任务分类闭集：组合与监控走后端同一份枚举', () => {
 
 test('新增模板的日程与职责固定：港美股、组合、监控、研究与盘中各有明确窗口', () => {
   const cases = [
-    { id: 'us-close', title: '美股收盘', category: 'market', cadence: 'weekly', time: '07:00', weekdays: [2, 3, 4, 5, 6], tradingDaysOnly: false, matches: [/三大指数/, /盘后异动/, /休市/] },
-    { id: 'midday-snapshot', title: '午间快照', category: 'market', cadence: 'daily', time: '11:35', tradingDaysOnly: true, matches: [/11:35/, /涨跌停/, /采集时间/] },
+    { id: 'us-close', title: '美股收盘', category: 'market', cadence: 'weekly', time: '07:00', weekdays: [2, 3, 4, 5, 6], tradingDaysOnly: false, matches: [/三大指数/, /盘后异动/, /这些标的的当日财报/, /休市/] },
+    { id: 'midday-snapshot', title: '午间快照', category: 'market', cadence: 'daily', time: '11:35', tradingDaysOnly: true, matches: [/11:35/, /涨跌停家数/, /采集时间/] },
     { id: 'todo-verifier-close', title: 'TODO 核验', category: 'monitor', cadence: 'daily', time: '17:00', tradingDaysOnly: true, matches: [/候选 TODO/, /insufficient/, /JSON/] },
-    { id: 'hk-close', title: '港股收盘', category: 'market', cadence: 'daily', time: '16:30', tradingDaysOnly: true, matches: [/恒生/, /AH 溢价/, /休市/] },
-    { id: 'us-premarket', title: '美股盘前', category: 'market', cadence: 'weekly', time: '20:30', weekdays: [1, 2, 3, 4, 5], tradingDaysOnly: false, matches: [/盘前/, /未取到/, /休市/] },
-    { id: 'portfolio-weekly', title: '组合周报', category: 'portfolio', cadence: 'weekly', time: '10:00', weekdays: [6], tradingDaysOnly: false, matches: [/标记的持仓/, /集中度/, /不补满 100%/] },
-    { id: 'watchlist-weekly', title: '自选股周检', category: 'monitor', cadence: 'weekly', time: '14:00', weekdays: [6], tradingDaysOnly: false, matches: [/可以移出/, /催化剂/, /合并成一组/] },
-    { id: 'sector-weekly', title: '行业周报', category: 'market', cadence: 'weekly', time: '20:00', weekdays: [6], tradingDaysOnly: false, matches: [/行业周报/, /资金集中度/, /景气/] },
-    { id: 'research-topics', title: '研究选题', category: 'research', cadence: 'weekly', time: '14:00', weekdays: [7], tradingDaysOnly: false, matches: [/3 个/, /核心问题/, /核查/] },
-    { id: 'earnings-tracker', title: '财报跟踪', category: 'research', cadence: 'weekly', time: '16:00', weekdays: [7], tradingDaysOnly: false, matches: [/一致预期/, /财报预约/, /不要硬凑/] },
+    { id: 'hk-close', title: '港股收盘', category: 'market', cadence: 'daily', time: '16:30', tradingDaysOnly: true, matches: [/恒生/, /HSAHP/, /最近已披露交易日/, /休市/] },
+    { id: 'us-premarket', title: '美股盘前', category: 'market', cadence: 'weekly', time: '20:30', weekdays: [1, 2, 3, 4, 5], tradingDaysOnly: false, matches: [/盘前/, /不扫非自选股的财报/, /未取到/, /休市/] },
+    { id: 'portfolio-weekly', title: '组合周报', category: 'portfolio', cadence: 'weekly', time: '10:00', weekdays: [6], tradingDaysOnly: false, matches: [/标记的持仓/, /集中度相对上周的变化/, /不补满 100%/] },
+    { id: 'watchlist-weekly', title: '自选股周检', category: 'monitor', cadence: 'weekly', time: '14:00', weekdays: [6], tradingDaysOnly: false, matches: [/可以移出/, /催化剂/, /不做选题与核查计划/] },
+    { id: 'sector-weekly', title: '行业周报', category: 'market', cadence: 'weekly', time: '20:00', weekdays: [6], tradingDaysOnly: false, matches: [/所在行业/, /行业 β/, /不写市场级两融/] },
+    { id: 'research-topics', title: '研究选题', category: 'research', cadence: 'weekly', time: '14:00', weekdays: [7], tradingDaysOnly: false, matches: [/3 个/, /核心问题/, /不复述分诊名单/] },
+    { id: 'earnings-tracker', title: '财报跟踪', category: 'research', cadence: 'weekly', time: '16:00', weekdays: [7], tradingDaysOnly: false, matches: [/一致预期/, /下一场披露/, /不硬凑/] },
     { id: 'week-ahead-calendar', title: '下周事件日历', category: 'monitor', cadence: 'weekly', time: '18:00', weekdays: [7], tradingDaysOnly: false, matches: [/财报预约/, /解禁/, /待确认/] },
-    { id: 'market-weekly', title: '市场周报', category: 'market', cadence: 'weekly', time: '20:00', weekdays: [7], tradingDaysOnly: false, matches: [/板块轮动/, /市场状态/, /缺口/] },
-    { id: 'portfolio-risk-monthly', title: '组合风险月报', category: 'portfolio', cadence: 'monthly', time: '20:30', dayOfMonth: 'last', tradingDaysOnly: false, matches: [/集中度/, /未评估/, /不填 0/] },
+    { id: 'market-weekly', title: '市场周报', category: 'market', cadence: 'weekly', time: '20:00', weekdays: [7], tradingDaysOnly: false, matches: [/沪深300/, /只写市场状态对自选股/, /缺口/] },
+    { id: 'portfolio-risk-monthly', title: '组合风险月报', category: 'portfolio', cadence: 'monthly', time: '20:30', dayOfMonth: 'last', tradingDaysOnly: false, matches: [/集中度水平/, /未评估/, /不重列周报的收益归因/] },
   ]
   for (const item of cases) {
     const { defaults } = BUILTIN_BY_ID.get(item.id)
@@ -128,31 +133,35 @@ test('新增模板的日程与职责固定：港美股、组合、监控、研�
   }
 })
 
-test('盘前公告在 08:00 补晚间披露，按开盘前优先级排', () => {
+test('盘前公告只收自选股，按开盘前优先级给动作', () => {
   const { instruction, trigger, title } = BUILTIN_BY_ID.get('pre-open-filings').defaults
   assert.equal(title, '盘前公告')
   assert.equal(trigger.time, '08:00', '盘前公告要在开盘前留出阅读时间')
   for (const kind of ['业绩预告', '重组并购', '重大合同', '增减持', '回购', '股权激励', '停复牌', '分红']) {
     assert.match(instruction, new RegExp(kind), `盘前公告缺少「${kind}」这一类`)
   }
-  assert.match(instruction, /上一交易日收盘后至运行时刻/, '盘前公告要覆盖 16:00 到开盘前的窗口')
+  assert.match(instruction, /上一交易日 16:00 后至运行时刻/, '盘前公告只收隔夜增量，16:00 是当日公告的收口点')
   assert.match(instruction, /A 股、港股、美股/, '盘前公告必须覆盖全部自选股市场，不能只做 A 股')
-  assert.match(instruction, /不得只做 A 股/, '盘前公告要明确禁止只做 A 股')
-  assert.match(instruction, /每只股票都要有结论/, '自选股逐只要给结论，不能把港股/美股标成不适用')
+  assert.match(instruction, /分开逐只过/, '盘前公告要按市场分开逐只过自选股，不能只看指数或只看 A 股')
+  assert.match(instruction, /每只都要有结论/, '自选股逐只要给结论，不能把港股/美股标成不适用')
   assert.match(instruction, /开盘前必看/, '晚间披露要按开盘前优先级分级')
-  assert.match(instruction, /只写公告/, '盘前公告不复述隔夜外盘与大盘行情')
+  assert.match(instruction, /开盘前要做的动作/, '盘前公告要落到动作，而不是再抄一遍公告摘要')
+  assert.match(instruction, /不写行情、外盘与宏观/, '盘前公告只写公告，不复述行情、外盘与宏观')
   assert.match(instruction, /未取到/, '取不到公告要明说，不能写成没有公告')
 })
 
-test('早间资讯按档覆盖盘前事实，缺档不许静默跳过', () => {
+test('早间资讯只做开盘前的信息面，公告明细交给盘前公告', () => {
   const { instruction } = BUILTIN_BY_ID.get('morning-brief').defaults
   assert.match(instruction, /3 件事/, '开头要给出最该知道的几件事，避免读完才知道重点')
-  for (const bucket of ['隔夜外盘', '大宗商品', '汇率', '宏观', '自选股', '披露', '解禁', '股东大会']) {
+  for (const bucket of ['隔夜外盘', '商品', '汇率', '宏观', '自选股', '披露', '解禁', '股东大会']) {
     assert.match(instruction, new RegExp(bucket), `早间资讯缺少「${bucket}」这一档`)
   }
+  assert.match(instruction, /公告明细交给盘前公告/, '早间资讯不能重复盘前公告的公告明细')
+  assert.match(instruction, /不写个股行情与复盘/, '早间资讯不做个股行情与复盘')
+  assert.match(instruction, /逐只核过/, '自选股要逐只核对，没有新信息再并成一句')
+  assert.match(instruction, /不复述美股收盘的读数、结论与验证点/, '早间资讯不能重复美股收盘的结论')
   assert.match(instruction, /未取到/, '取不到的档必须明说，不能省略成"没有"')
   assert.match(instruction, /写「无」/, '确实没有要写「无」，让用户知道这一档查过')
-  assert.match(instruction, /逐只过/, '自选股要逐只核对，不能只报有消息的')
 })
 
 test('当日公告仍定在 16:00，产出次日复核清单并交代披露截止', () => {
@@ -162,20 +171,83 @@ test('当日公告仍定在 16:00，产出次日复核清单并交代披露截�
   for (const kind of ['业绩预告', '重组并购', '重大合同', '增减持', '回购', '股权激励', '停复牌', '分红']) {
     assert.match(instruction, new RegExp(kind), `当日公告缺少「${kind}」这一类`)
   }
+  assert.match(instruction, /窗口为当日 00:00 至运行时刻/, '当日公告要写死当日窗口，避免把隔夜披露再扫一遍')
+  assert.match(instruction, /16:00 后的披露留给次日盘前公告/, '16:00 后的披露归盘前公告，两份清单不重叠')
+  assert.match(instruction, /分开逐只过/, '当日公告也要按市场分开逐只过自选股')
   assert.match(instruction, /次日必须处理/, '公告要按次日复核优先级分级')
   assert.match(instruction, /信息截止时刻/, '16:00 披露窗口未完，必须写明信息截止时刻')
   assert.match(instruction, /暂未披露/, '截止后待披露的部分要单列，不能当成没有公告')
+  assert.match(instruction, /不写行情与市场综述/, '当日公告不写行情与市场综述')
+  assert.match(instruction, /取不到写「未取到」/, '取不到公告要明说，不能写成没有公告')
 })
 
 test('每日复盘以自选股为主体，只把指数与板块当背景', () => {
   const { instruction } = BUILTIN_BY_ID.get('daily-review').defaults
-  assert.match(instruction, /主体是自选股/, '复盘必须点明自选股是主体')
+  assert.match(instruction, /只复盘自选股/, '复盘必须点明自选股是主体')
   assert.match(instruction, /近 20 日区间/, '要给出可核对的位置基准，不能只说"表现"')
   assert.match(instruction, /驱动/, '异动要写驱动因素，不能只列涨跌幅')
   assert.match(instruction, /风险信号/, '复盘的异常与风险要单独交代，不能只报涨跌')
   assert.match(instruction, /需优先复核/, '结果要分级，便于用户决定先看谁')
   assert.match(instruction, /不单独成节/, '指数与板块轮动只能当个股背景')
-  assert.match(instruction, /触发点/, '明日观察条件要可验证')
+  assert.match(instruction, /触发价或触发事件/, '明日观察条件要可验证')
+  assert.match(instruction, /不复述公告原文与盘面快照/, '复盘不能把公告和午间快照再抄一遍')
+})
+
+test('任务说明与任务指令同口径：说明里承诺的交付，指令必须兑现', () => {
+  const mirrors = {
+    'us-close': '盘后异动',
+    'pre-open-filings': '开盘前必看',
+    'morning-brief': '3 件事',
+    'midday-snapshot': '上午收盘',
+    'post-close-filings': '信息截止时刻',
+    'hk-close': 'AH 溢价',
+    'daily-review': '观察条件',
+    'todo-verifier-close': '候选 TODO',
+    'us-premarket': '今晚最该盯',
+    'portfolio-weekly': '收益贡献',
+    'watchlist-weekly': '可以移出',
+    'sector-weekly': '行业 β',
+    'research-topics': '研究选题',
+    'earnings-tracker': '一致预期',
+    'week-ahead-calendar': '事件日历',
+    'market-weekly': '市场级读数',
+    'portfolio-risk-monthly': '未评估',
+  }
+  for (const [id, term] of Object.entries(mirrors)) {
+    const { description, instruction } = BUILTIN_BY_ID.get(id).defaults
+    assert.ok(description.includes(term), `${id} 的模板说明没有写到「${term}」`)
+    assert.ok(instruction.includes(term), `${id} 的指令没有兑现说明里的「${term}」`)
+  }
+})
+
+test('模板之间不共用交付词：每个任务有只属于自己的输出锚点', () => {
+  const anchors = {
+    'us-close': '盘后异动',
+    'pre-open-filings': '开盘前必看',
+    'morning-brief': '今早最该知道',
+    'midday-snapshot': '11:35',
+    'post-close-filings': '信息截止时刻',
+    'hk-close': 'AH 溢价',
+    'daily-review': '近 20 日区间',
+    'todo-verifier-close': 'insufficient',
+    'us-premarket': '今晚最该盯',
+    'portfolio-weekly': '收益贡献',
+    'watchlist-weekly': '可以移出',
+    'sector-weekly': '行业 β',
+    'research-topics': '可证伪',
+    'earnings-tracker': '一致预期',
+    'week-ahead-calendar': '待确认',
+    'market-weekly': '市场状态',
+    'portfolio-risk-monthly': '未评估',
+  }
+  for (const [id, anchor] of Object.entries(anchors)) {
+    assert.ok(BUILTIN_BY_ID.get(id).defaults.instruction.includes(anchor), `${id} 缺少自己的输出锚点「${anchor}」`)
+    for (const definition of BUILTIN_DEFINITIONS) {
+      if (definition.id === id) continue
+      assert.equal(definition.defaults.instruction.includes(anchor), false,
+        `${definition.id} 与 ${id} 共用「${anchor}」，两个任务会写出同一段内容`)
+    }
+  }
 })
 
 test('wire create schema 不接受 profile / owner / session / preset / cwd / state 这类服务端字段', () => {

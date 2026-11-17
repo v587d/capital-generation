@@ -58,6 +58,8 @@ docs/design/*
 !docs/design/python-runtime.md
 # 投研自动化的实现契约（固定域、owner/occurrence、运行闸门）只在这份里有，docs/dev/automation.md 指向它，随代码入库。
 !docs/design/automation-tasks-v0.4.md
+# TODO 决策记忆的行为规则、抑制窗口与回滚边界只在这份里有；改动 automation/brief.js 前按它落地。
+!docs/design/automation-todo-memory-v0.1.md
 docs/reference/*
 !docs/reference/dsh-surface-ledger.md
 !docs/reference/external-skill-scan-2026-10.md

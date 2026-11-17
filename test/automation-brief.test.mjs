@@ -140,9 +140,17 @@ test('简报输出：gaps 也不设条数上限，原文列了几条就保留几
   assert.equal(parsed.gaps.at(-1).topic, '能力缺口 8')
 })
 
-test('简报 prompt：不再宣告 items 的条数上限', () => {
+test('简报 prompt：动作与复核项进 items，指数/板块/ETF 不进 stocks', () => {
   assert.doesNotMatch(BRIEF_SYSTEM_PROMPT, /items 只提取[^\n]*最多\s*6\s*条/)
   assert.match(BRIEF_SYSTEM_PROMPT, /items 只提取[^\n]*不设条数上限/)
+  assert.match(BRIEF_SYSTEM_PROMPT, /确认、验证、跟踪或执行/)
+  assert.match(BRIEF_SYSTEM_PROMPT, /开盘前要做的动作/)
+  assert.match(BRIEF_SYSTEM_PROMPT, /次日必须处理/)
+  assert.match(BRIEF_SYSTEM_PROMPT, /分级词[^\n]*不要写进 title/)
+  assert.match(BRIEF_SYSTEM_PROMPT, /只列明确出现的个股/)
+  assert.match(BRIEF_SYSTEM_PROMPT, /不要把指数、板块、ETF 当个股/)
+  assert.match(BRIEF_SYSTEM_PROMPT, /不要把原文只覆盖的自选股\/持仓扩写成全市场或大盘/)
+  assert.match(BRIEF_SYSTEM_PROMPT, /原文写“未取到”就保留这个缺口/)
 })
 
 test('简报输出：headline 按字符数计，24 个通过、25 个报出实际长度', () => {
@@ -258,6 +266,21 @@ test('会话正文：结算通知唤醒的短确认不覆盖上一轮完整答�
   })
   assert.match(extracted.text, /完整晨报/, '上一轮完整答复必须进入简报正文')
   assert.match(extracted.text, /本轮没有新增信息/, '最后一轮确认仍保留，交给简报模型判断哪一段是实质结论')
+})
+
+test('会话正文：同一轮里结算通知后的短确认不覆盖本轮完整答复', () => {
+  const extracted = extractSessionAnswer({
+    events: [
+      { type: 'turn/start', data: { turn: 1 } },
+      { type: 'user/message', data: { source: { kind: 'user' } } },
+      { type: 'user/message', data: { source: { kind: 'agent-message', form: 'relay' } } },
+      { type: 'assistant/message', data: { turn: 1, message: { content: [{ type: 'text', text: '完整盘前公告：三件事与数据来源。' }] } } },
+      { type: 'user/message', data: { source: { kind: 'subagent-settled', form: 'notice' } } },
+      { type: 'assistant/message', data: { turn: 1, message: { content: [{ type: 'text', text: '（此轮无新增信息，不输出正文）' }] } } },
+    ],
+  })
+  assert.match(extracted.text, /完整盘前公告/, '同一轮先前的完整答复必须进入简报正文')
+  assert.match(extracted.text, /此轮无新增信息/, '最后的短确认仍保留，交给简报模型判断')
 })
 
 test('会话正文：最后一轮本身有实质结论时也把上一轮保留为候选', () => {

@@ -24,6 +24,7 @@ const {
   IconRefreshOutlineRegular,
   IconRightUpOutlineRegular,
   IconSearchOutlineRegular,
+  IconSlidersTwoOutlineRegular,
   IconSparkleRegular,
   IconTrashOutlineRegular,
   IconWarningOutlineRegular,
@@ -845,6 +846,14 @@ function installStyles() {
     .capital-automation-select:disabled { opacity: .5; cursor: not-allowed; }
     .capital-automation-selectvalue { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .capital-automation-select > svg { flex: none; color: var(--ca-muted); }
+    .capital-automation-select.capital-automation-taskfilter { width: auto; min-width: 112px; max-width: 170px; height: 30px; padding: 0 9px 0 11px; border: .5px solid var(--ca-line-soft); border-radius: 999px; background: var(--ca-card); font-size: 12px; }
+    .capital-automation-select.capital-automation-taskfilter:hover:not(:disabled) { border-color: var(--ca-line); background: var(--ca-card); }
+    .capital-automation-taskfiltervalue { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+    .capital-automation-taskfiltervalue > svg { flex: none; color: var(--ca-muted); }
+    .capital-automation-taskfilter .capital-automation-filtercount { background: color-mix(in srgb, var(--ca-business) 12%, transparent); color: var(--ca-business-text); }
+    .capital-automation-taskfiltermenu { min-width: 176px; }
+    .capital-automation-taskfilteroption { display: flex; align-items: center; justify-content: flex-start; gap: 7px; min-width: 0; }
+    .capital-automation-taskfilteroptionlabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .capital-automation-formactions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 14px; border-top: .5px solid var(--ca-line); }
     .capital-automation-formactions[data-sticky="true"] { position: sticky; bottom: -1px; z-index: 2; margin-top: 2px; padding: 12px 0 4px; background: var(--dsw-alias-bg-base); }
     .capital-automation-formstatus { margin-right: auto; color: var(--ca-caption); font-size: 11.5px; line-height: 18px; }
@@ -2331,6 +2340,56 @@ function FilterButton(props) {
   count > 0 ? h('span', { className: 'capital-automation-filtercount' }, String(count)) : null)
 }
 
+function TaskFilterOption(props) {
+  const { label, count } = props
+  return h('span', { className: 'capital-automation-taskfilteroption' },
+    h('span', { className: 'capital-automation-taskfilteroptionlabel' }, label),
+    count > 0 ? h('span', { className: 'capital-automation-filtercount' }, String(count)) : null)
+}
+
+// items[].selectedId only covers `items`, so counted rows mark `selected` themselves.
+function TaskFilterMenu(props) {
+  const { value, options, counts, label, onChange } = props
+  const [open, setOpen] = useState(false)
+  const triggerRef = useRef(null)
+  const current = options.find((option) => option.value === value) ?? options[0]
+  const currentCount = counts[value] ?? 0
+  const closeMenu = () => setOpen(false)
+  const selectValue = (id) => {
+    setOpen(false)
+    triggerRef.current?.focus?.({ preventScroll: true })
+    if (id !== value) onChange(id)
+  }
+  return h(Menu, {
+    open,
+    anchor: h('button', {
+      ref: triggerRef,
+      type: 'button',
+      className: 'capital-automation-select capital-automation-taskfilter',
+      'aria-label': currentCount > 0 ? `${label}：${current.label}，${currentCount} 个` : `${label}：${current.label}`,
+      'aria-haspopup': 'menu',
+      'aria-expanded': open ? 'true' : 'false',
+      title: `${label}：${current.label}`,
+      onClick: () => setOpen((currentOpen) => !currentOpen),
+    },
+    h('span', { className: 'capital-automation-taskfiltervalue' },
+      h(IconSlidersTwoOutlineRegular, { size: 13 }),
+      h('span', { className: 'capital-automation-selectvalue' }, current.label),
+      currentCount > 0 ? h('span', { className: 'capital-automation-filtercount' }, String(currentCount)) : null),
+    h(IconChevronDownOutlineRegular, { size: 14 })),
+    items: [],
+    onClose: closeMenu,
+    align: 'end',
+    portal: true,
+    listClassName: 'capital-automation-taskfiltermenu',
+    children: options.map((option) => h(MenuItemButton, {
+      key: option.value,
+      selected: option.value === value,
+      onSelect: () => selectValue(option.value),
+    }, h(TaskFilterOption, { label: option.label, count: counts[option.value] }))),
+  })
+}
+
 function TaskTags(props) {
   const { task } = props
   const tags = [[categoryLabel(task.category), toneOf(task)]]
@@ -2674,20 +2733,23 @@ function TaskDashboard(props) {
     monitor: roster.filter((task) => task.category === 'monitor').length,
   }
   const filters = ['all', 'custom', 'news', 'market', 'review', 'research', 'portfolio', 'monitor']
+  const filterOptions = filters.map((value) => ({
+    value,
+    label: value === 'all' ? zh.filterAll : value === 'custom' ? zh.filterCustom : categoryLabel(value),
+  }))
   return h('div', null,
     h('section', { className: 'capital-automation-section', style: { marginTop: 0 } },
       h('div', { className: 'capital-automation-sectionhead' },
         h('h2', null, zh.taskSection),
         h('span', null, zh.taskSectionHint),
         h('div', { className: 'capital-automation-sectiontools' },
-          h('div', { className: 'capital-automation-filters', role: 'group', 'aria-label': zh.filterLabel },
-            filters.map((value) => h(FilterButton, {
-              key: value,
-              label: value === 'all' ? zh.filterAll : value === 'custom' ? zh.filterCustom : categoryLabel(value),
-              count: filterCounts[value],
-              active: filter === value,
-              onClick: () => setFilter(value),
-            }))),
+          h(TaskFilterMenu, {
+            value: filter,
+            options: filterOptions,
+            counts: filterCounts,
+            label: zh.filterLabel,
+            onChange: setFilter,
+          }),
           h('label', { className: 'capital-automation-search' },
             h(IconSearchOutlineRegular, { size: 13 }),
             h('input', {

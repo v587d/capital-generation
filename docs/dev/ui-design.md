@@ -10,7 +10,9 @@
 `SettingsForm` / `SettingsSecretField` / `SegmentedControl` / `Switch` / `Modal` / `Menu`。
 某项能力官方没给时，先看同仓库页面有没有实现；自动化页的 `Select`（`automation/client.src.cjs`）
 就是「胶囊触发器 + 宿主 `Menu`」的参考实现，设置卡的工作区下拉（`config/client.src.cjs` 的
-`WorkspaceSelect`）照抄这套行为，而不是各写一份。
+`WorkspaceSelect`）照抄这套行为，而不是各写一份。带计数的工具栏筛选看同一文件的 `TaskFilterMenu`：
+`Menu` + `MenuItemButton` 的 `selected` 标当前项，计数紧挨分类文字（不要用 `space-between` 推到行尾）；
+不要为省宽度退回一排 chip。
 
 **⛔ 禁止原生 `<select>` / `<input type="date">` 装点门面。**
 原生控件的弹层由浏览器绘制，配色、圆角、焦点环和键盘行为都不受宿主 token 控制；浅色模式下还会

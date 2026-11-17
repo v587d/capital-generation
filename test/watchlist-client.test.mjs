@@ -324,14 +324,27 @@ test('⛔ 源码已改、bundle 还是旧的：字典值与 CSS 规则必须在 
     '⛔ src 里的样式规则并非全部落到 bundle')
 })
 
-test('注册两条：overlay 座位的 list entry + 一条 commandUi contribution', () => {
+test('注册三个座位：弹窗 overlay + 工作台 main 面板 + 侧栏入口，另有一条 commandUi contribution', () => {
   const { ctx } = mount()
-  assert.deepEqual(ctx.injected, ['conversation.input.overlay'], '弹窗只占 conversation.input.overlay')
-  assert.equal(ctx.registrations.length, 1)
+  assert.deepEqual(ctx.injected, ['conversation.input.overlay', 'main', 'sidebar.panellist'], '弹窗占 overlay，工作台占 main；侧栏入口是同一个乘载体的入口')
+  assert.equal(ctx.registrations.length, 3)
   const declaration = ctx.registrations[0].declaration
   assert.equal(declaration.name, 'conversation.input.overlay')
   assert.equal(declaration.id, 'capital-watchlist-dialog')
   assert.equal(declaration.locale, 'capital.watchlist')
+
+  const panel = ctx.registrations[1].declaration
+  assert.equal(panel.name, 'main', '工作台是 main 里的一块面板，不是新的弹窗')
+  assert.equal(panel.key, 'capital-watchlist:desk')
+  assert.equal(panel.locale, 'capital.watchlist')
+
+  const entry = ctx.registrations[2].declaration
+  assert.equal(entry.name, 'sidebar.panellist')
+  assert.equal(entry.id, 'capital-watchlist:desk', '侧栏 entry id 必须等于 main 的 key，点了才知道开哪块面板')
+  assert.equal(entry.order, 12, '排在 CapGen 投研自动化（11）之后')
+  assert.equal(entry.label(), '自选股')
+  assert.equal(typeof ctx.registrations[2].component, 'function')
+
   assert.equal(ctx.contributions.length, 1)
 
   const contribution = ctx.contributions[0]
@@ -339,6 +352,123 @@ test('注册两条：overlay 座位的 list entry + 一条 commandUi contributio
   assert.equal(contribution.label(), '自选股')
   assert.equal(typeof contribution.icon, 'function', '图标从官方图标集取（IconChecklistOutlineRegular，清单语义）')
   assert.equal(contribution.ui.kind, 'action')
+})
+
+test('工作台页面：标题行只留标题 + 最近更新 + 刷新，列表/分时/成交量按现有报价渲染', () => {
+  const { ctx } = mount()
+  const t = (key) => ctx.dictionaries['capital.watchlist'].zh[key] ?? key
+  const desk = ctx.registrations[1]
+  assert.equal(desk.declaration.name, 'main')
+
+  // 组件按固定 hook 顺序读状态；这里直接种「清单已读完、选中第一行」的那一态。
+  const row = { ...QUOTED, name: '深证成指' }
+  freshHooks()
+  hookState[0] = [row]
+  hookState[1] = false
+  hookState[6] = { names: ['核心'], assignments: { [row.thscode]: ['核心'] } }
+  hookState[11] = row.thscode
+  const tree = desk.component({ t })
+
+  const text = textOf(tree)
+  assert.match(text, /自选股行情工作台/, '标题跟着工作台走')
+  assert.match(text, /当日分时/)
+  assert.match(text, /当前行情接口只返回最新快照/, '⛔ 没有分时序列就明说，不画假走势')
+  assert.match(text, /暂无成交量数据/)
+  assert.match(text, /深证成指/)
+  assert.match(text, /-3\.44%/, '涨跌幅两位小数')
+  assert.match(text, /12,858\.75/, '最新价两位小数并带千分位')
+
+  // 头部收干净：没有副标题、没有标的数/上涨/下跌统计卡；时间挪到刷新按钮左边。
+  assert.equal(classNodes(tree, 'cwd-stats').length, 0, '统计卡整块去掉')
+  assert.equal(classNodes(tree, 'cwd-sub').length, 0, '标题下那行说明去掉')
+  assert.equal(classNodes(tree, 'cwd-updated').length, 1, '最近更新只剩头部一处')
+  assert.equal(classNodes(tree, 'cwd-refresh').length, 1)
+  const head = classNodes(tree, 'cwd-head')[0]
+  const headKids = [].concat(head.props?.children ?? head.children ?? [])
+  const headActions = headKids.find((kid) => kid?.props?.className === 'cwd-headactions')
+  const headActionKids = [].concat(headActions?.props?.children ?? headActions?.children ?? [])
+  assert.equal(headActionKids[0]?.props?.className, 'cwd-updated', '时间排在刷新按钮左边')
+  assert.equal(headActionKids[1]?.props?.className, 'cwd-refresh')
+  assert.equal(classNodes(tree, 'cwd-row').length, 1)
+
+  // 类型徽标跟着名称走，不再单独压一行。
+  const nameLine = classNodes(tree, 'cwd-nameline')[0]
+  assert.ok(nameLine, '拿不到名称行')
+  assert.match(textOf(nameLine), /深证成指/, '名称在名称行')
+  assert.match(textOf(nameLine), /A指/, '类型徽标在名称右侧（指数行是「A指」）')
+
+  // 行内操作收进一个三点菜单：触发器 + Menu，不再铺三颗按钮。
+  const actionCells = classNodes(tree, 'cwd-rowactions')
+  assert.equal(actionCells.length, 1)
+  const actionKids = [].concat(actionCells[0].props?.children ?? actionCells[0].children ?? [])
+  assert.equal(actionKids.length, 1, '行内操作只挂一个菜单触发器')
+  assert.ok(actionKids[0].props?.anchor, '挂的是 Menu（触发器在 anchor 上）')
+  assert.equal(actionKids[0].props.anchor.props.className, 'cwd-iconbtn')
+  assert.equal(actionKids[0].props.anchor.props['aria-haspopup'], 'menu')
+  assert.equal(actionKids[0].props.anchor.props['aria-label'], '更多操作 深证成指')
+
+  assert.doesNotMatch(text, /分组只保存在本机/, '页脚说明已去掉')
+
+  let native = 0
+  walkNodes(tree, (node) => {
+    if (node.type === 'select' || (node.type === 'input' && node.props?.type === 'date')) native += 1
+  })
+  assert.equal(native, 0, '⛔ 下拉 / 日期一律宿主件，工作台里不许出现原生控件')
+})
+
+test('工作台无非选中行时给选择提示，而不是空白面板', () => {
+  const { ctx } = mount()
+  const t = (key) => ctx.dictionaries['capital.watchlist'].zh[key] ?? key
+  const desk = ctx.registrations[1]
+  freshHooks()
+  hookState[0] = [QUOTED]
+  hookState[1] = false
+  hookState[6] = { names: [], assignments: {} }
+  hookState[11] = null
+  const tree = desk.component({ t })
+  const text = textOf(tree)
+  assert.match(text, /选择一只标的查看详情/)
+  assert.match(text, /选中后这里显示报价、分时与成交量/, '空态要说清这里会出现什么')
+  assert.equal(classNodes(tree, 'cwd-row').length, 1, '列表照样在，只是详情没选中')
+})
+
+test('工作台：列表内嵌滚动且与详情等高、块底色与投研看板同源、左基线一致、焦点环落在输入框外沿', () => {
+  const css = mountedCss()
+  assert.match(css, /\.cwd-page button:focus-visible/)
+  assert.match(css, /\.cwd-field:focus-within/, '输入框的焦点环落在整只框的外沿')
+  assert.doesNotMatch(css, /\.cwd-page input:focus-visible/, '⛔ 内层 input 不再自己画一圈')
+
+  // 列表恢复内嵌滚动，高度与右侧详情一致（两栏共用一个定高）。
+  const tableBody = (css.match(/\.cwd-tablebody \{[^}]*\}/) ?? [])[0]
+  assert.ok(tableBody, '拿不到 .cwd-tablebody 规则')
+  assert.match(tableBody, /overflow-y:\s*auto/, '列表自己有滚动条')
+  assert.match(tableBody, /flex:\s*1/, '列表吃掉卡片剩余高度')
+  assert.match(css, /\.cwd-body \{[^}]*height:\s*var\(--cwd-body-h\)/, '两栏同一个定高')
+  const bodyH = /--cwd-body-h:\s*clamp\(([^)]+)\)/.exec(css)
+  assert.ok(bodyH, '拿不到 --cwd-body-h 的固定高度')
+  const cardRule = (css.match(/\.cwd-card \{[^}]*\}/) ?? [])[0]
+  assert.match(cardRule, /height:\s*100%/, '左右两张卡都撑满同一定高')
+  // 块的灰底与 CapGen 投研自动化看板同源；列表与详情共用同一张卡片。
+  assert.match(css, /--cwd-card:\s*var\(--dsw-alias-bg-layer-2/, '块底色取看板卡片灰')
+  const card = (css.match(/\.cwd-card \{[^}]*\}/) ?? [])[0]
+  assert.match(card, /background:\s*var\(--cwd-card\)/)
+  assert.equal((css.match(/\.cwd-stat \{/g) ?? []).length, 0, '统计卡的样式随卡片一起去掉')
+  for (const block of ['cwd-chart', 'cwd-volume']) {
+    const rule = (css.match(new RegExp(`\\.${block} \\{[^}]*\\}`)) ?? [])[0]
+    assert.ok(rule, `拿不到 .${block} 规则`)
+    assert.match(rule, /var\(--dsw-alias-bg-module-platform\)/, `${block} 用卡片内的控件灰`)
+  }
+  // 工具条 / 表头 / 行共用一条左侧基线
+  const gutter = (selector) => {
+    const rules = css.match(new RegExp(`\\.${selector} \\{[^}]*\\}`, 'g')) ?? []
+    const rule = rules.find((entry) => entry.includes('padding:'))
+    return /padding:[^;}]*\s(\d+)px/.exec(rule ?? '')?.[1]
+  }
+  assert.equal(gutter('cwd-toolbar'), gutter('cwd-thead'), '工具条与表头左基线一致')
+  assert.equal(gutter('cwd-thead'), gutter('cwd-row'), '表头与行左基线一致')
+  assert.match(css, /\.cwd-body \{[^}]*minmax\(0, 1fr\) minmax\(430px, 1\.35fr\)/, '详情/走势列要比列表宽')
+  assert.match(card, /border:\s*\.5px solid var\(--dsw-alias-border-l1\)/)
+  assert.doesNotMatch(css, /\.cwd-card \{[^}]*border:\s*1px solid var\(--dsw-alias-border/)
 })
 
 test('菜单行不带英文别名：行面只留中文，typed 路径靠命令名（bare token）', () => {
@@ -698,7 +828,7 @@ test('面板排版：headless 官方卡片 + 420 宽 + 类型徽标 + 两位小�
   assert.match(text, /更新时间/, '更新时间落底部那一行')
   assert.match(text, /刷新报价/, '刷新动词就在更新时间左边')
   assert.equal((text.match(/09-28/g) ?? []).length, 1, '时间只出现一次（逐行重复是噪音）')
-  assert.match(text, /12858\.75/, '最新价两位小数')
+  assert.match(text, /12858\.75/, '最新价两位小数（弹窗保持紧凑写法，不加千分位）')
   assert.equal(text.includes('12858.7532'), false, '原始位数不许漏出来')
   assert.match(text, /-3\.44%/, '涨跌幅两位小数')
   assert.equal(classNodes(tree, 'capital-watchlist-down').length, 1, '跌是绿（A 股口径：红涨绿跌）')
@@ -797,7 +927,11 @@ test('🔴 浅色模式闸门：面板 CSS 只准用"两套主题都读得出"�
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[^@]*\.capital-watchlist-skeleton \{ animation: none/)
   const literals = css.match(/#[0-9a-fA-F]{3,8}\b/g) ?? []
   assert.deepEqual([...new Set(literals)].sort(), ['#17a063', '#d1493f'], `面板 CSS 里出现了新的颜色字面量：${literals}`)
-  assert.equal(literals.length, 2)
+  // 红绿只作为涨跌变量的值出现；弹窗卡片与工作台页面各声明一次作用域（自定义属性不跨子树继承）。
+  for (const literal of literals) {
+    assert.match(css, new RegExp(`--capital-watchlist-(?:up|down): ${literal};`), `${literal} 只能作为涨跌变量的值`)
+  }
+  assert.equal(literals.length, 4, '两处作用域：弹窗卡片 + 工作台页面')
 })
 
 test('输入 → 下拉候选：整行就是"添加"，已在清单的那条标已添加并禁用；点框外收起', async () => {
