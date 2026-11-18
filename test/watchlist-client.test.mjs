@@ -2520,7 +2520,10 @@ test('⛔ 分时还是别的那只：详情头退回报价，不许拿别人的�
   assert.equal(textOf(classNodes(tree, 'cwd-bigprice')[0]).trim(), '9.24')
   assert.equal(textOf(classNodes(tree, 'cwd-bigpct')[0]).trim(), '-2.43%')
   assert.equal(textOf(classNodes(tree, 'cwd-price')[0]).trim(), '9.24', '分时是别人的：清单与详情都退回报价')
-  assert.match(metaFields(tree)['行情时间'], /11-18 10:26/)
+  // Fallback stamps come from `captured_at`, which renders in the reader's own clock — never assert a
+  // zone here, or the suite turns red on a UTC runner (CI) and green on the author's UTC+8 box.
+  assert.match(metaFields(tree)['行情时间'], /^\d{2}-\d{2} \d{2}:\d{2}$/u, '退回报价时给抓取时刻')
+  assert.notEqual(metaFields(tree)['行情时间'], '11-18 09:29', '不能拿分时那一点的时间冒充')
 })
 
 
