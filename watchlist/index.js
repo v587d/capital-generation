@@ -969,27 +969,33 @@ export function createWatchlistService(options = {}) {
   }
 }
 
+/** A body we cannot read: empty series, changed row shape, unreadable field. */
+const PARSE_FAILURES = new Set(['tencent_parse_failed', 'tencent_invalid_response', 'tencent_empty_response'])
+
 /** Upstream failures degrade to one block in the desk, never to a whole-route error. */
 function trendFailure(error) {
   const name = typeof error?.name === 'string' ? error.name : ''
-  if (name === 'AbortError' || name === 'TimeoutError') return { ok: false, code: 'trend_timeout', message: '分时数据请求超时' }
+  if (name === 'AbortError' || name === 'TimeoutError') return { ok: false, code: 'trend_timeout', message: '上游没有及时回话' }
   const code = typeof error?.code === 'string' ? error.code : ''
-  if (code === 'trend_unavailable' || code === 'trend_parse_failed') return { ok: false, code, message: '分时数据暂时取不到' }
+  if (PARSE_FAILURES.has(code) || code === 'trend_parse_failed') return { ok: false, code: 'trend_parse_failed', message: '上游这次回的报文不完整' }
+  if (code === 'trend_unavailable') return { ok: false, code, message: '该市场暂时没有分时数据' }
   if (code === 'rate_limited' || code === 'tencent_rate_limit' || code === 'eastmoney_rate_limit') {
     return { ok: false, code: 'rate_limited', message: '行情服务限流，请稍后再试' }
   }
-  return { ok: false, code: 'trend_unavailable', message: '分时数据暂时取不到' }
+  // "All three minute hosts are down" is an upstream outage, not a market without data: the desk
+  // must not answer it with the market hint.
+  return { ok: false, code: 'trend_upstream_unavailable', message: '行情源这次没有给出分时' }
 }
 
 function klineFailure(error) {
   const name = typeof error?.name === 'string' ? error.name : ''
-  if (name === 'AbortError' || name === 'TimeoutError') return { ok: false, code: 'kline_timeout', message: '日K数据请求超时' }
+  if (name === 'AbortError' || name === 'TimeoutError') return { ok: false, code: 'kline_timeout', message: '上游没有及时回话' }
   const code = typeof error?.code === 'string' ? error.code : ''
-  if (code === 'tencent_parse_failed' || code === 'trend_parse_failed') return { ok: false, code: 'kline_parse_failed', message: '日K数据解析失败' }
+  if (PARSE_FAILURES.has(code) || code === 'trend_parse_failed') return { ok: false, code: 'kline_parse_failed', message: '上游这次回的报文不完整' }
   if (code === 'rate_limited' || code === 'tencent_rate_limit' || code === 'eastmoney_rate_limit') {
     return { ok: false, code: 'rate_limited', message: '行情服务限流，请稍后再试' }
   }
-  return { ok: false, code: 'kline_unavailable', message: '日K数据暂时取不到' }
+  return { ok: false, code: 'kline_upstream_unavailable', message: '行情源这次没有给出日线' }
 }
 
 /** Only whole-batch failures become batch errors (rate limit, missing key, service down). */
@@ -1055,9 +1061,11 @@ const FAILURE_STATUS = {
   trend_unavailable: 502,
   trend_timeout: 504,
   trend_parse_failed: 502,
+  trend_upstream_unavailable: 502,
   kline_unavailable: 502,
   kline_timeout: 504,
   kline_parse_failed: 502,
+  kline_upstream_unavailable: 502,
   ambiguous: 409,
   list_full: 409,
   credential_missing: 503,
@@ -1133,10 +1141,12 @@ export function createRouteHandler(service, options = {}) {
       }
       if (method === 'GET' && pathname === '/list') return send(res, 200, await service.list())
       if (method === 'GET' && pathname === '/kline') {
-        return sendBusiness(res, await service.kline({ thscode: searchParams.get('thscode') ?? '', refresh: searchParams.get('refresh') === '1' }))
+        const thscode = searchParams.get('thscode') ?? ''
+        return sendBusiness(res, logUpstreamFailure(options.logger, 'kline', thscode, await service.kline({ thscode, refresh: searchParams.get('refresh') === '1' })))
       }
       if (method === 'GET' && pathname === '/trend') {
-        return sendBusiness(res, await service.trend({ thscode: searchParams.get('thscode') ?? '', refresh: searchParams.get('refresh') === '1' }))
+        const thscode = searchParams.get('thscode') ?? ''
+        return sendBusiness(res, logUpstreamFailure(options.logger, 'trend', thscode, await service.trend({ thscode, refresh: searchParams.get('refresh') === '1' })))
       }
       if (method === 'GET' && pathname === '/search') return sendBusiness(res, await service.search(searchParams.get('q') ?? ''))
       send(res, 404, { ok: false, code: 'not_found', message: 'unknown watchlist route' })
@@ -1149,6 +1159,20 @@ export function createRouteHandler(service, options = {}) {
 /** Storage failure copy keeps both code (locatable) and message (human-readable). */
 function storeCause(error) {
   return [error?.code, error?.message ?? error].filter(Boolean).join('：') || 'unknown'
+}
+
+/** Caller mistakes (a stale row, a bad code) are not incidents; only upstream and storage faults are. */
+const REQUEST_FAULTS = new Set(['invalid_query', 'not_watched', 'not_found', 'ambiguous', 'list_full'])
+
+/**
+ * The panel shows one sentence and nothing else, so the failure code has to land somewhere the
+ * maintainer can read it back: the host log names the route, the symbol and the upstream code.
+ */
+function logUpstreamFailure(logger, route, thscode, result) {
+  if (result?.ok !== true && !REQUEST_FAULTS.has(result.code)) {
+    logger?.warn?.(`capital-watchlist: ${route} ${thscode} → ${result.code}${result.reason === undefined ? '' : ` (${result.reason})`}`)
+  }
+  return result
 }
 
 function sendBusiness(res, result) {
@@ -1207,7 +1231,7 @@ export function apply(ctx) {
         const dispose = webCtx.webServer.register({
           kind: 'prefix',
           path: ROUTE_PATH,
-          handler: createRouteHandler(service, { authorize }),
+          handler: createRouteHandler(service, { authorize, logger: ctx.logger }),
         })
         return () => {
           if (typeof dispose === 'function') dispose()

@@ -2762,15 +2762,48 @@ test('工作台：分时失败给重试键，点一次带 refresh=1 重取', asy
   hookState[1] = false
   hookState[6] = { names: [], assignments: {} }
   hookState[11] = QUOTED.thscode
-  hookState[14] = { status: 'error', data: null, code: 'trend_timeout' }
+  hookState[14] = { status: 'error', data: null, code: 'trend_timeout', detail: '上游没有及时回话' }
   const render = () => { resetHooks(); return desk.component({ t }) }
-  const retry = classNodes(render(), 'cwd-pill').find((node) => textOf(node).includes('重试'))
+  const tree = render()
+  const retry = classNodes(tree, 'cwd-retry').find((node) => textOf(node).includes('重试'))
   assert.ok(retry, '错误态要有出口，不能只剩一行红字')
+  assert.equal(retry.props.type, 'button', '⛔ 重试必须是个按钮，不是一段带 onClick 的文字')
+  // 宿主给的原因要原样显示：只给错误码不够，用户要知道是超时还是报文坏了。
+  assert.ok(textOf(tree).includes('上游没有及时回话'), '失败原因要显示在标题下面')
   assert.equal(typeof retry.props.onClick, 'function')
   retry.props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.ok(urls.some((url) => url.includes('/capital-watchlist/trend?thscode=399001.SZ&refresh=1')), urls.join(','))
   assert.match(textOf(render()), /2026-11-17 收盘/, '重取成功后回到图')
+})
+
+test('⛔ 失败原因整条链路：宿主回执的 message 原样进面板，前端不许自己编', async () => {
+  const sandboxFetch = async (url) => {
+    const text = String(url)
+    if (text.includes('/trend')) {
+      return { ok: false, status: 504, text: async () => JSON.stringify({ ok: false, code: 'trend_timeout', message: '上游没有及时回话' }) }
+    }
+    return { ok: true, status: 200, text: async () => JSON.stringify(text.includes('/kline') ? KLINE : TREND) }
+  }
+  const { ctx } = mount({ fetch: sandboxFetch })
+  const t = (key) => ctx.dictionaries['capital.watchlist'].zh[key] ?? key
+  const desk = ctx.registrations[1]
+  freshHooks()
+  hookState[0] = [{ ...QUOTED }]
+  hookState[1] = false
+  hookState[6] = { names: [], assignments: {} }
+  hookState[11] = QUOTED.thscode
+  hookState[14] = { status: 'ready', data: TREND, code: null, detail: null }
+  hookState[15] = { status: 'ready', data: KLINE, code: null, detail: null }
+  const render = () => { resetHooks(); return desk.component({ t }) }
+
+  // 选中同一行重取：失败后面板要同时给出「分时加载失败」和宿主那句原因。
+  classNodes(render(), 'cwd-cellname')[0].props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(hookState[14].status, 'error')
+  assert.equal(hookState[14].code, 'trend_timeout')
+  assert.equal(hookState[14].detail, '上游没有及时回话', 'call() 必须把回执里的 message 带出来')
+  assert.ok(textOf(render()).includes('上游没有及时回话'))
 })
 
 test('⛔ 选中行即按那只票取分时；晚到的旧回包不许盖住新选中', async () => {

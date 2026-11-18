@@ -19,7 +19,7 @@ function harness(options = {}) {
     now: () => 1_790_586_000_000,
     ...(options.service ?? {}),
   })
-  const handler = createRouteHandler(service, { authorize: options.authorize })
+  const handler = createRouteHandler(service, { authorize: options.authorize, logger: options.logger })
   return { service, fake, handler }
 }
 
@@ -522,7 +522,8 @@ test('/trend：画不出来的市场直接给空态理由，不发请求', async
 
 test('/trend：代码格式与上游故障各有稳定错误码，不把整条路由打成 503', async () => {
   const stub = stubFuyao({ 'minute/query': JSON.stringify({ code: 0, data: {} }) })
-  const { service, fake, handler } = harness()
+  const warnings = []
+  const { service, fake, handler } = harness({ logger: { warn: (line) => warnings.push(line) } })
   try {
     await withHoldable(service, fake)
     const bad = await call(handler, { method: 'GET', url: '/capital-watchlist/trend?thscode=not-a-code' })
@@ -531,7 +532,12 @@ test('/trend：代码格式与上游故障各有稳定错误码，不把整条�
 
     const failed = await call(handler, { method: 'GET', url: '/capital-watchlist/trend?thscode=600519.SH' })
     assert.equal(failed.statusCode, 502)
-    assert.equal(failed.json().code, 'trend_unavailable')
+    // 三个入口全挂是上游故障，不能拿"该市场没有分时"的空态去骗人。
+    assert.equal(failed.json().code, 'trend_upstream_unavailable')
+    assert.equal(failed.json().reason, undefined)
+    // 面板只有一句话，排障靠宿主日志：路由、标的、上游码三样都要留下；校验失败不算上游故障。
+    assert.equal(warnings.length, 1, warnings.join(' / '))
+    assert.match(warnings[0], /trend 600519\.SH → trend_upstream_unavailable/u)
     // 宿主级冷却表是进程共享的：这条用例把三个入口都拉黑了，别让后面的用例跟着吃哑炮。
     tencentHostDownUntil.clear()
   } finally {

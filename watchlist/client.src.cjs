@@ -144,13 +144,13 @@ const zh = {
   'desk.trendUnavailable': '该市场暂时没有分时数据',
   'desk.trendUnavailableHint': '场外美股与部分海外指数没有分时源，这里不画假走势。',
   'desk.trendError': '分时加载失败',
-  'desk.trendRetry': '重试',
+  'desk.retry': '重试',
   'desk.daily': '日K',
   'desk.fold': '收起',
   'desk.unfold': '展开',
   'desk.adjustQfq': '前复权',
   'desk.klineLoading': '正在读取日K…',
-  'desk.klineError': '日K暂时取不到',
+  'desk.klineError': '日K加载失败',
   'desk.klineUnavailable': '该市场暂时没有日K数据',
   'desk.klineUnavailableHint': '港美股指数只有分时，没有可用的日线序列',
   'desk.kOpen': '开',
@@ -291,13 +291,13 @@ const en = {
   'desk.trendUnavailable': 'No intraday series for this market',
   'desk.trendUnavailableHint': 'OTC US lines and some overseas indices have no intraday source; nothing is drawn to fill the gap.',
   'desk.trendError': 'Intraday failed to load',
-  'desk.trendRetry': 'Retry',
+  'desk.retry': 'Retry',
   'desk.daily': 'Daily',
   'desk.fold': 'Collapse',
   'desk.unfold': 'Expand',
   'desk.adjustQfq': 'Forward-adjusted',
   'desk.klineLoading': 'Loading daily bars…',
-  'desk.klineError': 'Daily bars are unavailable',
+  'desk.klineError': 'Daily bars failed to load',
   'desk.klineUnavailable': 'No daily bars for this market',
   'desk.klineUnavailableHint': 'HK/US indices carry an intraday series only',
   'desk.kOpen': 'Open',
@@ -593,6 +593,13 @@ const CSS = `
 .cwd-chart { flex: 1; min-height: 150px; display: grid; place-items: center; padding: 12px; border: 1px dashed var(--dsw-alias-border-l2); border-radius: 10px; background: repeating-linear-gradient(180deg, color-mix(in srgb, var(--dsw-alias-border-l2) 60%, transparent) 0 1px, transparent 1px 36px), var(--dsw-alias-bg-module-platform); text-align: center; }
 .cwd-charttext { font-size: 12.5px; line-height: 18px; font-weight: 500; color: var(--dsw-alias-label-secondary); }
 .cwd-charthint { margin-top: 4px; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+.cwd-chartfail { border-style: solid; background: var(--dsw-alias-bg-module-platform); }
+.cwd-chartfail .cwd-charttext { color: var(--dsw-alias-label-primary); }
+.cwd-fallback { display: flex; flex-direction: column; align-items: center; gap: 2px; max-width: 360px; }
+.cwd-retry { display: inline-flex; align-items: center; gap: 6px; flex: none; margin-top: 12px; height: 34px; padding: 0 14px; border: .5px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 38%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent); color: var(--dsw-alias-state-business-primary); font-family: inherit; font-size: 12.5px; line-height: 20px; font-weight: 500; cursor: pointer; }
+.cwd-retry:hover { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 22%, transparent); }
+.cwd-retry:active { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 30%, transparent); }
+.cwd-retry:focus-visible { outline: 2px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 60%, transparent); outline-offset: 2px; }
 .cwd-trendstats { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: 2px 14px; min-width: 0; }
 .cwd-trendstat { display: flex; align-items: baseline; gap: 5px; font-size: 11px; line-height: 17px; }
 .cwd-trendstat span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -681,6 +688,9 @@ async function call(path, { query, body, signal } = {}) {
     : (response.status === 401 || response.status === 403) ? 'unauthorized' : 'fuyao_unavailable'
   const error = new Error(code)
   error.code = code
+  // The host's sentence already names what failed (timeout / garbled payload / upstream down);
+  // the pane prints it under the title instead of guessing from the code.
+  error.detail = typeof payload.message === 'string' && payload.message.length > 0 ? payload.message : null
   error.candidates = payload.candidates
   error.limit = payload.limit
   throw error
@@ -1989,8 +1999,8 @@ function WatchlistDeskPage({ t }) {
   const [selected, setSelected] = useState(null)
   const [pendingRemove, setPendingRemove] = useState(null)
   const [rowMenu, setRowMenu] = useState(null)
-  const [trend, setTrend] = useState({ status: 'idle', data: null, code: null })
-  const [kline, setKline] = useState({ status: 'idle', data: null, code: null })
+  const [trend, setTrend] = useState({ status: 'idle', data: null, code: null, detail: null })
+  const [kline, setKline] = useState({ status: 'idle', data: null, code: null, detail: null })
   // Folded = the intraday pane keeps only its title row, so the daily pane gets the whole column.
   const [trendFolded, setTrendFolded] = useState(false)
   const alive = useRef(true)
@@ -2020,41 +2030,43 @@ function WatchlistDeskPage({ t }) {
    */
   const loadTrend = async (thscode, options = {}) => {
     if (typeof thscode !== 'string' || thscode.length === 0) {
-      setTrend({ status: 'idle', data: null, code: null })
-      setKline({ status: 'idle', data: null, code: null })
+      setTrend({ status: 'idle', data: null, code: null, detail: null })
+      setKline({ status: 'idle', data: null, code: null, detail: null })
       return
     }
     const request = (deskTrendSequence += 1)
-    setTrend((previous) => ({ status: 'loading', data: previous.data !== null && previous.data.thscode === thscode ? previous.data : null, code: null }))
+    setTrend((previous) => ({ status: 'loading', data: previous.data !== null && previous.data.thscode === thscode ? previous.data : null, code: null, detail: null }))
     try {
       const query = `thscode=${encodeURIComponent(thscode)}${options.bust === true ? '&refresh=1' : ''}`
       const payload = await call('/trend', { query })
       if (!alive.current || request !== deskTrendSequence) return
-      setTrend({ status: 'ready', data: payload, code: null })
+      setTrend({ status: 'ready', data: payload, code: null, detail: null })
     } catch (failure) {
       if (!alive.current || request !== deskTrendSequence) return
       const code = typeof failure?.code === 'string' ? failure.code : 'trend_unavailable'
-      setTrend({ status: code === 'trend_unavailable' ? 'unavailable' : 'error', data: null, code })
+      const detail = typeof failure?.detail === 'string' && failure.detail.length > 0 ? failure.detail : null
+      setTrend({ status: code === 'trend_unavailable' ? 'unavailable' : 'error', data: null, code, detail })
     }
   }
 
   /** Same shape as `loadTrend`: the daily pane has its own request, so one slow history never blocks a tick. */
   const loadKline = async (thscode, options = {}) => {
     if (typeof thscode !== 'string' || thscode.length === 0) {
-      setKline({ status: 'idle', data: null, code: null })
+      setKline({ status: 'idle', data: null, code: null, detail: null })
       return
     }
     const request = (deskKlineSequence += 1)
-    setKline((previous) => ({ status: 'loading', data: previous.data !== null && previous.data.thscode === thscode ? previous.data : null, code: null }))
+    setKline((previous) => ({ status: 'loading', data: previous.data !== null && previous.data.thscode === thscode ? previous.data : null, code: null, detail: null }))
     try {
       const query = `thscode=${encodeURIComponent(thscode)}${options.bust === true ? '&refresh=1' : ''}`
       const payload = await call('/kline', { query })
       if (!alive.current || request !== deskKlineSequence) return
-      setKline({ status: 'ready', data: payload, code: null })
+      setKline({ status: 'ready', data: payload, code: null, detail: null })
     } catch (failure) {
       if (!alive.current || request !== deskKlineSequence) return
       const code = typeof failure?.code === 'string' ? failure.code : 'kline_unavailable'
-      setKline({ status: code === 'kline_unavailable' ? 'unavailable' : 'error', data: null, code })
+      const detail = typeof failure?.detail === 'string' && failure.detail.length > 0 ? failure.detail : null
+      setKline({ status: code === 'kline_unavailable' ? 'unavailable' : 'error', data: null, code, detail })
     }
   }
 
@@ -2120,7 +2132,7 @@ function WatchlistDeskPage({ t }) {
     setItems(before.filter((row) => row.thscode !== thscode))
     if (selected === thscode) {
       setSelected(null)
-      setTrend({ status: 'idle', data: null, code: null })
+      setTrend({ status: 'idle', data: null, code: null, detail: null })
     }
     try {
       await call('/remove', { body: { thscode } })
@@ -2305,16 +2317,34 @@ function WatchlistDeskPage({ t }) {
     ].map(([label, value]) => h('div', { key: label, className: 'cwd-trendstat' },
       h('span', null, label), h('span', { title: value }, value))))
 
+  /**
+   * One look for both panes when there is nothing to draw: the host's own sentence says what went
+   * wrong, and the retry is a real button — inside an empty 300px box a borderless pill reads as
+   * plain text, which is exactly what makes a dead pane look unrecoverable.
+   */
+  const chartFallback = (state, labels, retry = null) => {
+    const title = state.status === 'error' ? labels.error : state.status === 'loading' ? labels.loading : labels.unavailable
+    const reason = state.status === 'error' ? state.detail : state.status === 'unavailable' ? labels.hint : null
+    const showRetry = state.status === 'error' && retry !== null
+    return h('div', { className: showRetry ? 'cwd-chart cwd-chartfail' : 'cwd-chart' },
+      h('div', { className: 'cwd-fallback' },
+        h('div', { className: 'cwd-charttext' }, title),
+        reason === null || reason === undefined || reason.length === 0 ? null : h('div', { className: 'cwd-charthint' }, reason),
+        showRetry
+          ? h('button', { type: 'button', className: 'cwd-retry', onClick: retry.onClick },
+            h(IconRefreshOutlineRegular, { size: 14 }),
+            h('span', null, t('desk.retry')))
+          : null))
+  }
+
   const trendBody = trendData !== null
     ? h(IntradayChart, { key: trendData.thscode, data: trendData, t })
-    : h('div', { className: 'cwd-chart' }, h('div', null,
-      h('div', { className: 'cwd-charttext' }, trend.status === 'error' ? t('desk.trendError') : trend.status === 'loading' ? t('desk.trendLoading') : t('desk.trendUnavailable')),
-      trend.status === 'unavailable'
-        ? h('div', { className: 'cwd-charthint' }, t('desk.trendUnavailableHint'))
-        : null,
-      trend.status === 'error'
-        ? h('button', { type: 'button', className: 'cwd-pill', onClick: () => { void loadTrend(selected, { bust: true }) } }, t('desk.trendRetry'))
-        : null))
+    : chartFallback(trend, {
+      error: t('desk.trendError'),
+      loading: t('desk.trendLoading'),
+      unavailable: t('desk.trendUnavailable'),
+      hint: t('desk.trendUnavailableHint'),
+    }, { onClick: () => { void loadTrend(selected, { bust: true }) } })
   const klineData = kline.status === 'ready' && Array.isArray(kline.data?.bars) && kline.data.bars.length > 0 ? kline.data : null
   const klineNote = klineData === null
     ? (kline.status === 'loading' ? t('desk.klineLoading') : kline.status === 'error' ? t('desk.klineError') : '')
@@ -2328,12 +2358,12 @@ function WatchlistDeskPage({ t }) {
     }))
   const klineBody = klineData !== null
     ? h(DailyChart, { key: klineData.thscode, data: klineData, t })
-    : h('div', { className: 'cwd-chart' }, h('div', null,
-      h('div', { className: 'cwd-charttext' }, kline.status === 'error' ? t('desk.klineError') : kline.status === 'loading' ? t('desk.klineLoading') : t('desk.klineUnavailable')),
-      kline.status === 'unavailable' ? h('div', { className: 'cwd-charthint' }, t('desk.klineUnavailableHint')) : null,
-      kline.status === 'error'
-        ? h('button', { type: 'button', className: 'cwd-pill', onClick: () => { void loadKline(selected, { bust: true }) } }, t('desk.trendRetry'))
-        : null))
+    : chartFallback(kline, {
+      error: t('desk.klineError'),
+      loading: t('desk.klineLoading'),
+      unavailable: t('desk.klineUnavailable'),
+      hint: t('desk.klineUnavailableHint'),
+    }, { onClick: () => { void loadKline(selected, { bust: true }) } })
   const klineBlock = h('div', { className: 'cwd-block cwd-block-kline' },
     h('div', { className: 'cwd-blockhead' },
       h('span', { className: 'cwd-blocktitle' }, t('desk.daily')),

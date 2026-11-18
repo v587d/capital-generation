@@ -8,7 +8,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { elapsedTradingMinutes, fetchTrendSeries, resolveTrendTarget } from '../lib/sources/trend-series.js'
 import { tencentHostDownUntil } from '../lib/sources/tencent-public-core.js'
-import { EASTMONEY_AAPL, TENCENT_00700, TENCENT_600519, TENCENT_688599 } from './trend-fixtures.mjs'
+import { EASTMONEY_AAPL, TENCENT_00700, TENCENT_300803_AFTER_HOURS, TENCENT_600519, TENCENT_688599 } from './trend-fixtures.mjs'
 
 /** A-share session close in Asia/Shanghai on the fixture's own session date. */
 const AFTER_CLOSE = Date.parse('2026-11-17T16:30:00+08:00')
@@ -228,22 +228,54 @@ test('会话时钟：午休不算流逝，状态与滞后按交易所本地时�
   })
 })
 
-test('解析护栏：累计量倒退、行形态变化、空序列都响亮失败并带上游原话', async () => {
+test('解析护栏：行形态、时间倒流、空序列都响亮失败；累计量回退只当一次重述', async () => {
   const start = Date.parse('2026-11-17T09:00:00+08:00')
 
-  const backwards = JSON.stringify({
+  // 300803.SZ 真报文：盘后最后一行把成交额改低 0.04%（创业板盘后定价到 15:30）。整块分时不许因此判死。
+  await withStub({ tencent: TENCENT_300803_AFTER_HOURS }, async () => {
+    const series = await fetchTrendSeries(targetFor('300803.SZ', 'a-share'), {
+      signal: AbortSignal.timeout(5_000),
+      now: Date.parse('2026-11-18T15:40:00+08:00'),
+    })
+    assert.equal(series.session_status, 'closed')
+    assert.ok(series.points.length > 200, `只留盘中，实得 ${series.points.length} 根`)
+    assert.equal(series.points[series.points.length - 1][0], '15:00', '15:05 之后的盘后定价行不上图')
+    assert.ok(series.points.every((point) => point[3] >= 0 && point[4] >= 0), '回退不许变成负的成交量/额')
+    assert.equal(series.volume, 144232, '成交量取报价口径，不含盘后定价')
+  })
+
+  // 回退落在盘中的行上：那一根 delta 归零，后面接着按高水位继续累计。
+  const restated = JSON.stringify({
     code: 0,
     data: {
       sh600519: {
-        data: { date: '20261117', data: ['0930 10.00 500 5000.00', '0931 10.10 400 9000.00'] },
-        qt: { sh600519: [, 'x', '600519', '10.10', '10.00', '10.00', '500', , , , , , , , , , , , , , , , , , , , , , , , , , , '10.20', '9.40'] },
+        data: { date: '20261117', data: ['0930 10.00 500 5000.00', '0931 10.10 480 4900.00', '0932 10.20 520 5300.00'] },
+        qt: { sh600519: [, 'x', '600519', '10.20', '10.00', '10.00', '520', , , , , , , , , , , , , , , , , , , , , , , , , , , '10.20', '9.40'] },
       },
     },
   })
-  await withStub({ tencent: backwards }, async () => {
+  await withStub({ tencent: restated }, async () => {
+    const series = await fetchTrendSeries(targetFor('600519.SH', 'a-share'), { signal: AbortSignal.timeout(5_000), now: start })
+    // 高水位留在 500：0932 的 520 只算新增 20 股，回退的 480 不加回也不倒扣。
+    assert.deepEqual(series.points.map((point) => point[3]), [500, 0, 20], '回退那一根没有新成交')
+    assert.deepEqual(series.points.map((point) => point[4]), [5000, 0, 300])
+    assert.ok(series.points.every((point) => point[2] > 0), '均价仍按累计额算')
+  })
+
+  // 时间倒流不是重述而是坏报文：横轴会回头，必须响亮失败。
+  const reversed = JSON.stringify({
+    code: 0,
+    data: {
+      sh600519: {
+        data: { date: '20261117', data: ['0931 10.00 500 5000.00', '0930 10.10 600 6100.00'] },
+        qt: { sh600519: [, 'x', '600519', '10.10', '10.00', '10.00', '600'] },
+      },
+    },
+  })
+  await withStub({ tencent: reversed }, async () => {
     await assert.rejects(
       fetchTrendSeries(targetFor('600519.SH', 'a-share'), { signal: AbortSignal.timeout(5_000), now: start }),
-      (error) => error.code === 'trend_parse_failed' && /moved backwards/u.test(error.message),
+      (error) => error.code === 'trend_parse_failed' && /time moved backwards/u.test(error.message),
     )
   })
 

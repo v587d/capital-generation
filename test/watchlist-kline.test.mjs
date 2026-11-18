@@ -109,6 +109,24 @@ test('⛔ /kline 港美股指数直接给空态理由，不发请求', async () 
 
 test('/kline：上游给出非日线形状时响亮失败，不画半张图', async () => {
   tencentHostDownUntil.clear()
+  const broken = JSON.parse(TENCENT_KLINE_300803)
+  broken.data.sz300803.qfqday[0] = ['2026-05-25', '68.138']
+  const stub = stubFuyao({ [KLINE_URL]: JSON.stringify(broken) })
+  const { service, fake, handler } = harness()
+  try {
+    await withHoldable(service, fake)
+    await addRow(fake)
+    const res = await call(handler, { method: 'GET', url: '/capital-watchlist/kline?thscode=300803.SZ' })
+    assert.equal(res.statusCode, 502)
+    assert.equal(res.json().code, 'kline_parse_failed')
+    assert.equal(res.json().message, '上游这次回的报文不完整')
+  } finally {
+    stub.restore()
+  }
+})
+
+test('⛔ /kline：上游这次没有日线是可重试的故障，不许冒充"该市场没有日K"', async () => {
+  tencentHostDownUntil.clear()
   const stub = stubFuyao({ [KLINE_URL]: '{"code":0,"msg":"","data":{}}' })
   const { service, fake, handler } = harness()
   try {
@@ -116,8 +134,11 @@ test('/kline：上游给出非日线形状时响亮失败，不画半张图', as
     await addRow(fake)
     const res = await call(handler, { method: 'GET', url: '/capital-watchlist/kline?thscode=300803.SZ' })
     assert.equal(res.statusCode, 502)
-    assert.equal(res.json().code, 'kline_unavailable')
+    assert.equal(res.json().code, 'kline_upstream_unavailable')
+    // 带 reason 就走"该市场暂时没有日K数据"的空态，重试键也就没了。
+    assert.equal(res.json().reason, undefined)
   } finally {
     stub.restore()
+    tencentHostDownUntil.clear()
   }
 })
