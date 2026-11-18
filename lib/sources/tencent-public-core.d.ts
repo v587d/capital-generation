@@ -2,6 +2,14 @@ export declare const QUOTE_URL = "https://qt.gtimg.cn/q=";
 export declare const SMARTBOX_URL = "https://smartbox.gtimg.cn/s3/";
 export declare const TENCENT_MIN_INTERVAL_MS = 120;
 export declare const tencentThrottle: <T>(task: () => Promise<T>) => Promise<T>;
+/**
+ * ifzq JSON hosts (K-line + intraday trend). One rotation and one cooldown table for both
+ * callers: a host that failed for K-lines must not be retried by the trend path 200ms later.
+ */
+export declare const TENCENT_IFZQ_HOSTS: string[];
+export declare const TENCENT_HOST_COOLDOWN_MS = 120000;
+/** Shared by every ifzq caller; keyed by host URL. */
+export declare const tencentHostDownUntil: Map<string, number>;
 export type JsonRecord = Record<string, unknown>;
 export declare function isRecord(value: unknown): value is JsonRecord;
 export declare function numberOrNull(value: unknown): number | null;
@@ -48,3 +56,26 @@ export interface SmartboxCandidate {
 export declare function parseSmartbox(text: string): SmartboxCandidate[];
 export declare const SMARTBOX_MARKETS: string[];
 export declare function fetchSmartbox(query: string, market: string, signal: AbortSignal): Promise<SmartboxCandidate[]>;
+/** ifzq JSON body: empty / non-JSON / non-object must fail loudly with the host named. */
+export declare function parseIfzqPayload(text: string, context: string): JsonRecord;
+/** One ifzq request; `param=` is the K-line shape, `query` is for endpoints with their own names. */
+export interface IfzqRequest {
+    path: string;
+    param?: string;
+    query?: string;
+    label: string;
+    /** Error code when every host is exhausted; K-line keeps its historical code. */
+    code?: string;
+    /** "Host gave nothing": whole data object for A-shares, symbol series for HK/US. */
+    isEmpty: (data: JsonRecord) => boolean;
+    /**
+     * Stop on first param rejection: another host will not fix it, and blacklisting all hosts for
+     * 120s spreads one bad call process-wide. HK/US returns `{"code":1,"msg":"bad params"}`.
+     */
+    isParamRejection?: (payload: JsonRecord) => boolean;
+}
+/**
+ * Rotate the shared ifzq hosts and return the first non-empty `data` object. Cancellation and
+ * param failures rethrow before blacklist/rotation; see `docs/dev/web-retriever.md` §4.2.
+ */
+export declare function callIfzqHosts(request: IfzqRequest, signal: AbortSignal): Promise<JsonRecord>;

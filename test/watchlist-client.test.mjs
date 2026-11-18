@@ -21,6 +21,61 @@ const QUOTED = {
   source: 'seed',
   quote: { price: 12858.7532, change_pct: -3.440841, captured_at: 1790589000000, source_ts: 1 },
 }
+/**
+ * Ready intraday payload: same shape the host route returns (points are
+ * `[HH:MM, price, avg, volume, amount]`). Volume/amount are chosen so 万/亿 rounding is observable.
+ */
+const TREND = {
+  ok: true,
+  thscode: '399001.SZ',
+  source: 'tencent',
+  market: 'a-share',
+  tz: 'Asia/Shanghai',
+  session_date: '2026-11-17',
+  session_status: 'closed',
+  stale: false,
+  prev_close: 12880,
+  open: 12850.25,
+  high: 12901.5,
+  low: 12800.75,
+  last: 12858.7532,
+  avg: 12862.4,
+  volume: 1234567,
+  amount: 98765432109,
+  volume_unit: 'lot',
+  currency: null,
+  points: [
+    ['09:30', 12850.25, 12850.25, 1200, 1000000],
+    ['09:31', 12866.1, 12858.1, 3400, 2900000],
+    ['09:32', 12855.4, 12857, 900, 800000],
+    ['09:33', 12870.2, 12861.5, 2100, 1800000],
+    ['15:00', 12858.7532, 12862.4, 1500, 1300000],
+  ],
+}
+
+
+/** Daily bars: deterministic OHLCV so the candle geometry and the MA windows are assertable. */
+const KLINE = {
+  ok: true,
+  thscode: '399001.SZ',
+  source: 'tencent',
+  adjust: 'qfq',
+  volume_unit: 'lot',
+  currency: null,
+  bars: Array.from({ length: 70 }, (_, index) => {
+    const close = 12800 + Math.sin(index / 3) * 90 + index * 2
+    const open = close - Math.sin(index / 2) * 40
+    return {
+      date: `2026-${String(6 + Math.floor(index / 22)).padStart(2, '0')}-${String((index % 22) + 1).padStart(2, '0')}`,
+      open: Number(open.toFixed(2)),
+      high: Number((Math.max(open, close) + 30).toFixed(2)),
+      low: Number((Math.min(open, close) - 30).toFixed(2)),
+      close: Number(close.toFixed(2)),
+      volume: 1200 + (index % 7) * 310,
+    }
+  }),
+}
+
 /** Outlasts the client's 300ms search debounce. */
 const SEARCH_WAIT_MS = 400
 
@@ -96,7 +151,8 @@ function factoryRequire(name) {
           hookState[index] = typeof next === 'function' ? next(hookState[index]) : next
         }]
       },
-      useRef: () => ({ current: null }),
+      // Faithful to React: useRef(initial) keeps the first value, so `alive.current` is true on mount.
+      useRef: (value) => ({ current: value }),
       useMemo: (factory) => factory(),
     }
   }
@@ -360,23 +416,58 @@ test('工作台页面：标题行只留标题 + 最近更新 + 刷新，列表/�
   const desk = ctx.registrations[1]
   assert.equal(desk.declaration.name, 'main')
 
-  // 组件按固定 hook 顺序读状态；这里直接种「清单已读完、选中第一行」的那一态。
+  // 组件按固定 hook 顺序读状态；这里直接种「清单已读完、选中第一行、分时已到位」的那一态。
   const row = { ...QUOTED, name: '深证成指' }
   freshHooks()
   hookState[0] = [row]
   hookState[1] = false
   hookState[6] = { names: ['核心'], assignments: { [row.thscode]: ['核心'] } }
   hookState[11] = row.thscode
+  hookState[14] = { status: 'ready', data: TREND, code: null }
+  hookState[15] = { status: 'ready', data: KLINE, code: null }
   const tree = desk.component({ t })
 
   const text = textOf(tree)
   assert.match(text, /自选股行情工作台/, '标题跟着工作台走')
-  assert.match(text, /当日分时/)
-  assert.match(text, /当前行情接口只返回最新快照/, '⛔ 没有分时序列就明说，不画假走势')
-  assert.match(text, /暂无成交量数据/)
+  assert.match(text, /分时/)
   assert.match(text, /深证成指/)
-  assert.match(text, /-3\.44%/, '涨跌幅两位小数')
+  // 选中行与右栏共用同一份分时（比清单刷新更新），所以报价那份 -3.44% 不再出现：一屏不许两个数。
+  assert.match(text, /-0\.16%/, '涨跌幅两位小数，且与详情同源')
+  assert.equal(text.includes('-3.44%'), false, '⛔ 同一只票一屏两个涨跌幅')
   assert.match(text, /12,858\.75/, '最新价两位小数并带千分位')
+
+  // 分时到位时：统计行 + 走势图 + 成交量柱都在，占位文案一条都不剩。
+  assert.doesNotMatch(text, /当前行情接口只返回最新快照/)
+  assert.doesNotMatch(text, /暂无成交量数据/)
+  assert.match(text, /2026-11-17 收盘/, '块头说明交易状态，不冒充盘中')
+  for (const label of ['今开', '最高', '最低', '均价', '成交量', '成交额']) assert.match(text, new RegExp(label))
+  assert.match(text, /12,850\.25/, '今开')
+  assert.match(text, /12,901\.50/, '最高')
+  assert.match(text, /12,800\.75/, '最低')
+  assert.match(text, /123\.46万手/, '成交量按万手换算')
+  assert.match(text, /987\.65亿/, '成交额按亿换算')
+  const svg = classNodes(classNodes(tree, 'cwd-chartbox')[0], 'cwd-chartsvg')
+  assert.equal(svg.length, 1, '分时图是它自己盒子里的一张 SVG，不是 canvas 也不是空框')
+  assert.equal(svg[0].props.role, 'img')
+  assert.match(String(svg[0].props['aria-label']), /399001\.SZ/, '图有无障碍摘要')
+  assert.match(String(svg[0].props['aria-label']), /均价 12,862\.40/)
+  assert.ok(classNodes(tree, 'cwd-vol-up').length >= 1, '成交量柱按涨跌着色')
+  const line = classNodes(tree, 'cwd-chartline')[0]
+  assert.equal(line.props.style.stroke, 'var(--capital-watchlist-down)', '收盘低于昨收走绿（var() 只在 style 里生效，别写回属性）')
+  assert.match(String(line.props.d), /^M[\d.]+ [\d.]+(?:L[\d.]+ [\d.]+)+$/u, '折线路径只有有限坐标')
+  assert.doesNotMatch(String(line.props.d), /NaN|Infinity/u, '⛔ 坐标算出 NaN 就是一张空图')
+  const area = classNodes(tree, 'cwd-chartarea')[0]
+  assert.match(String(area.props.d), /Z$/u, '面积路径要闭合到图底')
+  const avg = classNodes(tree, 'cwd-chartavg')[0]
+  assert.ok(avg, '个股要画均价线')
+  assert.doesNotMatch(String(avg.props.d), /NaN|Infinity/u)
+  // x 轴刻度取交易所本地时刻；右轴百分比与左轴价格同源。
+  assert.ok(textOf(tree).includes('09:30') && textOf(tree).includes('15:00'), '横轴有开盘与收盘刻度')
+  for (const bar of classNodes(tree, 'cwd-vol-up').concat(classNodes(tree, 'cwd-vol-down'))) {
+    const height = Number(bar.props.height)
+    assert.ok(Number.isFinite(height) && height >= 0, '成交量柱高度必须是有限非负数')
+  }
+  assert.equal(classNodes(tree, 'cwd-chart').length, 0, '⛔ 有数据就不再显示占位框')
 
   // 头部收干净：没有副标题、没有标的数/上涨/下跌统计卡；时间挪到刷新按钮左边。
   assert.equal(classNodes(tree, 'cwd-stats').length, 0, '统计卡整块去掉')
@@ -443,9 +534,11 @@ test('工作台：列表内嵌滚动且与详情等高、块底色与投研看�
   assert.ok(tableBody, '拿不到 .cwd-tablebody 规则')
   assert.match(tableBody, /overflow-y:\s*auto/, '列表自己有滚动条')
   assert.match(tableBody, /flex:\s*1/, '列表吃掉卡片剩余高度')
-  assert.match(css, /\.cwd-body \{[^}]*height:\s*var\(--cwd-body-h\)/, '两栏同一个定高')
-  const bodyH = /--cwd-body-h:\s*clamp\(([^)]+)\)/.exec(css)
-  assert.ok(bodyH, '拿不到 --cwd-body-h 的固定高度')
+  // ⛔ 定高靠面板真实高度（flex 填充），不是 vh 猜的：猜小了里面出现滚动条，猜大了整页出现滚动条。
+  assert.match(css, /\.cwd-inner \{[^}]*display:\s*flex/, '页面内层要把剩余高度传下去')
+  assert.match(css, /\.cwd-body \{[^}]*flex:\s*1 1 auto/, '两栏吃满面板剩余高度')
+  assert.match(css, /\.cwd-body \{[^}]*max-height:\s*880px/, '超高窗口不许把卡片拉到无限高')
+  assert.match(css, /\.cwd-body \{[^}]*grid-template-rows:\s*minmax\(0, 1fr\)/, '⛔ 行高钉死，右栏长高不许把左列一起撑开')
   const cardRule = (css.match(/\.cwd-card \{[^}]*\}/) ?? [])[0]
   assert.match(cardRule, /height:\s*100%/, '左右两张卡都撑满同一定高')
   // 块的灰底与 CapGen 投研自动化看板同源；列表与详情共用同一张卡片。
@@ -453,11 +546,26 @@ test('工作台：列表内嵌滚动且与详情等高、块底色与投研看�
   const card = (css.match(/\.cwd-card \{[^}]*\}/) ?? [])[0]
   assert.match(card, /background:\s*var\(--cwd-card\)/)
   assert.equal((css.match(/\.cwd-stat \{/g) ?? []).length, 0, '统计卡的样式随卡片一起去掉')
-  for (const block of ['cwd-chart', 'cwd-volume']) {
+  for (const block of ['cwd-chart', 'cwd-chartbox']) {
     const rule = (css.match(new RegExp(`\\.${block} \\{[^}]*\\}`)) ?? [])[0]
     assert.ok(rule, `拿不到 .${block} 规则`)
     assert.match(rule, /var\(--dsw-alias-bg-module-platform\)/, `${block} 用卡片内的控件灰`)
   }
+  // ⛔ 走势图不许参与流式布局：viewBox 的宽高比会反推父盒高度，量测回写就是"自己把自己撑大"。
+  const chartBox = (css.match(/\.cwd-chartbox \{[^}]*\}/) ?? [])[0]
+  assert.match(chartBox, /overflow:\s*hidden/, '图表盒子裁掉越界绘制')
+  const chartSvg = (css.match(/\.cwd-chartsvg \{[^}]*\}/) ?? [])[0]
+  // ⛔ 两块图平分详情列：块自己可伸缩，图盒必须能被压进块的可用高度，否则会溢出去压住下一块的标题。
+  for (const selector of ['cwd-block-chart', 'cwd-block-kline']) {
+    const rule = (css.match(new RegExp(`\\.${selector} \\{[^}]*\\}`)) ?? [])[0]
+    assert.ok(rule, `拿不到 .${selector} 规则`)
+    assert.match(rule, /flex:\s*1 1 0/, `.${selector} 必须和另一块平分剩余高度`)
+  }
+  assert.match((css.match(/\.cwd-chartbox \{[^}]*\}/) ?? [])[0], /min-height:\s*120px/, '图盒要能被压下来')
+  assert.match((css.match(/\.cwd-klinebox \{[^}]*\}/) ?? [])[0], /min-height:\s*140px/, '日K 盒也要能被压下来')
+  assert.ok(chartSvg, '拿不到 .cwd-chartsvg 规则')
+  assert.match(chartSvg, /position:\s*absolute/, '⛔ SVG 必须绝对定位，否则它会撑大自己的容器')
+  assert.match(chartSvg, /inset:\s*0/, '绝对定位要贴着四边')
   // 工具条 / 表头 / 行共用一条左侧基线
   const gutter = (selector) => {
     const rules = css.match(new RegExp(`\\.${selector} \\{[^}]*\\}`, 'g')) ?? []
@@ -2331,4 +2439,368 @@ test('两套字典都要有持仓这一族，且英文界面不许画中文类�
   // 0~N is computed remaining allowance, not copy, so it lives in code and both languages match by construction.
   assert.equal(Object.values(zh).some((value) => /未填/.test(value)), false, 'zh 里不许再出现"未填"这个词')
   assert.equal(Object.values(en).some((value) => /not set/i.test(value)), false, 'en 里不许再出现 Not set')
+})
+
+/** Meta cells of the detail card as label → value, so assertions read the field a user reads. */
+function metaFields(tree) {
+  const fields = {}
+  for (const item of classNodes(tree, 'cwd-metaitem')) {
+    const label = textOf(classNodes(item, 'cwd-metalabel')[0]).trim()
+    fields[label] = textOf(classNodes(item, 'cwd-metavalue')[0]).trim()
+  }
+  return fields
+}
+
+test('⛔ 详情头必须与下面的分时同源：价格、涨跌幅、时间取自更新的那份', () => {
+  const { ctx } = mount()
+  const t = (key) => ctx.dictionaries['capital.watchlist'].zh[key] ?? key
+  const desk = ctx.registrations[1]
+  // 报价是 09:24 的 9.24 / -2.43%，分时已经走到 09:29 的 9.23；两份不同源，界面只许呈现一份。
+  const quote = { price: 9.24, change_pct: -2.43, captured_at: Date.parse('2026-11-18T10:26:00+08:00'), source_ts: 1 }
+  freshHooks()
+  hookState[0] = [{ ...QUOTED, thscode: '688599.SH', ticker: '688599', name: '天合光能', asset_type: 'a-share', quote }]
+  hookState[1] = false
+  hookState[6] = { names: [], assignments: {} }
+  hookState[11] = '688599.SH'
+  hookState[14] = {
+    status: 'ready',
+    code: '688599.SH',
+    data: {
+      ...TREND,
+      thscode: '688599.SH',
+      session_date: '2026-11-18',
+      session_status: 'live',
+      prev_close: 9.47,
+      last: 9.23,
+      avg: 9.307,
+      volume_unit: 'share',
+      volume: 11738122,
+      amount: 109243316,
+      points: [['09:30', 9.51, 9.51, 195498, 1859186], ['09:29', 9.23, 9.307, 1169140, 10881123]],
+    },
+  }
+  const tree = desk.component({ t })
+  assert.equal(textOf(classNodes(tree, 'cwd-bigprice')[0]).trim(), '9.23', '大价格取分时的最新一点，不取那份旧的报价快照')
+  assert.equal(textOf(classNodes(tree, 'cwd-bigpct')[0]).trim(), '-2.53%', '涨跌幅跟着同一份数据重算')
+  const fields = metaFields(tree)
+  assert.equal(textOf(classNodes(tree, 'cwd-price')[0]).trim(), '9.23', '左侧那一行跟着同一份分时，不许和右边打架')
+  assert.equal(textOf(classNodes(tree, 'cwd-pct')[0]).trim(), '-2.53%')
+  assert.equal(fields['行情时间'], '11-18 09:29', '时间戳说明的是上面那个价格是什么时候的')
+  assert.equal(fields['交易所时间'], undefined, '时间只留一格：交易所时间已并入行情时间')
+  assert.equal(fields['所属分组'], undefined, '分组不再占一格：筛选器已经是它的入口')
+  assert.deepEqual(Object.keys(fields), ['行情时间', '标的类型'], 'meta 区一行两格')
+  assert.match(textOf(tree), /1173\.81万股/, '科创板按股报量，不写万手')
+
+  // 美股走同一格，但钟不是读者的钟：必须带时区，否则会被当成北京时间读。
+  freshHooks()
+  hookState[0] = [{ ...QUOTED, thscode: 'AAPL.OQ', ticker: 'AAPL', name: '苹果', asset_type: 'us-stock', quote }]
+  hookState[1] = false
+  hookState[6] = { names: [], assignments: {} }
+  hookState[11] = 'AAPL.OQ'
+  hookState[14] = {
+    status: 'ready',
+    code: 'AAPL.OQ',
+    data: { ...TREND, thscode: 'AAPL.OQ', market: 'us', tz: 'America/New_York', session_date: '2026-11-17', prev_close: 9.47, last: 9.23, points: [['09:30', 9.51, null, 195498, 1859186], ['16:00', 9.23, null, 1169140, 10881123]] },
+  }
+  assert.equal(metaFields(desk.component({ t }))['行情时间'], '11-17 16:00 美东', '美东的钟点必须自己说是美东的')
+})
+
+test('⛔ 分时还是别的那只：详情头退回报价，不许拿别人的分时冒充自己', () => {
+  const { ctx } = mount()
+  const t = (key) => ctx.dictionaries['capital.watchlist'].zh[key] ?? key
+  const desk = ctx.registrations[1]
+  const quote = { price: 9.24, change_pct: -2.43, captured_at: Date.parse('2026-11-18T10:26:00+08:00'), source_ts: 1 }
+  freshHooks()
+  hookState[0] = [{ ...QUOTED, thscode: '688599.SH', ticker: '688599', name: '天合光能', asset_type: 'a-share', quote }]
+  hookState[1] = false
+  hookState[6] = { names: [], assignments: {} }
+  hookState[11] = '688599.SH'
+  hookState[14] = { status: 'ready', code: '600519.SH', data: { ...TREND, thscode: '600519.SH', prev_close: 1453.9, last: 1457.7 } }
+  const tree = desk.component({ t })
+  assert.equal(textOf(classNodes(tree, 'cwd-bigprice')[0]).trim(), '9.24')
+  assert.equal(textOf(classNodes(tree, 'cwd-bigpct')[0]).trim(), '-2.43%')
+  assert.equal(textOf(classNodes(tree, 'cwd-price')[0]).trim(), '9.24', '分时是别人的：清单与详情都退回报价')
+  assert.match(metaFields(tree)['行情时间'], /11-18 10:26/)
+})
+
+
+test('⛔ 版面把高度优先给图：时间/类型并排到价格右边，统计与均线并进各自标题行', () => {
+  const { ctx } = mount()
+  const t = (key) => ctx.dictionaries['capital.watchlist'].zh[key] ?? key
+  const desk = ctx.registrations[1]
+  freshHooks()
+  hookState[0] = [{ ...QUOTED }]
+  hookState[1] = false
+  hookState[6] = { names: [], assignments: {} }
+  hookState[11] = QUOTED.thscode
+  hookState[14] = { status: 'ready', data: TREND, code: null }
+  hookState[15] = { status: 'ready', data: KLINE, code: null }
+  const tree = desk.component({ t })
+
+  // 价格行右侧接管 meta：这两件事不再各占一行，省下来的高度全给两张图。
+  const quoterow = classNodes(tree, 'cwd-quoterow')
+  assert.equal(quoterow.length, 1, '价格与 meta 同一行')
+  const kids = [].concat(quoterow[0].props?.children ?? quoterow[0].children ?? [])
+  assert.equal(kids.length, 2, '左边报价、右边 meta')
+  assert.equal(String(kids[1].props.className), 'cwd-meta', 'meta 在价格右边')
+  assert.equal(classNodes(tree, 'cwd-bigquote').length, 1, '报价块只留价格与涨跌幅')
+
+  // 统计行进分时标题行、均线图例进日K 标题行，都是同一个 head 的孩子。
+  const heads = classNodes(tree, 'cwd-blockhead')
+  assert.equal(heads.length, 2)
+  const intradayHead = heads[0]
+  const dailyHead = heads[1]
+  const hasChild = (head, name) => classNodes(head, name).length === 1
+  assert.equal(hasChild(intradayHead, 'cwd-trendstats'), true, '统计跟标题同一行')
+  assert.equal(hasChild(dailyHead, 'cwd-malegend'), true, '均线图例跟标题同一行')
+
+  // CSS 契约：这两处是横向排布，不是原来的 grid / 独立行。
+  const css = mountedCss()
+  assert.match((css.match(/\.cwd-quoterow \{[^}]*\}/) ?? [])[0], /display:\s*flex/)
+  assert.match((css.match(/\.cwd-meta \{[^}]*\}/) ?? [])[0], /flex-wrap:\s*wrap/)
+  assert.doesNotMatch((css.match(/\.cwd-meta \{[^}]*\}/) ?? [])[0], /grid-template-columns/, '⛔ meta 不再是两列格子')
+  assert.match((css.match(/\.cwd-trendstats \{[^}]*\}/) ?? [])[0], /display:\s*flex/)
+})
+
+test('⛔ 分时块可收起：折叠后只剩标题行，高度让给日K', () => {
+  const { ctx } = mount()
+  const t = (key) => ctx.dictionaries['capital.watchlist'].zh[key] ?? key
+  const desk = ctx.registrations[1]
+  const render = () => { resetHooks(); return desk.component({ t }) }
+  freshHooks()
+  hookState[0] = [{ ...QUOTED }]
+  hookState[1] = false
+  hookState[6] = { names: [], assignments: {} }
+  hookState[11] = QUOTED.thscode
+  hookState[14] = { status: 'ready', data: TREND, code: null }
+  hookState[15] = { status: 'ready', data: KLINE, code: null }
+
+  const open = render()
+  const fold = classNodes(open, 'cwd-blockfold')
+  assert.equal(fold.length, 1, '标题行有一个收起键')
+  assert.equal(fold[0].props['aria-expanded'], 'true')
+  assert.equal(textOf(fold[0]).trim(), '收起')
+  assert.equal(classNodes(open, 'cwd-chartbox').length, 1, '展开时画分时')
+  assert.equal(classNodes(open, 'cwd-trendstats').length, 1)
+
+  fold[0].props.onClick()
+  const folded = render()
+  assert.equal(classNodes(folded, 'cwd-chartbox').length, 0, '收起后不画分时图')
+  assert.equal(classNodes(folded, 'cwd-trendstats').length, 0, '统计行一起收起')
+  assert.equal(classNodes(folded, 'cwd-blockfold')[0].props['aria-expanded'], 'false')
+  assert.equal(String(classNodes(folded, 'cwd-block-chart')[0].props.className).includes('cwd-folded'), true, '折叠态要能被 CSS 认出来')
+  assert.equal(classNodes(folded, 'cwd-klinebox').length, 1, '日K 不受影响')
+  assert.equal(textOf(classNodes(folded, 'cwd-blockfold')[0]).trim(), '展开')
+
+  classNodes(folded, 'cwd-blockfold')[0].props.onClick()
+  assert.equal(classNodes(render(), 'cwd-chartbox').length, 1, '再点一次回到展开')
+})
+
+test('日K：蜡烛、四条均线、量柱与月刻度都在，坐标不出 NaN', () => {
+  const { ctx } = mount()
+  const t = (key) => ctx.dictionaries['capital.watchlist'].zh[key] ?? key
+  const desk = ctx.registrations[1]
+  freshHooks()
+  hookState[0] = [{ ...QUOTED }]
+  hookState[1] = false
+  hookState[6] = { names: [], assignments: {} }
+  hookState[11] = QUOTED.thscode
+  hookState[14] = { status: 'ready', data: TREND, code: null }
+  hookState[15] = { status: 'ready', data: KLINE, code: null }
+  const tree = desk.component({ t })
+
+  const box = classNodes(tree, 'cwd-klinebox')
+  assert.equal(box.length, 1, '日K块要有自己的图盒')
+  const svg = classNodes(box[0], 'cwd-chartsvg')[0]
+  assert.ok(svg, '日K是一张 SVG')
+  assert.match(String(svg.props['aria-label']), /399001\.SZ/)
+
+  const ups = classNodes(tree, 'cwd-candle-up').length
+  const downs = classNodes(tree, 'cwd-candle-down').length
+  assert.equal(ups + downs, KLINE.bars.length, '一根日线一根蜡烛，涨跌都要有')
+  assert.ok(ups > 0 && downs > 0, '构造的样本里涨跌都有')
+  // 每根蜡烛 = 一根影线 + 一个实体；实体高度不许为负。
+  for (const candle of classNodes(tree, 'cwd-candle-up').concat(classNodes(tree, 'cwd-candle-down'))) {
+    const kids = [].concat(candle.props?.children ?? candle.children ?? [])
+    assert.equal(kids.length, 2, '影线 + 实体')
+    assert.ok(Number(kids[1].props.height) > 0)
+  }
+
+  for (const window of ['cwd-ma5', 'cwd-ma10', 'cwd-ma20', 'cwd-ma60']) {
+    const path = classNodes(tree, 'cwd-maline').find((node) => String(node.props.className).split(' ').includes(window))
+    assert.ok(path, `${window} 线要在`)
+    assert.match(String(path.props.d), /^M[\d.]+ [\d.]+(?:L[\d.]+ [\d.]+)+$/u, `${window} 路径只有有限坐标`)
+    assert.doesNotMatch(String(path.props.d), /NaN|Infinity/u)
+  }
+  // 70 根才够 MA60 画出点：少数几根时它只能是空的，这里顺便钉住窗口语义。
+  assert.ok(classNodes(tree, 'cwd-maline').find((node) => String(node.props.className).includes('cwd-ma60')).props.d.includes('L'), 'MA60 在第 60 根之后要有折线')
+
+  assert.equal(classNodes(tree, 'cwd-vol-up').length + classNodes(tree, 'cwd-vol-down').length >= KLINE.bars.length, true, '量柱按日着色')
+  const text = textOf(tree)
+  assert.match(text, /日K/)
+  assert.match(text, /前复权/)
+  for (const window of ['MA5', 'MA10', 'MA20', 'MA60']) assert.match(text, new RegExp(`${window} [\\d,]+\\.\\d\\d`), `${window} 图例要有数值`)
+  assert.match(text, /2026\/06/, '横轴第一个月带年份')
+})
+
+test('日K：没有日线的市场给空态与理由，图上没有别人的蜡烛', () => {
+  const { ctx } = mount()
+  const t = (key) => ctx.dictionaries['capital.watchlist'].zh[key] ?? key
+  const desk = ctx.registrations[1]
+  const render = () => { resetHooks(); return desk.component({ t }) }
+  freshHooks()
+  hookState[0] = [{ ...QUOTED }]
+  hookState[1] = false
+  hookState[6] = { names: [], assignments: {} }
+  hookState[11] = QUOTED.thscode
+  hookState[14] = { status: 'ready', data: TREND, code: null }
+  hookState[15] = { status: 'unavailable', data: null, code: 'kline_unavailable' }
+  const tree = render()
+  assert.equal(classNodes(tree, 'cwd-klinebox').length, 0, '没有日线就不画图')
+  assert.match(textOf(tree), /该市场暂时没有日K数据/)
+  assert.equal(classNodes(tree, 'cwd-candle-up').length, 0)
+})
+
+test('工作台：分时在途只给骨架文案，不画半张图', () => {
+  const { ctx } = mount()
+  const t = (key) => ctx.dictionaries['capital.watchlist'].zh[key] ?? key
+  const desk = ctx.registrations[1]
+  freshHooks()
+  hookState[0] = [{ ...QUOTED }]
+  hookState[1] = false
+  hookState[6] = { names: [], assignments: {} }
+  hookState[11] = QUOTED.thscode
+  hookState[14] = { status: 'loading', data: null, code: null }
+  hookState[15] = { status: 'ready', data: KLINE, code: null }
+  const tree = desk.component({ t })
+  assert.match(textOf(tree), /正在读取分时/)
+  assert.equal(classNodes(classNodes(tree, 'cwd-chartbox')[0], 'cwd-chartsvg').length, 0, '没有数据就不出图')
+  assert.equal(classNodes(classNodes(tree, 'cwd-block-chart')[0], 'cwd-chart').length, 1, '占位框还在，版面不跳')
+})
+
+test('工作台：没有分时源的市场给空态与理由，且不画任何走势', () => {
+  const { ctx } = mount()
+  const t = (key) => ctx.dictionaries['capital.watchlist'].zh[key] ?? key
+  const desk = ctx.registrations[1]
+  freshHooks()
+  hookState[0] = [{ ...QUOTED }]
+  hookState[1] = false
+  hookState[6] = { names: [], assignments: {} }
+  hookState[11] = QUOTED.thscode
+  hookState[14] = { status: 'unavailable', data: null, code: 'trend_unavailable' }
+  const render = () => { resetHooks(); return desk.component({ t }) }
+  const text = textOf(render())
+  assert.match(text, /该市场暂时没有分时数据/)
+  assert.match(text, /这里不画假走势/)
+  assert.equal(classNodes(classNodes(render(), 'cwd-chartbox')[0], 'cwd-chartsvg').length, 0)
+})
+
+test('⛔ 横轴是交易时钟：09:32 的走势只占最左一窄条，柱子按分钟定宽而不是按点数', () => {
+  const { ctx } = mount()
+  const t = (key) => ctx.dictionaries['capital.watchlist'].zh[key] ?? key
+  const desk = ctx.registrations[1]
+  freshHooks()
+  hookState[0] = [{ ...QUOTED }]
+  hookState[1] = false
+  hookState[6] = { names: [], assignments: {} }
+  hookState[11] = QUOTED.thscode
+  // 开盘三分钟：点少不代表整天，横轴必须按交易分钟铺开。
+  hookState[14] = {
+    status: 'ready',
+    code: null,
+    data: {
+      ...TREND,
+      session_status: 'live',
+      last: 41.56,
+      prev_close: 41.9,
+      points: [
+        ['09:30', 42, 42, 480, 1000000],
+        ['09:31', 42.18, 42.09, 1200, 2000000],
+        ['09:32', 41.56, 41.9, 900, 3000000],
+      ],
+    },
+  }
+  const tree = desk.component({ t })
+  const grid = classNodes(tree, 'cwd-chartgrid').map((line) => [Number(line.props.x1), Number(line.props.x2), Number(line.props.y1), Number(line.props.y2)])
+  const left = Math.min(...grid.map(([x1]) => x1))
+  const plotRight = Math.max(...grid.map(([, x2]) => x2))
+  assert.ok(plotRight - left > 100, '拿不到绘图区宽度')
+
+  const xs = String(classNodes(tree, 'cwd-chartline')[0].props.d).match(/[ML]([\d.]+) [\d.]+/gu).map((pair) => Number(pair.slice(1).split(' ')[0]))
+  assert.equal(xs.length, 3, '三个点就是三个顶点')
+  assert.ok(Math.max(...xs) - left < (plotRight - left) * 0.03, '⛔ 点数不许把走势拉满全天宽度（那样 4 个点就成了 4 根粗柱）')
+  assert.ok(Math.max(...xs) > left, '第一个点落在 09:30 的左沿')
+
+  // 柱子宽度跟着「一分钟一格」走，与到来点数无关。
+  const slot = (plotRight - left) / 240
+  for (const bar of classNodes(tree, 'cwd-vol-up').concat(classNodes(tree, 'cwd-vol-down'))) {
+    const width = Number(bar.props.width)
+    assert.ok(width >= 1 && width <= slot, `柱子宽度 ${width} 必须是分钟级的，不是 plotWidth/点数`)
+    assert.ok(Number(bar.props.x) + width <= plotRight + 0.5, '柱子不出绘图区')
+  }
+
+  // 轴照整段交易时间画：收盘刻度与右沿竖线都在，哪怕还没有半点数据。
+  const text = textOf(tree)
+  for (const label of ['09:30', '13:30', '15:00']) assert.ok(text.includes(label), `横轴缺 ${label}`)
+  assert.ok(grid.some(([x1, x2, y1, y2]) => x1 === x2 && x1 > plotRight - 1 && y2 - y1 > 40), '右沿有收盘竖线')
+})
+
+test('工作台：分时失败给重试键，点一次带 refresh=1 重取', async () => {
+  const urls = []
+  const sandboxFetch = async (url) => {
+    urls.push(String(url))
+    return { ok: true, status: 200, text: async () => JSON.stringify(TREND) }
+  }
+  const { ctx } = mount({ fetch: sandboxFetch })
+  const t = (key) => ctx.dictionaries['capital.watchlist'].zh[key] ?? key
+  const desk = ctx.registrations[1]
+  freshHooks()
+  hookState[0] = [{ ...QUOTED }]
+  hookState[1] = false
+  hookState[6] = { names: [], assignments: {} }
+  hookState[11] = QUOTED.thscode
+  hookState[14] = { status: 'error', data: null, code: 'trend_timeout' }
+  const render = () => { resetHooks(); return desk.component({ t }) }
+  const retry = classNodes(render(), 'cwd-pill').find((node) => textOf(node).includes('重试'))
+  assert.ok(retry, '错误态要有出口，不能只剩一行红字')
+  assert.equal(typeof retry.props.onClick, 'function')
+  retry.props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.ok(urls.some((url) => url.includes('/capital-watchlist/trend?thscode=399001.SZ&refresh=1')), urls.join(','))
+  assert.match(textOf(render()), /2026-11-17 收盘/, '重取成功后回到图')
+})
+
+test('⛔ 选中行即按那只票取分时；晚到的旧回包不许盖住新选中', async () => {
+  const urls = []
+  const sandboxFetch = async (url) => {
+    const text = String(url)
+    urls.push(text)
+    const thscode = decodeURIComponent(/thscode=([^&]+)/u.exec(text)?.[1] ?? '')
+    // The first row answers late; the second must win anyway.
+    if (thscode === '399001.SZ') await new Promise((resolve) => setTimeout(resolve, 20))
+    const payload = text.includes('/kline')
+      ? { ...KLINE, thscode }
+      : thscode === '399001.SZ'
+        ? TREND
+        : { ...TREND, thscode, last: 10, prev_close: 10, points: [['09:30', 10, 10, 1, 1], ['09:31', 10.2, 10.1, 2, 2]] }
+    return { ok: true, status: 200, text: async () => JSON.stringify(payload) }
+  }
+  const { ctx } = mount({ fetch: sandboxFetch })
+  const t = (key) => ctx.dictionaries['capital.watchlist'].zh[key] ?? key
+  const desk = ctx.registrations[1]
+  const other = { ...QUOTED, thscode: '600519.SH', ticker: '600519', name: '贵州茅台', exchange: 'SH', asset_type: 'a-share' }
+  freshHooks()
+  hookState[0] = [{ ...QUOTED }, other]
+  hookState[1] = false
+  hookState[6] = { names: [], assignments: {} }
+  const render = () => { resetHooks(); return desk.component({ t }) }
+
+  classNodes(render(), 'cwd-cellname')[0].props.onClick()
+  classNodes(render(), 'cwd-cellname')[1].props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 40))
+
+  const tree = render()
+  assert.ok(urls.some((url) => url.includes('thscode=399001.SZ')), '第一行也发过请求')
+  assert.ok(urls.some((url) => url.includes('thscode=600519.SH')), '第二行立刻发请求')
+  assert.match(String(classNodes(tree, 'cwd-chartsvg')[0].props['aria-label']), /600519\.SH/, '留下的必须是后点那行')
 })

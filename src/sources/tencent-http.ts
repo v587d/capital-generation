@@ -7,6 +7,7 @@ import { isLikelyIndex, normalizeSecurityCodes, parseSecurityCode, requireTencen
 import {
   QUOTE_URL,
   aShareQuoteTime,
+  callIfzqHosts,
   fetchOffshoreIndexQuotes,
   fetchOffshoreQuotes,
   isRecord,
@@ -24,18 +25,11 @@ import {
 } from './tencent-public-core.js'
 
 const TICK_URL = 'https://stock.gtimg.cn/data/index.php'
-const KLINE_HOSTS = [
-  'https://web.ifzq.gtimg.cn',
-  'https://proxy.finance.qq.com/ifzqgtimg',
-  'https://ifzq.gtimg.cn',
-]
-const HOST_COOLDOWN_MS = 120_000
 const KLINE_MINUTES = new Set(['m1', 'm5', 'm15', 'm30', 'm60'])
 const KLINE_PERIODS = new Set(['day', 'week', 'month', 'm1', 'm5', 'm15', 'm30', 'm60'])
 const KLINE_SPAN_DAYS: Record<string, number> = { day: 700, week: 3650, month: 18250 }
 const MAX_TICK_PAGES = 300
 const TICK_SESSION_END = '15:00:59'
-const hostDownUntil = new Map<string, number>()
 
 type Params = Record<string, unknown>
 type FetchLike = typeof globalThis.fetch
@@ -137,18 +131,6 @@ function strictDate(value: unknown, name: string): string {
 function integer(value: unknown, name: string, min: number, max: number): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min || value > max) throw new Error(`parameter ${name} must be an integer from ${min} to ${max}`)
   return value
-}
-
-function parseJson(text: string, context: string): JsonRecord {
-  if (!text.trim()) throw sourceError(`Tencent ${context} returned an empty response`, 'tencent_empty_response')
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(text)
-  } catch (error) {
-    throw sourceError(`Tencent ${context} returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`, 'tencent_invalid_response')
-  }
-  if (!isRecord(parsed)) throw sourceError(`Tencent ${context} returned ${Array.isArray(parsed) ? 'an array' : typeof parsed}, expected an object`, 'tencent_invalid_response')
-  return parsed
 }
 
 function parseCodeParams(params: Params, name = 'code'): { code: SecurityCode; canonical: string } {
@@ -257,52 +239,8 @@ async function executeQuote(params: Params, signal: AbortSignal): Promise<{ data
   return { data: rows, schema: quoteOutput }
 }
 
-/** Single K-line host rotation for A-shares and HK/US; entries differ only by callbacks. */
-interface KlineTransport {
-  path: string
-  param: string
-  label: string
-  /** "Host gave nothing": whole data object for A-shares, symbol series for HK/US. */
-  isEmpty: (data: JsonRecord) => boolean
-  /**
-   * Stop on first param rejection: another host will not fix it, and blacklisting all hosts for
-   * 120s spreads one bad call process-wide. HK/US returns `{"code":1,"msg":"bad params"}`.
-   */
-  isParamRejection?: (payload: JsonRecord) => boolean
-}
-
-function defaultParamRejection(payload: JsonRecord): boolean {
-  return payload.msg === 'param error'
-}
-
-async function callKlineHosts(transport: KlineTransport, signal: AbortSignal): Promise<JsonRecord> {
-  const errors: string[] = []
-  const rejected = transport.isParamRejection ?? defaultParamRejection
-  for (const host of KLINE_HOSTS) {
-    if ((hostDownUntil.get(host) ?? 0) > Date.now()) continue
-    try {
-      const url = `${host}${transport.path}?param=${encodeURIComponent(transport.param)}`
-      const payload = parseJson(await getText(url, signal), `${transport.label} ${host}`)
-      if (rejected(payload)) {
-        throw sourceError(`Tencent rejected the ${transport.label} parameter (${String(payload.msg ?? '') || `code ${String(payload.code)}`}): ${transport.param}`, 'tencent_invalid_param')
-      }
-      if (isRecord(payload.data) && !transport.isEmpty(payload.data)) return payload.data
-      errors.push(`${host}: empty data`)
-      hostDownUntil.set(host, Date.now() + HOST_COOLDOWN_MS)
-    } catch (error) {
-      // Cancellation and param failures rethrow before blacklist/rotation; see
-      // `docs/dev/web-retriever.md` §4.2.
-      if (error instanceof Error && error.name === 'AbortError') throw error
-      if ((error as Error & { code?: string }).code === 'tencent_invalid_param') throw error
-      errors.push(`${host}: ${error instanceof Error ? error.message : String(error)}`)
-      hostDownUntil.set(host, Date.now() + HOST_COOLDOWN_MS)
-    }
-  }
-  throw sourceError(`Tencent ${transport.label} endpoints unavailable: ${errors.join('; ')}`, 'tencent_kline_unavailable')
-}
-
 async function callKline(path: string, param: string, signal: AbortSignal): Promise<{ data: JsonRecord; host?: string }> {
-  return { data: await callKlineHosts({ path, param, label: 'K-line', isEmpty: (data) => Object.keys(data).length === 0 }, signal) }
+  return { data: await callIfzqHosts({ path, param, label: 'K-line', isEmpty: (data) => Object.keys(data).length === 0 }, signal) }
 }
 
 function addDays(date: string, days: number): string {
@@ -502,7 +440,7 @@ const offshoreKlinePaths: Record<'hk' | 'us', Record<string, string>> = {
 }
 
 async function callOffshoreKline(path: string, param: string, symbol: string, signal: AbortSignal): Promise<unknown[]> {
-  const data = await callKlineHosts({
+  const data = await callIfzqHosts({
     path,
     param,
     label: `${symbol} K-line`,
@@ -758,7 +696,7 @@ function parseUsPrepostRow(data: JsonRecord, symbol: string, requested: string):
 
 async function fetchUsPrepostRow(ticker: string, signal: AbortSignal): Promise<JsonRecord> {
   const symbol = await resolveUsKlineSymbol(ticker, signal)
-  const data = await callKlineHosts({
+  const data = await callIfzqHosts({
     path: '/appstock/app/usfqkline/get',
     param: `${symbol},day,,,${US_PREPOST_BARS},qfq`,
     label: `${symbol} pre/post`,
@@ -978,6 +916,46 @@ function createSource(options: {
     },
     execute: async (request: DataRequest, signal: AbortSignal) => options.execute(normalize(request.params), signal),
   }
+}
+
+/**
+ * One daily series for a UI pane: always day/qfq, one request per symbol, no paging.
+ * It runs the same executors and row parsers as `get_kline` (a second parser would drift), and it is
+ * the only place that knows the desk shows 万股 for 科创板 while the main board reports 手.
+ */
+export async function fetchDailyBars(input: { thscode: string }, signal: AbortSignal, count = 120): Promise<{
+  thscode: string
+  adjust: 'qfq'
+  bars: Array<{ date: string; open: number; high: number; low: number; close: number; volume: number }>
+  volume_unit: 'lot' | 'share'
+}> {
+  const thscode = typeof input.thscode === 'string' ? input.thscode.trim() : ''
+  const upper = thscode.toUpperCase()
+  const bars = (rows: JsonRecord[]) => rows.map((row) => ({
+    date: String(row.date),
+    open: Number(row.open),
+    high: Number(row.high),
+    low: Number(row.low),
+    close: Number(row.close),
+    volume: Number(row.volume),
+  }))
+
+  if (upper.endsWith('.HK')) {
+    const params = normalizeOffshoreKline({ code: thscode, period: 'day', adjust: 'qfq', count }, 'hk')
+    const { data } = await executeOffshoreKline(params, signal, 'hk')
+    return { thscode, adjust: 'qfq', bars: bars(data).slice(-count), volume_unit: 'share' }
+  }
+  if (/^[A-Z][A-Z0-9.]{0,9}\.[A-Z]{1,3}$/u.test(upper) && !/\.(SH|SZ|BJ)$/u.test(upper)) {
+    const params = normalizeOffshoreKline({ code: thscode, period: 'day', adjust: 'qfq', count }, 'us')
+    const { data } = await executeOffshoreKline(params, signal, 'us')
+    return { thscode, adjust: 'qfq', bars: bars(data).slice(-count), volume_unit: 'share' }
+  }
+  const { data } = await executeKline({ code: thscode, period: 'day', adjust: 'qfq', count }, signal)
+  // 科创板 reports daily volume in shares (688599: 27-29M) while the main board reports 手 (600519: 35,116)
+  // — the same split as the minute endpoint, and daily rows carry no turnover column to cross-check.
+  const digits = thscode.slice(0, 6)
+  // The endpoint answers count+1 rows; the pane asks for a window, so hand it exactly that.
+  return { thscode, adjust: 'qfq', bars: bars(data).slice(-count), volume_unit: /^68[89]/u.test(digits) ? 'share' : 'lot' }
 }
 
 export function createTencentSources(): DataSource[] {

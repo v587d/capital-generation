@@ -16,6 +16,12 @@ import {
   normalizeHkCode,
 } from '../lib/sources/tencent-public-core.js'
 import { ASSET_TYPES, isHoldable, weightCeiling, otherHeldWeightPct, MAX_ROW_WEIGHT_PCT, MAX_TOTAL_WEIGHT_PCT } from './holding-rules.js'
+// Intraday series core is shared with the plugin side (one parser per source, `docs/dev` §9.7);
+// the host only gates identity, caches and turns failures into codes.
+import { fetchTrendSeries, resolveTrendTarget } from '../lib/sources/trend-series.js'
+// Daily bars come from the same executors and parsers as the plugin's `get_kline`; the desk only
+// adds identity, a cache and the count it needs.
+import { fetchDailyBars } from '../lib/sources/tencent-http.js'
 
 export const name = 'capital-watchlist'
 
@@ -52,6 +58,18 @@ const REFRESH_BUDGET_CEIL_MS = 90_000
 export function refreshBudgetFor(count) {
   return Math.min(REFRESH_BUDGET_CEIL_MS, Math.max(REFRESH_BUDGET_FLOOR_MS, REFRESH_BUDGET_BASE_MS + REFRESH_BUDGET_PER_ITEM_MS * count))
 }
+/**
+ * Intraday series: one upstream call per selection, reused for a minute so flipping rows does not
+ * queue behind the shared throttles (Tencent 120ms, Eastmoney 1s across the whole process).
+ */
+const TREND_TTL_MS = 60_000
+const TREND_CACHE_MAX = 64
+/** Daily bars gain one closed bar per session and one moving last bar: five minutes is plenty. */
+const KLINE_TTL_MS = 300_000
+const KLINE_CACHE_MAX = 32
+const KLINE_TIMEOUT_MS = 15_000
+const KLINE_BARS = 120
+const TREND_TIMEOUT_MS = 10_000
 const MAX_BODY_BYTES = 65_536
 const MAX_QUERY_LENGTH = 64
 /** Same entry id as the `capital-config` card (settings namespace = entry id). */
@@ -375,6 +393,11 @@ export function createWatchlistService(options = {}) {
   let domainPromise
   /** Single gate for panel open and manual refresh: later callers share the in-flight run. */
   let refreshing = null
+  /** Insertion-ordered by design: the oldest key is what the capacity cap drops. */
+  const trendCache = new Map()
+  const trendInflight = new Map()
+  const klineCache = new Map()
+  const klineInflight = new Map()
 
   /**
    * Never memoize a failed open: `storageDomain` may not be provided yet during
@@ -842,8 +865,95 @@ export function createWatchlistService(options = {}) {
     return result
   }
 
+  /**
+   * One symbol's intraday series. Identity comes from the stored list only: a route that accepted
+   * the caller's asset_type would be an arbitrary quote proxy.
+   */
+  async function trend(input) {
+    const thscode = typeof input?.thscode === 'string' ? input.thscode.trim() : ''
+    if (thscode.length === 0 || thscode.length > MAX_QUERY_LENGTH || !KEY_REGEX.test(thscode)) {
+      return { ok: false, code: 'invalid_query', message: '代码格式不符' }
+    }
+    await ensureSeeded()
+    const opened = await domain()
+    const item = opened.table('items').get(thscode)
+    if (item === undefined || item === null) return { ok: false, code: 'not_watched', message: '该标的不在自选清单里' }
+    const target = resolveTrendTarget(item)
+    if (target === undefined) return { ok: false, code: 'trend_unavailable', message: '该市场暂时没有分时数据', reason: 'market_unsupported' }
+    if (input?.refresh !== true) {
+      const cached = trendCache.get(thscode)
+      if (cached !== undefined && now() - cached.at < TREND_TTL_MS) return cached.payload
+    }
+    const running = trendInflight.get(thscode)
+    if (running !== undefined) return running
+    const run = (async () => {
+      try {
+        const series = await fetchTrendSeries(target, { signal: AbortSignal.timeout(TREND_TIMEOUT_MS), now: now() })
+        const payload = { ok: true, ...series }
+        trendCache.set(thscode, { at: now(), payload })
+        if (trendCache.size > TREND_CACHE_MAX) trendCache.delete(trendCache.keys().next().value)
+        return payload
+      } catch (error) {
+        return trendFailure(error)
+      } finally {
+        trendInflight.delete(thscode)
+      }
+    })()
+    trendInflight.set(thscode, run)
+    return run
+  }
+
+  /**
+   * One symbol's daily bars. Same identity gate as `trend` — the stored row decides the market, so a
+   * caller cannot turn this into an arbitrary history proxy.
+   */
+  async function kline(input) {
+    const thscode = typeof input?.thscode === 'string' ? input.thscode.trim() : ''
+    if (thscode.length === 0 || thscode.length > MAX_QUERY_LENGTH || !KEY_REGEX.test(thscode)) {
+      return { ok: false, code: 'invalid_query', message: '代码格式不符' }
+    }
+    await ensureSeeded()
+    const opened = await domain()
+    const item = opened.table('items').get(thscode)
+    if (item === undefined || item === null) return { ok: false, code: 'not_watched', message: '该标的不在自选清单里' }
+    // HK/US indices have no daily series on the shared core (Tencent's K-line entries take a 5-digit
+    // HK code and a US ticker, not an index); the pane says so instead of drawing a fake line.
+    if (item.asset_type === 'hk-index' || item.asset_type === 'us-index') return { ok: false, code: 'kline_unavailable', message: '该市场暂时没有日K数据', reason: 'market_unsupported' }
+    if (input?.refresh !== true) {
+      const cached = klineCache.get(thscode)
+      if (cached !== undefined && now() - cached.at < KLINE_TTL_MS) return cached.payload
+    }
+    const running = klineInflight.get(thscode)
+    if (running !== undefined) return running
+    const run = (async () => {
+      try {
+        const day = await fetchDailyBars({ thscode }, AbortSignal.timeout(KLINE_TIMEOUT_MS), KLINE_BARS)
+        const payload = {
+          ok: true,
+          thscode,
+          source: 'tencent',
+          adjust: day.adjust,
+          volume_unit: day.volume_unit,
+          currency: resolveTrendTarget(item)?.currency ?? null,
+          bars: day.bars,
+        }
+        klineCache.set(thscode, { at: now(), payload })
+        if (klineCache.size > KLINE_CACHE_MAX) klineCache.delete(klineCache.keys().next().value)
+        return payload
+      } catch (error) {
+        return klineFailure(error)
+      } finally {
+        klineInflight.delete(thscode)
+      }
+    })()
+    klineInflight.set(thscode, run)
+    return run
+  }
+
   return {
     list,
+    trend,
+    kline,
     search,
     add,
     remove,
@@ -857,6 +967,29 @@ export function createWatchlistService(options = {}) {
       if (opened?.close !== undefined) await opened.close()
     },
   }
+}
+
+/** Upstream failures degrade to one block in the desk, never to a whole-route error. */
+function trendFailure(error) {
+  const name = typeof error?.name === 'string' ? error.name : ''
+  if (name === 'AbortError' || name === 'TimeoutError') return { ok: false, code: 'trend_timeout', message: '分时数据请求超时' }
+  const code = typeof error?.code === 'string' ? error.code : ''
+  if (code === 'trend_unavailable' || code === 'trend_parse_failed') return { ok: false, code, message: '分时数据暂时取不到' }
+  if (code === 'rate_limited' || code === 'tencent_rate_limit' || code === 'eastmoney_rate_limit') {
+    return { ok: false, code: 'rate_limited', message: '行情服务限流，请稍后再试' }
+  }
+  return { ok: false, code: 'trend_unavailable', message: '分时数据暂时取不到' }
+}
+
+function klineFailure(error) {
+  const name = typeof error?.name === 'string' ? error.name : ''
+  if (name === 'AbortError' || name === 'TimeoutError') return { ok: false, code: 'kline_timeout', message: '日K数据请求超时' }
+  const code = typeof error?.code === 'string' ? error.code : ''
+  if (code === 'tencent_parse_failed' || code === 'trend_parse_failed') return { ok: false, code: 'kline_parse_failed', message: '日K数据解析失败' }
+  if (code === 'rate_limited' || code === 'tencent_rate_limit' || code === 'eastmoney_rate_limit') {
+    return { ok: false, code: 'rate_limited', message: '行情服务限流，请稍后再试' }
+  }
+  return { ok: false, code: 'kline_unavailable', message: '日K数据暂时取不到' }
 }
 
 /** Only whole-batch failures become batch errors (rate limit, missing key, service down). */
@@ -918,6 +1051,13 @@ function send(res, status, payload) {
 const FAILURE_STATUS = {
   invalid_query: 400,
   not_found: 404,
+  not_watched: 404,
+  trend_unavailable: 502,
+  trend_timeout: 504,
+  trend_parse_failed: 502,
+  kline_unavailable: 502,
+  kline_timeout: 504,
+  kline_parse_failed: 502,
   ambiguous: 409,
   list_full: 409,
   credential_missing: 503,
@@ -992,6 +1132,12 @@ export function createRouteHandler(service, options = {}) {
         return send(res, 200, await service.refresh())
       }
       if (method === 'GET' && pathname === '/list') return send(res, 200, await service.list())
+      if (method === 'GET' && pathname === '/kline') {
+        return sendBusiness(res, await service.kline({ thscode: searchParams.get('thscode') ?? '', refresh: searchParams.get('refresh') === '1' }))
+      }
+      if (method === 'GET' && pathname === '/trend') {
+        return sendBusiness(res, await service.trend({ thscode: searchParams.get('thscode') ?? '', refresh: searchParams.get('refresh') === '1' }))
+      }
       if (method === 'GET' && pathname === '/search') return sendBusiness(res, await service.search(searchParams.get('q') ?? ''))
       send(res, 404, { ok: false, code: 'not_found', message: 'unknown watchlist route' })
     } catch (error) {

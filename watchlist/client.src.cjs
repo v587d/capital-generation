@@ -139,13 +139,39 @@ const zh = {
   'desk.noMatchHint': '换个关键词，或切回「全部」分组。',
   'desk.selectHint': '选择一只标的查看详情',
   'desk.selectHintBody': '左侧列表按分组筛选；选中后这里显示报价、分时与成交量。',
-  'desk.intraday': '当日分时',
-  'desk.intradayEmpty': '当前行情接口只返回最新快照',
-  'desk.intradayEmptyHint': '接入分时序列后，这里直接绘制当日走势。',
-  'desk.volume': '成交量',
-  'desk.volumeEmpty': '暂无成交量数据',
-  'desk.capturedAt': '快照时间',
-  'desk.sourceTime': '交易所时间',
+  'desk.intraday': '分时',
+  'desk.trendLoading': '正在读取分时…',
+  'desk.trendUnavailable': '该市场暂时没有分时数据',
+  'desk.trendUnavailableHint': '场外美股与部分海外指数没有分时源，这里不画假走势。',
+  'desk.trendError': '分时加载失败',
+  'desk.trendRetry': '重试',
+  'desk.daily': '日K',
+  'desk.fold': '收起',
+  'desk.unfold': '展开',
+  'desk.adjustQfq': '前复权',
+  'desk.klineLoading': '正在读取日K…',
+  'desk.klineError': '日K暂时取不到',
+  'desk.klineUnavailable': '该市场暂时没有日K数据',
+  'desk.klineUnavailableHint': '港美股指数只有分时，没有可用的日线序列',
+  'desk.kOpen': '开',
+  'desk.kHigh': '高',
+  'desk.kLow': '低',
+  'desk.kClose': '收',
+  'desk.trendLive': '盘中',
+  'desk.trendClosed': '收盘',
+  'desk.trendPrevious': '上一交易日',
+  'desk.trendStale': '数据滞后',
+  'desk.trendOpen': '今开',
+  'desk.trendHigh': '最高',
+  'desk.trendLow': '最低',
+  'desk.trendAvg': '均价',
+  'desk.trendVolume': '成交量',
+  'desk.trendAmount': '成交额',
+  'desk.lot': '手',
+  'desk.share': '股',
+  'desk.trendZoneUs': '美东',
+  'desk.trendZoneHk': '香港',
+  'desk.capturedAt': '行情时间',
   'desk.groupsOf': '所属分组',
   'desk.kind': '标的类型',
   'desk.colName': '名称',
@@ -261,12 +287,38 @@ const en = {
   'desk.selectHint': 'Select a symbol',
   'desk.selectHintBody': 'The left list filters by group; the quote, intraday and volume panels follow the selection.',
   'desk.intraday': 'Intraday',
-  'desk.intradayEmpty': 'The quote endpoint returns a snapshot only',
-  'desk.intradayEmptyHint': 'Once an intraday series is available, the same-session trend draws here.',
-  'desk.volume': 'Volume',
-  'desk.volumeEmpty': 'No volume data',
-  'desk.capturedAt': 'Captured',
-  'desk.sourceTime': 'Exchange time',
+  'desk.trendLoading': 'Loading intraday…',
+  'desk.trendUnavailable': 'No intraday series for this market',
+  'desk.trendUnavailableHint': 'OTC US lines and some overseas indices have no intraday source; nothing is drawn to fill the gap.',
+  'desk.trendError': 'Intraday failed to load',
+  'desk.trendRetry': 'Retry',
+  'desk.daily': 'Daily',
+  'desk.fold': 'Collapse',
+  'desk.unfold': 'Expand',
+  'desk.adjustQfq': 'Forward-adjusted',
+  'desk.klineLoading': 'Loading daily bars…',
+  'desk.klineError': 'Daily bars are unavailable',
+  'desk.klineUnavailable': 'No daily bars for this market',
+  'desk.klineUnavailableHint': 'HK/US indices carry an intraday series only',
+  'desk.kOpen': 'Open',
+  'desk.kHigh': 'High',
+  'desk.kLow': 'Low',
+  'desk.kClose': 'Close',
+  'desk.trendLive': 'Live',
+  'desk.trendClosed': 'Closed',
+  'desk.trendPrevious': 'Previous session',
+  'desk.trendStale': 'Stale',
+  'desk.trendOpen': 'Open',
+  'desk.trendHigh': 'High',
+  'desk.trendLow': 'Low',
+  'desk.trendAvg': 'VWAP',
+  'desk.trendVolume': 'Volume',
+  'desk.trendAmount': 'Turnover',
+  'desk.lot': 'lots',
+  'desk.share': 'shares',
+  'desk.trendZoneUs': 'ET',
+  'desk.trendZoneHk': 'HK',
+  'desk.capturedAt': 'As of',
   'desk.groupsOf': 'Groups',
   'desk.kind': 'Instrument',
   'desk.colName': 'Symbol',
@@ -471,8 +523,8 @@ const CSS = `
 /* Theme has no global border-box reset; the official item padding would overflow the list. */
 .capital-watchlist-rows button { box-sizing: border-box; }
 /* --- 行情工作台：左侧栏入口 + main 面板。卡片走发丝线，浮层交给官方 Menu。 --- */
-.cwd-page { height: 100%; min-height: 0; overflow-y: auto; --cwd-body-h: clamp(520px, 78vh, 860px); background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); --cwd-card: var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-layer-1)); --capital-watchlist-up: #d1493f; --capital-watchlist-down: #17a063; }
-.cwd-inner { max-width: 1180px; margin: 0 auto; padding: 28px 32px 44px; }
+.cwd-page { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow-y: auto; background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); --cwd-card: var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-layer-1)); --capital-watchlist-up: #d1493f; --capital-watchlist-down: #17a063; }
+.cwd-inner { display: flex; flex: 1; flex-direction: column; width: 100%; min-height: 0; max-width: 1180px; margin: 0 auto; padding: 24px 32px 32px; }
 .cwd-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .cwd-title { margin: 0; font-size: 26px; line-height: 32px; font-weight: 650; letter-spacing: -.2px; }
 .cwd-headactions { display: flex; align-items: center; gap: 14px; flex: none; }
@@ -480,7 +532,8 @@ const CSS = `
 .cwd-refresh { display: inline-flex; align-items: center; gap: 6px; flex: none; height: 34px; padding: 0 14px; border: .5px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 25%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent); color: var(--dsw-alias-state-business-primary); font-family: inherit; font-size: 13px; line-height: 20px; font-weight: 500; cursor: pointer; }
 .cwd-refresh:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 20%, transparent); }
 .cwd-refresh:disabled { opacity: .45; cursor: not-allowed; }
-.cwd-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(430px, 1.35fr); gap: 22px; align-items: stretch; height: var(--cwd-body-h); }
+.cwd-body { display: grid; flex: 1 1 auto; grid-template-columns: minmax(0, 1fr) minmax(430px, 1.35fr); grid-template-rows: minmax(0, 1fr); gap: 22px; align-items: stretch; min-height: 420px; max-height: 880px; }
+/* ⛔ 行高必须钉死：隐式行按内容自适应时，右栏一旦长高就把行撑开，左列跟着 height:100% 一起变高（实测症状）。 */
 .cwd-card { display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; border: .5px solid var(--dsw-alias-border-l1); border-radius: 14px; background: var(--cwd-card); overflow: hidden; }
 .cwd-toolbar { display: flex; flex: none; align-items: center; gap: 8px; flex-wrap: wrap; padding: 12px 14px; border-bottom: .5px solid var(--dsw-alias-border-l2); }
 .cwd-field { display: flex; align-items: center; gap: 6px; flex: 1 1 170px; min-width: 0; height: 34px; padding: 0 10px; border-radius: 10px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-tertiary); }
@@ -515,7 +568,7 @@ const CSS = `
 .cwd-iconbtn { flex: none; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; }
 .cwd-iconbtn:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover-accent); color: var(--dsw-alias-label-primary); }
 .cwd-iconbtn:disabled { opacity: .45; cursor: not-allowed; }
-.cwd-detail { display: flex; flex: 1; flex-direction: column; gap: 14px; min-height: 0; padding: 16px; overflow-y: auto; }
+.cwd-detail { display: flex; flex: 1; flex-direction: column; gap: 12px; min-height: 0; padding: 16px; overflow-y: auto; }
 .cwd-detailhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; min-width: 0; }
 .cwd-detailname { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 16px; line-height: 22px; font-weight: 600; }
 .cwd-detailtext { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -523,19 +576,59 @@ const CSS = `
 .cwd-bigquote { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; }
 .cwd-bigprice { font-size: 34px; line-height: 40px; font-weight: 650; font-variant-numeric: tabular-nums; }
 .cwd-bigpct { font-size: 14px; line-height: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.cwd-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
-.cwd-metaitem { min-width: 0; }
-.cwd-metalabel { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
-.cwd-metavalue { font-size: 12.5px; line-height: 18px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cwd-quoterow { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; }
+.cwd-meta { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 20px; padding-bottom: 4px; }
+.cwd-metaitem { display: flex; align-items: baseline; gap: 6px; }
+.cwd-metalabel { flex: none; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+.cwd-metavalue { font-size: 12px; line-height: 16px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .cwd-block { flex: none; padding-top: 12px; border-top: .5px solid var(--dsw-alias-border-l2); }
-.cwd-block-chart { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.cwd-blockhead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-.cwd-blocktitle { font-size: 12.5px; line-height: 18px; font-weight: 600; }
-.cwd-blocknote { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+.cwd-block-chart { flex: 1 1 0; display: flex; flex-direction: column; min-height: 200px; }
+/* Folded block keeps only its title row, so it stops competing for height. */
+.cwd-block-chart.cwd-folded { flex: none; min-height: 0; }
+.cwd-blockhead { display: flex; flex: none; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+.cwd-blocktitle { flex: none; font-size: 12.5px; line-height: 18px; font-weight: 600; }
+.cwd-blocknote { margin-left: auto; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+.cwd-blockfold { flex: none; padding: 0 2px; border: 0; background: none; font-family: inherit; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); cursor: pointer; }
+.cwd-blockfold:hover { color: var(--dsw-alias-label-primary); }
 .cwd-chart { flex: 1; min-height: 150px; display: grid; place-items: center; padding: 12px; border: 1px dashed var(--dsw-alias-border-l2); border-radius: 10px; background: repeating-linear-gradient(180deg, color-mix(in srgb, var(--dsw-alias-border-l2) 60%, transparent) 0 1px, transparent 1px 36px), var(--dsw-alias-bg-module-platform); text-align: center; }
 .cwd-charttext { font-size: 12.5px; line-height: 18px; font-weight: 500; color: var(--dsw-alias-label-secondary); }
 .cwd-charthint { margin-top: 4px; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
-.cwd-volume { height: 92px; display: grid; place-items: center; border: 1px dashed var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-module-platform); border-radius: 10px; font-size: 12px; color: var(--dsw-alias-label-tertiary); }
+.cwd-trendstats { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: 2px 14px; min-width: 0; }
+.cwd-trendstat { display: flex; align-items: baseline; gap: 5px; font-size: 11px; line-height: 17px; }
+.cwd-trendstat span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cwd-trendstat span:first-child { flex: none; color: var(--dsw-alias-label-tertiary); }
+.cwd-trendstat span:last-child { font-variant-numeric: tabular-nums; }
+.cwd-chartbox { position: relative; flex: 1; min-height: 120px; min-width: 0; overflow: hidden; border-radius: 10px; background: var(--dsw-alias-bg-module-platform); }
+/* The daily pane shares the SVG contract above (absolute child, determinate height): a flexed chart
+   next to a scrolled column is exactly how the container used to grow. */
+.cwd-block-kline { flex: 1 1 0; display: flex; flex-direction: column; min-height: 220px; }
+.cwd-klinebox { position: relative; flex: 1; min-height: 140px; min-width: 0; overflow: hidden; border-radius: 10px; background: var(--dsw-alias-bg-module-platform); }
+.cwd-malegend { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: 2px 12px; min-width: 0; font-size: 11px; line-height: 16px; font-variant-numeric: tabular-nums; }
+.cwd-candle-up { fill: var(--capital-watchlist-up); stroke: var(--capital-watchlist-up); stroke-width: 1; }
+.cwd-candle-down { fill: var(--capital-watchlist-down); stroke: var(--capital-watchlist-down); stroke-width: 1; }
+.cwd-maline { fill: none; stroke-width: 1.1; stroke-linejoin: round; }
+.cwd-ma5 { color: var(--dsw-alias-label-primary); stroke: var(--dsw-alias-label-primary); }
+.cwd-ma10 { color: var(--dsw-alias-state-warn-primary); stroke: var(--dsw-alias-state-warn-primary); }
+.cwd-ma20 { color: var(--dsw-alias-brand-primary); stroke: var(--dsw-alias-brand-primary); }
+.cwd-ma60 { color: var(--dsw-alias-label-tertiary); stroke: var(--dsw-alias-label-tertiary); }
+/* ⛔ 绝对定位不是为了叠层：SVG 一旦参与流式布局，viewBox 的宽高比会反推父盒高度，
+   量测回写就把容器越撑越大（实测逐帧增长）。它必须永远影响不了自己的容器。 */
+.cwd-chartsvg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; touch-action: pan-y; }
+.cwd-chartaxis { fill: var(--dsw-alias-label-tertiary); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.cwd-chartbaselabel { fill: var(--dsw-alias-label-secondary); }
+.cwd-chartgrid { stroke: color-mix(in srgb, var(--dsw-alias-border-l2) 55%, transparent); stroke-width: 1; shape-rendering: crispEdges; }
+.cwd-chartsep { stroke: var(--dsw-alias-border-l2); stroke-width: 1; stroke-dasharray: 2 3; }
+.cwd-chartline { fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.cwd-chartavg { fill: none; stroke: var(--dsw-alias-state-business-primary); stroke-width: 1; stroke-dasharray: 3 3; opacity: .85; }
+.cwd-chartbase { stroke: var(--dsw-alias-label-tertiary); stroke-width: 1; opacity: .7; }
+.cwd-chartcross { stroke: var(--dsw-alias-label-tertiary); stroke-width: 1; stroke-dasharray: 3 3; opacity: .8; }
+.cwd-chartdot { fill: currentColor; }
+.cwd-vol-up { fill: var(--capital-watchlist-up); opacity: .55; }
+.cwd-vol-down { fill: var(--capital-watchlist-down); opacity: .55; }
+.cwd-charttip { position: absolute; top: 8px; min-width: 150px; padding: 7px 9px; border-radius: 8px; border: .5px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-layer-1)); pointer-events: none; }
+.cwd-charttiptime { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+.cwd-charttipprice { font-size: 13px; line-height: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cwd-charttiprow { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; }
 .cwd-empty { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 34px 18px; text-align: center; }
 .cwd-emptytitle { font-size: 14px; line-height: 20px; font-weight: 600; }
 .cwd-emptyhint { margin: 6px 0 0; font-size: 12.5px; line-height: 19px; color: var(--dsw-alias-label-tertiary); }
@@ -548,7 +641,7 @@ const CSS = `
 .cwd-field:focus-within { outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: 1px; }
 .cwd-page button:focus-visible, .cwd-groupcreate input:focus-visible { outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: 1px; }
 .cwd-skeleton { display: block; height: 12px; border-radius: 6px; background: var(--dsw-alias-bg-skeleton); }
-@media (max-width: 1040px) { .cwd-body { grid-template-columns: minmax(0, 1fr); gap: 16px; height: auto; } .cwd-card { height: auto; } .cwd-tablebody { flex: none; max-height: 60vh; } .cwd-chart { flex: none; height: 200px; } }
+@media (max-width: 1040px) { .cwd-body { flex: none; grid-template-columns: minmax(0, 1fr); gap: 16px; height: auto; max-height: none; } .cwd-card { height: auto; } .cwd-tablebody { flex: none; max-height: 60vh; } .cwd-chart { flex: none; height: 200px; } .cwd-chartbox { flex: none; height: 260px; } .cwd-klinebox { flex: none; height: 260px; } .cwd-block-chart, .cwd-block-kline { flex: none; } }
 @media (max-width: 720px) { .cwd-inner { padding: 20px 16px 32px; } .cwd-thead, .cwd-row { grid-template-columns: minmax(0, 1.5fr) 78px 72px 36px; gap: 8px; } .cwd-thead { padding: 8px 10px; } .cwd-row { padding: 9px 10px; } }
 `
 
@@ -1403,6 +1496,9 @@ function WatchlistDialog({ useDialog, surface, t, inputActions }) {
 const DESK_PANEL_ID = `${ENTRY_NAME}:desk`
 const DESK_GROUPS_KEY = 'capital.watchlist.desk.groups.v1'
 const DESK_ALL = '__all__'
+/** Monotonic request id for the desk's series: a late answer must not overwrite a newer selection. */
+let deskTrendSequence = 0
+let deskKlineSequence = 0
 
 function readDeskGroups() {
   const empty = { names: [], assignments: {} }
@@ -1440,6 +1536,424 @@ const deskPctText = (value) => (value === null ? '—' : `${value > 0 ? '+' : ''
 /** Comma grouping is the market convention here, so it does not follow the UI locale. */
 const deskPriceFormat = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const deskPriceText = (quote) => (quote !== null && quote !== undefined && typeof quote.price === 'number' && Number.isFinite(quote.price) ? deskPriceFormat.format(quote.price) : '—')
+/** Any number → grouped text; every price on the desk keeps two decimals, indices included. */
+const deskNumberText = (value) => (typeof value === 'number' && Number.isFinite(value) ? deskPriceFormat.format(value) : '—')
+
+/** 万 / 亿 scaling for totals; the suffix stays Chinese in both locales, like the market comma. */
+function deskScaledText(value, digits = 2) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
+  const size = Math.abs(value)
+  if (size >= 1e8) return `${(value / 1e8).toFixed(digits)}亿`
+  if (size >= 1e4) return `${(value / 1e4).toFixed(digits)}万`
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: digits }).format(value)
+}
+
+const deskMinutesOf = (time) => (typeof time === 'string' && time.length >= 5 ? Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5)) : 0)
+
+function deskVolumeText(value, unit, t) {
+  const text = deskScaledText(value)
+  if (text === '—') return text
+  if (unit === 'lot') return `${text}${t('desk.lot')}`
+  if (unit === 'share') return `${text}${t('desk.share')}`
+  return text
+}
+
+function deskAmountText(value, currency) {
+  const text = deskScaledText(value)
+  if (text === '—') return text
+  return currency === null || currency === undefined || currency === 'CNY' ? text : `${text} ${currency}`
+}
+
+/**
+ * The x axis is the trading clock, not the point count: a 09:32 print must stay near the left edge
+ * instead of stretching over the whole pane (that is what turns four points into four fat bars).
+ * The lunch break takes no width, so a slot is one trading minute and `total` is the day's length.
+ */
+const TREND_SESSIONS = {
+  'a-share': [[570, 690], [780, 900]],
+  hk: [[570, 720], [780, 960]],
+  us: [[570, 960]],
+}
+
+const deskClockText = (minutes) => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
+
+function deskSessionOf(market) {
+  const spans = []
+  let total = 0
+  for (const [open, close] of TREND_SESSIONS[market] ?? TREND_SESSIONS.us) {
+    spans.push([open, close, total])
+    total += close - open
+  }
+  return { spans, total }
+}
+
+/** Minute of day → compressed slot; a print outside the session (the HK closing auction) lands on the edge. */
+function deskSlotOf(session, minutes) {
+  for (const [open, close, base] of session.spans) {
+    if (minutes <= open) return base
+    if (minutes < close) return base + minutes - open
+  }
+  return session.total
+}
+
+/** Half-hour grid; a tick landing on the previous tick's slot (11:30 and 13:00 share one) is dropped. */
+function deskTicksOf(session) {
+  const ticks = []
+  for (const [open, close, base] of session.spans) {
+    for (let minutes = open; minutes <= close; minutes += 30) {
+      const slot = base + minutes - open
+      if (ticks.length === 0 || ticks[ticks.length - 1].slot !== slot) ticks.push({ time: deskClockText(minutes), slot })
+    }
+  }
+  return ticks
+}
+
+/**
+ * Same-session trend drawn in plain SVG: price line + area, previous-close baseline, VWAP line,
+ * volume histogram and a pointer crosshair. Geometry is computed in pixels (the box is measured),
+ * so labels and dashes stay crisp at any width; nothing here fetches or invents a point.
+ */
+function IntradayChart({ data, t }) {
+  const [box, setBox] = useState({ width: 720, height: 300 })
+  const [cursor, setCursor] = useState(null)
+  const host = useRef(null)
+
+  useEffect(() => {
+    const element = host.current
+    if (element === null || element === undefined) return undefined
+    // Integer `clientWidth` rounding plus a content-sized box is exactly how a chart grows by a
+    // pixel per frame; measure the fractional rect and ignore sub-2px jitter. Returning the same
+    // object makes React bail out, so a wobbling layout can never re-enter this loop.
+    const measure = () => {
+      const rect = element.getBoundingClientRect()
+      if (!(rect.width > 0) || !(rect.height > 0)) return
+      const width = Math.max(280, Math.round(rect.width))
+      const height = Math.max(180, Math.round(rect.height))
+      setBox((current) => (Math.abs(current.width - width) < 2 && Math.abs(current.height - height) < 2 ? current : { width, height }))
+    }
+    measure()
+    if (typeof ResizeObserver === 'undefined') return undefined
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+
+  const points = data.points
+  const prevClose = data.prev_close
+  const width = box.width
+  const height = box.height
+  // Gutters fit `24,547.66` on the left and `+10.00%` on the right at 10.5px without clipping.
+  const left = 66
+  const right = 54
+  const top = 12
+  const axisHeight = 18
+  const volumeHeight = Math.round(Math.min(70, Math.max(30, height * 0.22)))
+  // Reserve the bottom axis band: the volume pane must stop above the tick labels, not under them.
+  const priceHeight = Math.max(60, height - top - axisHeight - volumeHeight - 10)
+  const plotWidth = Math.max(60, width - left - right)
+  const session = deskSessionOf(data.market)
+  const slotWidth = plotWidth / session.total
+
+  const values = points.map((point) => point[1])
+  const floorValue = Math.min(prevClose, ...values)
+  const peakValue = Math.max(prevClose, ...values)
+  const margin = (peakValue - floorValue) * 0.06 || Math.max(peakValue * 0.002, 0.01)
+  const low = floorValue - margin
+  const high = peakValue + margin
+  const scaleY = (value) => top + ((high - value) / (high - low)) * priceHeight
+  const slots = points.map((point) => deskSlotOf(session, deskMinutesOf(point[0])))
+  const scaleX = (slot) => left + slot * slotWidth
+  const firstX = scaleX(slots[0]).toFixed(1)
+  const lastX = scaleX(slots[points.length - 1]).toFixed(1)
+
+  const tone = data.last === null || data.last >= prevClose ? 'up' : 'down'
+  const stroke = tone === 'up' ? 'var(--capital-watchlist-up)' : 'var(--capital-watchlist-down)'
+  const pricePath = points.map((point, index) => `${index === 0 ? 'M' : 'L'}${scaleX(slots[index]).toFixed(1)} ${scaleY(point[1]).toFixed(1)}`).join('')
+  const bottom = (top + priceHeight).toFixed(1)
+  const areaPath = `${pricePath}L${lastX} ${bottom}L${firstX} ${bottom}Z`
+  const averagePath = points.reduce((path, point, index) => (point[2] === null ? path : `${path}${path === '' ? 'M' : 'L'}${scaleX(slots[index]).toFixed(1)} ${scaleY(point[2]).toFixed(1)}`), '')
+
+  const volumeTop = top + priceHeight + 10
+  const maxVolume = Math.max(1, ...points.map((point) => point[3] ?? 0))
+  // One bar per trading minute: thin by construction, never sized by how many points happened to arrive.
+  const barWidth = Math.max(1, Math.min(10, slotWidth * 0.72))
+  const baseY = scaleY(prevClose)
+  const gridLines = [0, 1, 2, 3, 4].map((step) => {
+    const value = low + ((high - low) * step) / 4
+    return { value, y: scaleY(value), pct: ((value - prevClose) / prevClose) * 100 }
+  }).filter((line) => Math.abs(line.y - baseY) > 9)
+
+  const sessionBreak = session.spans.length > 1 ? session.spans[1][2] : null
+  const allTicks = deskTicksOf(session)
+  const tickStep = width >= 620 ? 1 : 2
+  const ticks = allTicks.filter((tick, order) => order % tickStep === 0 || order === allTicks.length - 1)
+
+  const focus = cursor === null || cursor < 0 || cursor >= points.length ? null : points[cursor]
+  const focusX = focus === null ? 0 : scaleX(slots[cursor])
+  const focusY = focus === null ? 0 : scaleY(focus[1])
+  const tipLeft = Math.min(width - 172, Math.max(8, focusX + 12))
+  const summary = `${data.thscode} ${data.session_date ?? ''} ${t('desk.intraday')} · ${t('desk.trendOpen')} ${deskNumberText(data.open)} · ${t('desk.trendHigh')} ${deskNumberText(data.high)} · ${t('desk.trendLow')} ${deskNumberText(data.low)} · ${t('desk.trendAvg')} ${deskNumberText(data.avg)}`
+
+  const onMove = (event) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    if (!(rect.width > 0)) return
+    const slot = Math.max(0, Math.min(session.total, ((event.clientX - rect.left - left) / plotWidth) * session.total))
+    let nearest = 0
+    for (let index = 1; index < slots.length; index += 1) {
+      if (Math.abs(slots[index] - slot) < Math.abs(slots[nearest] - slot)) nearest = index
+    }
+    setCursor(nearest)
+  }
+
+  return h('div', { className: 'cwd-chartbox', ref: host },
+    h('svg', {
+      className: 'cwd-chartsvg',
+      viewBox: `0 0 ${width} ${height}`,
+      role: 'img',
+      'aria-label': summary,
+      onPointerMove: onMove,
+      onPointerLeave: () => setCursor(null),
+    },
+      h('defs', null,
+        h('linearGradient', { id: 'cwd-trend-fill', x1: '0', y1: '0', x2: '0', y2: '1' },
+          h('stop', { offset: '0%', style: { stopColor: stroke, stopOpacity: 0.2 } }),
+          h('stop', { offset: '100%', style: { stopColor: stroke, stopOpacity: 0 } }))),
+      gridLines.map((line) => h('g', { key: `grid-${line.value.toFixed(4)}` },
+        h('line', { className: 'cwd-chartgrid', x1: left, x2: left + plotWidth, y1: line.y, y2: line.y }),
+        h('text', { className: 'cwd-chartaxis', x: left - 8, y: line.y + 3.5, textAnchor: 'end' }, deskNumberText(line.value)),
+        h('text', { className: 'cwd-chartaxis', x: left + plotWidth + 8, y: line.y + 3.5 }, `${line.pct > 0 ? '+' : ''}${line.pct.toFixed(2)}%`))),
+      ticks.map((tick) => h('line', {
+        key: `grid-${tick.time}`,
+        className: 'cwd-chartgrid',
+        x1: scaleX(tick.slot),
+        x2: scaleX(tick.slot),
+        y1: top,
+        y2: volumeTop + volumeHeight,
+      })),
+      sessionBreak === null ? null : h('line', {
+        className: 'cwd-chartsep',
+        x1: scaleX(sessionBreak),
+        x2: scaleX(sessionBreak),
+        y1: top,
+        y2: volumeTop + volumeHeight,
+      }),
+      h('path', { className: 'cwd-chartarea', d: areaPath, fill: 'url(#cwd-trend-fill)' }),
+      points.map((point, index) => {
+        const value = point[3] ?? 0
+        const barHeight = Math.max(0, (value / maxVolume) * volumeHeight)
+        const previous = index === 0 ? prevClose : points[index - 1][1]
+        const center = scaleX(slots[index] + 0.5)
+        return h('rect', {
+          key: `vol-${index}`,
+          className: point[1] >= previous ? 'cwd-vol-up' : 'cwd-vol-down',
+          x: (Math.min(left + plotWidth - barWidth, Math.max(left, center - barWidth / 2))).toFixed(1),
+          y: (volumeTop + volumeHeight - barHeight).toFixed(1),
+          width: barWidth.toFixed(1),
+          height: Math.max(0.5, barHeight).toFixed(1),
+        })
+      }),
+      h('path', { className: 'cwd-chartline', d: pricePath, style: { stroke } }),
+      averagePath === '' ? null : h('path', { className: 'cwd-chartavg', d: averagePath }),
+      h('line', { className: 'cwd-chartbase', x1: left, x2: left + plotWidth, y1: baseY, y2: baseY, strokeDasharray: '4 3' }),
+      h('text', { className: 'cwd-chartaxis cwd-chartbaselabel', x: left - 8, y: baseY + 3.5, textAnchor: 'end' }, deskNumberText(prevClose)),
+      ticks.map((tick) => h('text', {
+        key: `tick-${tick.time}`,
+        className: 'cwd-chartaxis',
+        x: scaleX(tick.slot),
+        y: height - 5,
+        textAnchor: tick.slot === 0 ? 'start' : tick.slot >= session.total ? 'end' : 'middle',
+      }, tick.time)),
+      focus === null ? null : h('g', null,
+        h('line', { className: 'cwd-chartcross', x1: focusX, x2: focusX, y1: top, y2: volumeTop + volumeHeight }),
+        h('line', { className: 'cwd-chartcross', x1: left, x2: left + plotWidth, y1: focusY, y2: focusY }),
+        h('circle', { className: `cwd-chartdot ${tone === 'up' ? 'cwd-up' : 'cwd-down'}`, cx: focusX, cy: focusY, r: 3 })),
+    ),
+    focus === null ? null : h('div', { className: 'cwd-charttip', style: { left: `${tipLeft}px` } },
+      h('div', { className: 'cwd-charttiptime' }, focus[0]),
+      h('div', { className: `cwd-charttipprice ${tone === 'up' ? 'cwd-up' : 'cwd-down'}` },
+        `${deskNumberText(focus[1])} ${deskPctText(((focus[1] - prevClose) / prevClose) * 100)}`),
+      focus[2] === null ? null : h('div', { className: 'cwd-charttiprow' }, h('span', null, t('desk.trendAvg')), h('span', null, deskNumberText(focus[2]))),
+      focus[3] === null ? null : h('div', { className: 'cwd-charttiprow' }, h('span', null, t('desk.trendVolume')), h('span', null, deskVolumeText(focus[3], data.volume_unit, t)))))
+}
+
+/** Moving averages over a close series; the leading `window-1` slots stay null so a line never starts at the first bar. */
+function movingAverage(bars, window) {
+  const values = new Array(bars.length).fill(null)
+  let sum = 0
+  for (let index = 0; index < bars.length; index += 1) {
+    sum += bars[index].close
+    if (index >= window) sum -= bars[index - window].close
+    if (index >= window - 1) values[index] = sum / window
+  }
+  return values
+}
+
+/** Four lines is what a 700px pane can keep apart; MA30 would sit on top of MA20 most of the time. */
+const MA_WINDOWS = [5, 10, 20, 60]
+
+/**
+ * Daily candles for the desk. Same pixel geometry and the same measured box as the intraday pane
+ * (absolute SVG, 2px deadband, no intrinsic sizing), so the two charts stay aligned and neither can
+ * push its container. Candles are red on up and green on down, the A-share convention used above.
+ */
+function DailyChart({ data, t }) {
+  const [box, setBox] = useState({ width: 720, height: 300 })
+  const [cursor, setCursor] = useState(null)
+  const host = useRef(null)
+
+  useEffect(() => {
+    const element = host.current
+    if (element === null || element === undefined) return undefined
+    const measure = () => {
+      const rect = element.getBoundingClientRect()
+      if (!(rect.width > 0) || !(rect.height > 0)) return
+      const width = Math.max(280, Math.round(rect.width))
+      const height = Math.max(180, Math.round(rect.height))
+      setBox((current) => (Math.abs(current.width - width) < 2 && Math.abs(current.height - height) < 2 ? current : { width, height }))
+    }
+    measure()
+    if (typeof ResizeObserver === 'undefined') return undefined
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+
+  const bars = data.bars
+  const width = box.width
+  const height = box.height
+  const left = 66
+  const right = 54
+  const top = 10
+  const axisHeight = 18
+  const volumeHeight = Math.round(Math.min(64, Math.max(28, height * 0.2)))
+  const priceHeight = Math.max(60, height - top - axisHeight - volumeHeight - 12)
+  const plotWidth = Math.max(60, width - left - right)
+  const slot = plotWidth / Math.max(1, bars.length)
+  // Candles keep a gap so a dense series still reads as separate days instead of a solid block.
+  const barWidth = Math.max(1, Math.min(14, slot * 0.62))
+
+  const highest = Math.max(...bars.map((bar) => bar.high))
+  const lowest = Math.min(...bars.map((bar) => bar.low))
+  const margin = (highest - lowest) * 0.06 || Math.max(highest * 0.01, 0.01)
+  const high = highest + margin
+  const low = lowest - margin
+  const scaleY = (value) => top + ((high - value) / (high - low)) * priceHeight
+  const scaleX = (index) => left + (index + 0.5) * slot
+
+  const volumeTop = top + priceHeight + 12
+  const maxVolume = Math.max(1, ...bars.map((bar) => bar.volume))
+  const scaleVolume = (value) => (value / maxVolume) * volumeHeight
+
+  const maSeries = MA_WINDOWS.map((window) => ({ window, values: movingAverage(bars, window) }))
+  const lineOf = (values) => values.reduce((path, value, index) => (value === null ? path : `${path}${path === '' ? 'M' : 'L'}${scaleX(index).toFixed(1)} ${scaleY(value).toFixed(1)}`), '')
+
+  // Month boundaries only: twelve labels over 120 bars would collide, and every broker labels months.
+  const monthTicks = []
+  for (let index = 0; index < bars.length; index += 1) {
+    const month = bars[index].date.slice(5, 7)
+    if (index === 0 || month !== bars[index - 1].date.slice(5, 7)) monthTicks.push({ index, month })
+  }
+  // The year-prefixed first label is twice as wide as the others, so it only earns its place when the
+  // next month boundary is far enough away — a partial first month (five bars of May) collides with it.
+  const firstGapPx = monthTicks.length > 1 ? (monthTicks[1].index - monthTicks[0].index) * slot : Number.POSITIVE_INFINITY
+  const ticks = monthTicks.map((tick, order) => ({
+    index: tick.index,
+    label: order === 0 && firstGapPx >= 56 ? `${bars[tick.index].date.slice(0, 4)}/${tick.month}` : tick.month,
+  }))
+
+  const gridLines = [0, 1, 2, 3, 4].map((step) => {
+    const value = high - ((high - low) * step) / 4
+    return { value, y: scaleY(value) }
+  })
+
+  const focus = cursor === null || cursor < 0 || cursor >= bars.length ? null : bars[cursor]
+  const focusX = focus === null ? 0 : scaleX(cursor)
+  const focusY = focus === null ? 0 : scaleY(focus.close)
+  const focusPrev = cursor === null || cursor <= 0 ? null : bars[cursor - 1].close
+  const focusPct = focus === null || focusPrev === null || focusPrev <= 0 ? null : ((focus.close - focusPrev) / focusPrev) * 100
+  const tipLeft = Math.min(width - 186, Math.max(8, focusX + 12))
+  const summary = `${data.thscode} ${t('desk.daily')} · ${bars.length} · ${deskNumberText(bars[bars.length - 1].close)}`
+
+  const onMove = (event) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    if (!(rect.width > 0)) return
+    const index = Math.round((event.clientX - rect.left - left) / slot - 0.5)
+    setCursor(Math.max(0, Math.min(bars.length - 1, index)))
+  }
+
+  return h('div', { className: 'cwd-klinebox', ref: host },
+    h('svg', {
+      className: 'cwd-chartsvg',
+      viewBox: `0 0 ${width} ${height}`,
+      role: 'img',
+      'aria-label': summary,
+      onPointerMove: onMove,
+      onPointerLeave: () => setCursor(null),
+    },
+      gridLines.map((line) => h('g', { key: `grid-${line.value.toFixed(4)}` },
+        h('line', { className: 'cwd-chartgrid', x1: left, x2: left + plotWidth, y1: line.y, y2: line.y }),
+        h('text', { className: 'cwd-chartaxis', x: left - 8, y: line.y + 3.5, textAnchor: 'end' }, deskNumberText(line.value)))),
+      ticks.map((tick) => h('g', { key: `tick-${tick.index}` },
+        h('line', { className: 'cwd-chartgrid', x1: scaleX(tick.index), x2: scaleX(tick.index), y1: top, y2: volumeTop + volumeHeight }),
+        h('text', {
+          className: 'cwd-chartaxis',
+          x: scaleX(tick.index),
+          y: height - 5,
+          textAnchor: tick.index === 0 ? 'start' : 'middle',
+        }, tick.label))),
+      // Volume first: candles read on top of the histogram, never the other way round.
+      bars.map((bar, index) => {
+        const barHeight = Math.max(0.5, scaleVolume(bar.volume))
+        return h('rect', {
+          key: `vol-${bar.date}`,
+          className: bar.close >= bar.open ? 'cwd-vol-up' : 'cwd-vol-down',
+          x: (scaleX(index) - barWidth / 2).toFixed(1),
+          y: (volumeTop + volumeHeight - barHeight).toFixed(1),
+          width: barWidth.toFixed(1),
+          height: barHeight.toFixed(1),
+        })
+      }),
+      h('text', { className: 'cwd-chartaxis', x: left - 8, y: volumeTop + 8, textAnchor: 'end' }, deskScaledText(maxVolume)),
+      bars.map((bar, index) => {
+        const open = scaleY(bar.open)
+        const close = scaleY(bar.close)
+        const bodyTop = Math.min(open, close)
+        const bodyHeight = Math.max(0.8, Math.abs(close - open))
+        return h('g', { key: `bar-${bar.date}`, className: bar.close >= bar.open ? 'cwd-candle-up' : 'cwd-candle-down' },
+          h('line', {
+            x1: scaleX(index).toFixed(1),
+            x2: scaleX(index).toFixed(1),
+            y1: scaleY(bar.high).toFixed(1),
+            y2: scaleY(bar.low).toFixed(1),
+          }),
+          h('rect', {
+            x: (scaleX(index) - barWidth / 2).toFixed(1),
+            y: bodyTop.toFixed(1),
+            width: barWidth.toFixed(1),
+            height: bodyHeight.toFixed(1),
+          }))
+      }),
+      maSeries.map((series) => {
+        const path = lineOf(series.values)
+        return path === '' ? null : h('path', { key: `ma-${series.window}`, className: `cwd-maline cwd-ma${series.window}`, d: path })
+      }),
+      focus === null ? null : h('g', null,
+        h('line', { className: 'cwd-chartcross', x1: focusX, x2: focusX, y1: top, y2: volumeTop + volumeHeight }),
+        h('line', { className: 'cwd-chartcross', x1: left, x2: left + plotWidth, y1: focusY, y2: focusY })),
+    ),
+    focus === null ? null : h('div', { className: 'cwd-charttip', style: { left: `${tipLeft}px` } },
+      h('div', { className: 'cwd-charttiptime' }, focus.date),
+      h('div', { className: `cwd-charttipprice ${deskToneOf(focusPct)}` },
+        `${deskNumberText(focus.close)} ${deskPctText(focusPct)}`),
+      h('div', { className: 'cwd-charttiprow' },
+        h('span', null, t('desk.kOpen')), h('span', null, deskNumberText(focus.open)),
+        h('span', null, t('desk.kHigh')), h('span', null, deskNumberText(focus.high))),
+      h('div', { className: 'cwd-charttiprow' },
+        h('span', null, t('desk.kLow')), h('span', null, deskNumberText(focus.low)),
+        h('span', null, t('desk.kClose')), h('span', null, deskNumberText(focus.close))),
+      h('div', { className: 'cwd-charttiprow' },
+        h('span', null, t('desk.trendVolume')), h('span', null, deskVolumeText(focus.volume, data.volume_unit, t)))))
+}
 
 /** Sidebar glyph: an axis plus a rising line reads as quotes without inventing a wallet/pie shape. */
 function WatchlistDeskIcon({ size = 18 }) {
@@ -1475,6 +1989,10 @@ function WatchlistDeskPage({ t }) {
   const [selected, setSelected] = useState(null)
   const [pendingRemove, setPendingRemove] = useState(null)
   const [rowMenu, setRowMenu] = useState(null)
+  const [trend, setTrend] = useState({ status: 'idle', data: null, code: null })
+  const [kline, setKline] = useState({ status: 'idle', data: null, code: null })
+  // Folded = the intraday pane keeps only its title row, so the daily pane gets the whole column.
+  const [trendFolded, setTrendFolded] = useState(false)
   const alive = useRef(true)
 
   useEffect(() => {
@@ -1496,6 +2014,56 @@ function WatchlistDeskPage({ t }) {
     setError(payload.error !== undefined && payload.error !== null && typeof payload.error.code === 'string' ? payload.error.code : null)
   }
 
+  /**
+   * The series follows the selection: one request per click (the host caches it for a minute),
+   * no polling and no prefetch. A stale answer is dropped by sequence, not merged.
+   */
+  const loadTrend = async (thscode, options = {}) => {
+    if (typeof thscode !== 'string' || thscode.length === 0) {
+      setTrend({ status: 'idle', data: null, code: null })
+      setKline({ status: 'idle', data: null, code: null })
+      return
+    }
+    const request = (deskTrendSequence += 1)
+    setTrend((previous) => ({ status: 'loading', data: previous.data !== null && previous.data.thscode === thscode ? previous.data : null, code: null }))
+    try {
+      const query = `thscode=${encodeURIComponent(thscode)}${options.bust === true ? '&refresh=1' : ''}`
+      const payload = await call('/trend', { query })
+      if (!alive.current || request !== deskTrendSequence) return
+      setTrend({ status: 'ready', data: payload, code: null })
+    } catch (failure) {
+      if (!alive.current || request !== deskTrendSequence) return
+      const code = typeof failure?.code === 'string' ? failure.code : 'trend_unavailable'
+      setTrend({ status: code === 'trend_unavailable' ? 'unavailable' : 'error', data: null, code })
+    }
+  }
+
+  /** Same shape as `loadTrend`: the daily pane has its own request, so one slow history never blocks a tick. */
+  const loadKline = async (thscode, options = {}) => {
+    if (typeof thscode !== 'string' || thscode.length === 0) {
+      setKline({ status: 'idle', data: null, code: null })
+      return
+    }
+    const request = (deskKlineSequence += 1)
+    setKline((previous) => ({ status: 'loading', data: previous.data !== null && previous.data.thscode === thscode ? previous.data : null, code: null }))
+    try {
+      const query = `thscode=${encodeURIComponent(thscode)}${options.bust === true ? '&refresh=1' : ''}`
+      const payload = await call('/kline', { query })
+      if (!alive.current || request !== deskKlineSequence) return
+      setKline({ status: 'ready', data: payload, code: null })
+    } catch (failure) {
+      if (!alive.current || request !== deskKlineSequence) return
+      const code = typeof failure?.code === 'string' ? failure.code : 'kline_unavailable'
+      setKline({ status: code === 'kline_unavailable' ? 'unavailable' : 'error', data: null, code })
+    }
+  }
+
+  const selectRow = (thscode) => {
+    setSelected(thscode)
+    void loadTrend(thscode)
+    void loadKline(thscode)
+  }
+
   // Opening the panel is the user request: read the list, then quote it once. No polling.
   useEffect(() => {
     let cancelled = false
@@ -1506,7 +2074,12 @@ function WatchlistDeskPage({ t }) {
         const landed = cleanRows(listed.items) ?? []
         setItems(landed)
         // The detail panel is the main area: start on the first symbol instead of an empty aside.
-        setSelected((value) => (value !== null ? value : (typeof landed[0]?.thscode === 'string' ? landed[0].thscode : null)))
+        const first = typeof landed[0]?.thscode === 'string' ? landed[0].thscode : null
+        setSelected((value) => (value !== null ? value : first))
+        if (first !== null) {
+          void loadTrend(first)
+          void loadKline(first)
+        }
       } catch (failure) {
         if (!cancelled) setError(failure.code ?? 'load_failed')
         return
@@ -1530,6 +2103,10 @@ function WatchlistDeskPage({ t }) {
     try {
       const payload = await call('/refresh', { body: {} })
       if (alive.current) applyRefresh(payload)
+      if (alive.current && selected !== null) {
+        void loadTrend(selected, { bust: true })
+        void loadKline(selected, { bust: true })
+      }
     } catch (failure) {
       if (alive.current) setError(failure.code ?? 'fuyao_unavailable')
     } finally {
@@ -1541,7 +2118,10 @@ function WatchlistDeskPage({ t }) {
     const before = items
     setPendingRemove(null)
     setItems(before.filter((row) => row.thscode !== thscode))
-    if (selected === thscode) setSelected(null)
+    if (selected === thscode) {
+      setSelected(null)
+      setTrend({ status: 'idle', data: null, code: null })
+    }
     try {
       await call('/remove', { body: { thscode } })
     } catch {
@@ -1603,8 +2183,17 @@ function WatchlistDeskPage({ t }) {
   const groupMenuItems = [{ id: DESK_ALL, label: t('desk.allGroups'), icon: activeGroup === DESK_ALL ? h(IconChecklistOutlineRegular, { size: 14 }) : undefined }]
     .concat(groups.names.map((name) => ({ id: name, label: name, icon: activeGroup === name ? h(IconChecklistOutlineRegular, { size: 14 }) : undefined })))
 
+  // The row you are looking at is the freshest thing in the panel: once its intraday payload lands,
+  // the list shows that price too, so one instrument never carries two numbers on the same screen.
+  const liveQuote = (item) => {
+    if (trend.status !== 'ready' || trend.data === null || trend.data.thscode !== item.thscode || typeof trend.data.last !== 'number') return item.quote
+    const prevClose = trend.data.prev_close
+    return { price: trend.data.last, change_pct: prevClose > 0 ? ((trend.data.last - prevClose) / prevClose) * 100 : null }
+  }
+
   const rows = visible.map((item, index) => {
-    const pct = deskPctOf(item.quote)
+    const quote = liveQuote(item)
+    const pct = deskPctOf(quote)
     const failure = failures[item.thscode]
     const names = deskGroupsOf(groups, item.thscode)
     const isSelected = selected === item.thscode
@@ -1615,19 +2204,19 @@ function WatchlistDeskPage({ t }) {
       className: 'cwd-row',
       role: 'listitem',
       'aria-current': isSelected ? 'true' : undefined,
-      onClick: (event) => { if (event.target.closest('.cwd-rowactions') === null) setSelected(item.thscode) },
+      onClick: (event) => { if (event.target.closest('.cwd-rowactions') === null) selectRow(item.thscode) },
     },
       h('button', {
         type: 'button',
         className: 'cwd-cellname',
         'aria-pressed': isSelected,
-        onClick: () => setSelected(item.thscode),
+        onClick: () => selectRow(item.thscode),
       },
         h('span', { className: 'cwd-nameline' },
           h('span', { className: 'cwd-nametext', title: item.name }, scrubInvisible(item.name)),
           h(TypeTag, { assetType: item.asset_type, t })),
         h('span', { className: 'cwd-codeline' }, h('span', { className: 'cwd-code' }, item.thscode))),
-      h('div', { className: failure === undefined ? 'cwd-price' : 'cwd-price cwd-stale', title: quoteTitle }, deskPriceText(item.quote)),
+      h('div', { className: failure === undefined ? 'cwd-price' : 'cwd-price cwd-stale', title: quoteTitle }, deskPriceText(quote)),
       h('div', { className: `cwd-pct ${deskToneOf(pct)}`, title: quoteTitle }, deskPctText(pct)),
       // One trigger per row: pin, group checkboxes and remove live in the official Menu.
       h('div', { className: 'cwd-rowactions' },
@@ -1680,8 +2269,78 @@ function WatchlistDeskPage({ t }) {
         ? h('div', { className: 'cwd-empty' }, h('div', { className: 'cwd-emptytitle' }, t('desk.noMatch')), h('p', { className: 'cwd-emptyhint' }, t('desk.noMatchHint')))
         : h('div', { className: 'cwd-tablebody', role: 'list', 'aria-label': t('desk.title') }, rows)
 
-  const detailNames = current === null ? [] : deskGroupsOf(groups, current.thscode)
-  const detailPct = current === null ? null : deskPctOf(current.quote)
+
+  // The block note states the session fact (live / closed / previous) and the clock the axis uses.
+  const trendData = trend.status === 'ready' ? trend.data : null
+  // The chart is fetched later than the list, so for the selected row it is the fresher vintage:
+  // the headline price, its percentage and the as-of stamp all come from the same series as the
+  // pane below, instead of ageing by every minute the panel sits idle.
+  const trendOwns = trendData !== null && current !== null && trendData.thscode === current.thscode && typeof trendData.last === 'number'
+  const detailQuote = current === null ? null : liveQuote(current)
+  const detailPct = deskPctOf(detailQuote)
+  const detailPrint = trendOwns ? trendData.points[trendData.points.length - 1][0] : null
+  // One clock on the panel: when the number above was printed. The zone suffix only appears when
+  // that clock is not the reader's own (the US session runs on ET); A-share and HK print on it.
+  const printZone = trendOwns && trendData.market === 'us' ? ` ${t('desk.trendZoneUs')}` : ''
+  const detailAt = trendOwns
+    ? `${String(trendData.session_date ?? '').slice(5)} ${detailPrint}${printZone}`.trim()
+    : current === null || current.quote === null || current.quote === undefined ? t('desk.notRefreshed') : (formatTime(current.quote.captured_at) || t('desk.notRefreshed'))
+  const trendZone = trendData === null || trendData.market === 'a-share' ? '' : ` ${t(trendData.market === 'us' ? 'desk.trendZoneUs' : 'desk.trendZoneHk')}`
+  const trendNote = trendData === null
+    ? (trend.status === 'loading' ? t('desk.trendLoading') : trend.status === 'error' ? t('desk.trendError') : '')
+    : trendData.session_status === 'live'
+      ? `${trendData.stale ? t('desk.trendStale') : t('desk.trendLive')}${trendZone} · ${trendData.points[trendData.points.length - 1][0]}`
+      : trendData.session_status === 'closed'
+        ? `${trendData.session_date ?? ''} ${t('desk.trendClosed')}${trendZone}`
+        : `${t('desk.trendPrevious')} ${trendData.session_date ?? ''}${trendZone}`
+
+  const trendStats = trendData === null ? null : h('div', { className: 'cwd-trendstats' },
+    ...[
+      [t('desk.trendOpen'), deskNumberText(trendData.open)],
+      [t('desk.trendHigh'), deskNumberText(trendData.high)],
+      [t('desk.trendLow'), deskNumberText(trendData.low)],
+      [t('desk.trendAvg'), deskNumberText(trendData.avg)],
+      [t('desk.trendVolume'), deskVolumeText(trendData.volume, trendData.volume_unit, t)],
+      [t('desk.trendAmount'), deskAmountText(trendData.amount, trendData.currency)],
+    ].map(([label, value]) => h('div', { key: label, className: 'cwd-trendstat' },
+      h('span', null, label), h('span', { title: value }, value))))
+
+  const trendBody = trendData !== null
+    ? h(IntradayChart, { key: trendData.thscode, data: trendData, t })
+    : h('div', { className: 'cwd-chart' }, h('div', null,
+      h('div', { className: 'cwd-charttext' }, trend.status === 'error' ? t('desk.trendError') : trend.status === 'loading' ? t('desk.trendLoading') : t('desk.trendUnavailable')),
+      trend.status === 'unavailable'
+        ? h('div', { className: 'cwd-charthint' }, t('desk.trendUnavailableHint'))
+        : null,
+      trend.status === 'error'
+        ? h('button', { type: 'button', className: 'cwd-pill', onClick: () => { void loadTrend(selected, { bust: true }) } }, t('desk.trendRetry'))
+        : null))
+  const klineData = kline.status === 'ready' && Array.isArray(kline.data?.bars) && kline.data.bars.length > 0 ? kline.data : null
+  const klineNote = klineData === null
+    ? (kline.status === 'loading' ? t('desk.klineLoading') : kline.status === 'error' ? t('desk.klineError') : '')
+    : t('desk.adjustQfq')
+  // The legend reads the same series the paths draw, so the numbers and the lines cannot disagree.
+  const klineLegend = klineData === null ? null : h('div', { className: 'cwd-malegend' },
+    ...MA_WINDOWS.map((window) => {
+      const values = movingAverage(klineData.bars, window)
+      const last = values[values.length - 1]
+      return h('span', { key: window, className: `cwd-malegenditem cwd-ma${window}` }, `MA${window} ${last === null || last === undefined ? '—' : deskNumberText(last)}`)
+    }))
+  const klineBody = klineData !== null
+    ? h(DailyChart, { key: klineData.thscode, data: klineData, t })
+    : h('div', { className: 'cwd-chart' }, h('div', null,
+      h('div', { className: 'cwd-charttext' }, kline.status === 'error' ? t('desk.klineError') : kline.status === 'loading' ? t('desk.klineLoading') : t('desk.klineUnavailable')),
+      kline.status === 'unavailable' ? h('div', { className: 'cwd-charthint' }, t('desk.klineUnavailableHint')) : null,
+      kline.status === 'error'
+        ? h('button', { type: 'button', className: 'cwd-pill', onClick: () => { void loadKline(selected, { bust: true }) } }, t('desk.trendRetry'))
+        : null))
+  const klineBlock = h('div', { className: 'cwd-block cwd-block-kline' },
+    h('div', { className: 'cwd-blockhead' },
+      h('span', { className: 'cwd-blocktitle' }, t('desk.daily')),
+      klineLegend,
+      h('span', { className: 'cwd-blocknote' }, klineNote)),
+    klineBody)
+
   const detail = current === null
     ? h('div', { className: 'cwd-card' }, h('div', { className: 'cwd-empty' },
       h('div', { className: 'cwd-emptytitle' }, t('desk.selectHint')),
@@ -1693,25 +2352,30 @@ function WatchlistDeskPage({ t }) {
             h('span', { className: 'cwd-detailtext', title: current.name }, scrubInvisible(current.name)),
             h(TypeTag, { assetType: current.asset_type, t })),
           h('div', { className: 'cwd-detailcode' }, current.thscode))),
-      h('div', { className: 'cwd-bigquote' },
-        h('span', { className: 'cwd-bigprice' }, deskPriceText(current.quote)),
-        h('span', { className: `cwd-bigpct ${deskToneOf(detailPct)}` }, deskPctText(detailPct))),
-      h('div', { className: 'cwd-meta' },
-        h('div', { className: 'cwd-metaitem' }, h('div', { className: 'cwd-metalabel' }, t('desk.capturedAt')), h('div', { className: 'cwd-metavalue' }, current.quote === null || current.quote === undefined ? t('desk.notRefreshed') : (formatTime(current.quote.captured_at) || t('desk.notRefreshed')))),
-        h('div', { className: 'cwd-metaitem' }, h('div', { className: 'cwd-metalabel' }, t('desk.sourceTime')), h('div', { className: 'cwd-metavalue' }, typeof current.quote?.source_time === 'string' && current.quote.source_time.length > 0 ? current.quote.source_time : '—')),
-        h('div', { className: 'cwd-metaitem' }, h('div', { className: 'cwd-metalabel' }, t('desk.groupsOf')), h('div', { className: 'cwd-metavalue' }, detailNames.length === 0 ? t('desk.noGroup') : detailNames.join(' / '))),
-        h('div', { className: 'cwd-metaitem' }, h('div', { className: 'cwd-metalabel' }, t('desk.kind')), h('div', { className: 'cwd-metavalue' }, typeLabel(current.asset_type, t)))),
-      h('div', { className: 'cwd-block cwd-block-chart' },
+      // The price row owns the right half of the header: two facts sit beside it instead of under it,
+      // which is what buys both panes their height back.
+      h('div', { className: 'cwd-quoterow' },
+        h('div', { className: 'cwd-bigquote' },
+          h('span', { className: 'cwd-bigprice' }, deskPriceText(detailQuote)),
+          h('span', { className: `cwd-bigpct ${deskToneOf(detailPct)}` }, deskPctText(detailPct))),
+        h('div', { className: 'cwd-meta' },
+          h('div', { className: 'cwd-metaitem' }, h('div', { className: 'cwd-metalabel' }, t('desk.capturedAt')), h('div', { className: 'cwd-metavalue' }, detailAt)),
+          h('div', { className: 'cwd-metaitem' }, h('div', { className: 'cwd-metalabel' }, t('desk.kind')), h('div', { className: 'cwd-metavalue' }, typeLabel(current.asset_type, t))))),
+      h('div', { className: trendFolded ? 'cwd-block cwd-block-chart cwd-folded' : 'cwd-block cwd-block-chart' },
         h('div', { className: 'cwd-blockhead' },
           h('span', { className: 'cwd-blocktitle' }, t('desk.intraday')),
-          h('span', { className: 'cwd-blocknote' }, refreshedAt === null ? t('desk.notRefreshed') : formatTime(refreshedAt))),
-        h('div', { className: 'cwd-chart' },
-          h('div', null,
-            h('div', { className: 'cwd-charttext' }, t('desk.intradayEmpty')),
-            h('div', { className: 'cwd-charthint' }, t('desk.intradayEmptyHint'))))),
-      h('div', { className: 'cwd-block' },
-        h('div', { className: 'cwd-blockhead' }, h('span', { className: 'cwd-blocktitle' }, t('desk.volume'))),
-        h('div', { className: 'cwd-volume' }, t('desk.volumeEmpty')))))
+          trendFolded ? null : trendStats,
+          h('span', { className: 'cwd-blocknote' }, trendNote),
+          // Two panes in one column: folding the upper one hands the height to the daily pane instead
+          // of pushing the card into a scrollbar.
+          h('button', {
+            type: 'button',
+            className: 'cwd-blockfold',
+            'aria-expanded': trendFolded ? 'false' : 'true',
+            onClick: () => setTrendFolded(!trendFolded),
+          }, trendFolded ? t('desk.unfold') : t('desk.fold'))),
+        trendFolded ? null : trendBody),
+      klineBlock))
 
   return h('div', { className: 'cwd-page' },
     h('div', { className: 'cwd-inner' },

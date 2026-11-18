@@ -8,6 +8,8 @@ import assert from 'node:assert/strict'
 import { apply, createRouteHandler, createWatchlistService, ROUTE_PATH, SEED_ITEMS } from '../watchlist/index.js'
 import { fakeCtx } from './cordis-fake.mjs'
 import { createFakeDomain, httpFixture, stubFuyao, withHoldable } from './watchlist-harness.mjs'
+import { tencentHostDownUntil } from '../lib/sources/tencent-public-core.js'
+import { TENCENT_600519 } from './trend-fixtures.mjs'
 
 function harness(options = {}) {
   const fake = createFakeDomain()
@@ -429,6 +431,109 @@ test('search 的回包带 partial 时状态码仍是 200：一路挂了不是"�
     assert.equal(payload.ok, true)
     assert.deepEqual(payload.partial, [{ market: 'a-share', code: 'fuyao_unavailable' }])
     assert.ok(payload.items.some((item) => item.exchange === 'HK'), '候选照常给其余两路')
+  } finally {
+    stub.restore()
+  }
+})
+
+test('/trend：只认清单里的标的，未收录的代码一个请求都不发', async () => {
+  const stub = stubFuyao({ 'minute/query': TENCENT_600519 })
+  const { service, handler } = harness()
+  try {
+    await service.list()
+    const res = await call(handler, { method: 'GET', url: '/capital-watchlist/trend?thscode=600519.SH' })
+    assert.equal(res.statusCode, 404)
+    assert.equal(res.json().code, 'not_watched')
+    // 路由若接受客户端自报的 asset_type，就成了任意行情代理；闸门必须在服务层、且先于出网。
+    assert.equal(stub.calls.filter((entry) => entry.url.includes('minute/query')).length, 0)
+  } finally {
+    stub.restore()
+  }
+})
+
+test('/trend：成功返回归一化序列，60s 内复用，refresh=1 才重取', async () => {
+  const stub = stubFuyao({ 'minute/query': TENCENT_600519 })
+  const { service, fake, handler } = harness()
+  try {
+    await withHoldable(service, fake)
+    const first = await call(handler, { method: 'GET', url: '/capital-watchlist/trend?thscode=600519.SH' })
+    assert.equal(first.statusCode, 200)
+    const payload = first.json()
+    assert.equal(payload.ok, true)
+    assert.equal(payload.thscode, '600519.SH')
+    assert.equal(payload.source, 'tencent')
+    assert.equal(payload.market, 'a-share')
+    assert.equal(payload.points.length, 242)
+    assert.equal(payload.prev_close, 1453.9)
+    assert.equal(payload.volume, 35116)
+    assert.equal(payload.volume_unit, 'lot')
+    assert.equal(payload.points[0][0], '09:30')
+    assert.equal(payload.points[payload.points.length - 1][0], '15:00')
+
+    const callsAfterFirst = stub.calls.filter((entry) => entry.url.includes('minute/query')).length
+    assert.equal(callsAfterFirst, 1)
+
+    const cached = await call(handler, { method: 'GET', url: '/capital-watchlist/trend?thscode=600519.SH' })
+    assert.equal(cached.statusCode, 200)
+    assert.equal(cached.json().points.length, 242)
+    assert.equal(stub.calls.filter((entry) => entry.url.includes('minute/query')).length, 1, '60s 内第二次不再打上游')
+
+    const busted = await call(handler, { method: 'GET', url: '/capital-watchlist/trend?thscode=600519.SH&refresh=1' })
+    assert.equal(busted.statusCode, 200)
+    assert.equal(stub.calls.filter((entry) => entry.url.includes('minute/query')).length, 2, 'refresh=1 跳过缓存')
+  } finally {
+    stub.restore()
+  }
+})
+
+test('/trend：并发两次只打一次上游（单飞）', async () => {
+  const stub = stubFuyao({ 'minte/query': TENCENT_600519, 'minute/query': TENCENT_600519 })
+  const { service, fake, handler } = harness()
+  try {
+    await withHoldable(service, fake)
+    const [a, b] = await Promise.all([
+      call(handler, { method: 'GET', url: '/capital-watchlist/trend?thscode=600519.SH' }),
+      call(handler, { method: 'GET', url: '/capital-watchlist/trend?thscode=600519.SH' }),
+    ])
+    assert.equal(a.statusCode, 200)
+    assert.equal(b.statusCode, 200)
+    assert.equal(stub.calls.filter((entry) => entry.url.includes('minute/query')).length, 1)
+  } finally {
+    stub.restore()
+  }
+})
+
+test('/trend：画不出来的市场直接给空态理由，不发请求', async () => {
+  const stub = stubFuyao()
+  const { service, fake, handler } = harness()
+  try {
+    await withHoldable(service, fake)
+    await fake.table.put('TCEHY.PS', { thscode: 'TCEHY.PS', ticker: 'TCEHY', name: '腾讯控股ADR', exchange: 'US', asset_type: 'us-stock', added_at: 1, source: 'user', quote: null })
+    const res = await call(handler, { method: 'GET', url: '/capital-watchlist/trend?thscode=TCEHY.PS' })
+    assert.equal(res.statusCode, 502)
+    const payload = res.json()
+    assert.equal(payload.code, 'trend_unavailable')
+    assert.equal(payload.reason, 'market_unsupported')
+    assert.equal(stub.calls.filter((entry) => entry.url.includes('eastmoney') || entry.url.includes('minute/query')).length, 0)
+  } finally {
+    stub.restore()
+  }
+})
+
+test('/trend：代码格式与上游故障各有稳定错误码，不把整条路由打成 503', async () => {
+  const stub = stubFuyao({ 'minute/query': JSON.stringify({ code: 0, data: {} }) })
+  const { service, fake, handler } = harness()
+  try {
+    await withHoldable(service, fake)
+    const bad = await call(handler, { method: 'GET', url: '/capital-watchlist/trend?thscode=not-a-code' })
+    assert.equal(bad.statusCode, 400)
+    assert.equal(bad.json().code, 'invalid_query')
+
+    const failed = await call(handler, { method: 'GET', url: '/capital-watchlist/trend?thscode=600519.SH' })
+    assert.equal(failed.statusCode, 502)
+    assert.equal(failed.json().code, 'trend_unavailable')
+    // 宿主级冷却表是进程共享的：这条用例把三个入口都拉黑了，别让后面的用例跟着吃哑炮。
+    tencentHostDownUntil.clear()
   } finally {
     stub.restore()
   }

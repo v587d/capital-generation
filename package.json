@@ -1,6 +1,6 @@
 {
   "name": "@v587d/capital-generation",
-  "version": "2.26.0",
+  "version": "2.27.0",
   "description": "Capital Generation：面向中国散户的 AI 投资助手插件（自动模式 Agent Preset）",
   "icon": "assets/cg-icon.png",
   "author": "v587d",
@@ -162,6 +162,7 @@
     "python:verify": "node scripts/python-runtime.mjs verify",
     "prepublishOnly": "npm run build",
     "smoke:fuyao": "node scripts/smoke-fuyao.mjs",
+    "smoke:trend": "npm run build:watchlist-client && node scripts/smoke-trend.mjs",
     "smoke:wind": "node scripts/smoke-wind.mjs",
     "smoke:local-fetch": "node scripts/smoke-local-fetch.mjs",
     "smoke:calendar": "node scripts/smoke-calendar.mjs",

@@ -10,6 +10,20 @@ export const SMARTBOX_URL = 'https://smartbox.gtimg.cn/s3/'
 export const TENCENT_MIN_INTERVAL_MS = 120
 export const tencentThrottle = createRequestThrottle(TENCENT_MIN_INTERVAL_MS)
 
+/**
+ * ifzq JSON hosts (K-line + intraday trend). One rotation and one cooldown table for both
+ * callers: a host that failed for K-lines must not be retried by the trend path 200ms later.
+ */
+export const TENCENT_IFZQ_HOSTS = [
+  'https://web.ifzq.gtimg.cn',
+  'https://proxy.finance.qq.com/ifzqgtimg',
+  'https://ifzq.gtimg.cn',
+]
+export const TENCENT_HOST_COOLDOWN_MS = 120_000
+
+/** Shared by every ifzq caller; keyed by host URL. */
+export const tencentHostDownUntil = new Map<string, number>()
+
 export type JsonRecord = Record<string, unknown>
 
 export function isRecord(value: unknown): value is JsonRecord {
@@ -331,4 +345,67 @@ export async function fetchSmartbox(query: string, market: string, signal: Abort
   // ASCII `\uXXXX` body: use utf-8; the 'ascii' label maps to windows-1252.
   const text = await tencentGetText(url, signal)
   return parseSmartbox(text)
+}
+
+/** ifzq JSON body: empty / non-JSON / non-object must fail loudly with the host named. */
+export function parseIfzqPayload(text: string, context: string): JsonRecord {
+  if (!text.trim()) throw sourceError(`Tencent ${context} returned an empty response`, 'tencent_empty_response')
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch (error) {
+    throw sourceError(`Tencent ${context} returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`, 'tencent_invalid_response')
+  }
+  if (!isRecord(parsed)) throw sourceError(`Tencent ${context} returned ${Array.isArray(parsed) ? 'an array' : typeof parsed}, expected an object`, 'tencent_invalid_response')
+  return parsed
+}
+
+/** One ifzq request; `param=` is the K-line shape, `query` is for endpoints with their own names. */
+export interface IfzqRequest {
+  path: string
+  param?: string
+  query?: string
+  label: string
+  /** Error code when every host is exhausted; K-line keeps its historical code. */
+  code?: string
+  /** "Host gave nothing": whole data object for A-shares, symbol series for HK/US. */
+  isEmpty: (data: JsonRecord) => boolean
+  /**
+   * Stop on first param rejection: another host will not fix it, and blacklisting all hosts for
+   * 120s spreads one bad call process-wide. HK/US returns `{"code":1,"msg":"bad params"}`.
+   */
+  isParamRejection?: (payload: JsonRecord) => boolean
+}
+
+function ifzqParamRejected(payload: JsonRecord): boolean {
+  return payload.msg === 'param error'
+}
+
+/**
+ * Rotate the shared ifzq hosts and return the first non-empty `data` object. Cancellation and
+ * param failures rethrow before blacklist/rotation; see `docs/dev/web-retriever.md` §4.2.
+ */
+export async function callIfzqHosts(request: IfzqRequest, signal: AbortSignal): Promise<JsonRecord> {
+  const errors: string[] = []
+  const rejected = request.isParamRejection ?? ifzqParamRejected
+  const link = request.query ?? `param=${encodeURIComponent(request.param ?? '')}`
+  for (const host of TENCENT_IFZQ_HOSTS) {
+    if ((tencentHostDownUntil.get(host) ?? 0) > Date.now()) continue
+    try {
+      const payload = parseIfzqPayload(await tencentGetText(`${host}${request.path}?${link}`, signal), `${request.label} ${host}`)
+      if (rejected(payload)) {
+        const detail = String(payload.msg ?? '') || `code ${String(payload.code)}`
+        throw sourceError(`Tencent rejected the ${request.label} parameter (${detail})`, 'tencent_invalid_param')
+      }
+      if (isRecord(payload.data) && !request.isEmpty(payload.data)) return payload.data
+      errors.push(`${host}: empty data`)
+      tencentHostDownUntil.set(host, Date.now() + TENCENT_HOST_COOLDOWN_MS)
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') throw error
+      if ((error as Error & { code?: string }).code === 'tencent_invalid_param') throw error
+      errors.push(`${host}: ${error instanceof Error ? error.message : String(error)}`)
+      tencentHostDownUntil.set(host, Date.now() + TENCENT_HOST_COOLDOWN_MS)
+    }
+  }
+  throw sourceError(`Tencent ${request.label} endpoints unavailable: ${errors.join('; ')}`, request.code ?? 'tencent_kline_unavailable')
 }
