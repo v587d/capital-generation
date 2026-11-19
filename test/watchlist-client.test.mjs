@@ -175,6 +175,7 @@ function factoryRequire(name) {
       IconEllipsisOutlineRegular: icon('IconEllipsisOutlineRegular'),
       // The official set has no wallet/pie/coin icon, no hollow circle and no minus (stepper keys are text -/+). ⛔ Never fall back to IconCheckCircle*: a tick inside would lie in the unmarked state.
       IconGoalOutlineRegular: icon('IconGoalOutlineRegular'),
+      IconInfoOutlineRegular: icon('IconInfoOutlineRegular'),
       IconListPenOutlineRegular: icon('IconListPenOutlineRegular'),
       IconPinOutlineRegular: icon('IconPinOutlineRegular'),
       IconSearchOutlineRegular: icon('IconSearchOutlineRegular'),
@@ -2488,7 +2489,8 @@ test('⛔ 详情头必须与下面的分时同源：价格、涨跌幅、时间�
   assert.equal(fields['行情时间'], '11-18 09:29', '时间戳说明的是上面那个价格是什么时候的')
   assert.equal(fields['交易所时间'], undefined, '时间只留一格：交易所时间已并入行情时间')
   assert.equal(fields['所属分组'], undefined, '分组不再占一格：筛选器已经是它的入口')
-  assert.deepEqual(Object.keys(fields), ['行情时间', '标的类型'], 'meta 区一行两格')
+  assert.equal(fields['标的类型'], undefined, '类型不再单独占一格：行上的类型标签已经说了')
+  assert.deepEqual(Object.keys(fields), ['行情时间'], 'meta 只剩行情时间一格')
   assert.match(textOf(tree), /1173\.81万股/, '科创板按股报量，不写万手')
 
   // 美股走同一格，但钟不是读者的钟：必须带时区，否则会被当成北京时间读。
@@ -2548,13 +2550,14 @@ test('⛔ 版面把高度优先给图：时间/类型并排到价格右边，统
   assert.equal(String(kids[1].props.className), 'cwd-meta', 'meta 在价格右边')
   assert.equal(classNodes(tree, 'cwd-bigquote').length, 1, '报价块只留价格与涨跌幅')
 
-  // 统计行进分时标题行、均线图例进日K 标题行，都是同一个 head 的孩子。
+  // 六个字段收进分时标题行的信息键，均线图例仍在日K 标题行。
   const heads = classNodes(tree, 'cwd-blockhead')
   assert.equal(heads.length, 2)
   const intradayHead = heads[0]
   const dailyHead = heads[1]
   const hasChild = (head, name) => classNodes(head, name).length === 1
-  assert.equal(hasChild(intradayHead, 'cwd-trendstats'), true, '统计跟标题同一行')
+  assert.equal(hasChild(intradayHead, 'cwd-statsbox'), true, '统计收进标题行的信息键')
+  assert.equal(hasChild(intradayHead, 'cwd-statspanel'), true, '值在悬停卡片里，不占标题行')
   assert.equal(hasChild(dailyHead, 'cwd-malegend'), true, '均线图例跟标题同一行')
 
   // CSS 契约：这两处是横向排布，不是原来的 grid / 独立行。
@@ -2562,14 +2565,15 @@ test('⛔ 版面把高度优先给图：时间/类型并排到价格右边，统
   assert.match((css.match(/\.cwd-quoterow \{[^}]*\}/) ?? [])[0], /display:\s*flex/)
   assert.match((css.match(/\.cwd-meta \{[^}]*\}/) ?? [])[0], /flex-wrap:\s*wrap/)
   assert.doesNotMatch((css.match(/\.cwd-meta \{[^}]*\}/) ?? [])[0], /grid-template-columns/, '⛔ meta 不再是两列格子')
-  assert.match((css.match(/\.cwd-trendstats \{[^}]*\}/) ?? [])[0], /display:\s*flex/)
+  assert.match((css.match(/\.cwd-statsgrid \{[^}]*\}/) ?? [])[0], /grid-template-columns:\s*repeat\(3/)
 })
 
-test('⛔ 分时块可收起：折叠后只剩标题行，高度让给日K', () => {
+test('⛔ 统计收进信息键：悬停或聚焦才展开，键上带着全部六项，触摸也能点开', () => {
   const { ctx } = mount()
   const t = (key) => ctx.dictionaries['capital.watchlist'].zh[key] ?? key
   const desk = ctx.registrations[1]
-  const render = () => { resetHooks(); return desk.component({ t }) }
+  // mountedCss re-mounts and clears hook state, so read the stylesheet before seeding the hooks.
+  const css = mountedCss()
   freshHooks()
   hookState[0] = [{ ...QUOTED }]
   hookState[1] = false
@@ -2577,26 +2581,61 @@ test('⛔ 分时块可收起：折叠后只剩标题行，高度让给日K', () 
   hookState[11] = QUOTED.thscode
   hookState[14] = { status: 'ready', data: TREND, code: null }
   hookState[15] = { status: 'ready', data: KLINE, code: null }
+  const render = () => { resetHooks(); return desk.component({ t }) }
 
-  const open = render()
-  const fold = classNodes(open, 'cwd-blockfold')
-  assert.equal(fold.length, 1, '标题行有一个收起键')
-  assert.equal(fold[0].props['aria-expanded'], 'true')
-  assert.equal(textOf(fold[0]).trim(), '收起')
-  assert.equal(classNodes(open, 'cwd-chartbox').length, 1, '展开时画分时')
-  assert.equal(classNodes(open, 'cwd-trendstats').length, 1)
+  const box = classNodes(render(), 'cwd-statsbox')
+  assert.equal(box.length, 1, '标题行只有这一个信息键')
+  const info = classNodes(box[0], 'cwd-statsinfo')[0]
+  assert.ok(info, '信息键要在')
+  assert.equal(info.props.type, 'button', '⛔ 触摸端没有 hover，得能点')
+  assert.equal(info.props['aria-expanded'], 'false')
+  const label = String(info.props['aria-label'])
+  assert.match(label, /行情统计/u)
+  for (const field of ['今开', '最高', '最低', '均价', '成交量', '成交额']) {
+    assert.ok(label.includes(field), `读数不许丢：${field}`)
+  }
 
-  fold[0].props.onClick()
-  const folded = render()
-  assert.equal(classNodes(folded, 'cwd-chartbox').length, 0, '收起后不画分时图')
-  assert.equal(classNodes(folded, 'cwd-trendstats').length, 0, '统计行一起收起')
-  assert.equal(classNodes(folded, 'cwd-blockfold')[0].props['aria-expanded'], 'false')
-  assert.equal(String(classNodes(folded, 'cwd-block-chart')[0].props.className).includes('cwd-folded'), true, '折叠态要能被 CSS 认出来')
-  assert.equal(classNodes(folded, 'cwd-klinebox').length, 1, '日K 不受影响')
-  assert.equal(textOf(classNodes(folded, 'cwd-blockfold')[0]).trim(), '展开')
+  // 卡片默认不可见：装饰性内容（aria-hidden）由 CSS 的 hover / focus-within 揭示。
+  const panel = classNodes(box[0], 'cwd-statspanel')[0]
+  assert.equal(panel.props['aria-hidden'], 'true')
+  assert.match((css.match(/\.cwd-statspanel \{[^}]*\}/) ?? [])[0], /visibility:\s*hidden/)
+  assert.match(css, /\.cwd-statsbox:hover \.cwd-statspanel/u)
+  assert.match(css, /\.cwd-statsbox:focus-within \.cwd-statspanel/u)
+  assert.match(css, /\.cwd-statsbox-pinned \.cwd-statspanel/u, '点开后没有 hover 也要留在屏幕上')
 
-  classNodes(folded, 'cwd-blockfold')[0].props.onClick()
-  assert.equal(classNodes(render(), 'cwd-chartbox').length, 1, '再点一次回到展开')
+  info.props.onClick()
+  const pinned = classNodes(render(), 'cwd-statsbox')[0]
+  assert.equal(classNodes(pinned, 'cwd-statsinfo')[0].props['aria-expanded'], 'true')
+  assert.match(String(pinned.props.className), /cwd-statsbox-pinned/)
+})
+
+test('⛔ 分时标题行只留标题与信息键：会话状态、日期与收起键都不许再占位', () => {
+  const { ctx } = mount()
+  const t = (key) => ctx.dictionaries['capital.watchlist'].zh[key] ?? key
+  const desk = ctx.registrations[1]
+  freshHooks()
+  hookState[0] = [{ ...QUOTED }]
+  hookState[1] = false
+  hookState[6] = { names: [], assignments: {} }
+  hookState[11] = QUOTED.thscode
+  hookState[14] = { status: 'ready', data: TREND, code: null }
+  hookState[15] = { status: 'ready', data: KLINE, code: null }
+  const tree = desk.component({ t })
+
+  const head = classNodes(tree, 'cwd-blockhead')[0]
+  assert.equal(classNodes(head, 'cwd-blocktitle').length, 1, '标题还在')
+  assert.equal(classNodes(head, 'cwd-statsbox').length, 1, '信息键在标题旁')
+  assert.equal(classNodes(head, 'cwd-blocknote').length, 0, '⛔ 会话状态不再占标题行')
+  assert.equal(classNodes(head, 'cwd-blockfold').length, 0, '⛔ 收起键不再占标题行')
+  assert.equal(classNodes(head, 'cwd-blocktitle').length + classNodes(head, 'cwd-statsbox').length, 2, '标题行只有两件东西')
+
+  // 状态没有丢：它跟着六个读数进了信息卡的第一行。
+  const card = classNodes(tree, 'cwd-statscard')[0]
+  assert.ok(card, '信息卡在')
+  assert.equal(textOf(classNodes(card, 'cwd-statscap')[0]).trim(), '2026-11-17 收盘', '会话状态进卡片首行')
+  assert.equal(classNodes(card, 'cwd-trendstat').length, 6, '六项读数都在')
+  assert.equal(classNodes(tree, 'cwd-chartbox').length, 1, '分时图始终在（不再有折叠态）')
+  assert.equal(classNodes(tree, 'cwd-klinebox').length, 1, '日K 不受影响')
 })
 
 test('日K：蜡烛、四条均线、量柱与月刻度都在，坐标不出 NaN', () => {

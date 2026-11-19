@@ -9,7 +9,7 @@ const { createElement: h, useEffect, useRef, useState } = require('react')
 const { createSnapshotStore } = require('@deepseek-ai/dsh-client-store')
 // Official icons only; the set has no wallet/pie/coin glyph, so stepper keys use text −/+.
 // `MenuItemButton` gives the remove row official geometry and its separator line.
-const { IconChecklistOutlineRegular, IconCloseOutlineRegular, IconDatabaseOutlineRegular, IconEllipsisOutlineRegular, IconGoalOutlineRegular, IconListPenOutlineRegular, IconPinOutlineRegular, IconRefreshOutlineRegular, IconSearchOutlineRegular, IconTrashOutlineRegular, Menu, MenuItemButton, Modal, Switch } = require('@deepseek-ai/dsh-client-ui-primitives')
+const { IconChecklistOutlineRegular, IconCloseOutlineRegular, IconDatabaseOutlineRegular, IconEllipsisOutlineRegular, IconInfoOutlineRegular, IconGoalOutlineRegular, IconListPenOutlineRegular, IconPinOutlineRegular, IconRefreshOutlineRegular, IconSearchOutlineRegular, IconTrashOutlineRegular, Menu, MenuItemButton, Modal, Switch } = require('@deepseek-ai/dsh-client-ui-primitives')
 // Holdability and ceiling come from the same module the host gate uses.
 const { isHoldable, weightCeiling } = require('./holding-rules.js')
 
@@ -146,8 +146,6 @@ const zh = {
   'desk.trendError': '分时加载失败',
   'desk.retry': '重试',
   'desk.daily': '日K',
-  'desk.fold': '收起',
-  'desk.unfold': '展开',
   'desk.adjustQfq': '前复权',
   'desk.klineLoading': '正在读取日K…',
   'desk.klineError': '日K加载失败',
@@ -167,13 +165,13 @@ const zh = {
   'desk.trendAvg': '均价',
   'desk.trendVolume': '成交量',
   'desk.trendAmount': '成交额',
+  'desk.stats': '行情统计',
   'desk.lot': '手',
   'desk.share': '股',
   'desk.trendZoneUs': '美东',
   'desk.trendZoneHk': '香港',
   'desk.capturedAt': '行情时间',
   'desk.groupsOf': '所属分组',
-  'desk.kind': '标的类型',
   'desk.colName': '名称',
   'desk.colPrice': '最新',
   'desk.colChange': '涨跌',
@@ -293,8 +291,6 @@ const en = {
   'desk.trendError': 'Intraday failed to load',
   'desk.retry': 'Retry',
   'desk.daily': 'Daily',
-  'desk.fold': 'Collapse',
-  'desk.unfold': 'Expand',
   'desk.adjustQfq': 'Forward-adjusted',
   'desk.klineLoading': 'Loading daily bars…',
   'desk.klineError': 'Daily bars failed to load',
@@ -314,13 +310,13 @@ const en = {
   'desk.trendAvg': 'VWAP',
   'desk.trendVolume': 'Volume',
   'desk.trendAmount': 'Turnover',
+  'desk.stats': 'Session stats',
   'desk.lot': 'lots',
   'desk.share': 'shares',
   'desk.trendZoneUs': 'ET',
   'desk.trendZoneHk': 'HK',
   'desk.capturedAt': 'As of',
   'desk.groupsOf': 'Groups',
-  'desk.kind': 'Instrument',
   'desk.colName': 'Symbol',
   'desk.colPrice': 'Last',
   'desk.colChange': 'Change',
@@ -583,13 +579,9 @@ const CSS = `
 .cwd-metavalue { font-size: 12px; line-height: 16px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .cwd-block { flex: none; padding-top: 12px; border-top: .5px solid var(--dsw-alias-border-l2); }
 .cwd-block-chart { flex: 1 1 0; display: flex; flex-direction: column; min-height: 200px; }
-/* Folded block keeps only its title row, so it stops competing for height. */
-.cwd-block-chart.cwd-folded { flex: none; min-height: 0; }
 .cwd-blockhead { display: flex; flex: none; align-items: baseline; gap: 12px; margin-bottom: 8px; }
 .cwd-blocktitle { flex: none; font-size: 12.5px; line-height: 18px; font-weight: 600; }
 .cwd-blocknote { margin-left: auto; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
-.cwd-blockfold { flex: none; padding: 0 2px; border: 0; background: none; font-family: inherit; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); cursor: pointer; }
-.cwd-blockfold:hover { color: var(--dsw-alias-label-primary); }
 .cwd-chart { flex: 1; min-height: 150px; display: grid; place-items: center; padding: 12px; border: 1px dashed var(--dsw-alias-border-l2); border-radius: 10px; background: repeating-linear-gradient(180deg, color-mix(in srgb, var(--dsw-alias-border-l2) 60%, transparent) 0 1px, transparent 1px 36px), var(--dsw-alias-bg-module-platform); text-align: center; }
 .cwd-charttext { font-size: 12.5px; line-height: 18px; font-weight: 500; color: var(--dsw-alias-label-secondary); }
 .cwd-charthint { margin-top: 4px; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
@@ -600,11 +592,21 @@ const CSS = `
 .cwd-retry:hover { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 22%, transparent); }
 .cwd-retry:active { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 30%, transparent); }
 .cwd-retry:focus-visible { outline: 2px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 60%, transparent); outline-offset: 2px; }
-.cwd-trendstats { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: 2px 14px; min-width: 0; }
-.cwd-trendstat { display: flex; align-items: baseline; gap: 5px; font-size: 11px; line-height: 17px; }
+.cwd-statsbox { position: relative; display: inline-flex; align-items: center; flex: none; align-self: center; }
+.cwd-statsinfo { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--dsw-alias-label-tertiary); cursor: help; }
+.cwd-statsinfo:hover, .cwd-statsinfo:focus-visible, .cwd-statsbox-pinned .cwd-statsinfo { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-hover-accent); }
+.cwd-statsinfo:focus-visible { outline: 2px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 55%, transparent); outline-offset: 1px; }
+/* The padding on the panel is the hover bridge: the card starts 8px below the icon without a dead
+   strip where the pointer would drop the hover. */
+.cwd-statspanel { position: absolute; top: 100%; left: -10px; z-index: 8; padding-top: 8px; opacity: 0; visibility: hidden; transition: opacity .12s ease, visibility .12s ease; }
+.cwd-statsbox:hover .cwd-statspanel, .cwd-statsbox:focus-within .cwd-statspanel, .cwd-statsbox-pinned .cwd-statspanel { opacity: 1; visibility: visible; }
+.cwd-statscard { display: flex; flex-direction: column; gap: 7px; padding: 10px 14px; border: .5px solid var(--dsw-alias-border-l1); border-radius: 10px; background: var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-layer-1)); box-shadow: var(--dsw-elevation-prominent); }
+.cwd-statscap { font-size: 10.5px; line-height: 14px; color: var(--dsw-alias-label-tertiary); white-space: nowrap; }
+.cwd-statsgrid { display: grid; grid-template-columns: repeat(3, minmax(66px, auto)); gap: 7px 20px; }
+.cwd-trendstat { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .cwd-trendstat span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.cwd-trendstat span:first-child { flex: none; color: var(--dsw-alias-label-tertiary); }
-.cwd-trendstat span:last-child { font-variant-numeric: tabular-nums; }
+.cwd-trendstat span:first-child { flex: none; font-size: 10.5px; line-height: 14px; color: var(--dsw-alias-label-tertiary); }
+.cwd-trendstat span:last-child { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--dsw-alias-label-primary); font-variant-numeric: tabular-nums; }
 .cwd-chartbox { position: relative; flex: 1; min-height: 120px; min-width: 0; overflow: hidden; border-radius: 10px; background: var(--dsw-alias-bg-module-platform); }
 /* The daily pane shares the SVG contract above (absolute child, determinate height): a flexed chart
    next to a scrolled column is exactly how the container used to grow. */
@@ -2001,8 +2003,8 @@ function WatchlistDeskPage({ t }) {
   const [rowMenu, setRowMenu] = useState(null)
   const [trend, setTrend] = useState({ status: 'idle', data: null, code: null, detail: null })
   const [kline, setKline] = useState({ status: 'idle', data: null, code: null, detail: null })
-  // Folded = the intraday pane keeps only its title row, so the daily pane gets the whole column.
-  const [trendFolded, setTrendFolded] = useState(false)
+  // Touch has no hover: a tap pins the stats card open until the pointer leaves the box.
+  const [statsPinned, setStatsPinned] = useState(false)
   const alive = useRef(true)
 
   useEffect(() => {
@@ -2306,16 +2308,36 @@ function WatchlistDeskPage({ t }) {
         ? `${trendData.session_date ?? ''} ${t('desk.trendClosed')}${trendZone}`
         : `${t('desk.trendPrevious')} ${trendData.session_date ?? ''}${trendZone}`
 
-  const trendStats = trendData === null ? null : h('div', { className: 'cwd-trendstats' },
-    ...[
-      [t('desk.trendOpen'), deskNumberText(trendData.open)],
-      [t('desk.trendHigh'), deskNumberText(trendData.high)],
-      [t('desk.trendLow'), deskNumberText(trendData.low)],
-      [t('desk.trendAvg'), deskNumberText(trendData.avg)],
-      [t('desk.trendVolume'), deskVolumeText(trendData.volume, trendData.volume_unit, t)],
-      [t('desk.trendAmount'), deskAmountText(trendData.amount, trendData.currency)],
-    ].map(([label, value]) => h('div', { key: label, className: 'cwd-trendstat' },
-      h('span', null, label), h('span', { title: value }, value))))
+  // The six session facts are reference material, not the headline: they live behind one info
+  // button on the title row (hover / focus / tap) instead of eating the width the title and the
+  // session state need. The button carries them as its accessible name, so nothing is lost.
+  const trendFacts = trendData === null ? [] : [
+    [t('desk.trendOpen'), deskNumberText(trendData.open)],
+    [t('desk.trendHigh'), deskNumberText(trendData.high)],
+    [t('desk.trendLow'), deskNumberText(trendData.low)],
+    [t('desk.trendAvg'), deskNumberText(trendData.avg)],
+    [t('desk.trendVolume'), deskVolumeText(trendData.volume, trendData.volume_unit, t)],
+    [t('desk.trendAmount'), deskAmountText(trendData.amount, trendData.currency)],
+  ]
+  const trendStats = trendData === null ? null : h('div', {
+    className: statsPinned ? 'cwd-statsbox cwd-statsbox-pinned' : 'cwd-statsbox',
+    onMouseLeave: () => { if (statsPinned) setStatsPinned(false) },
+  },
+    h('button', {
+      type: 'button',
+      className: 'cwd-statsinfo',
+      'aria-label': `${t('desk.stats')}：${trendFacts.map(([label, value]) => `${label} ${value}`).join('，')}`,
+      'aria-expanded': statsPinned ? 'true' : 'false',
+      onClick: () => setStatsPinned(!statsPinned),
+      onKeyDown: (event) => { if (event.key === 'Escape') setStatsPinned(false) },
+    }, h(IconInfoOutlineRegular, { size: 13 })),
+    h('div', { className: 'cwd-statspanel', 'aria-hidden': 'true' },
+      h('div', { className: 'cwd-statscard' },
+        // The session state moved in here with the facts: the title row is the title's.
+        trendNote === '' ? null : h('div', { className: 'cwd-statscap' }, trendNote),
+        h('div', { className: 'cwd-statsgrid' },
+          ...trendFacts.map(([label, value]) => h('div', { key: label, className: 'cwd-trendstat' },
+            h('span', null, label), h('span', { title: value }, value)))))))
 
   /**
    * One look for both panes when there is nothing to draw: the host's own sentence says what went
@@ -2389,22 +2411,12 @@ function WatchlistDeskPage({ t }) {
           h('span', { className: 'cwd-bigprice' }, deskPriceText(detailQuote)),
           h('span', { className: `cwd-bigpct ${deskToneOf(detailPct)}` }, deskPctText(detailPct))),
         h('div', { className: 'cwd-meta' },
-          h('div', { className: 'cwd-metaitem' }, h('div', { className: 'cwd-metalabel' }, t('desk.capturedAt')), h('div', { className: 'cwd-metavalue' }, detailAt)),
-          h('div', { className: 'cwd-metaitem' }, h('div', { className: 'cwd-metalabel' }, t('desk.kind')), h('div', { className: 'cwd-metavalue' }, typeLabel(current.asset_type, t))))),
-      h('div', { className: trendFolded ? 'cwd-block cwd-block-chart cwd-folded' : 'cwd-block cwd-block-chart' },
+          h('div', { className: 'cwd-metaitem' }, h('div', { className: 'cwd-metalabel' }, t('desk.capturedAt')), h('div', { className: 'cwd-metavalue' }, detailAt)))),
+      h('div', { className: 'cwd-block cwd-block-chart' },
         h('div', { className: 'cwd-blockhead' },
           h('span', { className: 'cwd-blocktitle' }, t('desk.intraday')),
-          trendFolded ? null : trendStats,
-          h('span', { className: 'cwd-blocknote' }, trendNote),
-          // Two panes in one column: folding the upper one hands the height to the daily pane instead
-          // of pushing the card into a scrollbar.
-          h('button', {
-            type: 'button',
-            className: 'cwd-blockfold',
-            'aria-expanded': trendFolded ? 'false' : 'true',
-            onClick: () => setTrendFolded(!trendFolded),
-          }, trendFolded ? t('desk.unfold') : t('desk.fold'))),
-        trendFolded ? null : trendBody),
+          trendStats),
+        trendBody),
       klineBlock))
 
   return h('div', { className: 'cwd-page' },
