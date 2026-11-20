@@ -1309,6 +1309,58 @@ const probes = [
         : { status: FAIL, detail: `Team 面变了：${missing.join(' / ')}（见账本 L39；先确认 Team 行/deny 防线，再动探针）` }
     },
   },
+  {
+    id: 'L40',
+    title: '插件兼容闸门：manifest 的 `engines.dsh` 单独决定（有则忽略 peer），预发布参与比较，窗口外拒载',
+    why: '2.29.0 起支持窗口只写在 `engines.dsh`（同一 minor：>=0.2.2-rc.5 <0.2.3-0），peer 用同一区间只为'
+      + ' 安装期解析。宿主若改成"engines 与 peer 都查"、或去掉 includePrerelease、或改成窗口外只警告，'
+      + ' 症状都不是报错：rc.6 / 0.2.2 正式版会被静默拒载（用户只看到插件页「异常」），或者反过来把'
+      + ' 0.2.3 放进来。这条同时把"我们自己的清单确实按窗口判定"跑一遍，防止改了 package.json 却没人核。',
+    async run() {
+      const file = join(PKG('dsh-app-boot'), 'lib', 'index.js')
+      const text = readIfPresent(file)
+      if (text === undefined) return { status: FAIL, detail: `读不到 ${file}` }
+      const checks = [
+        ['`engines.dsh` 单独决定', /Object\.hasOwn\(engines, "dsh"\)/],
+        ['未声明 engines 才看 peer', /if \(!Object\.hasOwn\(fields, "peerDependencies"\)\) return \{\}/],
+        ['只认 @deepseek-ai/dsh 前缀', /name !== "@deepseek-ai\/dsh" && !name\.startsWith\("@deepseek-ai\/dsh-"\)/],
+        ['预发布参与比较', /includePrerelease: true/],
+      ]
+      const missing = checks.filter(([, pattern]) => !pattern.test(text)).map(([label]) => label)
+      if (missing.length > 0) {
+        return { status: FAIL, detail: `闸门语义变了：${missing.join(' / ')}（文件 ${file}；先读账本 L40）` }
+      }
+      const manifest = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8'))
+      const range = manifest.engines?.dsh
+      if (typeof range !== 'string') {
+        return { status: FAIL, detail: 'package.json 缺少 engines.dsh：2.29.0 起支持窗口只有这一处声明' }
+      }
+      const peerRange = manifest.peerDependencies?.['@deepseek-ai/dsh-skill']
+      if (peerRange !== range) {
+        return { status: FAIL, detail: `peer 区间与 engines.dsh 不一致（${String(peerRange)} ≠ ${range}）：安装期与启动期会各说一套` }
+      }
+      const { evaluatePluginCompatibility } = await import(pathToFileURL(file).href)
+      if (typeof evaluatePluginCompatibility !== 'function') {
+        return { status: FAIL, detail: `${file} 不再导出 evaluatePluginCompatibility` }
+      }
+      const verdict = (host, candidate = manifest) => evaluatePluginCompatibility(candidate, {}, host) === undefined
+      const table = [['0.2.2-rc.5', true], ['0.2.2-rc.6', true], ['0.2.2', true], ['0.2.3-rc.1', false], ['0.3.0-rc.1', false]]
+      const wrong = table.filter(([host, want]) => verdict(host) !== want).map(([host, want]) => `${host}（应${want ? '放行' : '拒绝'}）`)
+      if (wrong.length > 0) {
+        return { status: FAIL, detail: `支持窗口判定不对：${wrong.join(' / ')}（engines.dsh = ${range}）` }
+      }
+      // Engines must win over peers, and peers must still gate when engines is absent: both directions.
+      const enginesOnly = { name: 'probe', version: '1.0.0', engines: { dsh: range }, peerDependencies: { '@deepseek-ai/dsh-skill': '0.0.1' } }
+      if (!verdict('0.2.2-rc.6', enginesOnly)) {
+        return { status: FAIL, detail: '声明 engines.dsh 后 peer 仍参与判定：宿主升级与本次策略相反' }
+      }
+      const peersOnly = { name: 'probe', version: '1.0.0', peerDependencies: { '@deepseek-ai/dsh-skill': '0.0.1' } }
+      if (verdict('0.2.2-rc.6', peersOnly)) {
+        return { status: FAIL, detail: '没有 engines.dsh 时 peer 不再拦：宿主闸门的兜底方向变了' }
+      }
+      return { status: PASS, detail: `engines.dsh = ${range}：rc.6 / 0.2.2 放行，0.2.3 / 0.3.0 拒绝，peer 仅在无 engines 时生效` }
+    },
+  },
 ]
 
 const results = []

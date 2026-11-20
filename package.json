@@ -1,6 +1,6 @@
 {
   "name": "@v587d/capital-generation",
-  "version": "2.28.0",
+  "version": "2.29.0",
   "description": "Capital Generation：面向中国散户的 AI 投资助手插件",
   "icon": "assets/cg-icon.png",
   "author": "v587d",
@@ -173,10 +173,13 @@
     "ptc:report": "node scripts/ptc-session-report.mjs",
     "report:skill-usage": "node scripts/skill-usage-report.mjs"
   },
+  "engines": {
+    "dsh": ">=0.2.2-rc.5 <0.2.3-0"
+  },
   "peerDependencies": {
     "@deepseek-ai/cordis": "~4.1.0",
-    "@deepseek-ai/dsh-skill": "0.2.2-rc.5",
-    "@deepseek-ai/dsh-skill-filesystem": "0.2.2-rc.5"
+    "@deepseek-ai/dsh-skill": ">=0.2.2-rc.5 <0.2.3-0",
+    "@deepseek-ai/dsh-skill-filesystem": ">=0.2.2-rc.5 <0.2.3-0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.1.0",
