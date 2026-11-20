@@ -7,6 +7,33 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**、2.9.0 的选择器收敛与质检前置——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [2.28.0] - 2026-11-20
+
+适配 DSH `0.2.2-rc.5`：宿主换了网页搜索的默认提供方、新增一个拒答错误码，本插件的工具、数据契约与会话行为都不变。
+
+### Changed
+
+- **基线抬到 `0.2.2-rc.5`**：两个 dsh peer 精确 pin 到 rc.5，三颗开发依赖与 lockfile 里的 16 颗 `@deepseek-ai/dsh*` 同步；兼容预检对 rc.5 判定无问题。
+- **依赖面逐包核对**：rc.5 的 325 颗上游包全部抬版本，其中只有 28 颗有 manifest 之外的变化——两条官方升级指南（rc.3 的拒答错误码、rc.4 的搜索默认提供方）都不消费；其余是新增 `deepseek-chat-import` 官方 bundle、新的 `sidebar.session.action` 座位、工作区选择器重构与构建戳。本仓消费的 host 包除版本号外零 diff，`check:dsh` 39 条对 rc.5 全绿（29 条实测 + 10 条按设计 n/a）。
+- **宿主默认搜索变了，Capital 会话不受影响**：rc.4 起 DeepSeek 模型会话的宿主 `web_search` 改走旧版 Messages 搜索（按 token 计费）。本插件自带检索面（AnySearch / Wind / 具名来源 / 本机直连），宿主搜索工具不在 Capital 的 preset 行组合里（`web_fetch` 另在根侧按名 deny，`web_search` 由人设禁用），因此不需要配置 `searchProvider`。
+- **拒答错误码更名为 `CONTENT_REFUSED`**：自动化运行记录里的 `turn/end` 错误码跟着上游变，展示层照旧原样透传（不在码上分支），无需迁移。
+
+### Fixed
+
+- **`npm test` 在 DSH 会话里跑会误红 6 条**：`PythonRuntimeManager` 让 `$DSH_HOME` 优先于夹具传的 `dshHome`，而在 DSH 会话里该变量指向真实 `~/.dsh`——六条夹具把 Python 运行时缓存建到了用户目录，然后找不到自己造的文件。测试文件顶部改为清掉继承来的 `DSH_HOME`，夹具回到临时 home；断言一条未动，CI 行为不变。
+
+### Migration
+
+- **先升宿主再更新插件**：`0.2.2-rc.5` 是必需版本（peer 精确 pin），rc.2 上启动会被预检 `disabled`，界面上三个模式一起消失。更新后**重启宿主**——运行中的进程仍是旧版内存镜像。
+- 配置、自选股、数据集、图表与历史会话都不迁移；`CONTENT_REFUSED` 只影响新产生的失败记录。
+
+### Notes
+
+- 五个包版本抬到 `2.28.0`；`LOCAL_FETCH_CLIENT_VERSION` 与 `WIND_CLIENT_VERSION` 同步。
+- 回归：`check:dsh` 39 条全绿（对 rc.5：29 条实测 + 10 条按设计 n/a）、`npm test` 1598/1598、`smoke:boot` 真启动（预设 `broken=null`、13 行 bundle 组件、20/20 族行、4 颗身份闸门、三条自注册路由的 401/200 围栏、settings 条目、反向对照）。判据见 `docs/reference/host-upgrade-analysis-0.2.2-rc.2-to-rc.5.md`。
+- 顺带把 2.22.0 漏入库的 `docs/reference/host-upgrade-analysis-0.2.2-rc.1-to-rc.2.md` 补进 `.gitignore` 白名单（其余升级分析都在库里）。
+- 浏览器侧手工点选（配置卡片、自选股面板、图表卡片）留待重启 rc.5 宿主后按 README 清单过一遍，DOM 与槽位契约已由上述自动化覆盖。
+
 ## [2.27.2] - 2026-11-19
 
 「自选股」行情工作台的详情头瘦身：标题行只留标题与一个信息键，重复的事实删掉、参考读数收起来。

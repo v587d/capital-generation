@@ -7,6 +7,11 @@ import { tmpdir } from 'node:os'
 import { PythonRuntimeManager } from '../lib/python-runtime/manager.js'
 import { detectPlatform } from '../lib/python-runtime/platform.js'
 
+// The manager resolves `$DSH_HOME` before its `dshHome` option, so `npm test` started from inside a
+// DSH session inherits the real home and roots every fixture there (six false reds that also write
+// into the user's cache). Isolate the file; the option still names the fixture home.
+delete process.env.DSH_HOME
+
 const PACKAGE = '@test/cg-py-base-linux-x64'
 const PARQUET = '@test/cg-py-parquet-linux-x64'
 const VERSIONS = { numpy: '2.4.6', pandas: '3.0.6', 'python-dateutil': '2.9.0.post0', six: '1.17.0', tzdata: '2026.6' }
