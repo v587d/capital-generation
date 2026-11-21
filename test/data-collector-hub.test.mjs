@@ -19,12 +19,12 @@ const codePoints = (text) => Array.from(text).length
 // Registered Fuyao capabilities, kept as a routing regression list.
 const PHASE2_CAPABILITIES = [
   'ticker_list', 'corporate_actions', 'income_statement', 'balance_sheet', 'cash_flow',
-  'financial_indicators', 'valuation', 'auction', 'limit_up_pool', 'limit_up_ladder',
-  'index_catalog', 'index_constituents', 'index_quote', 'index_history',
+  'financial_indicators', 'valuation', 'auction', 'limit_up_pool', 'limit_up_ladder', 'limit_up_statistics',
+  'index_catalog', 'index_constituents', 'index_membership_by_stock', 'index_quote', 'index_history',
 ]
 const PHASE3_CAPABILITIES = [
   'limit_down_pool', 'limit_break_pool', 'skyrocket_list', 'hot_stock_list', 'hot_stock_history',
-  'hot_stock_rank_trend', 'anomaly_list', 'anomaly_stock', 'dragon_tiger', 'auction_benchmark',
+  'hot_stock_rank_trend', 'anomaly_list', 'anomaly_stock', 'abnormal_monitor_list', 'dragon_tiger', 'auction_benchmark',
 ]
 const PHASE3B_CAPABILITIES = [
   'fund_profile', 'fund_quote', 'fund_history', 'fund_nav', 'fund_returns', 'fund_drawdowns',
@@ -398,7 +398,7 @@ test('能力目录分片：taxonomy 完整、索引与单片预算各自成立�
   const { hub } = makeHub()
   for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources(), ...createWindSources(async () => 'key'), ...createFtshareSources(async () => 'key')]) hub.registerSource(dataSource)
   const names = hub.capabilityNames()
-  assert.equal(names.length, 132, '端点数量回归：分片断言必须覆盖 Fuyao、Tencent、Eastmoney、Wind 与 FTShare 全部已注册能力')
+  assert.equal(names.length, 135, '端点数量回归：分片断言必须覆盖 Fuyao、Tencent、Eastmoney、Wind 与 FTShare 全部已注册能力')
 
   // A missing production entry would fall into `meta`; stale entries would never be visible.
   assert.deepEqual(names.filter((name) => !Object.hasOwn(CATALOG_TAXONOMY, name)), [], '每个生产能力都必须在 catalog-taxonomy 里有 topic')
@@ -727,7 +727,7 @@ test('Dataset shape：行数组位置由数据源声明，龙虎榜这类 stock_
 
 test('数据源契约：Fuyao 每个端点都声明行数组位置，且与输出护栏的 itemKey 一致', async () => {
   const sources = createFuyaoRestSources(async () => 'key')
-  assert.equal(sources.length, 61)
+  assert.equal(sources.length, 64)
   for (const source of sources) {
     const rowShape = source.schema.rowShape
     assert.ok(rowShape, `${source.schema.capability} 必须声明 rowShape`)

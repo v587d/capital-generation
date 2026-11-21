@@ -400,12 +400,19 @@ test('tencent_us_prepost_quote：只取 pandata 的延长时段，prev_close 用
 
     payload = node({
       last: '355.00', volume: '1000', pct: '-0.14', netchange: '-0.50',
-      time: '2026-11-13 08:00:00', tag: 'pre', season: 'EST',
+      time: '2026-11-13 08:00:00', tag: 'before', season: 'EST',
     })
     const [pre] = (await execute(sources.tencent_us_prepost_quote, { codes: ['AAPL'] })).data
-    assert.equal(pre.session, 'pre')
+    assert.equal(pre.session, 'pre', '上游盘前标签是 before，输出必须归一成 pre')
     assert.equal(pre.prev_close, 355.5)
     assert.equal(pre.quote_time_utc, '2026-11-13T13:00:00.000Z')
+
+    payload = node({
+      last: '355.20', volume: '1000', pct: '-0.08', netchange: '-0.30',
+      time: '2026-11-13 08:05:00', tag: 'pre', season: 'EST',
+    })
+    const [canonical] = (await execute(sources.tencent_us_prepost_quote, { codes: ['AAPL'] })).data
+    assert.equal(canonical.session, 'pre', '规范标签 pre 仍照常接受')
 
     payload = node(undefined)
     const [empty] = (await execute(sources.tencent_us_prepost_quote, { codes: ['AAPL'] })).data

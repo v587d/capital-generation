@@ -870,7 +870,7 @@ test('行组合指认得出真东西：行名都在行契约里，且没有一�
   }
   for (const preset of allPresets()) {
     assert.ok(!allRowsOf(preset.config.id).some((row) => row?.name === '@v587d/capital-generation'),
-      `${preset.config.id} 仍挂单体入口：那一行一次带出全部工具（连 hub 与 132 个数据源一起建），工具面就不再是行组合说的算了`)
+      `${preset.config.id} 仍挂单体入口：那一行一次带出全部工具（连 hub 与 135 个数据源一起建），工具面就不再是行组合说的算了`)
   }
 })
 
@@ -1251,7 +1251,7 @@ test('data_collector preset：hub / store 仍住 isolate realm，realm 里只有
   assert.equal(scope.isolate?.datasetStore, true)
   const custom = (scope.config ?? []).filter((row) => typeof row?.name === 'string' && row.name.startsWith('@v587d/capital-generation'))
   assert.deepEqual(custom.map((row) => row.name), ['@v587d/capital-generation/tools/collect'],
-    'realm 里只许挂 tools/collect：hub 与 132 个数据源只能由它建，别挂进来就会跨 preset 重名')
+    'realm 里只许挂 tools/collect：hub 与 135 个数据源只能由它建，别挂进来就会跨 preset 重名')
 })
 
 test('data_junior preset：PTC executor 与出图委派仍是 YAML 框架行，不靠运行期名单', () => {

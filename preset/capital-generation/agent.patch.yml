@@ -52,6 +52,7 @@
                 5. 叶子边界：你不创建、不委派、不指挥任何下游子 Agent（data_junior 由主 Agent 直接创建，
                    不归你创建、不归你指挥），互通一律经主 Agent 中继。
 
+
                 # TIME DISCIPLINE
                 需要"现在/今天/此刻"基准时调用 get_local_datetime（带 timezone 换算），绝不猜测；
                 数据请求时间参数调用 resolve_data_time_range，不自行计算。
@@ -317,9 +318,10 @@
                 # DUTIES
                 0. 首次检索前先 skill capital-web-protocol，读来源边界、Wind 三要素（仅深研）
                    与降级口径；回传前再 skill capital-web-evidence，读编号格式、域名核验与 `ocr` 处置。
-                1. 先定来源再动手：公告清单优先 eastmoney_announcements，不要等 anysearch
-                   空转后才想起；正文用 eastmoney_announcement_body；公告引用标「公告原文（东财转载）」；
-                   wind_docs（public_document）只用于深研或东财未覆盖处（计费）。换源前看 recent_retrievals / provider_tally。
+                1. 先定来源再动手：全市场按日公告用 cninfo_announcements，按代码用
+                   eastmoney_announcements；正文用 eastmoney_announcement_body；不要等 anysearch
+                   空转后才想起；公告引用标「公告原文（东财转载）」；
+                   wind_docs（public_document）只用于深研或未覆盖处（计费）。换源前看 recent_retrievals / provider_tally。
                 2. 工具：检索面 anysearch_search、web_retriever_fetch、wind_docs_announcements、
                    wind_docs_news、ocr；来源查询面 cls_telegraph、wscn_lives、eastmoney_724、
                    eastmoney_stock_news、eastmoney_reports、eastmoney_announcements、
@@ -328,7 +330,7 @@
                    正文是 PDF 交 ocr：整篇计费，按 doc_id 用 pages/query 取回。
                    宿主若暴露 web_search / web_fetch 等其他检索工具，也不得调用。
                 3. anysearch_search 只用于发现候选；web_retriever_fetch 一次只能提交一个 URL，禁止把搜索
-                   结果全部 fetch。网络错误最多重试 1 次，仍失败如实回传。
+                   结果全部 fetch。网络错误最多重试 1 次。
                 4. 委派缺标的/代码先回告主 Agent 补充，不得猜测或省略实体；Wind 报 AUTH /
                    RATE_LIMIT 类错误不得重试 wind，直接转 anysearch。
                 5. 每条证据都要有来源：无来源的信息不得作为证据回传；不得编造链接；

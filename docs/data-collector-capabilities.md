@@ -2,7 +2,7 @@
 
 > 本表由 `npm run docs:capabilities` 从 Fuyao、Tencent、Eastmoney、Wind 与 FTShare source 定义生成，并由 `test/data-collector-capabilities.test.mjs` 断言与实现同步：新增端点若忘了重新生成，测试会失败。
 
-当前共 **132 个 capability**：同花顺 Fuyao 61 个，腾讯公开 HTTP 10 个，东方财富 HTTP 24 个，Wind 金融数据服务 3 个，FTShare（非凸科技）34 个。参数后带 **\*** 表示必填。
+当前共 **135 个 capability**：同花顺 Fuyao 64 个，腾讯公开 HTTP 10 个，东方财富 HTTP 24 个，Wind 金融数据服务 3 个，FTShare（非凸科技）34 个。参数后带 **\*** 表示必填。
 
 **复核方式**：Fuyao 能力可用 `npm run smoke:fuyao` 真实复核；Tencent 能力使用最小 smoke fixture 或按需真实请求复核；Eastmoney 能力使用固定 fixture，并按需执行公开网页 JSON smoke；Wind 能力用 `npm run smoke:wind` 真实复核（需要 `WIND_API_KEY`，**按次消耗上游积分**）。FTShare 那几条走 `npm run contract:probe` 的 daily 档巡检（需要 `FTSHARE_API_KEY`；**免费档限流 10 QPS / burst 20**，取数一律经本模块的进程级节流链）。
 
@@ -33,7 +33,8 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 |---|---|
 | A 股主力资金 `capital-flow/*`（Fuyao 侧） | 上游返回 `code=2004`：同花顺 AI 客户端专用，未开放外部接入。**这一块的覆盖已由 FTShare 的 `ftshare_stock_daily_flow` / `industry` / `concept` / `main_capital_flow` 四颗补上**（同花顺口径日度 + 15 分钟切片主力五档），所以它不再是空白，只是不来自 Fuyao |
 | 高频动向 `high-frequency/*` | 同上（`code=2004`） |
-| 全市场 Parquet 导出 `dump/market-dumps/*` | 预签名链接 + Parquet 二进制，需独立的下载/落盘链路，本阶段不接入 |
+| 全市场 Parquet 导出 `dump/market-dumps/*` | API Key 已能取预签名链接（2026-11-21 实测，通常 5 分钟有效），但日 K dump 只有不复权、全市场 10 年体量与 Dataset 的 7 天保留/raw 格式不匹配，需独立的下载与落盘链路，本阶段不接入 |
+| Fuyao 端内专用 `chip-shape-*`、`turnover-prediction-snapshot`、`fund/etf-flow/*`、`a-share-index/baseinfo/new-concepts`、`news/events/search` | 2026-11-21 实测 `code=2004`（`news/events/search` 由文档标注端内）：同花顺 AI 客户端专用，外部 API 不开放。不注册、不重试，也不要再当缺口立项 |
 | 期货 `futures/*`、期权 `options/*`、贵金属 | **2026-10-15 修订**：此前排除的真实原因是项目初期没有稳定数据源，不是产品定位——当时这句写成了"角色边界只覆盖股票/指数/基金"，是错的。现在只要拿到稳定且免费的上游就应当接入；FTShare 免费档已提供 10 条期货与 1 条贵金属接口，尚未注册，排在后续批次。**注意**：`ticker_search` / `ticker_list` 一直可按官方契约检索 `futures` / `options` 代码（元数据域全量放开），缺的只是行情/财务端点 |
 | FTShare 的北交所资金流 | 上游那三条同花顺日度资金流实测**不含北交所**（`920992` 返回 0 条、单日 5214 行无 BJ 尾码）；北证的**行情**已由 `ftshare_ashare_quote` / `ftshare_daily_kline_snapshot` 覆盖（含 349 只 BJ），缺的只是资金流 |
 | 基金新闻 `fund/news/article-list` | 非结构化内容，已由 `web_retriever` 的检索能力覆盖 |
@@ -80,6 +81,7 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 |---|---|---|---|---|---|
 | `limit_up_pool` | `flow` | `/api/a-share/special-data/limit-up-pool` | `date_ms` `page` `size` `sort_field` `sort_dir` | 是 | 按交易日分页的涨停/连板股票池 |
 | `limit_up_ladder` | `flow` | `/api/a-share/special-data/limit-up-ladder` | 无参数 | 否 | 近 30 日连板天梯矩阵 |
+| `limit_up_statistics` | `flow` | `/api/a-share/special-data/limit-up-statistics` | `date` | 否 | 涨停市场统计（封板率/打开家数/连板档位） |
 | `limit_down_pool` | `flow` | `/api/a-share/special-data/limit-down-pool` | `date_ms` `page` `size` `sort_field` `sort_dir` | 是 | 按交易日分页的跌停股票池 |
 | `limit_break_pool` | `flow` | `/api/a-share/special-data/limit-break-pool` | `date_ms` `page` `size` `sort_field` `sort_dir` | 是 | 按交易日分页的炸板（涨停破板）股票池 |
 | `skyrocket_list` | `flow` | `/api/a-share/special-data/skyrocket-list` | `period` | 否 | A 股热度飙升榜 Top30（日榜/小时榜） |
@@ -88,6 +90,7 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 | `hot_stock_rank_trend` | `flow` | `/api/a-share/special-data/hot-stock-rank-trend` | `thscode`\* `start_date`\* `end_date`\* | 否 | 单只 A 股的热榜排名走势（日线点位） |
 | `anomaly_list` | `flow` | `/api/a-share/special-data/anomaly-analysis-list` | `tag_codes` | 否 | 当日个股异动原因列表（可按标签过滤） |
 | `anomaly_stock` | `flow` | `/api/a-share/special-data/anomaly-analysis-stock` | `thscodes`\* | 否 | 按股票批量查询当日异动原因 |
+| `abnormal_monitor_list` | `flow` | `/api/a-share/special-data/abnormal-monitor-list` | `state` `page` `size` | 是 | 严重异动与重点监控记录（区间/分页） |
 | `dragon_tiger` | `flow` | `/api/a-share/special-data/dragon-tiger-list` | `board_type` `date` | 否 | A 股龙虎榜（全部/机构榜/游资榜，不分页） |
 
 ## 指数
@@ -96,6 +99,7 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 |---|---|---|---|---|---|
 | `index_catalog` | `meta` | `/api/a-share-index/catalog/ths-index-list` | `tag` | 否 | 同花顺指数目录（概念/区域/特色/行业） |
 | `index_constituents` | `meta` | `/api/a-share-index/constituents/ths-stock-list` | `thscode`\* | 否 | 单个指数的成分股清单 |
+| `index_membership_by_stock` | `meta` | `/api/a-share-index/constituents/ths-index-list-by-stock` | `thscode`\* `type` | 否 | 个股反查所属行业/概念/地域/特色板块（批量 100） |
 | `index_quote` | `quote` | `/api/a-share-index/prices/snapshot` | `thscodes`\* | 否 | 指数行情快照（批量） |
 | `index_history` | `quote` | `/api/a-share-index/prices/historical` | `thscode`\* `interval`\* `start`\* `end`\* | 否 | 单只指数日 K 线（窗口 ≤10 年） |
 
