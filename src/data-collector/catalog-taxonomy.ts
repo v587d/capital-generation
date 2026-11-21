@@ -86,6 +86,8 @@ export const CATALOG_TAXONOMY: Record<string, CatalogTopic> = {
   'limit_down_pool': 'flow',
   'limit_up_ladder': 'flow',
   'limit_up_pool': 'flow',
+  'limit_up_statistics': 'flow',
+  'abnormal_monitor_list': 'flow',
   'skyrocket_list': 'flow',
   // financials
   'balance_sheet': 'financials',
@@ -173,6 +175,7 @@ export const CATALOG_TAXONOMY: Record<string, CatalogTopic> = {
   'ftshare_index_weight': 'meta',
   'index_catalog': 'meta',
   'index_constituents': 'meta',
+  'index_membership_by_stock': 'meta',
   'ticker_list': 'meta',
   'ticker_search': 'meta',
   'trading_calendar': 'meta',

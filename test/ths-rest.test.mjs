@@ -8,11 +8,11 @@ const ALL_CAPABILITIES = [
   'ticker_search', 'quote', 'history', 'trading_calendar',
   // Phase 2
   'ticker_list', 'corporate_actions', 'income_statement', 'balance_sheet', 'cash_flow',
-  'financial_indicators', 'valuation', 'auction', 'limit_up_pool', 'limit_up_ladder',
-  'index_catalog', 'index_constituents', 'index_quote', 'index_history',
+  'financial_indicators', 'valuation', 'auction', 'limit_up_pool', 'limit_up_ladder', 'limit_up_statistics',
+  'index_catalog', 'index_constituents', 'index_membership_by_stock', 'index_quote', 'index_history',
   // Phase 3
   'limit_down_pool', 'limit_break_pool', 'skyrocket_list', 'hot_stock_list', 'hot_stock_history',
-  'hot_stock_rank_trend', 'anomaly_list', 'anomaly_stock', 'dragon_tiger', 'auction_benchmark',
+  'hot_stock_rank_trend', 'anomaly_list', 'anomaly_stock', 'abnormal_monitor_list', 'dragon_tiger', 'auction_benchmark',
   // Phase 3B
   'fund_profile', 'fund_quote', 'fund_history', 'fund_nav', 'fund_returns', 'fund_drawdowns',
   'fund_holdings', 'fund_asset_allocation', 'fund_industry_allocation', 'fund_stock_history',
@@ -29,13 +29,15 @@ const ALL_SOURCE_NAMES = [
   'get_meta_tickers_list', 'get_a_share_corporate_actions_adjustment_factors',
   'get_a_share_financials_income_statements', 'get_a_share_financials_balance_sheets', 'get_a_share_financials_cash_flow_statements',
   'get_a_share_financials_indicators', 'get_a_share_valuations_snapshot', 'get_a_share_auction_snapshot',
-  'get_a_share_special_data_limit_up_pool', 'get_a_share_special_data_limit_up_ladder',
+  'get_a_share_special_data_limit_up_pool', 'get_a_share_special_data_limit_up_ladder', 'get_a_share_special_data_limit_up_statistics',
   'get_a_share_index_catalog_ths_index_list', 'get_a_share_index_constituents_ths_stock_list',
+  'get_a_share_index_constituents_ths_index_list_by_stock',
   'get_a_share_index_prices_snapshot', 'get_a_share_index_prices_historical',
   'get_a_share_special_data_limit_down_pool', 'get_a_share_special_data_limit_break_pool',
   'get_a_share_special_data_skyrocket_list', 'get_a_share_special_data_hot_stock_list',
   'get_a_share_special_data_hot_stock_list_history', 'get_a_share_special_data_hot_stock_rank_trend',
   'get_a_share_special_data_anomaly_analysis_list', 'get_a_share_special_data_anomaly_analysis_stock',
+  'get_a_share_special_data_abnormal_monitor_list',
   'get_a_share_special_data_dragon_tiger_list', 'get_a_share_auction_short_term_benchmark',
   'get_fund_profile_detail', 'get_fund_market_snapshot', 'get_fund_market_historical',
   'get_fund_performance_nav', 'get_fund_performance_returns', 'get_fund_performance_drawdowns',
@@ -51,7 +53,7 @@ const ALL_SOURCE_NAMES = [
   'get_fund_diagnostics_detail', 'get_fund_backtest_result', 'get_fund_backtest_indicators',
 ]
 /** Capabilities that truly expose pagination semantics. */
-const PAGINATED = ['quote', 'history', 'ticker_list', 'limit_up_pool', 'limit_down_pool', 'limit_break_pool', 'fund_indicator_table']
+const PAGINATED = ['quote', 'history', 'ticker_list', 'limit_up_pool', 'limit_down_pool', 'limit_break_pool', 'abnormal_monitor_list', 'fund_indicator_table']
 
 function fakeCtx(credentials) {
   return { get: (name) => (name === 'credentials' ? credentials : undefined) }
@@ -246,8 +248,11 @@ const SAMPLE_PARAMS = {
   auction: { thscodes: '600519.sh,000001.sz', stage: 'final' },
   limit_up_pool: { date_ms: 1748102400000, page: 1, size: 50, sort_field: 'limit_up_time', sort_dir: 'DESC' },
   limit_up_ladder: {},
+  limit_up_statistics: { date: '2026-11-20' },
+  abnormal_monitor_list: { state: 'CURRENT', page: 1, size: 30 },
   index_catalog: { tag: 'CN_Concept' },
   index_constituents: { thscode: '000300.sh' },
+  index_membership_by_stock: { thscode: '600519.sh, 000001.SZ', type: 'INDUSTRY' },
   index_quote: { thscodes: '000001.sh,886042.ti' },
   index_history: { thscode: '000001.sh', interval: '1d', start: 1716105600000, end: 1747641600000 },
   // Phase 3
@@ -550,6 +555,55 @@ test('limit_up_ladder：无入参，传参被拒', () => {
   assert.throws(() => source.normalizeParams({ date: '20250620' }), /unsupported parameter: date/)
 })
 
+test('limit_up_statistics：date 可选且只收 yyyy-MM-dd，两层档位都进护栏', () => {
+  const source = byCapability('limit_up_statistics')
+  assert.deepEqual(source.normalizeParams({}), {})
+  assert.deepEqual(source.normalizeParams({ date: ' 2026-11-20 ' }), { date: '2026-11-20' })
+  assert.throws(() => source.normalizeParams({ date: '20261120' }), /YYYY-MM-DD/)
+  assert.throws(() => source.normalizeParams({ thscode: '600519.SH' }), /unsupported parameter: thscode/)
+  const good = {
+    timestamp: 1795191600000, trade_date: '2026-11-20', seal_rate: 0.71,
+    open_stock_count: 32, limit_up_stock_count: 58, touched_limit_up_stock_count: 90,
+    page_boards: [{ board_level: 'two', stock_count: 12, promotion_rate: 0.3 }],
+    exact_boards: [{ board_num: 2, stock_count: 9 }],
+  }
+  assert.equal(source.validateOutput(good), true)
+  assert.equal(source.validateOutput({ ...good, seal_rate: null, page_boards: [{ board_level: 'one', stock_count: 20, promotion_rate: null }] }), true, '一封晋级率恒 null')
+  assert.equal(source.validateOutput({ ...good, exact_boards: [{ stock_count: 9 }] }), false, '精确档缺 board_num')
+  assert.equal(source.validateOutput({ ...good, page_boards: [{ board_level: 'two', stock_count: 12, promotion_rate: '高' }] }), false)
+  assert.equal(source.validateOutput({ ...good, exact_boards: undefined }), false, '缺整体错误')
+})
+
+test('index_membership_by_stock：批量 100、整批拒绝坏项、空分组保留', () => {
+  const source = byCapability('index_membership_by_stock')
+  assert.deepEqual(source.normalizeParams({ thscode: ' 600519.sh , 000001.SZ,600519.SH ' }), { thscode: '600519.SH,000001.SZ' })
+  assert.deepEqual(source.normalizeParams({ thscode: '600519.SH', type: 'INDUSTRY' }), { thscode: '600519.SH', type: 'industry' })
+  assert.throws(() => source.normalizeParams({}), /missing required parameter: thscode/)
+  assert.throws(() => source.normalizeParams({ thscode: '600519' }), /full thscode/)
+  const tooMany = Array.from({ length: 101 }, (_, index) => `${600000 + index}.SH`).join(',')
+  assert.throws(() => source.normalizeParams({ thscode: tooMany }), /at most 100/)
+  assert.throws(() => source.normalizeParams({ thscode: '600519.SH', type: 'sw_industry' }), /invalid value/)
+  const row = { thscode: '600519.SH', index_list: [{ thscode: '881273.TI', name: '白酒', type: 'industry' }] }
+  assert.equal(source.validateOutput({ item: [row] }), true)
+  assert.equal(source.validateOutput({ item: [{ thscode: '000001.SZ', index_list: [] }] }), true, '无匹配也保留空列表')
+  assert.equal(source.validateOutput({ item: [{ thscode: '600519.SH', index_list: [{ thscode: '881273.TI', name: '白酒', type: 'vendor' }] }] }), false)
+  assert.equal(source.validateOutput({ item: [{ index_list: [] }] }), false, '缺分组 thscode')
+})
+
+test('abnormal_monitor_list：state/size 边界与可空身份', () => {
+  const source = byCapability('abnormal_monitor_list')
+  assert.deepEqual(source.normalizeParams({}), {})
+  assert.deepEqual(source.normalizeParams({ state: 'HISTORY', page: 2, size: 30 }), { state: 'history', page: 2, size: 30 })
+  assert.throws(() => source.normalizeParams({ state: 'all' }), /invalid value/)
+  assert.throws(() => source.normalizeParams({ size: 31 }), /must be <= 30/)
+  assert.throws(() => source.normalizeParams({ page: 0 }), /must be >= 1/)
+  const row = { thscode: '600825.SH', name: '新华传媒', start_date_ms: 1791734400000, end_date_ms: null, monitor_type: 1, monitor_label: '严重异动' }
+  assert.equal(source.validateOutput({ pagination: { page: 1, size: 30, total: null, has_next: false }, item: [row] }), true)
+  assert.equal(source.validateOutput({ pagination: { page: 1 }, item: [{ ...row, thscode: null, name: null }] }), true, '身份可空')
+  assert.equal(source.validateOutput({ item: [row] }), false, '缺 pagination')
+  assert.equal(source.validateOutput({ pagination: {}, item: [{ start_date_ms: 1, monitor_type: 1 }] }), false, '缺 monitor_label')
+})
+
 test('index 端点：tag 枚举、指数代码形态与接口差异', () => {
   const catalog = byCapability('index_catalog')
   assert.deepEqual(catalog.normalizeParams({ tag: 'CN_Concept' }), { tag: 'cn_concept' })
@@ -597,6 +651,16 @@ test('query 形态：参数顺序稳定、逗号列表已规范化、缺失参�
   assert.match(indexHistory, /\/api\/a-share-index\/prices\/historical\?thscode=000001\.SH&interval=1d&start=1&end=2$/)
 
   const { url: ladder } = await executeWithFetch(byCapability('limit_up_ladder'), {})
+  const { url: statistics } = await executeWithFetch(byCapability('limit_up_statistics'), {})
+  assert.match(statistics, /\/api\/a-share\/special-data\/limit-up-statistics$/, '无参统计端点不带问号')
+
+  const { url: membership } = await executeWithFetch(
+    byCapability('index_membership_by_stock'),
+    { thscode: '600519.sh,000001.SZ', type: 'industry' },
+  )
+  const membershipQuery = new URL(membership).searchParams
+  assert.equal(membershipQuery.get('thscode'), '600519.SH,000001.SZ')
+  assert.equal(membershipQuery.get('type'), 'industry')
   assert.match(ladder, /\/api\/a-share\/special-data\/limit-up-ladder$/, '无参端点不应带问号')
 
   const { url: deduped } = await executeWithFetch(byCapability('valuation'), { thscodes: '600519.sh,600519.SH' })

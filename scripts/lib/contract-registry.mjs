@@ -86,6 +86,8 @@ const FUYAO = [
   ds('fuyao', 'limit_down_pool', 'daily', { page: 1, size: 5 }),
   ds('fuyao', 'limit_break_pool', 'daily', { page: 1, size: 5 }),
   ds('fuyao', 'limit_up_ladder', 'daily', {}),
+  ds('fuyao', 'limit_up_statistics', 'daily', {}),
+  ds('fuyao', 'abnormal_monitor_list', 'daily', { state: 'current', size: 5 }),
   ds('fuyao', 'skyrocket_list', 'daily', { period: 'day' }),
   ds('fuyao', 'hot_stock_list', 'daily', { period: 'day' }),
   ds('fuyao', 'anomaly_list', 'daily', { tag_codes: 'LIMIT_UP' }),
@@ -94,6 +96,7 @@ const FUYAO = [
   ds('fuyao', 'auction_benchmark', 'daily', {}),
   ds('fuyao', 'index_catalog', 'daily', { tag: 'industry' }, { expect: { minRows: 1 } }),
   ds('fuyao', 'index_constituents', 'daily', { thscode: '000300.SH' }, { expect: { minRows: 1 } }),
+  ds('fuyao', 'index_membership_by_stock', 'daily', { thscode: '600519.SH,000001.SZ', type: 'industry' }, { expect: { minRows: 1 } }),
   ds('fuyao', 'index_quote', 'daily', { thscodes: '000001.SH,399001.SZ' }, { expect: { minRows: 1 } }),
   ds('fuyao', 'index_history', 'daily', { thscode: '000001.SH', interval: '1d', start: HISTORY_START, end: HISTORY_END }, { expect: { minRows: 1 } }),
 
@@ -129,8 +132,20 @@ const FUYAO = [
   ds('fuyao', 'fund_indicator_line', 'weekly', {
     indexes: JSON.stringify([{ thscodes: [ETFS], index_info: [{ index_id: 'rsi_pct' }] }]),
     time_range: JSON.stringify({ time_type: 'DAY_1' }),
+  }, {
+    shadow: {
+      since: '2026-11-21',
+      evidence: '上游 llms-full 已删除 /api/fund/indicators/line|table（路径 0 命中）；2026-11-21 实测 line 在线、table 5003',
+      revisit: '2027-02-21',
+    },
   }),
-  ds('fuyao', 'fund_indicator_table', 'weekly', { indexes: JSON.stringify([{ index_id: 'rsi_pct' }]) }, { knownCodes: ['5003'] }),
+  ds('fuyao', 'fund_indicator_table', 'weekly', { indexes: JSON.stringify([{ index_id: 'rsi_pct' }]) }, {
+    shadow: {
+      since: '2026-11-21',
+      evidence: '上游 llms-full 已删除 /api/fund/indicators/line|table（路径 0 命中）；2026-11-21 实测 table 恒 5003，仅保留观测',
+      revisit: '2027-02-21',
+    },
+  }),
   ds('fuyao', 'fund_dividends', 'weekly', { thscode: ETFS }),
   ds('fuyao', 'fund_offerings', 'weekly', { subscribe: 'active' }),
   ds('fuyao', 'fund_quota_list', 'weekly', { tab: JSON.stringify(['remen']) }),

@@ -31,6 +31,9 @@ const AUCTION_STAGES = ['live', 'final']
 const SORT_DIRECTIONS = ['asc', 'desc']
 const LIMIT_UP_SORT_FIELDS = ['last_price', 'continue_day_cnt', 'seal_money', 'limit_up_time']
 const INDEX_TAGS = ['cn_concept', 'region', 'tszs', 'industry']
+const ABNORMAL_MONITOR_STATES = ['current', 'history']
+/** Upstream pagination caps 1..30; asking for 31 returns 1003. */
+const MAX_ABNORMAL_MONITOR_SIZE = 30
 const RANK_PERIODS = ['day', 'hour']
 const ANOMALY_TAGS = ['LIMIT_UP', 'LIMIT_DOWN', 'SHARP_RISE', 'SHARP_FALL', 'RAPID_RALLY', 'RAPID_DECLINE']
 const DRAGON_TIGER_BOARDS = ['all', 'org', 'hot_money']
@@ -322,6 +325,31 @@ function validateAbilities(data: unknown): boolean {
   })
 }
 
+/** Membership rows may legitimately carry an empty list; every element still has to be a TI triple. */
+function validateIndexMembership(data: unknown): boolean {
+  if (!isRecord(data) || !Array.isArray(data.item)) return false
+  return data.item.every((row) => {
+    if (!isRecord(row) || !Array.isArray(row.index_list)) return false
+    return row.index_list.every((entry) => isRecord(entry)
+      && typeof entry.thscode === 'string'
+      && typeof entry.name === 'string'
+      && INDEX_TAGS.includes(String(entry.type)))
+  })
+}
+
+/** Two nested arrays; both counts are integers, promotion_rate is null for the one-board bucket. */
+function validateLimitUpStatistics(data: unknown): boolean {
+  if (!isRecord(data) || !Array.isArray(data.page_boards) || !Array.isArray(data.exact_boards)) return false
+  const pageBuckets = data.page_boards.every((row) => isRecord(row)
+    && typeof row.board_level === 'string'
+    && typeof row.stock_count === 'number'
+    && (row.promotion_rate === null || typeof row.promotion_rate === 'number'))
+  const exactBuckets = data.exact_boards.every((row) => isRecord(row)
+    && typeof row.board_num === 'number'
+    && typeof row.stock_count === 'number')
+  return pageBuckets && exactBuckets
+}
+
 const nullableInteger = { oneOf: [{ type: 'integer' }, { type: 'null' }] }
 const envelopeData = (item: object): object => ({ type: 'object', properties: { timestamp: nullableInteger, total: nullableInteger, item }, additionalProperties: true })
 const searchOutput = envelopeData({ type: 'array', items: { type: 'object', properties: { thscode: { type: 'string' }, ticker: { type: 'string' }, name: { type: 'string' }, exchange: { type: 'string' }, asset_type: { type: 'string' }, currency: { type: 'string' } }, additionalProperties: true } })
@@ -352,6 +380,8 @@ const limitUpPoolFields: Record<string, FieldSpec> = { thscode: 'text', ticker: 
 const ladderFields: Record<string, FieldSpec> = { date: 'text', boards: 'object' }
 const indexCatalogFields: Record<string, FieldSpec> = { thscode: 'text', name: 'text?' }
 const indexConstituentFields: Record<string, FieldSpec> = { thscode: 'text', ticker: 'text?', name: 'text?' }
+const indexMembershipFields: Record<string, FieldSpec> = { thscode: 'text', index_list: 'array' }
+const abnormalMonitorFields: Record<string, FieldSpec> = { thscode: 'text?', name: 'text?', start_date_ms: 'number', end_date_ms: 'number?', monitor_type: 'number', monitor_label: 'text' }
 const indexQuoteFields: Record<string, FieldSpec> = { thscode: 'text', ticker: 'text?', last_price: 'number?', price_change: 'number?', price_change_ratio_pct: 'number?', open_price: 'number?', high_price: 'number?', low_price: 'number?', prev_price: 'number?', volume: 'number?', turnover: 'number?' }
 const indexHistoryFields: Record<string, FieldSpec> = { date_ms: 'number', open_price: 'number?', high_price: 'number?', low_price: 'number?', close_price: 'number?', volume: 'number?', turnover: 'number?' }
 
@@ -601,6 +631,28 @@ function normalizeIndexCatalog(params: Params): Params {
 
 function normalizeIndexConstituents(params: Params): Params {
   return { thscode: indexCodeToken(requiredText(params.thscode, 'thscode', 32), 'thscode') }
+}
+
+function normalizeIndexMembership(params: Params): Params {
+  // Upstream keeps the singular name even for 1-100 codes; the model-facing key must match it
+  // because the Hub re-normalizes its own output and rejects keys the model did not declare.
+  const normalized: Params = { thscode: codeList(params.thscode, 'thscode', { maximum: MAX_BATCH_CODES }) }
+  if (params.type !== undefined) normalized.type = enumValue(params.type, 'type', INDEX_TAGS, lowerCase)
+  return normalized
+}
+
+function normalizeLimitUpStatistics(params: Params): Params {
+  const normalized: Params = {}
+  if (params.date !== undefined) normalized.date = dateString(params.date, 'date')
+  return normalized
+}
+
+function normalizeAbnormalMonitor(params: Params): Params {
+  const normalized: Params = {}
+  if (params.state !== undefined) normalized.state = enumValue(params.state, 'state', ABNORMAL_MONITOR_STATES, lowerCase)
+  if (params.page !== undefined) normalized.page = integer(params.page, 'page', { minimum: 1 })
+  if (params.size !== undefined) normalized.size = integer(params.size, 'size', { minimum: 1, maximum: MAX_ABNORMAL_MONITOR_SIZE })
+  return normalized
 }
 
 function normalizeIndexQuote(params: Params): Params {
@@ -1130,6 +1182,62 @@ function endpointDefinitions(): EndpointDefinition[] {
     },
 
     {
+      name: 'get_a_share_special_data_limit_up_statistics',
+      capability: 'limit_up_statistics',
+      summary: '涨停市场统计（封板率/打开家数/连板档位）',
+      description: '按交易日获取 A 股涨停市场统计：封板率、涨停打开家数、封板/触板家数、页面档位与精确连板家数。date 可选，格式 yyyy-MM-dd，只支持一年内；省略取最近可用交易日，但响应里的 trade_date 才是业务所属交易日，必须按它核对。seal_rate 与 promotion_rate 是**小数比例**（0.71 表示 71%），不做百分数换算；promotion_rate 对 one 档固定 null，five_plus 是**合并档位**，不能当五板精确家数；精确家数看 exact_boards[]（board_num >= 2）。⛔ 与 limit_up_pool / limit_up_ladder / limit_break_pool 是「统计 vs 名单」分工：封板率、打开家数、晋级率用本能力，个股与连板名单用后者，不互相替代。⛔ 统计口径（是否剔除 ST / 新股 / 北交所）上游未声明，不得自造口径；与名单计数不一致时按本能力原值转述并注明口径未确认。',
+      path: '/api/a-share/special-data/limit-up-statistics',
+      inputSchema: objectSchema({
+        date: { type: 'string', description: '目标交易日，格式 yyyy-MM-dd，只支持一年内；省略取最近可用交易日' },
+      }),
+      outputSchema: {
+        type: 'object',
+        properties: {
+          timestamp: { type: 'integer' },
+          trade_date: { type: 'string' },
+          seal_rate: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+          open_stock_count: { type: 'integer' },
+          limit_up_stock_count: { type: 'integer' },
+          touched_limit_up_stock_count: { type: 'integer' },
+          page_boards: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                board_level: { type: 'string' },
+                stock_count: { type: 'integer' },
+                promotion_rate: { oneOf: [{ type: 'number' }, { type: 'null' }] },
+              },
+              additionalProperties: true,
+            },
+          },
+          exact_boards: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: { board_num: { type: 'integer' }, stock_count: { type: 'integer' } },
+              additionalProperties: true,
+            },
+          },
+        },
+        additionalProperties: true,
+      },
+      allowed: ['date'],
+      normalize: normalizeLimitUpStatistics,
+      guard: {
+        data: {
+          trade_date: 'text',
+          seal_rate: 'number?',
+          open_stock_count: 'number',
+          limit_up_stock_count: 'number',
+          touched_limit_up_stock_count: 'number',
+          page_boards: 'array',
+          exact_boards: 'array',
+        },
+        custom: validateLimitUpStatistics,
+      },
+    },
+    {
       name: 'get_a_share_index_catalog_ths_index_list',
       capability: 'index_catalog',
       summary: '同花顺指数目录（概念/区域/特色/行业）',
@@ -1156,6 +1264,21 @@ function endpointDefinitions(): EndpointDefinition[] {
       allowed: ['thscode'],
       normalize: normalizeIndexConstituents,
       guard: { item: indexConstituentFields },
+    },
+    {
+      name: 'get_a_share_index_constituents_ths_index_list_by_stock',
+      capability: 'index_membership_by_stock',
+      summary: '个股反查所属行业/概念/地域/特色板块（批量 100）',
+      description: '按个股反查当前所属的行业、概念、地域与特色板块，支持单只与批量（1–100 只）。thscode 必填，逗号分隔的完整 A 股代码（SH/SZ/BJ，不接受指数或基金）；type 可选，取 cn_concept / industry / region / tszs，省略返回四类。返回 data.item[]，每只股票一组：thscode 与 index_list[]（thscode / name / type）；无匹配也保留空数组，不省略分组。板块代码是**同花顺指数**（如 881273.TI 白酒），可直接传给 index_quote / index_constituents；⛔ 这是同花顺行业口径，不是申万三级，不得与 ftshare_sw_* 的申万行业混用后比较。⛔ 参数层整批失败：空项、裸代码、中文逗号、非法 type 全部本地拒绝（上游 1002），不会只丢坏的那一项；返回是一份关系快照，无分页。',
+      path: '/api/a-share-index/constituents/ths-index-list-by-stock',
+      inputSchema: objectSchema({
+        thscode: { type: 'string', description: '逗号分隔的完整 A 股代码（如 600519.SH,000001.SZ），去重前最多 100 个' },
+        type: { type: 'string', enum: INDEX_TAGS, description: '板块分类：cn_concept 概念 / industry 行业 / region 地域 / tszs 特色；省略返回四类' },
+      }, ['thscode']),
+      outputSchema: envelopeData({ type: 'array', items: rowSchema(indexMembershipFields) }),
+      allowed: ['thscode', 'type'],
+      normalize: normalizeIndexMembership,
+      guard: { item: indexMembershipFields, custom: validateIndexMembership },
     },
     {
       name: 'get_a_share_index_prices_snapshot',
@@ -1321,6 +1444,40 @@ function endpointDefinitions(): EndpointDefinition[] {
       allowed: ['thscodes'],
       normalize: normalizeAnomalyStock,
       guard: { item: anomalyFields },
+    },
+    {
+      name: 'get_a_share_special_data_abnormal_monitor_list',
+      capability: 'abnormal_monitor_list',
+      summary: '严重异动与重点监控记录（区间/分页）',
+      description: '分页获取 A 股当前或历史的严重异动与重点监控记录。state 取 current（默认，当前监控中）/ history（历史记录）；page >= 1；size 取 1..30（超 30 上游返回 1003）。item[] 含 thscode / name（上游可为 null 或空串，原样保留）、start_date_ms / end_date_ms（结束可为 null，表示监控区间未结束）、monitor_type（原始类型码）与 monitor_label（1/2 = 严重异动，其余 = 重点监控）。⛔ 这是**监管监控区间**，不是异动原因：原因类问题走 anomaly_list / anomaly_stock；本能力也不提供交易所公告原文。pagination.total 上游可为 null，不得当 0；空列表是合法结果（当日无监控记录），不是失败。',
+      path: '/api/a-share/special-data/abnormal-monitor-list',
+      inputSchema: objectSchema({
+        state: { type: 'string', enum: ABNORMAL_MONITOR_STATES, description: 'current 当前监控中（默认）/ history 历史记录' },
+        page: { type: 'integer', minimum: 1, description: '页码，从 1 开始，默认 1' },
+        size: { type: 'integer', minimum: 1, maximum: MAX_ABNORMAL_MONITOR_SIZE, description: '每页条数，取值 1~30，默认 30' },
+      }),
+      outputSchema: {
+        type: 'object',
+        properties: {
+          timestamp: { type: 'integer' },
+          item: { type: 'array', items: rowSchema(abnormalMonitorFields) },
+          pagination: {
+            type: 'object',
+            properties: {
+              page: { type: 'integer' },
+              size: { type: 'integer' },
+              total: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+              has_next: { type: 'boolean' },
+            },
+            additionalProperties: true,
+          },
+        },
+        additionalProperties: true,
+      },
+      allowed: ['state', 'page', 'size'],
+      normalize: normalizeAbnormalMonitor,
+      guard: { data: { pagination: 'object' }, item: abnormalMonitorFields },
+      paginated: true,
     },
     {
       name: 'get_a_share_special_data_dragon_tiger_list',
@@ -1760,7 +1917,7 @@ function endpointDefinitions(): EndpointDefinition[] {
       name: 'get_fund_indicators_line',
       capability: 'fund_indicator_line',
       summary: '基金指标画线序列（多指标多标的）',
-      description: '按指标分组批量取画线序列。两个参数都是 **JSON 字符串**且都必填：indexes 为**数组**，每组必须含完整代码数组 thscodes 与指标数组 index_info（每项必含字符串 index_id，可选 attribute）；time_range 为**对象**，必含字符串 time_type，可选 start / end（Unix 毫秒整数）与 offset（整数周期偏移）。响应是三层的：time_range 为毫秒时间轴数组（元素可为 null、与每组 values 按位置对应）、indexes 为指标元信息（index_id / value_type / timestamp / time_type / attribute，其中 timestamp 为正数时是毫秒戳、0 与负数是位置选择）、data[] 为按代码组织的序列（thscode + values[]，每项含 idx 指向 indexes 下标与 values 数组）。',
+      description: '按指标分组批量取画线序列。两个参数都是 **JSON 字符串**且都必填：indexes 为**数组**，每组必须含完整代码数组 thscodes 与指标数组 index_info（每项必含字符串 index_id，可选 attribute）；time_range 为**对象**，必含字符串 time_type，可选 start / end（Unix 毫秒整数）与 offset（整数周期偏移）。响应是三层的：time_range 为毫秒时间轴数组（元素可为 null、与每组 values 按位置对应）、indexes 为指标元信息（index_id / value_type / timestamp / time_type / attribute，其中 timestamp 为正数时是毫秒戳、0 与负数是位置选择）、data[] 为按代码组织的序列（thscode + values[]，每项含 idx 指向 indexes 下标与 values 数组）。⛔ 2026-11-21 复核：上游 llms-full 已删除本端点文档（`/api/fund/indicators` 路径 0 命中），运行时仍在线；本能力按实测契约维护、巡检降为 shadow，不再在此之上做新功能。',
       path: '/api/fund/indicators/line',
       inputSchema: objectSchema({
         indexes: { type: 'string', description: 'JSON 数组字符串：[{thscodes:[完整代码], index_info:[{index_id, attribute?}]}]' },
@@ -1783,7 +1940,7 @@ function endpointDefinitions(): EndpointDefinition[] {
       name: 'get_fund_indicators_table',
       capability: 'fund_indicator_table',
       summary: '基金指标表格查询（分页/排序）',
-      description: '按选择器查询指标表格。四个参数都是 **JSON 字符串且全部可选**：code_selectors（对象；stock_code / fund_code 类型用 thscodes 数组，其它实体类型用 values）、indexes（数组，每项必含 index_id，可选 timestamp：正数=Unix 毫秒、0=最新位置、负数=位置偏移）、page_info（对象，page_begin / page_size / code_begin / code_page_size 均可选整数，**起点为 0**）、sort（数组，每项含整数 idx 指标下标与字符串 type 排序方向）。**该端点没有业务默认值，四个参数至少要给一个**。⚠️ 实测（2026-09）本端点对多只基金均返回 code=5003 数据源不可用（参数本身被接受、不是参数错误），属上游数据源缺口；接入时按 5003 如实回传，不要反复重试。响应含 total（上游结果总数）、indexes（与画线接口语义一致）、data[]（thscode + values[]，每项含 idx 与 value——value 可为 null，数值字符串保持原样如 "3.127400"）与可空的 part_order_thscodes。',
+      description: '按选择器查询指标表格。四个参数都是 **JSON 字符串且全部可选**：code_selectors（对象；stock_code / fund_code 类型用 thscodes 数组，其它实体类型用 values）、indexes（数组，每项必含 index_id，可选 timestamp：正数=Unix 毫秒、0=最新位置、负数=位置偏移）、page_info（对象，page_begin / page_size / code_begin / code_page_size 均可选整数，**起点为 0**）、sort（数组，每项含整数 idx 指标下标与字符串 type 排序方向）。**该端点没有业务默认值，四个参数至少要给一个**。⚠️ 实测（2026-09）本端点对多只基金均返回 code=5003 数据源不可用（参数本身被接受、不是参数错误），属上游数据源缺口；接入时按 5003 如实回传，不要反复重试。响应含 total（上游结果总数）、indexes（与画线接口语义一致）、data[]（thscode + values[]，每项含 idx 与 value——value 可为 null，数值字符串保持原样如 "3.127400"）与可空的 part_order_thscodes。⛔ 2026-11-21 复核：上游 llms-full 已删除本端点文档（`/api/fund/indicators` 路径 0 命中），运行时仍在线；本能力按实测契约维护、巡检降为 shadow，不再在此之上做新功能。',
       path: '/api/fund/indicators/table',
       inputSchema: objectSchema({
         code_selectors: { type: 'string', description: 'JSON 对象字符串：选择器（如 {fund_code:{thscodes:[...]}}）' },
