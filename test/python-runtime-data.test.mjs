@@ -136,7 +136,8 @@ test('runDataScript: writes request/input/fixed script into an isolated run dir 
 
   const call = calls[0]
   assert.ok(call.runDir.includes(join('data-runs', `${SCRIPT_ID}-`)), `run dir 必须在 cacheRoot/data-runs 下：${call.runDir}`)
-  assert.ok(call.runDir.includes('cache/test/python-runtime'), 'run dir 必须落在 cacheRoot 的临时区')
+  // join() 而不是 'cache/test/…'：Windows 上 runDir 用反斜杠，字面量断言会让这条测试只在 Linux 绿。
+  assert.ok(call.runDir.includes(join('cache', 'test', 'python-runtime')), 'run dir 必须落在 cacheRoot 的临时区')
   assert.deepEqual(call.request, { script: 'baostock_valuation_history.py', args: [] })
   assert.deepEqual(call.input, { code: 'sh.600519' })
   assert.equal(call.script, await readFile(SCRIPT_PATH, 'utf8'), '必须写入仓库自带的固定脚本，而不是模型内容')
