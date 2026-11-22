@@ -133,3 +133,39 @@ test('src 与 scripts 里不许有平台分支', () => {
       : undefined)
   assert.deepEqual(bad, [], '出现平台分支：\n' + bad.join('\n'))
 })
+
+// 2026-11-22 Windows CI 事故：`call.runDir.includes('cache/test/python-runtime')` 在 Linux 绿、Windows 红
+// （join() 与 fileURLToPath() 都产出反斜杠）。这条闸门只认「变量名以 Dir/dir/Root/root 结尾 + 字面量含 /」
+// 的 fs 子串断言：URL（://）、包名（@scope）、模块相对路径（./ ../）不算；负向断言同样算——它一样断言错了。
+// 只扫 test/：src/ 的 fs 路径由运行时代码与既有闸门管，且 manifest 校验里 `cacheRoot.startsWith('/')`
+// 这类「清单里就是 POSIX 相对路径」是合法的。
+const PATH_RECEIVER = /(?:Dir|dir|Root|root)$/
+const PATH_SUBSTRING = /([A-Za-z_$][\w$.\[\]'"]*)\.(?:includes|startsWith|endsWith)\(\s*(['"])([^'"]*)\2/g
+
+function pathLiteralViolation(line) {
+  for (const match of line.matchAll(PATH_SUBSTRING)) {
+    const receiver = match[1]
+    const literal = match[3]
+    if (!PATH_RECEIVER.test(receiver)) continue
+    if (!literal.includes('/')) continue
+    if (literal.includes('://') || literal.startsWith('@')) continue
+    if (literal.startsWith('./') || literal.startsWith('../')) continue
+    if (literal === '/') continue
+    return `${receiver} 被当作字符串与 '${literal}' 比对：fs 路径要用 join()/basename() 拼，Windows 分隔符是反斜杠`
+  }
+  return undefined
+}
+
+test('闸门自检：Windows 路径子串断言的形态能被抓住（空转 = 没有闸门）', () => {
+  // Assembled so this file does not trip its own scan.
+  const incident = '  assert.ok(call.runDir.includes(' + "'cache/test/python-runtime')" + ', "x")'
+  assert.ok(pathLiteralViolation(incident), '必须能抓住 2026-11-22 那条 Windows 事故形态')
+  assert.equal(pathLiteralViolation('  assert.ok(text.includes("docs/dev/tool-schema.md"))'), undefined, '文件内容比对不算 fs 路径')
+  assert.equal(pathLiteralViolation("  assert.ok(url.includes('https://x/y'))"), undefined, 'URL 不算 fs 路径')
+  assert.equal(pathLiteralViolation('  assert.equal(rel.startsWith("scripts/lib/"), true)'), undefined, '非路径变量不算')
+})
+
+test('test/ 里不许把 fs 路径变量与含 / 的字面量做子串比对', () => {
+  const bad = find((line, rel) => (rel.startsWith('test/') ? pathLiteralViolation(line) : undefined))
+  assert.deepEqual(bad, [], 'Windows 上分隔符是反斜杠，这类断言只在 Linux 绿：\n' + bad.join('\n'))
+})
