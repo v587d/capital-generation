@@ -7,6 +7,44 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**、2.9.0 的选择器收敛与质检前置——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [2.30.0] - 2026-11-22
+
+数据能力扩容：按上游 `a-stock-data` v3.10.4 的 15 层 87 端点复核补齐 **27 条能力**（135 → 162），并修两条口径缺陷。新增 ETF 期权、A50 期指、东财打板四池与日内异动、个股概念命中、同花顺热榜 / 涨停揭秘、沪深 ETF 份额、回购定盘、中证指数估值，以及一条受控的私有 Python 数据通道（BaoStock + 人民银行社融）。全部新能力都有真报文验收、巡检条目与回归。
+
+### Added
+
+- **新浪公开 HTTP（4 条，零 key）**：`sina_etf_option_contracts` / `sina_etf_option_tquote` / `sina_etf_option_greeks`（ETF 期权合约清单、T 型报价、希腊字母与 IV；GBK + Referer；希腊字母 `raw[1:4]` 三个空串必须跳过）与 `sina_a50_futures`（富时中国 A50 连续报价，时间轴与单位按实测写清；不含 CME 期货）。
+- **交易所与货币网官方（3 条，零 key）**：`sse_etf_shares`（上交所 ETF 份额按日归档，可查历史）、`szse_etf_shares`（深交所仅最新一天）、`chinamoney_repo_fixing`（银行间回购定盘 FR / FDR，`%` 原值、FDR 早期为 null）。
+- **中证指数（1 条）**：`csindex_index_valuation`（官网 JSON 的 PE(TTM) 日序列，全历史）；官网 JSON 不含 PB / 静态 PE / 股息率，description 已明确声明。
+- **东方财富（14 条）**：个股基本面 `eastmoney_security_profile`、`eastmoney_st_stock_list`、事件包（机构调研 / 增减持 / 回购 / 质押 / 新股）、东财口径打板四池（涨停 / 炸板 / 跌停 / 昨日涨停，含炸板次数、末封板时间、行业、振幅 / 涨速、封单资金、连续跌停天数、开板次数）、`eastmoney_price_anomaly_list` / `_count`（严重异常波动明细与按标的聚合）、`eastmoney_stock_hot_concepts`（个股动态概念命中热度）。
+- **同花顺网页直连（2 条，新家族，零 key）**：`ths_hot_list`（热榜 100 行，补 Fuyao 没有的概念标签 / 人气标签）、`ths_limit_up_detail`（涨停揭秘：板型 / 封板成功率 / 是否回封；与 Fuyao 涨停池 28/28 对账，差额全为 ST）。
+- **私有 Python 数据通道（3 条）**：`baostock_valuation_history`（PE/PB/PS/PCF + 换手率 + 停牌 + 逐日 ST）、`baostock_stock_basic`（上市日 / 退市日 / 状态）、`pbc_social_financing`（社融增量 12 列，亿元）。运行时新增 `runDataScript()`：固定脚本白名单 + 独立 run dir + 结果回 TS 逐字段校验后才落 Dataset；vendored 纯 Python 包（BaoStock BSD / openpyxl MIT / et_xmlfile MIT，约 1.8MB，LICENSE 随包，`THIRD_PARTY_NOTICES.md` 已登记）。
+- **Fuyao 补列**：`limit_up_pool.open_times`（炸板次数）、`limit_break_pool.first_seal_time` / `last_seal_time`（上游一直在返回、此前未声明）。四条池子与热榜的 description 互相点名缺列的替代能力，并写明两家口径不可混算。
+
+### Fixed
+
+- **`tencent_kline` 成交量单位**：科创板（688 / 689）是**股**、其余（含 588 ETF 与指数）是**手**——此前 description 一律写「手」，按手换算科创板会差 100 倍。现在每行带 `volume_unit`（`share` / `lot`），日线、分钟线、复权与否同一规则。
+- **`sina_reports` 假空页**：上游 1 秒内连打第二次起返回 HTTP 200 的假「没有找到相关内容」，与「确实没有研报」字节同形；现在所有请求走进程级 ≥6 秒节流链，空页按同一间隔重试一次，只有重试仍空才当「确实没有研报」，note 会写明已重试。
+
+### Changed
+
+- 能力总数 **135 → 162**；目录主题 **9 → 10**（新增 `options`）。
+- 巡检注册表新增 4 个家族：`sina` / `official` / `csindex` / `ths`；私有 Python 3 条标记 `excluded`（CI 不安装私有运行时，需本地手跑）。
+- `docs/data-collector-capabilities.md`、`docs/agent-roles.md` 与 README 的计数同步；复核结论与两轮落地记录见 `docs/design/a-stock-data-upstream-review-2026-11.md`（§8 / §9）。
+
+### Migration
+
+- 无破坏性变更：既有工具、能力名、参数与 Dataset 契约不变，新增能力均为增量。
+- 私有 Python 那 3 条是**可选**能力：需在「插件设置 → 分析环境」安装 base pack（约 60MB/平台）。未安装时调用会明确报 `data-runtime-not-ready`，不影响其它能力。
+- 升级后需重启 dsh 进程（`lib/` 已重建）。
+
+### Notes
+
+- 回归：`npm test` **1728 pass / 0 fail**；`npm run check:dsh` 40/40；`npm run smoke:boot` 预设 `broken=null`；`npm run contract:probe` 真打通过（新浪 3/3、官方 3/3、中证 1/1、同花顺直连 2/2、东财新增 7/7；push2 两条仍按 shadow 挂到 2026-12-20）。
+- 版本：根包与四个随包嵌套包（chart-ui / config / watchlist / automation）+ 两个客户端常量（`LOCAL_FETCH_CLIENT_VERSION` / `WIND_CLIENT_VERSION`）同步 2.30.0。
+- 口径提醒：东财打板四池只保留约最近 15 个交易日，且会把今天 / 未来日期夹到最近交易日；跌停池 `board_amount` 口径不可靠（禁止当成交额）；同花顺涨停揭秘不含 ST 与北交所；东财人气榜因名称价格依赖 push2 仍未接。
+- 明确未做：东财人气榜、筹码分布 CYQ、申万行业历史（源站 TLS / 508）、120 日东财资金流、iwencai、百度 MA、mootdx、北向分钟、央视批量。
+
 ## [2.29.0] - 2026-11-20
 
 宿主升级不再按 rc 打断插件：支持窗口从「精确 pin 一个 rc」改成「同一 minor」，跑在未验证宿主上时留一条可见记录（issue #20）。

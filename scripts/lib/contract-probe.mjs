@@ -10,6 +10,11 @@ import { createFuyaoRestSources } from '../../lib/sources/fuyao-rest.js'
 import { createFtshareSources } from '../../lib/sources/ftshare-rest.js'
 import { createEastmoneySources } from '../../lib/sources/eastmoney-http.js'
 import { createTencentSources } from '../../lib/sources/tencent-http.js'
+import { createSinaSources } from '../../lib/sources/sina-http.js'
+import { createOfficialSources } from '../../lib/sources/official-http.js'
+import { createCsindexSources } from '../../lib/sources/csindex-http.js'
+import { createThsSources } from '../../lib/sources/ths-http.js'
+import { createPythonSources } from '../../lib/sources/python-remote.js'
 import {
   createSourceTransport, createGatedEastmoneyTransport,
   clsTelegraph, wscnLives, cninfoAnnouncements, cninfoIrm, sseinfoQa,
@@ -109,7 +114,18 @@ function buildSources() {
   const fuyaoKey = resolveCredential('FUYAO_API_KEY')
   const ftshareKey = resolveCredential('FTSHARE_API_KEY')
   const map = new Map()
-  for (const source of [...createFuyaoRestSources(async () => fuyaoKey), ...createEastmoneySources(), ...createTencentSources(), ...createFtshareSources(async () => ftshareKey)]) {
+  for (const source of [
+    ...createFuyaoRestSources(async () => fuyaoKey),
+    ...createEastmoneySources(),
+    ...createTencentSources(),
+    ...createFtshareSources(async () => ftshareKey),
+    ...createSinaSources(),
+    ...createOfficialSources(),
+    ...createCsindexSources(),
+    ...createThsSources(),
+    // Every python capability is `excluded` (needs the private runtime); the stub only satisfies registration.
+    ...createPythonSources(async () => { throw new Error('python runtime is not part of the contract probe') }),
+  ]) {
     map.set(source.schema.capability, source)
   }
   return map
@@ -158,7 +174,7 @@ async function runWindProtocol(entry) {
 // Families run in egress order: finish one provider before starting the next.
 // ⛔ This list and the registry's `PROBE_FAMILIES` are two lists; a missing family silently probes
 // nothing. test/contract-registry.test.mjs pins the coverage.
-export const FAMILY_ORDER = ['fuyao', 'eastmoney', 'tencent', 'retriever', 'anysearch', 'wind', 'ftshare']
+export const FAMILY_ORDER = ['fuyao', 'eastmoney', 'tencent', 'retriever', 'anysearch', 'wind', 'ftshare', 'sina', 'official', 'csindex', 'ths', 'python']
 
 /**
  * ⚠️ Never wrap eastmoney / tencent / named sources in another throttle: their execute() already runs
@@ -170,7 +186,8 @@ const NO_PACE = (task) => task()
 function pacerFor(family) {
   // Production fuyao is bare fetch with no min spacing (Hub serializes); no Hub here, so add a floor.
   if (family === 'fuyao') return createRequestThrottle(FUYAO_PROBE_GAP_MS)
-  if (family === 'eastmoney' || family === 'tencent' || family === 'retriever' || family === 'ftshare') return NO_PACE
+  if (family === 'eastmoney' || family === 'tencent' || family === 'retriever' || family === 'ftshare'
+    || family === 'sina' || family === 'official' || family === 'ths') return NO_PACE
   return createRequestThrottle(1_000)
 }
 

@@ -513,6 +513,46 @@ test('tencent_kline rotates empty host and parses raw daily rows', async () => {
   }
 })
 
+test('tencent_kline 成交量单位：科创板（688/689）是股，其余是手，行里必须显式声明（上游 V3.10.1 对账）', async () => {
+  const sources = sourceMap()
+  const originalFetch = globalThis.fetch
+  const daily = (symbol, volume) => response(JSON.stringify({
+    code: 0,
+    data: { [symbol]: { day: [['2026-09-22', '10', '10.5', '10.8', '9.9', String(volume)]] } },
+  }))
+  const minute = (symbol, volume) => response(JSON.stringify({
+    code: 0,
+    data: { [symbol]: { m5: [['202609221000', '10', '10.5', '10.8', '9.9', String(volume)]] } },
+  }))
+  try {
+    // The split is by instrument, not by market: 588000 (科创板 ETF) and indices stay in 手.
+    for (const [code, symbol, unit] of [
+      ['688981.SH', 'sh688981', 'share'],
+      ['689009.SH', 'sh689009', 'share'],
+      ['600519.SH', 'sh600519', 'lot'],
+      ['588000.SH', 'sh588000', 'lot'],
+      ['000001.SH', 'sh000001', 'lot'],
+    ]) {
+      globalThis.fetch = async () => daily(symbol, 123)
+      const result = await execute(sources.tencent_kline, { code, period: 'day', adjust: 'none', count: 1 })
+      assert.equal(result.data[0].volume, 123, '上游数值原样保留，不替它换算')
+      assert.equal(result.data[0].volume_unit, unit, `${code} 的日线单位必须是 ${unit}`)
+    }
+    for (const [code, symbol, unit] of [['688981.SH', 'sh688981', 'share'], ['600519.SH', 'sh600519', 'lot']]) {
+      globalThis.fetch = async () => minute(symbol, 456)
+      const result = await execute(sources.tencent_kline, { code, period: 'm5', count: 1 })
+      assert.equal(result.data[0].volume, 456)
+      assert.equal(result.data[0].volume_unit, unit, `${code} 的分钟线单位必须是 ${unit}`)
+    }
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  // Conversion is the caller's job; the contract has to say so, not just the field.
+  const described = sources.tencent_kline.schema.description
+  assert.match(described, /volume_unit/)
+  assert.match(described, /科创板/)
+})
+
 test('tencent_kline 取消原样抛出：不拉黑任何入口、不降级成 tencent_kline_unavailable（§4.2）', async () => {
   const sources = sourceMap()
   const originalFetch = globalThis.fetch

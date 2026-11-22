@@ -11,7 +11,7 @@ export const ISSUE_VERDICTS = Object.freeze(['GUARD', 'ENVELOPE', 'HTTP_STATUS']
 export const DEFAULT_BUDGET_MS = 20_000
 
 /** Family = throttle group: serial within, gap between; never concurrent across (two throttles = none). */
-export const PROBE_FAMILIES = ['fuyao', 'eastmoney', 'tencent', 'retriever', 'anysearch', 'wind', 'paddle', 'ftshare']
+export const PROBE_FAMILIES = ['fuyao', 'eastmoney', 'tencent', 'retriever', 'anysearch', 'wind', 'paddle', 'ftshare', 'sina', 'official', 'csindex', 'ths', 'python']
 
 /** Gap between families so connection and rate counters cool down. */
 export const PROVIDER_GAP_MS = 2_000
@@ -191,6 +191,41 @@ const EM = [
   ds('eastmoney', 'eastmoney_global_kline', 'daily', { symbol: 'NDX', start_date: dayShift(-30), end_date: dayShift(-1) }, { expect: { minRows: 1 } }),
   ds('eastmoney', 'eastmoney_margin_total', 'daily', { start_date: dayShift(-30), end_date: dayShift(-1), page: 1, size: 3 }, { expect: { minRows: 1 }, note: '深/京 T+1，最近一天可能只有沪市一行' }),
   ds('eastmoney', 'eastmoney_convertible_bond_list', 'daily', { start_date: dayShift(-180), end_date: dayShift(-1), page: 1, size: 3 }),
+  // push2 系（个股基本面 / ST 名单）：字段已用录制真报文验证，但 2026-11-22 16:00 后本机出口对该域名
+  // 连续 46 次 fetch failed（同日 15:54 还 200），与 eastmoney_sector_rotation 的视角差异同因，先挂影子。
+  ds('eastmoney', 'eastmoney_security_profile', 'daily', { ticker: A_SHARE }, {
+    expect: { minRows: 1 },
+    shadow: {
+      since: '2026-11-22',
+      verdict: 'fetch failed（出口视角）',
+      evidence: '2026-11-22 16:26 前 46 次生产请求全部 fetch failed（9 个用例）；同日 15:54/16:00 同域名曾 HTTP 200，不是上游业务码',
+      revisit: '2026-12-20',
+    },
+  }),
+  ds('eastmoney', 'eastmoney_st_stock_list', 'daily', {}, {
+    expect: { minRows: 1 },
+    shadow: {
+      since: '2026-11-22',
+      verdict: 'fetch failed（出口视角）',
+      evidence: '与 eastmoney_security_profile 同一次专项探针：push2 域名 46 次请求全部传输层失败，datacenter 同刻 17/17 正常',
+      revisit: '2026-12-20',
+    },
+  }),
+  // 事件包（datacenter 同链路，实测可用）。排序键唯一性已在 description 与实测里钉住。
+  ds('eastmoney', 'eastmoney_institution_research', 'daily', { start_date: dayShift(-30), end_date: dayShift(-1), page: 1, size: 3 }, { expect: { minRows: 1 } }),
+  ds('eastmoney', 'eastmoney_holder_change', 'daily', { start_date: dayShift(-30), end_date: dayShift(-1), page: 1, size: 3 }, { expect: { minRows: 1 } }),
+  ds('eastmoney', 'eastmoney_buyback', 'daily', { page: 1, size: 3 }, { expect: { minRows: 1 }, note: '只给当前状态、没有历史轨迹；无区间时按 UPD 降序也有行' }),
+  ds('eastmoney', 'eastmoney_pledge', 'weekly', {}, { expect: { minRows: 100 }, note: '中国结算按周发布；不传参数=最新统计日全市场，周档足够' }),
+  ds('eastmoney', 'eastmoney_new_stock', 'daily', { page: 1, size: 3 }, { expect: { minRows: 1 } }),
+  // 东财口径打板四池（push2ex，与 push2 不同域）+ 日内异动（dycalchis）+ 概念命中（emappdata）。
+  // 固定偏移总有 1/7 的日子落到周末（Monday→Sunday），空池是合法结果、EMPTY 不开单；-1 语义最直白：昨日池。
+  ds('eastmoney', 'eastmoney_limit_up_pool', 'daily', { trade_date: dayShift(-1) }, { note: '四池只有约 15 个交易日窗口；非交易日/超窗口是合法空池' }),
+  ds('eastmoney', 'eastmoney_limit_break_pool', 'daily', { trade_date: dayShift(-1) }),
+  ds('eastmoney', 'eastmoney_limit_down_pool', 'daily', { trade_date: dayShift(-1) }),
+  ds('eastmoney', 'eastmoney_yesterday_limit_up_pool', 'daily', { trade_date: dayShift(-1) }),
+  ds('eastmoney', 'eastmoney_price_anomaly_list', 'daily', { page_size: 20, page_no: 1 }, { note: '上游忽略 date：只有当前业务日，历史拿不到' }),
+  ds('eastmoney', 'eastmoney_price_anomaly_count', 'daily', { page_size: 20, page_no: 1 }),
+  ds('eastmoney', 'eastmoney_stock_hot_concepts', 'daily', { ticker: A_SHARE }, { expect: { minRows: 1 } }),
 ]
 
 const TX = [
@@ -402,7 +437,46 @@ const FT = [
   }),
 ]
 
-export const CONTRACT_PROBES = [...FUYAO, ...EM, ...TX, ...WIND_DATA, ...RETRIEVER, ...WIND_PROTOCOL, ...ANYSEARCH, ...PADDLE, ...FT]
+/** Sina option quotes are field-position contracts: a moved column must show up here, not in a user answer. */
+const SINA = [
+  ds('sina', 'sina_etf_option_contracts', 'weekly', { underlying: '510050', side: 'call' }, { expect: { minRows: 40 }, note: '实测 49 行；挂牌月一月一变，周档足够' }),
+  ds('sina', 'sina_etf_option_tquote', 'daily', { codes: ['10012837'] }, { expect: { minRows: 1 }, note: '⛔ 合约号会到期（10012837 = 50ETF 购 6 月 3300，2027-06-23 到期）；到期前换次月合约，否则静默 EMPTY' }),
+  ds('sina', 'sina_etf_option_greeks', 'daily', { codes: ['10012837'] }, { expect: { minRows: 1 }, note: 'iv 被压到 0.0007 属正常，不要断言 iv>0' }),
+  ds('sina', 'sina_a50_futures', 'daily', {}, { expect: { minRows: 1 }, note: '周末返回上一场收盘快照，datetime 未必落在交易日' }),
+]
+
+/** Official exchange / CFETS files: no credentials, no WAF, same egress for everyone. */
+const OFFICIAL = [
+  ds('official', 'sse_etf_shares', 'daily', {}, { expect: { minRows: 100 }, note: '不传 trade_date 取最近已发布交易日 927 行' }),
+  ds('official', 'szse_etf_shares', 'daily', {}, {
+    expect: { minRows: 100 },
+    budgetMs: 60_000,
+    note: '内部翻 39 页实测 11.5s，20s 默认预算会卡在边缘；只有最新一天快照',
+  }),
+  ds('official', 'chinamoney_repo_fixing', 'daily', {}, { expect: { minRows: 200 }, note: 'FR 748 行 ∪ FDR 249 行；周末不追加' }),
+]
+
+/** Direct THS web JSON: the only source of hot-list concept tags and the 板型/封板成功率 columns. */
+const THS_WEB = [
+  ds('ths', 'ths_hot_list', 'daily', { type: 'hour' }, { expect: { minRows: 50 }, note: '网页直连；与 Fuyao hot_stock_list 同源不同入口，rank/heat 一致性以实测为准' }),
+  ds('ths', 'ths_limit_up_detail', 'daily', {}, { expect: { minRows: 1 }, note: '板型/封板成功率/是否回封；上游 filter 不含北交所' }),
+]
+
+const CSINDEX = [
+  ds('csindex', 'csindex_index_valuation', 'daily', { index_code: '000300', start_date: dayShift(-30), end_date: dayShift(-1) }, {
+    expect: { minRows: 1 },
+    note: '工作日序列；周末空区间是合法空。补行防护在 producer 层（请求起点前移 7 天再本地裁剪）',
+  }),
+]
+
+/** Needs the private Python runtime, which CI runners do not install: excluded, smoke by hand instead. */
+const PYTHON = [
+  dsOut('python', 'baostock_valuation_history', '需私有 Python 运行时（插件设置 → 分析环境 → base pack）；CI runner 不安装，按需本地 `npm run python:status` + 手跑冒烟', '2026-11-22'),
+  dsOut('python', 'baostock_stock_basic', '同 baostock_valuation_history：依赖私有运行时与 vendored baostock，不进 CI 巡检', '2026-11-22'),
+  dsOut('python', 'pbc_social_financing', '同 baostock_valuation_history：依赖私有运行时 + vendored openpyxl 解析人民银行 xlsx', '2026-11-22'),
+]
+
+export const CONTRACT_PROBES = [...FUYAO, ...EM, ...TX, ...WIND_DATA, ...RETRIEVER, ...WIND_PROTOCOL, ...ANYSEARCH, ...PADDLE, ...FT, ...SINA, ...OFFICIAL, ...CSINDEX, ...THS_WEB, ...PYTHON]
 
 export function secretRefOf(entry) {
   if (entry.excluded) return undefined

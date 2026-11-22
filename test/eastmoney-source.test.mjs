@@ -37,10 +37,13 @@ const MACRO_CAPABILITIES = [
   'eastmoney_cpi', 'eastmoney_ppi', 'eastmoney_gdp', 'eastmoney_pmi', 'eastmoney_money_supply',
   'eastmoney_rmb_loan', 'eastmoney_customs_trade', 'eastmoney_retail_sales', 'eastmoney_deposit_reserve',
 ]
-const SNAKE_CASE_CAPABILITIES = [...MACRO_CAPABILITIES, 'eastmoney_mutual_flow', 'eastmoney_mutual_quota', 'eastmoney_main_capital_snapshot', 'eastmoney_dividend_plan', 'eastmoney_holder_number_snapshot', 'eastmoney_margin_trading', 'eastmoney_margin_total', 'eastmoney_convertible_bond_list']
+const EVENT_CAPABILITIES = ['eastmoney_institution_research', 'eastmoney_holder_change', 'eastmoney_buyback', 'eastmoney_pledge', 'eastmoney_new_stock']
+// Datacenter `item` shape but a single snapshot: snake_case + item row key, yet paginated=false.
+const SNAPSHOT_CAPABILITIES = ['eastmoney_security_profile', 'eastmoney_st_stock_list', 'eastmoney_limit_up_pool', 'eastmoney_limit_break_pool', 'eastmoney_limit_down_pool', 'eastmoney_yesterday_limit_up_pool', 'eastmoney_stock_hot_concepts']
+const SNAKE_CASE_CAPABILITIES = [...MACRO_CAPABILITIES, 'eastmoney_mutual_flow', 'eastmoney_mutual_quota', 'eastmoney_main_capital_snapshot', 'eastmoney_dividend_plan', 'eastmoney_holder_number_snapshot', 'eastmoney_margin_trading', 'eastmoney_margin_total', 'eastmoney_convertible_bond_list', ...EVENT_CAPABILITIES, 'eastmoney_price_anomaly_list', 'eastmoney_price_anomaly_count']
 const ARRAY_CAPABILITIES = ['eastmoney_global_quote', 'eastmoney_global_kline']
 
-test('Eastmoney source：注册二十四个 capability 与内部身份', () => {
+test('Eastmoney source：注册三十八个 capability 与内部身份', () => {
   const sources = createEastmoneySources()
   assert.deepEqual(sources.map((source) => source.schema.capability), [
     'eastmoney_top_buy_sell_market', 'eastmoney_top_buy_sell_ticker', 'eastmoney_lockup_expiry',
@@ -48,8 +51,12 @@ test('Eastmoney source：注册二十四个 capability 与内部身份', () => {
     'eastmoney_mutual_flow', 'eastmoney_main_capital_snapshot',
     'eastmoney_dividend_plan', 'eastmoney_holder_number_snapshot', 'eastmoney_mutual_quota', 'eastmoney_margin_trading',
     'eastmoney_convertible_bond_list', 'eastmoney_global_quote', 'eastmoney_global_kline', 'eastmoney_margin_total',
+    'eastmoney_security_profile', 'eastmoney_st_stock_list', ...EVENT_CAPABILITIES,
+    'eastmoney_limit_up_pool', 'eastmoney_limit_break_pool', 'eastmoney_limit_down_pool',
+    'eastmoney_yesterday_limit_up_pool', 'eastmoney_price_anomaly_list', 'eastmoney_price_anomaly_count',
+    'eastmoney_stock_hot_concepts',
   ])
-  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 24)
+  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 38)
   for (const source of sources) {
     assert.equal(source.schema.source_label, 'eastmoney')
     assert.match(source.schema.data_key, /^eastmoney\.http\./)
@@ -59,7 +66,7 @@ test('Eastmoney source：注册二十四个 capability 与内部身份', () => {
 })
 
 test('Eastmoney 宏观表：行键名一律 ASCII snake_case（§10.6 不许透传上游缩写）', () => {
-  for (const capability of [...SNAKE_CASE_CAPABILITIES, ...ARRAY_CAPABILITIES]) {
+  for (const capability of [...SNAKE_CASE_CAPABILITIES, ...SNAPSHOT_CAPABILITIES, ...ARRAY_CAPABILITIES]) {
     const source = sourceMap()[capability]
     assert.ok(source, `${capability} 必须已注册`)
     const schema = source.schema.output_schema
@@ -75,6 +82,11 @@ test('Eastmoney 宏观表：行键名一律 ASCII snake_case（§10.6 不许透�
   for (const capability of SNAKE_CASE_CAPABILITIES) {
     const source = sourceMap()[capability]
     assert.equal(source.schema.paginated, capability === 'eastmoney_mutual_quota' ? false : true, '额度表是当日四条快照，不分页')
+    assert.deepEqual(source.schema.rowShape, { rowKey: 'item' })
+  }
+  for (const capability of SNAPSHOT_CAPABILITIES) {
+    const source = sourceMap()[capability]
+    assert.equal(source.schema.paginated, false, `${capability} 是快照，不分页`)
     assert.deepEqual(source.schema.rowShape, { rowKey: 'item' })
   }
   for (const capability of ARRAY_CAPABILITIES) {

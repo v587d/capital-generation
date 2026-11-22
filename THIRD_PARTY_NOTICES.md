@@ -83,6 +83,22 @@ git-only、不随包、任何角色都不执行，文件头写明来源与"不�
 查原 skill 的索引。它们留在这里只为将来升级公式或移植到宿主的计算面；skill 正文只写"把算式写进答复、
 需要算力时委派 `data_junior`"，不指向这些文件。
 
+## 随包分发的纯 Python 数据脚本依赖（随主包）
+
+私有 Python 运行时的 base pack 只带解释器与数值计算库；三条固定数据脚本还要两个纯 Python 包，
+它们以**源码原样**随主包发布到 python/vendor 目录（不新增平台运行时包、不走 pip/venv）。
+`worker.py` 的 run 子命令把 python/vendor 作为一条 `--site-packages` 传给私有解释器，与 base pack 的
+site-packages 并列；三个包都只有 `.py` 文件，无二进制。
+
+| 组件 | 版本 | 许可证 | 原始仓库 | 许可文本 | 用在哪里 |
+|---|---|---|---|---|---|
+| BaoStock | 0.9.4 | BSD（wheel 元数据声明；上游 wheel **不带** LICENSE 文件，证据见许可文本内引用的 METADATA 原文） | <http://www.baostock.com> | `python/vendor/baostock/LICENSE` | `baostock_valuation_history` / `baostock_stock_basic` 两条固定数据脚本的 TCP 客户端；BaoStock 自有协议，无 HTTP 等价物 |
+| openpyxl | 3.1.5 | MIT | <https://foss.heptapod.net/openpyxl/openpyxl> | `python/vendor/openpyxl/LICENSE` | `pbc_social_financing` 读取人民银行社融 `.xlsx` 附件 |
+| et_xmlfile | 2.0.0 | MIT（含一段 Python 标准库来源代码，其许可全文见 `python/vendor/et_xmlfile/LICENSE.python`） | <https://foss.heptapod.net/openpyxl/et_xmlfile> | `python/vendor/et_xmlfile/LICENSE` | openpyxl 的 XML 读写底层依赖；不直接调用 |
+
+三条脚本本身是本仓代码（python/scripts 目录），不复制上游实现；BaoStock 服务条款、人民银行附件版权
+归各服务方，见下文「外部数据与检索服务」。
+
 ## 按需安装的 Python 运行时包（不随主包）
 
 主 npm 包不携带解释器。用户首次点「准备分析环境」时，插件从 npm 安装对应的平台运行时包到

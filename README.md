@@ -3,7 +3,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License"></a>
   <a href="https://github.com/v587d/capital-generation"><img src="https://img.shields.io/badge/Financial%20Market-CN%20%7C%20HK%20%7C%20US-orange" alt="Market·CN+HK+US"></a>
   <a href="https://github.com/deepseek-ai"><img src="https://img.shields.io/badge/DSH%20Baseline-0.2.2--rc.5-blue" alt="DSH@0.2.2-rc.5"></a>
-  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.29.0-9cf" alt="Version"></a>
+  <a href="https://github.com/v587d/capital-generation/releases"><img src="https://img.shields.io/badge/version-2.30.0-9cf" alt="Version"></a>
   <a href="https://www.npmjs.com/package/@v587d/capital-generation"><img src="https://img.shields.io/npm/v/%40v587d%2Fcapital-generation" alt="npm version"></a>
 </p>
 
@@ -136,7 +136,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 
 ## 还能做什么
 
-- **查数据和资料：** 覆盖 A 股、港股、美股与期货等品种，由专用角色按需获取行情、财务、指数、基金、宏观行业与期货数据，检索公告、新闻和研报。共计 **135** 个数据收集能力和 **17** 个网页检索能力，部分公开数据源无需额外密钥；具体覆盖范围见 [数据收集能力表](docs/data-collector-capabilities.md) 和 [网页检索能力表](docs/web-retriever-capabilities.md)。
+- **查数据和资料：** 覆盖 A 股、港股、美股与期货等品种，由专用角色按需获取行情、财务、指数、基金、宏观行业与期货数据，检索公告、新闻和研报。共计 **162** 个数据收集能力和 **17** 个网页检索能力，部分公开数据源无需额外密钥；具体覆盖范围见 [数据收集能力表](docs/data-collector-capabilities.md) 和 [网页检索能力表](docs/web-retriever-capabilities.md)。
 - **数据质检：** 结构化数据不会直接进入模型上下文。每份数据先由分析师检查结构、时间轴、缺失与基础统计，再按受控方式汇总；原始数据行始终留在工具层。
 - **可视化：** 分析师判断数据适合图表，或你明确要图时，绘图专员会生成可交互图表；明确不要图时只完成质检。图表会登记为**最后一轮答复**的交付物，在答复末尾集中出现，可在侧栏查看或离线打开。了解处理流程可看 [Agent 角色说明](docs/agent-roles.md)。
 
@@ -192,7 +192,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 - **配置在哪？** 打开「插件」→ 已安装的 **Capital Generation**，插件介绍下方就是「数据源 / 投研自动化 / 精选 Skills / 包含的组件 / 分析环境」五格，五把密钥都在第一格；第二格可指定任务统一使用的默认工作区，也能改自动检查间隔与最长运行时间等上限；第五格准备 Python 分析环境；不在 DSH 的普通「设置」页面，也不用点进任何一行组件。保存密钥后新建会话再试。
 - **升级到 2.9.0 后，分析师和绘图专员去哪了？** 这一版把它们收进自动模式内部，不再出现在选择器与预设管理里，避免误开一个没有取数入口的空会话。旧会话仍能按原身份恢复；新任务直接用自动模式提出即可。
 - **宿主更新后插件显示异常、三个模式消失？** 插件只支持**同一 minor** 的宿主（本版是 `>=0.2.2-rc.5 <0.2.3-0`）：宿主跨到 0.2.3 及以上时，旧插件会被启动拒载（插件页显示「异常」）。先把宿主升到与插件同一条 minor，再在插件页更新插件；应急可用版本豁免（有崩溃风险，见 CHANGELOG 的 Migration）。日志里出现「宿主 dsh … 未逐项验证」说明你跑在同一 minor 的未验证补丁版上——能跑，但遇异常请先升级插件并把那行日志附在 issue 里。
-- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.29.0` 或 `@2.29.0`。
+- **桌面端升级后仍是旧版？** 桌面端安装时会固定所解析的版本，不会自动升级。卸载后重新安装，再到插件详情查看版本号；如需指定版本，可在地址末尾加 `#v2.30.0` 或 `@2.30.0`。
 - **刚发布的新版本装不到？** 桌面端取包时会跳过**刚发布不久**的版本（宿主侧包管理器的发布冷却策略，实测会静默装成上一个版本），国内镜像的同步也可能滞后一段时间。急着用最新代码，改用仓库地址安装最直接；但仓库地址安装的是 git 依赖，插件页不显示「版本」检查。
 - **插件页的「版本」段怎么用？** 只有用包名从 npm 安装的版本才有；它只列比当前新的版本。回旧版要先卸载，再安装 `@v587d/capital-generation@版本号`（桌面端地址末尾加 `#v版本号`）；旧版必须匹配当前 DSH 基线，对应关系见 [CHANGELOG 的 Migration](CHANGELOG.md)。
 - **网页抓取失败？** 配置卡片中的「允许启动本地提取网页内容」默认开启：AnySearch 提取失败时可尝试本机直连。关闭后，本机直连的具名来源查询也不可用；请检查该开关和网络连接。

@@ -1,0 +1,19 @@
+BaoStock 0.9.4 — license evidence
+=================================
+
+The upstream wheel `baostock-0.9.4-py3-none-any.whl` ships **no LICENSE file** (verified by
+unpacking it: `LICENSE`, `COPYING` and `NOTICE` are absent). Redistribution here rests on the
+license declaration carried by the same wheel's package metadata (`baostock-0.9.4.dist-info/METADATA`),
+quoted verbatim below:
+
+    Name: baostock
+    Version: 0.9.4
+    Summary: A tool for obtaining historical data of China stock market
+    Home-page: http://www.baostock.com
+    Author: baostock
+    Author-email: baostock@163.com
+    License: BSD License
+    Classifier: License :: OSI Approved :: BSD License
+
+The package is redistributed unmodified for use with the plugin's private Python runtime.
+See `THIRD_PARTY_NOTICES.md` at the repository root for the package inventory and usage.

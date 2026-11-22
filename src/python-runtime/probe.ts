@@ -6,6 +6,9 @@ import { pythonChildEnv } from './child-env.js'
 import { detachedChild, killTree, pythonFlags } from './platform.js'
 import type { ProbeReport } from './types.js'
 
+/** Tail kept per stream; probes and scripts only ever surface the end of a traceback. */
+const OUTPUT_LIMIT = 64 * 1024
+
 export interface ProbeOptions {
   python: string
   workerPath: string
@@ -15,6 +18,73 @@ export interface ProbeOptions {
   timeoutMs: number
   signal?: AbortSignal
   env?: Record<string, string | undefined>
+}
+
+export interface WorkerProcessOptions {
+  python: string
+  /** Full argv after the interpreter path: worker script, subcommand and its flags. */
+  args: string[]
+  cwd: string
+  env: Record<string, string>
+  timeoutMs: number
+  signal?: AbortSignal
+}
+
+export interface WorkerProcessResult {
+  code: number | null
+  stdout: string
+  stderr: string
+  timedOut: boolean
+  aborted: boolean
+  /** Set when the child could not be started at all; no exit code exists in that case. */
+  spawnError?: string
+}
+
+export type WorkerProcessRunner = (options: WorkerProcessOptions) => Promise<WorkerProcessResult>
+
+/**
+ * Spawn the private interpreter once. Timeout kills the whole child tree, abort behaves the same
+ * without becoming an error here: callers map the flags to their own `timeout` / `cancelled` codes.
+ */
+export async function runWorkerProcess(options: WorkerProcessOptions): Promise<WorkerProcessResult> {
+  return await new Promise<WorkerProcessResult>((resolvePromise) => {
+    let stdout = ''
+    let stderr = ''
+    let timedOut = false
+    let settled = false
+    const child = spawn(options.python, options.args, {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      detached: detachedChild,
+    })
+    const timer = setTimeout(() => {
+      timedOut = true
+      void killTree(child.pid, child, 'SIGTERM')
+      setTimeout(() => { void killTree(child.pid, child, 'SIGKILL') }, 2_000).unref?.()
+    }, options.timeoutMs)
+    timer.unref?.()
+    const abort = () => { void killTree(child.pid, child, 'SIGTERM') }
+    options.signal?.addEventListener('abort', abort, { once: true })
+    const finish = (code: number | null) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      options.signal?.removeEventListener('abort', abort)
+      resolvePromise({ code, stdout, stderr, timedOut, aborted: options.signal?.aborted === true })
+    }
+    child.stdout?.on('data', (chunk: Buffer) => { stdout = (stdout + chunk.toString('utf8')).slice(-OUTPUT_LIMIT) })
+    child.stderr?.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString('utf8')).slice(-OUTPUT_LIMIT) })
+    child.once('error', (error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      options.signal?.removeEventListener('abort', abort)
+      resolvePromise({ code: null, stdout, stderr, timedOut, aborted: options.signal?.aborted === true, spawnError: String(error) })
+    })
+    child.once('close', (code) => finish(code))
+  })
 }
 
 function parseReport(output: string): ProbeReport {
@@ -60,50 +130,21 @@ export async function probePython(options: ProbeOptions): Promise<ProbeReport> {
     'probe',
     ...options.sitePackages.flatMap((path) => ['--site-packages', path]),
   ]
-
-  return await new Promise<ProbeReport>((resolvePromise, reject) => {
-    let stdout = ''
-    let stderr = ''
-    let timedOut = false
-    let settled = false
-    const child = spawn(options.python, args, {
-      cwd: options.tempDir,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-      detached: detachedChild,
-    })
-    const timer = setTimeout(() => {
-      timedOut = true
-      void killTree(child.pid, child, 'SIGTERM')
-      setTimeout(() => { void killTree(child.pid, child, 'SIGKILL') }, 2_000).unref?.()
-    }, options.timeoutMs)
-    timer.unref?.()
-    const abort = () => { void killTree(child.pid, child, 'SIGTERM') }
-    options.signal?.addEventListener('abort', abort, { once: true })
-    const finish = (code: number | null) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      options.signal?.removeEventListener('abort', abort)
-      if (timedOut) return reject(new PythonRuntimeError('timeout', 'Python probe 超时。', stderr))
-      if (options.signal?.aborted === true) return reject(new PythonRuntimeError('cancelled', undefined, stderr))
-      if (code !== 0) return reject(new PythonRuntimeError('probe-failed', `Python probe 退出码 ${String(code)}。`, stderr || stdout))
-      try {
-        resolvePromise(parseReport(stdout))
-      } catch (error) {
-        reject(error)
-      }
-    }
-    child.stdout?.on('data', (chunk: Buffer) => { stdout = (stdout + chunk.toString('utf8')).slice(-64 * 1024) })
-    child.stderr?.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString('utf8')).slice(-64 * 1024) })
-    child.once('error', (error) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      options.signal?.removeEventListener('abort', abort)
-      reject(new PythonRuntimeError('probe-failed', `启动 Python 失败：${String(error)}`))
-    })
-    child.once('close', (code) => finish(code))
+  const result = await runWorkerProcess({
+    python: options.python,
+    args,
+    cwd: options.tempDir,
+    env,
+    timeoutMs: options.timeoutMs,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
   })
+  if (result.spawnError !== undefined) {
+    throw new PythonRuntimeError('probe-failed', `启动 Python 失败：${result.spawnError}`)
+  }
+  if (result.timedOut) throw new PythonRuntimeError('timeout', 'Python probe 超时。', result.stderr)
+  if (result.aborted) throw new PythonRuntimeError('cancelled', undefined, result.stderr)
+  if (result.code !== 0) {
+    throw new PythonRuntimeError('probe-failed', `Python probe 退出码 ${String(result.code)}。`, result.stderr || result.stdout)
+  }
+  return parseReport(result.stdout)
 }

@@ -30,6 +30,7 @@ import {
   wscnLives,
 } from '../lib/web-retriever/sources.js'
 import { assertToolOutput } from './output-contract.mjs'
+import { SINA_REPORTS_MIN_INTERVAL_MS, sharedSinaReportsThrottle } from '../lib/web-retriever/throttle.js'
 
 const TRANSPORT_OPTIONS = {
   timeoutMs: 1_000,
@@ -42,6 +43,22 @@ const TRANSPORT_OPTIONS = {
 
 function makeTransport() {
   return createSourceTransport(TRANSPORT_OPTIONS)
+}
+
+/** Unit tests must not wait on the production 6s sina chain; behaviour of the chain itself is asserted separately. */
+/** Unit tests must not wait on the production 6s sina chain; behaviour of the chain itself is asserted separately. */
+const PASS_THROUGH = (task) => task()
+
+/** GBK is not synthesizable in tests, so page fixtures that carry Chinese text bypass the encoder. */
+function textRequester(pages) {
+  let index = 0
+  return {
+    async request() {
+      const text = pages[Math.min(index, pages.length - 1)]
+      index += 1
+      return { status: 200, headers: { get: () => null }, text }
+    },
+  }
 }
 
 function makeResponse(status, headers = {}, body = '') {
@@ -815,7 +832,7 @@ test('sina_reports：必须补交易所前缀（缺前缀时科创板会返回�
   const restore = installFetch(async () => makeResponse(200, { 'content-type': 'text/html; charset=gbk' },
     '<table><tr><td>1</td><td class="tal f14"><a title="t" href="https://x/rptid/1/index.phtml">t</a></td><td>company-type</td><td>2026-09-01</td><td>o</td><td>a</td></tr></table>'))
   try {
-    await sinaReports(makeTransport(), { code: '688017', page: 1 })
+    await sinaReports(makeTransport(), { code: '688017', page: 1, throttle: PASS_THROUGH })
     const url = new URL(restore.requests[0].url)
     assert.equal(url.searchParams.get('symbol'), 'sh688017', '科创板必须带 sh 前缀')
   } finally {
@@ -832,7 +849,7 @@ test('sina_reports：列序按页面表头（报告类型在第 4 列、发布�
   const row = '<tr><td>1</td><td class="tal f14"><a target="_blank" title="绿的谐波(688017)2026年半年报点评" href="//stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/rptid/841632286677/index.phtml">绿</a></td><td>company-type</td><td>2026-09-01</td><td><div class="fname05"><span>org-co</span></div></td><td>analyst-a</td></tr>'
   const restore = installFetch(async () => makeResponse(200, { 'content-type': 'text/html; charset=gbk' }, `<table>${row}</table>`))
   try {
-    const outcome = await sinaReports(makeTransport(), { code: '688017', page: 1 })
+    const outcome = await sinaReports(makeTransport(), { code: '688017', page: 1, throttle: PASS_THROUGH })
     assert.equal(outcome.items.length, 1)
     // Swapped columns keep every value but shift the whole row.
     assert.equal(outcome.items[0].date, '2026-09-01')
@@ -850,10 +867,39 @@ test('sina_reports：列序按页面表头（报告类型在第 4 列、发布�
 test('sina_reports：带序号的行解析不出来时必须报错（结构变更不得伪装成空结果）', async () => {
   const restore = installFetch(async () => makeResponse(200, { 'content-type': 'text/html; charset=gbk' }, '<table><tr><td>1</td><td>完全变了的结构</td></tr></table>'))
   try {
-    await assert.rejects(sinaReports(makeTransport(), { code: '600519', page: 1 }), /页面行结构可能已变/)
+    await assert.rejects(sinaReports(makeTransport(), { code: '600519', page: 1, throttle: PASS_THROUGH }), /页面行结构可能已变/)
   } finally {
     restore.restore()
   }
+})
+
+test('sina_reports：一次假空页不等于「没有研报」，必须隔 6s 重试一次（上游 V3.10.3 实测）', async () => {
+  const row = '<tr><td>1</td><td class="tal f14"><a target="_blank" title="绿的谐波(688017)2026年半年报点评" href="https://x/rptid/841632286677/index.phtml">绿</a></td><td>company-type</td><td>2026-09-01</td><td>org-co</td><td>analyst-a</td></tr>'
+  const starts = []
+  // The injected chain stands in for the 6s one; the point is one retry through the chain, not sleeping here.
+  const outcome = await sinaReports(textRequester(['<p>没有找到相关内容..</p>', `<table>${row}</table>`]), {
+    code: '688017',
+    page: 1,
+    throttle: (task) => { starts.push(Date.now()); return task() },
+  })
+  assert.equal(starts.length, 2, '空页后必须再请求一次，不能直接把假空页当结论；重试也必须走同一条节流链')
+  assert.equal(outcome.items.length, 1, '第二次拿到的研报必须返回')
+  assert.equal(outcome.note, undefined, '拿到研报就不该带「没有研报」的注')
+})
+
+test('sina_reports：重试后仍空才当「确实没有研报」，并说清已重试', async () => {
+  let calls = 0
+  const requester = textRequester(['<p>没有找到相关内容..</p>'])
+  const counted = { async request(input, signal) { calls += 1; return requester.request(input, signal) } }
+  const outcome = await sinaReports(counted, { code: '688017', page: 1, throttle: PASS_THROUGH })
+  assert.equal(calls, 2, '两次都空才是「确实没有研报」，所以必须真的请求两次')
+  assert.deepEqual(outcome.items, [])
+  assert.match(String(outcome.note), /重试一次/)
+})
+
+test('sina_reports：默认节流链是进程级单例、最小间隔 6 秒（两次请求打同一出口会拿到假空页）', () => {
+  assert.equal(SINA_REPORTS_MIN_INTERVAL_MS, 6000)
+  assert.equal(sharedSinaReportsThrottle(), sharedSinaReportsThrottle(), '两个链等于没有节流')
 })
 
 test('ths_eps_forecast：从多张干扰表里认出目标表，均值即一致预期（GBK 解码由真机冒烟覆盖）', async () => {

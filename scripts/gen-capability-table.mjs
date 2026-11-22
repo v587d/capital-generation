@@ -9,6 +9,11 @@ import { writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { createFuyaoRestSources } from '../lib/sources/fuyao-rest.js'
 import { createTencentSources } from '../lib/sources/tencent-http.js'
+import { createSinaSources } from '../lib/sources/sina-http.js'
+import { createOfficialSources } from '../lib/sources/official-http.js'
+import { createCsindexSources } from '../lib/sources/csindex-http.js'
+import { createThsSources } from '../lib/sources/ths-http.js'
+import { createPythonSources } from '../lib/sources/python-remote.js'
 import { createEastmoneySources } from '../lib/sources/eastmoney-http.js'
 import { createWindSources } from '../lib/sources/wind-mcp.js'
 import { createFtshareSources } from '../lib/sources/ftshare-rest.js'
@@ -18,7 +23,9 @@ import { topicOf } from '../lib/data-collector/catalog-taxonomy.js'
 const OUTPUT = fileURLToPath(new URL('../docs/data-collector-capabilities.md', import.meta.url))
 
 const hub = new DataCollectorHub({ store: { async save() { throw new Error('unused') } } })
-const sources = [...createFuyaoRestSources(async () => 'unused'), ...createTencentSources(), ...createEastmoneySources(), ...createWindSources(async () => 'unused'), ...createFtshareSources(async () => 'unused')]
+// The python factory only needs a runner for assemble/describe; its capabilities are excluded from
+// contract probing (private runtime), but their schemas must still reach the catalog.
+const sources = [...createFuyaoRestSources(async () => 'unused'), ...createTencentSources(), ...createEastmoneySources(), ...createSinaSources(), ...createOfficialSources(), ...createCsindexSources(), ...createThsSources(), ...createPythonSources(async () => { throw new Error('docs generation does not run python') }), ...createWindSources(async () => 'unused'), ...createFtshareSources(async () => 'unused')]
 for (const source of sources) hub.registerSource(source)
 
 const pathOf = (source) => source.schema.source_label === 'tencent'
@@ -29,7 +36,17 @@ const pathOf = (source) => source.schema.source_label === 'tencent'
       ? `/wind/${source.schema.capability.replace(/^wind_/, '')}`
       : source.schema.source_label === 'ftshare'
         ? `/ftshare/${source.schema.capability.replace(/^ftshare_/, '')}`
-        : '/' + source.schema.data_key.replace('fuyao.api.', '').replace(/\./g, '/')
+        : source.schema.source_label === 'sina'
+          ? `/sina/${source.schema.capability.replace(/^sina_/, '')}`
+          : source.schema.source_label === 'csindex'
+            ? `/csindex/${source.schema.capability.replace(/^csindex_/, '')}`
+            : source.schema.source_label === 'ths'
+              ? `/ths/${source.schema.capability.replace(/^ths_/, '')}`
+            : source.schema.source_label === 'official'
+              ? `/official/${source.schema.capability}`
+              : source.schema.source_label === 'python'
+                ? `/python/${source.schema.capability}`
+                : '/' + source.schema.data_key.replace('fuyao.api.', '').replace(/\./g, '/')
 
 // Eastmoney is split into macro / mutual / capital tables with overlapping filters, so the
 // generic group must exclude the other two path sets or rows show up in two tables.
@@ -54,6 +71,11 @@ const GROUPS = [
   ['东方财富 HTTP（沪深港通）', (p) => MUTUAL_PATHS.has(p)],
   ['东方财富 HTTP（宏观指标）', (p) => MACRO_PATHS.has(p)],
   ['东方财富 HTTP（资金与筹码）', (p) => p.startsWith('/eastmoney/') && !MACRO_PATHS.has(p) && !MUTUAL_PATHS.has(p)],
+  ['新浪公开 HTTP（ETF 期权 + A50）', (p) => p.startsWith('/sina/')],
+  ['交易所与货币网官方（ETF 份额、回购定盘）', (p) => p.startsWith('/official/')],
+  ['中证指数（指数估值）', (p) => p.startsWith('/csindex/')],
+  ['同花顺网页直连（热榜概念标签、涨停揭秘板型）', (p) => p.startsWith('/ths/')],
+  ['私有 Python 通道（BaoStock 估值/退市信息、人民银行社融）', (p) => p.startsWith('/python/')],
   ['Wind 金融数据服务（MCP）', (p) => p.startsWith('/wind/')],
   ['FTShare（资金流 + 行情与日 K 截面 + 快照与日历 + 大宗交易、业绩预告/快报、申万行业 + 涨跌停价、龙虎榜席位、股东人数、指数权重、可转债 K 线，plan B）', (p) => p.startsWith('/ftshare/')],
 ]
@@ -69,16 +91,26 @@ const paramsOf = (source) => {
 const L = []
 L.push('# data_collector 能力总表')
 L.push('')
-L.push('> 本表由 `npm run docs:capabilities` 从 Fuyao、Tencent、Eastmoney、Wind 与 FTShare source 定义生成，并由 `test/data-collector-capabilities.test.mjs` 断言与实现同步：新增端点若忘了重新生成，测试会失败。')
+L.push('> 本表由 `npm run docs:capabilities` 从各 source 定义生成（Fuyao、Tencent、Eastmoney、Sina、交易所/货币网官方、中证指数、私有 Python 通道、Wind、FTShare），并由 `test/data-collector-capabilities.test.mjs` 断言与实现同步：新增端点若忘了重新生成，测试会失败。')
 L.push('')
-const fuyaoCount = sources.filter((source) => source.schema.source_label === 'fuyao').length
-const tencentCount = sources.filter((source) => source.schema.source_label === 'tencent').length
-const eastmoneyCount = sources.filter((source) => source.schema.source_label === 'eastmoney').length
-const windCount = sources.filter((source) => source.schema.source_label === 'wind').length
-const ftshareCount = sources.filter((source) => source.schema.source_label === 'ftshare').length
-L.push('当前共 **' + sources.length + ' 个 capability**：同花顺 Fuyao ' + fuyaoCount + ' 个，腾讯公开 HTTP ' + tencentCount + ' 个，东方财富 HTTP ' + eastmoneyCount + ' 个，Wind 金融数据服务 ' + windCount + ' 个，FTShare（非凸科技）' + ftshareCount + ' 个。参数后带 **\\*** 表示必填。')
+const SOURCE_LABELS = [
+  ['fuyao', '同花顺 Fuyao'],
+  ['tencent', '腾讯公开 HTTP'],
+  ['eastmoney', '东方财富 HTTP'],
+  ['sina', '新浪公开 HTTP'],
+  ['official', '交易所与货币网官方'],
+  ['csindex', '中证指数'],
+  ['ths', '同花顺网页直连'],
+  ['python', '私有 Python 通道'],
+  ['wind', 'Wind 金融数据服务'],
+  ['ftshare', 'FTShare（非凸科技）'],
+]
+const counts = SOURCE_LABELS
+  .map(([label, name]) => [name, sources.filter((source) => source.schema.source_label === label).length])
+  .filter(([, count]) => count > 0)
+L.push('当前共 **' + sources.length + ' 个 capability**：' + counts.map(([name, count]) => name + ' ' + count + ' 个').join('，') + '。参数后带 **\\*** 表示必填。')
 L.push('')
-L.push('**复核方式**：Fuyao 能力可用 `npm run smoke:fuyao` 真实复核；Tencent 能力使用最小 smoke fixture 或按需真实请求复核；Eastmoney 能力使用固定 fixture，并按需执行公开网页 JSON smoke；Wind 能力用 `npm run smoke:wind` 真实复核（需要 `WIND_API_KEY`，**按次消耗上游积分**）。FTShare 那几条走 `npm run contract:probe` 的 daily 档巡检（需要 `FTSHARE_API_KEY`；**免费档限流 10 QPS / burst 20**，取数一律经本模块的进程级节流链）。')
+L.push('**复核方式**：Fuyao 能力可用 `npm run smoke:fuyao` 真实复核；Tencent 能力使用最小 smoke fixture 或按需真实请求复核；Eastmoney 能力使用固定 fixture，并按需执行公开网页 JSON smoke；新浪 / 交易所与货币网官方 / 中证指数走 `npm run contract:probe` 的日档巡检（零 key）；私有 Python 通道那三条需要本机私有运行时，巡检标记为 excluded、按需手跑；Wind 能力用 `npm run smoke:wind` 真实复核（需要 `WIND_API_KEY`，**按次消耗上游积分**）；FTShare 那几条同样走 `npm run contract:probe`（需要 `FTSHARE_API_KEY`；**免费档限流 10 QPS / burst 20**，取数一律经本模块的进程级节流链）。')
 L.push('')
 L.push('## 怎么用')
 L.push('')

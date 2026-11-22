@@ -3,7 +3,7 @@
  * source: the nine shards must be audited together, and a missing production entry is a
  * test failure rather than a capability that silently falls into `meta`.
  */
-export declare const CATALOG_TOPICS: readonly ["quote", "flow", "financials", "fund", "events", "macro", "futures", "cross", "meta"];
+export declare const CATALOG_TOPICS: readonly ["quote", "flow", "financials", "fund", "events", "macro", "futures", "options", "cross", "meta"];
 export type CatalogTopic = (typeof CATALOG_TOPICS)[number];
 export declare const CATALOG_TOPIC_LABELS: Record<CatalogTopic, string>;
 /**

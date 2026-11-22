@@ -6,6 +6,11 @@ import { DatasetStoreError } from '../lib/data-collector/store.js'
 import { createFuyaoRestSources } from '../lib/sources/fuyao-rest.js'
 import { createTencentSources } from '../lib/sources/tencent-http.js'
 import { createEastmoneySources } from '../lib/sources/eastmoney-http.js'
+import { createSinaSources } from '../lib/sources/sina-http.js'
+import { createOfficialSources } from '../lib/sources/official-http.js'
+import { createCsindexSources } from '../lib/sources/csindex-http.js'
+import { createThsSources } from '../lib/sources/ths-http.js'
+import { createPythonSources } from '../lib/sources/python-remote.js'
 import { createWindSources } from '../lib/sources/wind-mcp.js'
 import { createFtshareSources } from '../lib/sources/ftshare-rest.js'
 
@@ -396,9 +401,9 @@ test('describeCapability：返回单个能力详情，未知名字返回 undefin
 
 test('能力目录分片：taxonomy 完整、索引与单片预算各自成立，不靠单份全目录', async () => {
   const { hub } = makeHub()
-  for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources(), ...createWindSources(async () => 'key'), ...createFtshareSources(async () => 'key')]) hub.registerSource(dataSource)
+  for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources(), ...createSinaSources(), ...createOfficialSources(), ...createCsindexSources(), ...createThsSources(), ...createPythonSources(async () => { throw new Error('catalog only') }), ...createWindSources(async () => 'key'), ...createFtshareSources(async () => 'key')]) hub.registerSource(dataSource)
   const names = hub.capabilityNames()
-  assert.equal(names.length, 135, '端点数量回归：分片断言必须覆盖 Fuyao、Tencent、Eastmoney、Wind 与 FTShare 全部已注册能力')
+  assert.equal(names.length, 162, '端点数量回归：分片断言必须覆盖全部已注册能力（含新浪 / 官方 / 中证 / 私有 Python 通道）')
 
   // A missing production entry would fall into `meta`; stale entries would never be visible.
   assert.deepEqual(names.filter((name) => !Object.hasOwn(CATALOG_TAXONOMY, name)), [], '每个生产能力都必须在 catalog-taxonomy 里有 topic')
@@ -406,12 +411,12 @@ test('能力目录分片：taxonomy 完整、索引与单片预算各自成立�
 
   const index = hub.catalogIndex()
   assert.ok(codePoints(index) < 1024, `主题索引 ${codePoints(index)} 码点超过 1024：索引只放 topic 头，不放能力行`)
-  assert.equal(index.split('\n').length, 9, '索引必须覆盖九个主题')
+  assert.equal(index.split('\n').length, 10, '索引必须覆盖十个主题')
   for (const line of index.split('\n')) assert.equal(line.split('|').length, 5, `索引行不是 topic|label|count|chars|examples：${line}`)
 
   const entries = hub.catalogTopicEntries()
-  assert.equal(entries.length, 9)
-  assert.equal(entries.reduce((sum, entry) => sum + entry.count, 0), names.length, '九片条数之和必须等于注册数')
+  assert.equal(entries.length, 10)
+  assert.equal(entries.reduce((sum, entry) => sum + entry.count, 0), names.length, '十片条数之和必须等于注册数')
   for (const entry of entries) {
     const shard = hub.capabilityDirectory(entry.topic)
     assert.equal(shard.split('\n').length, entry.count, `${entry.topic} 的行数与索引头不一致`)
@@ -422,7 +427,7 @@ test('能力目录分片：taxonomy 完整、索引与单片预算各自成立�
 
   // The full directory is internal only (docs/tests); shards must partition it with no loss or duplicate.
   const sharded = entries.flatMap((entry) => hub.capabilityDirectory(entry.topic).split('\n')).sort()
-  assert.deepEqual(sharded, hub.capabilityDirectory().split('\n').sort(), '九片必须恰好覆盖全目录，不能丢能力或重复')
+  assert.deepEqual(sharded, hub.capabilityDirectory().split('\n').sort(), '十片必须恰好覆盖全目录，不能丢能力或重复')
 })
 
 test('宽表详情预算：字段字典让 72 列的能力留在预算内（直发 output_schema 必爆）', () => {
@@ -463,7 +468,7 @@ test('宽表详情预算：字段字典让 72 列的能力留在预算内（直�
 
 test('单能力详情体积预算：字典投影后仍不许逼近剪枝阈值', async () => {
   const { hub } = makeHub()
-  for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources(), ...createWindSources(async () => 'key'), ...createFtshareSources(async () => 'key')]) hub.registerSource(dataSource)
+  for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources(), ...createSinaSources(), ...createOfficialSources(), ...createCsindexSources(), ...createThsSources(), ...createPythonSources(async () => { throw new Error('catalog only') }), ...createWindSources(async () => 'key'), ...createFtshareSources(async () => 'key')]) hub.registerSource(dataSource)
   // Detail is returned per call, so it gets a tighter 4096-codepoint guard.
   // Every new source family must be registered here or it escapes the check.
   const details = hub.capabilityNames().map((capability) => JSON.stringify(hub.describeCapability(capability)))

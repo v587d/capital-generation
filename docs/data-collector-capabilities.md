@@ -1,10 +1,10 @@
 # data_collector 能力总表
 
-> 本表由 `npm run docs:capabilities` 从 Fuyao、Tencent、Eastmoney、Wind 与 FTShare source 定义生成，并由 `test/data-collector-capabilities.test.mjs` 断言与实现同步：新增端点若忘了重新生成，测试会失败。
+> 本表由 `npm run docs:capabilities` 从各 source 定义生成（Fuyao、Tencent、Eastmoney、Sina、交易所/货币网官方、中证指数、私有 Python 通道、Wind、FTShare），并由 `test/data-collector-capabilities.test.mjs` 断言与实现同步：新增端点若忘了重新生成，测试会失败。
 
-当前共 **135 个 capability**：同花顺 Fuyao 64 个，腾讯公开 HTTP 10 个，东方财富 HTTP 24 个，Wind 金融数据服务 3 个，FTShare（非凸科技）34 个。参数后带 **\*** 表示必填。
+当前共 **162 个 capability**：同花顺 Fuyao 64 个，腾讯公开 HTTP 10 个，东方财富 HTTP 38 个，新浪公开 HTTP 4 个，交易所与货币网官方 3 个，中证指数 1 个，同花顺网页直连 2 个，私有 Python 通道 3 个，Wind 金融数据服务 3 个，FTShare（非凸科技） 34 个。参数后带 **\*** 表示必填。
 
-**复核方式**：Fuyao 能力可用 `npm run smoke:fuyao` 真实复核；Tencent 能力使用最小 smoke fixture 或按需真实请求复核；Eastmoney 能力使用固定 fixture，并按需执行公开网页 JSON smoke；Wind 能力用 `npm run smoke:wind` 真实复核（需要 `WIND_API_KEY`，**按次消耗上游积分**）。FTShare 那几条走 `npm run contract:probe` 的 daily 档巡检（需要 `FTSHARE_API_KEY`；**免费档限流 10 QPS / burst 20**，取数一律经本模块的进程级节流链）。
+**复核方式**：Fuyao 能力可用 `npm run smoke:fuyao` 真实复核；Tencent 能力使用最小 smoke fixture 或按需真实请求复核；Eastmoney 能力使用固定 fixture，并按需执行公开网页 JSON smoke；新浪 / 交易所与货币网官方 / 中证指数走 `npm run contract:probe` 的日档巡检（零 key）；私有 Python 通道那三条需要本机私有运行时，巡检标记为 excluded、按需手跑；Wind 能力用 `npm run smoke:wind` 真实复核（需要 `WIND_API_KEY`，**按次消耗上游积分**）；FTShare 那几条同样走 `npm run contract:probe`（需要 `FTSHARE_API_KEY`；**免费档限流 10 QPS / burst 20**，取数一律经本模块的进程级节流链）。
 
 ## 怎么用
 
@@ -224,6 +224,58 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 | `eastmoney_global_quote` | `quote` | `/eastmoney/global_quote` | `symbols`\* | 否 | 东财全球指数/商品/汇率/美债快照 |
 | `eastmoney_global_kline` | `quote` | `/eastmoney/global_kline` | `symbol`\* `period` `start_date`\* `end_date`\* | 否 | 东财全球指数/商品/汇率/美债日周月 K 线 |
 | `eastmoney_margin_total` | `flow` | `/eastmoney/margin_total` | `start_date`\* `end_date`\* `market` `page` `size` | 是 | 东财市场级两融合计（按交易所日频） |
+| `eastmoney_security_profile` | `meta` | `/eastmoney/security_profile` | `ticker`\* | 否 | 东财个股基本面：行业/股本/市值/上市日/PE/PB |
+| `eastmoney_st_stock_list` | `meta` | `/eastmoney/st_stock_list` | `market` | 否 | 沪深京 ST/*ST 当日名单（风险警示快照） |
+| `eastmoney_institution_research` | `events` | `/eastmoney/institution_research` | `ticker` `start_date` `end_date` `page` `size` | 是 | 东财机构调研事件（按公告日，一次调研一行） |
+| `eastmoney_holder_change` | `events` | `/eastmoney/holder_change` | `ticker` `start_date` `end_date` `direction` `page` `size` | 是 | 东财重要股东增减持事件（按公告日） |
+| `eastmoney_buyback` | `events` | `/eastmoney/buyback` | `ticker` `start_date` `end_date` `progress` `page` `size` | 是 | 东财回购方案与实施进度（方案一行） |
+| `eastmoney_pledge` | `events` | `/eastmoney/pledge` | `ticker` `start_date` `end_date` `page` `size` | 是 | 东财股权质押周度统计（仅沪深） |
+| `eastmoney_new_stock` | `events` | `/eastmoney/new_stock` | `ticker` `start_date` `end_date` `page` `size` | 是 | 东财新股申购与发行日历（含未申购排期） |
+| `eastmoney_limit_up_pool` | `flow` | `/eastmoney/limit_up_pool` | `trade_date`\* | 否 | 东财涨停池（push2ex 口径，含首末封与封板资金） |
+| `eastmoney_limit_break_pool` | `flow` | `/eastmoney/limit_break_pool` | `trade_date`\* | 否 | 东财炸板池（push2ex 口径，含涨停价与振幅） |
+| `eastmoney_limit_down_pool` | `flow` | `/eastmoney/limit_down_pool` | `trade_date`\* | 否 | 东财跌停池（push2ex 口径，含封单资金与连续跌停） |
+| `eastmoney_yesterday_limit_up_pool` | `flow` | `/eastmoney/yesterday_limit_up_pool` | `trade_date`\* | 否 | 东财昨日涨停池（昨涨停今表现，含晋级率原料） |
+| `eastmoney_price_anomaly_list` | `flow` | `/eastmoney/price_anomaly_list` | `page_size` `page_no` `date` | 是 | 东财严重异常波动明细（规则码/累计偏离/统计窗口） |
+| `eastmoney_price_anomaly_count` | `flow` | `/eastmoney/price_anomaly_count` | `page_size` `page_no` `date` `sort_key` `sort_dir` | 是 | 东财异动按标的聚合（窗口内异动次数/累计偏离） |
+| `eastmoney_stock_hot_concepts` | `flow` | `/eastmoney/stock_hot_concepts` | `ticker`\* | 否 | 东财个股动态概念命中热度（App 热度口径） |
+
+## 新浪公开 HTTP（ETF 期权 + A50）
+
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `sina_etf_option_contracts` | `options` | `/sina/etf_option_contracts` | `underlying`\* `side`\* | 否 | 新浪 ETF 期权合约清单（标的×月份×认购/认沽） |
+| `sina_etf_option_tquote` | `options` | `/sina/etf_option_tquote` | `codes`\* | 否 | 新浪 ETF 期权 T 型报价（盘口/持仓/涨跌/振幅） |
+| `sina_etf_option_greeks` | `options` | `/sina/etf_option_greeks` | `codes`\* | 否 | 新浪 ETF 期权希腊字母与隐含波动率 |
+| `sina_a50_futures` | `futures` | `/sina/a50_futures` | 无参数 | 否 | 富时中国 A50 CFD 连续报价（新浪） |
+
+## 交易所与货币网官方（ETF 份额、回购定盘）
+
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `sse_etf_shares` | `flow` | `/official/sse_etf_shares` | `trade_date` | 否 | 上交所 ETF 份额（按日归档，可查历史） |
+| `szse_etf_shares` | `flow` | `/official/szse_etf_shares` | `trade_date` | 否 | 深交所 ETF 份额（仅最新一天快照） |
+| `chinamoney_repo_fixing` | `macro` | `/official/chinamoney_repo_fixing` | `start_date` `end_date` | 否 | 银行间回购定盘利率 FR/FDR 全历史 |
+
+## 中证指数（指数估值）
+
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `csindex_index_valuation` | `quote` | `/csindex/index_valuation` | `index_code`\* `start_date`\* `end_date`\* `count` | 否 | 中证指数滚动市盈率 PE(TTM) 日序列（官网 JSON） |
+
+## 同花顺网页直连（热榜概念标签、涨停揭秘板型）
+
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `ths_hot_list` | `flow` | `/ths/hot_list` | `type` | 否 | 同花顺热榜 100 行（含概念/人气标签，网页直连） |
+| `ths_limit_up_detail` | `flow` | `/ths/limit_up_detail` | `date` `page` `size` | 是 | 同花顺涨停揭秘（板型/封板成功率/是否回封） |
+
+## 私有 Python 通道（BaoStock 估值/退市信息、人民银行社融）
+
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `baostock_valuation_history` | `financials` | `/python/baostock_valuation_history` | `code`\* `start_date`\* `end_date`\* | 否 | BaoStock 日频历史估值：PE/PB/PS/PCF + 换手率 + 停牌/ST |
+| `baostock_stock_basic` | `meta` | `/python/baostock_stock_basic` | `codes`\* | 否 | BaoStock 上市日/退市日/证券类型/上市状态（批量 1..50） |
+| `pbc_social_financing` | `macro` | `/python/pbc_social_financing` | `months` | 否 | 人民银行社会融资规模增量（月度，亿元，2022-01 起） |
 
 ## Wind 金融数据服务（MCP）
 

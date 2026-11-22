@@ -1398,7 +1398,7 @@ export function registerSourceTools(ctx: Context, localFetchOptions: LocalFetchO
     },
     {
       name: 'sina_reports',
-      description: '取新浪研报列表（研报第二来源，与 eastmoney_reports 互为备份）。不传 code 取全市场最新一页（约 40 条）；传 6 位代码只看该股（本工具会自动补交易所前缀——实测缺前缀时科创板会返回假空页）。只给标题/类型/日期/机构/研究员/详情页链接，**不含评级与目标价**（需要这些用 eastmoney_reports）。上游空页是 HTTP 200 且与"确实没有研报"同形，本工具已按行数与空页提示双重判定区分。',
+      description: '取新浪研报列表（研报第二来源，与 eastmoney_reports 互为备份）。不传 code 取全市场最新一页（约 40 条）；传 6 位代码只看该股（本工具会自动补交易所前缀——实测缺前缀时科创板会返回假空页）。只给标题/类型/日期/机构/研究员/详情页链接，**不含评级与目标价**（需要这些用 eastmoney_reports）。⛔ 上游「空页」是 HTTP 200 且与「确实没有研报」同形：1 秒内连打两次，第二次起会拿到假的「没有找到相关内容」。本工具已做两件事——① 所有请求走 ≥6 秒最小间隔的进程级节流链；② 空页会按该间隔重试一次，**只有重试仍空**才当作「该股确实没有研报」，此时 note 里会写明已重试。代价是空页场景一次调用可能要多等约 6 秒，这是正确性成本，不要为了快而绕过。',
       parameters: jsonObject({
         code: { type: 'string', description: `可选，6 位股票代码；省略则取全市场最新${CODE_FORMS}` },
         page: { type: 'integer', description: '可选，页码从 1 开始' },

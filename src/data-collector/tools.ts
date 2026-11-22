@@ -164,7 +164,7 @@ function resolveCapability(hub: DataCollectorHub, value: unknown): string {
     if (available.length === 0) {
       throw capabilityError('capability_catalog_empty', '当前没有任何已注册的数据能力（数据源注册没有生效）。注意：缺凭据**不会**让目录变空——同花顺能力始终在目录里，只在取数那一刻点名 FUYAO_API_KEY 失败。本工具此刻对任何名字都会失败——不要反复重试，也不要编造能力名；请把该状态回告主 Agent，必要时用 dc_status 核对 registered_capability_count / registered_topics 与 api_key。')
     }
-    throw capabilityError('capability_unknown', `未注册的能力 "${name}"。目录按九个主题分片，下面是索引；先按 topic 取分片，再原样复制名字：\n${hub.catalogIndex()}\n不要自行编造、缩写或改写。`)
+    throw capabilityError('capability_unknown', `未注册的能力 "${name}"。目录按十个主题分片，下面是索引；先按 topic 取分片，再原样复制名字：\n${hub.catalogIndex()}\n不要自行编造、缩写或改写。`)
   }
   return name
 }
@@ -173,7 +173,7 @@ function resolveCapability(hub: DataCollectorHub, value: unknown): string {
 function resolveCatalogTopic(hub: DataCollectorHub, value: unknown): CatalogTopic | undefined {
   if (value === undefined || value === null) return undefined
   if (typeof value !== 'string') {
-    throw capabilityError('capability_scope_invalid', `topic 必须是字符串（收到 ${Array.isArray(value) ? 'array' : typeof value}）。省略 topic 取九行索引，或从索引里选一个 topic 原样传入。`)
+    throw capabilityError('capability_scope_invalid', `topic 必须是字符串（收到 ${Array.isArray(value) ? 'array' : typeof value}）。省略 topic 取十行索引，或从索引里选一个 topic 原样传入。`)
   }
   const topic = value.trim()
   if (topic.length === 0) return undefined
@@ -181,7 +181,7 @@ function resolveCatalogTopic(hub: DataCollectorHub, value: unknown): CatalogTopi
   const match = entries.find((entry) => entry.topic === topic)
   if (!match) {
     const available = entries.map((entry) => `${entry.topic}(${entry.label},${entry.count}条)`).join('、')
-    throw capabilityError('capability_scope_invalid', `未知 topic "${topic}"。可用 topic：${available || '（当前目录为空）'}。请从 list_capabilities() 的索引里原样选一个 topic，再调用 list_capabilities({ "topic": "<topic>" })；不要编造。需要全量就九片分别取，不要用 all。`)
+    throw capabilityError('capability_scope_invalid', `未知 topic "${topic}"。可用 topic：${available || '（当前目录为空）'}。请从 list_capabilities() 的索引里原样选一个 topic，再调用 list_capabilities({ "topic": "<topic>" })；不要编造。需要全量就十片分别取，不要用 all。`)
   }
   return match.topic
 }
@@ -249,12 +249,12 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
     ),
     tool(
       'list_capabilities',
-      '发现数据能力目录。不传 topic：返回九行主题索引 `topic|中文|条数|码点|例子`，先看哪个主题包含所需能力；传 topic：返回该主题的 `capability|summary|paginated` 行。按问题需要取片，不设片数上限：复杂/跨资产问题建议第一步九片全取，单一资产按需取；同一 session 已有结果不要重复调用，多个 topic 在同一条消息里并发调用（本工具纯读、可并发）。片数是结果，不是配额；单片 <2048 是体积预算。目录刻意不含 schema；选定能力后用 describe_capability 取完整契约。request_data 的 capability 必须以目录为准，不要编造。未知 topic 返回 capability_scope_invalid 并列出可用主题。',
+      '发现数据能力目录。不传 topic：返回十行主题索引 `topic|中文|条数|码点|例子`，先看哪个主题包含所需能力；传 topic：返回该主题的 `capability|summary|paginated` 行。按问题需要取片，不设片数上限：复杂/跨资产问题建议第一步十片全取，单一资产按需取；同一 session 已有结果不要重复调用，多个 topic 在同一条消息里并发调用（本工具纯读、可并发）。片数是结果，不是配额；单片 <2048 是体积预算。目录刻意不含 schema；选定能力后用 describe_capability 取完整契约。request_data 的 capability 必须以目录为准，不要编造。未知 topic 返回 capability_scope_invalid 并列出可用主题。',
       jsonObject({
         topic: {
           type: 'string',
           enum: [...CATALOG_TOPICS],
-          description: '可选。省略返回九行主题索引；给出 topic 返回该主题的能力目录。一次只取需要的主题，不要拉全部。',
+          description: '可选。省略返回十行主题索引；给出 topic 返回该主题的能力目录。一次只取需要的主题，不要拉全部。',
         },
       }),
       { type: 'string' },
@@ -270,7 +270,7 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
     ),
     tool(
       'describe_capability',
-      '读取**一个**能力的完整契约：description（单位、null 语义、时间与分页口径）、input_schema（params 的取值与约束）、output_fields（返回字段的逐行字典 `路径:类型[:说明]`，类型后缀 `?` 为可为 null、`[].` 为数组元素的字段）与 paginated。request_data 的 params 必须按这里返回的 input_schema 填写；request_data 若返回 request_params_invalid，应回到这里重新读取后再重试。一个能力描述一次即可：结果已在本 session 历史里，重复描述同一个能力只会白占上下文；需要几个能力就**在同一条消息里一次发出多个调用**（本工具是纯读、可并发执行，框架会把它们放进并发池、在同一个下一步一起返回），但一次仍只传**一个**名字，不要用逗号把多个名字塞进一条调用。错误按 code 引导：capability_required（没给名字，先 list_capabilities()）、capability_invalid（不是字符串/超长/含逗号，改为目录中的单个名字）、capability_catalog_empty（数据源未注册，别重试，回告主 Agent）、capability_unknown（名字不存在，错误里回九行索引，按 topic 取分片后原样复制）。',
+      '读取**一个**能力的完整契约：description（单位、null 语义、时间与分页口径）、input_schema（params 的取值与约束）、output_fields（返回字段的逐行字典 `路径:类型[:说明]`，类型后缀 `?` 为可为 null、`[].` 为数组元素的字段）与 paginated。request_data 的 params 必须按这里返回的 input_schema 填写；request_data 若返回 request_params_invalid，应回到这里重新读取后再重试。一个能力描述一次即可：结果已在本 session 历史里，重复描述同一个能力只会白占上下文；需要几个能力就**在同一条消息里一次发出多个调用**（本工具是纯读、可并发执行，框架会把它们放进并发池、在同一个下一步一起返回），但一次仍只传**一个**名字，不要用逗号把多个名字塞进一条调用。错误按 code 引导：capability_required（没给名字，先 list_capabilities()）、capability_invalid（不是字符串/超长/含逗号，改为目录中的单个名字）、capability_catalog_empty（数据源未注册，别重试，回告主 Agent）、capability_unknown（名字不存在，错误里回十行索引，按 topic 取分片后原样复制）。',
       jsonObject({ capability: { type: 'string' } }, ['capability']),
       jsonObject({
         capability: { type: 'string' },
@@ -290,7 +290,7 @@ export function registerDataCollectorTools(ctx: Context, hub: DataCollectorHub, 
       { concurrencySafe: true },
     ),
     ...(diagnostics ? [
-      tool('dc_status', '诊断工具：返回数据管道运行状态 —— at/call 为本次真实执行的时间戳与计数（防伪）、api_key 为**本次调用现取**的凭据解析结果（present/source，不含密钥值）、registered_capability_count 与 registered_topics 为当前注册规模（九片 topic/label/count 汇总；**不返回全部能力名**，名字从 `list_capabilities` 分片取）、agent_tool_policy 为工具面收敛的现场记录（preset_id / root / outcome / allowed / denied / failed：`outcome=restricted` 是组合期那次减名字的账，`guard-denied` 是一次调用真的被调用级闸门拦下（`ocr` 的 url 形态、`write` / `edit`、角色的 `interrupt_agent`），`not-capital` / `skipped` / `unavailable` / `pending` 是四种没生效的原因；`root=true` 是用户手开出来的会话。工具面本身由该 preset 挂的工具行决定，allowed 恒为空。排查"某个 Agent 为什么看得见、或为什么用不了某颗工具"用）、session_identity 为最近的工具授权判据现场（tool / via=preset|topology / preset_id / allowed；`via:"topology"` 表示 registry 读不到身份、回落到"必须是被委派的子会话"这一旧判据）。数据源注册不依赖 key：api_key.present=false 时同花顺能力仍在目录里，但每次取数会点名 FUYAO_API_KEY 失败。排障时优先调用。', jsonObject(),
+      tool('dc_status', '诊断工具：返回数据管道运行状态 —— at/call 为本次真实执行的时间戳与计数（防伪）、api_key 为**本次调用现取**的凭据解析结果（present/source，不含密钥值）、registered_capability_count 与 registered_topics 为当前注册规模（十片 topic/label/count 汇总；**不返回全部能力名**，名字从 `list_capabilities` 分片取）、agent_tool_policy 为工具面收敛的现场记录（preset_id / root / outcome / allowed / denied / failed：`outcome=restricted` 是组合期那次减名字的账，`guard-denied` 是一次调用真的被调用级闸门拦下（`ocr` 的 url 形态、`write` / `edit`、角色的 `interrupt_agent`），`not-capital` / `skipped` / `unavailable` / `pending` 是四种没生效的原因；`root=true` 是用户手开出来的会话。工具面本身由该 preset 挂的工具行决定，allowed 恒为空。排查"某个 Agent 为什么看得见、或为什么用不了某颗工具"用）、session_identity 为最近的工具授权判据现场（tool / via=preset|topology / preset_id / allowed；`via:"topology"` 表示 registry 读不到身份、回落到"必须是被委派的子会话"这一旧判据）。数据源注册不依赖 key：api_key.present=false 时同花顺能力仍在目录里，但每次取数会点名 FUYAO_API_KEY 失败。排障时优先调用。', jsonObject(),
         jsonObject({
           at: { type: 'integer' },
           call: { type: 'integer' },

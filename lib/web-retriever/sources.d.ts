@@ -205,11 +205,18 @@ export declare function eastmoneyAnnouncementBody(client: EastmoneyClient, input
 /**
  * Always add the exchange prefix: bare codes get a fake empty page for STAR/ChiNext.
  * That page is HTTP 200 and looks like "no reports", so also verify the numbered row count.
+ *
+ * ⛔ A *real* empty page is byte-identical to that fake one, so a single empty answer proves nothing:
+ * querying once per second gets the fake page, waiting ≥5s gets the reports. Every request therefore
+ * goes through the shared 6s chain, and an empty page is retried once — only then is it reported as
+ * "no reports". A page past the last one pays the same 6s and still comes back empty; correct, just slow.
  */
 export declare function sinaReports(transport: Requester, input: {
     code?: string;
     page: number;
     signal?: AbortSignal;
+    /** Tests inject a pass-through; production defaults to the shared 6s chain. */
+    throttle?: <T>(task: () => Promise<T>) => Promise<T>;
 }): Promise<SourceOutcome>;
 /**
  * Always prefix the exchange; order matters: BJ segments (43/83/87/920) start with 9/4

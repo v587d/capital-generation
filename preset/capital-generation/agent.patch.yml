@@ -109,7 +109,7 @@
               dataCollectorHub: true
               datasetStore: true
             config:
-              # Family row: hub + 132 sources + the collect tools; `tools/time` sits outside the realm (own store).
+              # Family row: hub + 162 sources + the collect tools; `tools/time` sits outside the realm (own store).
               - id: capital-collect-tools
                 name: '@v587d/capital-generation/tools/collect'
 

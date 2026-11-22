@@ -100,7 +100,7 @@
 ## 1.5 capability 发现与体积预算
 
 - `data_key` 是宿主内部路由字段，不进模型协议；模型侧只用短小全局唯一的 capability 名。
-- **三级发现（索引 → 分片 → 详情）**：`list_capabilities()` 返回九行主题索引
+- **三级发现（索引 → 分片 → 详情）**：`list_capabilities()` 返回十行主题索引
   `topic|中文|条数|码点|例子`；带 `topic` 返回该片 `capability|summary|paginated` 行；
   `describe_capability` 给 `description` / `input_schema` / `output_fields`。三段都不带 schema。
   新增 Fuyao 端点必须同时写 `summary` 与 `description`，并在 `catalog-taxonomy.ts` 登记
@@ -113,7 +113,7 @@
   在 `stock_items`）。**新增端点若行数组不叫 `item`，必须在 guard 写明 `itemKey`**。
 - **分片预算**：pruner 的 `thresholdChars` 仍是宿主真实上限（8192，且不能按 Agent 区分）；模型侧
   按条送：索引 <1024、单片 <2048 软目标 / 4096 硬上限、单能力详情 <4096。全目录不合成单条结果；
-  需要时可九片全取，片数按问题定、不设上限。
+  需要时可十片全取，片数按问题定、不设上限。
   能力总数增长先由 `catalog-taxonomy.ts` 落到某一片，片内超预算才失败，不再直接撞 6144；
   `test/data-collector-hub.test.mjs` 先失败。
 

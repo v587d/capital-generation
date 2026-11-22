@@ -58,13 +58,13 @@ description: Use when composing or reading a Capital data message — data_reque
 
 | 步 | 工具 | 得到什么 | 调用纪律 |
 |----|------|----------|----------|
-| ① | `list_capabilities()` | 九行主题索引：`topic\|中文\|条数\|码点\|例子` | **一个任务只调一次索引**；重复调用白占上下文 |
-| ② | `list_capabilities({ topic })` | 该主题的 `capability\|summary\|paginated` 行 | **每个 topic 只调一次**；按问题需要取片，不设片数上限：需要几片取几片，复杂/跨资产问题可以九片全取；多个 topic 同一条消息并发发出 |
+| ① | `list_capabilities()` | 十行主题索引：`topic\|中文\|条数\|码点\|例子` | **一个任务只调一次索引**；重复调用白占上下文 |
+| ② | `list_capabilities({ topic })` | 该主题的 `capability\|summary\|paginated` 行 | **每个 topic 只调一次**；按问题需要取片，不设片数上限：需要几片取几片，复杂/跨资产问题可以十片全取；多个 topic 同一条消息并发发出 |
 | ③ | `describe_capability({ capability })` | 完整 `description` / `input_schema` / `output_fields`（逐行字段字典） | 一次只传**一个**名字、**不传逗号**；同一个能力只描述一次；多个描述同一条消息并发发出 |
 
-- **先看索引再选片**：复杂/跨资产问题第一步九片全取；单一资产按需取。
-- **片数是结果不是配额**：按需取片，不要为省片数漏能力。单片 <2048 是体积预算；九片合起来仍是全目录，不会触发单条剪枝。
-- **九片全取用九个独立调用**：不要 `topic=all`，那会合成一条 10k 结果，剪枝按单条算；分开取。
+- **先看索引再选片**：复杂/跨资产问题第一步十片全取；单一资产按需取。
+- **片数是结果不是配额**：按需取片，不要为省片数漏能力。单片 <2048 是体积预算；十片合起来仍是全目录，不会触发单条剪枝。
+- **十片全取用十个独立调用**：不要 `topic=all`，那会合成一条 10k 结果，剪枝按单条算；分开取。
 - 读分片**按行切**：第一个 `|` 前是 capability；`\|`、`\n` 是转义。索引行五个字段，分片行三个。
 - `output_fields` 每行 `字段路径:类型[:说明]`：`?` = 上游可能给 `null`，`[].` = 数组元素字段；按它写 `query_dataset` 的 `select` / `filters` 列名，原样照抄。
 - 目录刻意不带 schema（全量约 23KB 会被剪枝）；分片只解决目录总量，详情仍逐个取。
@@ -78,8 +78,8 @@ description: Use when composing or reading a Capital data message — data_reque
 |------|------|----------|
 | `capability_required` | 没给名字（缺失或空白） | 先取一次索引，再取对应 topic 的分片，把名字原样传入 |
 | `capability_invalid` | 不是字符串 / 超长 / 含逗号 | 改成单个字符串名字后重试一次；多个能力分多次调用 |
-| `capability_unknown` | 名字不在目录里（错误信息会回九行索引，不再列全量名字） | 从错误里的索引选 topic，取分片后原文复制名字；不编造、不缩写、不改写 |
-| `capability_scope_invalid` | `list_capabilities` 的 topic 不在当前索引里 | 按错误列出的主题重选一个；不要重试同一个 topic。需要全量就九片分别取，不要用 `all` |
+| `capability_unknown` | 名字不在目录里（错误信息会回十行索引，不再列全量名字） | 从错误里的索引选 topic，取分片后原文复制名字；不编造、不缩写、不改写 |
+| `capability_scope_invalid` | `list_capabilities` 的 topic 不在当前索引里 | 按错误列出的主题重选一个；不要重试同一个 topic。需要全量就十片分别取，不要用 `all` |
 | `capability_catalog_empty` | 当前没有任何已注册能力（数据源注册没生效；**缺凭据不会让目录变空**，只会在取数那一刻点名凭据失败） | **不要重试**（此刻任何名字都会失败）；用 `dc_status` 核对 `registered_capability_count` / `registered_topics` 与 `api_key`，如实回告主 Agent |
 | `request_params_invalid` | `request_data` 的 `params` 不符合该能力契约（错误会保留具体字段原因） | 先按错误中的 capability 调 `describe_capability({"capability":"..."})`，重新读取 `input_schema`，修正后只重试一次；不要凭记忆猜参数。网络、超时、落盘错误不要走这条路径 |
 

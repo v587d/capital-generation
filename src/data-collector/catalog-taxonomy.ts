@@ -11,6 +11,7 @@ export const CATALOG_TOPICS = [
   'events',
   'macro',
   'futures',
+  'options',
   'cross',
   'meta',
 ] as const
@@ -25,6 +26,7 @@ export const CATALOG_TOPIC_LABELS: Record<CatalogTopic, string> = {
   events: '公告与公司行为',
   macro: '宏观与利率',
   futures: '期货与商品',
+  options: '期权',
   cross: '跨境与全球',
   meta: '日历与元数据',
 }
@@ -37,6 +39,7 @@ export const CATALOG_TOPIC_LABELS: Record<CatalogTopic, string> = {
 export const CATALOG_TAXONOMY: Record<string, CatalogTopic> = {
   // quote
   'auction': 'quote',
+  'csindex_index_valuation': 'quote',
   'eastmoney_global_kline': 'quote',
   'eastmoney_global_quote': 'quote',
   'eastmoney_sector_rotation': 'quote',
@@ -89,8 +92,13 @@ export const CATALOG_TAXONOMY: Record<string, CatalogTopic> = {
   'limit_up_statistics': 'flow',
   'abnormal_monitor_list': 'flow',
   'skyrocket_list': 'flow',
+  'ths_hot_list': 'flow',
+  'ths_limit_up_detail': 'flow',
+  'sse_etf_shares': 'flow',
+  'szse_etf_shares': 'flow',
   // financials
   'balance_sheet': 'financials',
+  'baostock_valuation_history': 'financials',
   'cash_flow': 'financials',
   'eastmoney_convertible_bond_list': 'financials',
   'financial_indicators': 'financials',
@@ -136,9 +144,16 @@ export const CATALOG_TAXONOMY: Record<string, CatalogTopic> = {
   'fund_top_holders': 'fund',
   // events
   'corporate_actions': 'events',
+  'eastmoney_buyback': 'events',
   'eastmoney_dividend_plan': 'events',
+  'eastmoney_holder_change': 'events',
+  'eastmoney_institution_research': 'events',
   'eastmoney_lockup_expiry': 'events',
+  'eastmoney_new_stock': 'events',
+  'eastmoney_pledge': 'events',
   // macro
+  'chinamoney_repo_fixing': 'macro',
+  'pbc_social_financing': 'macro',
   'eastmoney_cpi': 'macro',
   'eastmoney_customs_trade': 'macro',
   'eastmoney_deposit_reserve': 'macro',
@@ -165,13 +180,28 @@ export const CATALOG_TAXONOMY: Record<string, CatalogTopic> = {
   'ftshare_futures_settle': 'futures',
   'ftshare_futures_warrant': 'futures',
   'ftshare_futures_weekly': 'futures',
+  'sina_a50_futures': 'futures',
+  // options
+  'sina_etf_option_contracts': 'options',
+  'sina_etf_option_greeks': 'options',
+  'sina_etf_option_tquote': 'options',
   // cross
+  'eastmoney_limit_up_pool': 'flow',
+  'eastmoney_limit_break_pool': 'flow',
+  'eastmoney_limit_down_pool': 'flow',
+  'eastmoney_yesterday_limit_up_pool': 'flow',
+  'eastmoney_price_anomaly_list': 'flow',
+  'eastmoney_price_anomaly_count': 'flow',
+  'eastmoney_stock_hot_concepts': 'flow',
   'eastmoney_mutual_flow': 'cross',
   'eastmoney_mutual_quota': 'cross',
   'ftshare_financial_calendar': 'cross',
   'ftshare_trading_calendar': 'cross',
   'wind_stock_kline': 'cross',
   // meta
+  'baostock_stock_basic': 'meta',
+  'eastmoney_security_profile': 'meta',
+  'eastmoney_st_stock_list': 'meta',
   'ftshare_index_weight': 'meta',
   'index_catalog': 'meta',
   'index_constituents': 'meta',

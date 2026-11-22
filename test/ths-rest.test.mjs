@@ -690,7 +690,7 @@ test('Phase 2 输出护栏：主标识严格、指标宽容、null 放行', () =
   assert.equal(valuation.validateOutput({ item: [{ thscode: '600519.SH', pe_ttm: '不是数字' }] }), false)
 
   const pool = byCapability('limit_up_pool')
-  const poolItem = { thscode: '603986.SH', ticker: '603986', name: '兆易创新', is_st: false, is_new: false, last_price: 118.23, price_change_ratio_pct: 10.0008, limit_up_time: '09:34', limit_up_reason: null, continue_day_text: '2连板', continue_day_cnt: 2, seal_money: 123456789.12, max_seal_money: 234567890.12 }
+  const poolItem = { thscode: '603986.SH', ticker: '603986', name: '兆易创新', is_st: false, is_new: false, last_price: 118.23, price_change_ratio_pct: 10.0008, limit_up_time: '09:34', limit_up_reason: null, continue_day_text: '2连板', continue_day_cnt: 2, seal_money: 123456789.12, max_seal_money: 234567890.12, open_times: 2 }
   assert.equal(pool.validateOutput({ timestamp: 1748102400000, pagination: { total: 126, pages: 3, size: 50, page: 1 }, item: [poolItem] }), true)
   assert.equal(pool.validateOutput({ item: [poolItem] }), false, '缺 data.pagination 判不符')
   assert.equal(pool.validateOutput({ pagination: { total: 0, pages: 0, size: 50, page: 1 }, item: [] }), true)
@@ -715,6 +715,30 @@ test('Phase 2 输出护栏：主标识严格、指标宽容、null 放行', () =
 })
 
 // Phase 3 shares pagination fields but each endpoint has a distinct sort whitelist.
+
+test('Phase 3：涨停池炸板次数与炸板池首/末封板时间已收录（上游实测返回，2026-11-22）', () => {
+  const pool = byCapability('limit_up_pool')
+  const poolProps = pool.schema.output_schema.properties.item.items.properties
+  assert.ok('open_times' in poolProps, '涨停池必须声明炸板次数列，否则上游返回了也看不见')
+  const poolItem = { thscode: '603986.SH', is_st: false, is_new: false, limit_up_time: '09:34', continue_day_text: '2连板', continue_day_cnt: 2, seal_money: 1, open_times: 2 }
+  assert.equal(pool.validateOutput({ pagination: { total: 1, pages: 1, size: 50, page: 1 }, item: [poolItem] }), true)
+  assert.equal(pool.validateOutput({ pagination: { total: 1, pages: 1, size: 50, page: 1 }, item: [{ ...poolItem, open_times: '2' }] }), true, '既有 guard 对数值字段容忍数字字符串，保持原语义')
+  assert.equal(pool.validateOutput({ pagination: { total: 1, pages: 1, size: 50, page: 1 }, item: [{ ...poolItem, open_times: 'abc' }] }), false, '非数值字符串必须拒绝')
+  assert.match(pool.schema.description, /eastmoney_limit_up_pool/, '缺的列要指向东财四池，不能假装都有')
+
+  const brk = byCapability('limit_break_pool')
+  const brkProps = brk.schema.output_schema.properties.item.items.properties
+  assert.ok('first_seal_time' in brkProps && 'last_seal_time' in brkProps, '炸板池必须声明首/末封板时间')
+  const brkItem = { thscode: '002148.SZ', open_times: 2, first_seal_time: '11:18', last_seal_time: '13:50' }
+  const brkPage = { pagination: { total: 1, pages: 1, size: 50, page: 1 }, item: [brkItem] }
+  assert.equal(brk.validateOutput(brkPage), true)
+  assert.equal(brk.validateOutput({ ...brkPage, item: [{ ...brkItem, first_seal_time: 1118 }] }), false, '封板时间必须是时间串')
+  assert.match(brk.schema.description, /eastmoney_limit_break_pool/)
+
+  assert.match(byCapability('hot_stock_list').schema.description, /ths_hot_list/, '热榜缺的概念/人气标签要指向 ths_hot_list')
+  assert.match(byCapability('limit_down_pool').schema.description, /eastmoney_limit_down_pool/)
+})
+
 
 test('Phase 3：跌停池与炸板池的排序白名单各自独立', () => {
   const down = byCapability('limit_down_pool')

@@ -82,11 +82,23 @@ const klineOutput = {
       high: { type: 'number' },
       low: { type: 'number' },
       close: { type: 'number' },
-      volume: { type: 'number' },
+      volume: { type: 'number', description: '成交量；单位见 volume_unit（科创板是股，其余是手，不是同一量纲）' },
+      volume_unit: { enum: ['lot', 'share'], description: '科创板（688/689）为 share，其余（含 ETF 588、指数）为 lot' },
       turnover_rate_pct: { oneOf: [{ type: 'number' }, { type: 'null' }] },
     },
     additionalProperties: true,
   },
+}
+
+/**
+ * Tencent reports K-line volume in 股 for 科创板 (688/689) and in 手 for every other instrument —
+ * main board, 创业板, B 股, ETF (including the 科创板 ETFs 588xxx), LOF, REITs and indices. Same rule
+ * for daily/weekly/monthly and minute bars, adjusted or not. Upstream v3.10.1 documented this after
+ * counting against the TDX post-close package (shares); the K-line docs used to say 手 for all, which
+ * makes 科创板 volume come out 100× too small when converted.
+ */
+function volumeUnitOf(canonical: string): 'lot' | 'share' {
+  return /^68[89]/u.test(canonical.slice(0, 6)) ? 'share' : 'lot'
 }
 
 const ticksOutput = {
@@ -263,6 +275,7 @@ function parseKlineRows(data: JsonRecord, symbol: string, canonical: string, per
     throw sourceError(`Tencent K-line ${symbol} returned empty ${key} beside non-empty raw ${period}`, 'tencent_invalid_response')
   }
   const rows: JsonRecord[] = []
+  const volume_unit = volumeUnitOf(canonical)
   for (const item of items) {
     if (!Array.isArray(item) || item.length < 6) throw sourceError(`Tencent K-line ${symbol} row shape changed`, 'tencent_invalid_response')
     const date = String(item[0])
@@ -277,6 +290,7 @@ function parseKlineRows(data: JsonRecord, symbol: string, canonical: string, per
       low: requiredNumber(item[4], 'low'),
       close: requiredNumber(item[2], 'close'),
       volume: requiredNumber(item[5], 'volume'),
+      volume_unit,
     })
   }
   return rows
@@ -296,6 +310,7 @@ async function executeKline(params: Params, signal: AbortSignal): Promise<{ data
     if (!isRecord(node) || !Array.isArray(node[period])) throw sourceError(`Tencent minute K-line ${symbol} response has no ${period} array`, 'tencent_invalid_response')
     const rows: JsonRecord[] = []
     const seen = new Set<string>()
+    const volume_unit = volumeUnitOf(code.canonical)
     for (const item of node[period] as unknown[]) {
       if (!Array.isArray(item) || item.length < 6) throw sourceError(`Tencent minute K-line ${symbol} row shape changed`, 'tencent_invalid_response')
       const stamp = String(item[0])
@@ -311,6 +326,7 @@ async function executeKline(params: Params, signal: AbortSignal): Promise<{ data
         low: requiredNumber(item[4], 'low'),
         close: requiredNumber(item[2], 'close'),
         volume: requiredNumber(item[5], 'volume'),
+        volume_unit,
         turnover_rate_pct: item.length > 7 ? (numberOrNull(item[7]) === null ? null : (numberOrNull(item[7]) as number) / 100) : null,
       })
     }
@@ -954,11 +970,8 @@ export async function fetchDailyBars(input: { thscode: string }, signal: AbortSi
     return { thscode, adjust: 'qfq', bars: bars(data).slice(-count), volume_unit: 'share' }
   }
   const { data } = await executeKline({ code: thscode, period: 'day', adjust: 'qfq', count }, signal)
-  // 科创板 reports daily volume in shares (688599: 27-29M) while the main board reports 手 (600519: 35,116)
-  // — the same split as the minute endpoint, and daily rows carry no turnover column to cross-check.
-  const digits = thscode.slice(0, 6)
   // The endpoint answers count+1 rows; the pane asks for a window, so hand it exactly that.
-  return { thscode, adjust: 'qfq', bars: bars(data).slice(-count), volume_unit: /^68[89]/u.test(digits) ? 'share' : 'lot' }
+  return { thscode, adjust: 'qfq', bars: bars(data).slice(-count), volume_unit: volumeUnitOf(thscode) }
 }
 
 export function createTencentSources(): DataSource[] {
@@ -982,7 +995,7 @@ export function createTencentSources(): DataSource[] {
       cacheMaxAgeMs: 60_000,
       name: 'get_tencent_kline',
       summary: '腾讯日周月复权和分钟 K 线',
-      description: '获取单只 SH/SZ 股票、指数或 ETF 的腾讯 K 线。period 为 day/week/month 或 m1/m5/m15/m30/m60；日周月可用 qfq/hfq/none，分钟线只能 none；start/end 仅日周月支持 YYYY-MM-DD，count 日周月最多 640、分钟最多 320。volume 单位为手，腾讯 K 线不提供成交额；分钟返回 turnover_rate_pct，腾讯原始字段为基点后除以 100。内部会按参考 skill 的三个腾讯入口轮换，但不把入口拆成 capability。BJ 代码明确拒绝。',
+      description: '获取单只 SH/SZ 股票、指数或 ETF 的腾讯 K 线。period 为 day/week/month 或 m1/m5/m15/m30/m60；日周月可用 qfq/hfq/none，分钟线只能 none；start/end 仅日周月支持 YYYY-MM-DD，count 日周月最多 640、分钟最多 320。⛔ **成交量的单位分两套，行里用 `volume_unit` 显式标明**：科创板（688/689）是**股**（`share`），其余——沪深主板、创业板、B 股、ETF（含科创板 ETF 588xxx）、LOF、REITs、指数——是**手**（`lot`，1 手 = 100 股/份；本能力不覆盖可转债的 1 手 = 10 张）。日周月线、分钟线、复权与否都是同一规则；按「手」统一换算科创板会差 100 倍（上游 V3.10.1 用通达信盘后包逐股对账后确认，此前文档一律写「手」）。另：非科创板**最近一个交易日**的分钟量是整手、到下一个交易日才回填成精确股数（回填时点上游未测出），科创板分钟量当天就是精确股数——所以隔日的分钟合计与日线成交量会对不上一点点，那不是丢数据。腾讯 K 线不提供成交额；分钟返回 turnover_rate_pct，腾讯原始字段为基点后除以 100。内部会按参考 skill 的三个腾讯入口轮换，但不把入口拆成 capability。BJ 代码明确拒绝。',
       inputSchema: { type: 'object', properties: { code: { type: 'string', description: '单只完整证券代码，如 600519.SH' }, period: { type: 'string', enum: ['day', 'week', 'month', 'm1', 'm5', 'm15', 'm30', 'm60'] }, adjust: { type: 'string', enum: ['qfq', 'hfq', 'none'] }, start: { type: 'string', description: '日/周/月起始日期 YYYY-MM-DD' }, end: { type: 'string', description: '日/周/月结束日期 YYYY-MM-DD' }, count: { type: 'integer', minimum: 1, maximum: 640 } }, required: ['code'], additionalProperties: false },
       outputSchema: klineOutput,
       paginated: false,

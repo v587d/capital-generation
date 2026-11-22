@@ -1,6 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createEastmoneySources } from '../lib/sources/eastmoney-http.js'
+import { createSinaSources } from '../lib/sources/sina-http.js'
+import { createOfficialSources } from '../lib/sources/official-http.js'
+import { createCsindexSources } from '../lib/sources/csindex-http.js'
+import { createThsSources } from '../lib/sources/ths-http.js'
+import { createPythonSources } from '../lib/sources/python-remote.js'
 import { createTencentSources } from '../lib/sources/tencent-http.js'
 import { createWindSources } from '../lib/sources/wind-mcp.js'
 import { DataCollectorHub } from '../lib/data-collector/hub.js'
@@ -45,12 +50,39 @@ const SAMPLES = {
   tencent_hk_kline: { code: '00700', period: 'day', adjust: 'none', count: 5 },
   tencent_us_kline: { code: 'AAPL.OQ', period: 'day', adjust: 'none', count: 5 },
   tencent_us_prepost_quote: { codes: ['AAPL'] },
+  eastmoney_security_profile: { ticker: '600519.SH' },
+  eastmoney_st_stock_list: {},
+  eastmoney_institution_research: { start_date: '2026-10-01', end_date: '2026-11-21' },
+  eastmoney_holder_change: { start_date: '2026-10-01', end_date: '2026-11-21' },
+  eastmoney_buyback: {},
+  eastmoney_pledge: {},
+  eastmoney_new_stock: {},
+  sina_etf_option_contracts: { underlying: '510050', side: 'call' },
+  sina_etf_option_tquote: { codes: ['10012837'] },
+  sina_etf_option_greeks: { codes: ['10012837'] },
+  sina_a50_futures: {},
+  sse_etf_shares: {},
+  szse_etf_shares: {},
+  chinamoney_repo_fixing: {},
+  csindex_index_valuation: { index_code: '000300', start_date: '2026-11-01', end_date: '2026-11-20' },
+  eastmoney_limit_up_pool: { trade_date: '2026-11-20' },
+  eastmoney_limit_break_pool: { trade_date: '2026-11-20' },
+  eastmoney_limit_down_pool: { trade_date: '2026-11-20' },
+  eastmoney_yesterday_limit_up_pool: { trade_date: '2026-11-20' },
+  eastmoney_price_anomaly_list: {},
+  eastmoney_price_anomaly_count: {},
+  eastmoney_stock_hot_concepts: { ticker: '600519.SH' },
+  ths_hot_list: { type: 'hour' },
+  ths_limit_up_detail: {},
+  baostock_valuation_history: { code: '600519.SH', start_date: '2026-11-01', end_date: '2026-11-21' },
+  baostock_stock_basic: { codes: ['600519.SH'] },
+  pbc_social_financing: { months: 12 },
   wind_edb_search: { question: '中国GDP相关指标' },
   wind_edb_query: { indicator: 'M5567876', start_date: '2025-01-01', end_date: '2025-12-31' },
   wind_stock_kline: { code: '600519.SH', start_date: '2026-08-01', end_date: '2026-08-15' },
 }
 
-const sources = [...createEastmoneySources(), ...createTencentSources(), ...createWindSources(async () => 'secret')]
+const sources = [...createEastmoneySources(), ...createTencentSources(), ...createSinaSources(), ...createOfficialSources(), ...createCsindexSources(), ...createThsSources(), ...createPythonSources(async () => { throw new Error('normalize only') }), ...createWindSources(async () => 'secret')]
 
 test('参数样例表必须覆盖全部已注册的公开 HTTP 能力：新增没登记就失败，不静默少测', () => {
   const registered = sources.map((source) => source.schema.capability).sort()

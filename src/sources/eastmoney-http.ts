@@ -1,7 +1,7 @@
 import type { DataRequest, DataSource, SchemaDescriptor } from '../data-collector/hub.js'
 import { buildDataKey } from '../data-collector/hub.js'
 import { getDataTimeContract } from '../time/tools.js'
-import { sharedEastmoneyClient, EastmoneyTransportError } from '../net/eastmoney-client.js'
+import { sharedEastmoneyClient, sharedEastmoneyThrottle, EastmoneyTransportError } from '../net/eastmoney-client.js'
 import { normalizeEastmoneyAshareIdentity, normalizeEastmoneyBoardIdentity, normalizeEastmoneySecurityIdentity, type EastmoneyBoardIdentity, type EastmoneyMarket } from './security-identity.js'
 
 type Params = Record<string, unknown>
@@ -1494,6 +1494,668 @@ const marketMarginInput = {
   additionalProperties: false,
 }
 
+const PROFILING_URL = 'https://push2.eastmoney.com/api/qt/stock/get'
+
+/**
+ * push2 secid market digit: SH is `1`, SZ and BJ share `0`. 5x ETFs/LOFs, 588x STAR ETFs and 900x
+ * SH B-shares are SH — a `6`-prefix guess routes them to `0.` and upstream answers `data: null`.
+ * 92x (BSE since 2024-10) must be tested before 9x. Never derive a market from one leading digit.
+ */
+function eastmoneySecidMarketId(digits: string): '1' | '0' {
+  if (/^92/u.test(digits)) return '0'
+  return /^[569]/u.test(digits) ? '1' : '0'
+}
+
+/** A-share market implied by the secid rule: SH when the market digit is 1, else BJ on 4x/8x/92x. */
+function eastmoneyAshareMarket(digits: string): EastmoneyMarket {
+  if (eastmoneySecidMarketId(digits) === '1') return 'SH'
+  return /^(?:4|8|92)/u.test(digits) ? 'BJ' : 'SZ'
+}
+
+const TICKER_FORM = /^(?:(\d{6})(?:\.(SH|SZ|BJ))?|(SH|SZ|BJ)(\d{6}))$/u
+
+/**
+ * Canonical `600519.SH` for stock-keyed capabilities. A bare code reads as the A-share of that
+ * number (`000001` = 平安银行, not 上证指数); an explicit market that disagrees with the A-share
+ * prefix is rejected rather than rewritten, so `000001.SH` cannot silently become 平安银行 rows.
+ */
+function ashareThscode(value: unknown, name = 'ticker'): string {
+  if (typeof value !== 'string') throw new Error(`${name} must be a string`)
+  const match = TICKER_FORM.exec(value.trim().toUpperCase())
+  if (!match) throw new Error(`${name} must be a six-digit A-share code, optionally with a market suffix (e.g. 600519 or 600519.SH)`)
+  const digits = String(match[1] ?? match[4])
+  const derived = eastmoneyAshareMarket(digits)
+  const declared = (match[2] ?? match[3]) as EastmoneyMarket | undefined
+  if (declared !== undefined && declared !== derived) {
+    throw new Error(`${name} market ${declared} conflicts with the A-share code prefix (resolved ${derived}); index/ETF-style codes are not accepted`)
+  }
+  return `${digits}.${derived}`
+}
+
+/** Upstream `20010827`-style compact date; invalid or empty becomes null, never a 1970 timestamp. */
+function compactDay(value: unknown): string | null {
+  const text = String(value ?? '').trim()
+  if (!/^\d{8}$/u.test(text)) return null
+  const day = `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}`
+  const parsed = new Date(`${day}T00:00:00Z`)
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === day ? day : null
+}
+
+const profileRow = {
+  type: 'object',
+  properties: {
+    thscode: { type: 'string' }, ticker: { type: 'string' }, name: { type: 'string' },
+    market: { type: 'string', enum: ['SH', 'SZ', 'BJ'] }, eastmoney_secid: { type: 'string' },
+    industry: nullableString,
+    total_shares: nullableNumber, float_shares: nullableNumber,
+    total_market_cap: nullableNumber, float_market_cap: nullableNumber,
+    list_date: nullableString, list_date_ms: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    pe_dynamic: nullableNumber, pb: nullableNumber,
+  },
+  required: ['thscode', 'ticker', 'name', 'market', 'eastmoney_secid', 'industry', 'total_shares', 'float_shares', 'total_market_cap', 'float_market_cap', 'list_date', 'list_date_ms', 'pe_dynamic', 'pb'],
+  additionalProperties: false,
+}
+
+const profileInput = {
+  type: 'object',
+  properties: {
+    ticker: { type: 'string', description: '六位代码或带市场后缀（600519 / 600519.SH / sh600519）；裸代码按 A 股个股解析（000001 = 平安银行，不是上证指数），指数/ETF 不接受' },
+  },
+  required: ['ticker'],
+  additionalProperties: false,
+}
+
+function normalizeProfile(params: Params): Params {
+  assertKnown(params, ['ticker'])
+  return { ticker: ashareThscode(params.ticker) }
+}
+
+function parseProfileRow(data: JsonRecord, thscode: string): JsonRecord {
+  const [digits, market] = thscode.split('.') as [string, EastmoneyMarket]
+  if (String(data.f57 ?? '') !== digits || typeof data.f58 !== 'string' || data.f58.trim().length === 0) {
+    throw sourceError(`Eastmoney profile response does not match ${thscode}`, 'eastmoney_invalid_response')
+  }
+  const totalShares = numberOrNull(data.f84)
+  // Indexes/funds answer with a code and name but no share capital; reporting them as a "stock
+  // profile" would hand back a row of nulls.
+  if (totalShares === null || totalShares <= 0) {
+    throw sourceError(`Eastmoney profile for ${thscode} has no share capital (indexes and funds are out of scope)`, 'eastmoney_invalid_ticker')
+  }
+  const listDate = compactDay(data.f189)
+  return {
+    thscode, ticker: digits, name: data.f58.trim(), market, eastmoney_secid: `${eastmoneySecidMarketId(digits)}.${digits}`,
+    industry: textOrNull(data.f127),
+    total_shares: totalShares,
+    float_shares: numberOrNull(data.f85),
+    total_market_cap: numberOrNull(data.f116),
+    float_market_cap: numberOrNull(data.f117),
+    list_date: listDate,
+    list_date_ms: listDate === null ? null : dateMs(listDate),
+    // f162 = 市盈率(动态) and f167 = 市净率: verified against datacenter PE_DYNAMIC 21.6075 and
+    // price / BPS (1485.75 / 216.9496 = 6.848) for 600519 on 2026-11-20. f9/f23 are not returned here.
+    pe_dynamic: numberOrNull(data.f162),
+    pb: numberOrNull(data.f167),
+  }
+}
+
+async function executeProfile(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
+  const thscode = String(params.ticker)
+  const digits = thscode.slice(0, 6)
+  const url = new URL(PROFILING_URL)
+  url.searchParams.set('fltt', '2')
+  url.searchParams.set('invt', '2')
+  url.searchParams.set('secid', `${eastmoneySecidMarketId(digits)}.${digits}`)
+  url.searchParams.set('fields', 'f57,f58,f84,f85,f116,f117,f127,f162,f167,f189')
+  const payload = await getJson(url.toString(), signal, `security profile ${thscode}`)
+  if (Number(payload.rc) !== 0) throw sourceError(`Eastmoney profile failed for ${thscode}: rc ${String(payload.rc)}`, 'eastmoney_upstream_error')
+  if (payload.data === null || payload.data === undefined) {
+    throw sourceError(`Eastmoney profile returned no data for ${thscode} (unknown code or wrong secid market)`, 'eastmoney_invalid_ticker')
+  }
+  if (!isRecord(payload.data)) throw sourceError('Eastmoney profile returned a non-object data', 'eastmoney_invalid_response')
+  return { data: { item: [parseProfileRow(payload.data, thscode)], pagination: pagination(1, 1, 1, 1) }, schema: datacenterOutput(profileRow) }
+}
+
+const ST_MARKETS = ['sh', 'sz', 'bj'] as const
+type StMarket = typeof ST_MARKETS[number]
+/** Eastmoney risk-warning board: `m:1` SH, `m:0` SZ — the SZ arm also returns BSE codes (see execute). */
+const ST_RISK_BOARD_FS: Record<'sh' | 'sz', string> = { sh: 'm:1+f:4', sz: 'm:0+f:4' }
+/** BSE full A-share list; BSE ST names must be filtered by name, not by the risk-warning flag. */
+const ST_BSE_FS = 'm:0+t:81+s:2048'
+const ST_CLIST_FIELDS = 'f12,f13,f14,f2,f3,f4,f5,f6,f7,f8'
+const ST_PAGE_SIZE = 100
+const ST_MAX_PAGES = 30
+
+const stStockRow = {
+  type: 'object',
+  properties: {
+    code: { type: 'string' }, name: { type: 'string' }, market: { type: 'string', enum: ['sh', 'sz', 'bj'] },
+    share_type: { type: 'string', enum: ['a_share', 'b_share'] }, st_type: { type: 'string', enum: ['ST', '*ST'] },
+    price: nullableNumber, change_pct: nullableNumber, change_amount: nullableNumber,
+    volume: nullableNumber, amount: nullableNumber, amplitude_pct: nullableNumber, turnover_pct: nullableNumber,
+  },
+  required: ['code', 'name', 'market', 'share_type', 'st_type', 'price', 'change_pct', 'change_amount', 'volume', 'amount', 'amplitude_pct', 'turnover_pct'],
+  additionalProperties: false,
+}
+
+const stStockListInput = {
+  type: 'object',
+  properties: {
+    market: { type: 'string', enum: ['all', 'sh', 'sz', 'bj'], description: '默认 all；按市场分别取沪风险警示板 / 深风险警示板 / 北交所全表名称筛' },
+  },
+  required: [],
+  additionalProperties: false,
+}
+
+const stStockListOutput = {
+  type: 'object',
+  properties: {
+    item: { type: 'array', items: stStockRow },
+    total: { type: 'integer' },
+    markets: { type: 'array', items: { type: 'string', enum: [...ST_MARKETS] } },
+    by_market: {
+      type: 'object',
+      properties: { sh: { type: 'integer' }, sz: { type: 'integer' }, bj: { type: 'integer' } },
+      required: ['sh', 'sz', 'bj'], additionalProperties: false,
+    },
+  },
+  required: ['item', 'total', 'markets', 'by_market'],
+  additionalProperties: false,
+}
+
+function normalizeStStockList(params: Params): Params {
+  assertKnown(params, ['market'])
+  const market = params.market === undefined ? 'all' : String(params.market).toLowerCase()
+  if (market !== 'all' && !ST_MARKETS.includes(market as StMarket)) throw new Error(`market must be one of all, ${ST_MARKETS.join(', ')}`)
+  return { market }
+}
+
+/** `f12`-only classification: BSE legacy 4x/8x and 920x, SH 5x/6x/9x, everything else SZ. */
+function stMarketOf(code: string): StMarket {
+  if (/^(?:4|8|92)/u.test(code)) return 'bj'
+  if (/^[569]/u.test(code)) return 'sh'
+  return 'sz'
+}
+
+async function fetchCListAll(fs: string, signal: AbortSignal, context: string): Promise<JsonRecord[]> {
+  const rows: JsonRecord[] = []
+  let total: number | null = null
+  for (let page = 1; page <= ST_MAX_PAGES; page += 1) {
+    const url = new URL(CLIST_URL)
+    url.searchParams.set('pn', String(page))
+    url.searchParams.set('pz', String(ST_PAGE_SIZE))
+    url.searchParams.set('po', '1')
+    url.searchParams.set('np', '1')
+    url.searchParams.set('ut', EASTMONEY_UT)
+    url.searchParams.set('fltt', '2')
+    url.searchParams.set('invt', '2')
+    url.searchParams.set('fid', 'f12')
+    url.searchParams.set('fs', fs)
+    url.searchParams.set('fields', ST_CLIST_FIELDS)
+    const data = requireCList(await getJson(url.toString(), signal, context), context)
+    if (!Array.isArray(data.diff) || typeof data.total !== 'number' || !data.diff.every(isRecord)) throw sourceError(`Eastmoney ${context} result shape changed`, 'eastmoney_invalid_response')
+    // A list that changes between pages would mix two snapshots; fail instead of returning a blend.
+    if (total !== null && data.total !== total) throw sourceError(`Eastmoney ${context} total changed from ${total} to ${data.total} while paging; retry`, 'eastmoney_invalid_response')
+    total = data.total
+    rows.push(...data.diff)
+    if (rows.length >= total || data.diff.length === 0) break
+  }
+  if (total === null) throw sourceError(`Eastmoney ${context} returned no total`, 'eastmoney_invalid_response')
+  if (rows.length !== total) throw sourceError(`Eastmoney ${context} returned ${rows.length} of ${total} rows`, 'eastmoney_invalid_response')
+  return rows
+}
+
+function parseStStockRow(raw: JsonRecord, market: StMarket): JsonRecord {
+  const code = String(raw.f12 ?? '')
+  const name = String(raw.f14 ?? '').trim()
+  if (!/^\d{6}$/u.test(code) || name.length === 0) throw sourceError('Eastmoney risk-warning row has an unusable code or name', 'eastmoney_invalid_response')
+  // Every SH/SZ risk-warning row must carry the ST marker; a missing one means the flag changed.
+  if (!/ST/iu.test(name)) throw sourceError(`Eastmoney risk-warning row ${code} has no ST marker in its name (${name})`, 'eastmoney_invalid_response')
+  return {
+    code, name, market, share_type: /^(?:2|9)/u.test(code) ? 'b_share' : 'a_share',
+    st_type: name.startsWith('*') ? '*ST' : 'ST',
+    // Suspended/halted rows ship `-` in the quote columns; numberOrNull keeps them null, never 0.
+    price: numberOrNull(raw.f2),
+    change_pct: numberOrNull(raw.f3),
+    change_amount: numberOrNull(raw.f4),
+    volume: numberOrNull(raw.f5),
+    amount: numberOrNull(raw.f6),
+    amplitude_pct: numberOrNull(raw.f7),
+    turnover_pct: numberOrNull(raw.f8),
+  }
+}
+
+async function executeStStockList(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
+  const requested = String(params.market)
+  const markets: StMarket[] = requested === 'all' ? [...ST_MARKETS] : [requested as StMarket]
+  const rows: JsonRecord[] = []
+  for (const market of markets) {
+    if (market === 'bj') {
+      const list = await fetchCListAll(ST_BSE_FS, signal, 'BSE full list')
+      // An empty BSE list would turn "no data" into "no ST on BSE"; the name filter needs the list.
+      if (list.length === 0) throw sourceError('Eastmoney BSE full list is empty; refusing to report "no ST on BSE"', 'eastmoney_invalid_response')
+      for (const raw of list) if (/ST/iu.test(String(raw.f14 ?? ''))) rows.push(parseStStockRow(raw, 'bj'))
+      continue
+    }
+    const board = await fetchCListAll(ST_RISK_BOARD_FS[market], signal, `${market === 'sh' ? 'SH' : 'SZ'} risk-warning board`)
+    // Always non-empty in practice: an empty board is an upstream break, not "no ST stocks today".
+    if (board.length === 0) throw sourceError(`Eastmoney ${market} risk-warning board returned no rows; refusing to call it an empty ST list`, 'eastmoney_invalid_response')
+    for (const raw of board) {
+      const code = String(raw.f12 ?? '')
+      // Verified 2026-11-22: the m:0 board carries 189 BSE codes (186 legacy 430x/83x/87x that are no
+      // longer in the BSE list). They belong to the BSE arm, which filters the current list by name.
+      if (stMarketOf(code) === 'bj') continue
+      if (stMarketOf(code) !== market) throw sourceError(`Eastmoney ${market} risk-warning board returned ${code} as ${stMarketOf(code)}`, 'eastmoney_invalid_response')
+      rows.push(parseStStockRow(raw, market))
+    }
+  }
+  const seen = new Set<string>()
+  for (const row of rows) {
+    const code = String(row.code)
+    if (seen.has(code)) throw sourceError(`Eastmoney ST list contains duplicate code ${code}`, 'eastmoney_invalid_response')
+    seen.add(code)
+  }
+  const order: Record<string, number> = { sh: 0, sz: 1, bj: 2 }
+  rows.sort((left, right) => (order[String(left.market)] - order[String(right.market)]) || String(left.code).localeCompare(String(right.code)))
+  const by_market = { sh: 0, sz: 0, bj: 0 }
+  for (const row of rows) by_market[String(row.market) as StMarket] += 1
+  return {
+    data: { item: rows, total: rows.length, markets, by_market },
+    schema: stStockListOutput,
+  }
+}
+
+const EVENT_DEFAULT_SIZE = 100
+
+/** Optional ticker + optional closed date range + page/size: the shape shared by the event tables. */
+function eventInput(options: { ticker: string; startDate: string; endDate: string; extra?: Record<string, object> }): object {
+  return {
+    type: 'object',
+    properties: {
+      ticker: { type: 'string', description: options.ticker },
+      start_date: { type: 'string', description: options.startDate },
+      end_date: { type: 'string', description: options.endDate },
+      ...(options.extra ?? {}),
+      page: { type: 'integer', minimum: 1 },
+      size: { type: 'integer', minimum: 1, maximum: MAX_PAGE_SIZE },
+    },
+    required: [],
+    additionalProperties: false,
+  }
+}
+
+/** Values-only canonicalization: keys stay exactly those the model declared (§10.7) and a second
+ * pass over the result is a no-op. Dates are optional but must come as a pair. */
+function normalizeEvent(params: Params, extraKeys: string[] = []): Params {
+  assertKnown(params, ['ticker', 'start_date', 'end_date', 'page', 'size', ...extraKeys])
+  const page = params.page === undefined ? 1 : integer(params.page, 'page', 1, Number.MAX_SAFE_INTEGER)
+  const size = params.size === undefined ? EVENT_DEFAULT_SIZE : integer(params.size, 'size', 1, MAX_PAGE_SIZE)
+  const normalized: Params = { page, size }
+  if (params.ticker !== undefined) normalized.ticker = ashareThscode(params.ticker)
+  const start = params.start_date === undefined ? undefined : date(params.start_date, 'start_date')
+  const end = params.end_date === undefined ? undefined : date(params.end_date, 'end_date')
+  if ((start === undefined) !== (end === undefined)) throw new Error('start_date and end_date must be given together')
+  if (start !== undefined && end !== undefined) {
+    if (start > end) throw new Error('start_date must not be later than end_date')
+    normalized.start_date = start
+    normalized.end_date = end
+  }
+  return normalized
+}
+
+function eventFilter(parts: string[]): string { return parts.join('') }
+function eventTickerFilter(field: string, ticker: unknown): string[] {
+  return ticker === undefined ? [] : [`(${field}="${String(ticker).slice(0, 6)}")`]
+}
+function eventDateFilter(field: string, params: Params): string[] {
+  return params.start_date === undefined ? [] : [`(${field}>='${String(params.start_date)}')(${field}<='${String(params.end_date)}')`]
+}
+
+async function fetchEventPage(spec: { reportName: string; context: string; filter: string; sortColumns: string; sortTypes: string; page: number; size: number }, signal: AbortSignal): Promise<{ rows: JsonRecord[]; pages: number; total: number }> {
+  const url = new URL(DATACENTER_URL)
+  url.searchParams.set('reportName', spec.reportName)
+  url.searchParams.set('columns', 'ALL')
+  url.searchParams.set('source', 'WEB')
+  url.searchParams.set('client', 'WEB')
+  url.searchParams.set('sortColumns', spec.sortColumns)
+  url.searchParams.set('sortTypes', spec.sortTypes)
+  url.searchParams.set('pageNumber', String(spec.page))
+  url.searchParams.set('pageSize', String(spec.size))
+  if (spec.filter.length > 0) url.searchParams.set('filter', spec.filter)
+  const result = requireDatacenterResult(await getJson(url.toString(), signal, spec.context), spec.context)
+  return requireRows(result, spec.context)
+}
+
+/** SECUCODE when the table carries it, else the 6-digit code column with the A-share digit rule. */
+function rowIdentity(raw: JsonRecord, context: string, codeField: string): JsonRecord {
+  if (typeof raw.SECUCODE === 'string' && raw.SECUCODE.includes('.')) return { ...normalizeEastmoneySecurityIdentity({ secucode: raw.SECUCODE }) }
+  const code = String(raw[codeField] ?? '')
+  if (!/^\d{6}$/u.test(code)) throw sourceError(`Eastmoney ${context} row has no usable security code`, 'eastmoney_invalid_response')
+  return { ...normalizeEastmoneyAshareIdentity(code) }
+}
+
+function eventRowSchema(properties: Record<string, object>): object {
+  return {
+    type: 'object',
+    properties: {
+      thscode: { type: 'string' }, ticker: { type: 'string' }, eastmoney_code: { type: 'string' },
+      eastmoney_market: { type: 'string', enum: ['SH', 'SZ', 'BJ'] }, name: { type: 'string' },
+      ...properties,
+    },
+    required: ['thscode', 'ticker', 'eastmoney_code', 'eastmoney_market', 'name', ...Object.keys(properties)],
+    additionalProperties: false,
+  }
+}
+
+const institutionResearchRow = eventRowSchema({
+  notice_date: { type: 'string' }, notice_date_ms: { type: 'integer' },
+  survey_start_date: nullableString, survey_end_date: nullableString,
+  org_count: nullableNumber, survey_way: nullableString, reception_place: nullableString, receptionist: nullableString,
+})
+
+const institutionResearchInput = eventInput({
+  ticker: '个股代码（600519 或 600519.SH）；省略取全市场',
+  startDate: '公告日区间起点 YYYY-MM-DD（NOTICE_DATE）',
+  endDate: '公告日区间终点 YYYY-MM-DD（NOTICE_DATE）',
+})
+
+function normalizeInstitutionResearch(params: Params): Params { return normalizeEvent(params) }
+
+function parseInstitutionResearchRow(raw: JsonRecord): JsonRecord {
+  const notice = dayValue(raw.NOTICE_DATE)
+  if (notice === null) throw sourceError('Eastmoney institution survey row has invalid NOTICE_DATE', 'eastmoney_invalid_response')
+  return {
+    ...rowIdentity(raw, 'institution survey', 'SECURITY_CODE'),
+    name: String(raw.SECURITY_NAME_ABBR ?? ''),
+    notice_date: notice,
+    notice_date_ms: dateMs(notice),
+    survey_start_date: dayValue(raw.RECEIVE_START_DATE),
+    survey_end_date: dayValue(raw.RECEIVE_END_DATE),
+    org_count: numberOrNull(raw.SUM),
+    survey_way: textOrNull(raw.RECEIVE_WAY_EXPLAIN),
+    reception_place: textOrNull(raw.RECEIVE_PLACE),
+    receptionist: textOrNull(raw.RECEPTIONIST),
+  }
+}
+
+async function executeInstitutionResearch(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
+  // Aggregate rows only: NUMBERNEW="1" keeps one row per survey and SUM is the reported org count.
+  const filter = eventFilter(['(IS_SOURCE="1")(NUMBERNEW="1")', ...eventTickerFilter('SECURITY_CODE', params.ticker), ...eventDateFilter('NOTICE_DATE', params)])
+  // Sort uniqueness (verified 2026-11-22): NOTICE_DATE 2026-11-01..2026-11-21 = 1728 rows over 4 pages
+  // of 500 → 0 duplicate (NOTICE_DATE, SECURITY_CODE, RECEIVE_START_DATE) tuples, 0 duplicate rows.
+  const parsed = await fetchEventPage({ reportName: 'RPT_ORG_SURVEYNEW', context: 'institution survey', filter, sortColumns: 'NOTICE_DATE,SECURITY_CODE,RECEIVE_START_DATE', sortTypes: '-1,1,-1', page: Number(params.page), size: Number(params.size) }, signal)
+  return { data: { item: parsed.rows.map(parseInstitutionResearchRow), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(institutionResearchRow) }
+}
+
+const HOLDER_DIRECTION_CODE: Record<string, string> = { increase: '增持', decrease: '减持' }
+const HOLDER_DIRECTION_TEXT: Record<string, string> = { 增持: 'increase', 减持: 'decrease' }
+
+const holderChangeRow = eventRowSchema({
+  notice_date: { type: 'string' }, notice_date_ms: { type: 'integer' },
+  holder_name: { type: 'string' }, direction: { type: 'string', enum: ['increase', 'decrease'] },
+  change_shares_10k: nullableNumber, change_pct_total: nullableNumber, change_pct_float: nullableNumber,
+  after_hold_shares_10k: nullableNumber, after_pct_total: nullableNumber,
+  after_float_hold_shares_10k: nullableNumber, after_pct_float: nullableNumber,
+  avg_price: nullableNumber, channel: nullableString, start_date: nullableString, end_date: nullableString,
+})
+
+const holderChangeInput = eventInput({
+  ticker: '个股代码（600519 或 600519.SH）；省略取全市场',
+  startDate: '公告日区间起点 YYYY-MM-DD（NOTICE_DATE）',
+  endDate: '公告日区间终点 YYYY-MM-DD（NOTICE_DATE）',
+  extra: { direction: { type: 'string', enum: ['increase', 'decrease'], description: '增持 increase / 减持 decrease；省略取两种' } },
+})
+
+function normalizeHolderChange(params: Params): Params {
+  const normalized = normalizeEvent(params, ['direction'])
+  if (params.direction === undefined) return normalized
+  const direction = String(params.direction).toLowerCase()
+  if (!(direction in HOLDER_DIRECTION_CODE)) throw new Error('direction must be one of increase, decrease')
+  return { ...normalized, direction }
+}
+
+function parseHolderChangeRow(raw: JsonRecord): JsonRecord {
+  const notice = dayValue(raw.NOTICE_DATE)
+  if (notice === null) throw sourceError('Eastmoney holder change row has invalid NOTICE_DATE', 'eastmoney_invalid_response')
+  const direction = HOLDER_DIRECTION_TEXT[String(raw.DIRECTION ?? '')]
+  if (direction === undefined) throw sourceError(`Eastmoney holder change row has unknown DIRECTION ${String(raw.DIRECTION ?? '(empty)')}`, 'eastmoney_invalid_response')
+  const changeShares = numberOrNull(raw.CHANGE_NUM_SYMBOL)
+  // Upstream ships a signed share count plus a separate direction; a mismatch would silently flip
+  // 增持 into 减持 for consumers reading only the number.
+  if (changeShares !== null && changeShares !== 0 && (changeShares < 0) !== (direction === 'decrease')) {
+    throw sourceError('Eastmoney holder change row flips the signed share count against DIRECTION', 'eastmoney_invalid_response')
+  }
+  return {
+    ...rowIdentity(raw, 'holder change', 'SECURITY_CODE'),
+    name: String(raw.SECURITY_NAME_ABBR ?? ''),
+    notice_date: notice,
+    notice_date_ms: dateMs(notice),
+    holder_name: String(raw.HOLDER_NAME ?? ''),
+    direction,
+    change_shares_10k: changeShares,
+    // ⛔ AFTER_CHANGE_RATE is the move's share of total shares, not the post-move holding ratio:
+    // 000915 moved 213.04万股 → 0.909 here while HOLD_RATIO (holding after) is 24.17.
+    change_pct_total: numberOrNull(raw.AFTER_CHANGE_RATE),
+    change_pct_float: numberOrNull(raw.CHANGE_FREE_RATIO),
+    after_hold_shares_10k: numberOrNull(raw.AFTER_HOLDER_NUM),
+    after_pct_total: numberOrNull(raw.HOLD_RATIO),
+    after_float_hold_shares_10k: numberOrNull(raw.FREE_SHARES),
+    after_pct_float: numberOrNull(raw.FREE_SHARES_RATIO),
+    avg_price: numberOrNull(raw.TRADE_AVERAGE_PRICE),
+    channel: textOrNull(raw.MARKET),
+    start_date: dayValue(raw.START_DATE),
+    end_date: dayValue(raw.END_DATE),
+  }
+}
+
+async function executeHolderChange(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
+  const directionFilter = params.direction === undefined ? [] : [`(DIRECTION="${HOLDER_DIRECTION_CODE[String(params.direction)]}")`]
+  const filter = eventFilter([...directionFilter, ...eventTickerFilter('SECURITY_CODE', params.ticker), ...eventDateFilter('NOTICE_DATE', params)])
+  // Sort uniqueness (verified 2026-11-22): NOTICE_DATE 2026-06-01..2026-11-21 = 2969 rows over 6 pages
+  // of 500 → 0 duplicate identity tuples and 0 duplicate rows.
+  const parsed = await fetchEventPage({ reportName: 'RPT_SHARE_HOLDER_INCREASE', context: 'holder change', filter, sortColumns: 'NOTICE_DATE,SECURITY_CODE,HOLDER_NAME,START_DATE,END_DATE', sortTypes: '-1,1,1,1,1', page: Number(params.page), size: Number(params.size) }, signal)
+  return { data: { item: parsed.rows.map(parseHolderChangeRow), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(holderChangeRow) }
+}
+
+/** 001–006 have names; 007/008 appear in the table (63 + 1 of 5846 rows on 2026-11-22) but upstream
+ * never names them, so `progress` stays null and `progress_code` keeps the raw code. */
+const BUYBACK_PROGRESS: Record<string, string> = { '001': '董事会预案', '002': '股东大会通过', '003': '股东大会否决', '004': '实施中', '005': '停止实施', '006': '完成实施' }
+const BUYBACK_PROGRESS_CODE: Record<string, string> = Object.fromEntries(Object.entries(BUYBACK_PROGRESS).map(([code, label]) => [label, code]))
+const BUYBACK_PROGRESS_NAMES = Object.keys(BUYBACK_PROGRESS_CODE)
+
+const buybackRow = eventRowSchema({
+  progress: { oneOf: [{ type: 'string', enum: BUYBACK_PROGRESS_NAMES }, { type: 'null' }] },
+  progress_code: { type: 'string' },
+  update_date: { type: 'string' }, update_date_ms: { type: 'integer' },
+  plan_notice_date: nullableString, latest_notice_date: nullableString, finish_date: nullableString,
+  plan_start_date: nullableString, plan_end_date: nullableString,
+  price_cap: nullableNumber,
+  plan_shares_lower: nullableNumber, plan_shares_upper: nullableNumber,
+  plan_amount_lower: nullableNumber, plan_amount_upper: nullableNumber,
+  plan_pct_total_lower: nullableNumber, plan_pct_total_upper: nullableNumber,
+  done_shares: nullableNumber, done_amount: nullableNumber,
+  done_price_low: nullableNumber, done_price_high: nullableNumber,
+  objective: nullableString,
+})
+
+const buybackInput = eventInput({
+  ticker: '个股代码（000333 或 000333.SZ）；省略取全市场',
+  startDate: '数据更新日区间起点 YYYY-MM-DD（UPD，不是方案公告日）',
+  endDate: '数据更新日区间终点 YYYY-MM-DD（UPD）',
+  extra: { progress: { type: 'string', enum: BUYBACK_PROGRESS_NAMES, description: '方案进度；省略取全部（含上游未命名的 007/008 码）' } },
+})
+
+function normalizeBuyback(params: Params): Params {
+  const normalized = normalizeEvent(params, ['progress'])
+  if (params.progress === undefined) return normalized
+  const progress = String(params.progress)
+  if (!(progress in BUYBACK_PROGRESS_CODE)) throw new Error(`progress must be one of ${BUYBACK_PROGRESS_NAMES.join(', ')}`)
+  return { ...normalized, progress }
+}
+
+function parseBuybackRow(raw: JsonRecord): JsonRecord {
+  const updateDate = dayValue(raw.UPD)
+  if (updateDate === null) throw sourceError('Eastmoney buyback row has invalid UPD', 'eastmoney_invalid_response')
+  const code = String(raw.REPURPROGRESS ?? '')
+  return {
+    ...rowIdentity(raw, 'buyback', 'DIM_SCODE'),
+    name: String(raw.SECURITYSHORTNAME ?? ''),
+    progress: BUYBACK_PROGRESS[code] ?? null,
+    progress_code: code,
+    update_date: updateDate,
+    update_date_ms: dateMs(updateDate),
+    plan_notice_date: dayValue(raw.UPDATEDATE),
+    latest_notice_date: dayValue(raw.NOTICEDATE),
+    finish_date: dayValue(raw.FINISHDATE),
+    plan_start_date: dayValue(raw.REPURSTARTDATE),
+    plan_end_date: dayValue(raw.REPURENDDATE),
+    price_cap: numberOrNull(raw.REPURPRICECAP),
+    plan_shares_lower: numberOrNull(raw.REPURNUMLOWER),
+    plan_shares_upper: numberOrNull(raw.REPURNUMCAP),
+    plan_amount_lower: numberOrNull(raw.REPURAMOUNTLOWER),
+    plan_amount_upper: numberOrNull(raw.REPURAMOUNTLIMIT),
+    plan_pct_total_lower: numberOrNull(raw.ZSZXX),
+    plan_pct_total_upper: numberOrNull(raw.ZSZSX),
+    done_shares: numberOrNull(raw.REPURNUM),
+    done_amount: numberOrNull(raw.REPURAMOUNT),
+    done_price_low: numberOrNull(raw.REPURPRICELOWER1),
+    done_price_high: numberOrNull(raw.REPURPRICECAP1),
+    objective: textOrNull(raw.REPUROBJECTIVE),
+  }
+}
+
+async function executeBuyback(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
+  const progressFilter = params.progress === undefined ? [] : [`(REPURPROGRESS="${BUYBACK_PROGRESS_CODE[String(params.progress)]}")`]
+  const filter = eventFilter([...progressFilter, ...eventTickerFilter('DIM_SCODE', params.ticker), ...eventDateFilter('UPD', params)])
+  // Sort uniqueness (verified 2026-11-22): all 5846 rows over 12 pages of 500 → 0 duplicate
+  // (DIM_SCODE, REPURCODE) plans and 0 duplicate rows. One row per plan, current state only.
+  const parsed = await fetchEventPage({ reportName: 'RPTA_WEB_GETHGLIST_NEW', context: 'buyback', filter, sortColumns: 'UPD,DIM_SCODE,REPURCODE', sortTypes: '-1,1,1', page: Number(params.page), size: Number(params.size) }, signal)
+  return { data: { item: parsed.rows.map(parseBuybackRow), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(buybackRow) }
+}
+
+const pledgeRow = eventRowSchema({
+  stats_date: { type: 'string' }, stats_date_ms: { type: 'integer' },
+  industry: nullableString,
+  pledge_ratio_pct: nullableNumber, pledged_shares_10k: nullableNumber, pledged_market_cap_10k: nullableNumber,
+  pledge_deal_num: nullableNumber, unrestricted_pledged_10k: nullableNumber, restricted_pledged_10k: nullableNumber,
+})
+
+const pledgeInput = eventInput({
+  ticker: '沪深个股代码（600519 或 600519.SH）；北交所不接受（中国结算统计只覆盖沪深）',
+  startDate: '统计日区间起点 YYYY-MM-DD（TRADE_DATE；中国结算按周发布，通常周五）',
+  endDate: '统计日区间终点 YYYY-MM-DD（TRADE_DATE）',
+})
+
+function normalizePledge(params: Params): Params {
+  const normalized = normalizeEvent(params)
+  const ticker = normalized.ticker
+  if (typeof ticker === 'string' && ticker.endsWith('.BJ')) {
+    throw new Error(`${ticker} 是北交所证券；中国结算股权质押统计只覆盖沪深（实测 2026-11-20 全市场 2265 行无北交所），本能力不返回北交所数据`)
+  }
+  return normalized
+}
+
+function parsePledgeRow(raw: JsonRecord): JsonRecord {
+  const statsDate = dayValue(raw.TRADE_DATE)
+  if (statsDate === null) throw sourceError('Eastmoney pledge row has invalid TRADE_DATE', 'eastmoney_invalid_response')
+  const total = numberOrNull(raw.REPURCHASE_BALANCE)
+  const unrestricted = numberOrNull(raw.REPURCHASE_UNLIMITED_BALANCE)
+  const restricted = numberOrNull(raw.REPURCHASE_LIMITED_BALANCE)
+  // Verified invariant over all 2265 rows of 2026-11-20: 无限售 + 限售 = 合计 (万股).
+  if (total !== null && unrestricted !== null && restricted !== null && Math.abs(unrestricted + restricted - total) > Math.max(1, total * 0.001)) {
+    throw sourceError(`Eastmoney pledge row ${String(raw.SECURITY_CODE ?? '')} has unrestricted + restricted != total`, 'eastmoney_invalid_response')
+  }
+  return {
+    ...rowIdentity(raw, 'pledge', 'SECURITY_CODE'),
+    name: String(raw.SECURITY_NAME_ABBR ?? ''),
+    stats_date: statsDate,
+    stats_date_ms: dateMs(statsDate),
+    industry: textOrNull(raw.INDUSTRY),
+    pledge_ratio_pct: numberOrNull(raw.PLEDGE_RATIO),
+    pledged_shares_10k: total,
+    pledged_market_cap_10k: numberOrNull(raw.PLEDGE_MARKET_CAP),
+    pledge_deal_num: numberOrNull(raw.PLEDGE_DEAL_NUM),
+    unrestricted_pledged_10k: unrestricted,
+    restricted_pledged_10k: restricted,
+  }
+}
+
+async function executePledge(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
+  const common = { reportName: 'RPT_CSDC_LIST', context: 'pledge', sortColumns: 'TRADE_DATE,PLEDGE_RATIO,SECURITY_CODE', sortTypes: '-1,-1,1' as const }
+  let filter: string
+  if (params.ticker !== undefined || params.start_date !== undefined) {
+    filter = eventFilter([...eventTickerFilter('SECURITY_CODE', params.ticker), ...eventDateFilter('TRADE_DATE', params)])
+  } else {
+    // No filters means "latest statistics week", matching the upstream convenience behaviour: one
+    // extra 1-row request resolves the date so later pages cannot spill into earlier weeks.
+    const latest = await fetchEventPage({ ...common, filter: '', page: 1, size: 1 }, signal)
+    const statsDate = latest.rows.length === 0 ? null : dayValue(latest.rows[0].TRADE_DATE)
+    if (statsDate === null) throw sourceError('Eastmoney pledge table has no statistics date', 'eastmoney_invalid_response')
+    filter = `(TRADE_DATE='${statsDate}')`
+  }
+  // Sort uniqueness (verified 2026-11-22): 2026-11-20 = 2265 rows over 5 pages of 500 → 0 duplicate
+  // (TRADE_DATE, SECURITY_CODE); ratio alone is NOT unique (upstream saw a dup + a missing row).
+  const parsed = await fetchEventPage({ ...common, filter, page: Number(params.page), size: Number(params.size) }, signal)
+  return { data: { item: parsed.rows.map(parsePledgeRow), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(pledgeRow) }
+}
+
+const newStockRow = eventRowSchema({
+  apply_code: nullableString, exchange: nullableString, board: nullableString,
+  apply_date: { type: 'string' }, apply_date_ms: { type: 'integer' },
+  ballot_date: nullableString, pay_date: nullableString, listing_date: nullableString,
+  issue_price: nullableNumber, issue_pe: nullableNumber, industry_pe: nullableNumber,
+  issue_shares_10k: nullableNumber, online_shares: nullableNumber, apply_upper_shares: nullableNumber,
+  top_apply_mktcap_10k: nullableNumber, win_rate_pct: nullableNumber,
+  first_close_price: nullableNumber, first_close_change_pct: nullableNumber,
+})
+
+const newStockInput = eventInput({
+  ticker: '新股代码（920067 或 920067.BJ）；省略取全市场',
+  startDate: '申购日区间起点 YYYY-MM-DD（APPLY_DATE）',
+  endDate: '申购日区间终点 YYYY-MM-DD（APPLY_DATE）',
+})
+
+function normalizeNewStock(params: Params): Params { return normalizeEvent(params) }
+
+function parseNewStockRow(raw: JsonRecord): JsonRecord {
+  const applyDate = dayValue(raw.APPLY_DATE)
+  if (applyDate === null) throw sourceError('Eastmoney new stock row has invalid APPLY_DATE', 'eastmoney_invalid_response')
+  const issuePrice = numberOrNull(raw.ISSUE_PRICE)
+  return {
+    ...rowIdentity(raw, 'new stock', 'SECURITY_CODE'),
+    name: String(raw.SECURITY_NAME ?? ''),
+    apply_code: textOrNull(raw.APPLY_CODE),
+    exchange: textOrNull(raw.TRADE_MARKET),
+    // MARKET names the board precisely (上交所科创板 / 深交所创业板); BSE rows leave MARKET null and
+    // only carry MARKET_TYPE_NEW = 北交所, so the fallback is the only way to keep board non-null.
+    board: textOrNull(raw.MARKET) ?? textOrNull(raw.MARKET_TYPE_NEW),
+    apply_date: applyDate,
+    apply_date_ms: dateMs(applyDate),
+    ballot_date: dayValue(raw.BALLOT_NUM_DATE),
+    pay_date: dayValue(raw.BALLOT_PAY_DATE),
+    listing_date: dayValue(raw.LISTING_DATE),
+    // Null before pricing. Upstream also parks 0 in adjacent price placeholders, so 0 is reported as
+    // null (not priced yet) rather than a real zero-yuan offer; all 2 such rows on 2026-11-22 are null.
+    issue_price: issuePrice === null || issuePrice <= 0 ? null : issuePrice,
+    issue_pe: numberOrNull(raw.AFTER_ISSUE_PE),
+    industry_pe: numberOrNull(raw.INDUSTRY_PE),
+    issue_shares_10k: numberOrNull(raw.ISSUE_NUM),
+    online_shares: numberOrNull(raw.ONLINE_ISSUE_NUM),
+    apply_upper_shares: numberOrNull(raw.ONLINE_APPLY_UPPER),
+    top_apply_mktcap_10k: numberOrNull(raw.TOP_APPLY_MARKETCAP),
+    win_rate_pct: numberOrNull(raw.ONLINE_ISSUE_LWR),
+    first_close_price: numberOrNull(raw.CLOSE_PRICE),
+    first_close_change_pct: numberOrNull(raw.LD_CLOSE_CHANGE),
+  }
+}
+
+async function executeNewStock(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
+  const filter = eventFilter([...eventTickerFilter('SECURITY_CODE', params.ticker), ...eventDateFilter('APPLY_DATE', params)])
+  // Sort uniqueness (verified 2026-11-22): all 5642 rows over 12 pages of 500 → 0 duplicate
+  // SECURITY_CODE and 0 duplicate rows; includes upcoming subscriptions (LISTING_DATE null).
+  const parsed = await fetchEventPage({ reportName: 'RPTA_APP_IPOAPPLY', context: 'new stock calendar', filter, sortColumns: 'APPLY_DATE,SECURITY_CODE', sortTypes: '-1,-1', page: Number(params.page), size: Number(params.size) }, signal)
+  return { data: { item: parsed.rows.map(parseNewStockRow), pagination: pagination(Number(params.page), Number(params.size), parsed.pages, parsed.total) }, schema: datacenterOutput(newStockRow) }
+}
+
 export function createEastmoneySources(): DataSource[] {
   return [
     createSource({ capability: 'eastmoney_top_buy_sell_market', name: 'get_eastmoney_top_buy_sell_market', summary: '东财全市场龙虎榜汇总', description: '按交易日区间分页获取东方财富龙虎榜上榜股票汇总。金额字段单位为元，CHANGE_RATE/TURNOVERRATE/DEAL_*_RATIO 为东财百分数原值；同一股票同日可能因多个上榜原因返回多行，不去重。上游 HTTP 200 但 success=false、code 非 0 或 result 缺失均视为失败，不转换为空数组。', inputSchema: dateRangeInput, outputSchema: datacenterOutput(topBuySellRow), paginated: true, rowShape: { rowKey: 'item' }, allowed: ['start_date', 'end_date', 'page', 'size'], normalize: (params) => normalizeDateRange(params, ['start_date', 'end_date', 'page', 'size']), execute: (params, signal) => executeBillboard(params, signal) }),
@@ -1577,6 +2239,886 @@ export function createEastmoneySources(): DataSource[] {
       outputSchema: datacenterOutput(marketMarginRow),
       paginated: true, rowShape: { rowKey: 'item' },
       allowed: ['start_date', 'end_date', 'market', 'page', 'size'], normalize: normalizeMarketMargin, execute: executeMarketMargin,
+    }),
+    createSource({
+      capability: 'eastmoney_security_profile', cacheMaxAgeMs: 60_000, name: 'get_eastmoney_security_profile',
+      summary: '东财个股基本面：行业/股本/市值/上市日/PE/PB',
+      description: '获取单只 A 股的东财 push2 基本面快照（stock/get，按 secid 直连）。字段口径已实测核对（2026-11-22，600519）：industry 是东财 f127 行业板块名（实测「白酒Ⅱ」），total_shares/float_shares 为 f84/f85（股，与 datacenter TOTAL_SHARE 1,250,081,601 精确一致），total_market_cap/float_market_cap 为 f116/f117（元，实测等于价×股本 1,857,308,738,685.75），list_date 为 f189（上游 YYYYMMDD「20010827」，转 YYYY-MM-DD 并给 list_date_ms），pe_dynamic 为 f162 动态市盈率（实测 21.61，与 datacenter PE_DYNAMIC 21.60752555 对上），pb 为 f167 市净率（实测 6.85，价格/BPS = 1485.75/216.9496 = 6.848 对上）。市值随价格变动，是查询时点快照，不是历史序列。⛔ 与同花顺口径的 index_membership_by_stock **不是一回事**：这里 industry 只给东财一级/二级板块名一个字符串（如「白酒Ⅱ」），既没有板块代码也不给多板块归属，不能当申万行业或同花顺行业用，两者不可对比、不可拼接。⛔ secid 市场号由 helper 规则决定（沪=1，深/北同为 0；5x ETF、588x 科创 ETF、900x 沪 B 都算沪市，92x 北交所必须先于 9x 判断），不许按首位数字猜：裸 6 位代码按 A 股个股解析（000001 = 平安银行，不是上证指数），显式市场与代码前缀冲突（如 000001.SH 上证指数）直接拒绝。指数/基金不在范围：上游对这类 secid 不给股本，本能力报 eastmoney_invalid_ticker，不回一行 null 冒充。PE/PB 是东财原值：亏损股动态 PE 可为负值，停牌或异常时上游用「-」占位，本能力输出 null（null 不等于 0 倍）。',
+      inputSchema: profileInput, outputSchema: datacenterOutput(profileRow), paginated: false, rowShape: { rowKey: 'item' },
+      allowed: ['ticker'], normalize: normalizeProfile, execute: executeProfile,
+      validateOutput: (data) => isRecord(data) && Array.isArray(data.item) && data.item.length === 1 && isRecord(data.pagination),
+    }),
+    createSource({
+      capability: 'eastmoney_st_stock_list', cacheMaxAgeMs: 300_000, name: 'get_eastmoney_st_stock_list',
+      summary: '沪深京 ST/*ST 当日名单（风险警示快照）',
+      description: '获取沪深京当日 ST / *ST 名单快照（东财 push2 clist，实测 2026-11-22：沪风险警示板 81 行、深风险警示板 304 行、北交所全表 366 行）。⛔ 北交所口径实测与上游 SKILL 文档不一致，按实测写清：`m:0+f:4` 并不是「只有深市」——实测返回 304 行，其中 189 行是北交所代码（430/830/831/…/873 老号段加 920 新号段），但这 189 行里 186 只在北交所当前 A 股全表（m:0+t:81+s:2048，实测 366 行）里没有对应的 ST 名称行，属老号段僵尸数据；当前北交所真正的 ST 只有 3 只（920575 *ST康乐、920090 *ST同辉、920023 *ST田野），它们既出现在风险警示板里也在北交所全表里。所以本能力按市场分别取：sh 用 m:1+f:4；sz 用 m:0+f:4 并剔除北交所代码；bj 用 m:0+t:81+s:2048 全表按名称含 ST 筛——⛔ 不能直接吃风险警示板，否则会把 186 只僵尸老号段当成北交所 ST 列出来。行按 sh→sz→bj、代码升序，code 唯一（重复即报 upstream 结构变化）。share_type 区分 a_share / b_share（沪 900xxx、深 200xxx 是 B 股；实测沪市 1 只 ST中路B、深市 2 只 ST晨鸣B / *ST皇庭B），⛔ B 股价格与成交额币种不同（沪 B 美元、深 B 港元），不能与 A 股人民币金额相加。单位：price 元（B 股为各自币种）、change_pct %、change_amount 元、volume 手、amount 元、amplitude_pct / turnover_pct %，均为东财原值；停牌行上游给「-」，这里输出 null 而不是 0。⛔ 只有当日快照、没有历史：要回测用的历史 ST 状态请换来源，本能力不提供按日回溯。翻页途中上游 total 变化会直接报错（避免把两份名单拼在一起）；任一风险警示板返回 0 行按上游异常报错，不会被说成「今天没有 ST」。total / by_market 是本次行数与各市场计数，markets 是实际覆盖的市场集合。',
+      inputSchema: stStockListInput, outputSchema: stStockListOutput, paginated: false, rowShape: { rowKey: 'item' },
+      allowed: ['market'], normalize: normalizeStStockList, execute: executeStStockList,
+      validateOutput: (data) => isRecord(data) && Array.isArray(data.item) && typeof data.total === 'number' && Array.isArray(data.markets) && isRecord(data.by_market),
+    }),
+    createSource({
+      capability: 'eastmoney_institution_research', cacheMaxAgeMs: 300_000, name: 'get_eastmoney_institution_research',
+      summary: '东财机构调研事件（按公告日，一次调研一行）',
+      description: '按公告日区间 / 个股分页获取东方财富机构调研事件（RPT_ORG_SURVEYNEW，取 IS_SOURCE="1" 且 NUMBERNEW="1" 的汇总行：一次调研一行）。实测 2026-11-22：NOTICE_DATE 2026-10-01..2026-11-21 共 2,941 条，688062 共 12 次调研。时间轴有两个：notice_date 是公告日（NOTICE_DATE，start_date/end_date 过滤的就是它，给 notice_date_ms 毫秒轴）；survey_start_date / survey_end_date 是实际接待日（RECEIVE_START_DATE / RECEIVE_END_DATE），通常早于公告日几天。org_count 是上游汇总的参与机构家数（SUM，单位家）——⛔ 实测与逐机构明细行数并不总相等（002053: 1 vs 2、600098: 68 vs 69），它是公司披露口径的家数，不要反推成机构明细条数、也不是去重后的机构个数。survey_way 是调研方式原文（如「特定对象调研,路演活动」）、reception_place 接待地点、receptionist 接待人，均为上游原文不改写。⛔ 本能力只做汇总口径，不提供逐机构明细：上游同一张表可以关掉 NUMBERNEW 换成一行一机构，但那样行语义会变，不做进同一个能力。排序键 NOTICE_DATE 降序 + SECURITY_CODE 升序 + RECEIVE_START_DATE 降序，已实测唯一（1728 行 / 4 页无重复、无漏行）。空结果=区间内没有调研记录（上游 9201，返回空 item + 全零分页），不是取数失败，不要重试。',
+      inputSchema: institutionResearchInput, outputSchema: datacenterOutput(institutionResearchRow), paginated: true, rowShape: { rowKey: 'item' },
+      allowed: ['ticker', 'start_date', 'end_date', 'page', 'size'], normalize: normalizeInstitutionResearch, execute: executeInstitutionResearch,
+    }),
+    createSource({
+      capability: 'eastmoney_holder_change', cacheMaxAgeMs: 300_000, name: 'get_eastmoney_holder_change',
+      summary: '东财重要股东增减持事件（按公告日）',
+      description: '按公告日区间 / 个股 / 方向分页获取东方财富重要股东增减持事件（RPT_SHARE_HOLDER_INCREASE）。实测 2026-11-22：NOTICE_DATE 2026-06-01..2026-11-21 共 2,969 条；方向分布（2026-09-01 起 1,248 行）增持 371 / 减持 877，且带符号变动股数的符号与 DIRECTION 100% 一致（代码里对该一致性有断言）。时间轴：notice_date 是公告日（NOTICE_DATE，start_date/end_date 过滤口径，给 notice_date_ms）、start_date / end_date 是变动期间起止。⛔ 字段名陷阱：上游 AFTER_CHANGE_RATE 实测是「本次变动占总股本的比例(%)」，**不是**变动后持股比例——000915 增持 213.04 万股对应 0.909（变动/总股本），变动后持股占比是 HOLD_RATIO = 24.17；本能力把它输出为 change_pct_total 并在描述里钉死，别把它当持股比例用。change_pct_float（CHANGE_FREE_RATIO）是本次变动占流通股比例(%)。after_hold_shares_10k / after_float_hold_shares_10k 是变动后持股数（万股），after_pct_total / after_pct_float 是变动后占公司总股本 / 流通股比例(%)——实测 000915 变动后 5,664.1741 万股 × 24.17% 与总股本自洽。股数单位统一万股，change_shares_10k 带符号（减持为负）。avg_price 是公告披露的成交均价（元/股），实测 1,248 行有 809 行为 null——很多公告不披露，null 不是 0。channel 是变动方式原文（如「二级市场」「大宗交易」「协议转让」）。⛔ 上游 CHANGE_RATE（实测样本 -4.3769）、CLOSE_PRICE 等列口径未核验（疑似公告日行情涨跌幅），不收录，也不要用本能力推断「公告后股价反应」。direction 参数与输出都用 ASCII increase / decrease（上游原文是「增持」「减持」）。排序键 NOTICE_DATE 降序 + SECURITY_CODE 升序 + HOLDER_NAME + START_DATE + END_DATE 升序，已实测唯一（2,969 行 / 6 页无重复、无漏行）。空结果=区间内没有增减持公告，不是失败。',
+      inputSchema: holderChangeInput, outputSchema: datacenterOutput(holderChangeRow), paginated: true, rowShape: { rowKey: 'item' },
+      allowed: ['ticker', 'start_date', 'end_date', 'direction', 'page', 'size'], normalize: normalizeHolderChange, execute: executeHolderChange,
+    }),
+    createSource({
+      capability: 'eastmoney_buyback', cacheMaxAgeMs: 300_000, name: 'get_eastmoney_buyback',
+      summary: '东财回购方案与实施进度（方案一行）',
+      description: '按数据更新日区间 / 个股 / 进度分页获取东方财富回购方案（RPTA_WEB_GETHGLIST_NEW，一个方案一行、只给当前状态，没有历史轨迹）。实测 2026-11-22：全表 5,846 行 / 1,949 页；进度码分布 001 董事会预案 115、002 股东大会通过 15、003 股东大会否决 8、004 实施中 445、005 停止实施 125、006 完成实施 5,074、007 63、008 1。⛔ 上游 007/008 两个进度码连东财页面都不给名字，本能力 progress=null、progress_code 保留原码，不猜语义。⛔ 时间轴是三个不同字段，别混：参数 start_date/end_date 过滤的是 UPD（数据更新日，也是排序键，输出 update_date / update_date_ms）；plan_notice_date 来自上游 UPDATEDATE（方案相关公告日，实测 001 预案行等于更新日、004 行早于最新进展公告）、latest_notice_date 来自 NOTICEDATE（最新一次进展公告日，001/007 行为 null）、finish_date 来自 FINISHDATE（完成日）。量纲（实测 600519 精确对上）：股数为股、金额为元——plan_shares_lower/upper（REPURNUMLOWER/REPURNUMCAP，804,864 / 1,609,727 股）、plan_amount_lower/upper（15 亿 / 30 亿元）、done_shares/done_amount（已回购 2,188,614 股 / 2,999,933,749.57 元）、price_cap 回购价格上限（元）、done_price_low/high 已回购价格区间（元）。plan_pct_total_lower/upper 是占总股本%的下限/上限（实测 804,864/1,250,081,601 = 0.0644 与 ZSZXX 0.06427 对上），实测 635/5,846 行这两列为 null（老方案上游不填）。done_* 在未开始实施的方案上为 null（实测 280 行两者皆空），null 不等于 0。progress 参数用 6 个中文名（对应 001–006），无法用 007/008 过滤，但省略 progress 时会返回它们。objective 是上游原文（如「用于依法注销减少注册资本」），不改写。排序键 UPD 降序 + DIM_SCODE 升序 + REPURCODE 升序，已实测唯一（5,846 行 / 12 页无重复方案、无重复行）。空结果=区间内没有回购记录，不是失败。',
+      inputSchema: buybackInput, outputSchema: datacenterOutput(buybackRow), paginated: true, rowShape: { rowKey: 'item' },
+      allowed: ['ticker', 'start_date', 'end_date', 'progress', 'page', 'size'], normalize: normalizeBuyback, execute: executeBuyback,
+    }),
+    createSource({
+      capability: 'eastmoney_pledge', cacheMaxAgeMs: 3_600_000, name: 'get_eastmoney_pledge',
+      summary: '东财股权质押周度统计（仅沪深）',
+      description: '获取东方财富股权质押周度统计（RPT_CSDC_LIST，原始来源中国结算，实测 2026-11-22 全表 1,655,524 行、最新统计日 2026-11-20（周五）2,265 只沪深股票）。⛔ **只覆盖沪深、没有北交所**：实测最新统计日 2,265 行里没有任何 4x/8x/92x 北交所代码，用 920982 查上游直接 9201 空结果；所以本能力对北交所 ticker 在参数层直接拒绝，不返回空表冒充「没有质押」（空表说明不了没有质押，只说明本表不覆盖）。不传 ticker 也不传日期时=最近一个统计日全市场：内部先查一次最新 TRADE_DATE 再按当天过滤，避免翻页滑到上一周。时间轴 stats_date 是统计日（TRADE_DATE，按周发布、通常周五；给 stats_date_ms），不是公告日。量纲（实测 301015 精确对上）：pledged_shares_10k 是质押股数（万股，REPURCHASE_BALANCE，18,522.06 万股 ÷ 总股本 = pledge_ratio_pct 35.24% 自洽）、pledged_market_cap_10k 是质押市值（万元，411,374.9526 万元 ≈ 41.1 亿元）、pledge_ratio_pct 质押股数占总股本%。unrestricted_pledged_10k / restricted_pledged_10k 是无限售 / 有限售质押股数（万股），实测 2,265 行全部满足「无限售 + 限售 = 合计」，代码里有该断言，不成立即报上游结构变化。pledge_deal_num 是上游 PLEDGE_DEAL_NUM（笔数口径未独立核验，只做同列相对比较）。industry 是东财行业名原文，空则 null。排序键 TRADE_DATE 降序 + PLEDGE_RATIO 降序 + SECURITY_CODE 升序，已实测唯一（2,265 行 / 5 页无重复、无漏行）——⛔ 只按 PLEDGE_RATIO 排序不唯一，上游曾因此翻页重复 1 行、漏 1 行。空结果=区间里没有统计日（按周发布、通常周五），不是失败。',
+      inputSchema: pledgeInput, outputSchema: datacenterOutput(pledgeRow), paginated: true, rowShape: { rowKey: 'item' },
+      allowed: ['ticker', 'start_date', 'end_date', 'page', 'size'], normalize: normalizePledge, execute: executePledge,
+    }),
+    createSource({
+      capability: 'eastmoney_new_stock', cacheMaxAgeMs: 3_600_000, name: 'get_eastmoney_new_stock',
+      summary: '东财新股申购与发行日历（含未申购排期）',
+      description: '按申购日区间 / 个股分页获取东方财富新股申购与发行日历（RPTA_APP_IPOAPPLY，含尚未申购的排期与已上市新股）。实测 2026-11-22：全表 5,642 行、2026 年 139 只、覆盖三个交易所（上交所 / 深交所 / 北交所）。时间轴：apply_date 是申购日（APPLY_DATE，start_date/end_date 过滤口径，给 apply_date_ms）、ballot_date 是摇号中签日（BALLOT_NUM_DATE）、pay_date 是缴款日（BALLOT_PAY_DATE）、listing_date 是上市日（未上市为 null）。exchange 是 TRADE_MARKET 原文（上海证券交易所 / 深圳证券交易所 / 北京证券交易所），board 取 MARKET（如「上交所科创板」「深交所创业板」）——北交所行 MARKET 为 null、只有 MARKET_TYPE_NEW=北交所，故 board 先取 MARKET 再退回 MARKET_TYPE_NEW，否则北交所行会丢板块。量纲（实测对得上）：issue_price 元/股、issue_shares_10k 发行股数（万股，ISSUE_NUM；301661 1375 万股与网上 2,887,500 + 网下 6,737,500 股、战略配售合计自洽）、online_shares 网上发行股数（股）、apply_upper_shares 网上申购上限（股）、win_rate_pct 网上中签率%、issue_pe 发行后市盈率、industry_pe 行业市盈率、first_close_price / first_close_change_pct 上市首日收盘价（元）与首日涨跌幅（%）——实测 5,637 行里 5,629 行满足 close = price×(1+chg/100)，8 行例外是 B 股 / 异常历史行，故两列原值给出、不做二次换算。⛔ ISSUE_PRICE 在定价前是 null（实测全表仅 2 行，均为未上市新股），上游在相邻价格列用 0 占位，本能力把 0 也当 null（未定价），不要把 null 读成 0 元发行。⛔ TOP_APPLY_MARKETCAP 单位虽是万元但口径跨市场不同：沪深是「顶格申购需配市值」（实测 688845 9000 股 → 9 万元、301661 2500 股 → 2.5 万元），北交所是「顶格申购需缴款金额」（实测 920067 708,300 股 × 23.52 元 = 1665.92 万元精确成立），禁止跨市场比较。win_rate_pct 实测全表 559 行为 null（未定价或未公布中签率），null 不是 0。排序键 APPLY_DATE 降序 + SECURITY_CODE 降序，已实测唯一（5,642 行 / 12 页无重复代码、无重复行）。空结果=区间内没有新股，不是失败。',
+      inputSchema: newStockInput, outputSchema: datacenterOutput(newStockRow), paginated: true, rowShape: { rowKey: 'item' },
+      allowed: ['ticker', 'start_date', 'end_date', 'page', 'size'], normalize: normalizeNewStock, execute: executeNewStock,
+    }),
+    ...createEastmoneyLimitPoolSources(),
+  ]
+}
+
+
+/**
+ * push2ex limit pools, dycalchis price anomalies, emappdata stock hot concepts. All three hosts sit
+ * outside the push2 egress path; every call still goes through the shared eastmoney client or the
+ * process-wide throttle (no private fetch/limiter).
+ */
+
+const PUSH2EX_BASE_URL = 'https://push2ex.eastmoney.com'
+const PUSH2EX_UT = '7eea3edcaed734bea9cbfc24409ed989'
+const PUSH2EX_REFERER = 'https://quote.eastmoney.com/'
+/** Upstream caps pagesize at 10k; a pool must be taken in one page because page boundaries are not stable. */
+const PUSH2EX_PAGE_SIZE = 10_000
+
+const ANOMALY_BASE_URL = 'https://dycalchis.eastmoney.com/price-anomaly'
+/** Six fixed H5 params: without `team=h5` (and the rest) upstream answers {"result":1001,"msg":"unknow team"}. */
+const ANOMALY_H5_PARAMS: Record<string, string> = { team: 'h5', product: 'EastMoney', client: 'WAP', version: '9001', name: 'WAP', user: '123' }
+const ANOMALY_LIST_DEFAULT_SIZE = 200
+const ANOMALY_COUNT_DEFAULT_SIZE = 50
+/** Count-endpoint sorting is applied locally: upstream ignores sortKey/sortDir (5 combinations, identical order). */
+const ANOMALY_SORT_FIELDS: Record<string, string> = { times: 'anomaly_times', deviation_pct: 'deviation_pct', change_pct: 'change_pct', price: 'price', window_days: 'window_days' }
+/** 12 rule names taken from the upstream frontend map; unknown codes stay null (no invented text). */
+const ANOMALY_RULES: Record<number, string> = {
+  1: '主板连续10个交易日内4次出现同向异常波动',
+  2: '创业板连续10个交易日内3次出现同向异常波动',
+  3: '科创板连续10个交易日内3次出现同向异常波动',
+  4: '连续十个交易日内日收盘价涨跌幅偏离值累计达到+100%',
+  5: '连续十个交易日内日收盘价涨跌幅偏离值累计达到-50%',
+  6: '连续三十个交易日内日收盘价涨跌幅偏离值累计达到+200%',
+  7: '连续三十个交易日内日收盘价涨跌幅偏离值累计达到-70%',
+  8: '北交所连续10个交易日内3次出现同向异常波动',
+  40: '连续十个交易日内日收盘价涨跌幅偏离值累计达到+150%',
+  50: '连续十个交易日内日收盘价涨跌幅偏离值累计达到-60%',
+  60: '连续三十个交易日内日收盘价涨跌幅偏离值累计达到+300%',
+  70: '连续三十个交易日内日收盘价涨跌幅偏离值累计达到-75%',
+}
+
+const HOT_CONCEPT_URL = 'https://emappdata.eastmoney.com/stockrank/getHotStockRankList'
+const HOT_CONCEPT_BODY: Record<string, string> = { appId: 'appId01', globalId: '786e4c21-70dc-435a-93bb-38' }
+
+/** Beijing calendar day. push2ex silently clamps any date later than the latest trading day onto that day. */
+function beijingToday(): string {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date()).map((part) => [part.type, part.value]))
+  return `${parts.year}-${parts.month}-${parts.day}`
+}
+
+/** `getJson` has no header slot; push2ex wants Referer, so this entry reuses the shared client and mirrors its classification. */
+async function getJsonWithHeaders(url: string, signal: AbortSignal, context: string, headers: Record<string, string>): Promise<JsonRecord> {
+  let payload: unknown
+  try {
+    payload = await sharedEastmoneyClient().fetchJson(url, { signal, headers })
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') throw error
+    const status = error instanceof EastmoneyTransportError ? error.status : undefined
+    throw sourceError(
+      status === undefined
+        ? `Eastmoney request failed for ${context}: ${error instanceof Error ? error.message : String(error)}`
+        : `Eastmoney HTTP ${status} for ${context}`,
+      status === 429 ? 'eastmoney_rate_limit' : 'eastmoney_http_error',
+    )
+  }
+  if (!isRecord(payload)) throw sourceError(`Eastmoney ${context} returned a non-object response`, 'eastmoney_invalid_response')
+  return payload
+}
+
+/**
+ * emappdata only speaks POST with a JSON body and the shared client has no body slot, so this entry
+ * uses the same process-wide throttle and repeats that client's abort/status/JSON classification.
+ */
+async function postJsonWithThrottle(url: string, body: JsonRecord, signal: AbortSignal, context: string): Promise<JsonRecord> {
+  let payload: unknown
+  try {
+    payload = await sharedEastmoneyThrottle()(async () => {
+      if (signal.aborted) {
+        const error = new Error('eastmoney request aborted')
+        error.name = 'AbortError'
+        throw error
+      }
+      const response = await globalThis.fetch(url, {
+        method: 'POST',
+        headers: { 'user-agent': 'Mozilla/5.0', 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal,
+      })
+      if (response.status >= 400) {
+        const error = new Error(`eastmoney returned HTTP ${response.status}`) as Error & { status?: number }
+        error.status = response.status
+        throw error
+      }
+      return await response.json()
+    })
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') throw error
+    const status = (error as { status?: unknown } | null)?.status
+    const statusCode = typeof status === 'number' ? status : undefined
+    throw sourceError(
+      statusCode === undefined
+        ? `Eastmoney request failed for ${context}: ${error instanceof Error ? error.message : String(error)}`
+        : `Eastmoney HTTP ${statusCode} for ${context}`,
+      statusCode === 429 ? 'eastmoney_rate_limit' : 'eastmoney_http_error',
+    )
+  }
+  if (!isRecord(payload)) throw sourceError(`Eastmoney ${context} returned a non-object response`, 'eastmoney_invalid_response')
+  return payload
+}
+
+/** Row array of plain objects; a non-array or a non-object row is an upstream shape change. */
+function poolRowArray(value: unknown, context: string): JsonRecord[] {
+  if (!Array.isArray(value)) throw sourceError(`Eastmoney ${context} is missing its row array`, 'eastmoney_invalid_response')
+  const rows: JsonRecord[] = []
+  for (const row of value) {
+    if (!isRecord(row)) throw sourceError(`Eastmoney ${context} contains a non-object row`, 'eastmoney_invalid_response')
+    rows.push(row)
+  }
+  return rows
+}
+
+function poolNumber(value: unknown, field: string, context: string): number | null {
+  if (value === undefined || value === null || value === '') return null
+  const parsed = numberOrNull(value)
+  if (parsed === null) throw sourceError(`Eastmoney ${context} row has an unreadable ${field}=${String(value)}`, 'eastmoney_invalid_response')
+  return parsed
+}
+
+function poolInteger(value: unknown, field: string, context: string): number | null {
+  const parsed = poolNumber(value, field, context)
+  if (parsed !== null && !Number.isSafeInteger(parsed)) throw sourceError(`Eastmoney ${context} row has a non-integer ${field}=${String(value)}`, 'eastmoney_invalid_response')
+  return parsed
+}
+
+/** Upstream pool prices are thousandths of a yuan (27710 = 27.71). A non-integer here means a unit change. */
+function poolPrice(value: unknown, field: string, context: string): number | null {
+  const parsed = poolNumber(value, field, context)
+  if (parsed === null) return null
+  if (!Number.isSafeInteger(parsed)) throw sourceError(`Eastmoney ${context} row has a non-integer ${field}=${String(value)}; pool prices are x1000`, 'eastmoney_invalid_response')
+  return parsed / 1000
+}
+
+/** Seal times are HHMMSS integers (92501 = 09:25:01), not Unix seconds: the two must never be mixed. */
+function poolSealTime(value: unknown, field: string, context: string): string | null {
+  const parsed = poolInteger(value, field, context)
+  if (parsed === null) return null
+  if (parsed < 0 || parsed > 235959) throw sourceError(`Eastmoney ${context} row has an out-of-range ${field}=${String(value)} (expected HHMMSS)`, 'eastmoney_invalid_response')
+  const text = String(parsed).padStart(6, '0')
+  const hour = Number(text.slice(0, 2))
+  const minute = Number(text.slice(2, 4))
+  const second = Number(text.slice(4, 6))
+  if (hour > 23 || minute > 59 || second > 59) throw sourceError(`Eastmoney ${context} row has an invalid clock time ${field}=${String(value)}`, 'eastmoney_invalid_response')
+  return `${text.slice(0, 2)}:${text.slice(2, 4)}:${text.slice(4, 6)}`
+}
+
+/** zttj = { days, ct }: upstream frontend renders ct/days (n/m = n limit-ups in m days) -> "N天M板". */
+function poolZtStat(value: unknown, context: string): { days: number | null; boards: number | null; text: string | null } {
+  if (value === undefined || value === null) return { days: null, boards: null, text: null }
+  if (!isRecord(value)) throw sourceError(`Eastmoney ${context} row has a malformed zttj`, 'eastmoney_invalid_response')
+  const days = poolInteger(value.days, 'zttj.days', context)
+  const boards = poolInteger(value.ct, 'zttj.ct', context)
+  if (days === null || boards === null) throw sourceError(`Eastmoney ${context} row has an incomplete zttj`, 'eastmoney_invalid_response')
+  return { days, boards, text: `${days}天${boards}板` }
+}
+
+/** m is 1 for SH and 0 for both SZ and BSE, so the market is derived from the code range with the shared helper. */
+function poolBaseRow(raw: JsonRecord, context: string, seen: Set<string>): JsonRecord {
+  const code = String(raw.c ?? '')
+  if (!/^\d{6}$/u.test(code)) throw sourceError(`Eastmoney ${context} row has an unusable code ${code || '(empty)'}`, 'eastmoney_invalid_response')
+  const identity = normalizeEastmoneyAshareIdentity(code)
+  const marketCode = poolInteger(raw.m, 'm', context)
+  const expectedMarketCode = identity.eastmoney_market === 'SH' ? 1 : 0
+  if (marketCode !== expectedMarketCode) {
+    throw sourceError(`Eastmoney ${context} row ${code} carries market code ${String(raw.m)} but its code range is ${identity.eastmoney_market}`, 'eastmoney_invalid_response')
+  }
+  if (seen.has(code)) throw sourceError(`Eastmoney ${context} contains duplicate code ${code}; a pool is one row per stock`, 'eastmoney_invalid_response')
+  seen.add(code)
+  const name = textOrNull(raw.n)
+  if (name === null || name.trim().length === 0) throw sourceError(`Eastmoney ${context} row ${code} has no name`, 'eastmoney_invalid_response')
+  return { thscode: identity.thscode, code, name, market: identity.eastmoney_market }
+}
+
+function parseLimitUpRow(raw: JsonRecord, context: string, seen: Set<string>): JsonRecord {
+  const base = poolBaseRow(raw, context, seen)
+  const stat = poolZtStat(raw.zttj, context)
+  return {
+    ...base,
+    price: poolPrice(raw.p, 'p', context),
+    change_pct: poolNumber(raw.zdp, 'zdp', context),
+    amount: poolNumber(raw.amount, 'amount', context),
+    float_market_cap: poolNumber(raw.ltsz, 'ltsz', context),
+    total_market_cap: poolNumber(raw.tshare, 'tshare', context),
+    turnover_rate_pct: poolNumber(raw.hs, 'hs', context),
+    limit_days: poolInteger(raw.lbc, 'lbc', context),
+    first_seal: poolSealTime(raw.fbt, 'fbt', context),
+    last_seal: poolSealTime(raw.lbt, 'lbt', context),
+    seal_fund: poolNumber(raw.fund, 'fund', context),
+    break_times: poolInteger(raw.zbc, 'zbc', context),
+    industry: textOrNull(raw.hybk),
+    zt_stat: stat.text,
+    zt_stat_days: stat.days,
+    zt_stat_boards: stat.boards,
+  }
+}
+
+function parseLimitBreakRow(raw: JsonRecord, context: string, seen: Set<string>): JsonRecord {
+  const base = poolBaseRow(raw, context, seen)
+  const stat = poolZtStat(raw.zttj, context)
+  return {
+    ...base,
+    price: poolPrice(raw.p, 'p', context),
+    limit_price: poolPrice(raw.ztp, 'ztp', context),
+    change_pct: poolNumber(raw.zdp, 'zdp', context),
+    amount: poolNumber(raw.amount, 'amount', context),
+    float_market_cap: poolNumber(raw.ltsz, 'ltsz', context),
+    total_market_cap: poolNumber(raw.tshare, 'tshare', context),
+    turnover_rate_pct: poolNumber(raw.hs, 'hs', context),
+    first_seal: poolSealTime(raw.fbt, 'fbt', context),
+    break_times: poolInteger(raw.zbc, 'zbc', context),
+    amplitude_pct: poolNumber(raw.zf, 'zf', context),
+    speed_pct: poolNumber(raw.zs, 'zs', context),
+    industry: textOrNull(raw.hybk),
+    zt_stat: stat.text,
+    zt_stat_days: stat.days,
+    zt_stat_boards: stat.boards,
+  }
+}
+
+function parseLimitDownRow(raw: JsonRecord, context: string, seen: Set<string>): JsonRecord {
+  const base = poolBaseRow(raw, context, seen)
+  return {
+    ...base,
+    price: poolPrice(raw.p, 'p', context),
+    change_pct: poolNumber(raw.zdp, 'zdp', context),
+    amount: poolNumber(raw.amount, 'amount', context),
+    float_market_cap: poolNumber(raw.ltsz, 'ltsz', context),
+    total_market_cap: poolNumber(raw.tshare, 'tshare', context),
+    pe: poolNumber(raw.pe, 'pe', context),
+    turnover_rate_pct: poolNumber(raw.hs, 'hs', context),
+    seal_fund: poolNumber(raw.fund, 'fund', context),
+    last_seal: poolSealTime(raw.lbt, 'lbt', context),
+    board_amount: poolNumber(raw.fba, 'fba', context),
+    limit_down_days: poolInteger(raw.days, 'days', context),
+    open_times: poolInteger(raw.oc, 'oc', context),
+    industry: textOrNull(raw.hybk),
+  }
+}
+
+/** Yesterday pool: `yfbt`/`ylbc` are yesterday-scoped columns; never feed them through the limit-up parser. */
+function parseYesterdayLimitUpRow(raw: JsonRecord, context: string, seen: Set<string>): JsonRecord {
+  const base = poolBaseRow(raw, context, seen)
+  const stat = poolZtStat(raw.zttj, context)
+  return {
+    ...base,
+    price: poolPrice(raw.p, 'p', context),
+    limit_price: poolPrice(raw.ztp, 'ztp', context),
+    change_pct: poolNumber(raw.zdp, 'zdp', context),
+    amount: poolNumber(raw.amount, 'amount', context),
+    float_market_cap: poolNumber(raw.ltsz, 'ltsz', context),
+    total_market_cap: poolNumber(raw.tshare, 'tshare', context),
+    turnover_rate_pct: poolNumber(raw.hs, 'hs', context),
+    amplitude_pct: poolNumber(raw.zf, 'zf', context),
+    speed_pct: poolNumber(raw.zs, 'zs', context),
+    yesterday_first_seal: poolSealTime(raw.yfbt, 'yfbt', context),
+    yesterday_limit_days: poolInteger(raw.ylbc, 'ylbc', context),
+    industry: textOrNull(raw.hybk),
+    zt_stat: stat.text,
+    zt_stat_days: stat.days,
+    zt_stat_boards: stat.boards,
+  }
+}
+
+interface LimitPoolSpec {
+  context: string
+  endpoint: string
+  sort: string
+  row: object
+  parse: (raw: JsonRecord, context: string, seen: Set<string>) => JsonRecord
+}
+
+const limitPoolEnvelope = (row: object) => ({
+  type: 'object',
+  properties: {
+    item: { type: 'array', items: row },
+    trade_date: { type: 'string' },
+    server_latest_trade_date: nullableString,
+    requested_date_clamped: { type: 'boolean' },
+    available: { type: 'boolean' },
+    row_count: { type: 'integer' },
+    upstream_total: { type: 'integer' },
+    note: nullableString,
+  },
+  required: ['item', 'trade_date', 'server_latest_trade_date', 'requested_date_clamped', 'available', 'row_count', 'upstream_total', 'note'],
+  additionalProperties: false,
+})
+
+async function executeLimitPool(spec: LimitPoolSpec, params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
+  const tradeDate = String(params.trade_date)
+  const url = new URL(`${PUSH2EX_BASE_URL}/${spec.endpoint}`)
+  url.searchParams.set('ut', PUSH2EX_UT)
+  url.searchParams.set('dpt', 'wz.ztzt')
+  url.searchParams.set('Pageindex', '0')
+  url.searchParams.set('pagesize', String(PUSH2EX_PAGE_SIZE))
+  url.searchParams.set('sort', spec.sort)
+  url.searchParams.set('date', tradeDate.replaceAll('-', ''))
+  const payload = await getJsonWithHeaders(url.toString(), signal, spec.context, { referer: PUSH2EX_REFERER })
+  if (Number(payload.rc) !== 0) {
+    throw sourceError(
+      `Eastmoney ${spec.context} rejected trade_date ${tradeDate}: rc=${String(payload.rc)}; upstream needs date=YYYYMMDD and answers rc=102/null when it is missing or unreadable`,
+      'eastmoney_upstream_error',
+    )
+  }
+  if (!isRecord(payload.data)) throw sourceError(`Eastmoney ${spec.context} returned rc=0 without a data object`, 'eastmoney_invalid_response')
+  const data = payload.data
+  const total = poolInteger(data.tc, 'tc', spec.context)
+  if (total === null) throw sourceError(`Eastmoney ${spec.context} returned no total (tc)`, 'eastmoney_invalid_response')
+  const rawRows = poolRowArray(data.pool, spec.context)
+  if (rawRows.length !== total) {
+    throw sourceError(`Eastmoney ${spec.context} returned ${rawRows.length} of ${total} rows at pagesize=${PUSH2EX_PAGE_SIZE}; a partial pool is not served`, 'eastmoney_invalid_response')
+  }
+  const latest = compactDay(data.qdate)
+  if (latest === null) throw sourceError(`Eastmoney ${spec.context} returned an unusable qdate ${String(data.qdate ?? '(missing)')}`, 'eastmoney_invalid_response')
+  const clamped = tradeDate > latest
+  const seen = new Set<string>()
+  const item = rawRows.map((raw) => spec.parse(raw, spec.context, seen))
+  const available = item.length > 0
+  const note = available
+    ? (clamped ? `请求日 ${tradeDate} 晚于上游最近交易日 ${latest}：上游把日期夹到 ${latest}，本批行属于 ${latest}，不是请求日。` : null)
+    : (clamped
+      ? `请求日 ${tradeDate} 晚于上游最近交易日 ${latest}：上游夹到 ${latest}，而该日池为空（tc=0）。`
+      : `上游在 ${tradeDate} 返回 tc=0 的空池（非交易日，或早于上游约 15 个交易日的保留窗口；服务器最近交易日 ${latest}）。空池不是取数失败。`)
+  return {
+    data: { item, trade_date: tradeDate, server_latest_trade_date: latest, requested_date_clamped: clamped, available, row_count: item.length, upstream_total: total, note },
+    schema: limitPoolEnvelope(spec.row),
+  }
+}
+
+function normalizeLimitPool(params: Params): Params {
+  assertKnown(params, ['trade_date'])
+  const trade_date = date(params.trade_date, 'trade_date')
+  if (trade_date > beijingToday()) {
+    throw new Error(`trade_date ${trade_date} is in the future (Beijing today is ${beijingToday()}); upstream would silently serve the latest trading day, so it is rejected here`)
+  }
+  return { trade_date }
+}
+
+const limitPoolInput = {
+  type: 'object',
+  properties: {
+    trade_date: { type: 'string', description: '交易日 YYYY-MM-DD（北京时间）。必填：上游省略 date 直接 rc=102/data=null，没有「最新」默认；今天或更早都接受，未来日期在参数层拒绝' },
+  },
+  required: ['trade_date'],
+  additionalProperties: false,
+}
+
+const limitUpRow = {
+  type: 'object',
+  properties: {
+    thscode: { type: 'string' }, code: { type: 'string' }, name: { type: 'string' }, market: { type: 'string', enum: ['SH', 'SZ', 'BJ'] },
+    price: nullableNumber, change_pct: nullableNumber, amount: nullableNumber,
+    float_market_cap: nullableNumber, total_market_cap: nullableNumber, turnover_rate_pct: nullableNumber,
+    limit_days: nullableNumber, first_seal: nullableString, last_seal: nullableString,
+    seal_fund: nullableNumber, break_times: nullableNumber, industry: nullableString,
+    zt_stat: nullableString, zt_stat_days: nullableNumber, zt_stat_boards: nullableNumber,
+  },
+  required: ['thscode', 'code', 'name', 'market', 'price', 'change_pct', 'amount', 'float_market_cap', 'total_market_cap', 'turnover_rate_pct', 'limit_days', 'first_seal', 'last_seal', 'seal_fund', 'break_times', 'industry', 'zt_stat', 'zt_stat_days', 'zt_stat_boards'],
+  additionalProperties: false,
+}
+
+const limitBreakRow = {
+  type: 'object',
+  properties: {
+    thscode: { type: 'string' }, code: { type: 'string' }, name: { type: 'string' }, market: { type: 'string', enum: ['SH', 'SZ', 'BJ'] },
+    price: nullableNumber, limit_price: nullableNumber, change_pct: nullableNumber, amount: nullableNumber,
+    float_market_cap: nullableNumber, total_market_cap: nullableNumber, turnover_rate_pct: nullableNumber,
+    first_seal: nullableString, break_times: nullableNumber, amplitude_pct: nullableNumber, speed_pct: nullableNumber,
+    industry: nullableString, zt_stat: nullableString, zt_stat_days: nullableNumber, zt_stat_boards: nullableNumber,
+  },
+  required: ['thscode', 'code', 'name', 'market', 'price', 'limit_price', 'change_pct', 'amount', 'float_market_cap', 'total_market_cap', 'turnover_rate_pct', 'first_seal', 'break_times', 'amplitude_pct', 'speed_pct', 'industry', 'zt_stat', 'zt_stat_days', 'zt_stat_boards'],
+  additionalProperties: false,
+}
+
+const limitDownRow = {
+  type: 'object',
+  properties: {
+    thscode: { type: 'string' }, code: { type: 'string' }, name: { type: 'string' }, market: { type: 'string', enum: ['SH', 'SZ', 'BJ'] },
+    price: nullableNumber, change_pct: nullableNumber, amount: nullableNumber,
+    float_market_cap: nullableNumber, total_market_cap: nullableNumber, pe: nullableNumber, turnover_rate_pct: nullableNumber,
+    seal_fund: nullableNumber, last_seal: nullableString, board_amount: nullableNumber,
+    limit_down_days: nullableNumber, open_times: nullableNumber, industry: nullableString,
+  },
+  required: ['thscode', 'code', 'name', 'market', 'price', 'change_pct', 'amount', 'float_market_cap', 'total_market_cap', 'pe', 'turnover_rate_pct', 'seal_fund', 'last_seal', 'board_amount', 'limit_down_days', 'open_times', 'industry'],
+  additionalProperties: false,
+}
+
+const yesterdayLimitUpRow = {
+  type: 'object',
+  properties: {
+    thscode: { type: 'string' }, code: { type: 'string' }, name: { type: 'string' }, market: { type: 'string', enum: ['SH', 'SZ', 'BJ'] },
+    price: nullableNumber, limit_price: nullableNumber, change_pct: nullableNumber, amount: nullableNumber,
+    float_market_cap: nullableNumber, total_market_cap: nullableNumber, turnover_rate_pct: nullableNumber,
+    amplitude_pct: nullableNumber, speed_pct: nullableNumber,
+    yesterday_first_seal: nullableString, yesterday_limit_days: nullableNumber, industry: nullableString,
+    zt_stat: nullableString, zt_stat_days: nullableNumber, zt_stat_boards: nullableNumber,
+  },
+  required: ['thscode', 'code', 'name', 'market', 'price', 'limit_price', 'change_pct', 'amount', 'float_market_cap', 'total_market_cap', 'turnover_rate_pct', 'amplitude_pct', 'speed_pct', 'yesterday_first_seal', 'yesterday_limit_days', 'industry', 'zt_stat', 'zt_stat_days', 'zt_stat_boards'],
+  additionalProperties: false,
+}
+
+const LIMIT_UP_POOL_SPEC: LimitPoolSpec = { context: 'limit-up pool', endpoint: 'getTopicZTPool', sort: 'fbt:asc', row: limitUpRow, parse: parseLimitUpRow }
+const LIMIT_BREAK_POOL_SPEC: LimitPoolSpec = { context: 'limit-break pool', endpoint: 'getTopicZBPool', sort: 'fbt:asc', row: limitBreakRow, parse: parseLimitBreakRow }
+const LIMIT_DOWN_POOL_SPEC: LimitPoolSpec = { context: 'limit-down pool', endpoint: 'getTopicDTPool', sort: 'fund:asc', row: limitDownRow, parse: parseLimitDownRow }
+const YESTERDAY_LIMIT_UP_POOL_SPEC: LimitPoolSpec = { context: 'yesterday limit-up pool', endpoint: 'getYesterdayZTPool', sort: 'zs:desc', row: yesterdayLimitUpRow, parse: parseYesterdayLimitUpRow }
+
+/** Market code only documents upstream column m; the market itself comes from the code range (m=0 is SZ and BJ). */
+function anomalyIdentity(raw: JsonRecord, context: string): { thscode: string; code: string; market: EastmoneyMarket; eastmoney_market_code: number | null } {
+  const code = String(raw.c ?? '')
+  if (!/^\d{6}$/u.test(code)) throw sourceError(`Eastmoney ${context} row has an unusable code ${code || '(empty)'}`, 'eastmoney_invalid_response')
+  const identity = normalizeEastmoneyAshareIdentity(code)
+  const marketCode = poolInteger(raw.m, 'm', context)
+  const expectedMarketCode = identity.eastmoney_market === 'SH' ? 1 : 0
+  if (marketCode !== null && marketCode !== expectedMarketCode) {
+    throw sourceError(`Eastmoney ${context} row ${code} carries m=${marketCode} but its code range is ${identity.eastmoney_market} (m=0 covers SZ and BJ)`, 'eastmoney_invalid_response')
+  }
+  return { thscode: identity.thscode, code, market: identity.eastmoney_market, eastmoney_market_code: marketCode }
+}
+
+function anomalyName(raw: JsonRecord, context: string, code: string): string {
+  const name = textOrNull(raw.n)
+  if (name === null || name.trim().length === 0) throw sourceError(`Eastmoney ${context} row ${code} has no name`, 'eastmoney_invalid_response')
+  return name
+}
+
+function parseAnomalyListRow(raw: JsonRecord, context: string): JsonRecord {
+  const identity = anomalyIdentity(raw, context)
+  const board = poolInteger(raw.s, 's', context)
+  const rule = poolInteger(raw.e, 'e', context)
+  // Frontend map: s==6 takes the stricter e*10 tier (4->40 .. 7->70); no s=6 sample observed yet.
+  const ruleCode = rule === null ? null : (board === 6 && rule >= 4 && rule <= 7 ? rule * 10 : rule)
+  const status = poolInteger(raw.o, 'o', context)
+  return {
+    ...identity,
+    name: anomalyName(raw, context, String(identity.code)),
+    board_code: board,
+    rule_code: ruleCode,
+    rule: ruleCode === null ? null : (ANOMALY_RULES[ruleCode] ?? null),
+    change_pct: poolNumber(raw.a, 'a', context),
+    change_target_pct: poolNumber(raw.t, 't', context),
+    deviation_pct: poolNumber(raw.x, 'x', context),
+    window_days: poolInteger(raw.d, 'd', context),
+    // o=2 is the upstream IS_HAPPEN "not today" value; anything else counts as today (frontend mapping).
+    is_today: status === null ? null : status !== 2,
+    status_code: status,
+  }
+}
+
+function parseAnomalyCountRow(raw: JsonRecord, context: string): JsonRecord {
+  const identity = anomalyIdentity(raw, context)
+  // Count `t` is an integer anomaly count; list `t` is a float target change. Never share this parser.
+  const times = poolInteger(raw.t, 't', context)
+  return {
+    ...identity,
+    name: anomalyName(raw, context, String(identity.code)),
+    board_code: poolInteger(raw.s, 's', context),
+    price: poolNumber(raw.p, 'p', context),
+    change_pct: poolNumber(raw.a, 'a', context),
+    anomaly_times: times,
+    deviation_pct: poolNumber(raw.x, 'x', context),
+    window_days: poolInteger(raw.d, 'd', context),
+  }
+}
+
+const anomalyListRow = {
+  type: 'object',
+  properties: {
+    thscode: { type: 'string' }, code: { type: 'string' }, name: { type: 'string' }, market: { type: 'string', enum: ['SH', 'SZ', 'BJ'] },
+    eastmoney_market_code: nullableNumber, board_code: nullableNumber, rule_code: nullableNumber, rule: nullableString,
+    change_pct: nullableNumber, change_target_pct: nullableNumber, deviation_pct: nullableNumber, window_days: nullableNumber,
+    is_today: { oneOf: [{ type: 'boolean' }, { type: 'null' }] }, status_code: nullableNumber,
+  },
+  required: ['thscode', 'code', 'name', 'market', 'eastmoney_market_code', 'board_code', 'rule_code', 'rule', 'change_pct', 'change_target_pct', 'deviation_pct', 'window_days', 'is_today', 'status_code'],
+  additionalProperties: false,
+}
+
+const anomalyCountRow = {
+  type: 'object',
+  properties: {
+    thscode: { type: 'string' }, code: { type: 'string' }, name: { type: 'string' }, market: { type: 'string', enum: ['SH', 'SZ', 'BJ'] },
+    eastmoney_market_code: nullableNumber, board_code: nullableNumber,
+    price: nullableNumber, change_pct: nullableNumber, anomaly_times: nullableNumber,
+    deviation_pct: nullableNumber, window_days: nullableNumber,
+  },
+  required: ['thscode', 'code', 'name', 'market', 'eastmoney_market_code', 'board_code', 'price', 'change_pct', 'anomaly_times', 'deviation_pct', 'window_days'],
+  additionalProperties: false,
+}
+
+const anomalyEnvelope = (row: object) => ({
+  type: 'object',
+  properties: {
+    item: { type: 'array', items: row },
+    data_date: { type: 'string' },
+    requested_date: nullableString,
+    requested_date_clamped: { type: 'boolean' },
+    available: { type: 'boolean' },
+    row_count: { type: 'integer' },
+    pagination: {
+      type: 'object',
+      properties: { page: { type: 'integer' }, size: { type: 'integer' }, pages: { type: 'integer' } },
+      required: ['page', 'size', 'pages'],
+      additionalProperties: false,
+    },
+    note: nullableString,
+  },
+  required: ['item', 'data_date', 'requested_date', 'requested_date_clamped', 'available', 'row_count', 'pagination', 'note'],
+  additionalProperties: false,
+})
+
+function anomalySortLetter(sortKey: string): string {
+  const letters: Record<string, string> = { times: 't', deviation_pct: 'x', change_pct: 'a', price: 'p', window_days: 'd' }
+  return letters[sortKey] ?? sortKey
+}
+
+async function executeAnomaly(kind: 'list' | 'count', params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
+  const context = kind === 'list' ? 'price anomaly list' : 'price anomaly count'
+  const url = new URL(`${ANOMALY_BASE_URL}/${kind}`)
+  for (const [key, value] of Object.entries(ANOMALY_H5_PARAMS)) url.searchParams.set(key, value)
+  url.searchParams.set('pageSize', String(params.page_size))
+  url.searchParams.set('pageNo', String(params.page_no))
+  if (params.date !== undefined) url.searchParams.set('date', String(params.date).replaceAll('-', ''))
+  if (kind === 'count' && params.sort_key !== undefined) {
+    url.searchParams.set('sortKey', anomalySortLetter(String(params.sort_key)))
+    url.searchParams.set('sortDir', params.sort_dir === undefined ? 'desc' : String(params.sort_dir))
+  }
+  const payload = await getJson(url.toString(), signal, context)
+  if (Number(payload.result) !== 0) {
+    throw sourceError(
+      `Eastmoney ${context} rejected the request: result=${String(payload.result)} msg=${JSON.stringify(payload.msg ?? '')}; result!=0 is an upstream rejection (1001=unknow team), never "no anomalies"`,
+      'eastmoney_upstream_error',
+    )
+  }
+  const dataDate = compactDay(payload.date)
+  if (dataDate === null) throw sourceError(`Eastmoney ${context} returned no business date (date=${String(payload.date ?? '(missing)')})`, 'eastmoney_invalid_response')
+  const rawRows = poolRowArray(payload.data, context)
+  const pageCount = poolInteger(payload.count, 'count', context)
+  if (pageCount !== null && pageCount !== rawRows.length) {
+    throw sourceError(`Eastmoney ${context} reports count=${pageCount} but returned ${rawRows.length} rows (count is this page's row count)`, 'eastmoney_invalid_response')
+  }
+  const pages = poolInteger(payload.pages, 'pages', context)
+  if (pages === null) throw sourceError(`Eastmoney ${context} returned no pages value`, 'eastmoney_invalid_response')
+  const requestedDate = params.date === undefined ? null : String(params.date)
+  let clamped = false
+  if (requestedDate !== null && requestedDate !== dataDate) {
+    if (requestedDate > dataDate) clamped = true
+    else {
+      throw sourceError(
+        `Eastmoney ${context} only serves the latest business day (${dataDate}); requested ${requestedDate} is not available (upstream ignores the date parameter)`,
+        'eastmoney_no_anomaly_data',
+      )
+    }
+  }
+  const item = rawRows.map((raw) => (kind === 'list' ? parseAnomalyListRow(raw, context) : parseAnomalyCountRow(raw, context)))
+  const sortKey = params.sort_key === undefined ? undefined : String(params.sort_key)
+  if (kind === 'count' && sortKey !== undefined) {
+    const field = ANOMALY_SORT_FIELDS[sortKey]
+    const direction = params.sort_dir === 'asc' ? 1 : -1
+    item.sort((left, right) => {
+      const leftValue = typeof left[field] === 'number' ? left[field] as number : null
+      const rightValue = typeof right[field] === 'number' ? right[field] as number : null
+      if (leftValue === null && rightValue === null) return 0
+      if (leftValue === null) return 1
+      if (rightValue === null) return -1
+      return (leftValue - rightValue) * direction
+    })
+  }
+  const available = item.length > 0
+  const notes: string[] = []
+  if (clamped) notes.push(`请求日 ${requestedDate} 晚于上游业务日 ${dataDate}：上游忽略 date 并返回最近业务日（实测 2026-11-22 传 20261001/abc/0/20270105 全部返回 20261120 同一批数据），本批行属于 ${dataDate}。`)
+  if (!available) notes.push(`上游 data=[]（业务日 ${dataDate} 没有${kind === 'list' ? '严重异常波动明细' : '异动聚合记录'}；合法空，不是取数失败）。`)
+  if (kind === 'count' && sortKey !== undefined) notes.push('排序在本地对本页执行：上游忽略 sortKey/sortDir（实测 5 种组合返回完全相同的顺序），跨页顺序不受控。')
+  return {
+    data: {
+      item,
+      data_date: dataDate,
+      requested_date: requestedDate,
+      requested_date_clamped: clamped,
+      available,
+      row_count: item.length,
+      pagination: { page: Number(params.page_no), size: Number(params.page_size), pages },
+      note: notes.length === 0 ? null : notes.join(' '),
+    },
+    schema: anomalyEnvelope(kind === 'list' ? anomalyListRow : anomalyCountRow),
+  }
+}
+
+function normalizeAnomalyDatePrefix(params: Params): Params {
+  const page_size = params.page_size === undefined
+    ? undefined
+    : integer(params.page_size, 'page_size', 1, MAX_PAGE_SIZE)
+  const page_no = params.page_no === undefined ? 1 : integer(params.page_no, 'page_no', 1, Number.MAX_SAFE_INTEGER)
+  if (params.date !== undefined) {
+    const day = date(params.date, 'date')
+    if (day > beijingToday()) throw new Error(`date ${day} is in the future (Beijing today is ${beijingToday()}); this endpoint only serves the latest business day`)
+  }
+  return { page_size, page_no, ...(params.date === undefined ? {} : { date: String(params.date) }) }
+}
+
+function normalizeAnomalyList(params: Params): Params {
+  assertKnown(params, ['page_size', 'page_no', 'date'])
+  const normalized = normalizeAnomalyDatePrefix(params)
+  if (normalized.page_size === undefined) normalized.page_size = ANOMALY_LIST_DEFAULT_SIZE
+  return normalized
+}
+
+function normalizeAnomalyCount(params: Params): Params {
+  assertKnown(params, ['page_size', 'page_no', 'date', 'sort_key', 'sort_dir'])
+  const normalized = normalizeAnomalyDatePrefix(params)
+  if (normalized.page_size === undefined) normalized.page_size = ANOMALY_COUNT_DEFAULT_SIZE
+  if (params.sort_key !== undefined) {
+    const sort_key = String(params.sort_key)
+    if (!(sort_key in ANOMALY_SORT_FIELDS)) throw new Error(`sort_key must be one of ${Object.keys(ANOMALY_SORT_FIELDS).join(', ')}`)
+    normalized.sort_key = sort_key
+  }
+  if (params.sort_dir !== undefined) {
+    const sort_dir = String(params.sort_dir)
+    if (sort_dir !== 'desc' && sort_dir !== 'asc') throw new Error('sort_dir must be desc or asc')
+    normalized.sort_dir = sort_dir
+  }
+  return normalized
+}
+
+const anomalyListInput = {
+  type: 'object',
+  properties: {
+    page_size: { type: 'integer', minimum: 1, maximum: MAX_PAGE_SIZE, description: '每页行数，默认 200；上游实测接受 10000，本层封顶 500（单日通常 < 50 行）' },
+    page_no: { type: 'integer', minimum: 1, description: '页码，默认 1' },
+    date: { type: 'string', description: '期望业务日 YYYY-MM-DD（可选）。上游忽略该参数、只返回最近业务日；早于返回业务日会被响亮拒绝，晚于则用 requested_date_clamped 标出' },
+  },
+  required: [],
+  additionalProperties: false,
+}
+
+const anomalyCountInput = {
+  type: 'object',
+  properties: {
+    ...anomalyListInput.properties,
+    page_size: { type: 'integer', minimum: 1, maximum: MAX_PAGE_SIZE, description: '每页行数，默认 50；上游实测接受 10000，本层封顶 500' },
+    sort_key: { type: 'string', enum: Object.keys(ANOMALY_SORT_FIELDS), description: '本地排序键，默认不排序（保持上游顺序）；上游忽略该参数' },
+    sort_dir: { type: 'string', enum: ['desc', 'asc'], description: '本地排序方向，默认 desc' },
+  },
+  required: [],
+  additionalProperties: false,
+}
+
+const hotConceptRow = {
+  type: 'object',
+  properties: { concept_name: { type: 'string' }, concept_code: { type: 'string' }, hit_count: { type: 'integer' } },
+  required: ['concept_name', 'concept_code', 'hit_count'],
+  additionalProperties: false,
+}
+
+const hotConceptOutput = {
+  type: 'object',
+  properties: {
+    item: { type: 'array', items: hotConceptRow },
+    thscode: { type: 'string' }, ticker: { type: 'string' }, market: { type: 'string', enum: ['SH', 'SZ', 'BJ'] },
+    src_security_code: { type: 'string' },
+    calculated_at: nullableString,
+    calculated_at_ms: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    available: { type: 'boolean' },
+    note: nullableString,
+  },
+  required: ['item', 'thscode', 'ticker', 'market', 'src_security_code', 'calculated_at', 'calculated_at_ms', 'available', 'note'],
+  additionalProperties: false,
+}
+
+function normalizeHotConcepts(params: Params): Params {
+  assertKnown(params, ['ticker'])
+  return { ticker: ashareThscode(params.ticker) }
+}
+
+async function executeHotConcepts(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
+  const thscode = String(params.ticker)
+  const [ticker, market] = thscode.split('.') as [string, EastmoneyMarket]
+  const srcSecurityCode = `${market}${ticker}`
+  const payload = await postJsonWithThrottle(HOT_CONCEPT_URL, { ...HOT_CONCEPT_BODY, srcSecurityCode }, signal, 'stock hot concepts')
+  if (Number(payload.code) !== 0 || Number(payload.status) !== 0) {
+    throw sourceError(
+      `Eastmoney stock hot concepts failed for ${srcSecurityCode}: ${String(payload.message ?? 'unknown upstream error')} (code ${String(payload.code ?? 'unknown')})`,
+      'eastmoney_upstream_error',
+    )
+  }
+  if (!Array.isArray(payload.data)) throw sourceError('Eastmoney stock hot concepts returned no data array', 'eastmoney_invalid_response')
+  const context = 'stock hot concepts'
+  const rawRows = poolRowArray(payload.data, context)
+  const rows = rawRows.map((raw) => {
+    if (String(raw.srcSecurityCode ?? '') !== srcSecurityCode) {
+      throw sourceError(`Eastmoney ${context} returned ${String(raw.srcSecurityCode ?? '(missing)')} for requested ${srcSecurityCode}`, 'eastmoney_invalid_response')
+    }
+    const conceptName = textOrNull(raw.conceptName)
+    if (conceptName === null || conceptName.trim().length === 0) throw sourceError(`Eastmoney ${context} row has no conceptName`, 'eastmoney_invalid_response')
+    const conceptCode = String(raw.conceptId ?? '')
+    if (!/^BK\d{4}$/u.test(conceptCode)) throw sourceError(`Eastmoney ${context} row has an unusable conceptId ${conceptCode || '(empty)'}`, 'eastmoney_invalid_response')
+    const hitCount = poolInteger(raw.hitCount, 'hitCount', context)
+    if (hitCount === null) throw sourceError(`Eastmoney ${context} row has no hitCount`, 'eastmoney_invalid_response')
+    return { concept_name: conceptName, concept_code: conceptCode, hit_count: hitCount }
+  })
+  // Upstream is already ordered by heat; sort locally so the promise "heat desc" does not depend on it.
+  rows.sort((left, right) => right.hit_count - left.hit_count)
+  const calculatedAt = rows.length === 0 ? null : textOrNull(rawRows[0].calcTime)
+  let calculatedAtMs: number | null = null
+  if (calculatedAt !== null) {
+    if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/u.test(calculatedAt)) throw sourceError(`Eastmoney ${context} returned an unparseable calcTime ${calculatedAt}`, 'eastmoney_invalid_response')
+    calculatedAtMs = Date.parse(`${calculatedAt.replace(' ', 'T')}+08:00`)
+    if (Number.isNaN(calculatedAtMs)) throw sourceError(`Eastmoney ${context} returned an unparseable calcTime ${calculatedAt}`, 'eastmoney_invalid_response')
+  }
+  const available = rows.length > 0
+  return {
+    data: {
+      item: rows,
+      thscode,
+      ticker,
+      market,
+      src_security_code: srcSecurityCode,
+      calculated_at: calculatedAt,
+      calculated_at_ms: calculatedAtMs,
+      available,
+      note: available ? null : `东财 App 动态热度口径下 ${srcSecurityCode} 当前没有概念命中（上游 data=[]，合法空，不是取数失败；也不代表该股不属于任何板块）。`,
+    },
+    schema: hotConceptOutput,
+  }
+}
+
+function validateLimitPoolOutput(data: unknown): boolean {
+  return isRecord(data)
+    && Array.isArray(data.item)
+    && data.item.every(isRecord)
+    && data.item.length === data.row_count
+    && typeof data.trade_date === 'string'
+    && (data.server_latest_trade_date === null || typeof data.server_latest_trade_date === 'string')
+    && typeof data.requested_date_clamped === 'boolean'
+    && typeof data.available === 'boolean'
+    && typeof data.upstream_total === 'number'
+}
+
+function validateAnomalyOutput(data: unknown): boolean {
+  return isRecord(data)
+    && Array.isArray(data.item)
+    && data.item.every(isRecord)
+    && data.item.length === data.row_count
+    && typeof data.data_date === 'string'
+    && typeof data.available === 'boolean'
+    && isRecord(data.pagination)
+}
+
+function validateHotConceptOutput(data: unknown): boolean {
+  return isRecord(data)
+    && Array.isArray(data.item)
+    && data.item.every(isRecord)
+    && typeof data.thscode === 'string'
+    && typeof data.available === 'boolean'
+}
+
+function createEastmoneyLimitPoolSources(): DataSource[] {
+  return [
+    createSource({
+      capability: 'eastmoney_limit_up_pool', cacheMaxAgeMs: 300_000, name: 'get_eastmoney_limit_up_pool',
+      summary: '东财涨停池（push2ex 口径，含首末封与封板资金）',
+      description: '获取东方财富涨停板行情中心的涨停池（push2ex getTopicZTPool，零 key，与 push2 不同主机；实测 2026-11-22 17:2x 北京时间可直连、HTTP 200）。⛔ 与本地 Fuyao/同花顺口径的 `limit_up_pool` 是**两家口径**：家数、连板数、封板时间、封板资金都不可比、不可拼接、不可混算。参数 trade_date（YYYY-MM-DD，北京时间交易日）**必填**：上游省略 date 直接返回 rc=102 + data=null（实测），没有「最新」默认，本层不做日期猜测。实测 2026-11-20（周五）涨停 28 只、2026-11-19 为 23 只；上游只保留**最近约 15 个交易日**（实测 2026-11-02 有数据 tc=125、2026-10-30 起 tc=0），更早日期与非交易日返回 rc=0 + tc=0 + pool=[]（**不是 data=null，也不是取数失败**：输出 available=false + note）；请求日**晚于最近交易日**（含周末、节假日、未来日）会被上游静默夹到最近交易日，本层在参数层拒绝未来日期，今天及更晚的请求用 requested_date_clamped + server_latest_trade_date（上游 qdate）标出真实归属日。一次 pagesize=10000 取满、不翻页；行数必须等于 data.tc，不等即响亮失败；同一代码出现两次、或 m 市场码与代码号段矛盾同样响亮失败（实测 2026-11-19 曾收到过一次混入其他交易日行的缓存脏响应，靠这两条拦住）。字段映射（均字节级实测）：c→code（6 位）、n→name、m 只用于校验（1=沪，0=深市与北交所同码），不输出；市场一律按代码号段用 helper 推导，禁止按 m 猜、p→price（**上游 ×1000 整数，÷1000 得元**，如 27710→27.71）、zdp→change_pct（百分数原值，10.0039701461792 即 +10.00397%）、amount→amount（成交额，元）、ltsz→float_market_cap（流通市值，元）、tshare→total_market_cap（总市值，元；实测 603324 为 4,183,747,797.2）、hs→turnover_rate_pct（百分数原值）、lbc→limit_days（连板数）、fbt→first_seal、lbt→last_seal（**上游是 HHMMSS 整数**，92501→"09:25:01"；与同花顺的 Unix 秒不是一套）、fund→seal_fund（封板资金，元；实测与腾讯买一量×100×涨停价 28/28 一致）、zbc→break_times（炸板次数）、hybk→industry（东财行业名原文，实测存在被截断的短名如「汽车零部」）、zttj{days,ct}→zt_stat（「N天M板」，东财前端 n/m 口径：days=窗口天数、ct=涨停次数；与连板数 limit_days 不等价，实测 002548 lbc=1 而 zttj={6,3}），同时保留 zt_stat_days/zt_stat_boards 原值。不含炸板/跌停/昨日涨停池字段，不要跨池拼行。',
+      inputSchema: limitPoolInput, outputSchema: limitPoolEnvelope(limitUpRow), paginated: false, rowShape: { rowKey: 'item' },
+      allowed: ['trade_date'], normalize: normalizeLimitPool, execute: (params, signal) => executeLimitPool(LIMIT_UP_POOL_SPEC, params, signal),
+      validateOutput: validateLimitPoolOutput,
+    }),
+    createSource({
+      capability: 'eastmoney_limit_break_pool', cacheMaxAgeMs: 300_000, name: 'get_eastmoney_limit_break_pool',
+      summary: '东财炸板池（push2ex 口径，含涨停价与振幅）',
+      description: '获取东方财富涨停板行情中心的炸板池（push2ex getTopicZBPool，与涨停池同族、只有 endpoint 与 sort 不同，零 key）。⛔ 与本地 Fuyao/同花顺口径的 `limit_break_pool` 是**两家口径**，家数与字段不可混、不可拼接。参数 trade_date 必填（YYYY-MM-DD）；上游省略 date 返回 rc=102/data=null（实测），非交易日与超出约 15 个交易日保留窗口的日期返回 rc=0 + tc=0 + pool=[]（合法空，输出 available=false + note），请求日晚于最近交易日会被静默夹到最近交易日（用 requested_date_clamped + server_latest_trade_date 标出；未来日期在参数层拒绝）。一次 pagesize=10000 取满不翻页，行数必须等于 data.tc，重复代码或 m 与代码号段矛盾即响亮失败。字段（2026-11-20 实测 7 只）：c/n→code/name、m 只用于校验（市场按代码号段），不输出、p→price（×1000 整数÷1000，元）、ztp→limit_price（**涨停价**，同样 ÷1000；实测直真科技 p=32.26/ztp=35.86、涨跌幅 -1.04%，35.86 恰为昨收 32.60×1.1）、zdp→change_pct（百分数原值）、amount→amount（成交额，元）、ltsz→float_market_cap（元）、tshare→total_market_cap（元）、hs→turnover_rate_pct（百分数原值）、fbt→first_seal（HHMMSS 整数，93454→"09:34:54"）、zbc→break_times（炸板次数）、zf→amplitude_pct（振幅百分数原值）、zs→speed_pct（涨速百分数原值；**实测收盘后全为 0**，盘中才有值）、hybk→industry（东财行业名原文）、zttj{days,ct}→zt_stat/zt_stat_days/zt_stat_boards（「N天M板」，炸板池常见 {0,0} → 「0天0板」，表示窗口内没有计入的连续板数，不是缺数）。本池没有 lbt（末封时间）与封板资金，需要请用 `eastmoney_limit_up_pool`。',
+      inputSchema: limitPoolInput, outputSchema: limitPoolEnvelope(limitBreakRow), paginated: false, rowShape: { rowKey: 'item' },
+      allowed: ['trade_date'], normalize: normalizeLimitPool, execute: (params, signal) => executeLimitPool(LIMIT_BREAK_POOL_SPEC, params, signal),
+      validateOutput: validateLimitPoolOutput,
+    }),
+    createSource({
+      capability: 'eastmoney_limit_down_pool', cacheMaxAgeMs: 300_000, name: 'get_eastmoney_limit_down_pool',
+      summary: '东财跌停池（push2ex 口径，含封单资金与连续跌停）',
+      description: '获取东方财富涨停板行情中心的跌停池（push2ex getTopicDTPool，零 key；与涨停/炸板同族，sort=fund:asc）。⛔ 与本地 Fuyao/同花顺口径的 `limit_down_pool` 是**两家口径**，家数与字段不可混、不可拼接。参数 trade_date 必填（YYYY-MM-DD）；上游省略 date 返回 rc=102/data=null（实测），非交易日与超出约 15 个交易日保留窗口的日期返回 rc=0 + tc=0 + pool=[]（合法空，available=false + note），请求日晚于最近交易日会被静默夹到最近交易日（requested_date_clamped + server_latest_trade_date 标出；未来日期参数层拒绝）。一次 pagesize=10000 取满不翻页，行数必须等于 data.tc，重复代码或 m 与代码号段矛盾即响亮失败。字段（2026-11-20 实测 58 只，逐列在真报文上核对）：c/n→code/name、m 只用于校验（1=沪、0=深市与北交所同码），不输出；市场按代码号段、p→price（×1000 整数÷1000，元）、zdp→change_pct（百分数原值）、amount→amount（成交额，元；实测与换手率×流通市值一致）、ltsz→float_market_cap（流通市值，元）、tshare→total_market_cap（总市值，元）、pe→pe（东财动态市盈率原值，亏损股为负）、hs→turnover_rate_pct（百分数原值）、fund→seal_fund（**封单资金，元**，上游前端 title「当前以跌停价挂的卖单的资金总量」；实测与腾讯卖一量×100×股价 57/58 一致，如 605255 为 15067 手×100×59.80=90,100,660）、lbt→last_seal（末次触及跌停时间，HHMMSS 整数→HH:MM:SS，实测 135838→"13:58:38"）、days→limit_down_days（**连续跌停天数**，实测 603037 于 11-19 为 1、11-20 为 2 连续递增）、oc→open_times（**打开跌停板次数**）、hybk→industry（东财行业名原文）。⛔ fba→board_amount 收录但**口径不可靠**：上游前端 title 写「成交价格为该股票跌停价的所有成交额的总和」，实测 58 行中 12 行大于当日成交额（002535：157,452,224 vs 23,102,652），3 只全天一字跌停（最高=最低）的票也不等于成交额，说明它并非已成交额子集；原值输出、只允许同列相对比较，禁止当成交额用、禁止与 amount 相减。',
+      inputSchema: limitPoolInput, outputSchema: limitPoolEnvelope(limitDownRow), paginated: false, rowShape: { rowKey: 'item' },
+      allowed: ['trade_date'], normalize: normalizeLimitPool, execute: (params, signal) => executeLimitPool(LIMIT_DOWN_POOL_SPEC, params, signal),
+      validateOutput: validateLimitPoolOutput,
+    }),
+    createSource({
+      capability: 'eastmoney_yesterday_limit_up_pool', cacheMaxAgeMs: 300_000, name: 'get_eastmoney_yesterday_limit_up_pool',
+      summary: '东财昨日涨停池（昨涨停今表现，含晋级率原料）',
+      description: '获取东方财富涨停板行情中心的**昨日涨停池**（push2ex getYesterdayZTPool，sort=zs:desc，零 key）：昨日涨停个股在今日的表现，用于算晋级率/赚钱效应。⛔ 本地此前没有这一池；与 Fuyao `limit_break_pool`/`limit_up_pool` 是两家口径，不可混算。⛔ **上游字段名带 y_ 前缀（yfbt/ylbc），不能与涨停池复用解析**：本能力用独立 parser 与独立行 schema，`yesterday_first_seal`/`yesterday_limit_days` 只来自 yfbt/ylbc，绝不读 fbt/lbt/lbc。参数 trade_date 必填（YYYY-MM-DD）；上游省略 date 返回 rc=102/data=null（实测），非交易日与超出约 15 个交易日保留窗口的日期返回 rc=0 + tc=0 + pool=[]（合法空），请求日晚于最近交易日会被静默夹到最近交易日（requested_date_clamped + server_latest_trade_date 标出；未来日期参数层拒绝）。一次 pagesize=10000 取满不翻页，行数必须等于 data.tc，重复代码或 m 与代码号段矛盾即响亮失败。字段（2026-11-20 实测 23 只）：c/n→code/name、m 只用于校验（市场按代码号段），不输出、p→price（×1000÷1000，今日最新价，元）、ztp→limit_price（**今日涨停价**，÷1000；已涨停者 ztp==p，实测 002579/002771 相等）、zdp→change_pct（**今日涨跌幅**百分数原值，实测 002420 为 -9.81 即今天砸到接近跌停）、amount→amount（元）、ltsz→float_market_cap（元）、tshare→total_market_cap（元）、hs→turnover_rate_pct（百分数原值）、zf→amplitude_pct（振幅百分数原值）、zs→speed_pct（涨速百分数原值，实测收盘后全 0）、yfbt→yesterday_first_seal（**昨日**最后触及涨停时间，HHMMSS 整数→HH:MM:SS，如 131351→"13:13:51"）、ylbc→yesterday_limit_days（**昨日**连板数；实测 000656 的 1119 涨停池 lbc=1 与本池 ylbc=1 对齐）、hybk→industry、zttj→zt_stat（「N天M板」，按截至今日的口径：今日仍涨停者会更新成今日档，如 002771 昨 3 板、今日仍涨停则本池给 4天4板）。本池没有今日首末封时间与封板资金；要今日封板质量请用 `eastmoney_limit_up_pool`。',
+      inputSchema: limitPoolInput, outputSchema: limitPoolEnvelope(yesterdayLimitUpRow), paginated: false, rowShape: { rowKey: 'item' },
+      allowed: ['trade_date'], normalize: normalizeLimitPool, execute: (params, signal) => executeLimitPool(YESTERDAY_LIMIT_UP_POOL_SPEC, params, signal),
+      validateOutput: validateLimitPoolOutput,
+    }),
+    createSource({
+      capability: 'eastmoney_price_anomaly_list', cacheMaxAgeMs: 900_000, name: 'get_eastmoney_price_anomaly_list',
+      summary: '东财严重异常波动明细（规则码/累计偏离/统计窗口）',
+      description: '获取东方财富「严重异常波动」口径的异动明细（dycalchis price-anomaly/list，交易所监管口径，零 key）。⛔ 必须带固定 H5 参数 team=h5&product=EastMoney&client=WAP&version=9001&name=WAP&user=123——缺 team 时上游回 {"result":1001,"msg":"unknow team"}（实测）；`result != 0` 一律**正向抛错**（eastmoney_upstream_error），绝不当成「今天没异动」静默吞掉。⛔ **date 参数实测被上游完全忽略**：传 2026-11-20、2026-10-01、abc、0、2027-01-05 全部返回同一批 date=20261120 的数据（2026-11-22 北京时间实测）。因此本能力的 date 只是**断言**：等于返回业务日则通过；早于返回业务日 **响亮失败（eastmoney_no_anomaly_data）**，因为上游拿不到历史；晚于返回业务日（今天/周末/节假日）用 requested_date_clamped 标出，未来日期在参数层拒绝。响应 date 是**业务所属日**（YYYYMMDD→YYYY-MM-DD，非交易时段返回上一交易日属正常）。分页：page_size 默认 200、本层上限 500（上游实测接受 10000）；上游 pages 的口径是 floor(total/page_size)+1（实测 list 4 行、size=2 时 pages=3 且第 3 页为空），count=**本页行数**（不是总数），代码按 count==行数 校验。字段映射（2026-11-20 实测 4 行）：c/n→code/name；m→eastmoney_market_code 仅原值（**m=0 同时代表深市与北交所**，市场只能按代码号段 4/8/92→BJ 判，helper 复用）；s→board_code（板块码，实测 1=主板、4=创业板、5=科创板，窗口内无 6/8 样本）；e→rule_code（规则码；⛔ 上游前端映射：s==6 且 e∈{4,5,6,7} 时按 e*10 取更严阈值那档 4→40/5→50/6→60/7→70，本层按该规则换算，但**实测全窗口只有 s∈{4,5}、没有 s=6 样本，该分支未经真报文验证**）；rule→上游 12 条规则中文名（对不上/未知码给 null，不编造；文字亦未逐条真报文核对）；x→deviation_pct（累计偏离值 %，与 count 端点同名列同一口径：603324 4 连板时 x=48.29/d=4）；d→window_days（统计窗口天数）；a→change_pct（当日涨跌幅 %，实测 600530=-10、603324=+10、002148=8.17 与炸板池 zdp 8.172 一致）；t→change_target_pct（⛔ **list 的 t 是浮点「涨跌幅目标值」**，与 count 的整数 t=异动次数**不是一回事**，本层分开解析、测试钉住；其精确口径未独立核验，只做同列比较）；o→status_code + is_today（上游 IS_HAPPEN：=2 记 false、其余 true，按前端映射，未逐值核验）。空 data 是合法空（available=false + note）。本能力与本地 `anomaly_list`/`abnormal_monitor_list` 的「异动原因/监控区间」口径不同，不可拼接。',
+      inputSchema: anomalyListInput, outputSchema: anomalyEnvelope(anomalyListRow), paginated: true, rowShape: { rowKey: 'item' },
+      allowed: ['page_size', 'page_no', 'date'], normalize: normalizeAnomalyList, execute: (params, signal) => executeAnomaly('list', params, signal),
+      validateOutput: validateAnomalyOutput,
+    }),
+    createSource({
+      capability: 'eastmoney_price_anomaly_count', cacheMaxAgeMs: 900_000, name: 'get_eastmoney_price_anomaly_count',
+      summary: '东财异动按标的聚合（窗口内异动次数/累计偏离）',
+      description: '获取东方财富「严重异常波动」口径的**按标的聚合统计**（dycalchis price-anomaly/count，零 key）。⛔ 必须带固定 H5 参数 team=h5&product=EastMoney&client=WAP&version=9001&name=WAP&user=123（缺 team 回 result=1001 unknow team）；`result != 0` 一律**正向抛错**，不许当「没有异动」。⛔ date 实测被上游忽略（2026-11-22 传 2026-10-01/abc/0/2027-01-05 全部返回 date=20261120 同一批数据）；本能力 date 只是断言：等于返回业务日通过、早于返回业务日响亮失败（历史拿不到）、晚于用 requested_date_clamped 标出，未来日期参数层拒绝。响应 date 是业务所属日，非交易时段返回上一交易日属正常。分页：page_size 默认 50、本层上限 500；上游 pages=floor(total/page_size)+1（实测 11 行、size=2 时 pages=6），count=本页行数（按 count==行数校验）。⛔ **两函数同名字母含义不同**：本端点（count）的 `t` 是**窗口内异动次数（整数）**，list 端点的 `t` 是浮点「涨跌幅目标值」——本能力用独立 parser，t 非整数即响亮失败，绝不跨端点复用解析（测试钉住）。字段映射（2026-11-20 实测 11 行）：c/n→code/name；m→eastmoney_market_code 仅原值（m=0 同时代表深市与北交所，市场按代码号段判）；s→board_code（实测 1=主板，样本无 4/5/6/8）；p→price（最新价，元；实测 603324=27.71、002771=15.82、002148=10.06 与涨停/炸板池价格逐条一致）；a→change_pct（当日涨跌幅 % 原值）；t→anomaly_times（窗口内异动次数，整数）；x→deviation_pct（累计偏离值 %）；d→window_days（统计窗口天数）。sort_key/sort_dir：⛔ 上游**忽略** sortKey/sortDir（实测 sortKey=t/x/a、asc/desc 共 5 种组合返回完全相同的顺序与数据），本层在**本地对本页**排序（sort_key ∈ times/deviation_pct/change_pct/price/window_days，默认不排序、保持上游顺序），跨页顺序不受控，note 会写明。空 data 是合法空（available=false + note）。本能力与本地 `anomaly_list`/`abnormal_monitor_list` 的「异动原因/监控区间」口径不同，不可拼接。',
+      inputSchema: anomalyCountInput, outputSchema: anomalyEnvelope(anomalyCountRow), paginated: true, rowShape: { rowKey: 'item' },
+      allowed: ['page_size', 'page_no', 'date', 'sort_key', 'sort_dir'], normalize: normalizeAnomalyCount, execute: (params, signal) => executeAnomaly('count', params, signal),
+      validateOutput: validateAnomalyOutput,
+    }),
+    createSource({
+      capability: 'eastmoney_stock_hot_concepts', cacheMaxAgeMs: 300_000, name: 'get_eastmoney_stock_hot_concepts',
+      summary: '东财个股动态概念命中热度（App 热度口径）',
+      description: '获取东方财富 App「个股热门概念命中」：这只票当下被市场归到哪些概念在炒（emappdata getHotStockRankList，POST {"appId":"appId01","globalId":"786e4c21-70dc-435a-93bb-38","srcSecurityCode":"SH600519"}，零 key）。srcSecurityCode 必须是**大写 SH/SZ/BJ 前缀 + 6 位代码**：市场号段复用本文件既有 helper（4/8/92→BJ，6/9→SH，其余→SZ），**不许按首位猜沪深**，北交所 920x 必须走 BJ。返回 conceptName→concept_name、conceptId→concept_code（BK 码，校验 BK+4 位）、hitCount→hit_count（整数），按 hit_count 降序（上游实测即降序，本层再稳定降序）并给 calculated_at/calculated_at_ms（上游 calcTime，实测「2026-11-22 17:00:00」，北京时间口径的 App 热度计算时间）。⛔ **空 data 是合法空**（该票当前没有概念命中），输出 available=false + note，不是取数失败；实测 600519 有 7 条（白酒 BK0896 命中 6176）、000001 有 8 条、688981 有 6 条，而北交所 920575/920924/430047、错误前缀（SZ600519）、未知代码、裸 6 位代码都返回 code=0 的 data=[]——空只说明动态热度口径无命中，**不代表不属于任何概念**。返回行带 srcSecurityCode，必须与请求票一致，不一致即响亮失败；上游 code/status 非 0 抛错（实测空 body 回 code=-1「srcSecurityCode 股票代码不能为空」）。⛔ 这是**东财 App 动态热度口径**，与 `index_membership_by_stock`（同花顺静态板块归属）**不是一回事：不可对比、不可拼接**；hit_count 是热度命中计数，不是涨幅、资金流或板块成员数。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          ticker: { type: 'string', description: 'A 股代码（600519 或 600519.SH；北交所 920xxx 也可）；内部转成大写 SH/SZ/BJ 前缀的 srcSecurityCode' },
+        },
+        required: ['ticker'],
+        additionalProperties: false,
+      },
+      outputSchema: hotConceptOutput, paginated: false, rowShape: { rowKey: 'item' },
+      allowed: ['ticker'], normalize: normalizeHotConcepts, execute: executeHotConcepts,
+      validateOutput: validateHotConceptOutput,
     }),
   ]
 }

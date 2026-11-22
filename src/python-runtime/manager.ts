@@ -1,7 +1,7 @@
-import { chmod, mkdir, readFile, rename, rm, stat } from 'node:fs/promises'
+import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
-import { join, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { PythonRuntimeError, isPythonRuntimeError, messageOf } from './errors.js'
 import { withInstallLock } from './lock.js'
@@ -24,9 +24,10 @@ import {
   storeRoot,
   writeJsonAtomic,
 } from './paths.js'
-import { findPnpmCli, type PlatformFacts } from './platform.js'
+import { findPnpmCli, pythonFlags, type PlatformFacts } from './platform.js'
 import { classifyPnpmFailure, installArgs, runPnpm, writeInstallProject, type PnpmInvocation } from './pnpm.js'
-import { probePython } from './probe.js'
+import { probePython, runWorkerProcess, type WorkerProcessResult, type WorkerProcessRunner } from './probe.js'
+import { pythonChildEnv } from './child-env.js'
 import type {
   PackName,
   PackStatus,
@@ -58,6 +59,7 @@ export interface PythonRuntimeManagerOptions {
   now?: () => Date
   runPnpm?: typeof runPnpm
   probePython?: typeof probePython
+  runWorkerProcess?: WorkerProcessRunner
 }
 
 interface RuntimePackMetadata {
@@ -78,6 +80,51 @@ interface ActiveJob {
 }
 
 const PACK_ORDER: PackName[] = ['base', 'parquet']
+
+/** Fixed data scripts live in the repo (never model-supplied code); ids map 1:1 to `python/scripts/<id>.py`. */
+const DATA_SCRIPT_DIR = fileURLToPath(new URL('../../python/scripts', import.meta.url))
+/** Pure-Python packages for those scripts; absolute so the child never depends on cwd. */
+const PYTHON_VENDOR_DIR = fileURLToPath(new URL('../../python/vendor', import.meta.url))
+const DATA_SCRIPT_ID = /^[a-z0-9_]+$/u
+const DATA_RUN_DIR = 'data-runs'
+const DIAGNOSTIC_TAIL_CHARS = 2_000
+
+export interface RunDataScriptOptions {
+  /** Script id: the file name without `.py` under `python/scripts/`. */
+  script: string
+  /** Written to the run directory as `input.json`; scripts validate it themselves. */
+  params?: Record<string, unknown>
+  timeoutMs?: number
+  signal?: AbortSignal
+}
+
+export interface DataScriptResult {
+  rows: unknown[]
+  pythonVersion: string
+  durationMs: number
+}
+
+function recordOf(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+}
+
+function diagnosticTail(...values: Array<string | undefined>): string | undefined {
+  const text = values.map((value) => value?.trim() ?? '').filter((value) => value !== '').join('\n')
+  if (text === '') return undefined
+  return text.length <= DIAGNOSTIC_TAIL_CHARS ? text : `…${text.slice(-DIAGNOSTIC_TAIL_CHARS)}`
+}
+
+/** Scripts print one concise stderr line; it beats the worker's generic "analysis.py exited with N". */
+function lastStderrLine(value: string | undefined): string | undefined {
+  const line = (value ?? '').split(/\r?\n/u).map((item) => item.trim()).filter((item) => item !== '').at(-1)
+  if (line === undefined) return undefined
+  return line.length <= 500 ? line : `…${line.slice(-500)}`
+}
+
+function failureDiagnostics(worker: WorkerProcessResult, failure: Record<string, unknown> | undefined): string | undefined {
+  const traceback = typeof failure?.traceback === 'string' ? failure.traceback : undefined
+  return diagnosticTail(worker.stderr, worker.stdout, traceback)
+}
 
 function nowIso(now: () => Date): string {
   return now().toISOString()
@@ -121,6 +168,7 @@ export class PythonRuntimeManager {
   private readonly now: () => Date
   private readonly runPnpm: typeof runPnpm
   private readonly probePython: typeof probePython
+  private readonly runWorker: WorkerProcessRunner
   private readonly jobs = new Map<string, ActiveJob>()
   private activeJobId?: string
   private pnpmInvocation?: PnpmInvocation
@@ -139,6 +187,7 @@ export class PythonRuntimeManager {
     this.now = options.now ?? (() => new Date())
     this.runPnpm = options.runPnpm ?? runPnpm
     this.probePython = options.probePython ?? probePython
+    this.runWorker = options.runWorkerProcess ?? runWorkerProcess
   }
 
   private targetId(): TargetId {
@@ -538,6 +587,112 @@ export class PythonRuntimeManager {
       if (!allowed) throw new PythonRuntimeError('probe-failed', `probe 使用了未授权的 site-packages：${item}`)
     }
     return report
+  }
+
+  /** Base pack must be installed and intact; a missing runtime is a call-time failure, never a boot gate. */
+  private async resolveDataRuntime(): Promise<RuntimeHandle> {
+    try {
+      return await this.resolve(['base'])
+    } catch (error) {
+      if (isPythonRuntimeError(error) && (error.code === 'runtime-not-ready' || error.code === 'pack-invalid' || error.code === 'unsupported-platform')) {
+        throw new PythonRuntimeError('data-runtime-not-ready', undefined, error.message)
+      }
+      throw error
+    }
+  }
+
+  /** Quote a JSON value for a script's `input.json`: no `undefined`, no non-finite numbers. */
+  private static serializeParams(params: Record<string, unknown> | undefined): string {
+    return JSON.stringify(params ?? {})
+  }
+
+  /**
+   * Run one fixed repo data script in an isolated run directory and return the rows it wrote.
+   *
+   * The child only ever sees a copied repo script and `input.json`; its whole working set lives under
+   * `<cacheRoot>/data-runs/<script>-<uuid>/` and is removed afterwards. `python/vendor` rides along as
+   * an extra `--site-packages` entry so no pip/venv/pack is involved.
+   */
+  async runDataScript(options: RunDataScriptOptions): Promise<DataScriptResult> {
+    const script = typeof options?.script === 'string' ? options.script : ''
+    if (!DATA_SCRIPT_ID.test(script)) {
+      throw new PythonRuntimeError('invalid-request', `固定数据脚本名不合法：${JSON.stringify(script)}`)
+    }
+    const scriptFile = `${script}.py`
+    let source: string
+    try {
+      source = await readFile(join(DATA_SCRIPT_DIR, scriptFile), 'utf8')
+    } catch (error) {
+      throw new PythonRuntimeError('pack-invalid', `固定数据脚本缺失：${scriptFile}（${messageOf(error)}）`)
+    }
+    const timeoutMs = options?.timeoutMs ?? this.manifest.limits.probeTimeoutMs
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+      throw new PythonRuntimeError('invalid-request', 'timeoutMs 必须是正整数。')
+    }
+    const signal = options?.signal
+    const handle = await this.resolveDataRuntime()
+
+    const runRoot = join(this.cacheRoot, DATA_RUN_DIR)
+    const runDir = join(runRoot, `${script}-${randomUUID()}`)
+    const homeDir = join(runDir, 'home')
+    const tempDir = join(runDir, 'tmp')
+    try {
+      await mkdir(runRoot, { recursive: true, mode: 0o700 })
+      await removeStaleStaging(runRoot)
+      await mkdir(runDir, { recursive: true, mode: 0o700 })
+      await mkdir(homeDir, { recursive: true, mode: 0o700 })
+      await mkdir(tempDir, { recursive: true, mode: 0o700 })
+      await writeFile(join(runDir, scriptFile), source, { encoding: 'utf8', mode: 0o600 })
+      await writeFile(join(runDir, 'request.json'), JSON.stringify({ script: scriptFile, args: [] }), 'utf8')
+      await writeFile(join(runDir, 'input.json'), PythonRuntimeManager.serializeParams(options?.params), 'utf8')
+
+      const sitePackages = [...handle.sitePackages]
+      if (await exists(PYTHON_VENDOR_DIR)) sitePackages.push(PYTHON_VENDOR_DIR)
+      const env = pythonChildEnv({ pythonDir: dirname(handle.python), homeDir, tempDir, baseEnv: process.env })
+      const args = [
+        ...pythonFlags,
+        this.workerPath,
+        'run',
+        ...sitePackages.flatMap((item) => ['--site-packages', item]),
+        '--run-dir',
+        runDir,
+      ]
+      const worker = await this.runWorker({
+        python: handle.python,
+        args,
+        cwd: runDir,
+        env,
+        timeoutMs,
+        ...(signal === undefined ? {} : { signal }),
+      })
+      if (worker.spawnError !== undefined) {
+        throw new PythonRuntimeError('script-failed', `启动 Python 失败：${worker.spawnError}`, diagnosticTail(worker.stderr))
+      }
+      if (worker.timedOut) throw new PythonRuntimeError('timeout', `Python 数据脚本超时（${scriptFile}）。`, diagnosticTail(worker.stderr))
+      if (worker.aborted) throw new PythonRuntimeError('cancelled', undefined, diagnosticTail(worker.stderr))
+
+      const executed = recordOf(await readJson<unknown>(join(runDir, 'result.json')))
+      if (executed === undefined) {
+        throw new PythonRuntimeError('script-failed', `数据脚本没有写出 result.json（退出码 ${String(worker.code)}）。`, diagnosticTail(worker.stderr || worker.stdout))
+      }
+      const failure = recordOf(executed.error)
+      if (executed.ok !== true) {
+        const workerMessage = typeof failure?.message === 'string' && failure.message.trim() !== '' ? failure.message.trim() : undefined
+        const message = lastStderrLine(worker.stderr) ?? workerMessage ?? `数据脚本退出码 ${String(worker.code)}。`
+        throw new PythonRuntimeError('script-failed', message, failureDiagnostics(worker, failure))
+      }
+      const output = recordOf(await readJson<unknown>(join(runDir, 'out.json')))
+      if (output === undefined || !Array.isArray(output.rows)) {
+        throw new PythonRuntimeError('script-failed', `数据脚本没有写出 out.json（{"rows":[...]}）。`, diagnosticTail(worker.stderr))
+      }
+      return {
+        rows: output.rows as unknown[],
+        pythonVersion: typeof executed.python === 'string' ? executed.python : handle.pythonVersion,
+        durationMs: typeof executed.durationMs === 'number' && Number.isFinite(executed.durationMs) ? executed.durationMs : 0,
+      }
+    } finally {
+      await rm(runDir, { recursive: true, force: true }).catch(() => undefined)
+    }
   }
 
   async resolve(packs: unknown = ['base']): Promise<RuntimeHandle> {

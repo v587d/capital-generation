@@ -263,7 +263,7 @@ test('list_capabilities：无参数返回主题索引，带 topic 返回一行�
   assertToolOutput(definition, index)
   assert.equal(definition.parameters.required.length, 0, 'topic 必须可选：无参数是索引入口')
   assert.ok(Array.isArray(definition.parameters.properties.topic.enum) && definition.parameters.properties.topic.enum.includes('quote'))
-  assert.equal(definition.parameters.properties.topic.enum.length, 9, 'enum 必须是九个主题')
+  assert.equal(definition.parameters.properties.topic.enum.length, 10, 'enum 必须是十个主题')
   assert.ok(!definition.parameters.properties.topic.enum.includes('all'), '不提供 topic=all：那会重新制造单条全目录')
 
   const directory = await runTool(toolRuntime, 'list_capabilities', { topic: 'quote' }, exec(delegatedSession()))

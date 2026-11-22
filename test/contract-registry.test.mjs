@@ -9,6 +9,11 @@ import { fileURLToPath } from 'node:url'
 
 import { createFuyaoRestSources } from '../lib/sources/fuyao-rest.js'
 import { createEastmoneySources } from '../lib/sources/eastmoney-http.js'
+import { createSinaSources } from '../lib/sources/sina-http.js'
+import { createOfficialSources } from '../lib/sources/official-http.js'
+import { createCsindexSources } from '../lib/sources/csindex-http.js'
+import { createThsSources } from '../lib/sources/ths-http.js'
+import { createPythonSources } from '../lib/sources/python-remote.js'
 import { createTencentSources } from '../lib/sources/tencent-http.js'
 import { createWindSources } from '../lib/sources/wind-mcp.js'
 import { createFtshareSources } from '../lib/sources/ftshare-rest.js'
@@ -23,6 +28,11 @@ const registered = new Map()
 for (const [factory, list] of [
   ['fuyao', createFuyaoRestSources(async () => 'coverage-check-only')],
   ['eastmoney', createEastmoneySources()],
+  ['sina', createSinaSources()],
+  ['official', createOfficialSources()],
+  ['csindex', createCsindexSources()],
+  ['ths', createThsSources()],
+  ['python', createPythonSources(async () => { throw new Error('coverage-check-only') })],
   ['tencent', createTencentSources()],
   ['wind', createWindSources()],
   ['ftshare', createFtshareSources(async () => 'coverage-check-only')],

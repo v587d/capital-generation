@@ -6,6 +6,7 @@
 
 import { createHttpRequester, safeUrl } from './local-fetch.js'
 import { stripInvisibleText } from './html-markdown.js'
+import { sharedSinaReportsThrottle } from './throttle.js'
 import type { EastmoneyClient, EastmoneyTransport } from '../net/eastmoney-client.js'
 import type { LocalFetchOptions } from './local-fetch.js'
 
@@ -1335,14 +1336,48 @@ export async function eastmoneyAnnouncementBody(
 
 const SINA_REPORT_URL = 'https://vip.stock.finance.sina.com.cn/q/go.php/vReport_List/kind'
 const SINA_REFERER = 'https://finance.sina.com.cn/'
+const SINA_ROW_PATTERN = /<tr>\s*<td>\d+<\/td>\s*<td class="tal f14">\s*<a[^>]*?title="([^"]*)"[^>]*?href="([^"]*?\/rptid\/(\d+)\/[^"]*)"[^>]*>[\s\S]*?<\/a>\s*<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([\s\S]*?)<\/td>\s*<td>([\s\S]*?)<\/td>\s*<\/tr>/gu
+const SINA_FAKE_EMPTY_MARKER = '没有找到相关内容'
+
+function parseSinaReportPage(text: string): { items: SourceItem[]; numbered: number } {
+  const numbered = (text.match(/<tr>\s*<td>\d+<\/td>/gu) ?? []).length
+  const items: SourceItem[] = []
+  for (const match of text.matchAll(SINA_ROW_PATTERN)) {
+    const href = match[2]
+    // Occasionally protocol-relative (`//host/...`): promote to https, one link form.
+    const url = itemUrl(href.startsWith('//') ? `https:${href}` : href)
+    items.push({
+      // Column order from the page header: type is col 4, date is col 5.
+      date: clip(match[5]),
+      title: clip(stripHtml(match[1])),
+      type: clip(match[4]),
+      org: clip(stripHtml(match[6])),
+      researcher: clip(stripHtml(match[7])),
+      report_id: match[3],
+      url,
+    })
+  }
+  return { items, numbered }
+}
 
 /**
  * Always add the exchange prefix: bare codes get a fake empty page for STAR/ChiNext.
  * That page is HTTP 200 and looks like "no reports", so also verify the numbered row count.
+ *
+ * ⛔ A *real* empty page is byte-identical to that fake one, so a single empty answer proves nothing:
+ * querying once per second gets the fake page, waiting ≥5s gets the reports. Every request therefore
+ * goes through the shared 6s chain, and an empty page is retried once — only then is it reported as
+ * "no reports". A page past the last one pays the same 6s and still comes back empty; correct, just slow.
  */
 export async function sinaReports(
   transport: Requester,
-  input: { code?: string; page: number; signal?: AbortSignal },
+  input: {
+    code?: string
+    page: number
+    signal?: AbortSignal
+    /** Tests inject a pass-through; production defaults to the shared 6s chain. */
+    throttle?: <T>(task: () => Promise<T>) => Promise<T>
+  },
 ): Promise<SourceOutcome> {
   const params = new URLSearchParams()
   let url: string
@@ -1355,34 +1390,30 @@ export async function sinaReports(
     params.set('t1', 'all')
     params.set('p', String(input.page))
   }
-  const outcome = await transport.request(
-    { url: `${url}?${params.toString()}`, headers: { referer: SINA_REFERER }, encoding: 'gbk' },
-    input.signal,
-  )
-  const text = outcome.text
-  const emptyPage = text.includes('没有找到相关内容')
-  const numbered = (text.match(/<tr>\s*<td>\d+<\/td>/gu) ?? []).length
-  const rowPattern = /<tr>\s*<td>\d+<\/td>\s*<td class="tal f14">\s*<a[^>]*?title="([^"]*)"[^>]*?href="([^"]*?\/rptid\/(\d+)\/[^"]*)"[^>]*>[\s\S]*?<\/a>\s*<\/td>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>\s*<td>([\s\S]*?)<\/td>\s*<td>([\s\S]*?)<\/td>\s*<\/tr>/gu
-  const items: SourceItem[] = []
-  for (const match of text.matchAll(rowPattern)) {
-    const href = match[2]
-    // Occasionally protocol-relative (`//host/...`): promote to https, one link form.
-    const url = itemUrl(href.startsWith('//') ? `https:${href}` : href)
-    items.push({
-    // Column order from the page header: type is col 4, date is col 5.
-    date: clip(match[5]),
-      title: clip(stripHtml(match[1])),
-      type: clip(match[4]),
-      org: clip(stripHtml(match[6])),
-      researcher: clip(stripHtml(match[7])),
-      report_id: match[3],
-      url,
-    })
+  const throttle = input.throttle ?? sharedSinaReportsThrottle()
+  const fetchPage = async (): Promise<string> => {
+    const outcome = await throttle(() => transport.request(
+      { url: `${url}?${params.toString()}`, headers: { referer: SINA_REFERER }, encoding: 'gbk' },
+      input.signal,
+    ))
+    return outcome.text
   }
+
+  let text = await fetchPage()
+  let page = parseSinaReportPage(text)
+  let retried = false
+  // The chain already spaces the retry ≥6s after the previous request started; no extra sleep.
+  if (page.items.length === 0 && text.includes(SINA_FAKE_EMPTY_MARKER)) {
+    retried = true
+    text = await fetchPage()
+    page = parseSinaReportPage(text)
+  }
+  const { items, numbered } = page
   // Every numbered row must parse; mismatch means the page structure changed.
   if (items.length !== numbered) {
     throw new SourceError('sina', 'INVALID_RESPONSE', `新浪研报页有 ${numbered} 行带序号、只解析出 ${items.length} 条（页面行结构可能已变）`)
   }
+  const emptyPage = text.includes(SINA_FAKE_EMPTY_MARKER)
   if (items.length === 0 && !emptyPage) {
     throw new SourceError('sina', 'INVALID_RESPONSE', '新浪研报页没有研报也没有「没有找到相关内容」提示（页面结构可能已变）')
   }
@@ -1390,7 +1421,9 @@ export async function sinaReports(
     source: 'sina',
     operation: input.code === undefined ? 'latest' : 'by_stock',
     items: clipItems(items),
-    ...(items.length === 0 ? { note: '上游明确返回「没有找到相关内容」：该标的近期无研报，或已翻过末页' } : {}),
+    ...(items.length === 0
+      ? { note: `上游返回「没有找到相关内容」${retried ? '（已按 6 秒间隔重试一次，仍为空）' : '（已按 6 秒间隔确认）'}：该标的近期无研报，或已翻过末页` }
+      : {}),
   }
 }
 
