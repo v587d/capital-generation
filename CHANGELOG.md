@@ -7,6 +7,26 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**、2.9.0 的选择器收敛与质检前置——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [2.30.1] - 2026-11-23
+
+修三条实机验收发现的口径可见性问题：envelope 根级字段现在能随 DatasetRef 与读面出来，同花顺涨停揭秘补交易日列，腾讯前复权日线的盘后滞后写进契约。数据能力本身无失败，本轮只补「看得见」。
+
+### Fixed
+
+- **envelope 根级字段对消费者不可见**：`eastmoney_limit_up_pool` / `_break` / `_down` / `yesterday_limit_up_pool` / `price_anomaly_*` / `stock_hot_concepts` 这类能力的响应把 `trade_date`、`server_latest_trade_date`、`requested_date_clamped`、`available`、`note`、`upstream_total`、`calculated_at` 放在根级，`raw.json` 里有值，但 `request_data` 回执与 `describe_dataset` / `inspect_dataset` 都拿不到——日期钳制护栏与快照计算时间等于对使用者不存在。现在 **DatasetRef 与读面新增 `envelope`**：只带根级标量（以及一层扁平对象，如上游 `pagination`），行数组与嵌套结构一律不带；总长 ≤ 4KB、长文本按 512 字符截断、非有限数丢弃；数组型 Dataset 没有该字段。升级前落盘的 Dataset 在读面会从 `raw.json` 现算，7 天保留期内旧数据同样能核对口径。`request_data` / `inspect_dataset` / `describe_dataset` 的 `output.schema` 与 description 同步。
+- **`ths_limit_up_detail` 行内补 `trade_date`**：此前行内没有任何日期列，问「今天涨停股」只能靠 `captured_at` 推断业务日。现在每行带交易日（上游 `data.date`，省略 `date` 参数时也给出上游最近交易日），时间轴（`time_coverage`）自动识别该列，`resolve_data_time_range` 的提示同步；行 schema、`validateOutput` 护栏与 description 一并更新。
+
+### Changed
+
+- **`tencent_kline` 描述补「前复权盘后滞后」**：实测 2026-11-23 17:35，600519 的 `qfqday` 只到 11-20、同票 `adjust:"none"` 已有 11-23，而 688981 正常返回当日。要当日收盘价请用 `adjust:"none"` 或 `tencent_quote` 快照；少一根是上游复权序列尚未回填，不是数据损坏。代码行为不变，只补契约提示。
+
+### Notes
+
+- 修复依据：2026-11-23 实机验收——11 个真实「自动模式」session（3 条私有 Python 通道必测 + 8 条抽检）全部通过，测试树内 39 次 `request_data` 零失败；三条发现与证据记录见 `docs/design/a-stock-data-upstream-review-2026-11.md` §9.5。
+- 回归：`npm test` **1735 pass / 0 fail**（新增 `test/data-collector-store.test.mjs` 4 例 envelope、`test/describe-dataset.test.mjs` 1 例读面；THS 行断言随列更新）。
+- 版本：根包与四个随包嵌套包（chart-ui / config / watchlist / automation）+ `LOCAL_FETCH_CLIENT_VERSION` / `WIND_CLIENT_VERSION` 同步 2.30.1；无配置、数据或会话迁移。
+- 升级后需重启 dsh 进程（`lib/` 已重建）。
+
 ## [2.30.0] - 2026-11-22
 
 数据能力扩容：按上游 `a-stock-data` v3.10.4 的 15 层 87 端点复核补齐 **27 条能力**（135 → 162），并修两条口径缺陷。新增 ETF 期权、A50 期指、东财打板四池与日内异动、个股概念命中、同花顺热榜 / 涨停揭秘、沪深 ETF 份额、回购定盘、中证指数估值，以及一条受控的私有 Python 数据通道（BaoStock + 人民银行社融）。全部新能力都有真报文验收、巡检条目与回归。

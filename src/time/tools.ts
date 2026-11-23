@@ -92,7 +92,7 @@ const DATA_TIME_CONTRACTS: Record<string, DataTimeContract> = {
   sse_etf_shares: { kind: 'date', fields: ['trade_date'], warning: '省略 trade_date 取最近已发布交易日（默认不是今天）；非交易日/尚未发布返回空结果，不是取数失败' },
   chinamoney_repo_fixing: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: '上游只给整份 CSV，区间是本地裁剪；落在中国周末/节假的区间返回空，不是取数失败' },
   csindex_index_valuation: { kind: 'date_range', fields: ['start_date', 'end_date'], maxDays: TEN_YEAR_DAYS, warning: '日期轴是上游工作日序列（节假日也有行）；各指数更新不同步，最新值可能差一个工作日' },
-  ths_limit_up_detail: { kind: 'date', fields: ['date'], warning: '省略 date 取上游最近交易日；不含北交所（上游 filter=HS,GEM2STAR）' },
+  ths_limit_up_detail: { kind: 'date', fields: ['date'], warning: '省略 date 取上游最近交易日；行内 trade_date 即业务日；不含北交所（上游 filter=HS,GEM2STAR）' },
   // 东财 push2ex four pools: the upstream keeps only ~15 trading days and silently clamps future/today dates.
   eastmoney_limit_up_pool: { kind: 'date', fields: ['trade_date'], warning: '上游只保留最近约 15 个交易日；非交易日/超窗口返回空池，今天及更晚会被夹到最近交易日（行内 requested_date_clamped 标出）' },
   eastmoney_limit_break_pool: { kind: 'date', fields: ['trade_date'], warning: '同 eastmoney_limit_up_pool：约 15 个交易日窗口，今天及更晚会夹到最近交易日' },

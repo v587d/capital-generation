@@ -25,6 +25,11 @@ export declare const MAX_STRUCTURE_ENTRIES = 24;
 export declare const MAX_DOCUMENT_CHARS = 6000;
 /** Presentation rows are capped: charts are bounded rendering, not a general analysis channel. */
 export declare const MAX_PRESENTATION_ROWS = 200000;
+/**
+ * Envelope root scalars carried on DatasetRef (dates, clamp flags, notes). Rows never ride here;
+ * this is the only way a consumer can see `requested_date_clamped` / `calculated_at` at all.
+ */
+export declare const MAX_ENVELOPE_BYTES = 4096;
 export declare const ARTIFACT_SCHEME = "workspace://";
 export interface DatasetRef {
     dataset_id: string;
@@ -41,6 +46,12 @@ export interface DatasetRef {
     params_digest: string;
     /** Host-computed from the stored rows; omitted only by manifests written before this field existed. */
     time_coverage?: DatasetTimeCoverage;
+    /**
+     * Bounded root-level scalars of an envelope-shaped response (trade_date / requested_date_clamped /
+     * available / note / calculated_at …). Never rows and never nested payloads; omitted for arrays,
+     * for documents, and by manifests written before this field existed.
+     */
+    envelope?: Record<string, unknown>;
 }
 export type DatasetShape = 'array' | 'envelope_item' | 'document' | 'none';
 export interface DatasetInspection extends DatasetRef {

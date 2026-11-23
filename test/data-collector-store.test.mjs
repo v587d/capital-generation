@@ -169,6 +169,72 @@ test('save：time_coverage 原样写入回执与 manifest，旧 manifest 仍可�
   assert.equal(reopened.time_coverage, undefined, '旧 manifest 没有该字段时不能伪造')
 })
 
+test('envelope：响应根级标量随 DatasetRef 落盘，行数组不进回执', async () => {
+  const { store, fs } = makeStore({ newId: deterministicId() })
+  const data = {
+    trade_date: '2026-11-23',
+    requested_date_clamped: false,
+    available: true,
+    upstream_total: 146,
+    note: null,
+    item: [{ code: '000593' }],
+  }
+  const ref = await store.save(saveInput({ data, row_key: 'item', row_count: 1 }))
+  assert.deepEqual(ref.envelope, {
+    trade_date: '2026-11-23', requested_date_clamped: false, available: true, upstream_total: 146, note: null,
+  })
+  assert.ok(!Object.hasOwn(ref.envelope, 'item'), '行数组不能进 envelope')
+  const manifest = JSON.parse(fs.files.get(manifestPath('/workspace/proj', ref.dataset_id)))
+  assert.deepEqual(manifest.envelope, ref.envelope, 'manifest 与回执同源')
+  assert.deepEqual((await store.readRef(ref.dataset_id, SESSION)).envelope, ref.envelope, '缓存命中同样带 envelope')
+  const inspection = await store.inspectDataset(ref.dataset_id, SESSION)
+  assert.deepEqual(inspection.envelope, ref.envelope)
+  assert.equal(inspection.query_access.shape, 'envelope_item')
+  assert.ok(!JSON.stringify(ref).includes('/workspace'), 'DatasetRef 不得泄露绝对路径')
+})
+
+test('envelope：只收标量与一层扁平对象；嵌套、数组、非有限数、超长文本都不带出', async () => {
+  const { store } = makeStore({ newId: deterministicId() })
+  const ref = await store.save(saveInput({
+    data: {
+      trade_date: '2026-11-23',
+      pagination: { total: 2, pages: 1, page: 1 },
+      nested: { inner: { deep: 1 } },
+      list: [1, 2],
+      longText: 'x'.repeat(600),
+      weird: Number.POSITIVE_INFINITY,
+      item: [],
+    },
+    row_key: 'item',
+    row_count: 0,
+  }))
+  assert.deepEqual(ref.envelope, {
+    trade_date: '2026-11-23',
+    pagination: { total: 2, pages: 1, page: 1 },
+    longText: `${'x'.repeat(512)}…`,
+  })
+})
+
+test('envelope：数组型 Dataset 不带该字段（不能把行伪装成 envelope）', async () => {
+  const { store, fs } = makeStore({ newId: deterministicId() })
+  const ref = await store.save(saveInput({ data: [{ date_ms: 1, close_price: 100 }], row_count: 1 }))
+  assert.equal(ref.envelope, undefined)
+  const manifest = JSON.parse(fs.files.get(manifestPath('/workspace/proj', ref.dataset_id)))
+  assert.equal(manifest.envelope, undefined)
+})
+
+test('envelope：旧 manifest 没有该字段时读回为空，inspect 从 raw 现算（升级前落盘的数据仍可核对口径）', async () => {
+  const { store, fs } = makeStore({ newId: deterministicId() })
+  const data = { trade_date: '2026-11-23', requested_date_clamped: true, item: [{ code: '000593' }] }
+  const ref = await store.save(saveInput({ data, row_key: 'item', row_count: 1 }))
+  const manifest = JSON.parse(fs.files.get(manifestPath('/workspace/proj', ref.dataset_id)))
+  delete manifest.envelope
+  fs.files.set(manifestPath('/workspace/proj', ref.dataset_id), JSON.stringify(manifest))
+  assert.equal((await store.readRef(ref.dataset_id, SESSION)).envelope, undefined, '旧 manifest 不伪造字段')
+  const inspection = await store.inspectDataset(ref.dataset_id, SESSION)
+  assert.deepEqual(inspection.envelope, { trade_date: '2026-11-23', requested_date_clamped: true })
+})
+
 test('save：task_id 可关联任务', async () => {
   const { store } = makeStore({ newId: deterministicId() })
   const ref = await store.save(saveInput({ task_id: 'task-7' }))

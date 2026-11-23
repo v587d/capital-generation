@@ -198,6 +198,43 @@ test('describe_dataset：一次调用完成 inspect + profile + queries', async 
   assert.ok(!JSON.stringify(result).includes('/workspace/proj'))
 })
 
+test('describe_dataset：envelope 根级标量随读面返回（日期钳制/快照时间不再不可见）', async () => {
+  const { store } = makeStore()
+  const ref = await saveRows(store, {
+    item: closeRows(3),
+    trade_date: '2026-11-23',
+    requested_date_clamped: false,
+    available: true,
+    note: null,
+  })
+  const definition = describeTool(store)
+  const result = await definition.execute({ dataset_id: ref.dataset_id }, exec(CHILD))
+  assert.deepEqual(result.envelope, {
+    trade_date: '2026-11-23', requested_date_clamped: false, available: true, note: null,
+  })
+  assert.ok(!Object.hasOwn(result.envelope, 'item'), 'envelope 不能把行带出来')
+  assertToolOutput(definition, result)
+
+  // columns_of_interest 收窄的是列统计，envelope 是口径元数据，不能被裁掉。
+  const narrowed = await definition.execute({ dataset_id: ref.dataset_id, columns_of_interest: ['close_price'] }, exec(CHILD))
+  assert.deepEqual(narrowed.envelope, result.envelope)
+
+  // 数组型 Dataset 没有 envelope 字段（不能凭空造一个空对象）。
+  const arrayRef = await store.save({
+    session: CHILD,
+    capability: 'history',
+    params_digest: 'digest-array',
+    source_label: 'fuyao',
+    format: 'json_rows',
+    schema: { type: 'array' },
+    row_count: 1,
+    data: [{ date_ms: 1, close_price: 100 }],
+  })
+  const arrayResult = await definition.execute({ dataset_id: arrayRef.dataset_id }, exec(CHILD))
+  assert.equal(arrayResult.envelope, undefined)
+  assertToolOutput(definition, arrayResult)
+})
+
 test('describe_dataset：document 型不执行 queries，文档内容随行返回', async () => {
   const { store } = makeStore()
   const ref = await saveRows(store, {

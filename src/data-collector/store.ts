@@ -38,6 +38,13 @@ export const MAX_DOCUMENT_CHARS = 6_000
 
 /** Presentation rows are capped: charts are bounded rendering, not a general analysis channel. */
 export const MAX_PRESENTATION_ROWS = 200_000
+/**
+ * Envelope root scalars carried on DatasetRef (dates, clamp flags, notes). Rows never ride here;
+ * this is the only way a consumer can see `requested_date_clamped` / `calculated_at` at all.
+ */
+export const MAX_ENVELOPE_BYTES = 4_096
+const MAX_ENVELOPE_TEXT_CHARS = 512
+const MAX_ENVELOPE_OBJECT_BYTES = 1_024
 const DOCUMENT_ARRAY_KEEP_STEPS = [8, 3, 1, 0]
 const DOCUMENT_MAX_DEPTH = 6
 const DOCUMENT_MAX_OMISSIONS = 8
@@ -59,6 +66,12 @@ export interface DatasetRef {
   params_digest: string
   /** Host-computed from the stored rows; omitted only by manifests written before this field existed. */
   time_coverage?: DatasetTimeCoverage
+  /**
+   * Bounded root-level scalars of an envelope-shaped response (trade_date / requested_date_clamped /
+   * available / note / calculated_at …). Never rows and never nested payloads; omitted for arrays,
+   * for documents, and by manifests written before this field existed.
+   */
+  envelope?: Record<string, unknown>
 }
 
 type StoredDatasetManifest = DatasetRef & {
@@ -442,6 +455,57 @@ function validNonNegativeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 }
 
+/**
+ * Envelope root scalars are the only part of a response that otherwise reaches nobody: rows stay in
+ * raw.json, while `requested_date_clamped` / `calculated_at` / `available` live beside the row array.
+ * Arrays and nested objects are skipped on purpose — they are rows or payloads, not metadata.
+ */
+function envelopeOf(data: unknown, rowKey: string | undefined): Record<string, unknown> | undefined {
+  if (!isRecord(data)) return undefined
+  const rowRoot = rowKey?.split('.')[0]
+  const envelope: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(data)) {
+    if (key === rowRoot) continue
+    const picked = envelopeValueOf(value)
+    if (picked === undefined) continue
+    if (JSON.stringify({ ...envelope, [key]: picked }).length > MAX_ENVELOPE_BYTES) break
+    envelope[key] = picked
+  }
+  return Object.keys(envelope).length === 0 ? undefined : envelope
+}
+
+/** Primitives, plus one shallow object of primitives (upstream wraps page totals this way). */
+function envelopeValueOf(value: unknown): unknown {
+  if (value === null || typeof value === 'boolean') return value
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined
+  if (typeof value === 'string') {
+    return value.length > MAX_ENVELOPE_TEXT_CHARS ? `${value.slice(0, MAX_ENVELOPE_TEXT_CHARS)}…` : value
+  }
+  if (!isRecord(value)) return undefined
+  const flat: Record<string, string | number | boolean | null> = {}
+  for (const [key, entry] of Object.entries(value)) {
+    if (entry === null || typeof entry === 'boolean' || typeof entry === 'string') {
+      flat[key] = entry
+      continue
+    }
+    if (typeof entry === 'number' && Number.isFinite(entry)) {
+      flat[key] = entry
+      continue
+    }
+    return undefined
+  }
+  return JSON.stringify(flat).length > MAX_ENVELOPE_OBJECT_BYTES ? undefined : flat
+}
+
+function validEnvelope(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value) || !Object.keys(value).every((key) => envelopeValueOf(value[key]) !== undefined)) return false
+  try {
+    return JSON.stringify(value).length <= MAX_ENVELOPE_BYTES
+  } catch {
+    return false
+  }
+}
+
 export class WorkspaceDatasetStore {
   private readonly fs: FsLike | undefined
   private readonly sandboxPolicy: SandboxPolicyLike | undefined
@@ -468,6 +532,7 @@ export class WorkspaceDatasetStore {
     await this.assertContained(root, dirPath, signal)
 
     const capturedAt = this.now()
+    const envelope = input.format === 'json_rows' ? envelopeOf(input.data, input.row_key) : undefined
     const manifest: DatasetRef = {
       dataset_id: datasetId,
       task_id: input.task_id ?? null,
@@ -482,6 +547,7 @@ export class WorkspaceDatasetStore {
       retention_until: capturedAt + this.retentionMs,
       params_digest: input.params_digest,
       ...(input.time_coverage === undefined ? {} : { time_coverage: input.time_coverage }),
+      ...(envelope === undefined ? {} : { envelope }),
     }
 
     const storedManifest: StoredDatasetManifest = {
@@ -552,7 +618,17 @@ export class WorkspaceDatasetStore {
     const { session_scope_id: _scope, row_key: rowKey, ...ref } = stored
     try {
       const raw = await this.readRaw(ref, session, signal, rowKey)
-      return { ...ref, query_access: { readable: true, shape: raw.kind === 'document' ? 'document' : raw.shape } }
+      // Manifests written before `envelope` existed still have the raw response: derive it on read
+      // so a Dataset taken minutes before the upgrade stays readable on the same terms.
+      const envelope = ref.envelope
+        ?? (raw.kind === 'rows' && raw.shape === 'envelope_item' && raw.envelope !== undefined
+          ? envelopeOf(raw.envelope, rowKey)
+          : undefined)
+      return {
+        ...ref,
+        ...(envelope === undefined ? {} : { envelope }),
+        query_access: { readable: true, shape: raw.kind === 'document' ? 'document' : raw.shape },
+      }
     } catch (error) {
       if (error instanceof DatasetStoreError && ['dataset_too_large', 'dataset_not_row_readable'].includes(error.code)) {
         return { ...ref, query_access: { readable: false, shape: 'none', reason: error.code } }
@@ -1472,6 +1548,7 @@ function validateStoredDatasetManifest(value: unknown, datasetId: string): Store
   if (typeof value.params_digest !== 'string' || value.params_digest.length === 0) return undefined
   if (value.row_key !== undefined && (typeof value.row_key !== 'string' || value.row_key.length === 0 || value.row_key.length > 128)) return undefined
   if (value.time_coverage !== undefined && !validTimeCoverage(value.time_coverage)) return undefined
+  if (value.envelope !== undefined && !validEnvelope(value.envelope)) return undefined
   const ref: DatasetRef = {
     dataset_id: value.dataset_id as string,
     task_id: value.task_id as string | null,
@@ -1486,6 +1563,7 @@ function validateStoredDatasetManifest(value: unknown, datasetId: string): Store
     retention_until: value.retention_until as number,
     params_digest: value.params_digest as string,
     ...(value.time_coverage === undefined ? {} : { time_coverage: value.time_coverage }),
+    ...(value.envelope === undefined ? {} : { envelope: value.envelope as Record<string, unknown> }),
   }
   return {
     ...ref,

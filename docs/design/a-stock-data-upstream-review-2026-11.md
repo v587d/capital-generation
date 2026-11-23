@@ -506,3 +506,16 @@ P0 的 H1/A2 与美股/港股相关的 U2/U3/U4/G3/H2/H3 **完全不受影响**�
 - `npm run check:dsh` 40/40；`npm run smoke:boot` 预设 `broken=null`、`pythonRuntime=present`、族行 20/20。
 - `npm run contract:probe` 真打：`--family ths` 2/2 PASS；东财 7 条逐条 PASS；四池真数据另用 2026-11-20 手工复核 28/7/58/23 行。
 - `npm run docs:capabilities` 已重生成（162 条）。
+
+## 9.5 实机验收与修复（2026-11-23，2.30.1）
+
+2026-11-23 收盘后按真实「自动模式」session 逐能力跑了一遍：3 条私有 Python 通道必测 + 8 条抽检（新浪期权链、上交所份额、中证 PE、东财涨停池、东财热门概念、同花顺涨停揭秘、Fuyao 炸板池补列、腾讯成交量单位），11 个 session 全部 succeeded，测试树内 39 次 `request_data` 零失败，产物 91 条不变量断言全过。三条发现与修复：
+
+1. **envelope 根级字段对消费者不可见**（影响口径判断，已修）：`raw.json` 里 `trade_date` / `requested_date_clamped` / `upstream_total` / `available` / `note` / `calculated_at` 都有值，但回执只有 13 个 DatasetRef 键、`describe_dataset` 也不返回根级标量，`query_dataset` 报 `query_column_not_found`。E8（东财涨停池）的 collector 明确回告「回执未暴露根级字段」，E14（热门概念）的 `calculated_at`（实际 `2026-11-23 16:00:00`）只能弃用。修复：DatasetRef/读面新增 `envelope`（根级标量 + 一层扁平对象，≤4KB；旧 manifest 读面从 raw 现算）。
+2. **`ths_limit_up_detail` 无日期列**（已修）：行内加 `trade_date`（上游 `data.date`），时间轴自动识别，行 schema/护栏/description/时间契约同步。
+3. **腾讯 qfq 日线盘后缺当日 bar**（文档修复）：2026-11-23 17:35 实测 600519 `qfqday` 止于 11-20（`day` 已有 11-23），688981 正常；`tencent_kline` 描述补「qfq/hfq 盘后可能未回填，要当日收盘价用 none 或快照」。
+4. 过程噪音（不影响数据能力）：PTC 自写程序报错 6 次、AnySearch 抓取失败 8 次、角色越界/时间轴工具误用 3 次，agent 均自行重试成功。
+
+同轮补跑的验收口径：D1 BaoStock 估值 242 行、D2 基本信息 3 行、D3 社融 12 行；B1 510300 = 55,184,887,700 份（与描述对账值逐位相同）；C1 最新 PE 13.09、分位复算 50.18%；E8 146 行且 `upstream_total=row_count`；F2 145 行与东财 146 的差集只有北交所 920690；G2 23 行补列齐全；H1 `volume_unit` 逐行 share/lot。
+
+回归：`npm test` **1735 pass / 0 fail**（新增 envelope 5 例）。

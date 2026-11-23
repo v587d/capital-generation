@@ -177,7 +177,7 @@ function sealClock(value: unknown, upstreamDate: string, field: string, label: s
 
 const HOT_KEYS = ['rank', 'code', 'name', 'rank_change', 'heat', 'change_pct', 'concepts', 'popularity_tag']
 const LIMIT_UP_KEYS = [
-  'code', 'name', 'price', 'change_pct', 'reason', 'board_type', 'seal_rate', 'break_times',
+  'trade_date', 'code', 'name', 'price', 'change_pct', 'reason', 'board_type', 'seal_rate', 'break_times',
   'seal_amount', 'seal_volume', 'high_days', 'first_seal', 'last_seal', 'is_again', 'turnover_rate_pct',
 ]
 
@@ -214,6 +214,7 @@ const hotListOutput = {
 const limitUpOutput = {
   type: 'array',
   items: rowSchema({
+    trade_date: { type: 'string', description: '交易日 YYYY-MM-DD，取自上游 data.date（省略 date 参数时是上游最近交易日）；行内可核验的业务日期' },
     code: { type: 'string', description: '6 位 A 股代码，不带市场后缀（不含北交所）' },
     name: { type: 'string', description: '证券简称' },
     price: { type: 'number', description: '最新价，元' },
@@ -325,6 +326,7 @@ function mapLimitUpRow(item: unknown, upstreamDate: string, label: string): Json
   if (isAgain !== 0 && isAgain !== 1) throw thsError(`${label} has an unreadable is_again_limit: ${JSON.stringify(item.is_again_limit)}`, 'ths_invalid_response')
   const turnoverPct = requiredNumber(item.turnover_rate, 'turnover_rate', label)
   return {
+    trade_date: isoDateFromCompact(upstreamDate),
     code,
     name,
     price,
@@ -427,6 +429,7 @@ function isHotRow(row: unknown): boolean {
 function isLimitUpRow(row: unknown): boolean {
   return isRecord(row)
     && Object.keys(row).length === LIMIT_UP_KEYS.length
+    && typeof row.trade_date === 'string' && DATE_PATTERN.test(row.trade_date) && isCalendarDate(row.trade_date)
     && typeof row.code === 'string' && /^\d{6}$/.test(row.code)
     && typeof row.name === 'string' && row.name.length > 0
     && typeof row.price === 'number' && Number.isFinite(row.price) && row.price > 0
@@ -507,7 +510,7 @@ export function createThsSources(): DataSource[] {
       capability: 'ths_limit_up_detail',
       name: 'get_ths_limit_up_detail',
       summary: '同花顺涨停揭秘（板型/封板成功率/是否回封）',
-      description: '同花顺涨停揭秘（data.10jqka.com.cn 网页 JSON，零 key）：按交易日取涨停个股，补上 Fuyao `limit_up_pool` 没有的三列——**board_type（板型：实测 换手板 / 一字板 / T字板）、seal_rate（封板成功率 0~1 小数）、is_again（是否回封 0/1）**；另有 reason（涨停原因题材）/ price / change_pct / turnover_rate_pct / seal_amount / seal_volume / break_times / high_days / first_seal / last_seal。⛔ 与 Fuyao `limit_up_pool` 是两家口径、必须并存：Fuyao 有连板数（continue_day_cnt）/ 封板资金（seal_money）/ 涨停原因，但**没有板型 / 封板成功率 / 是否回封**；本能力**不含北交所**（上游 filter=HS,GEM2STAR 只覆盖沪深主板 + 创业板 + 科创板；实测 2026-11-20 的 28 行 market_type 只有 HS/GEM、无 8/4/92 开头代码，2026-01-05 的 107 行出现 HS/GEM/STAR），也**不含 ST 涨停**（实测与 Fuyao 三个交易日对账：2026-11-20 28 vs 30 差 2 行、2025-11-20 41 vs 49 差 8 行、2026-01-05 107 vs 126 差 19 行，差额**全部**是 ST 股）——北交所与 ST 涨停请用 Fuyao `limit_up_pool`。⛔ 单位 / 口径（全部实测）：price 是最新价（元）；change_pct 是**百分数原值**（10.0228 = +10.0228%，与 Fuyao price_change_ratio_pct、tencent_quote pct、ftshare_ashare_quote change_rate×100 三方一致）；turnover_rate_pct 是**百分数原值**（27.7729 = 27.7729%，同 tencent_quote turnover 27.77）；seal_rate 是**0~1 小数比例**（0.8 = 80%，1 = 100%；**null = 上游未给**（实测 2026-01-05 的 107 行里 14 行 null），不是 0；2026-11-20 国光股份 0 是真实值）；seal_amount 单位**元**（实测 2026-11-20 全 28 行 = seal_volume × price，偏差 ≤5 元为上游取整、最大实测 4.25 元）；seal_volume 单位**股**；break_times 是开板（炸板）次数，**null 不是 0**（实测连 LIMIT_BACK 的行也有 null，不能用它反推开板次数）；high_days 是**字符串**（首板 / 3天2板 / 7天4板 / 15天13板），⛔ **不是连板数**（实测 2026-11-20 好当家 THS「7天4板」而 Fuyao continue_day_cnt=1「首板」）；is_again 是上游 is_again_limit 的 0/1 原值；first_seal / last_seal 由上游 **Unix 秒**（字符串，如 "1795144339"）转北京时间 HH:MM:SS（1795144339 → 11:12:19；实测与 Fuyao limit_up_time 的 HH:MM 逐行一致：2026-11-20 28/28、2026-01-05 107/107），⛔ **不是东财四池的 HHMMSS 整数**；时间戳换算出的北京日期必须等于响应 data.date，否则按结构异常失败。参数：date 省略 = 上游最近交易日（实测 2026-11-22 周日省略 → data.date=20261120；行内不带日期列，要确定业务日期请显式传），YYYY-MM-DD（也收 YYYYMMDD，归一成 YYYY-MM-DD）；实测支持窗口起点 2025-11-07（2025-11-06 及更早回 status_code=-1「date参数不合法」，是**响亮失败不是空**；起点是固定日还是滚动窗未核出）；非交易日 / 未来日期回 status_code=0 + info=[]（合法空）。page / size：page 从 1 开始、size 1~200（实测 size=201 → status_code=-1「limitmust be less than or equal to 200」，上游原文如此），默认 1 / 200，单次只取一页（上游 page 元数据 {limit,total,count=总页数,page}；输出只有本页行，行数 = size 时可能还有下一页）；⛔ 超界 page 上游**回落到最后一页且该页返回 0 行**（实测 page=99&size=10 → 回显 page 3、info=[]；size=200 时只有 1 页 → 回显 page 1），本层核对回显 page，不一致即失败，不静默把别的页当请求页返回。合法空 vs 失败：status_code=0 且 info=[] 才是合法空（非交易日 / 未来日期 / 当日无涨停）；status_code 或 HTTP 非 0、非 JSON、data 结构不对一律响亮失败（同花顺有反爬史，401/403 不要循环重试）。⛔ 响应里的 trade_status 是**查询时刻**的会话状态、不是请求日期的状态（实测周日查 2026-11-20 时 trade_status=non_trading_day 却有 28 行），不要用它判空或判失败。未收录上游字段：market_type / market_id / currency_value（流通市值）/ is_new / change_tag / high_days_value / time_preview，以及 data.limit_up_count / limit_down_count / trade_status。',
+      description: '同花顺涨停揭秘（data.10jqka.com.cn 网页 JSON，零 key）：按交易日取涨停个股，补上 Fuyao `limit_up_pool` 没有的三列——**board_type（板型：实测 换手板 / 一字板 / T字板）、seal_rate（封板成功率 0~1 小数）、is_again（是否回封 0/1）**；另有 reason（涨停原因题材）/ price / change_pct / turnover_rate_pct / seal_amount / seal_volume / break_times / high_days / first_seal / last_seal。⛔ 与 Fuyao `limit_up_pool` 是两家口径、必须并存：Fuyao 有连板数（continue_day_cnt）/ 封板资金（seal_money）/ 涨停原因，但**没有板型 / 封板成功率 / 是否回封**；本能力**不含北交所**（上游 filter=HS,GEM2STAR 只覆盖沪深主板 + 创业板 + 科创板；实测 2026-11-20 的 28 行 market_type 只有 HS/GEM、无 8/4/92 开头代码，2026-01-05 的 107 行出现 HS/GEM/STAR），也**不含 ST 涨停**（实测与 Fuyao 三个交易日对账：2026-11-20 28 vs 30 差 2 行、2025-11-20 41 vs 49 差 8 行、2026-01-05 107 vs 126 差 19 行，差额**全部**是 ST 股）——北交所与 ST 涨停请用 Fuyao `limit_up_pool`。⛔ 单位 / 口径（全部实测）：price 是最新价（元）；change_pct 是**百分数原值**（10.0228 = +10.0228%，与 Fuyao price_change_ratio_pct、tencent_quote pct、ftshare_ashare_quote change_rate×100 三方一致）；turnover_rate_pct 是**百分数原值**（27.7729 = 27.7729%，同 tencent_quote turnover 27.77）；seal_rate 是**0~1 小数比例**（0.8 = 80%，1 = 100%；**null = 上游未给**（实测 2026-01-05 的 107 行里 14 行 null），不是 0；2026-11-20 国光股份 0 是真实值）；seal_amount 单位**元**（实测 2026-11-20 全 28 行 = seal_volume × price，偏差 ≤5 元为上游取整、最大实测 4.25 元）；seal_volume 单位**股**；break_times 是开板（炸板）次数，**null 不是 0**（实测连 LIMIT_BACK 的行也有 null，不能用它反推开板次数）；high_days 是**字符串**（首板 / 3天2板 / 7天4板 / 15天13板），⛔ **不是连板数**（实测 2026-11-20 好当家 THS「7天4板」而 Fuyao continue_day_cnt=1「首板」）；is_again 是上游 is_again_limit 的 0/1 原值；first_seal / last_seal 由上游 **Unix 秒**（字符串，如 "1795144339"）转北京时间 HH:MM:SS（1795144339 → 11:12:19；实测与 Fuyao limit_up_time 的 HH:MM 逐行一致：2026-11-20 28/28、2026-01-05 107/107），⛔ **不是东财四池的 HHMMSS 整数**；时间戳换算出的北京日期必须等于响应 data.date，否则按结构异常失败。参数：date 省略 = 上游最近交易日（实测 2026-11-22 周日省略 → data.date=20261120；⛔ 行内 `trade_date` 就是上游 data.date，省略参数时同样给出，回答「今天/哪个交易日」用它，不要用 captured_at 推断），YYYY-MM-DD（也收 YYYYMMDD，归一成 YYYY-MM-DD）；实测支持窗口起点 2025-11-07（2025-11-06 及更早回 status_code=-1「date参数不合法」，是**响亮失败不是空**；起点是固定日还是滚动窗未核出）；非交易日 / 未来日期回 status_code=0 + info=[]（合法空）。page / size：page 从 1 开始、size 1~200（实测 size=201 → status_code=-1「limitmust be less than or equal to 200」，上游原文如此），默认 1 / 200，单次只取一页（上游 page 元数据 {limit,total,count=总页数,page}；输出只有本页行，行数 = size 时可能还有下一页）；⛔ 超界 page 上游**回落到最后一页且该页返回 0 行**（实测 page=99&size=10 → 回显 page 3、info=[]；size=200 时只有 1 页 → 回显 page 1），本层核对回显 page，不一致即失败，不静默把别的页当请求页返回。合法空 vs 失败：status_code=0 且 info=[] 才是合法空（非交易日 / 未来日期 / 当日无涨停）；status_code 或 HTTP 非 0、非 JSON、data 结构不对一律响亮失败（同花顺有反爬史，401/403 不要循环重试）。⛔ 响应里的 trade_status 是**查询时刻**的会话状态、不是请求日期的状态（实测周日查 2026-11-20 时 trade_status=non_trading_day 却有 28 行），不要用它判空或判失败。未收录上游字段：market_type / market_id / currency_value（流通市值）/ is_new / change_tag / high_days_value / time_preview，以及 data.limit_up_count / limit_down_count / trade_status。',
       inputSchema: limitUpInput,
       outputSchema: limitUpOutput,
       paginated: true,

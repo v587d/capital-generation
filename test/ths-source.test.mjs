@@ -132,6 +132,7 @@ const HOT_ROW = {
 }
 
 const LIMIT_ROW = {
+  trade_date: '2026-11-20',
   code: '600327',
   name: '大东方',
   price: 4.83,
@@ -200,6 +201,7 @@ test('description 点明与 Fuyao 的分工、北交所/ST 缺口、快照无历
   assert.match(limitDescription, /不是东财四池的 HHMMSS 整数/)
   assert.match(limitDescription, /null 不是 0/)
   assert.match(limitDescription, /回落到最后一页/)
+  assert.match(limitDescription, /行内 `trade_date` 就是上游 data.date/, '行内交易日要写进 description，消费方才知道能自证业务日')
   assert.match(limitDescription, /trade_status 是\*\*查询时刻\*\*/)
 })
 
@@ -301,6 +303,7 @@ test('涨停揭秘：URL 固定 14 个字段 ID/filter/order 与分页参数，U
   assert.deepEqual(data, [
     LIMIT_ROW,
     {
+      trade_date: '2026-11-20',
       code: '688433',
       name: '华曙高科',
       price: 79.4,
@@ -326,6 +329,7 @@ test('涨停揭秘：URL 固定 14 个字段 ID/filter/order 与分页参数，U
 test('涨停揭秘：省略 date 不下发 date 参数；显式 YYYY-MM-DD 与 YYYYMMDD 等价', async () => {
   const omitted = await execute('ths_limit_up_detail', {}, jsonResponse(LIMIT_PAYLOAD))
   assert.equal(new URL(omitted.requests[0].url).searchParams.get('date'), null)
+  assert.deepEqual([...new Set(omitted.data.map((row) => row.trade_date))], ['2026-11-20'], '省略 date 时行内 trade_date 仍是上游最近交易日')
   const compact = await execute('ths_limit_up_detail', { date: '20261120', page: 1, size: 200 }, jsonResponse(LIMIT_PAYLOAD))
   assert.deepEqual(compact.data, omitted.data)
   const dashed = await execute('ths_limit_up_detail', { date: '2026-11-20' }, jsonResponse(LIMIT_PAYLOAD))
@@ -428,6 +432,8 @@ test('validateOutput：拒绝多一个键、错类型、百分数写法与非法
   assert.equal(limitUp().validateOutput([{ ...LIMIT_ROW, extra: null }]), false)
   assert.equal(limitUp().validateOutput([{ ...LIMIT_ROW, seal_rate: 80 }]), false)
   assert.equal(limitUp().validateOutput([{ ...LIMIT_ROW, first_seal: '111219' }]), false)
+  assert.equal(limitUp().validateOutput([{ ...LIMIT_ROW, trade_date: '2026/11/20' }]), false, 'trade_date 必须是 YYYY-MM-DD')
+  assert.equal(limitUp().validateOutput([{ ...LIMIT_ROW, trade_date: '2026-02-30' }]), false, 'trade_date 必须是日历日')
   assert.equal(limitUp().validateOutput([{ ...LIMIT_ROW, last_seal: '24:00:00' }]), false)
   assert.equal(limitUp().validateOutput([{ ...LIMIT_ROW, is_again: 2 }]), false)
   assert.equal(limitUp().validateOutput([{ ...LIMIT_ROW, break_times: -1 }]), false)

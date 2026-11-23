@@ -39,6 +39,8 @@ export interface DescribeResult {
     retention_until: number;
     params_digest: string;
     query_access: DatasetInspection['query_access'];
+    /** Envelope root scalars (trade_date / requested_date_clamped / calculated_at …), never rows. */
+    envelope?: Record<string, unknown>;
     profile_id: string;
     profile_ref: string;
     columns: string[];

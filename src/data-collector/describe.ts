@@ -58,6 +58,8 @@ export interface DescribeResult {
   retention_until: number
   params_digest: string
   query_access: DatasetInspection['query_access']
+  /** Envelope root scalars (trade_date / requested_date_clamped / calculated_at …), never rows. */
+  envelope?: Record<string, unknown>
   profile_id: string
   profile_ref: string
   columns: string[]
@@ -267,6 +269,7 @@ export async function describeDataset(input: DescribeDatasetInput): Promise<Desc
     params_digest: inspection.params_digest,
     time_coverage: inspection.time_coverage,
     query_access: inspection.query_access,
+    envelope: inspection.envelope,
     profile_id: profile.profile_id,
     profile_ref: profile.artifact_ref,
     columns: profile.columns,
@@ -295,6 +298,7 @@ export async function describeDataset(input: DescribeDatasetInput): Promise<Desc
       profile_ref: profile.artifact_ref,
       shape,
       columns: profile.columns,
+      envelope: inspection.envelope,
       bytes,
       facts_bytes: factsBytes,
       queries_bytes: queriesBytes,
