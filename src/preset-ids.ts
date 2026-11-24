@@ -36,6 +36,7 @@ export function isCapitalPresetId(id: string | undefined): boolean {
 export const INTERNAL_ROLE_PRESET_IDS: readonly string[] = [
   ROLE_PRESET_IDS.junior,
   ROLE_PRESET_IDS.specialist,
+  ROLE_PRESET_IDS.analyst,
 ]
 
 const INTERNAL_ROLE_PRESET_ID_SET: ReadonlySet<string> = new Set(INTERNAL_ROLE_PRESET_IDS)
@@ -53,7 +54,13 @@ export function isInternalRolePresetId(id: unknown): boolean {
  */
 export const DATA_COLLECTION_PRESET_IDS: readonly string[] = [ROLE_PRESET_IDS.collector]
 
-export const DATASET_READING_PRESET_IDS: readonly string[] = [ROLE_PRESET_IDS.junior, ROLE_PRESET_IDS.analyst]
+export const DATASET_READING_PRESET_IDS: readonly string[] = [ROLE_PRESET_IDS.junior]
 
 /** May issue `chart_source_ref` for chart reads. */
 export const CHART_SOURCE_PRESET_IDS: readonly string[] = [ROLE_PRESET_IDS.junior]
+
+/**
+ * May call the `tools/analysis` family. The senior analyst consumes snapshot refs and never reads
+ * raw rows, so it is deliberately absent from `DATASET_READING_PRESET_IDS` above.
+ */
+export const ANALYSIS_PRESET_IDS: readonly string[] = [ROLE_PRESET_IDS.analyst]

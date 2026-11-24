@@ -7,6 +7,85 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**、2.9.0 的选择器收敛与质检前置——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [2.31.0] - 2026-11-24
+
+高级分析师（`senior_analyst`）上线：补上「取数 → 质检 → 分析 → 结论」的最后一段——新增一个根直系叶子角色、
+一族六颗分析工具、一个受控 Python 分析模块与四册协议。分析在宿主的受控模块里跑，模型只给 `module_id` 与
+`params`，不提交脚本、不读原始 rows；产物是结构化 `AnalysisArtifact`，宿主逐条校验数字锚点、引用与失效条件
+后才落盘。本轮**不开子 Agent 直连**：高级分析师的一切消息仍经主 Agent 中继，直连是下一版的事。
+
+### Added
+
+- **新内部角色「高级分析师」**（语义键 `senior_analyst` / 树内名 `senior-analyst` / preset id 仍
+  `capital-data-analyst`）：自动模式按需委派（`subagent_senior_analyst`），不进新会话选择器；只挂分析族行 +
+  time + skill + send_message，没有取数 / 检索 / shell / PTC / 出图 / 子 Agent 入口，`interrupt_agent` /
+  `list_agents` / `wait_agent` 逐名 deny。卡片描述与主 persona 路由同步（单点事实问题不派它）。
+- **`tools/analysis` 六颗工具**：`create_analysis_snapshot`（冻结输入版本，返回 `analysis_id` 与 `input_fingerprint`）、
+  `read_profile`（有界 profile 事实，不给行）、`list_analysis_modules` / `describe_analysis_module`（静态 registry 的
+  契约查询）、`run_analysis`（同快照同指纹复用，不重复起进程）、`submit_analysis`（分级校验后落盘）。
+  授权一律走 `src/tool-exec.ts` 的同一道 `authorizedSession`，没有第二份判据。
+- **首个受控分析模块 `financial_quality 1.0.0`**：吃三份 Dataset（利润表 / 资产负债表 / 现金流量表），按列签名识别、
+  按 `period_end_ms`（缺则 `period`）对齐同一报告期，不要求预拼宽表；输出 17 项比率 + 5 项环比（毛利率、营业利润率、
+  净利率、ROE、ROA、资产周转、权益乘数、现金转换、经营现金流利润率、FCF、资产负债率、产权比率、利息保障倍数、
+  流动 / 速动比率、应收账款天数等）。缺报表、缺列、分母无经济含义一律写 `data_gaps`，**指标缺席而不是写 0**；
+  缺整张利润表 `status=blocked`，其余有缺口最多 `partial`。每个指标的公式与输入值写进 `outputs/<name>.json`，
+  可逐项复算。来源 FinanceSkills（MIT，固定 commit），模块自带 `LICENSE` 与 provenance，进第三方清单。
+- **分析产物布局** `capital-analysis/runs/<analysis_id>/`（snapshot / run / artifact + 宿主授权输入副本 +
+  模块 request/result/outputs/logs）；保留期 `min(创建 + 7d, 最早输入保留期)`，到期是逻辑失效，**不删文件**。
+- **四册内置协议**：`capital-senior-analysis`（总流程与失败处置）、`capital-analysis-evidence`（快照、缺口分类、
+  补数请求）、`capital-analysis-synthesis`（claims / 反证 / 冲突 / 情景 / 失效条件）、`capital-analysis-validation`
+  （数字锚点、引用、Tier 分级、体积预算）。每册都被 senior persona 的一条 duty 点名，正文 3.6–4.0 KB（剪枝阈值内）。
+- **`capital:data-contract` 角色变体**：高级分析师拿到的是快照口径——输入由 `AnalysisSnapshot` 给出，缺数据经
+  主 Agent 发 `analysis_data_request`；不再套"委派 data_collector / web_retriever"那段。
+- 研发文档：`docs/dev/senior-analysis.md`（§1.9：边界、工具面、直连目标、产物布局、模块协议、校验分级）、
+  `docs/design/senior-analyst-development-design.md`（取代 `data-analyst-architecture.md`）、`docs/agent-roles.md`、
+  `AGENTS.md` §0 索引、preset README、根 README 角色叙事。
+
+### Changed
+
+- **`data_analyst` 对外语义全部改为 `senior_analyst`**：卡片名「高级分析师」、精选方法角色键、skill 正文、
+  manifest `roles`；`config.id` 仍 `capital-data-analyst`（写进历史会话身份，改名会让旧会话恢复失败）。
+  旧键 `data_analyst` 只保留为精选方法的兼容别名。
+- **`ROLE_TOOL_SURFACES`**：analyst 面从"预留"转正；新增 `ANALYST_DENIED_TOOLS = ['wait_agent']`，只加在
+  analyst 上——`data_junior` 有出图子 Agent，它的 barrier 仍需要 `wait_agent`。
+- **存储统计**：`capital-analysis/runs` 计入设置卡片「存储 → 分析结果 → 分析产物」，但**没有删除入口**——
+  「清除数据缓存」仍只作用于 `capital-data`；分析产物靠逻辑过期，审计要能一直读到 `artifact.json` / `run.json`。
+- **打包边界**：分析模块的 `fixtures/` 不进发布包（`fixtures/.npmignore`），`module.json` / entrypoint / `LICENSE`
+  逐个进包，断言按 registry 驱动（新增模块自动纳入）。
+- **Python 运行时**：`worker.py` 增加 `analysis` 子命令（只导入 registry 白名单里的模块，模型侧不能提交脚本）；
+  取消升级为 SIGTERM → 5 秒 → SIGKILL；分析子进程的 HOME / TMPDIR 落系统临时目录（缓存目录可能只读）。
+
+### Fixed
+
+- **工具 schema 越出宿主强制子集，会让整族行在 boot 期失效**：分析族 schema 最初用了 `anyOf` / `maxItems` /
+  `maxLength`，而 `dsh-tools` 只接受 `type` / `oneOf` / `properties` / `required` / `additionalProperties` / `items` /
+  `enum` / `const` + 注解。表现不是测试红，而是角色 preset 在真实 boot 里 `broken`、六颗工具整族不存在（禁用期
+  从不激活，所以一直假绿）。已改 `oneOf`、把条数 / 长度预算移进 `validateArtifact` 的代码检查，并加"逐定义扫关键字"回归。
+- **报告期标签取错列**：fuyao A 股三表的 `period` 列实测是常量 `annual`，模块曾把它当报告期标签，导致所有报告期
+  同名、`period` 参数完全不可用（真实会话里连试 11 种写法全被拒）。现在标签取报告期键（`period_end_ms` → 日期），
+  `period` 参数另认 `fiscal_year` / `2024-FY` / `2024-12-30`；报错会列出可选报告期。新增真实形状 fixture 与回归。
+- **运行时缺失时错误码被降级**：缺 base pack 报的是 `data-runtime-not-ready`，但没映射到
+  `analysis_runtime_not_ready`，外泄成 `analysis_output_invalid`；已修并加回归。
+- **模块结果缺假设 / 方法日志不再放行**：`assumptions` / `methodology_log` 必须非空（缺了不可复算）。
+- **`submit_analysis` 先过 artifact schema**：未知字段、每侧 claims > 20、场景 > 8 都算 schema 不符（Tier 1），
+  再做语义分级与体积检查。
+
+### Notes
+
+- **需要安装分析环境**：高级分析师的分析在私有 Python 运行时里跑（插件设置 → 分析环境 → 安装 base pack）。
+  未安装时 `run_analysis` 返回 `analysis_runtime_not_ready` 并给安装提示，不影响取数 / 质检 / 检索 / 出图。
+- **高级分析师是内部角色**：与 data-junior / 绘图专员一样不进新会话选择器；单独打开时也读不到别的会话的数据。
+- **本轮不开直连**：所有消息仍经主 Agent 中继（含 `analysis_data_request` 与补计算请求）；直连邻接表与收尾判据
+  （`peer_exchanges` / 往返预算 / `waiting_peer`）留到下一版。
+- 精选方法：高级分析师暂与 data-junior 共用同一方法集（拆分留待评测后决定）；旧键 `data_analyst` 的配置继续生效。
+- 升级后重启 dsh 进程（`lib/` 已重建）；无数据 / 配置 / 会话迁移。
+- 版本：根包 + 四个随包嵌套包（chart-ui / config / watchlist / automation）+
+  `LOCAL_FETCH_CLIENT_VERSION` / `WIND_CLIENT_VERSION` 同步 2.31.0。
+- 回归：`npm test` **1783 pass / 0 fail**（新增 44 条分析族用例：schema / 快照 / 真实解释器端到端 / fixtures golden /
+  失败路径 / 全链路 artifact 落盘），`smoke:boot` 五颗角色 preset 全 `broken: null`、`problems: []`，
+  `check:dsh` 40/40；另用真实 web profile 会话跑通 600519.SH 财务质量全链路（取数 → profile → senior →
+  `financial_quality` → artifact → 主 Agent 最终答复），实机两处发现已在上文 Fixed 里。
+
 ## [2.30.1] - 2026-11-23
 
 修三条实机验收发现的口径可见性问题：envelope 根级字段现在能随 DatasetRef 与读面出来，同花顺涨停揭秘补交易日列，腾讯前复权日线的盘后滞后写进契约。数据能力本身无失败，本轮只补「看得见」。

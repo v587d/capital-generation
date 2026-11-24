@@ -9,6 +9,9 @@ export { ROLE_PRESET_IDS, ROLE_PRESET_ID_LIST, type RolePresetId } from '../pres
 /** Registered together with `send_message` by `tool-subagent-control`; no host switch, so leaf roles deny these by name.
  * 0.2.2 moved `list_agents` into the same main entry, so the welded set grew from one to two names. */
 export declare const SIBLING_DENIED_TOOLS: readonly ["interrupt_agent", "list_agents"];
+/** Welded in by the same row, but only the analyst denies it: it is a leaf with nothing to wait on,
+ * while data-junior's chart barrier needs `wait_agent` (design §5.5 — do not widen this to the shared set). */
+export declare const ANALYST_DENIED_TOOLS: readonly ["wait_agent"];
 /** Full intended surface; only names that resolve as host-global are enforced by the allow-list.
  * Scoped family-row tools stay visible regardless; they must remain in this list for review. */
 export declare const COLLECTOR_ROLE_TOOLS: readonly ["send_message", "skill", "get_local_datetime", "resolve_data_time_range", "request_data", "list_capabilities", "describe_capability", "dc_status"];

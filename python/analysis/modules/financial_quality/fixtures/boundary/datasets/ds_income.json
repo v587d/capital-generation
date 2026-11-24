@@ -1,0 +1,34 @@
+{
+  "dataset_id": "ds_income",
+  "rows": [
+    {
+      "thscode": "600519.SH",
+      "ticker": "600519",
+      "currency": "CNY",
+      "period": "2024-4",
+      "fiscal_year": 2024,
+      "fiscal_period": "4",
+      "period_end_ms": 1735603200000,
+      "report_date_ms": 1743379200000,
+      "operating_income": 10000000000,
+      "operating_costs": 9000000000,
+      "operating_expenses": 1200000000,
+      "sales_fee": 500000000,
+      "manage_fee": 400000000,
+      "research_and_development_expenses": 300000000,
+      "operating_profit": -200000000,
+      "interest_expenses": 0,
+      "profit_total": -600000000,
+      "income_tax_expense": 0,
+      "net_profit": -600000000,
+      "parent_holder_net_profit": -600000000,
+      "basic_eps": -0.6
+    }
+  ],
+  "time_coverage": {
+    "column": "period_end_ms",
+    "from": "2024-12-31",
+    "to": "2024-12-31",
+    "format": "epoch_ms"
+  }
+}

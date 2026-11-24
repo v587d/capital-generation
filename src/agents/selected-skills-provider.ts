@@ -35,7 +35,7 @@ export const SELECTED_SKILL_CATALOG = CATALOG as readonly SelectedSkillCatalogEn
 
 /** Roles a preset row may declare. data_collector / visualization have no method set. */
 export const SELECTED_SKILL_ENTRY_ROLES = [
-  'main', 'data_junior', 'web_retriever', 'data_analyst', 'data_collector', 'visualization_specialist',
+  'main', 'data_junior', 'web_retriever', 'senior_analyst', 'data_analyst', 'data_collector', 'visualization_specialist',
 ] as const
 export type SelectedSkillRole = typeof SELECTED_SKILL_ENTRY_ROLES[number]
 
@@ -70,6 +70,8 @@ const ROLE_PRESET: Record<SelectedSkillRole, string> = {
   main: ROOT_PRESET_ID,
   data_junior: ROLE_PRESET_IDS.junior,
   web_retriever: ROLE_PRESET_IDS.retriever,
+  senior_analyst: ROLE_PRESET_IDS.analyst,
+  /** Legacy key: presets written before 2026-11-24 name the same role. */
   data_analyst: ROLE_PRESET_IDS.analyst,
   data_collector: ROLE_PRESET_IDS.collector,
   visualization_specialist: ROLE_PRESET_IDS.specialist,

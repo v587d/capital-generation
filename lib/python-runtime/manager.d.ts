@@ -35,6 +35,28 @@ export interface DataScriptResult {
     pythonVersion: string;
     durationMs: number;
 }
+export interface RunAnalysisModuleOptions {
+    /** Absolute directory of the reviewed module inside the package. */
+    moduleDir: string;
+    entrypoint: string;
+    /** Absolute run directory the worker reads `request.json` from and writes `result.json` into. */
+    runDir: string;
+    /** Absolute `inputs/` directory of the snapshot (staged dataset/profile/evidence copies). */
+    inputsDir: string;
+    capabilities: readonly string[];
+    limits: {
+        max_input_rows: number;
+        max_output_bytes: number;
+        max_log_bytes: number;
+    };
+    timeoutMs: number;
+    signal?: AbortSignal;
+}
+export interface AnalysisModuleRunResult {
+    result: unknown;
+    pythonVersion: string;
+    durationMs: number;
+}
 export declare class PythonRuntimeManager {
     readonly manifest: RuntimeManifest;
     readonly dshHome: string;
@@ -81,6 +103,14 @@ export declare class PythonRuntimeManager {
      * an extra `--site-packages` entry so no pip/venv/pack is involved.
      */
     runDataScript(options: RunDataScriptOptions): Promise<DataScriptResult>;
+    /**
+     * Run one reviewed analysis module and return the object it wrote.
+     *
+     * The child gets a run directory inside the workspace: `request.json` is already there (the store
+     * wrote it), and the module's `outputs/` and `logs/` land beside it. The run directory is not
+     * deleted here — it is the audit trail; retention is the analysis layer's decision.
+     */
+    runAnalysisModule(options: RunAnalysisModuleOptions): Promise<AnalysisModuleRunResult>;
     resolve(packs?: unknown): Promise<RuntimeHandle>;
     remove(pack: PackName): Promise<void>;
     dispose(): Promise<void>;

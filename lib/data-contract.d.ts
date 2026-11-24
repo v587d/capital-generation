@@ -7,9 +7,10 @@
 export declare const DATA_CONTRACT_SECTION = "capital:data-contract";
 /** Just before the selected-skill brief (order 60). */
 export declare const DATA_CONTRACT_ORDER = 59;
-export declare function dataContractSection(): {
+export interface DataContractSection {
     name: string;
     order: number;
     interpolate: false;
     text: string;
-};
+}
+export declare function dataContractSection(role?: string): DataContractSection;

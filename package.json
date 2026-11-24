@@ -1,6 +1,6 @@
 {
   "name": "@v587d/capital-generation",
-  "version": "2.30.1",
+  "version": "2.31.0",
   "description": "Capital Generation：面向中国散户的 AI 投资助手插件",
   "icon": "assets/cg-icon.png",
   "author": "v587d",
@@ -36,6 +36,11 @@
       "types": "./lib/policy-entry.d.ts",
       "import": "./lib/policy-entry.js",
       "default": "./lib/policy-entry.js"
+    },
+    "./tools/analysis": {
+      "types": "./lib/analysis-entry.d.ts",
+      "import": "./lib/analysis-entry.js",
+      "default": "./lib/analysis-entry.js"
     },
     "./tools/chart-render": {
       "types": "./lib/chart-render-entry.d.ts",

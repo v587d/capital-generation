@@ -3,6 +3,10 @@
  * (datasets, derived profiles, OCR); `capital-analysis` is user-facing output and
  * stays read-only. Only direct children of `capital-data` are removed, never the
  * directory itself, and symlinks are never followed.
+ *
+ * Product rule: analysis artifacts (`capital-analysis/runs/`) ARE counted in the panel
+ * (`analysis.categories.runs`) but are never deletable — there is deliberately no clear
+ * path for them. Do not add one; retention is logical (snapshot `expires_at`), not deletion.
  */
 import { lstat, readdir, realpath, rm, unlink } from 'node:fs/promises'
 import { homedir } from 'node:os'

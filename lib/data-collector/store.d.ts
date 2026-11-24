@@ -188,7 +188,7 @@ export interface ProfilePayload {
     validation?: ProfileValidation;
     warnings: string[];
 }
-export type DatasetStoreErrorCode = 'workspace_not_writable' | 'session_unavailable' | 'session_cwd_unavailable' | 'sandbox_policy_unavailable' | 'filesystem_unavailable' | 'dataset_write_failed' | 'dataset_id_invalid' | 'dataset_not_found' | 'dataset_expired' | 'dataset_session_mismatch' | 'dataset_manifest_invalid' | 'dataset_format_unsupported' | 'dataset_not_row_readable' | 'dataset_too_large' | 'profile_invalid' | 'profile_too_large' | 'profile_dataset_mismatch' | 'workspace_path_invalid' | 'workspace_file_invalid';
+export type DatasetStoreErrorCode = 'workspace_not_writable' | 'session_unavailable' | 'session_cwd_unavailable' | 'sandbox_policy_unavailable' | 'filesystem_unavailable' | 'dataset_write_failed' | 'dataset_id_invalid' | 'dataset_not_found' | 'dataset_expired' | 'dataset_session_mismatch' | 'dataset_manifest_invalid' | 'dataset_format_unsupported' | 'dataset_not_row_readable' | 'dataset_too_large' | 'profile_invalid' | 'profile_not_found' | 'profile_expired' | 'profile_too_large' | 'profile_dataset_mismatch' | 'workspace_path_invalid' | 'workspace_file_invalid';
 export declare class DatasetStoreError extends Error {
     readonly code: DatasetStoreErrorCode;
     constructor(code: DatasetStoreErrorCode, detail: string);
@@ -356,6 +356,19 @@ export declare class WorkspaceDatasetStore {
         signal?: AbortSignal;
     }): Promise<TimeAxisSnapshot | undefined>;
     writeProfile(input: WriteProfileInput): Promise<ProfileRef>;
+    /**
+     * Host-internal profile read (analysis staging and `read_profile`). Same scope and expiry rules as
+     * Datasets: a profile belongs to the parent session scope and an expired one must not be analyzed.
+     * There is no model-facing read path for the raw profile object.
+     */
+    readProfile(input: {
+        session: SessionLike;
+        profile_id: string;
+        signal?: AbortSignal;
+    }): Promise<{
+        ref: ProfileRef;
+        profile: ProfilePayload;
+    }>;
     /**
      * Host-internal presentation read (charts). The returned rows must never enter any agent message,
      * tool result or model context; this is the only path that hands raw rows outside the store.

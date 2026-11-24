@@ -43,7 +43,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   let lastRenderError: string | undefined
   ctx.effect(() => {
     // Every role that can load a skill also needs the boundary that says where its data comes from.
-    const disposeContract = ctx.systemPrompt.section(dataContractSection())
+    const disposeContract = ctx.systemPrompt.section(dataContractSection(role))
     const dispose = ctx.systemPrompt.section({
       name: SECTION_NAME,
       order: SECTION_ORDER,

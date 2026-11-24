@@ -1,0 +1,65 @@
+{
+  "id": "financial_quality",
+  "version": "1.0.0",
+  "entrypoint": "module.py",
+  "runtime": "python",
+  "description": "财务比率、盈利质量与偿债能力：利润率、ROE/DuPont、现金转换、杠杆、利息覆盖与营运资本（三张报表按报告期对齐）",
+  "roles": ["senior_analyst"],
+  "capabilities": ["dataset.read"],
+  "required_fields": [],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "period": { "type": "string", "description": "报告期：2024 / 2024-FY / 2024-12-30 都认，缺省取最新一期；报错会列出可选报告期" },
+      "compare_previous": { "type": "boolean", "description": "是否计算与上一期的环比（默认 true）" },
+      "income_dataset_id": { "type": "string", "maxLength": 128 },
+      "balance_dataset_id": { "type": "string", "maxLength": 128 },
+      "cashflow_dataset_id": { "type": "string", "maxLength": 128 }
+    },
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": { "type": "string", "enum": ["completed", "partial", "blocked", "failed"] },
+      "summary": { "type": "string" },
+      "metrics": { "type": "object" },
+      "claims": { "type": "array" },
+      "assumptions": { "type": "array" },
+      "methodology_log": { "type": "array" },
+      "sensitivity": { "type": "object" },
+      "limitations": { "type": "array" },
+      "data_gaps": { "type": "array" },
+      "outputs": { "type": "array" }
+    },
+    "required": [
+      "status", "summary", "metrics", "claims", "assumptions", "methodology_log",
+      "sensitivity", "limitations", "data_gaps", "outputs"
+    ],
+    "additionalProperties": false
+  },
+  "assumptions": [
+    "EBIT 用「利润总额 + 利息费用」近似：中国会计准则下利息费用已在利润总额之前扣除",
+    "ROE、现金转换与周转率按期末余额计算，未使用期初期末平均值",
+    "total_debt 是资产负债表「负债合计」（全部负债），不是有息负债；净负债与有息负债率不在本模块口径内",
+    "报表期为累计口径（一季报/中报/三季报为年初至期末），不做年化或季度换算",
+    "金额按数据集原币计，不做币种换算；跨币种数据集不合并"
+  ],
+  "applicability": [
+    "按报告期对齐的三张报表序列：利润表、资产负债表、现金流量表各一份 Dataset",
+    "报表需要 period_end_ms 或 period 列作为报告期键；同一报表同一报告期只能有一行",
+    "A 股与美股合并报表均可用；本模块不区分行业口径，也不给评级或目标价"
+  ],
+  "limits": {
+    "timeout_ms": 30000,
+    "max_input_rows": 200000,
+    "max_output_bytes": 1048576,
+    "max_log_bytes": 65536
+  },
+  "provenance": {
+    "source_type": "adapted",
+    "repository": "GAJETOso/financeskills",
+    "commit": "b0c6239e339c1865c54bd2bb4cd4c1974120f1b8",
+    "license": "MIT"
+  }
+}

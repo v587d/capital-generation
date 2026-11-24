@@ -14,8 +14,11 @@ export const SELECTED_SKILL_ROLES = Object.freeze({
   web_retriever: Object.freeze({ zh: '检索与取证', en: 'Retrieval & evidence' }),
 })
 
-/** `data_analyst` is reserved; until it is enabled it executes the data_junior method set. */
-export const SELECTED_SKILL_ROLE_ALIASES = Object.freeze({ data_analyst: 'data_junior' })
+/** `senior_analyst` (formerly `data_analyst`) executes the data_junior method set until its own routing lands. */
+export const SELECTED_SKILL_ROLE_ALIASES = Object.freeze({
+  data_analyst: 'data_junior',
+  senior_analyst: 'data_junior',
+})
 
 /**
  * Settings-card preset names. These are the five cards a user can pick in the

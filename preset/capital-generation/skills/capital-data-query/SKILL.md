@@ -130,7 +130,7 @@ prompt 给定。它仍然走 `run_code`，但**不是**取数，也不套数据 
   同样的错误码），不必因为"想确认某个入口行不行"而重复试。
 - `query_dataset` 取不到原始行：`select` 只能引用分组列或聚合别名，所以「首末/最新值」要用
   profile 的 `time_facts`——`time_facts` 已经给了首末行取值，不要用 query 去取。
-- `query_dataset` 是受控分组/聚合透视查询，不是通用 raw.json 读取器，也不替代基础描述性 profile。对市场指数、指数组成、基金重仓股等不适合当前 QuerySpec 的数据，不要强行改写查询；不足以回答时如实回传能力边界。自定义查询脚本和自定义执行脚本属于后续 `data_analyst`，不得转移给 data_junior。
+- `query_dataset` 是受控分组/聚合透视查询，不是通用 raw.json 读取器，也不替代基础描述性 profile。对市场指数、指数组成、基金重仓股等不适合当前 QuerySpec 的数据，不要强行改写查询；不足以回答时如实回传能力边界。自定义查询脚本和自定义执行脚本不归 data_junior；需要受控分析时经 lead 派 `senior_analyst`。
 
 完成回传：
 

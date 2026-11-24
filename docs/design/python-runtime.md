@@ -201,6 +201,11 @@ DSH 的 build approval。
 
 首期只提供运行时准备与 probe；`run_analysis` 是下一阶段。
 
+> **现状（Phase 2）**：`worker.py` 有两条子命令——`run`（数据脚本 `analysis.py`，仍由 data_junior 的
+> `run_code` 面使用）与 `analysis`（**只**导入 registry 里登记过的审查模块，调 `analyze(request, context)`；
+> 模型侧不能提交脚本）。分析模块的 run 目录、产物布局与保留期见 `docs/dev/senior-analysis.md` §1.9；
+> 超时默认 30 秒（模块 manifest 只可收紧），取消先 SIGTERM、5 秒未退再 SIGKILL。
+
 将来的运行目录：
 
 ```text
@@ -249,7 +254,8 @@ capital-analysis/runs/<run_id>/
 - 不把 Python 层 guard 当安全边界；它不是 OS sandbox。
 - 不在分析回合偷偷下载/升级运行时。
 - 不把 API key 放进 Python 环境；数据由 DSH 侧预取。
-- 不开放任意 `analysis.py`，直到 `run_analysis` 有角色授权、脚本路径校验、超时和产物上限。
+- **任意脚本入口仍不开放**：`analysis` 子命令只跑 registry 白名单里的模块；`run` 子命令的 `analysis.py`
+  限 data_junior 的 `run_code` 面，仍有角色授权（`src/tool-exec.ts`）、路径校验、超时与产物上限。
 
 ## 9. 错误码
 

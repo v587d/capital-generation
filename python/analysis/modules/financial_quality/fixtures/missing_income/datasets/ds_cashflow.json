@@ -1,0 +1,27 @@
+{
+  "dataset_id": "ds_cashflow",
+  "rows": [
+    {
+      "thscode": "600519.SH",
+      "ticker": "600519",
+      "currency": "CNY",
+      "period": "2024-4",
+      "fiscal_year": 2024,
+      "fiscal_period": "4",
+      "period_end_ms": 1735603200000,
+      "report_date_ms": 1743379200000,
+      "act_cash_flow_net": -1000000000,
+      "invest_cash_flow_net": -1000000000,
+      "financing_cash_flow_net": 2000000000,
+      "pay_fixed_assets_etc_cash": 2000000000,
+      "pay_dividends_profits_interest_cash": 500000000,
+      "cash_equivalents_net_addition": 0
+    }
+  ],
+  "time_coverage": {
+    "column": "period_end_ms",
+    "from": "2024-12-31",
+    "to": "2024-12-31",
+    "format": "epoch_ms"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "dataset_id": "ds_document",
+  "kind": "document",
+  "document": {
+    "title": "2024 年年度报告",
+    "sections": [
+      {
+        "heading": "经营情况讨论",
+        "body": "示例文档型 Dataset：没有行数组，只能做 profile 或证据。"
+      }
+    ]
+  }
+}

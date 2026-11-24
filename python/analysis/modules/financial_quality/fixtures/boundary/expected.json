@@ -1,0 +1,28 @@
+{
+  "status": "partial",
+  "period": "2024-4",
+  "previous_period": null,
+  "metrics": {
+    "currency": "CNY",
+    "gross_margin": 0.1,
+    "operating_margin": -0.02,
+    "net_margin": -0.06,
+    "roa": -0.012,
+    "asset_turnover": 0.2,
+    "ocf_margin": -0.1,
+    "fcf_amount": -3000000000,
+    "fcf_margin": -0.3,
+    "debt_ratio": 1.1,
+    "current_ratio": 0.666667,
+    "quick_ratio": 0.5,
+    "receivable_days": 109.5
+  },
+  "data_gaps": [
+    "roe 未计算：2024-4 期末净资产 ≤ 0，ROE 无经济含义",
+    "equity_multiplier 未计算：2024-4 期末净资产 ≤ 0，权益乘数无经济含义",
+    "cash_conversion 未计算：2024-4 净利润 ≤ 0，现金转换倍数无意义",
+    "debt_to_equity 未计算：2024-4 期末净资产 ≤ 0，产权比率无经济含义",
+    "interest_coverage 未计算：2024-4 利息费用 ≤ 0，利息保障倍数无意义",
+    "未计算趋势：这批数据集没有早于 2024-4 的报告期"
+  ]
+}

@@ -56,8 +56,8 @@
   而 skill 只在模型决定加载时才生效。
 - **按需进 `skills/`**：载荷 JSON 样例、字段级规则、`error/code → 处置`表、四态事实怎么读、
   QuerySpec 细则、检索收敛法则、官方域名核验清单、回传格式范例。
-- **子 Agent 也能按需加载**：每颗角色 preset 自己挂 `@deepseek-ai/dsh-tool-skill` 行（四颗在用角色都有；预留的
-  `capital-data-analyst` declaration 已 disabled，恢复时要去掉 `disabled`），子 Agent 就同时拿到
+- **子 Agent 也能按需加载**：每颗角色 preset 自己挂 `@deepseek-ai/dsh-tool-skill` 行（五颗角色都有），
+  子 Agent 就同时拿到
   目录与加载器。判据在 `dsh-tools` 的 `view()`：restriction 过滤**继承层（全局 + 全部祖先
   scope，含 preset 层）**，只豁免"本 scope 自己注册的"工具；而 `dsh-tool-skill` 发布目录的
   条件正是 `ctx.tools.get('skill', agent) === 该注册对象`。源码注释里记着这段历史坑
@@ -144,10 +144,9 @@
 - 不用 `dsh-time-context` 行：它每个 step 自动注入时钟读数，与自研 `get_local_datetime`
   重复；时间读数只来自后者（会话组作用域内注册，主 Agent 与全部子 Agent 共享，支持
   `timezone` 换算）。
-- `data_analyst` 的 preset 与委派行都保持 `disabled`（2026-10-18 用户要求先停用，等价于注释）。
-  恢复前置条件（缺一不可）：宿主先实现 Python runner 与 coding 工具；插件注册 `read_profile`
-  （新工具必须先有族行带它、行契约同步）；更新 `AGENTS.md`、`docs/dev/data-roles.md` 与
-  `test/persona.test.mjs` 的预留期断言。
+- `senior_analyst`（preset id 仍 `capital-data-analyst`，卡片名「高级分析师」）在 Phase 3 启用：preset 与
+  委派行去掉 `disabled`，工具面只有分析族行 + time + skill + send_message（叶子，无 shell / PTC / 取数）。
+  再停用 = 把这两处 `disabled` 加回去；它的边界、四册 skill 与直连语义见 `docs/dev/senior-analysis.md`。
 
 ## 5.1 shell 与文件口：主 Agent 保留 shell，data_junior 用 PTC（2026-10-15 / 2026-10-23）
 

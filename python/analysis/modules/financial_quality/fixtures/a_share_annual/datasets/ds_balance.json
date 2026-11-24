@@ -1,0 +1,65 @@
+{
+  "dataset_id": "ds_balance",
+  "rows": [
+    {
+      "thscode": "600519.SH",
+      "ticker": "600519",
+      "period": "annual",
+      "fiscal_year": 2022,
+      "fiscal_period": "FY",
+      "report_date_ms": 1680134400000,
+      "period_end_ms": 1672358400000,
+      "currency": "CNY",
+      "assets_total": 200000000000,
+      "total_current_assets": 150000000000,
+      "non_current_nets_total": 50000000000,
+      "cash": 60000000000,
+      "accounts_receivable": 2000000000,
+      "total_debt": 40000000000,
+      "holder_equity_total": 160000000000
+    },
+    {
+      "thscode": "600519.SH",
+      "ticker": "600519",
+      "period": "annual",
+      "fiscal_year": 2023,
+      "fiscal_period": "FY",
+      "report_date_ms": 1711670400000,
+      "period_end_ms": 1703894400000,
+      "currency": "CNY",
+      "assets_total": 225000000000,
+      "total_current_assets": 160000000000,
+      "non_current_nets_total": 65000000000,
+      "cash": 65000000000,
+      "accounts_receivable": 2200000000,
+      "total_debt": 45000000000,
+      "holder_equity_total": 180000000000
+    },
+    {
+      "thscode": "600519.SH",
+      "ticker": "600519",
+      "period": "annual",
+      "fiscal_year": 2024,
+      "fiscal_period": "FY",
+      "report_date_ms": 1743292800000,
+      "period_end_ms": 1735516800000,
+      "currency": "CNY",
+      "assets_total": 240000000000,
+      "total_current_assets": 180000000000,
+      "non_current_nets_total": 60000000000,
+      "cash": 72000000000,
+      "accounts_receivable": 2400000000,
+      "total_debt": 48000000000,
+      "holder_equity_total": 192000000000
+    }
+  ],
+  "envelope": {
+    "thscode": "600519.SH"
+  },
+  "time_coverage": {
+    "column": "period_end_ms",
+    "from": "2022-12-30",
+    "to": "2024-12-30",
+    "format": "epoch_ms"
+  }
+}

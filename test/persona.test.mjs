@@ -98,7 +98,7 @@ const VISUALIZATION_PERSONA = rolePersona(ROLE_PRESET_IDS.specialist)
 const retrieverRow = delegation('subagent_web_retriever', ROOT_PRESET_ID).row
 const RETRIEVER_PERSONA = rolePersona(ROLE_PRESET_IDS.retriever)
 
-const analystRow = delegation('subagent_data_analyst', ROOT_PRESET_ID).row
+const analystRow = delegation('subagent_senior_analyst', ROOT_PRESET_ID).row
 const ANALYST_PERSONA = rolePersona(ROLE_PRESET_IDS.analyst)
 
 const childRows = [collectorRow, juniorRow, retrieverRow]
@@ -124,6 +124,9 @@ const SURFACE_GATE_PRESETS = [
 const PLUGIN_TOOLS = [
   'request_data', 'list_capabilities', 'describe_capability', 'dc_status',
   'describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'write_profile', 'prepare_chart_source', 'render_chart',
+  // Senior-analyst family: snapshot / module introspection / run / submit. It never reads raw rows.
+  'create_analysis_snapshot', 'read_profile', 'list_analysis_modules',
+  'describe_analysis_module', 'run_analysis', 'submit_analysis',
   'get_local_datetime',
   'resolve_data_time_range',
   // Read-only and attached only to the Capital root row.
@@ -143,7 +146,8 @@ const PLUGIN_TOOLS = [
 const PRESET_TOOLS = [
   'send_message', 'interrupt_agent', 'list_agents', 'wait_agent',
   // Only the four specialized delegation rows; the removed generic row must not reappear.
-  'subagent_data_collector', 'subagent_data_junior', 'subagent_web_retriever', 'subagent_visualization_specialist',
+  'subagent_data_collector', 'subagent_data_junior', 'subagent_senior_analyst', 'subagent_web_retriever',
+  'subagent_visualization_specialist',
   'ask_user_question', 'todo_write', 'skill',
   // Platform-paired rows register exactly one shell name.
   'bash', 'pwsh',
@@ -375,7 +379,7 @@ test('capital-equity-research：完整报告覆盖证据、降级与角色边界
     /公司与业务/, /经营与财务/, /估值/, /价格与技术/, /事件与环境/, /风险与反方/,
     /capital-orchestration/, /capital-data-protocol/, /capital-web-protocol/,
     /capital-visualization-protocol/, /data_collector/, /data_junior/, /web_retriever/,
-    /不转原始 rows/, /报告就是最终答复正文/, /data_analyst.*未启用/,
+    /不转原始 rows/, /报告就是最终答复正文/, /估值模型、回测或统计检验交 `senior_analyst`/,
     /负盈利时不解释 PE 为有效倍数/, /搜索摘要仅是线索/,
     /子 Agent 未结算/, /缺关键证据就降低结论强度/, /不承诺收益/,
   ]) assertRule(text, pattern, `投资研究 skill 缺少边界或证据门：${pattern}`)
@@ -399,7 +403,7 @@ test('capital-event-impact：事件时间线、版本与归因边界', () => {
   const text = readFileSync(`${SKILL_DIR}capital-event-impact/SKILL.md`, 'utf8')
   for (const pattern of [
     /capital-orchestration/, /capital-data-protocol/, /capital-web-protocol/,
-    /data_collector/, /data_junior/, /web_retriever/, /data_analyst.*未启用/,
+    /data_collector/, /data_junior/, /web_retriever/, /交 `senior_analyst`/,
     /首次披露、补充\/更正、审议通过、生效和实际实施/,
     /首个可交易时点/, /公告披露金额不是已兑现利润/,
     /相关性不是公告导致涨跌的证明/, /在已检索范围内未查到/,
@@ -412,7 +416,7 @@ test('capital-portfolio-review：用户持仓不等于自选股，快照不等�
   const text = readFileSync(`${SKILL_DIR}capital-portfolio-review/SKILL.md`, 'utf8')
   for (const pattern of [
     /capital-orchestration/, /capital-data-protocol/, /capital-web-protocol/,
-    /data_collector/, /data_junior/, /web_retriever/, /data_analyst.*未启用/,
+    /data_collector/, /data_junior/, /web_retriever/, /交 `senior_analyst`/,
     /先调 `get_watchlist`/, /只能经这条只读工具/, /券商账户仍读不到/,
     /未标持仓的关注条目.*都不算用户仓位/, /holding_marked_age_days.*向用户复述确认/,
     /这是.*自报值/, /不写回持仓/, /不调用自选股面板的宿主路由/, /不假设等权/,
@@ -533,7 +537,9 @@ test('主 persona：数据调度纪律——通过 list_agents + send_message �
   // The main Agent never reads a Dataset: content and basic stats go through data_junior's query_dataset.
   assertRule(MAIN_PERSONA, /看内容或基础统计.*data_junior/)
   assertRuleAny(MAIN_PERSONA, [/绝不直接调用 Dataset 系列工具/, /禁止直调 Dataset 工具/], '主 persona 必须禁止直调 Dataset 系列工具')
-  assertRuleAny(MAIN_PERSONA, [/data_analyst 尚未/, /data_analyst 未启用/], '主 persona 需说明 data_analyst 不可用')
+  // Phase 3 enabled the analyst: the main persona routes conclusion work to it instead of around it.
+  assertRule(MAIN_PERSONA, /结论层复核 → senior_analyst/, '主 persona 必须把结论层复核路由给 senior_analyst')
+  assertRule(MAIN_PERSONA, /逐行 \/ 专业分析、财务质量复核 → 委派 senior_analyst/, '逐行 / 专业分析必须派 senior')
   assertRule(MAIN_PERSONA, /dataset_session_mismatch/)
   assertRule(MAIN_PERSONA, /不要重试直读/)
   assertRule(MAIN_PERSONA, /媒体转述旁证/)
@@ -801,7 +807,7 @@ test('委派出口只有专用角色：没有通用 subagent，也没有谁自�
   for (const preset of allPresets()) {
     if (preset.config.id === ROOT_PRESET_ID) {
       assert.deepEqual(delegationOf(preset),
-        ['subagent_data_analyst', 'subagent_data_collector', 'subagent_data_junior', 'subagent_web_retriever'],
+        ['subagent_data_collector', 'subagent_data_junior', 'subagent_senior_analyst', 'subagent_web_retriever'],
         '主 preset 的委派出口必须恰好是这四颗专用工具')
       continue
     }
@@ -816,7 +822,7 @@ test('委派出口只有专用角色：没有通用 subagent，也没有谁自�
     // Root mounting ocr is deliberate: local documents only, outbound URLs gated at the url shape check.
     'ocr': [ROLE_PRESET_IDS.retriever, ROOT_PRESET_ID],
     fetch: [ROLE_PRESET_IDS.collector],
-    dataset: [ROLE_PRESET_IDS.junior, ROLE_PRESET_IDS.analyst],
+    dataset: [ROLE_PRESET_IDS.junior],
     chart_issue: [ROLE_PRESET_IDS.junior],
     chart_render: [ROLE_PRESET_IDS.specialist],
     watchlist: [ROOT_PRESET_ID],
@@ -1138,7 +1144,7 @@ test('data_junior persona：接收 DatasetRef 或假设建模，输出 profile �
     /不要为了填空编造能力名/,
     /取不到原始行/,
   ]) assertRule(JUNIOR_PERSONA, pattern, `data_junior persona 缺少要点: ${pattern}`)
-  assertNoRule(JUNIOR_PERSONA, /request_data|list_capabilities|dc_status|subagent_data_collector|subagent_data_analyst/, 'junior persona 不应引用取数或委派工具')
+  assertNoRule(JUNIOR_PERSONA, /request_data|list_capabilities|dc_status|subagent_data_collector|subagent_senior_analyst/, 'junior persona 不应引用取数或委派工具')
   assertNoRule(JUNIOR_PERSONA, /data_key|list_schemas|get_latest|from_cache/, 'junior persona 不应包含 data_key/旧缓存协议')
   assertNoRule(JUNIOR_PERSONA, /官方|DSH|exec\.agent/, 'junior persona 不应出现框架术语')
 
@@ -1224,7 +1230,7 @@ const PRESET_ROW_COMPOSITION = {
     '@v587d/capital-generation/tools/selected-skills',
   ],
   // A disabled role preset can still be opened by hand, so reserved roles go through family rows too.
-  [ROLE_PRESET_IDS.analyst]: ['@v587d/capital-generation/tools/dataset-read', '@v587d/capital-generation/tools/time', '@v587d/capital-generation/tools/selected-skills'],
+  [ROLE_PRESET_IDS.analyst]: ['@v587d/capital-generation/tools/analysis', '@v587d/capital-generation/tools/time', '@v587d/capital-generation/tools/selected-skills'],
   // Root: time, local document parsing, watchlist, present (final-turn chart delivery),
   // orchestration (single-turn wait), and root-extras (which registers no tool itself).
   [ROOT_PRESET_ID]: [
@@ -1313,26 +1319,52 @@ test('capital-generation preset：组合面只有时间 / 本地文档 / 自选�
   assert.deepEqual(fsRow.config, { read: true, write: false, edit: false }, 'write / edit 必须在组合期就不注册')
 })
 
-test('subagent_data_analyst 行：仍在开发中——preset 与委派行都 disabled，预留工具名不得先行启用', () => {
+test('subagent_senior_analyst 行：Phase 3 已启用——preset 与委派行去掉 disabled，四册 skill 各有 duty 点名', () => {
   const analystPreset = allPresets().find((preset) => preset?.config?.id === ROLE_PRESET_IDS.analyst)
-  assert.equal(analystPreset?.disabled, true, '2026-10-18 用户要求先停用 analyst declaration，恢复时再去掉 disabled')
-  assertDelegationRowShape(analystRow, 'subagent_data_analyst', ROLE_PRESET_IDS.analyst)
-  assert.equal(analystRow.disabled, true, 'data_analyst 仍在开发中，委派行必须 disabled')
-  // ⛔ A disabled delegation row cannot stop a hand-opened session; row composition is the gate that still holds.
-  assert.deepEqual(capitalFace(ROLE_PRESET_IDS.analyst),
-    ['describe_dataset', 'get_local_datetime', 'inspect_dataset', 'profile_dataset', 'query_dataset', 'resolve_data_time_range'],
-    '预留行的工具面必须真注册：挂一行不存在的族 = 那一颗 preset 静默少一整族能力')
-  assert.ok(!KNOWN_TOOLS.has('read_profile'), 'read_profile 仍未注册：启用 data_analyst 前必须先实现它，再连同族行一起补回')
+  assert.equal(analystPreset?.disabled, undefined, 'Phase 3 启用 senior：tools/analysis 族行与固定模块就绪后就去掉 disabled')
+  assertDelegationRowShape(analystRow, 'subagent_senior_analyst', ROLE_PRESET_IDS.analyst)
+  assert.equal(analystRow.disabled, undefined, '委派行必须启用，否则主 Agent 拿不到 subagent_senior_analyst')
+  // ⛔ A disabled row cannot stop a hand-opened session; row composition is the gate that still holds.
+  assert.deepEqual(capitalFace(ROLE_PRESET_IDS.analyst), [
+    'create_analysis_snapshot', 'describe_analysis_module', 'get_local_datetime',
+    'list_analysis_modules', 'read_profile', 'resolve_data_time_range', 'run_analysis', 'submit_analysis',
+  ], '工具面必须真注册：挂一行不存在的族 = 那颗 preset 静默少一整族能力')
+  assert.ok(mountsRow(ROLE_PRESET_IDS.analyst, '@v587d/capital-generation/tools/analysis'),
+    '分析族行是 senior 的主工作面')
+  // Senior consumes snapshot refs only: mounting the dataset-read row would open a second raw-data entrance.
+  assert.ok(!mountsRow(ROLE_PRESET_IDS.analyst, '@v587d/capital-generation/tools/dataset-read'),
+    'senior 不读原始 rows：dataset-read 行必须留在 junior 那一侧')
   assert.ok(SURFACE_GATE_PRESETS.includes(ROLE_PRESET_IDS.analyst), '五颗角色清单全部进行组合闸门（手开路径也算）')
   for (const forbiddenRow of ['@deepseek-ai/dsh-tool-bash', '@deepseek-ai/dsh-tool-pwsh', '@deepseek-ai/dsh-tool-fs']) {
-    assert.ok(!mountsRow(ROLE_PRESET_IDS.analyst, forbiddenRow), `预留期不该挂 ${forbiddenRow}`)
+    assert.ok(!mountsRow(ROLE_PRESET_IDS.analyst, forbiddenRow), `senior 是叶子且不写文件，不该挂 ${forbiddenRow}`)
   }
-  for (const pattern of [/金融工程研究员（data_analyst）/, /analysis_request/, /analysis_failed/, /DatasetRef/, /artifact_ref/, /经主 Agent 中继/, /不索取或保存账户密码/]) {
-    assertRule(ANALYST_PERSONA, pattern, `data_analyst persona 缺少要点: ${pattern}`)
+
+  // Four volumes, each named by a duty line: a volume nobody loads is a rule that never runs.
+  for (const name of ['capital-senior-analysis', 'capital-analysis-evidence', 'capital-analysis-synthesis', 'capital-analysis-validation']) {
+    assert.ok(existsSync(`${SKILL_DIR}${name}/SKILL.md`), `缺少分册 skills/${name}/SKILL.md`)
+    assertRule(ANALYST_PERSONA, new RegExp(`skill ${name}`), `senior persona 必须点名 ${name}`)
+    assert.ok(skillBody(name).length <= VISIBLE_CAP, `${name} 正文 ${skillBody(name).length} > 可见上限 ${VISIBLE_CAP}`)
+  }
+  for (const pattern of [/高级分析师（senior_analyst）/, /不取数/, /不创建子 Agent/, /经主 Agent 中继/,
+    /analysis_result/, /analysis_data_request/, /不索取或保存账户密码/]) {
+    assertRule(ANALYST_PERSONA, pattern, `senior_analyst persona 缺少要点: ${pattern}`)
   }
   assertNoRule(ANALYST_PERSONA, /data_key|官方|DSH|exec\.agent/, 'analyst persona 不应包含内部键名/框架术语')
-  assertRuleAny(MAIN_PERSONA, [/data_analyst 仍在开发中/, /data_analyst 未启用/], '主 persona 必须写明 data_analyst 未启用')
-  assertRuleAny(MAIN_PERSONA, [/当前会话不创建、不使用/, /data_analyst 未启用：不创建/], '主 persona 必须写明当前会话不创建 data_analyst')
+  // Main persona routes to it and waits for the receipt before writing the final answer.
+  assertRule(MAIN_PERSONA, /结论层复核 → senior_analyst/)
+  assertRule(MAIN_PERSONA, /未收到 analysis_result 不写结论/)
+})
+
+test('senior_analyst 身份四层：语义键 / 树内名 / preset id 各归其位，不许互相替代', () => {
+  // ⛔ The preset id is the session-log identity: renaming it makes every historical session unresolvable.
+  assert.equal(ROLE_PRESET_IDS.analyst, 'capital-data-analyst', 'preset id 是历史会话身份，改名即旧会话 agent-preset/not-found')
+  const analystPreset = allPresets().find((preset) => preset?.config?.id === ROLE_PRESET_IDS.analyst)
+  assert.equal(analystPreset.config.name, '高级分析师', '卡片显示名是用户可见的那一层')
+  assert.equal(analystRow.config.toolName, 'subagent_senior_analyst', '委派工具名 = 树内名字那一层')
+  assert.equal(analystRow.config.agentPreset, 'capital-data-analyst', '委派行仍按 preset id 选角色')
+  const skillsRow = allRowsOf(ROLE_PRESET_IDS.analyst)
+    .find((row) => row?.name === '@v587d/capital-generation/tools/selected-skills')
+  assert.equal(skillsRow.config.role, 'senior_analyst', '精选方法用语义键，不是 preset id，也不是树内名')
 })
 
 test('主 persona：data_junior 是直接子 Agent，dc 不得创建它', () => {
@@ -1352,7 +1384,7 @@ test('data_collector persona：叶子边界——不得创建/指挥 data_junior
   assertRule(COLLECTOR_PERSONA, /data_junior 由主\s*Agent 直接创建/)
   // Request ownership is always the caller itself; no proxied requester concept.
   assertRule(COLLECTOR_PERSONA, /请求归属恒为调用者自身/)
-  assertNoRule(COLLECTOR_PERSONA, /subagent_data_junior|subagent_data_analyst/, 'dc persona 不应包含创建下游 Agent 的委派工具名')
+  assertNoRule(COLLECTOR_PERSONA, /subagent_data_junior|subagent_senior_analyst/, 'dc persona 不应包含创建下游 Agent 的委派工具名')
 })
 
 test('skill 内容：编排 skill 覆盖预检异常与清单，数据 skill 覆盖三种载荷', () => {
@@ -1536,7 +1568,7 @@ test('preset 卡片显示名：自动模式 + 四颗角色，config.id 保持会
     [ROLE_PRESET_IDS.retriever, '资讯专员'],
     [ROLE_PRESET_IDS.junior, '分析师'],
     [ROLE_PRESET_IDS.specialist, '绘图专员'],
-    [ROLE_PRESET_IDS.analyst, '专业分析（未启用）'],
+    [ROLE_PRESET_IDS.analyst, '高级分析师'],
   ])
   const configs = new Map(allPresets().map((preset) => [preset.config.id, preset.config]))
   for (const [presetId, name] of expected) {
@@ -1552,6 +1584,7 @@ test('preset 卡片显示名：自动模式 + 四颗角色，config.id 保持会
   assert.match(configs.get(ROLE_PRESET_IDS.retriever).description, /^资讯公文专员：/)
   assert.match(configs.get(ROLE_PRESET_IDS.junior).description, /^分析师（内部角色）：/)
   assert.match(configs.get(ROLE_PRESET_IDS.specialist).description, /^绘图专员（内部角色）：/)
+  assert.match(configs.get(ROLE_PRESET_IDS.analyst).description, /^高级分析师（内部角色）：/)
   // Standalone capability is a product promise, not a layout detail: pin the four different answers.
   assert.match(configs.get(ROLE_PRESET_IDS.collector).description, /可以单独打开取数/)
   assert.match(configs.get(ROLE_PRESET_IDS.junior).description, /单独打开时没有取数入口/)

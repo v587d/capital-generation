@@ -1,0 +1,32 @@
+{
+  "status": "partial",
+  "period": "2023-12-30",
+  "previous_period": "2022-12-30",
+  "metrics": {
+    "currency": "CNY",
+    "gross_margin": 0.915,
+    "operating_margin": 0.690909,
+    "net_margin": 0.518182,
+    "roe": 0.316667,
+    "roa": 0.253333,
+    "asset_turnover": 0.488889,
+    "equity_multiplier": 1.25,
+    "cash_conversion": 1.105263,
+    "ocf_margin": 0.572727,
+    "fcf_amount": 58500000000,
+    "fcf_margin": 0.531818,
+    "debt_ratio": 0.2,
+    "debt_to_equity": 0.25,
+    "interest_coverage": 691.909091,
+    "receivable_days": 7.3,
+    "gross_margin_delta": -0.005,
+    "net_margin_delta": -0.006818,
+    "roe_delta": -0.011458,
+    "cash_conversion_delta": -0.037594,
+    "debt_ratio_delta": 0.0
+  },
+  "data_gaps": [
+    "current_ratio 未计算：2023-12-30 缺 total_current_liabilities",
+    "quick_ratio 未计算：2023-12-30 缺 inventory、total_current_liabilities"
+  ]
+}

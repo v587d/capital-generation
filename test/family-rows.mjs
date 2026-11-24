@@ -8,6 +8,11 @@
 export const CAPITAL_ROW_TOOLS = {
   '@v587d/capital-generation/tools/collect': ['request_data', 'list_capabilities', 'describe_capability', 'dc_status'],
   '@v587d/capital-generation/tools/dataset-read': ['describe_dataset', 'inspect_dataset', 'profile_dataset', 'query_dataset'],
+  // Senior-analyst family: snapshot / module introspection / run / submit. Never dataset rows.
+  '@v587d/capital-generation/tools/analysis': [
+    'create_analysis_snapshot', 'read_profile', 'list_analysis_modules',
+    'describe_analysis_module', 'run_analysis', 'submit_analysis',
+  ],
   '@v587d/capital-generation/tools/chart-source': ['prepare_chart_source'],
   '@v587d/capital-generation/tools/chart-render': ['render_chart'],
   '@v587d/capital-generation/tools/retrieve-search': ['anysearch_search', 'web_retriever_fetch', 'wind_docs_announcements', 'wind_docs_news'],

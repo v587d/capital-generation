@@ -20,7 +20,7 @@
 | `main` | `capital-generation` | 研究框架、组合/交易流程、写作、教学、税务 | 组织证据、最终答复、用户决策 |
 | `data_junior` | `capital-data-junior` | 估值、会计、财务质量、风险、筛选、技术/期权/ETF、取证 | `run_code` 计算、表格、统计 |
 | `web_retriever` | `capital-web-retriever` | 10-K 深读、电话会纪要、逐条核验 | 取证、文档阅读、来源核对 |
-| `data_analyst` | `capital-data-analyst`（未启用） | 与 `data_junior` 同一方法集 | 预留的独立分析角色 |
+| `senior_analyst` | `capital-data-analyst`（Phase 3 启用） | 与 `data_junior` 同一方法集 | 独立分析角色；方法集是否拆分见 §8.7 末段 |
 | `data_collector` | `capital-data-collector` | 无 | 只取结构化数据，不套方法 |
 | `visualization_specialist` | `capital-visualization-specialist` | 无 | 只出图，不套方法 |
 
@@ -120,7 +120,8 @@ frontmatter 的 `description` 只作溯源，不再直接进模型目录（provi
   正交，六个协议顶部写定位与按角色加载。复测组合复盘同时加载 `capital-portfolio-review` + `portfolio-review`，
   10-K 加载 `capital-web-protocol` + `10k-digest`。无 Dataset 建模仍由主 persona 路由 data_junior。
 - 角色短清单只列 12 条；角色目录仍是完整集合，模型从宿主技能目录选择其余条目。
-- `data_analyst` 未启用，只做 `data_junior` 的别名；启用时要单独决定是否拆分方法集。
+- `senior_analyst`（旧键 `data_analyst`）Phase 3 启用后仍共用 `data_junior` 的方法集：拆分（研究框架 /
+  证据综合 / bear case 归 senior）需要重排 70 行角色列，留到 Phase 6 按评测结果决定，不先猜。
 - 使用反馈已落到运行期账本与会话日志：报告能证明“加载过什么、最终答复有没有点名”，但不能判断
   方法是否被正确执行；方法质量仍由内容闸门与人工评审负责。
 - 真机尚未验证“角色子 Agent 的 `composedPreset` 返回角色 id”这一条；第一次实机看到某个角色目录

@@ -8,6 +8,9 @@
 > 2026-10-23 起 data_junior 改用宿主 PTC：只挂 `tool-presentation`（0.2.2 起直接挂
 > `@deepseek-ai/dsh-tool-executor-ptc`），不挂 shell；它的程序面是 `run_code`，同样只做工具调度与派生算术，不是取数通道。
 
+> `senior_analyst`（`capital-data-analyst`）不挂 shell 与 PTC：`capital-analysis/runs/` 的写权限由分析族行
+> 走 store 承担，不经 shell。详见 `senior-analysis.md` §1.9。
+
 ## 1.6 接线与结构件
 
 - **接线**：shell 行 preset 自持、**平台成对**挂载（Linux `tool-bash` / Windows `tool-pwsh`；Web

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 import * as collectEntry from '../lib/collect-entry.js'
 import * as datasetReadEntry from '../lib/dataset-read-entry.js'
+import * as analysisEntry from '../lib/analysis-entry.js'
 import * as chartSourceEntry from '../lib/chart-source-entry.js'
 import * as chartRenderEntry from '../lib/chart-render-entry.js'
 import * as searchEntry from '../lib/search-entry.js'
@@ -65,6 +66,7 @@ const namesOf = (apply, options) => {
 const ENTRIES = {
   '@v587d/capital-generation/tools/collect': collectEntry,
   '@v587d/capital-generation/tools/dataset-read': datasetReadEntry,
+  '@v587d/capital-generation/tools/analysis': analysisEntry,
   '@v587d/capital-generation/tools/chart-source': chartSourceEntry,
   '@v587d/capital-generation/tools/chart-render': chartRenderEntry,
   '@v587d/capital-generation/tools/retrieve-search': searchEntry,

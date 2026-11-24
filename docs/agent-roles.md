@@ -11,7 +11,7 @@
 
 ## 角色详情
 
-目前覆盖以下 Subagent（data_analyst 为预留角色，暂未启用）：
+目前覆盖以下 Subagent：
 
 - **data_collector**: 主 Agent 直属下级（spawn），负责根据上级指令收集金融财经类结构化数据，目前支持
   **162 个数据 capability**：同花顺（fuyao）64 个（行情、财务、估值竞价、盘面特色、指数、基金），
@@ -30,8 +30,9 @@
   以及数据透视，目的是阐述数据背后的"故事"。读一份 Dataset 默认走 `describe_dataset`（一次调用完成
   元数据 + 基础 profile + 受控查询，多份数据在同一条消息里并发）；时间窗与时间戳换算一律由宿主完成
   （`time_facts` 的 `axis` / `windows`、`resolve_data_time_range`），子 Agent 不自行把日期算成毫秒。
-- **data_analyst**: 主 Agent 直属下级，负责根据上级指令，通过运用编程技能分析上游数据
-  （**仍在开发中**，委派行 disabled，暂不启用）。
+- **senior_analyst**（卡片名「高级分析师」，Phase 3 起启用）: 主 Agent 直属下级（spawn），负责用受控
+  分析模块做财务质量、收益风险与情景敏感性复核，输出可溯源的结构化产物（结论、正反论据、替代解释、
+  失效条件）；不直接取数、不读原始行、不出图、不写最终答复。preset id 仍是 `capital-data-analyst`。
 - **web_retriever**: 主 Agent 直属下级（spawn），负责根据上级指令，运用网络搜索和抓取能力，获取外部
   非结构化数据。检索面为 AnySearch（`anysearch_search` / `web_retriever_fetch`，失败可按开关回退本机
   直连）与 Wind Alice（`wind_docs_announcements` / `wind_docs_news`，公告/新闻的语义深研，
@@ -49,8 +50,8 @@
 ## 「Agent 预设」里的角色
 
 本插件在「Agent 预设」里留下三张可独立选择的卡片：「自动模式」「行情专家」「资讯专员」。`分析师` 与 `绘图专员`
-是自动模式的内部角色：插件把这两颗内部角色从新会话选择器与预设管理里隐藏，但它们仍按原身份参与自动模式的
-委派。预留的 `data_analyst` 仍处于停用状态，不参与显示。
+是自动模式的内部角色：插件把这三颗内部角色从新会话选择器与预设管理里隐藏，但它们仍按原身份参与自动模式的
+委派。
 
 三个用户模式的顺序是「自动模式 → 行情专家 → 资讯专员」，排在官方 `standard` / `ptc` / `minimal` /
 `cordis` 之前；官方模式仍保留在下方，方便继续使用 Creator 等原始模式。DSH 的选择器是扁平列表，

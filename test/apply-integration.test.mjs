@@ -724,3 +724,22 @@ test('apply()：本地回退默认启用并把 UA 落到本机直连请求；ena
     else process.env.FUYAO_API_KEY = SAVED_KEY
   }
 })
+
+test('tools/selected-skills：senior 的数据边界换成快照口径，不把"委派取数"原样给它', async () => {
+  const { ctx, sections, services, effectResults } = fakeCtx()
+  services.set('agentPresets', { composedPreset: (agentCtx) => agentCtx?.preset })
+  applySelectedSkills(ctx, { role: 'senior_analyst' })
+  await Promise.all(effectResults)
+
+  const contract = sections.find((item) => item.name === 'capital:data-contract')
+  assert.ok(contract, 'senior 也要有 capital:data-contract：它的输入来源同样只有一处说法')
+  assert.equal(contract.order, 59, '与其它角色同一座位，换的是正文不是位置')
+  assert.equal(contract.interpolate, false)
+  const text = typeof contract.text === 'function' ? contract.text() : contract.text
+  assert.match(text, /AnalysisSnapshot/, 'senior 的输入是宿主冻结的快照，不是委派取数')
+  assert.match(text, /analysis_data_request/, '缺数据只能经主 Agent 提请求')
+  assert.match(text, /data_gaps/, '缺字段要落进缺口，不靠默认值')
+  assert.match(text, /pasted by user/)
+  assert.doesNotMatch(text, /委派 data_collector/, 'senior 没有委派权：主 Agent 那段边界对它不成立')
+  assert.doesNotMatch(text, /https?:\/\//, '边界不写 URL')
+})

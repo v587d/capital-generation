@@ -1,7 +1,7 @@
 /**
  * Call-level `send_message` target guard. rc.2 lets any two members of one subagent tree message
  * each other; Capital keeps the main-agent relay: root -> direct child only, child -> lead only,
- * specialist -> none. The target map is explicit so a future data-junior -> data-analyst link is a
+ * specialist -> none. The target map is explicit so a future data-junior -> senior-analyst link is a
  * one-line addition, not a policy rewrite. Non-Capital presets fail open.
  */
 import type { GuardedExecution, PolicyContext } from './root-tool-policy.js'

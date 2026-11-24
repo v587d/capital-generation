@@ -248,6 +248,8 @@ export type DatasetStoreErrorCode =
   | 'dataset_not_row_readable'
   | 'dataset_too_large'
   | 'profile_invalid'
+  | 'profile_not_found'
+  | 'profile_expired'
   | 'profile_too_large'
   | 'profile_dataset_mismatch'
   | 'workspace_path_invalid'
@@ -732,6 +734,44 @@ export class WorkspaceDatasetStore {
       this.mapWriteError(error, `writing profile.json (${profileId})`)
     }
     return profileRef
+  }
+
+  /**
+   * Host-internal profile read (analysis staging and `read_profile`). Same scope and expiry rules as
+   * Datasets: a profile belongs to the parent session scope and an expired one must not be analyzed.
+   * There is no model-facing read path for the raw profile object.
+   */
+  async readProfile(input: { session: SessionLike; profile_id: string; signal?: AbortSignal }): Promise<{ ref: ProfileRef; profile: ProfilePayload }> {
+    if (!PROFILE_ID_PATTERN.test(input.profile_id)) throw new DatasetStoreError('profile_invalid', 'profile_id is invalid')
+    const root = this.readRoot(input.session)
+    if (!root || !this.fs) throw new DatasetStoreError('filesystem_unavailable', 'workspace filesystem is unavailable')
+    let text: string
+    try {
+      const target = await this.resolveContained(`${PROFILES_SUBDIR}/${input.profile_id}/${PROFILE_FILE}`, root, input.signal)
+      text = await this.fs.readText(target, input.signal)
+    } catch (error) {
+      if (errorCodeOf(error) === 'FS_NOT_FOUND') throw new DatasetStoreError('profile_not_found', `profile ${input.profile_id} was not found`)
+      if (error instanceof DatasetStoreError) throw error
+      throw new DatasetStoreError('profile_invalid', 'profile.json could not be read')
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      throw new DatasetStoreError('profile_invalid', 'profile.json is not valid JSON')
+    }
+    if (!isRecord(parsed) || !isRecord(parsed.ref)) throw new DatasetStoreError('profile_invalid', 'profile.json is missing its ref')
+    const ref = parsed.ref as unknown as ProfileRef
+    if (typeof ref.profile_id !== 'string' || ref.profile_id !== input.profile_id) {
+      throw new DatasetStoreError('profile_invalid', 'profile ref does not match its directory')
+    }
+    if (ref.session_id !== sessionScopeFor(input.session)) {
+      throw new DatasetStoreError('dataset_session_mismatch', 'profile belongs to another session scope')
+    }
+    if (typeof ref.retention_until === 'number' && ref.retention_until <= this.now()) {
+      throw new DatasetStoreError('profile_expired', `profile ${input.profile_id} has expired`)
+    }
+    return { ref, profile: validateProfile(parsed.profile) }
   }
 
   /**

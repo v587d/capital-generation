@@ -65,7 +65,11 @@ export async function runWorkerProcess(options: WorkerProcessOptions): Promise<W
       setTimeout(() => { void killTree(child.pid, child, 'SIGKILL') }, 2_000).unref?.()
     }, options.timeoutMs)
     timer.unref?.()
-    const abort = () => { void killTree(child.pid, child, 'SIGTERM') }
+    // Abort escalates once: a child that ignores SIGTERM would keep the workspace run directory open.
+    const abort = () => {
+      void killTree(child.pid, child, 'SIGTERM')
+      setTimeout(() => { void killTree(child.pid, child, 'SIGKILL') }, 5_000).unref?.()
+    }
     options.signal?.addEventListener('abort', abort, { once: true })
     const finish = (code: number | null) => {
       if (settled) return

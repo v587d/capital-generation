@@ -263,11 +263,19 @@ test('selected skill provider: 数据侧与检索侧各自拿到自己的方法�
   assert.deepEqual((await retrieverHarness.provider.list({})).map(({ name }) => name), ['fact-check', '10k-digest'])
 
   const analystHarness = makeHarness()
-  registerSelectedSkills(analystHarness.ctx, 'data_analyst', selection, analystHarness.createFilesystemProvider)
+  registerSelectedSkills(analystHarness.ctx, 'senior_analyst', selection, analystHarness.createFilesystemProvider)
   const analyst = analystHarness.makeAgent({ preset: 'capital-data-analyst', parentSession: 'root' })
   await analystHarness.listeners.get('agent/created')({ agent: analyst.agent })
   assert.deepEqual((await analystHarness.provider.list({})).map(({ name }) => name), ['financial-health'],
-    'data_analyst 是保留角色，启用前与 data_junior 共用方法集')
+    'senior_analyst 是保留角色，启用前与 data_junior 共用方法集')
+
+  // The old key stays registered: presets written before the rename still name the same role.
+  const legacyHarness = makeHarness()
+  registerSelectedSkills(legacyHarness.ctx, 'data_analyst', selection, legacyHarness.createFilesystemProvider)
+  const legacy = legacyHarness.makeAgent({ preset: 'capital-data-analyst', parentSession: 'root' })
+  await legacyHarness.listeners.get('agent/created')({ agent: legacy.agent })
+  assert.deepEqual((await legacyHarness.provider.list({})).map(({ name }) => name), ['financial-health'],
+    'data_analyst 是旧键别名：历史 preset 仍要能注册，不能因为改名就静默少一整族方法')
 })
 
 test('selected skill provider: auto 模式按角色开放全部方法，勾选不参与过滤', async () => {

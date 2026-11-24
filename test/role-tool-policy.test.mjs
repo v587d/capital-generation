@@ -11,6 +11,7 @@ import {
   rolePolicyProbes,
   rolePresetIdOf,
   roleSiblingGuardReasonFor,
+  ANALYST_DENIED_TOOLS,
   SIBLING_DENIED_TOOLS,
 } from '../lib/agents/role-tool-policy.js'
 import { resetRootPolicyProbes, rootPolicyProbes, TEAM_DENIED_TOOLS } from '../lib/agents/root-tool-policy.js'
@@ -78,15 +79,24 @@ test('角色残留面：兄弟 deny 与宿主全局白名单分开，不恢复�
     for (const name of surface.allowTools ?? []) {
       assert.equal(typeof name, 'string', `${presetId} 的宿主白名单只能写工具名`)
     }
+    const welded = presetId === ROLE_PRESET_IDS.analyst
+      ? [...SIBLING_DENIED_TOOLS, ...ANALYST_DENIED_TOOLS]
+      : [...SIBLING_DENIED_TOOLS]
     for (const name of surface.denySiblings ?? []) {
-      assert.ok(SIBLING_DENIED_TOOLS.includes(name), `${presetId} 的 deny 里出现了不是"同行兄弟”的名字（${name}）——那就是 §6.1 禁止恢复的"继承全部再划掉"形状`)
+      assert.ok(welded.includes(name), `${presetId} 的 deny 里出现了不是"同行焊进来"的名字（${name}）——那就是 §6.1 禁止恢复的"继承全部再划掉"形状`)
     }
     assert.deepEqual([...(surface.denyTeam ?? [])], [...TEAM_DENIED_TOOLS], `${presetId} 必须 deny 宿主 Team 的四个工具（Team 行保留，仅 Capital 工具面不可见）`)
   }
   // Only control-row roles have a sibling name to deny.
-  for (const role of [ROLE_PRESET_IDS.collector, ROLE_PRESET_IDS.junior, ROLE_PRESET_IDS.retriever, ROLE_PRESET_IDS.analyst]) {
+  for (const role of [ROLE_PRESET_IDS.collector, ROLE_PRESET_IDS.junior, ROLE_PRESET_IDS.retriever]) {
     assert.deepEqual([...ROLE_TOOL_SURFACES[role].denySiblings], [...SIBLING_DENIED_TOOLS], `${role} 要 send_message，就得减掉焊在一起的 interrupt_agent / list_agents`)
   }
+  // The analyst is the only role that also denies `wait_agent`: it is a leaf with no child to wait on,
+  // while data-junior's chart barrier needs it (§5.5 — do not widen the shared constant).
+  assert.deepEqual([...ROLE_TOOL_SURFACES[ROLE_PRESET_IDS.analyst].denySiblings],
+    [...SIBLING_DENIED_TOOLS, ...ANALYST_DENIED_TOOLS], 'analyst 另减 wait_agent（叶子没有子 Agent 可等）')
+  assert.deepEqual([...ANALYST_DENIED_TOOLS], ['wait_agent'], '只加这一颗：junior 的 barrier 依赖它')
+  assert.ok(!ROLE_TOOL_SURFACES[ROLE_PRESET_IDS.junior].denySiblings.includes('wait_agent'), 'junior 不得被连带禁掉 wait_agent')
   for (const role of [ROLE_PRESET_IDS.specialist]) {
     assert.equal(ROLE_TOOL_SURFACES[role].denySiblings, undefined, `${role} 不挂 control 行，不该有兄弟名清单`)
   }
@@ -272,6 +282,17 @@ test('roleSiblingGuardReasonFor：角色人设调 interrupt_agent / list_agents 
       assert.match(reason, new RegExp(presetId), '拒绝要点名是谁被拒')
       assert.match(reason, /send_message/, '拒绝必须给出正确路径（回告主 Agent）')
       assert.match(reason, name === 'list_agents' ? /子 Agent 名单/ : /打断/, '拒绝理由要说明这颗工具的真实用途')
+    }
+  }
+  // wait_agent is welded in too, but only the analyst denies it.
+  for (const name of ANALYST_DENIED_TOOLS) {
+    const reason = guard({ name, agent: { ctx: { presetId: ROLE_PRESET_IDS.analyst } } })
+    assert.ok(typeof reason === 'string' && reason.length > 0, `analyst 必须拦下 ${name}`)
+    assert.match(reason, /wait_agent/, '拒绝理由要点名这颗工具')
+    assert.match(reason, /叶子角色没有子 Agent 可等/, '拒绝理由要说明为什么叶子不能用 wait_agent')
+    for (const presetId of [ROLE_PRESET_IDS.collector, ROLE_PRESET_IDS.junior, ROLE_PRESET_IDS.retriever]) {
+      assert.equal(guard({ name, agent: { ctx: { presetId } } }), undefined,
+        `${presetId} 不得被连带禁掉 ${name}（junior 的出图 barrier 依赖它）`)
     }
   }
   // Root may interrupt / list its children; unknown presets must remain allowed.

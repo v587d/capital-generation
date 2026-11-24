@@ -1,0 +1,30 @@
+{
+  "dataset_id": "ds_balance",
+  "rows": [
+    {
+      "thscode": "600519.SH",
+      "ticker": "600519",
+      "currency": "CNY",
+      "period": "2024-4",
+      "fiscal_year": 2024,
+      "fiscal_period": "4",
+      "period_end_ms": 1735603200000,
+      "report_date_ms": 1743379200000,
+      "assets_total": 50000000000,
+      "total_current_assets": 20000000000,
+      "non_current_nets_total": 30000000000,
+      "cash": 2000000000,
+      "accounts_receivable": 3000000000,
+      "total_debt": 55000000000,
+      "holder_equity_total": -5000000000,
+      "total_current_liabilities": 30000000000,
+      "inventory": 5000000000
+    }
+  ],
+  "time_coverage": {
+    "column": "period_end_ms",
+    "from": "2024-12-31",
+    "to": "2024-12-31",
+    "format": "epoch_ms"
+  }
+}

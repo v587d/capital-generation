@@ -15,8 +15,10 @@ const roster = () => ({
   ],
 })
 
-test('内部角色名单只含分析师与绘图专员：其余预设仍可独立打开', () => {
-  assert.deepEqual([...INTERNAL_ROLE_PRESET_IDS], [ROLE_PRESET_IDS.junior, ROLE_PRESET_IDS.specialist])
+test('内部角色名单：分析师 / 绘图专员 / 高级分析师，其余预设仍可独立打开', () => {
+  assert.deepEqual([...INTERNAL_ROLE_PRESET_IDS],
+    [ROLE_PRESET_IDS.junior, ROLE_PRESET_IDS.specialist, ROLE_PRESET_IDS.analyst],
+    'D6：senior 是内部角色，不进新会话选择器')
 })
 
 test('roster 过滤只摘内部角色：保留顺序、isDefault 与调用方数组', () => {

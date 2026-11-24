@@ -1,0 +1,31 @@
+{
+  "status": "completed",
+  "period": "2024-4",
+  "previous_period": "2023-4",
+  "metrics": {
+    "currency": "CNY",
+    "gross_margin": 0.18,
+    "operating_margin": 0.08,
+    "net_margin": 0.08,
+    "roe": 0.044444,
+    "roa": 0.026667,
+    "asset_turnover": 0.333333,
+    "equity_multiplier": 1.666667,
+    "cash_conversion": 1.5,
+    "ocf_margin": 0.12,
+    "fcf_amount": 6000000000,
+    "fcf_margin": 0.06,
+    "debt_ratio": 0.4,
+    "debt_to_equity": 0.666667,
+    "interest_coverage": 11.0,
+    "current_ratio": 2.0,
+    "quick_ratio": 1.333333,
+    "receivable_days": 73.0,
+    "gross_margin_delta": 0.013333,
+    "net_margin_delta": 0.008889,
+    "roe_delta": 0.005656,
+    "cash_conversion_delta": 0.09375,
+    "debt_ratio_delta": -0.010714
+  },
+  "data_gaps": []
+}

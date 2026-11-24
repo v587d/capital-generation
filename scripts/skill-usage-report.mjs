@@ -38,13 +38,14 @@ const ROLE_BY_PRESET = {
   'capital-generation': 'main',
   'capital-data-junior': 'data_junior',
   'capital-web-retriever': 'web_retriever',
-  'capital-data-analyst': 'data_analyst',
+  'capital-data-analyst': 'senior_analyst',
   'capital-data-collector': 'data_collector',
   'capital-visualization-specialist': 'visualization_specialist',
 }
 const ROLE_LABEL = {
   ...Object.fromEntries(Object.entries(SELECTED_SKILL_ROLES).map(([role, label]) => [role, label.zh])),
-  data_analyst: '数据分析（保留）',
+  data_analyst: '数据分析（旧键）',
+  senior_analyst: '高级分析（预留）',
   data_collector: '数据采集',
   visualization_specialist: '可视化',
 }

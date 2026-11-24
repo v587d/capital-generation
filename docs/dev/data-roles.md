@@ -37,8 +37,8 @@
     `@deepseek-ai/dsh-tool-executor-ptc`）；程序只调度
     已授权工具与做算术，**不是取数通道**，也不读 `capital-data/**` 落盘（§1.6 → `bash-gate.md`）。
     外层 `run_code` 结果只走宿主的 `tool-result-pruner`（8192），本仓不新设第二道闸门；程序只
-    `return` 结论是纪律，不是 gate。data_analyst 启用前逐行 / 序列级分析没有合规路径，须如实告知
-    用户并降级到统计能力。
+    `return` 结论是纪律，不是 gate。逐行 / 序列级分析派 `senior-analyst`（§1.9）：它只消费 ref、
+    不读 rows。
 - **主 Agent 读数据一律委派 data_junior**，绝不直接调用 Dataset 系列工具（工具层拒绝主 Agent，
   `dataset_session_mismatch`）。**这道闸门的判据是人设，不是会话拓扑**（2026-10-19，设计
   `docs/design/agent-preset-four-modes.md` §4.1）：`src/tool-exec.ts` 的 `authorizedSession` 读
@@ -57,12 +57,12 @@
   `agent/created` 只剩两处 restrict（根收敛 + 角色可见性），它们管的是**被委派子会话**那一支
   （可见性真能减掉，手开那一支减不掉）。rc.2 允许整棵树任意互发，`send_message` 闸门把 Capital
   收回到“根只发直系、叶子只发 `lead`、specialist 不发”；目标表在 `src/agents/messaging-policy.ts`
-  的 `ROLE_MESSAGE_TARGETS`，为未来的 `junior → data-analyst` 预留一项。
+  的 `ROLE_MESSAGE_TARGETS`；Phase 3 仍全中继，`junior → senior-analyst` 直连在 Phase 4 开。
 - **`visualization_specialist`**：data_junior 的异步子 Agent（0.2.1 起子会话一律异步，one-shot /
   前台模式已随 `backgroundMode` 一起删除），工具表只有 `skill` + `render_chart`；
   spec 由它组装，data_junior 只交"要什么视图"。
-- **`data_analyst`**：保持 `disabled`，启用前置条件见 §8.4（`preset-persona.md`）。启用后由主 Agent **按需激活**（不进每轮强制预检），补数走 §1.4 的 `analysis_data_request`，不直接持有取数工具。
-  **`web_retriever`**：纪律见 §4.1（`web-retriever.md`）。
+- **`senior_analyst`**（preset id 仍 `capital-data-analyst`）：保持 `disabled`；边界、工具面、直连语义与启用顺序见 §1.9，不持有取数工具，补数经主 Agent（§1.4）。
+- **`web_retriever`**：纪律见 §4.1（`web-retriever.md`）。
 
 ## 1.2 两条数据边界（必须分清；2026-09 放宽仅此一处）
 
@@ -143,8 +143,8 @@ main Agent (lead)
   +-- data-collector   外部取数，立即持久化，只回传 DatasetRef
   +-- data-junior      质量 / 建模 / 统计 / 可视化 gate（PTC `run_code`），只回传 profile_ref / 聚合结果 / chart_ref
   |     └── chart-<n> (visualization_specialist)  异步出图，只回传 chart_ref / 小回执
-  +-- data-analyst     Python 分析（仅预留，未启用；未来挂在 data-junior 之下）
+  +-- senior-analyst   受控分析模块（根直系叶子，Phase 3 启用，不挂 data-junior）
   +-- web-retriever    网页材料获取（一次一个）
 ```
 
-会话内名字是树内路径：根固定 `lead`，直系是 `data-collector` / `data-junior` / `web-retriever`，孙 Agent 形如 `data-junior/chart-1`；历史 child 没有 name 时用 session id（不含 `/`）列出。
+会话内名字是树内路径：根固定 `lead`，直系是 `data-collector` / `data-junior` / `web-retriever` / `senior-analyst`，孙 Agent 形如 `data-junior/chart-1`；历史 child 没有 name 时用 session id（不含 `/`）列出。

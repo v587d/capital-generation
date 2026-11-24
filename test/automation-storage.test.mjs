@@ -23,6 +23,10 @@ async function workspace() {
   await writeFile(join(root, 'capital-data', 'stray', 'note.txt'), 'w'.repeat(5))
   await mkdir(join(root, 'capital-analysis', 'charts', 'c1'), { recursive: true })
   await writeFile(join(root, 'capital-analysis', 'charts', 'c1', 'chart.html'), 'h'.repeat(200))
+  // 分析产物必须计入统计但永不删除：放一份真实 run 目录，下面两处回归断言都靠它。
+  await mkdir(join(root, 'capital-analysis', 'runs', 'analysis_test01', 'modules', 'module_run_1'), { recursive: true })
+  await writeFile(join(root, 'capital-analysis', 'runs', 'analysis_test01', 'snapshot.json'), 's'.repeat(60))
+  await writeFile(join(root, 'capital-analysis', 'runs', 'analysis_test01', 'modules', 'module_run_1', 'result.json'), 'r'.repeat(40))
   await writeFile(join(root, 'user.txt'), 'keep')
   return root
 }
@@ -52,8 +56,9 @@ test('storage：统计只算 capital-data / capital-analysis，符号链接不�
   assert.ok(!JSON.stringify(cache).includes('outside'), '工作区外的文件不能进入任何分类')
 
   assert.deepEqual(analysis.categories.charts, { bytes: 200, files: 1 })
-  assert.equal(analysis.bytes, 200)
-  assert.equal(analysis.files, 1)
+  assert.deepEqual(analysis.categories.runs, { bytes: 100, files: 2 }, '分析产物必须进统计（runs 分类）')
+  assert.equal(analysis.bytes, 300)
+  assert.equal(analysis.files, 3)
 })
 
 test('storage：清理只删 capital-data 的子项，分析结果与用户文件保留', async (t) => {
@@ -76,6 +81,11 @@ test('storage：清理只删 capital-data 的子项，分析结果与用户文�
   await assert.rejects(stat(join(root, 'capital-data', 'escape')), { code: 'ENOENT' })
 
   assert.equal(await readFile(join(root, 'capital-analysis', 'charts', 'c1', 'chart.html'), 'utf8'), 'h'.repeat(200))
+  assert.equal(
+    await readFile(join(root, 'capital-analysis', 'runs', 'analysis_test01', 'snapshot.json'), 'utf8'),
+    's'.repeat(60),
+    '分析产物不随缓存清理删除：统计里有它，删除入口里没有',
+  )
   assert.equal(await readFile(join(root, 'user.txt'), 'utf8'), 'keep')
   assert.equal(await readFile(outside, 'utf8'), 'outside', '符号链接只删链接，不删目标')
 
@@ -154,14 +164,42 @@ test('storage service：默认工作区、会话统计与清理后刷新', async
   assert.equal(stats.workspace.id, 'ws-1')
   assert.equal(stats.workspace.scope, 'dedicated')
   assert.equal(stats.cache.bytes, 165)
-  assert.equal(stats.analysis.bytes, 200)
+  assert.equal(stats.analysis.bytes, 300)
+  assert.deepEqual(stats.analysis.categories.runs, { bytes: 100, files: 2 })
   assert.deepEqual(stats.sessions, { available: true, bytes: 42, count: 1 })
 
   const cleared = await service.clear()
   assert.equal(cleared.bytes, 165)
   const after = await service.stats()
   assert.equal(after.cache.bytes, 0)
-  assert.equal(after.analysis.bytes, 200, 'capital-analysis 不随清理删除')
+  assert.equal(after.analysis.bytes, 300, 'capital-analysis 不随清理删除')
+})
+
+test('storage service：分析产物只计入统计，服务面没有删除入口', async (t) => {
+  const root = await workspace()
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const workspaces = {
+    details: async () => ({
+      workspaces: [{ id: 'ws-1', title: 'T', path: root, displayPath: '~/T', default: true, dedicated: true }],
+      defaultWorkspaceId: 'ws-1',
+    }),
+  }
+  const service = createStorageService({
+    ctx: { get: () => undefined },
+    workspaces,
+    profile: { runDir: root, displayName: 'web' },
+  })
+  // 唯一允许的清理入口是 `clear`，它只作用于 capital-data；给分析产物加删除入口会破坏"可审计、不可删"的约定。
+  assert.deepEqual(Object.keys(service).sort(), ['clear', 'stats', 'workspaceOf'],
+    '存储服务不得新增删除分析产物的入口：产物只计入统计，保留期靠逻辑过期')
+
+  const stats = await service.stats({ force: true })
+  assert.deepEqual(stats.analysis.categories.runs, { bytes: 100, files: 2 }, '面板必须能读到 runs 分类')
+
+  await service.clear()
+  const after = await service.stats({ force: true })
+  assert.deepEqual(after.analysis.categories.runs, { bytes: 100, files: 2 }, '清理后 runs 分类原样保留')
+  assert.equal(after.cache.bytes, 0)
 })
 
 test('storage service：会话服务不可用时只丢会话尺寸，不影响缓存', async (t) => {
@@ -181,5 +219,6 @@ test('storage service：会话服务不可用时只丢会话尺寸，不影响�
   const stats = await service.stats()
   assert.deepEqual(stats.sessions, { available: false, bytes: 0, count: 0 })
   assert.equal(stats.cache.bytes, 165)
-  assert.equal(stats.analysis.bytes, 200)
+  assert.equal(stats.analysis.bytes, 300)
+  assert.deepEqual(stats.analysis.categories.runs, { bytes: 100, files: 2 })
 })

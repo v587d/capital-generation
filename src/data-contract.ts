@@ -23,6 +23,30 @@ const TEXT = `# 数据边界
 
 skill 正文只写"要什么证据"，不写服务商、密钥、URL、下载步骤或脚本命令。`
 
-export function dataContractSection(): { name: string; order: number; interpolate: false; text: string } {
-  return { name: DATA_CONTRACT_SECTION, order: DATA_CONTRACT_ORDER, interpolate: false, text: TEXT }
+/**
+ * The senior analyst has no delegation right: its inputs arrive as an AnalysisSnapshot, and every
+ * request for more goes through the lead. Same section name, different text — one home per role.
+ */
+const SENIOR_TEXT = `# 数据边界
+
+你的输入由宿主冻结的 \`AnalysisSnapshot\` 给出：Dataset / profile / 证据都以 opaque ref 出现，快照在前、分析在后。你不取数、不检索、不读原始 rows，也没有 shell 或文件入口。
+
+- 缺数据（快照里没有的字段、期间或来源）→ 经主 Agent 发 \`analysis_data_request\`，写清标的、字段、期间与用途；由主 Agent 决定是否扩大范围。
+- 需要补计算（用快照里已有的 Dataset/profile）→ 也经主 Agent 转交，并在请求里带 task_id 与要算的口径；不自己找 data_collector / web_retriever。
+- \`run_analysis\` 只返回指标、假设、缺口与 run ref；原始 rows 留在快照的宿主副本里，不会进你的上下文。
+
+每个数字都要能被宿主追溯：claim 的 \`number_anchors\`、\`calculations\` 必须指向快照里的 dataset / profile / evidence 或本次计算，否则 \`submit_analysis\` 会拒。缺字段就点名缺哪个并写进 \`data_gaps\`，不估算、不回填、不用训练记忆补数字。用户粘贴的材料标 pasted by user，不因此提高置信度。
+
+skill 正文只写"要什么证据"，不写服务商、密钥、URL、下载步骤或脚本命令。`
+
+export interface DataContractSection {
+  name: string
+  order: number
+  interpolate: false
+  text: string
+}
+
+export function dataContractSection(role?: string): DataContractSection {
+  const text = role === 'senior_analyst' ? SENIOR_TEXT : TEXT
+  return { name: DATA_CONTRACT_SECTION, order: DATA_CONTRACT_ORDER, interpolate: false, text }
 }

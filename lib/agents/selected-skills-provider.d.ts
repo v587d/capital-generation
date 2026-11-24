@@ -16,7 +16,7 @@ export type SelectedSkillCatalogEntry = {
 };
 export declare const SELECTED_SKILL_CATALOG: readonly SelectedSkillCatalogEntry[];
 /** Roles a preset row may declare. data_collector / visualization have no method set. */
-export declare const SELECTED_SKILL_ENTRY_ROLES: readonly ["main", "data_junior", "web_retriever", "data_analyst", "data_collector", "visualization_specialist"];
+export declare const SELECTED_SKILL_ENTRY_ROLES: readonly ["main", "data_junior", "web_retriever", "senior_analyst", "data_analyst", "data_collector", "visualization_specialist"];
 export type SelectedSkillRole = typeof SELECTED_SKILL_ENTRY_ROLES[number];
 export type SelectedSkillSelection = Partial<Record<string, boolean>>;
 export type SelectedSkillSelectionSource = SelectedSkillSelection | (() => SelectedSkillSelection);

@@ -14,6 +14,7 @@
 | 你要动什么 | 详情在 |
 |---|---|
 | 角色边界、Dataset 消息 / 返回边界、capability 目录预算 | `docs/dev/data-roles.md`（§1.1 §1.2 §1.4 §1.5 §1.7 §1.8）|
+| senior 边界、直连邻接表、分析产物布局 | `docs/dev/senior-analysis.md`（§1.9）|
 | 时间轴、日期归一、session 读取 | `docs/dev/time-axis.md`（§1.3）|
 | shell 闸门、PTC 执行面、fs 写口与挂载 | `docs/dev/bash-gate.md`（§1.6）|
 | web_retriever、本地回退、十一个具名来源、文档解析 `ocr` | `docs/dev/web-retriever.md`（§4.1 §4.2 §4.3）|
@@ -76,8 +77,7 @@ capital-analysis/runs/<analysis_id>/          # 预留（data_analyst）
 
 ## 4. web_retriever 纪律
 
-模型侧纪律在主 / 子 persona 与 skill `capital-web-protocol`（都有断言）；维护者结构事实——三类工作面
-（含文档解析 `ocr`）、本地回退边界、输出预算与 `ocr` 的 job 生命周期与落盘——在 `docs/dev/web-retriever.md`。
+模型侧纪律在主 / 子 persona 与 skill `capital-web-protocol`；三类工作面、本地回退、输出预算与 job 生命周期在 `docs/dev/web-retriever.md`。
 
 ## 5. settings 配置纪律（`capital-config`，host 平面）
 

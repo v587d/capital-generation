@@ -42,12 +42,19 @@ const MESSAGES: Record<PythonRuntimeErrorCode, string> = {
 export class PythonRuntimeError extends Error {
   readonly code: PythonRuntimeErrorCode
   readonly diagnostics?: string
+  /**
+   * Stable analysis code raised by a reviewed module (e.g. `analysis_input_invalid`). The worker
+   * reports it because a module cannot throw a TypeScript error; `script-failed` alone would hide
+   * "this input shape is unsupported" behind "the module crashed".
+   */
+  readonly analysisCode?: string
 
-  constructor(code: PythonRuntimeErrorCode, message?: string, diagnostics?: string) {
+  constructor(code: PythonRuntimeErrorCode, message?: string, diagnostics?: string, analysisCode?: string) {
     super(message ?? MESSAGES[code])
     this.name = 'PythonRuntimeError'
     this.code = code
     this.diagnostics = diagnostics
+    if (analysisCode !== undefined) this.analysisCode = analysisCode
   }
 }
 

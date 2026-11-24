@@ -66,6 +66,10 @@ docs/design/*
 !docs/design/watchlist-intraday-v0.1.md
 # TODO 决策记忆的行为规则、抑制窗口与回滚边界只在这份里有；改动 automation/brief.js 前按它落地。
 !docs/design/automation-todo-memory-v0.1.md
+# 高级分析师的执行契约（身份四层、直连邻接表、模块协议、校验分级）只在这份里有，
+# docs/dev/senior-analysis.md 与后续 Phase 都指向它；v1 留档是为了让取代关系能对照，不删。
+!docs/design/data-analyst-architecture.md
+!docs/design/senior-analyst-development-design.md
 docs/reference/*
 !docs/reference/dsh-surface-ledger.md
 !docs/reference/external-skill-scan-2026-10.md

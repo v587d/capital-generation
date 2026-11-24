@@ -78,6 +78,11 @@ test('打包闸门：vendored 图表库与构建产物都在发布清单里', (t
     'preset/capital-generation/skills/capital-data-query/SKILL.md',
     'preset/capital-generation/skills/capital-web-protocol/SKILL.md',
     'preset/capital-generation/skills/capital-web-evidence/SKILL.md',
+    // Senior analyst: the persona's duty lines name all four volumes, so each must ship.
+    'preset/capital-generation/skills/capital-senior-analysis/SKILL.md',
+    'preset/capital-generation/skills/capital-analysis-evidence/SKILL.md',
+    'preset/capital-generation/skills/capital-analysis-synthesis/SKILL.md',
+    'preset/capital-generation/skills/capital-analysis-validation/SKILL.md',
     'cordis.patch.yml',
   ]) {
     assert.ok(paths.has(required), `发布清单里缺少 ${required}（npm run build 是否跑过？files 列表是否漏了？）`)
@@ -236,6 +241,21 @@ test('插件显示名：根包 locale meta 必须能被宿主读到，且 README
     'README 还在让用户到「已安装」列表里找 npm 包名，但卡片显示的是 locale meta.title')
   assert.match(readme, /已安装的 \*\*Capital Generation\*\*/u,
     'README 的指路措辞要与卡片显示名同源（zh 界面是 meta.title「Capital Generation（证券研究）」的前半）')
+})
+
+test('打包闸门：每个分析模块连同 LICENSE 进包，fixtures 不进包', async () => {
+  // Driven by the registry, not a hand-copied list: a newly registered module is covered the moment
+  // it is registered, and a module shipped without its LICENSE breaks the MIT attribution duty.
+  const { listAnalysisModules } = await import('../lib/analysis/registry.js')
+  const paths = packedFilePaths()
+  for (const entry of listAnalysisModules()) {
+    const root = `python/analysis/modules/${entry.manifest.id}`
+    for (const file of ['module.json', entry.manifest.entrypoint, 'LICENSE']) {
+      assert.ok(paths.has(`${root}/${file}`), `分析模块 ${entry.manifest.id} 的 ${file} 没有随包发布`)
+    }
+    const fixtures = [...paths].filter((path) => path.startsWith(`${root}/fixtures/`))
+    assert.deepEqual(fixtures, [], `fixtures 是测试数据，必须排除在发布包外：${fixtures.join(', ')}`)
+  }
 })
 
 test('打包闸门：第三方清单点名的文件必须真的随包发布', () => {

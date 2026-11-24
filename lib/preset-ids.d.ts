@@ -36,3 +36,8 @@ export declare const DATA_COLLECTION_PRESET_IDS: readonly string[];
 export declare const DATASET_READING_PRESET_IDS: readonly string[];
 /** May issue `chart_source_ref` for chart reads. */
 export declare const CHART_SOURCE_PRESET_IDS: readonly string[];
+/**
+ * May call the `tools/analysis` family. The senior analyst consumes snapshot refs and never reads
+ * raw rows, so it is deliberately absent from `DATASET_READING_PRESET_IDS` above.
+ */
+export declare const ANALYSIS_PRESET_IDS: readonly string[];

@@ -1,0 +1,9 @@
+{
+  "status": "blocked",
+  "period": null,
+  "previous_period": null,
+  "metrics": {},
+  "data_gaps": [
+    "缺少利润表数据集（需要同时含 operating_income 与 net_profit 列）：利润率、ROE、现金转换都无法计算"
+  ]
+}

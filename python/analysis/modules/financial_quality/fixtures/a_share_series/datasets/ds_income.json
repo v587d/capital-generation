@@ -1,0 +1,60 @@
+{
+  "dataset_id": "ds_income",
+  "rows": [
+    {
+      "thscode": "600519.SH",
+      "ticker": "600519",
+      "currency": "CNY",
+      "period": "2023-4",
+      "fiscal_year": 2023,
+      "fiscal_period": "4",
+      "period_end_ms": 1703980800000,
+      "report_date_ms": 1711756800000,
+      "operating_income": 90000000000,
+      "operating_costs": 75000000000,
+      "operating_expenses": 8400000000,
+      "sales_fee": 3600000000,
+      "manage_fee": 2800000000,
+      "research_and_development_expenses": 2000000000,
+      "operating_profit": 6600000000,
+      "interest_expenses": 1000000000,
+      "profit_total": 8000000000,
+      "income_tax_expense": 1600000000,
+      "net_profit": 6400000000,
+      "parent_holder_net_profit": 6200000000,
+      "basic_eps": 6.2
+    },
+    {
+      "thscode": "600519.SH",
+      "ticker": "600519",
+      "currency": "CNY",
+      "period": "2024-4",
+      "fiscal_year": 2024,
+      "fiscal_period": "4",
+      "period_end_ms": 1735603200000,
+      "report_date_ms": 1743379200000,
+      "operating_income": 100000000000,
+      "operating_costs": 82000000000,
+      "operating_expenses": 9000000000,
+      "sales_fee": 4000000000,
+      "manage_fee": 3000000000,
+      "research_and_development_expenses": 2000000000,
+      "operating_profit": 8000000000,
+      "interest_expenses": 1000000000,
+      "profit_total": 10000000000,
+      "income_tax_expense": 2000000000,
+      "net_profit": 8000000000,
+      "parent_holder_net_profit": 7800000000,
+      "basic_eps": 7.8
+    }
+  ],
+  "envelope": {
+    "thscode": "600519.SH"
+  },
+  "time_coverage": {
+    "column": "period_end_ms",
+    "from": "2023-12-31",
+    "to": "2024-12-31",
+    "format": "epoch_ms"
+  }
+}
