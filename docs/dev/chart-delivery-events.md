@@ -31,6 +31,9 @@
   或消息尚未 admitted 的保留（它可能是唯一结果/失败信号）。收尾回调必须在**每次纯文本 finish**
   就武装，不要等根会话 idle：child 仍标记 running、收尾后才 settle 正是会多开一轮的竞争窗口。人类消息重置 exchange，子 Agent 新
   activation 清掉旧 marker。`src/agents/settled-wake.ts` 是唯一实现。
+- **只跟 peer 通信的子 Agent 不在 admit 账本里**：`admitted` 只由向根投递的 `agent-message` 标记，
+  peer-only 的 child 结算通知会被保留、可能多唤醒根一个空轮——**噪声不是数据丢失**，直连首版接受
+  （`docs/dev/senior-analysis.md` §1.9）。
 - **⛔ 交付去重按 exchange，不按 `turn` 是否存在**：同一次 exchange 只写一次
   `deliverables/presented`；收尾帧可能一次带 `turn`、一次不带，用 `turn ?? -1` 当哨兵会让卡片
   又落进结论后的短句（`lastFlushedTurn` 已改为 `flushed` 布尔，写失败不置位、可重试）。

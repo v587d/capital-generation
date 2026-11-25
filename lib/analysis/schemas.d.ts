@@ -5,13 +5,19 @@
  * `additionalProperties: false` everywhere is deliberate — an undeclared field is a protocol
  * change, and silently accepting it would make the artifact contract a suggestion.
  */
-/** Submit-time budgets; exceeding one names the offending section (`analysis_result_too_large`). */
-export declare const ARTIFACT_MAX_CHARS = 20000;
+/**
+ * Submit-time budgets; exceeding one names the offending section (`analysis_result_too_large`).
+ * 30k: a comprehensive multi-period artifact naturally lands at 20–22k, and a 20k cap made the
+ * model rewrite the same artifact for minutes instead of finishing (2026-11-25 real session).
+ */
+export declare const ARTIFACT_MAX_CHARS = 30000;
 export declare const HEADLINE_MAX_CHARS = 300;
 export declare const THESIS_MAX_CHARS = 1200;
 export declare const STATEMENT_MAX_CHARS = 600;
 export declare const MAX_CLAIMS = 20;
 export declare const MAX_SCENARIOS = 8;
+/** §5.6-2 peer round-trip budget per task_id. The send edge stops the fourth request; this is the record check. */
+export declare const MAX_PEER_EXCHANGES = 3;
 /** Bounded evidence intake: single item bytes and total count. */
 export declare const EVIDENCE_ITEM_MAX_BYTES = 2048;
 export declare const EVIDENCE_MAX_ITEMS = 20;

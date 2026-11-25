@@ -19,7 +19,7 @@ description: Use before submitting a Capital AnalysisArtifact — the pre-submit
 7. `evidence_refs` 都在快照的 evidence 里；锚点 `source.ref` 都在快照或本次 `calculations` 里。
 8. `methods_used` 的模块 id 与版本与 `run_analysis` 返回的一致。
 9. `limitations` 非空；`alternative_explanations` 尽量非空。
-10. 序列化后 ≤20000 字符（单条 statement ≤600、claims 每侧 ≤20、scenarios ≤8）。
+10. 序列化后 ≤30000 字符（单条 statement ≤600、claims 每侧 ≤20、scenarios ≤8）。
 
 ## 2. 数字锚点怎么算命中
 
@@ -29,14 +29,17 @@ description: Use before submitting a Capital AnalysisArtifact — the pre-submit
 1. 与某个 `number_anchors[].value` 在声明的 `precision` 内相等；
 2. 等于某个 `calculations[].value`；
 3. 等于某个锚点的 `value × 100`（比率与百分比互写，容差同 precision）；
-4. 属于豁免集：年份（19xx/20xx）、"第 N 期/条"里的整数、单位换算常数（1e4/1e6/1e8/1e12）、
-   标识符里的数字（`claim_1`、`FY2025`）。
+4. 与锚点/计算值**按你写出的小数位四舍五入后相等**（`1.23` 命中 `1.2345`、`4.44%` 命中
+   `4.4444%`、整数百分比 `18%` 命中 `18.04%`；整数本身不按小数位放宽）；
+5. 属于豁免集：年份（19xx/20xx）、"第 N 期/条"里的整数、单位换算常数（1e4/1e6/1e8/1e12）、
+   标识符里的数字（`claim_1`、`FY2025`）、**六位证券代码**（`600519`、`000858`、`920000`）、
+   结构性计数（≤20 的整数且后面带"条/项/个/次/家/年"等量词）。
 
 **precision 的算法**：容差 = 0.5 × 10^-precision，默认 4（即 ±0.00005）。
 
 - 你写 `0.1823` → 锚点 `0.1823`、`precision: 4` 命中；写 `18.23%` 时按 `value × 100` 命中。
-- 你把数字四舍五入成两位小数（`18.23%`、`1.41 倍`），就把 `precision` 声明成 2；不声明就按 4 算，
-  会被判成"没有来源"。
+- 四舍五入成两位小数（`18.23%`、`1.41 倍`）现在**直接命中**，不必再声明 `precision: 2`；
+  但锚点仍要保留足够位数，别把 `0.1823` 写成 `0.18`。
 - 比率类数字**优先写 4-6 位小数或原样引用 metrics**，最省事：`0.044444` 直接配 `0.044444`。
 
 ## 3. 引用核对
@@ -61,7 +64,7 @@ description: Use before submitting a Capital AnalysisArtifact — the pre-submit
 
 ## 5. 体积预算
 
-整体 ≤20000 字符；`headline` ≤300、`thesis` ≤1200、单条 `statement` ≤600、每侧 claims ≤20、`scenarios` ≤8。
+整体 ≤30000 字符；`headline` ≤300、`thesis` ≤1200、单条 `statement` ≤600、每侧 claims ≤20、`scenarios` ≤8。
 超限错误会点名**哪一段最大**（headline / thesis / support_claims / calculations / …），按它压缩，
 不要盲目删结论。压缩优先级：删重复论据 > 合并同类 claim > 缩短 statement > 砍 thesis。
 

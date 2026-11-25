@@ -744,7 +744,7 @@ test('主 persona：每轮先查 direct children，按角色标签复用，确�
   }
   assertRule(MAIN_PERSONA, /list_agents\(\)/)
   assertRule(MAIN_PERSONA, /上一轮空?的?列表不能代替本轮/)
-  assertRule(MAIN_PERSONA, /data_collector、data_junior、web_retriever/)
+  assertRule(MAIN_PERSONA, /按 name 匹配 data-collector \/ data-junior \/ web-retriever/)
   // name is copied from a fresh list_agents output, never recalled from context.
   assertRule(MAIN_PERSONA, /name.*从最近一次 list_agents.*复制/)
   assertRule(MAIN_PERSONA, /发送前核对 name、description.*三者对应/)
@@ -756,7 +756,8 @@ test('主 persona：每轮先查 direct children，按角色标签复用，确�
   assertRule(MAIN_PERSONA, /DUPLICATE_AGENT_NAME/)
   assertRule(MAIN_PERSONA, /INVALID_AGENT_NAME|下划线非法/)
   assertRule(MAIN_PERSONA, /根只发无 `\/` 且不是 `lead` 的直系名/)
-  assertRule(MAIN_PERSONA, /子 Agent 只回 `lead`/)
+  assertRule(MAIN_PERSONA, /兄弟子 Agent 按邻接表直连/)
+  assertRule(MAIN_PERSONA, /senior 对 junior 只补计算（≤3 次）/)
   assertRule(MAIN_PERSONA, /wait_agent 只返回 timedOut/)
   assertRule(MAIN_PERSONA, /不使用 Team 任务板工具/)
   // list_agents reports only running / inactive; idle and ready are states the model could never match.
@@ -1130,7 +1131,7 @@ test('data_junior persona：接收 DatasetRef 或假设建模，输出 profile �
     /run_code 里的 Node 也不得/,
     /不索取或保存账户密码/,
     /不会被\s*data_collector 创建/,
-    /经主 Agent 中继/,
+    /补计算回执直达 senior-analyst/,
     /重试/,
     /skill capital-data-profile/,
     // The four fact classes must be named, else the model only repeats field names or reads min/max as a trend.
@@ -1345,14 +1346,37 @@ test('subagent_senior_analyst 行：Phase 3 已启用——preset 与委派行�
     assertRule(ANALYST_PERSONA, new RegExp(`skill ${name}`), `senior persona 必须点名 ${name}`)
     assert.ok(skillBody(name).length <= VISIBLE_CAP, `${name} 正文 ${skillBody(name).length} > 可见上限 ${VISIBLE_CAP}`)
   }
-  for (const pattern of [/高级分析师（senior_analyst）/, /不取数/, /不创建子 Agent/, /经主 Agent 中继/,
-    /analysis_result/, /analysis_data_request/, /不索取或保存账户密码/]) {
+  for (const pattern of [/高级分析师（senior_analyst）/, /不取数/, /不创建子 Agent/, /补计算直达 data-junior/,
+    /analysis_result/, /不索取或保存账户密码/]) {
     assertRule(ANALYST_PERSONA, pattern, `senior_analyst persona 缺少要点: ${pattern}`)
   }
+  // Payload types moved to the protocol volume; the persona keeps the edges, receipt and budget.
+  assertRule(skillVolume('capital-senior-analysis'), /analysis_data_request/, '四册协议必须写全消息类型')
+  assertRule(ANALYST_PERSONA, /同一分析任务 ≤3 次/, 'senior persona 必须写明 peer 往返预算')
   assertNoRule(ANALYST_PERSONA, /data_key|官方|DSH|exec\.agent/, 'analyst persona 不应包含内部键名/框架术语')
   // Main persona routes to it and waits for the receipt before writing the final answer.
   assertRule(MAIN_PERSONA, /结论层复核 → senior_analyst/)
   assertRule(MAIN_PERSONA, /未收到 analysis_result 不写结论/)
+})
+
+test('直连邻接表：skill 列全部允许边，四个 persona 只说自己的边，收尾补 waiting_peer', () => {
+  const orchestration = readFileSync(`${SKILL_DIR}capital-orchestration/SKILL.md`, 'utf8')
+  assertRule(orchestration, /### 5\.1 邻接表/)
+  for (const edge of ['lead→仅直系', 'data-collector→data-junior、senior-analyst',
+    'data-junior、web-retriever→senior-analyst', 'senior-analyst→data-junior（只补计算，同一分析任务 ≤3 次）',
+    'visualization-specialist 无']) {
+    const pattern = new RegExp(edge.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'))
+    assertRule(orchestration, pattern, `邻接表缺少边：${edge}`)
+  }
+  assertRule(orchestration, /waiting_peer`?（在等同行回执）/, '状态词汇必须包含 waiting_peer')
+  assertRule(orchestration, /`waiting_peer` 行不是 ✓/, '对账表必须写明 waiting_peer 不等于完成')
+  assertRule(COLLECTOR_PERSONA, /数据可直达 data-junior \/ senior-analyst/, 'collector 必须知道自己的直连边')
+  assertRule(JUNIOR_PERSONA, /补计算回执直达 senior-analyst/, 'junior 必须知道补计算可直发 senior')
+  assertRule(ANALYST_PERSONA, /补计算直达 data-junior/, 'senior 必须知道补计算可直发 junior')
+  assertRule(MAIN_PERSONA, /按邻接表直连/, '主 persona 必须指向邻接表')
+  for (const persona of [COLLECTOR_PERSONA, JUNIOR_PERSONA, ANALYST_PERSONA]) {
+    assertNoRule(persona, /互通一律经主 Agent 中继|互通经主 Agent 中继/, '直连开启后旧的"全中继"口径必须删除')
+  }
 })
 
 test('senior_analyst 身份四层：语义键 / 树内名 / preset id 各归其位，不许互相替代', () => {
@@ -1389,7 +1413,7 @@ test('data_collector persona：叶子边界——不得创建/指挥 data_junior
 
 test('skill 内容：编排 skill 覆盖预检异常与清单，数据 skill 覆盖三种载荷', () => {
   const orchestration = readFileSync(`${SKILL_DIR}capital-orchestration/SKILL.md`, 'utf8')
-  for (const pattern of [/list_agents\(\)/, /running/, /inactive/, /corrupt/, /unsupported/, /unavailable/, /委派清单/, /data-collector/, /data-junior/, /web-retriever/, /capital-data-protocol/, /Wind 能力暂不可用/, /dataset_session_mismatch/, /分钟级/, /名字纪律/, /DUPLICATE_AGENT_NAME/, /INVALID_AGENT_NAME/, /started subagent/, /投错对象/, /waiting_data/, /data_gap/, /中途消息是工单/, /结算通知 ≠ 任务完成/, /Canonical task_id/, /中间隔了长回传/, /回传到达后集中核对/]) {
+  for (const pattern of [/list_agents\(\)/, /running/, /inactive/, /corrupt/, /unsupported/, /unavailable/, /委派清单/, /data-collector/, /data-junior/, /web-retriever/, /capital-data-protocol/, /Wind 能力暂不可用/, /dataset_session_mismatch/, /分钟级/, /名字纪律/, /DUPLICATE_AGENT_NAME/, /INVALID_AGENT_NAME/, /started subagent/, /投错对象/, /waiting_data/, /data_gap/, /中途消息是工单/, /结算通知 ≠ 任务完成/, /Canonical task_id/, /隔了长回传或多轮消息就重查/, /写最终结论前.*逐行列出/]) {
     assertMatches(orchestration, pattern, `capital-orchestration 缺少要点: ${pattern}`)
   }
   // Status vocabulary is a closed set (running / inactive): idle and ready are criteria the model can never satisfy.

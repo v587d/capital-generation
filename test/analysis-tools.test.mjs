@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 import { registerAnalysisTools } from '../lib/analysis/tools.js'
+import { ARTIFACT_MAX_CHARS } from '../lib/analysis/schemas.js'
 import { DatasetStoreError } from '../lib/data-collector/store.js'
 import { ANALYSIS_PRESET_IDS, ROLE_PRESET_IDS } from '../lib/preset-ids.js'
 import { PythonRuntimeManager } from '../lib/python-runtime/manager.js'
@@ -310,6 +311,15 @@ test('全链路：建快照 → 跑模块 → 提交产物，artifact 与 run �
   )
   assert.equal(JSON.parse(await readFile(join(dir, 'artifact.json'), 'utf8')).status, 'partial', '被拒的提交不得覆盖已落盘产物')
 
+  // §5.6-2: peer 往返超预算用专用错误码拒（不是笼统的 validation_failed）。
+  const peerExchange = (index) => ({
+    peer: 'data-junior', type: 'analysis_calculation_request', request_id: `peer_${index}`, answered: true,
+  })
+  await assert.rejects(
+    () => execute('submit_analysis', { ...artifactFrom(snapshot), peer_exchanges: [1, 2, 3, 4].map(peerExchange) }),
+    (error) => error.code === 'analysis_peer_budget_exhausted' && /4 条.*超过 3 次预算/u.test(error.message),
+  )
+
   // Artifact schema: an over-long claim list is a schema mismatch, not a silent truncation.
   const tooManyClaims = { ...artifactFrom(snapshot), support_claims: Array.from({ length: 21 }, (_item, index) => ({ ...artifactFrom(snapshot).support_claims[0], claim_id: `claim_${index}` })) }
   await assert.rejects(
@@ -317,7 +327,7 @@ test('全链路：建快照 → 跑模块 → 提交产物，artifact 与 run �
     (error) => error.code === 'analysis_validation_failed' && /超过 20 条上限/u.test(error.message),
   )
 
-  // 体积超限：直接超 20000 字符，错误里点名是哪一段。
+  // 体积超限：超过上限即拒，错误里点名是哪一段（上限由 schemas 模块单一维护）。
   const longClaim = (index) => ({
     ...artifactFrom(snapshot).support_claims[0],
     claim_id: `claim_bulk_${index}`,
@@ -329,8 +339,11 @@ test('全链路：建快照 → 跑模块 → 提交产物，artifact 与 run �
     support_claims: Array.from({ length: 20 }, (_item, index) => longClaim(index)),
     counter_claims: Array.from({ length: 20 }, (_item, index) => longClaim(index)),
   }
+  if (JSON.stringify(oversized).length <= ARTIFACT_MAX_CHARS) {
+    oversized.unresolved_gaps = ['毛'.repeat(ARTIFACT_MAX_CHARS + 1)]
+  }
   await assert.rejects(
     () => execute('submit_analysis', oversized),
-    (error) => error.code === 'analysis_result_too_large' && /超过 20000/u.test(error.message),
+    (error) => error.code === 'analysis_result_too_large' && error.message.includes(`超过 ${ARTIFACT_MAX_CHARS}`),
   )
 })

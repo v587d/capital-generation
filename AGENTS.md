@@ -47,7 +47,7 @@
 角色树与逐角色边界见 `docs/dev/data-roles.md`（§1.1–§1.8）。
 
 一句话版：**原始 rows 永不出工具层**，Agent 间只传引用与聚合；主 Agent 一律委派、自己不出图；
-角色是叶子，互通经主 Agent；data_junior
+角色按邻接表直连，取数检索仍经主 Agent；data_junior
 只跑 PTC `run_code`，程序只调度工具与算术；委派后 `wait_for_agents` 等子树收敛，不以等待行结束回合。
 ## 2. 项目结构
 ```text
@@ -70,7 +70,7 @@ capital-data/datasets/<dataset_id>/raw.json   # 原始 Dataset，不可变，默
 capital-data/profiles/<profile_id>/profile.json
 capital-data/ocr/<doc_id>/                    # ocr 产物：document.md + meta.json（§4.3）
 capital-analysis/charts/<chart_id>/           # render_chart 产物：spec.json / series.json / chart.html（自包含）
-capital-analysis/runs/<analysis_id>/          # 预留（data_analyst）
+capital-analysis/runs/<analysis_id>/          # 分析产物（senior）
 ```
 
 业务数据（Dataset/profile/chart/ocr）不落 `.dsh` 或 DSH home；跨 Agent 只传 workspace opaque 引用；用户级资产（自选股）落宿主 storage-domain；内存只留 in-flight。

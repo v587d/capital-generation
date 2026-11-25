@@ -153,8 +153,8 @@
 
 > **规则**：这些断言**只能改写成新事实，不能删**（`AGENTS.md` §8.3 第 2 条）。
 >
-> **进度（2026-11-24）**：身份与行契约那几行已在 Phase 0 改写成新事实；剩下的是 persona 文案
-> （Phase 3）与 D2 邻接表（Phase 4）。
+> **进度（2026-11-25）**：身份与行契约在 Phase 0 改写成新事实；persona 文案在 Phase 3 改写；
+> D2 邻接表在 Phase 4 落地（断言在 `test/messaging-policy.test.mjs` 与 `test/persona.test.mjs`）。
 
 ### 3.4 文档预算（硬闸门）
 
@@ -331,6 +331,11 @@ senior 对 `data-junior` 只能请求"用已有 Dataset/profile 做计算"，不
    只跟 peer 通信的子 Agent 不会被 admit，其结算通知可能把已收尾的根再唤醒一轮。
    **这是噪声不是数据丢失**（最多多一个空轮），首版接受；若实测频繁，再评估把 peer relay
    计入 admit 条件。文档与测试都要写明这一点，不要假装已解决。
+
+> **实现（Phase 4）**：预算在发送侧与产物侧各查一次——`send_message` guard 按 senior 会话计出向 peer
+> 次数（第 4 次直接拒，提示改回 `analysis_blocked` + `peer_budget_exhausted`）；`validateArtifact`
+> 再按 `task_id` 核 `peer_exchanges` 条数（>3 条 Tier 1，`submit_analysis` 抛
+> `analysis_peer_budget_exhausted`）。`waiting_peer` 行落在 `capital-orchestration` §4/§6.1/§7。
 
 ### 5.7 Dataset scope
 
@@ -834,7 +839,8 @@ src/analysis/registry.ts
 
 ### 10.6 `submit_analysis`
 
-输入：最终 `AnalysisArtifact`（§11）。**体积预算**：序列化后 ≤ 20000 字符；
+输入：最终 `AnalysisArtifact`（§11）。**体积预算**：序列化后 ≤ 30000 字符
+（2026-11-25 由 20000 上调：综合多期产物实测 20–21.7k，20k 上限让模型反复删减重提）；
 单字段上限 `headline` ≤ 300、`thesis` ≤ 1200、每条 `statement` ≤ 600、`claims` ≤ 20 条、
 `scenarios` ≤ 8 条。超限 → `analysis_result_too_large`，错误里点名**是哪一段超了**，
 模型据此压缩而不是盲目重发。
@@ -970,10 +976,13 @@ src/analysis/registry.ts
 1. 与某个 `number_anchor.value` 在声明 `precision` 内相等；
 2. 等于某个 `calculations[].value`；
 3. 等于某个 anchor 的 `value × 100`（百分比与比率互写，容差同 precision）；
-4. 属于豁免集：年份（19xx/20xx）、序号/期数（≤ 20 的整数且紧邻"第/期/条"）、
-   单位换算常数（如 1e8、1e4）。
+4. 与锚点/计算值**按 token 写出的小数位四舍五入后相等**（`1.23` 命中 `1.2345`、`4.44%` 命中
+   `4.4444%`、整数百分比 `18%` 命中 `18.04%`；无小数的整数不按小数位放宽）；
+5. 属于豁免集：年份（19xx/20xx）、序号/期数（≤ 20 的整数且紧邻"第/期/条"，或后接
+   "个/条/项/次/家/年"等量词）、单位换算常数（如 1e8、1e4）、六位证券代码（`600519` /
+   `000858` / `920000`）、标识符里的数字。
 
-未命中 → `number_without_anchor` issue，严重级别按 §11.4 分级。
+同一字段内同一个未命中数字只报一次（去重）；未命中 → `number_without_anchor` issue，严重级别按 §11.4 分级。
 
 > 只校验"能提取到的数字"。散文里的定性表述不在范围内——**不要**声称这条校验能证明
 > 全文无编造，它只保证"结论里的数字有锚点"。
@@ -1412,6 +1421,48 @@ test/senior-analyst.test.mjs
 
 **验收**：§18.2 #4/#5/#6；直连下收尾不多轮、不少结论。
 
+> **进度（2026-11-25）**：已实现并全绿——`ROLE_MESSAGE_TARGETS` 改为 §5.2 邻接表（固定树名匹配，
+> 表外目标逐角色拒语点名可用目标与范围闸门）；senior 出向 peer 预算 3 次（发送侧按会话计数、
+> 产物侧按 `task_id` 记账，`analysis_peer_budget_exhausted`）；`waiting_peer` 进对账表与状态词汇；
+> 唤醒噪声写进 `settled-wake` 测试与 `chart-delivery-events.md`（首版接受）。文案面同步：主 persona
+> 指向邻接表、四个角色 persona 只留自己的边、`capital-orchestration` §5.1 邻接表、四册中的消息与
+> 回执章节。回归：`test/messaging-policy.test.mjs` 逐边正反 + 预算隔离，`test/analysis-validation`
+> 与 `test/analysis-tools` 的预算硬拒，`test/settled-wake` 的 peer-only 噪声，persona / 文档行数 /
+> 体积闸门全绿。
+
+### Phase 4 实测：真实会话能力评估（2026-11-25）
+
+用 scratch `DSH_HOME` + 本机 web profile（link 本仓）+ in-boot 探针跑了三场真实任务（模型
+`opencode-go/deepseek-v4.1-flash`）：
+
+- **A｜FY2024 单年盈利质量（轻量版，13.7 min）**：senior 只用了 13 颗工具（4 册 skill → 快照 →
+  run_analysis → submit_analysis → analysis_result），无 retriever、无出图；产物 `partial` +
+  `validation=warning`（1 条 calculation_without_anchor），5 条 support / 4 条 counter / 32 条
+  calculations / 9 条 gaps / 5 条 limitations；主 Agent 最终答复 5 条结论，逐条带来源、缺口与失效条件，
+  未给买卖建议。**这是当前最稳的能力形态。**
+- **B｜FY2023–2024 五年期复核（19 min 超时，未产出最终答复）**：senior 对 2021–2025 各跑一次
+  `run_analysis`（全部 `partial`），`submit_analysis` 连续 7 次被拒：6 次 `analysis_result_too_large`
+  （21741 / 20720 / 20074 / 20043 / 21260 / 20298 字符）＋1 次 `number_without_anchor`（1.23、5、0、
+  1.22…）。**20k 产物预算 + 全数字锚点是综合长报告的实际瓶颈**，人设「不重发同一份」挡不住
+  “反复删减重提”的拉锯。**已于 2026-11-25 调整**：预算上限 20000 → 30000 字符；锚点改为
+  按显示精度四舍五入匹配（`1.23` 命中 `1.2345`、整数百分比 `18%` 命中 `18.04%`），六位证券代码
+  与结构性计数（≤20 且带量词）进豁免集，同一字段重复的未命中数字去重。
+- **C｜估值 + 买卖建议（18.8 min）**：问题超出 senior 的模块面（无估值模块），senior 仍被派出并
+  试了 10 次 `run_analysis`（季度数据不匹配，`analysis_input_invalid`），还调用了 `terminal_open`
+  （宿主拒绝）与 `working_directory`（可见）；`read_profile` 传了 dataset id → `profile_not_found`。
+  主 Agent 最终答复给出了「不买入/持有/卖出触发线」——**违反“不输出买卖建议”的产品口径**，需要
+  在 persona/skill 或宿主侧加固。**路由纠偏（估值/收益风险/事件不派 senior）与买卖建议护栏按
+  用户 2026-11-25 决定，放到 Phase 5 完成后整体处理**；本轮只先解决产物预算与锚点口径。
+- **直连实测**：三场里 `collector → data-junior` 与 `web-retriever → senior-analyst` 的
+  `send_message` 目标均真实命中（不是中继替身），P4 邻接表通过真机；未见跨边误发。
+- **修复（实测发现）**：`ProfileRef.session_id` 写入的是产出者 session id，而 `readProfile` 用
+  `sessionScopeFor` 比较，导致兄弟子 Agent（senior 读 junior 的 profile）**永远** `dataset_session_mismatch`；
+  已改为写 scope，并补 `test/data-junior-tools.test.mjs` 的跨兄弟 profile 读取回归。
+- **结论**：senior 的强项是「单公司、年度口径、≤2 期、≤5 条结论」的三表财务质量复核（可复算、带缺口）；
+  估值 / 收益风险 / 回测 / 事件影响没有模块，派 senior 只会浪费轮次。要扩大能力面，优先 Phase 5 的
+  `returns_risk` + `scenario_sensitivity`。产物预算与锚点口径已于 2026-11-25 先行调整（见上）；
+  路由纠偏与买卖建议护栏放到 Phase 5 完成后整体处理。
+
 ### Phase 5：模块扩展
 
 1. `returns_risk` + `scenario_sensitivity`（覆盖序列与假设网格两种形状）。
@@ -1484,7 +1535,7 @@ test/senior-analyst.test.mjs
 
 - 开发期 senior preset 与委派行保持 `disabled: true`；Phase 3 起才启用。
 - 出问题时禁用 senior 委派行即可回滚，不影响 collector/junior/retriever。
-- 直连可单独回滚：`ROLE_MESSAGE_TARGETS` 改回全中继，不动工具面。
+- 直连可单独回滚：`ROLE_MESSAGE_TARGETS` 每个角色只留 `lead`（peer 预算自然不再触发），不动工具面。
 - `tools/analysis` 族行可单独摘掉（角色少一族工具，不崩）。
 - 不删除旧 `capital-data-analyst` preset id。
 - 不引入不可逆数据迁移；`capital-analysis/runs/` 保留供审计。

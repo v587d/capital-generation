@@ -197,10 +197,10 @@ export function roleSiblingGuardReasonFor(ctx: PolicyContext): (exec: GuardedExe
         + '等待归主 Agent 的 wait_for_agents 负责。'
     }
     if (name === 'list_agents') {
-      return `${name} 不对人设 ${claim.claim} 开放：叶子角色只回传自己的结果，子 Agent 名单与调度归主 Agent。`
-        + '需要别的 Agent 配合，用 send_message 回告主 Agent；不要自己换工具硬做。'
+      return `${name} 不对人设 ${claim.claim} 开放：子 Agent 名单与调度归主 Agent；peer 边只认固定树名，`
+        + '按邻接表直接 send_message。需要别的 Agent 配合，不要自己换工具硬做。'
     }
-    return `${name} 不对人设 ${claim.claim} 开放：叶子角色只回传自己的结果，打断别的会话归主 Agent 决定。`
+    return `${name} 不对人设 ${claim.claim} 开放：打断别的会话归主 Agent 决定（peer 之间也不许）。`
       + '需要别的 Agent 停下来，用 send_message 回告主 Agent；不要自己换工具硬做。'
   }
 }

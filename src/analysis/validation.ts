@@ -11,7 +11,7 @@
  * do not describe it as such.
  */
 import type { AnalysisArtifact, AnalysisSnapshot, Claim, ModuleManifest, NumberAnchor, ValidationIssue } from './types.js'
-import { HEADLINE_MAX_CHARS, MAX_CLAIMS, MAX_SCENARIOS, STATEMENT_MAX_CHARS, THESIS_MAX_CHARS } from './schemas.js'
+import { HEADLINE_MAX_CHARS, MAX_CLAIMS, MAX_PEER_EXCHANGES, MAX_SCENARIOS, STATEMENT_MAX_CHARS, THESIS_MAX_CHARS } from './schemas.js'
 
 type Json = Record<string, unknown>
 
@@ -159,6 +159,10 @@ const UNIT_CONSTANTS = new Set([1e4, 1e6, 1e8, 1e12])
 const YEAR = /^(?:19|20)\d{2}$/u
 const NUMBER_TOKEN = /-?\d+(?:\.\d+)?/gu
 const PERCENT_AFTER = /^\s*[%％]/u
+// Six-digit securities codes (`600519`, `000858`, `300750`, `920000`, funds `510300`) are identifiers,
+// not measured values. Amounts that start with 1 or 2 still need an anchor.
+const SECURITY_CODE = /^(?:0|[3-9])\d{5}$/u
+const COUNT_CLASSIFIER = /^\s*[个条项期只家次类轮档组段页册笔位名张份套种年]/u
 
 interface NumberToken {
   readonly text: string
@@ -185,18 +189,50 @@ function tolerance(precision: number | undefined): number {
   return 0.5 * 10 ** -digits
 }
 
-function exemptToken(text: string, token: NumberToken, source: string): boolean {
+function exemptToken(token: NumberToken, source: string): boolean {
   // Digits inside an identifier (`claim_1`, `FY2025`) are not quantities.
   const before = source[token.start - 1]
   const after = source[token.start + token.text.length]
   if ((before !== undefined && /[A-Za-z_]/u.test(before)) || (after !== undefined && /[A-Za-z_]/u.test(after))) return true
   if (!token.percent && YEAR.test(token.text)) return true
+  // A securities code is an identifier, not a measured value.
+  if (!token.percent && SECURITY_CODE.test(token.text)) return true
   if (Number.isInteger(token.value) && Math.abs(token.value) <= 20) {
-    const before = source.slice(Math.max(0, token.start - 2), token.start)
-    if (/[第期条项]/u.test(before)) return true
+    const head = source.slice(Math.max(0, token.start - 2), token.start)
+    if (/[第期条项]/u.test(head)) return true
+    // Structural counts ("5 条"、"0 次"、"3 个情景") are not quantities to trace either.
+    if (!token.percent && COUNT_CLASSIFIER.test(source.slice(token.start + token.text.length))) return true
   }
   if (UNIT_CONSTANTS.has(token.value) && /^\d+$/u.test(token.text)) return true
   return false
+}
+
+/** Digits after the decimal point as written: `18.00` → 2, an integer → 0. */
+function shownDecimals(text: string): number {
+  const dot = text.indexOf('.')
+  return dot === -1 ? 0 : text.length - dot - 1
+}
+
+/**
+ * Prose rounds stored values: `1.23` is how `1.2345` is written, `4.44%` is how `4.4444%` is
+ * written. Compare at the precision the prose actually shows, for fractional tokens only — an
+ * integer is a quantity in its own right, not a rounded fraction.
+ */
+function displayMatch(token: NumberToken, value: number): boolean {
+  const decimals = shownDecimals(token.text)
+  if (decimals === 0) return false
+  // Symmetric half-digit tolerance, so negative values round the same way as positive ones.
+  return Math.abs(value - token.value) <= 0.5 * 10 ** -decimals + 1e-12
+}
+
+function matchesToken(token: NumberToken, value: number, precision: number | undefined): boolean {
+  const tol = tolerance(precision)
+  if (Math.abs(value - token.value) <= tol) return true
+  // Ratio written as a percentage (0.1823 ↔ 18.23) — same precision, scaled by 100.
+  if (Math.abs(value * 100 - token.value) <= Math.max(tol * 100, 0.5 * 10 ** -2)) return true
+  if (displayMatch(token, value) || displayMatch(token, value * 100)) return true
+  // Whole-number percentages are a rounded display too: 0.1804 written as 18%.
+  return token.percent && shownDecimals(token.text) === 0 && Math.abs(value * 100 - token.value) < 0.5
 }
 
 function anchoredNumbers(artifact: AnalysisArtifact): { anchors: NumberAnchor[]; values: number[] } {
@@ -215,16 +251,14 @@ function anchoredNumbers(artifact: AnalysisArtifact): { anchors: NumberAnchor[];
 
 function unmatchedNumbers(text: string, anchors: readonly NumberAnchor[], calculations: readonly number[]): string[] {
   const misses: string[] = []
+  const seen = new Set<string>()
   for (const token of numberTokens(text)) {
-    if (exemptToken(text, token, text)) continue
-    const hit = anchors.some((anchor) => {
-      const tol = tolerance(anchor.precision)
-      if (Math.abs(anchor.value - token.value) <= tol) return true
-      // Ratio written as a percentage (0.1823 ↔ 18.23) — same precision, scaled by 100.
-      return Math.abs(anchor.value * 100 - token.value) <= Math.max(tol * 100, 0.5 * 10 ** -2)
-    })
-    if (hit) continue
-    if (calculations.some((value) => Math.abs(value - token.value) <= tolerance(undefined))) continue
+    if (exemptToken(token, text)) continue
+    if (anchors.some((anchor) => matchesToken(token, anchor.value, anchor.precision))) continue
+    if (calculations.some((value) => matchesToken(token, value, undefined))) continue
+    // The same unanchored value repeated in one field is one problem, not six.
+    if (seen.has(token.text)) continue
+    seen.add(token.text)
     misses.push(token.text)
   }
   return misses
@@ -339,10 +373,16 @@ export function validateArtifact(artifact: AnalysisArtifact, snapshot: AnalysisS
     }
   }
 
-  // Peer exchanges: an unanswered peer request means the result is not final.
-  const unanswered = (artifact.peer_exchanges ?? []).filter((item) => item?.answered !== true)
+  // Peer exchanges: an unanswered peer request means the result is not final, and the round-trip
+  // budget is a hard rule (§5.6-2). The send edge prevents the fourth request; this rejects a record
+  // that claims more than the budget (fabricated or from an unguarded client).
+  const exchanges = artifact.peer_exchanges ?? []
+  const unanswered = exchanges.filter((item) => item?.answered !== true)
   if (unanswered.length > 0) {
     tier2.push({ code: 'peer_unanswered', severity: 'warning', field: 'peer_exchanges', detail: `${unanswered.length} 条 peer 请求没有回执；产物最多 partial` })
+  }
+  if (exchanges.length > MAX_PEER_EXCHANGES) {
+    tier1.push({ code: 'peer_budget_exhausted', severity: 'error', field: 'peer_exchanges', detail: `peer 往返 ${exchanges.length} 条，超过 ${MAX_PEER_EXCHANGES} 次预算；超出部分应回 analysis_blocked + peer_budget_exhausted 交 lead 裁决` })
   }
   if (artifact.status === 'completed' && unanswered.length > 0) {
     tier1.push({ code: 'peer_unanswered_completed', severity: 'error', field: 'status', detail: '存在未回执的 peer 请求时不能写 completed' })

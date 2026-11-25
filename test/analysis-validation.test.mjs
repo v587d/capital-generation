@@ -87,6 +87,38 @@ function resultCodes(validation) {
   return [...codes(validation.tier1), ...codes(validation.tier2)]
 }
 
+test('锚点放宽：显示精度四舍五入、证券代码、结构性计数都算命中，真正的无锚点数字仍拒', () => {
+  const relaxed = validateArtifact(artifact({
+    headline: '毛利率 18.2%，现金转换 1.23 倍',
+    thesis: 'ROE 4.44%，整数百分比 18% 也落在同一锚点上',
+    support_claims: [claim({
+      statement: '毛利率 18.23%，现金转换 1.2345 倍',
+      number_anchors: [
+        { value: 0.1823, unit: 'ratio', source: { kind: 'dataset', ref: 'ds_income' }, precision: 4 },
+        { value: 1.2345, unit: 'ratio', source: { kind: 'computation', ref: 'calc_1' }, precision: 4 },
+        { value: 0.044444, unit: 'ratio', source: { kind: 'dataset', ref: 'ds_balance' }, precision: 4 },
+      ],
+    })],
+    calculations: [{ calculation_id: 'calc_1', module_id: 'financial_quality', module_version: '1.0.0', metric: 'cash_conversion', value: 1.2345, unit: 'ratio' }],
+  }), SNAPSHOT)
+  assert.deepEqual(codes(relaxed.tier1), [], '按写出的小数位四舍五入、或整数百分比，都应命中')
+
+  const identifiers = validateArtifact(artifact({
+    headline: '证券 600519、000858 的毛利率 18%',
+    support_claims: [claim({ statement: '3 个情景下 0 次回购，5 条待验证结论' })],
+  }), SNAPSHOT)
+  assert.deepEqual(codes(identifiers.tier1), [], '六位证券代码与结构性计数不是被测量的量')
+
+  const strict = validateArtifact(artifact({ headline: '毛利率 18.7%，营收 12.345 亿元' }), SNAPSHOT)
+  assert.deepEqual(codes(strict.tier1), ['number_without_anchor'])
+  assert.match(strict.tier1[0].detail, /18\.7/u)
+
+  // 同一字段里同一个未命中数字只报一次，避免错误信息被重复值淹没。
+  const repeated = validateArtifact(artifact({ headline: '未知数字 12.345、12.345' }), SNAPSHOT)
+  assert.deepEqual(codes(repeated.tier1), ['number_without_anchor'])
+  assert.match(repeated.tier1[0].detail, /：12\.345$/u)
+})
+
 test('数字豁免集：年份、第 N 期、单位常数与标识符里的数字不算结论数字', () => {
   const result = validateArtifact(artifact({
     thesis: '2025 年第二期毛利率与 FY2024 同期相比变化 100000000 以内（口径见 claim_1）',
@@ -143,6 +175,17 @@ test('Tier 1：超长结论字段与超多条论据按体积拒', () => {
     scenarios: Array.from({ length: 9 }, (_item, index) => ({ name: `s${index}`, assumptions: ['假设'] })),
   }), SNAPSHOT)
   assert.ok(manyScenarios.tier1.some((issue) => issue.field === 'scenarios' && /超过 8 条上限/u.test(issue.detail)))
+})
+
+test('Tier 1：peer 往返超过 3 次预算按 §5.6-2 硬拒，3 次以内放行', () => {
+  const exchange = (index) => ({
+    peer: 'data-junior', type: 'analysis_calculation_request', request_id: `peer_${index}`, answered: true,
+  })
+  const within = validateArtifact(artifact({ peer_exchanges: [1, 2, 3].map(exchange) }), SNAPSHOT)
+  assert.deepEqual(codes(within.tier1), [], '3 次往返是预算上限，不是违规')
+  const over = validateArtifact(artifact({ peer_exchanges: [1, 2, 3, 4].map(exchange) }), SNAPSHOT)
+  assert.deepEqual(codes(over.tier1), ['peer_budget_exhausted'])
+  assert.match(over.tier1[0].detail, /4 条.*超过 3 次预算/u)
 })
 
 // ── Tier 2: warning, lands but downgrades ────────────────────────────────────────────────────

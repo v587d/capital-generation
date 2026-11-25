@@ -14,14 +14,14 @@ description: Use when delegating in Capital mode — running the per-round list_
 - 创建工具：`subagent_data_collector` / `subagent_data_junior` / `subagent_web_retriever`。
 - 查询方式：`list_agents()`，一次即可。渲染行是 `<name> [<status>] — <description>`，首行 `lead`。
   **直系子 Agent 的 name 不含 `/` 且不是 `lead`**；`data-junior/chart-1` 这类孙 Agent 一律忽略。
-- 状态取值是 `running` / `inactive` / `corrupt` / `unsupported` / `unavailable`；它只表示当下能否接消息，
+- 状态取值是 `running` / `inactive` / `corrupt` / `unsupported` / `unavailable`；只表示当下能否接消息，
   不代表任务完成、成功或失败。
-- 上一轮的空列表不能代替本轮查询。
-- 一次查询覆盖全部角色；等待回传期间不要轮询。
+- 上一轮空列表不能代替本轮；一次查询覆盖全部角色，等待回传期间不轮询。
 
 ## 1.1 Canonical task_id（不可分叉）
 
-主 Agent 在本轮第一次委派前先确定一个唯一的 `task_id`，并把它原样写入所有 `data-collector`、`data-junior` 和需要可视化的任务 prompt。子 Agent 不得自行生成替代 task_id；收到缺失或不同值时必须回告主 Agent，不要默默创建新任务。
+主 Agent 在第一次委派前确定唯一的 `task_id`，原样写进所有任务 prompt；子 Agent 不得另造 task_id，
+缺失或不一致必须回告，不要默默创建新任务。
 
 委派清单的 `task_id` 是授权账本，不是描述性备注。`DatasetRef.task_id`、`profile_ref.task_id`、`chart_source_ref` 和 `chart_ref` 必须能沿同一个值对账。引用 chart receipt 前先核对它绑定的 task；若错误返回 `expected_task_id`，使用错误中给出的实际绑定值修正，不要猜测或反复试不同 id。
 
@@ -41,15 +41,12 @@ description: Use when delegating in Capital mode — running the per-round list_
 
 ### 2.1 名字纪律（防长上下文抄错名字）
 
-child 的名字是树内路径，长会话里凭记忆复述极易抄错，甚至把 A 角色的请求投给 B 角色。
-**`list_agents` 即权威名字存储**：用之前查一次就够了：
+child 的名字是树内路径，长会话凭记忆极易抄错甚至投错角色。**`list_agents` 即权威名字存储**：
 
 - `send_message` 的 `agent` 只从**最近一次 `list_agents` 的渲染输出**复制（每行就是
   `<name> [<status>] — <description>`）；不从早前轮次的上下文、委派清单或旧工具回执里复述。
-- `list_agents` 与 `send_message` 之间不要插入其他工具调用；中间隔了长回传或多轮消息，
-  就重新 `list_agents` 一次再发。
-- 发送前三行核对：这一行 name 的 `description` 是不是目标角色、状态是否可投（`running` 与 `inactive`
-  均可投）、本次任务是否确实属于该角色。
+- 两次调用之间别插其他工具；隔了长回传或多轮消息就重查一次再发。
+- 发送前核对三行：name 对应的 `description` 是目标角色、状态可投、任务确实属于它。
 - 名字规则：小写字母 / 数字 / 连字符，字母开头，最多 32 位；`lead` 保留给根。`data_collector`
   这类下划线名字会被 `INVALID_AGENT_NAME` 拒绝；不发明名字，不改写宿主返回的名字。
 - **同名创建**会被 `DUPLICATE_AGENT_NAME` 拒绝，不要重试；一个角色只保留一个 Agent。
@@ -67,7 +64,7 @@ child 的名字是树内路径，长会话里凭记忆复述极易抄错，甚�
   任务标题、标的、参数只能写进 `prompt`。写进 description 会让下一轮无法可靠识别角色。
 - `prompt` 只写本次委托上下文；**不需要复制任何模板**——身份、职责与工具边界由委派行配置注入。
 - 创建回执是 `started subagent <name>`；立即把 name、角色标签、本次任务记入委派清单。
-- 每会话只需一个 `data-collector`、一个 `data-junior`、一个 `web-retriever`，不要反复创建。
+- 每会话每角色一个，不反复创建。
 
 ## 4. 委派清单（会话内维护）
 
@@ -80,9 +77,8 @@ child 的名字是树内路径，长会话里凭记忆复述极易抄错，甚�
 | web_retriever | web-retriever | task_… | 交易所公告原文 | done | url + 正文要点 |
 
 状态取值：`running` / `done` / `failed` / `waiting_data`（子 Agent 已发 `data_gap` 或
-就绪登记、正等主 Agent 补数据）。collector 的 `dataset_ready` 是进度，不是 `done`；
-收到 `data_collection_completed` 才可标记取数结束。回传引用只记 DatasetRef、profile_ref、URL 等标识，
-**不记原始数据行**。
+就绪登记、正等主 Agent 补数据）/ `waiting_peer`（在等同行回执）。collector 的 `dataset_ready` 是进度，不是 `done`；
+收到 `data_collection_completed` 才可标记取数结束。回传引用只记 ref 与 URL 标识，**不记原始数据行**。
 
 ## 5. 路由表
 
@@ -98,11 +94,17 @@ child 的名字是树内路径，长会话里凭记忆复述极易抄错，甚�
 - **终判据是**错法**而不是形状**：凡要写进用户结论的数字，一律委派 `data_collector`；网页数字只能当线索或异常抽样。
 - 多角色可并行委派，但每个角色都必须先按第 2 节复用或创建，各记清单，等结算通知齐了再综合
   （齐不齐按 §6.1 的对账表逐行判定，不靠"看起来都回了"）。
-- 主 Agent 给 collector 的问题写清标的、时间范围、证据用途和所需新鲜度，由 collector 按目录选足能力，不预设“只取一个”或固定上限。
-- 给 `web_retriever` 的事实核查分级：核心事实（审计意见、商誉、质押/担保、现金流背离、有息负债、
-  重组等）≤10 条逐条核验、每条一行来源；外围事实一句话清单。不预设默认审计级格式；异常项再深挖（口径见 `capital-web-evidence` §5）。
+- 给 collector 写清标的、时间范围、证据用途与新鲜度，由它按目录选足能力，不预设固定上限。
+- 给 `web_retriever` 的事实核查分级：核心事实（审计意见、商誉、质押/担保、现金流背离、有息负债等）
+  ≤10 条逐条核验、每条一行来源；外围事实一句话清单。不预设默认审计级格式；异常项再深挖（口径见 `capital-web-evidence` §5）。
 - 主 Agent 不自行调用任何网络检索/抓取/搜索类工具；外部检索入口只有 `web_retriever` 的回传。
-- **没有通用委派出口**：直接子角色只有 `data_collector`、`data_junior`、`web_retriever` 三颗创建工具（专员归 junior）；不属于它们的活你自己做，或如实说明缺口。
+- **没有通用委派出口**：只有上面三颗专用创建工具（专员归 junior），其余活自己做或如实说明缺口。
+
+### 5.1 邻接表（谁可以直接给谁发消息）
+
+邻接表：lead→仅直系；data-collector→data-junior、senior-analyst；data-junior、web-retriever→senior-analyst；
+senior-analyst→data-junior（只补计算，同一分析任务 ≤3 次）；visualization-specialist 无。
+表外目标会被 `send_message` 闸门拒绝（闸门只看名字字符串，不是安全边界）；新数据与新检索仍一律经 lead。
 
 ## 6. 回合纪律与结算
 
@@ -116,27 +118,30 @@ child 的名字是树内路径，长会话里凭记忆复述极易抄错，甚�
 - **结算通知 ≠ 任务完成**：collector 未发 `data_collection_completed`，或者清单里标 `waiting_data` 的子 Agent 结束本轮是在等回信，
   不要向用户断言它已完成，也不要新建替代实例。
 - 等待：用 `wait_for_agents`；不检索、不反复 `list_agents`。`wait_agent` 只返回 `{ timedOut }`，
-  不是收尾屏障，不要拿它替代 `wait_for_agents`。不使用 `team_task_*`，不把 Team 任务板当委派清单。
+  不是收尾屏障，不要拿它替代 `wait_for_agents`；不用 `team_task_*`。
   子 Agent 卡在上游重试时，发停止指令收已有数据，不等自愈。
-- 回传到达后集中核对材料与结论，再决定继续委派或汇总输出。
 - **收口顺序（硬）**：所有委派行结算 → 对账通过 → 有 `chart_refs` 先 `present_charts` 一次
   （全部 ref；记不清就传 `task_id`）→ 再写最终答复；登记必须早于最终答复。
 - 已答复后被唤醒且无新信息：不输出可见正文，或重发自足总结（§6.1）；绝不写“已完成/见上”。
-- 永远不要设置 `run_in_background: false`；所有委派必须是 continuable。
 
 ### 6.1 结算对账表（写结论前必交，硬）
 
-**「收齐了吗」不靠印象回答，靠一张表。** 想写最终结论时，先在本步逐行列出本回合委派过的
-每个子 Agent（含孙 Agent `visualization_specialist` 的父链即 data-junior），一行一个：
+**「收齐了吗」靠表，不靠印象。** 写最终结论前，在本步逐行列出本回合每个子 Agent
+（含 `visualization_specialist` 的父链即 data-junior）：
 
 ```text
 结算对账｜task_id=...
 - data-collector  最后交互：<turn N 的 send_message>  结算已收 ✓
 - data-junior     最后交互：<turn N 的 send_message>  结算 ✗ 未收
 - web-retriever   最后交互：<turn N 的 send_message>  结算已收 ✓
+- senior-analyst  最后交互：<turn N 的 analysis_result>  waiting_peer（等补计算回执）
 ```
 
 判据只有一条：**✗ 只能被结算通知翻正**。
+
+- **`waiting_peer` 行不是 ✓**：结算通知可能只表示它在等同行回执（senior 等 data-junior 的补计算，
+  或 junior 等 senior 的补计算请求）。lead 必须收到它的最终回执（`analysis_result`、`profile_ref` 等）
+  才可记完成；等 peer 期间不写结论、不新建实例。
 
 - 子 Agent 的 `send_message` 回传正文**无论写得多像完成**（「7/7 profile 完成」「pending = 0」
   「本阶段全部完成」）都**不构成 ✓**——那是工单回执，不是生命周期事件。它下面紧跟的
@@ -145,12 +150,11 @@ child 的名字是树内路径，长会话里凭记忆复述极易抄错，甚�
 - 有任何一行是 ✗ → 本步**只写等待行**（欠谁、在等什么），结论留到 ✗ 全部翻正的那一步。
 - 这张表写在 reasoning 里即可，不要作为正文发给用户（用户只看到结论）。
 
-**为什么必须等：** 真机上回执可比结算通知早到十几秒；先综合，结算必然落在结论后被投成第二个 step。
+**为什么必须等：** 回执可比结算通知早到十几秒；先综合会让结算落在结论后，被投成第二个 step。
 
 **已经被追上（结论后才有结算）**：
 
-- 无新信息/纠正 → **不要写一行确认**（它会成为折叠后唯一可见的最后一轮）：要么不输出可见正文，
-  要么重发自足总结（结论/证据/来源、局限、观察/验证/防守）；**绝不写
+- 无新信息/纠正 → **不要写一行确认**：要么不输出可见正文，要么重发自足总结（结论/证据/来源、局限、观察/验证/防守）；**绝不写
   “分析已完成/结论见上/如上”**。
 - 有新事实或推翻口径 → 重写一份完整结论，不要只补一段。
 - 补齐后重新对账：这步之后又有人被唤醒，回到本节重来。
@@ -164,6 +168,7 @@ child 的名字是树内路径，长会话里凭记忆复述极易抄错，甚�
 | 创建报 `DUPLICATE_AGENT_NAME` / `INVALID_AGENT_NAME` | 同名复用不重试；下划线名改成 `data-collector` 这种连字符名 |
 | 子 Agent 发来 `data_gap` | 按清单复用角色补数，`send_message` 发回同一个子 Agent；失败也要回执 |
 | `waiting_data` 行发来结算通知 | 它在等补数据，不是完成；不要断言完成，也不要新建实例 |
+| `waiting_peer` 行发来结算通知 | 它在等同行回执，不是完成；等最终回执，不写结论、不新建实例 |
 | 只有回传、没有结算却想写结论 | 按 §6.1 交对账表；✗ 未被结算翻正就本步只写等待行 |
 | 结论输出后才被结算通知唤醒 | 无新信息不写可见正文或重发自足总结；有新事实重写完整结论 |
 | `send_message` 投错对象 | `interrupt_agent({ agent: "<name>" })` 停当前轮 → 重查 → 向正确 name 重发 |

@@ -107,4 +107,4 @@ description: Use when writing the conclusion layer of a Capital analysis — tur
 ## 9. 回执里的 peer_exchanges
 
 - 每条往返写 `{ "peer": "data-junior", "type": "analysis_calculation_request", "request_id": "...", "answered": true|false }`。
-- 当前阶段全中继，通常为空数组；将来直连时按实际往返填，**有 `answered:false` 就不能写 completed**。
+- 按实际往返填写，**不得超过 3 条**（超出会被宿主按预算拒）；有 `answered:false` 就不能写 completed。

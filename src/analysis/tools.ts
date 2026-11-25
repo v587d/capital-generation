@@ -401,6 +401,10 @@ export function registerAnalysisTools(deps: AnalysisToolDeps): void {
         })
         const validation = validateArtifact(artifact, snapshot)
         if (validation.tier1.length > 0) {
+          // The reserved code exists for exactly this budget (§5.6-2); a generic validation error
+          // would hide that the peer loop is the problem.
+          const budget = validation.tier1.find((issue) => issue.code === 'peer_budget_exhausted')
+          if (budget !== undefined) throw new AnalysisError('analysis_peer_budget_exhausted', budget.detail)
           throw new AnalysisError(
             'analysis_validation_failed',
             `产物未通过硬校验（${validation.tier1.length} 条）：${validation.tier1.slice(0, 6).map((issue) => `${issue.code} ${issue.detail}`).join('；')}`,

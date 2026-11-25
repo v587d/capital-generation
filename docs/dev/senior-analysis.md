@@ -5,10 +5,9 @@
 
 ## 1.9 `senior_analyst` 边界与直连语义
 
-**状态（Phase 3 完成）**：`tools/analysis` 六颗工具、宿主校验与产物落盘可用；`hello`（环境自检）与
+**状态（Phase 4 完成）**：`tools/analysis` 六颗工具、宿主校验与产物落盘可用；`hello`（环境自检）与
 `financial_quality`（首个真实模块，三张报表按报告期对齐）都跑通，golden case 由手算冻结；senior preset 与
-委派行已启用（去掉 `disabled`），主 persona 按需路由，四册 skill 各有 duty 点名。Phase 4 才开直连——
-不要先放开直连再补收尾判据。
+委派行已启用，主 persona 按需路由，四册 skill 各有 duty 点名。直连已按邻接表开启，收尾四条同时生效。
 
 ### 身份：四个层各一个值，不许互相替代
 
@@ -19,8 +18,7 @@
 | 树内名字 | `senior-analyst` | 主 persona 固定的 `name`，`send_message` 目标 |
 | preset id | `capital-data-analyst` | `config.id` = 会话日志身份，**不能改** |
 
-`config.id` 已写进历史会话，改名后旧会话 `agent-preset/not-found`；旧语义键 `data_analyst`
-只作精选方法路由的兼容别名。`test/persona.test.mjs` 把这张表钉死。
+`config.id` 已写进历史会话，改名后旧会话 `agent-preset/not-found`；旧语义键 `data_analyst` 只作精选方法路由的兼容别名。`test/persona.test.mjs` 把这张表钉死。
 
 ### 工具面（叶子，无子 Agent）
 
@@ -33,7 +31,8 @@ senior 只消费 ref、不读 rows。调用级另外 deny `interrupt_agent` / `l
 
 ### 直连（D2）：邻接表就是全部允许边
 
-**Phase 0–3 仍是全中继**；下表是 Phase 4 的目标，开直连前先补「收尾四条」。
+下表就是 `src/agents/messaging-policy.ts` 的实际允许边（`ROLE_MESSAGE_TARGETS`）；表外目标由调用级
+guard 拒绝，能力上仍可互发——**这是路由纪律不是安全边界**。
 
 | 发送方 | 允许目标 |
 |---|---|
@@ -52,10 +51,12 @@ senior 只消费 ref、不读 rows。调用级另外 deny `interrupt_agent` / `l
   路由纪律（防误发），不要写成安全边界。
 - **信封没有宿主校验**：`send_message` 只判目标、不解析 `message` 正文；`protocol` 信封是模型侧
   约定，真正需要确定性保证的 refs / 数字 / 状态必须走工具返回值。
-- **收尾四条**（缺一条就多轮或少结论）：peer 往返进 `analysis_result.peer_exchanges[]`；
-  同一 task 的补计算往返 ≤ 3 次，超出回 `analysis_blocked`；对账表新增 `waiting_peer` 行，
-  空闲等 peer ≠ 完成；`src/agents/settled-wake.ts` 的 admit 只认向根投递过 relay 的子 Agent，
-  只跟 peer 通信的可能多唤醒一个空轮——**是噪声不是数据丢失**，别在文档里假装已解决。
+- **收尾四条**（缺一条就多轮或少结论）：① peer 往返进 `analysis_result.peer_exchanges[]`，
+  `answered:false` 时写 `completed` 是 Tier 1 硬拒；② 同一 task 的补计算往返 ≤ 3 次：发送侧 guard 按
+  senior 会话计出向 peer 次数（第 4 次直接拒），`submit_analysis` 再按 `task_id` 查记录，超 3 条抛
+  `analysis_peer_budget_exhausted`；③ 对账表新增 `waiting_peer` 行（`capital-orchestration` §4/§6.1/§7），
+  空闲等 peer ≠ 完成，只有 lead 收到最终回执才可记完成；④ `src/agents/settled-wake.ts` 的 admit 只认向根
+  投递过 relay 的子 Agent，只跟 peer 通信的可能多唤醒一个空轮——**是噪声不是数据丢失**，首版接受。
 
 > ⛔ **工具 schema 只能写宿主的 JSON Schema 子集**（`dsh-tools`：`type` / `oneOf` / `properties` /
 > `required` / `additionalProperties` / `items` / `enum` / `const` + 注解）。写 `anyOf`、`maxItems`、
@@ -125,9 +126,10 @@ capital-analysis/runs/<analysis_id>/
 
 ### 校验分级
 
-- **Tier 1 硬拒**（不落盘）：结论性字段的数字无锚点、refs 不存在、缺失效条件、schema 不符或非无损 JSON。
+- **Tier 1 硬拒**（不落盘）：结论性字段的数字无锚点（按显示精度四舍五入匹配；证券代码与结构性计数豁免）、
+  refs 不存在、缺失效条件、schema 不符或非无损 JSON。
   `submit_analysis` 先按 artifact schema 校验（未知字段、每侧 claims > 20、场景 > 8 都算 schema 不符），
-  再跑语义分级；体积 > 20000 字符单独报 `analysis_result_too_large` 并点名超的是哪一段。
+  再跑语义分级；体积 > 30000 字符单独报 `analysis_result_too_large` 并点名超的是哪一段。
 - **Tier 2 警告**（落盘但 `validation.status = "warning"`，artifact 最多 `partial`）：`metrics` /
   `calculations` 的数字无锚点、`confidence` 缺 basis、`limitations` 为空、peer 有未回执项。
 - **Tier 3** 只计数，不改状态。
@@ -144,5 +146,5 @@ capital-analysis/runs/<analysis_id>/
 
 ### 回滚
 
-preset 与委派行保持 `disabled` 即可回滚；直连单独回滚 = 把 `ROLE_MESSAGE_TARGETS` 改回全中继，
-不动工具面；`tools/analysis` 族行可单独摘掉（角色少一族工具，不崩）。不删旧 preset id。
+preset 与委派行保持 `disabled` 即可回滚；直连单独回滚 = 把 `ROLE_MESSAGE_TARGETS` 每个角色改回只留
+`lead`（peer 预算表可留着，不再触发），不动工具面；`tools/analysis` 族行可单独摘掉（角色少一族工具，不崩）。不删旧 preset id。

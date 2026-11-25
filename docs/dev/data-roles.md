@@ -55,13 +55,13 @@
   `tools.guard()` 按 `exec.agent` 判定、与实例绑哪层无关，所以四颗身份闸门（fs 写口 / `ocr` 形态 /
   兄弟名字 `interrupt_agent`+`list_agents` / `send_message` 目标）都**全局装在插件 ctx 上、各一次**；
   `agent/created` 只剩两处 restrict（根收敛 + 角色可见性），它们管的是**被委派子会话**那一支
-  （可见性真能减掉，手开那一支减不掉）。rc.2 允许整棵树任意互发，`send_message` 闸门把 Capital
-  收回到“根只发直系、叶子只发 `lead`、specialist 不发”；目标表在 `src/agents/messaging-policy.ts`
-  的 `ROLE_MESSAGE_TARGETS`；Phase 3 仍全中继，`junior → senior-analyst` 直连在 Phase 4 开。
+  （可见性真能减掉，手开那一支减不掉）。rc.2 允许整棵树任意互发，`send_message` 闸门按 §5.2
+  邻接表收边（根只发直系、同行边见表、specialist 不发）；目标表在 `src/agents/messaging-policy.ts`
+  的 `ROLE_MESSAGE_TARGETS`，senior→junior 另有每会话 3 次预算。
 - **`visualization_specialist`**：data_junior 的异步子 Agent（0.2.1 起子会话一律异步，one-shot /
   前台模式已随 `backgroundMode` 一起删除），工具表只有 `skill` + `render_chart`；
   spec 由它组装，data_junior 只交"要什么视图"。
-- **`senior_analyst`**（preset id 仍 `capital-data-analyst`）：保持 `disabled`；边界、工具面、直连语义与启用顺序见 §1.9，不持有取数工具，补数经主 Agent（§1.4）。
+- **`senior_analyst`**（preset id 仍 `capital-data-analyst`）：已启用（内部角色）；边界、工具面、直连语义见 §1.9，不持有取数工具，补数经主 Agent（§1.4）。
 - **`web_retriever`**：纪律见 §4.1（`web-retriever.md`）。
 
 ## 1.2 两条数据边界（必须分清；2026-09 放宽仅此一处）
@@ -77,10 +77,10 @@
 - **`data_gap` 不需要插件代码**：data_junior 用 `send_message({ agent: "lead" })` 向主 Agent 发
   **补数据请求**（细则在 persona 与 skill `capital-data-protocol`，两侧都有断言）。rc.2 的树内名字
   固定 `lead` 指根；子 Agent 不再收到 parent id，`agent_id` / `PARENT` 都是旧词汇。
-- **中继边界**：data_collector 与 data_junior 是兄弟，但互通一律经主 Agent——collector 只把
-  `dataset_ready` / `data_failed` / `data_collection_completed` 回给 `lead`，主 Agent 决定把哪份
-  DatasetRef 转给 junior；junior 的 `data_gap` 也先回 `lead`。rc.2 的树内互发能力不改变这条调度链：
-  全局 `send_message` 目标 guard 会拒掉叶子→兄弟/孙 Agent 的发送。
+- **中继与直连边界**：取数链仍由主 Agent 调度——collector 的 `dataset_ready` / `data_failed` /
+  `data_collection_completed` 可直达 data-junior / senior-analyst，主 Agent 仍是范围与补数闸门；
+  junior 的 `data_gap`、senior 的新数据请求一律先回 `lead`。同行直连只有 §5.2 邻接表里的边，
+  表外目标（兄弟/孙 Agent）由全局 `send_message` guard 拒绝。
 - **`analysis_data_request` 与 `data_gap` 同构**：analyst 用 `send_message` 向主 Agent 发补数请求（`{type:'analysis_data_request', task_id, analysis_id, need, blocking, already_have, suggested_query}`，见设计稿 §6.2）。主 Agent 是**范围闸门**：只转交 brief 内的请求，超出范围或目标已满足就拒绝并说明。取回新 refs 后发回**同一个** analyst（continuable 复用、不新建同角色）；`blocking: true` 未决时主 Agent **不得写最终答复**，必须先补数或让 analyst 明确降级 partial。暂不设轮次硬上限，出现“连续 blocking 仍不收敛”的 bad case 再评估。
 - **子 Agent 结束本轮 ≠ 任务完成**：等数据的子 Agent 会先结束回合。委派清单用 `waiting_data`
   标记；收到结算通知不得认定完成、不得新建同角色实例。

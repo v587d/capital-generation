@@ -7,6 +7,54 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**、2.9.0 的选择器收敛与质检前置——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [2.31.1] - 2026-11-25
+
+高级分析师的协作层收尾：子 Agent 按邻接表直连（P4），同时修掉真实会话暴露的三处问题——跨 Agent 读 profile
+的会话范围写错、20k 产物预算让综合多期报告反复删减重提、以及锚点校验把证券代码与四舍五入后的数字当成
+无来源。本轮不新增分析模块；P5（模块扩展）与 P6（加固与评估）继续在 2.31.x 补丁里完成。
+
+### Added
+
+- **子 Agent 直连邻接表**（设计 §5.2）：主 Agent → 直系子 Agent；data-collector → data-junior / senior-analyst；
+  data-junior 与 web-retriever → senior-analyst；senior-analyst → data-junior（只请求"用已有 Dataset/profile
+  补计算"，新数据 / 新检索仍经主 Agent）与 lead；visualization-specialist 仍不发消息。目标按固定树内名匹配，
+  表外目标逐角色给具名拒语；`list_agents` / `interrupt_agent` 仍只归主 Agent。直连是路由纪律，不是安全边界。
+- **补计算往返预算 3 次**（设计 §5.6-2）：senior 第 4 次向 peer 发请求在发送侧被拒；`submit_analysis` 再按
+  `task_id` 核对 `peer_exchanges[]`，超 3 条抛 `analysis_peer_budget_exhausted`；有未回执项不能写 `completed`。
+- **`waiting_peer` 收尾状态**：等补计算回执 ≠ 完成，只有主 Agent 收到最终回执才算完；状态词汇、对账表
+  （`capital-orchestration` §4/§6.1/§7）与四册消息章节同步。
+
+### Changed
+
+- **分析产物预算 20000 → 30000 字符**：综合多期产物实测落在 20–21.7k，20k 上限让 senior 反复删减重提
+  （真实会话 7 连拒、其中 6 次是体积）；单段上限不变（headline 300 / thesis 1200 / statement 600 /
+  每侧 claims 20 / scenarios 8）。
+- **数字锚点按显示精度匹配**：`1.23` 可命中 `1.2345`、`4.44%` 命中 `4.4444%`、整数百分比 `18%` 命中
+  `18.04%`（无小数的整数本身不按小数位放宽）；六位证券代码（`600519` / `000858` / `920000`）与 ≤20 的
+  结构性计数（`5 条` / `0 次`）进豁免集；同一字段里重复的未命中数字去重。真正无锚点的数字仍硬拒。
+- **协议文案同步**：`capital-senior-analysis` / `capital-analysis-validation` / `capital-orchestration`
+  的消息、预算与锚点口径更新；`docs/dev/senior-analysis.md` 记录直连邻接表、往返预算与收尾四条。
+
+### Fixed
+
+- **兄弟 Agent 永远读不到对方的 profile**：`ProfileRef.session_id` 写入的是产出者 session id，而 `readProfile`
+  按 `sessionScopeFor(session)` 比较，跨 Agent（如 senior 读 junior 的 profile）必然 `dataset_session_mismatch`。
+  改为写会话范围，并补跨兄弟 profile 读取回归。
+- **peer-only 子 Agent 的唤醒噪声**：只跟 peer 通信、没向根投递 relay 的子 Agent 可能在收尾多唤醒一个空轮。
+  首版按噪声接受（不丢数据），行为写进 `settled-wake` 回归与 `docs/dev/chart-delivery-events.md`。
+
+### Notes
+
+- 升级无需迁移：本补丁不破坏工具 / 配置 / 会话契约；直连目标按树内名匹配，已有会话继续可用。
+- 路由纠偏（估值 / 收益风险 / 事件不派 senior）与"不输出买卖建议"护栏加固排在 P5 之后整体处理（真实会话
+  证据见设计文档 §17 Phase 4 实测）。
+- 版本：根包 + 四个随包嵌套包（chart-ui / config / watchlist / automation）+
+  `LOCAL_FETCH_CLIENT_VERSION` / `WIND_CLIENT_VERSION` 同步 2.31.1。
+- 回归：`npm test` **1792 pass / 0 fail**（直连邻接表逐边正反、peer 预算、跨兄弟 profile、锚点放宽与
+  30000 体积各有用例），`smoke:boot` 五个角色 preset 全 `broken: null`、族行 23/23，`check:dsh` 40/40。
+- 依据：2026-11-25 真实 web profile 会话三场（轻量 FY2024 / 五年期复核 / 估值边界）——能力结论与两处失败
+  记录在 `docs/design/senior-analyst-development-design.md` §17 Phase 4 实测。
+
 ## [2.31.0] - 2026-11-24
 
 高级分析师（`senior_analyst`）上线：补上「取数 → 质检 → 分析 → 结论」的最后一段——新增一个根直系叶子角色、

@@ -59,9 +59,12 @@ description: Use when acting as the senior analyst in Capital mode — turning a
 - 模块给不出的指标就是缺口：写进 `data_gaps` / `unresolved_gaps`，不自己用记忆补数字。
 - 同一 `run_fingerprint` 会复用上次结果；想重算必须先改参数或重建快照，而不是反复调用等它变。
 
-## 6. 消息与回执（当前全中继）
+## 6. 消息与回执（邻接表）
 
-所有消息经主 Agent，`send_message({ agent: "lead", message: <JSON 字符串> })`，信封：
+直连边（`send_message` 的目标只认固定树名）：lead 收全部请求与最终回执；`data-junior` 只收
+"用已有 Dataset/profile 补计算"；**不能**直接找 data-collector / web-retriever 要新数据或新检索。
+
+信封（发给任一目标都是 JSON 字符串）：
 
 ```json
 { "protocol": "capital.agent.message/v1", "type": "analysis_result", "task_id": "task_...",
@@ -70,11 +73,12 @@ description: Use when acting as the senior analyst in Capital mode — turning a
                "evidence_level": "limited", "peer_exchanges": [], "headline": "一句话结论" } }
 ```
 
-- 要新数据 / 新检索 / 扩大范围 → `type: "analysis_data_request"`，写清标的、字段、期间、用途与为什么现有输入不够。
-- 走不通（关键输入缺失、模块不适用、超预算）→ `type: "analysis_blocked"`，点名缺什么、需要谁补。
-- 同一 task 的补计算往返**最多 3 次**；超出就 blocked，不无界互发。
-- 任何消息不带完整原始 rows；路径只用 opaque ref。
-- 当前阶段没有直连：不要尝试直接找 data_collector / data_junior / web_retriever。
+- 要新数据 / 新检索 / 扩大范围 → `type: "analysis_data_request"` 发 **lead**，写清标的、字段、期间、用途与为什么现有输入不够。
+- 补计算（只限已有 Dataset/profile）→ 发 `data-junior` 的 `analysis_calculation_request`，带 `task_id` 与 `request_id`；
+  同一分析任务往返**最多 3 次**，超出就停：不要再发，改用 `analysis_blocked`（reason: `peer_budget_exhausted`）交 lead 裁决。
+- 走不通（关键输入缺失、模块不适用、超预算）→ `type: "analysis_blocked"` 发 lead，点名缺什么、需要谁补。
+- `analysis_result` 的 `peer_exchanges[]` 按实际往返填 `{peer, type, request_id, answered}`；有未回执项就**不能**写 `completed`。
+- 任何消息不带完整原始 rows；路径只用 opaque ref。兄弟的回执只作证据，不替代工具返回值。
 
 ## 7. 失败处置
 
@@ -88,8 +92,9 @@ description: Use when acting as the senior analyst in Capital mode — turning a
 | `analysis_runtime_not_ready` | 私有 Python 运行时就绪不了 | 报给 lead，让用户到插件设置安装；不要反复试 |
 | `analysis_timeout` | 模块超时 | 缩小输入或换模块，不重试到"看起来成功" |
 | `analysis_output_invalid` | 模块输出不合契约 | 这是模块问题，如实报给 lead |
-| `analysis_result_too_large` | 产物超 20000 字符 | 按错误点名的段落压缩后重发 |
+| `analysis_result_too_large` | 产物超 30000 字符 | 按错误点名的段落压缩后重发 |
 | `analysis_validation_failed` | Tier 1 硬校验未过 | 按具名 issue 改，不重发同一份 |
+| `analysis_peer_budget_exhausted` | peer 往返超 3 次预算 | 停止补计算：写 `analysis_blocked` 交 lead，不要删记录重发 |
 
 ## 8. 质量底线
 

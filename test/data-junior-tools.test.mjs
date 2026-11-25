@@ -411,6 +411,32 @@ test('Dataset session scope：collector 与 junior 兄弟子 Agent 可共享，�
   await assert.rejects(() => store.inspectDataset(ref.dataset_id, INDEPENDENT_SESSION), /dataset_session_mismatch/)
 })
 
+test('Profile session scope：兄弟子 Agent 可读同一 scope 的 profile，独立主 session 不可读', async () => {
+  // Ref 记的是 scope（父 session），不是产出者自身：readProfile 拿它和 sessionScopeFor 比较，
+  // 写入若记产出者 id，senior 的 read_profile / 快照挂 profile 就永远 mismatch。
+  const { store } = makeStore()
+  const ref = await store.save(saveInput({ session: COLLECTOR_CHILD }))
+  const profile = await store.writeProfile({
+    session: COLLECTOR_CHILD,
+    dataset_id: ref.dataset_id,
+    task_id: 'task-1',
+    profile: {
+      row_count: 3,
+      columns: ['date_ms', 'close_price'],
+      quality: { missing_values: 0, duplicate_rows: 0, time_ordered: true },
+      statistics: { close_price: { min: 100, max: 102, mean: 101, p50: 101 } },
+      warnings: [],
+    },
+  })
+  assert.equal(profile.session_id, 'main-1', 'profile ref 记的是 scope（父 session），不是产出者自身')
+  const read = await store.readProfile({ session: JUNIOR_CHILD, profile_id: profile.profile_id })
+  assert.equal(read.ref.profile_id, profile.profile_id)
+  await assert.rejects(
+    () => store.readProfile({ session: INDEPENDENT_SESSION, profile_id: profile.profile_id }),
+    /dataset_session_mismatch/,
+  )
+})
+
 
 test('Dataset Phase 3：拒绝其他 session 和绝对路径', async () => {
   const { store } = makeStore()

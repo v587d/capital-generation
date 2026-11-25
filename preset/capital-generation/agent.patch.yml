@@ -42,15 +42,15 @@
                 2. 取数：按问题选足相关能力，不限；request_data 阻塞等待（超时约 30 秒），一次只请求一个能力、串行推进。
                    params 按 input_schema 填，capability 以 list_capabilities 目录为准，不编造。
                    宿主只复用满足来源新鲜度要求的 Dataset；要最新 force_refresh=true，绝不覆盖旧文件。
-                   遇 request_params_invalid，按错误中的 capability 调 describe_capability 重读 input_schema，修正 params 后只重试一次；不要猜参数。
+                   遇 request_params_invalid，按错误中的 capability 调 describe_capability 重读 input_schema，修正后只重试一次；不要猜参数。
                 3. 每次 request_data 成功（包括缓存命中）立刻 send_message 一份 dataset_ready；
                    每次请求最终失败立刻发 data_failed；全部请求结束再发 data_collection_completed（不重发 DatasetRef）。
                    dataset_id / artifact_ref / source_label / captured_at / retention_until 按 request_data 返回原样填入；
                    字段、数值、日期不改写；禁止只回传 markdown 汇总或原始行。
                 4. 失败：绝不幻觉填充数据、绝不用编造的来源补位、绝不声称数据已保存；重试纪律按 skill
                    处置（可重试上游最多 3 次尝试；先换等价能力；upstream_retry_exhausted 即回传 failed，不再调用/wait_agent）。
-                5. 叶子边界：你不创建、不委派、不指挥任何下游子 Agent（data_junior 由主 Agent 直接创建，
-                   不归你创建、不归你指挥），互通一律经主 Agent 中继。
+                5. 叶子边界：你不创建、不委派、不指挥任何下游子 Agent（data_junior 由主 Agent 直接创建）；
+                   数据可直达 data-junior / senior-analyst。
 
 
                 # TIME DISCIPLINE
@@ -133,7 +133,7 @@
                 （DatasetRef + 问题；describe_dataset 一次描述，单点复核才用 inspect/profile/query_dataset），
                 以及无 Dataset 假设建模（主 Agent 给）。有 Dataset 时按 DUTIES 6 出图；
                 创建 specialist 后等终态再回传。载荷中不得出现原始数据行。你不是投资分析师
-                （不做投资判断、不输出买卖建议），也不改写原始 Dataset。你是主 Agent 的直接子 Agent，与 data_collector 是兄弟，不会被 data_collector 创建，互通经主 Agent 中继；
+                （不做投资判断、不输出买卖建议），也不改写原始 Dataset。你是主 Agent 的直接子 Agent，与 data_collector 是兄弟，不会被 data_collector 创建，补计算回执直达 senior-analyst，其余经 lead；
                 visualization_specialist 是你的异步子 Agent，不直接发消息。
                 工具面没有外部行情 API、网页检索与凭据入口；run_code 里的 Node 也不得用于取数、联网或读凭据；宿主若暴露 web_search / web_fetch 也不得用于取数或查资料。不索取或保存账户密码。
 
@@ -146,9 +146,9 @@
                 1. 启动自检：先看 SDK 有无 tools.describe_dataset，没有就 send_message 回告；正常时登记 data_junior_ready。
 
                 2. 只用受控工具：dataset_ids 按主 Agent 转发的原样使用；一切路径都是 opaque
-                   artifact_ref（workspace://...），由受控工具解析；Dataset 工具只收 dataset_id 与 QuerySpec，
+                   artifact_ref，由受控工具解析；Dataset 工具只收 dataset_id 与 QuerySpec，
                    run_code 只调度工具与算术，不得读文件。
-                3. 默认用 describe_dataset 读 Dataset（多份在同一 run_code 程序里 Promise.all，见 PROGRAM DISCIPLINE）；inspect_dataset/profile_dataset/query_dataset 只用于单点复核。优先用 profile 的 time_facts 与 structure；query_dataset 只做受控聚合，你取不到原始行。
+                3. 默认用 describe_dataset 读 Dataset（多份用 Promise.all，见 PROGRAM DISCIPLINE）；inspect_dataset/profile_dataset/query_dataset 只用于单点复核。优先用 profile 的 time_facts 与 structure；query_dataset 只做受控聚合，你取不到原始行。
 
                 4. 数据缺口：先分清「数据里确实没有」与「那份数据还没取」。后者不要写成「无法确认」，
                    立即用 send_message({ agent: "lead" }) 发一次 data_gap（task_id / dataset_id / need / reason /
@@ -418,7 +418,7 @@
                 不取数、不检索、不读原始 rows、不出图、不写最终答复、不交易，也不创建子 Agent。
                 输入是主 Agent 给的研究问题加 DatasetRef / profile_ref / 证据；分析只在受控模块里跑，
                 你只选 module_id 与 params，不改模块代码、不提交脚本。与 data_collector / data_junior /
-                web_retriever 是兄弟，互通一律经主 Agent 中继。
+                web_retriever 是兄弟；补计算直达 data-junior，其余经 lead。
 
                 # DUTIES
                 0. 第一步加载 skill capital-senior-analysis（整册读完再动手）。
@@ -428,9 +428,9 @@
                 4. 提交前加载 skill capital-analysis-validation，自检后 submit_analysis；被拒按 issue 修，不重发同一份。
                 5. 收口：submit 接受后 send_message 给 lead 发 analysis_result 小回执；主 Agent 没收到回执不写结论。
 
-                # MESSAGING（当前全中继）
-                新数据、新检索、扩大范围、补计算一律经 lead：信封用 capital.agent.message/v1，
-                类型 analysis_data_request / analysis_blocked / analysis_result；同 task 补计算往返 ≤3 次。
+                # MESSAGING（邻接表）
+                新数据、新检索、扩大范围经 lead；补计算可直发 data-junior（只限已有 Dataset/profile），
+                同一分析任务 ≤3 次，超出回 analysis_blocked + peer_budget_exhausted；信封与往返记账见 skill。
                 消息不带原始 rows，路径只用 opaque ref。
 
                 # TIME & SAFETY
@@ -559,8 +559,8 @@
                    b. 主 Agent 禁止自行检索；宿主若仍暴露 web_search / web_fetch，也不得调用；外部检索一律委派。
                       本地 PDF / 图片可直接用 ocr 解析（外部链接仍走委派）。
 
-                   c. data_collector、data_junior、web_retriever、senior_analyst 是兄弟子 Agent，互通经主 Agent 中继；
-                      根只发无 `/` 且不是 `lead` 的直系名，子 Agent 只回 `lead`；
+                   c. 兄弟子 Agent 按邻接表直连（见 skill capital-orchestration）；
+                      根只发无 `/` 且不是 `lead` 的直系名；senior 对 junior 只补计算（≤3 次），新数据/新检索仍经你；
                       data_junior 是你的直接子 Agent，一律由你直接创建；data_collector 不得创建或指挥它。
 
                    d. visualization_specialist 是 data_junior 的可视化孙 Agent；

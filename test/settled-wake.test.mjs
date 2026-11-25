@@ -97,6 +97,21 @@ test('该 child 从没发过消息：保留通知（它可能是唯一结果/失
   assert.equal(nextStep.length, 1)
 })
 
+test('只跟 peer 通信的子 Agent 不在 admit 账本：结算通知保留（噪声不是数据丢失）', () => {
+  // `admitted` 只由"向根投递的 agent-message"标记。只跟 peer 直连的 child 从不进入账本，它的结算
+  // 通知会被保留、可能多唤醒根一个空轮——直连首版接受这个噪声（docs/dev/senior-analysis.md §1.9）。
+  const { agent, nextStep, removed } = harness()
+  const guard = createSettledWakeGuard()
+  nextStep.push(notice('senior-analyst', 'settled-peer-only'))
+
+  guard.acceptUserMessage(MAIN, { kind: 'user' })
+  guard.acceptClosing(agent)
+
+  assert.deepEqual(guard.admitted(), [], 'peer-only child 不进入 admit 账本')
+  assert.deepEqual(removed, [], '通知不是重复消息，必须保留')
+  assert.equal(nextStep.length, 1, '多一个空轮是噪声不是数据丢失')
+})
+
 test('该 child 的消息还只是 pending、没有 admitted：保留通知', () => {
   const { agent, nextStep, removed } = harness()
   const guard = createSettledWakeGuard()
