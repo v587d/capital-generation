@@ -265,7 +265,7 @@ test('全链路：建快照 → 跑模块 → 提交产物，artifact 与 run �
   const { execute } = chainHarness(root)
 
   const listed = await execute('list_analysis_modules', {})
-  assert.deepEqual(listed.modules.map((item) => item.id), ['hello', 'financial_quality'])
+  assert.deepEqual(listed.modules.map((item) => item.id), ['hello', 'financial_quality', 'returns_risk', 'scenario_sensitivity'])
   const described = await execute('describe_analysis_module', { module_id: 'financial_quality' })
   assert.equal(described.version, '1.0.0')
   assert.ok(described.input_schema.properties.period, 'describe 必须给出真实输入契约')

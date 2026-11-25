@@ -1,0 +1,17 @@
+{
+  "target_name": "bad",
+  "model": "product",
+  "factors": [
+    {
+      "name": "x",
+      "base": -1,
+      "exponent": 0.5
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "s",
+      "values": {}
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "status": "partial",
+  "metrics": {
+    "observations": 4,
+    "returns_count": 3,
+    "total_return": 0.08,
+    "annualized_return": 641.089342,
+    "annualized_volatility": 0.192038,
+    "max_drawdown": 0.0,
+    "mean_daily_return": 0.026033,
+    "best_day": 0.04,
+    "worst_day": 0.018868,
+    "positive_day_ratio": 1.0,
+    "var": 0.0,
+    "cvar": 0.0,
+    "confidence": 0.95,
+    "risk_free_rate": 0.0,
+    "annualization": 252,
+    "sharpe_ratio": 3338.354888
+  },
+  "data_gaps": [
+    "价格列 close 有 3 行不是正数或时间无法解析（已跳过）：2024-01-03、2024-01-04、2024/01/05"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "status": "completed",
+  "metrics": {
+    "base_target": 200,
+    "factor_count": 2,
+    "scenario_count": 3,
+    "scenario_min": 162,
+    "scenario_max": 242,
+    "grid_cells": 9,
+    "grid_min": 162,
+    "grid_max": 242
+  },
+  "data_gaps": []
+}

@@ -1,0 +1,11 @@
+{
+  "status": "completed",
+  "metrics": {
+    "base_target": 400,
+    "factor_count": 2,
+    "grid_cells": 3,
+    "grid_min": 350,
+    "grid_max": 450
+  },
+  "data_gaps": []
+}

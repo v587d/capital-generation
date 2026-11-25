@@ -1,0 +1,58 @@
+{
+  "target_name": "net_profit",
+  "target_unit": "CNY",
+  "model": "product",
+  "factors": [
+    {
+      "name": "revenue",
+      "base": 1000,
+      "unit": "CNY",
+      "exponent": 1
+    },
+    {
+      "name": "net_margin",
+      "base": 0.2,
+      "unit": "ratio",
+      "exponent": 1
+    }
+  ],
+  "grid": [
+    {
+      "factor": "revenue",
+      "values": [
+        900,
+        1000,
+        1100
+      ]
+    },
+    {
+      "factor": "net_margin",
+      "values": [
+        0.18,
+        0.2,
+        0.22
+      ]
+    }
+  ],
+  "grid_mode": "full",
+  "scenarios": [
+    {
+      "name": "悲观",
+      "values": {
+        "revenue": 900,
+        "net_margin": 0.18
+      }
+    },
+    {
+      "name": "基准",
+      "values": {}
+    },
+    {
+      "name": "乐观",
+      "values": {
+        "revenue": 1100,
+        "net_margin": 0.22
+      }
+    }
+  ]
+}

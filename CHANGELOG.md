@@ -7,6 +7,42 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**、2.9.0 的选择器收敛与质检前置——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [2.31.2] - 2026-11-25
+
+高级分析师 Phase 5：补上 `returns_risk`（序列形状）与 `scenario_sensitivity`（假设网格形状）两颗分析模块。
+至此模块协议的三种输入形状（三表横截面 / 价格序列 / 参数网格）各有一颗经审查的模块与手算 golden，
+senior 的「取数 → 质检 → 分析 → 结论」不再只能回答财务质量一类问题。
+
+### Added
+
+- **`returns_risk 1.0.0`**：吃一份时间列 + 正价格序列 Dataset（可选第二份做基准），输出区间 / 年化收益、
+  年化波动、最大回撤、夏普 / 索提诺 / Calmar、历史 VaR / CVaR，有基准才有 beta / 相关；坏行跳过并写
+  `data_gaps`，重复日期、混用时间格式、找不到时间 / 价格列在启动前响亮失败，有效观测 < 3 个直接
+  `blocked`；样本 < 30 个收益只作方向性参考并写进 limitations。`risk_metrics.json` 保留逐日收盘与收益，
+  每个指标都能从这组输入复算。
+- **`scenario_sensitivity 1.0.0`**（params-only，`capabilities: []`）：调用方给显式恒等式
+  （`product` = Π factor^exponent / `sum` = Σ factor×exponent）+ 因子基准 + `oat` / `full` 网格 + 具名情景，
+  输出基准、情景表、格点表与 `inherited` 假设追踪；负基准小数指数、未声明因子、空网格 / 空情景在启动前
+  拒；基准为 0 时变化率给 null + 缺口，不写 0 冒充百分比。网格区间不是置信区间，摘要写明"不是预测"。
+- 三颗模块的 fixtures / golden / provenance 齐全；新增模块的 `LICENSE` 随包、`fixtures/` 由 `.npmignore`
+  排除（打包测试按 registry 自动覆盖）。
+
+### Changed
+
+- `list_analysis_modules` / `describe_analysis_module` 的真实模块清单从 1 颗扩到 3 颗：`financial_quality`
+  （横截面）→ `returns_risk`（序列）→ `scenario_sensitivity`（假设网格）。`capital-analysis-evidence` §6
+  改成三颗模块的输入契约，`capital-senior-analysis` §5 加"按输入形状选模块"，`docs/dev/senior-analysis.md`
+  的模块清单同步。
+
+### Notes
+
+- 版本：根包 + 四个随包嵌套包（chart-ui / config / watchlist / automation）+
+  `LOCAL_FETCH_CLIENT_VERSION` / `WIND_CLIENT_VERSION` 同步 2.31.2。
+- 回归：`npm test` **1808 pass / 0 fail**（新增 `returns_risk` 8 例、`scenario_sensitivity` 8 例：手算 golden、
+  坏行 / 重复日期 / 极端参数等失败路径，全部走真实 worker 端到端），`smoke:boot` 五颗角色 preset 全
+  `broken: null`、族行 23/23，`check:dsh` 40/40。
+- 本轮能力验证是模块协议 golden + 真实 worker，不是整条真机会话；Phase 6 的评测集会覆盖真实问答。
+
 ## [2.31.1] - 2026-11-25
 
 高级分析师的协作层收尾：子 Agent 按邻接表直连（P4），同时修掉真实会话暴露的三处问题——跨 Agent 读 profile

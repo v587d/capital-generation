@@ -1470,6 +1470,26 @@ test/senior-analyst.test.mjs
 
 **验收**：三种输入形状都验证过；每颗模块的 fixtures/golden/provenance 齐全。
 
+**进度（2026-11-25）**：两颗模块已实现，三种输入形状各有 golden 与真实 worker 回归。
+
+- `returns_risk 1.0.0`（original）：吃一份时间列 + 正价格序列（可选第二份基准）。输出区间 / 年化
+  收益、年化波动、最大回撤、夏普 / 索提诺 / Calmar、历史 VaR / CVaR，有基准才有 beta / 相关。
+  坏行跳过并写 `data_gaps`；重复日期、混用时间格式、找不到时间/价格列在启动前响亮失败；有效观测
+  < 3 个直接 `blocked`（不拿 1–2 个点硬算年化）。fixtures：`normal`（含基准）/ `no_benchmark` /
+  `bad_rows` / `ms_timezone` / `too_short` / `duplicate`。
+- `scenario_sensitivity 1.0.0`（original，**params-only**，`capabilities: []`）：调用方给显式恒等式
+  （`product` = Π factor^exponent，`sum` = Σ factor×exponent）+ 因子基准 + `grid`（`oat` / `full`）+
+  具名情景，输出基准、情景表、格点表与 `inherited` 假设追踪；负基准小数指数、未声明因子、空网格 /
+  空情景都在启动前拒。fixtures：`normal_grid` / `oat_division` / `sum_weighted` / `zero_base` /
+  `invalid_negative` / `invalid_scenario`。
+- 三种形状对照：`financial_quality`（横截面）→ `returns_risk`（序列）→ `scenario_sensitivity`
+  （假设网格）。模块结果仍只有指标 / 假设 / 方法 / 缺口；结论、情景叙事与失效条件归 senior。
+- 口径边界：`returns_risk` 不预测波动、不把历史 VaR 当未来承诺；`scenario_sensitivity` 的网格区间
+  不是置信区间或目标价，摘要与 limitations 都写明"恒等式取值，不是预测"。
+- 文档/技能：`docs/dev/senior-analysis.md` 模块清单、`capital-analysis-evidence` §6 三颗模块输入契约、
+  `capital-senior-analysis` §5 按输入形状选模块。打包仍由 registry 驱动：新模块 `LICENSE` 随包、
+  `fixtures/` 由 `.npmignore` 排除。
+
 ### Phase 6：加固与评估
 
 1. 评测集固定与逐案 pass/fail（D8）。

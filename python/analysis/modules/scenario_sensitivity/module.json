@@ -1,0 +1,105 @@
+{
+  "id": "scenario_sensitivity",
+  "version": "1.0.0",
+  "entrypoint": "module.py",
+  "runtime": "python",
+  "description": "假设网格与情景对比：按调用方给出的显式恒等式（乘积 / 加权和）计算目标值在不同因子假设下的取值，含基准、情景表与格点表（纯算术，不预测、不评级）",
+  "roles": ["senior_analyst"],
+  "capabilities": [],
+  "required_fields": [],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "target_name": { "type": "string", "maxLength": 64, "description": "目标名称，如 net_profit / roe / fcf" },
+      "target_unit": { "type": "string", "maxLength": 32, "description": "目标单位，如 CNY / ratio；省略不填" },
+      "model": { "type": "string", "enum": ["product", "sum"], "description": "product = Π factor^exponent；sum = Σ factor×exponent（默认 product）" },
+      "factors": {
+        "type": "array",
+        "maxItems": 4,
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string", "maxLength": 64 },
+            "base": { "type": "number", "description": "因子基准值；必须是同一口径、同一期的数" },
+            "unit": { "type": "string", "maxLength": 32 },
+            "exponent": { "type": "number", "description": "product 模型为幂次（可为负，如 1/权益 用 -1）；sum 模型为权重；默认 1" }
+          },
+          "required": ["name", "base"],
+          "additionalProperties": false
+        }
+      },
+      "grid": {
+        "type": "array",
+        "maxItems": 4,
+        "items": {
+          "type": "object",
+          "properties": {
+            "factor": { "type": "string", "maxLength": 64 },
+            "values": { "type": "array", "maxItems": 32, "items": { "type": "number" } }
+          },
+          "required": ["factor", "values"],
+          "additionalProperties": false
+        }
+      },
+      "grid_mode": { "type": "string", "enum": ["oat", "full"], "description": "oat = 单因子扫描（其余因子取基准）；full = 网格因子的笛卡尔积；默认 oat" },
+      "scenarios": {
+        "type": "array",
+        "maxItems": 12,
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string", "maxLength": 64 },
+            "values": {
+              "type": "object",
+              "description": "该情景下被改写的因子值；未给出的因子继承基准"
+            }
+          },
+          "required": ["name", "values"],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": ["target_name", "factors"],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": { "type": "string", "enum": ["completed", "partial", "blocked", "failed"] },
+      "summary": { "type": "string" },
+      "metrics": { "type": "object" },
+      "claims": { "type": "array" },
+      "assumptions": { "type": "array" },
+      "methodology_log": { "type": "array" },
+      "sensitivity": { "type": "object" },
+      "limitations": { "type": "array" },
+      "data_gaps": { "type": "array" },
+      "outputs": { "type": "array" }
+    },
+    "required": [
+      "status", "summary", "metrics", "claims", "assumptions", "methodology_log",
+      "sensitivity", "limitations", "data_gaps", "outputs"
+    ],
+    "additionalProperties": false
+  },
+  "assumptions": [
+    "目标是显式算术恒等式：product 模型 target = Π factor^exponent；sum 模型 target = Σ factor×exponent",
+    "因子基准值由调用方给出，本模块不判断其来源、口径或是否来自同一期",
+    "情景值由调用方给出；未在情景里出现的因子继承基准，并在 trace 里标 inherited",
+    "网格是单因子扫描（oat）或网格因子笛卡尔积（full），不做随机采样、不插值",
+    "输出只是同一恒等式在不同假设下的取值，不是预测、不是概率，也不构成收益承诺",
+    "product 模型下负基准值只允许整数指数；零基准值不允许负指数"
+  ],
+  "applicability": [
+    "目标可由 1–4 个因子按 product / sum 恒等式表达（如净利润 = 营收 × 净利率、ROE = 净利润 × 权益^-1）",
+    "因子基准值应来自同一口径、同一期；跨期或跨币种混用不在本模块校验",
+    "需要概率分布、反馈回路或非线性模型时，本模块不适用"
+  ],
+  "limits": {
+    "timeout_ms": 15000,
+    "max_input_rows": 200000,
+    "max_output_bytes": 1048576,
+    "max_log_bytes": 65536
+  },
+  "provenance": { "source_type": "original", "license": "MIT" }
+}

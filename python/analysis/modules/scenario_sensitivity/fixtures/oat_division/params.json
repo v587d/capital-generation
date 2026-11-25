@@ -1,0 +1,30 @@
+{
+  "target_name": "roe",
+  "target_unit": "ratio",
+  "model": "product",
+  "factors": [
+    {
+      "name": "net_profit",
+      "base": 50,
+      "unit": "CNY",
+      "exponent": 1
+    },
+    {
+      "name": "equity",
+      "base": 250,
+      "unit": "CNY",
+      "exponent": -1
+    }
+  ],
+  "grid": [
+    {
+      "factor": "equity",
+      "values": [
+        200,
+        250,
+        300
+      ]
+    }
+  ],
+  "grid_mode": "oat"
+}

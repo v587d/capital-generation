@@ -1,0 +1,31 @@
+{
+  "target_name": "net_profit",
+  "target_unit": "CNY",
+  "model": "product",
+  "factors": [
+    {
+      "name": "revenue",
+      "base": 1000,
+      "unit": "CNY"
+    },
+    {
+      "name": "net_margin",
+      "base": 0,
+      "unit": "ratio"
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "修复至 10%",
+      "values": {
+        "net_margin": 0.1
+      }
+    },
+    {
+      "name": "修复至 20%",
+      "values": {
+        "net_margin": 0.2
+      }
+    }
+  ]
+}

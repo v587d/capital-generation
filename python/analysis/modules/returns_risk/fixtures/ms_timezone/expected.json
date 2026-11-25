@@ -1,0 +1,24 @@
+{
+  "status": "completed",
+  "metrics": {
+    "observations": 3,
+    "returns_count": 2,
+    "total_return": 0.045,
+    "annualized_return": 255.243346,
+    "annualized_volatility": 1.683746,
+    "max_drawdown": -0.05,
+    "mean_daily_return": 0.025,
+    "best_day": 0.1,
+    "worst_day": -0.05,
+    "positive_day_ratio": 0.5,
+    "var": 0.035,
+    "cvar": 0.05,
+    "confidence": 0.9,
+    "risk_free_rate": 0.02,
+    "annualization": 252,
+    "sharpe_ratio": 151.580685,
+    "sortino_ratio": 454.742056,
+    "calmar_ratio": 5104.866916
+  },
+  "data_gaps": []
+}

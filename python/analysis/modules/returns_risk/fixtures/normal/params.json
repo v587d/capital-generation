@@ -1,0 +1,7 @@
+{
+  "periods_per_year": 252,
+  "risk_free_rate": 0.0,
+  "confidence": 0.95,
+  "price_dataset_id": "ds_price",
+  "benchmark_dataset_id": "ds_benchmark"
+}

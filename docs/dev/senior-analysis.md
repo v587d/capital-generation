@@ -101,12 +101,12 @@ capital-analysis/runs/<analysis_id>/
 ### 模块协议要点
 
 - 静态 registry（`src/analysis/registry.ts` 的 id 白名单），不扫目录；只跑仓库内审查过的模块
-  （`python/analysis/modules/<id>/`，manifest 住 `module.json`）。当前登记 `hello`（环境自检，不产出结论）
-  与 `financial_quality`（利润率 / ROE・DuPont / 现金转换 / 杠杆 / 利息覆盖 / 营运资本）。
+  （`python/analysis/modules/<id>/`，manifest 住 `module.json`）。当前登记 `hello`（环境自检，不产出结论）、
+  `financial_quality`（三表比率）、`returns_risk`（价格序列收益 / 风险）、`scenario_sensitivity`（假设网格求值）。
 - `financial_quality` 吃**三份 Dataset**（利润表 / 资产负债表 / 现金流量表），按列签名识别、按
   `period_end_ms`（缺则 `period`）对齐；**不要求先拼宽表**——没有任何入口能产出宽表。缺报表、缺列、
   分母无经济含义（负净资产、零利息、净利 ≤ 0）一律写 `data_gaps`，对应指标缺席而不是写 0；缺整张利润表
-  时 `status=blocked`，其余有缺口的情况最多 `partial`。
+  时 `status=blocked`，其余有缺口的情况最多 `partial`。`returns_risk` 吃价格序列（可选基准）、`scenario_sensitivity` 只吃参数（显式恒等式 + 网格 / 情景，不读 Dataset）：横截面 / 序列 / 假设网格三种形状各一颗。
 - 报告期标签取报告期键（`period_end_ms` → 日期），**不取数据源的 `period` 列**：fuyao A 股三表那列实测是常量
   `"annual"`，当成标签会让所有报告期同名、`period` 参数不可用（2026-11-24 真实会话踩到，11 次重试全被拒）。
 - 每颗模块的 `fixtures/`（正常 / 边界 / 失败 + **手算** golden）随仓库、**不进发布包**（`fixtures/.npmignore`）；

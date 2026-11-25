@@ -1,0 +1,30 @@
+{
+  "target_name": "profit",
+  "target_unit": "CNY",
+  "model": "sum",
+  "factors": [
+    {
+      "name": "revenue",
+      "base": 1000,
+      "unit": "CNY",
+      "exponent": 1
+    },
+    {
+      "name": "cost",
+      "base": 600,
+      "unit": "CNY",
+      "exponent": -1
+    }
+  ],
+  "grid": [
+    {
+      "factor": "cost",
+      "values": [
+        550,
+        600,
+        650
+      ]
+    }
+  ],
+  "grid_mode": "oat"
+}

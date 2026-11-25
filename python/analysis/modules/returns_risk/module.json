@@ -1,0 +1,66 @@
+{
+  "id": "returns_risk",
+  "version": "1.0.0",
+  "entrypoint": "module.py",
+  "runtime": "python",
+  "description": "价格序列的收益与风险：区间/年化收益、年化波动、最大回撤、夏普/索提诺/Calmar、历史 VaR/CVaR，可选基准的 beta 与相关（日频序列算术，不预测、不评级）",
+  "roles": ["senior_analyst"],
+  "capabilities": ["dataset.read"],
+  "required_fields": [],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "price_dataset_id": { "type": "string", "maxLength": 128, "description": "价格序列所在 Dataset；只有一份像日线序列时可省略" },
+      "benchmark_dataset_id": { "type": "string", "maxLength": 128, "description": "可选基准序列（如指数日线），用于 beta 与相关；不传则不计算" },
+      "price_column": { "type": "string", "maxLength": 64, "description": "价格列名；省略时按 close / adj_close / close_price / price / nav 识别" },
+      "time_column": { "type": "string", "maxLength": 64, "description": "时间列名；省略时优先用 Dataset 的 time_coverage 列，再按 trade_date_ms / date 等识别" },
+      "timezone": { "type": "string", "maxLength": 64, "description": "数值时间轴（epoch 毫秒）标注日期用的 IANA 时区，如 Asia/Shanghai；省略按 UTC 标注" },
+      "risk_free_rate": { "type": "number", "minimum": -1, "maximum": 1, "description": "年化无风险利率（小数，0.015 = 1.5%）；省略为 0 并在摘要与假设里披露" },
+      "confidence": { "type": "number", "minimum": 0.5, "maximum": 0.999, "description": "历史 VaR/CVaR 的置信度，默认 0.95" },
+      "periods_per_year": { "type": "integer", "minimum": 1, "maximum": 366, "description": "年化因子（日频默认 252）；周频用 52、月频用 12" }
+    },
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": { "type": "string", "enum": ["completed", "partial", "blocked", "failed"] },
+      "summary": { "type": "string" },
+      "metrics": { "type": "object" },
+      "claims": { "type": "array" },
+      "assumptions": { "type": "array" },
+      "methodology_log": { "type": "array" },
+      "sensitivity": { "type": "object" },
+      "limitations": { "type": "array" },
+      "data_gaps": { "type": "array" },
+      "outputs": { "type": "array" }
+    },
+    "required": [
+      "status", "summary", "metrics", "claims", "assumptions", "methodology_log",
+      "sensitivity", "limitations", "data_gaps", "outputs"
+    ],
+    "additionalProperties": false
+  },
+  "assumptions": [
+    "价格口径沿用 Dataset 的取数参数（qfq / hfq / none），本模块不检测也不做复权调整",
+    "年化用参数 periods_per_year（默认 252）与样本内几何收益；日历天数不参与年化",
+    "波动率是日收益样本标准差（ddof=1）× sqrt(periods_per_year)",
+    "夏普 / 索提诺 =（年化收益 − risk_free_rate）/ 对应年化风险；risk_free_rate 为年化小数，省略时按 0 披露",
+    "VaR / CVaR 为历史法单期损失（正数 = 亏损幅度），置信度取参数",
+    "停牌或平盘日的价格重复会形成 0 收益，按原序列计入，不剔除",
+    "beta / 相关按重叠交易日的日收益计算；基准与标的不同复权口径时 beta 有偏"
+  ],
+  "applicability": [
+    "单只标的的日频（或周频、月频）价格序列，一行一个时间点；价格列必须是正数",
+    "时间列是 ISO 日期（YYYY-MM-DD）或 epoch 毫秒；同一时间不得重复",
+    "可选一份基准序列（如指数），用重叠交易日的收益计算 beta 与相关",
+    "不适用于分钟级高频、跨币种拼接或需要分红再投资的场景（除非数据本身已是复权价）"
+  ],
+  "limits": {
+    "timeout_ms": 30000,
+    "max_input_rows": 200000,
+    "max_output_bytes": 1048576,
+    "max_log_bytes": 65536
+  },
+  "provenance": { "source_type": "original", "license": "MIT" }
+}

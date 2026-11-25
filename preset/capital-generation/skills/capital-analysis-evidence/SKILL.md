@@ -75,7 +75,9 @@ description: Use when freezing or reviewing the inputs of a Capital analysis —
 - `blocking: false` 表示可以先出降级结论；`true` 表示没有它就只能 blocked。
 - 不要在请求里指定数据源或给服务商键名——那是主 Agent 和取数侧的事。
 
-## 6. 首个模块 `financial_quality` 的输入契约
+## 6. 三个模块的输入契约
+
+**`financial_quality`（三表横截面）**
 
 - 吃**三份 Dataset**：利润表（`operating_income` + `net_profit`）、资产负债表（`assets_total` +
   `holder_equity_total`）、现金流量表（`act_cash_flow_net`）。靠列签名识别，不需要预拼宽表。
@@ -91,6 +93,25 @@ description: Use when freezing or reviewing the inputs of a Capital analysis —
   分母无经济含义）、`outputs`（每个指标的公式与输入值，可逐项复算）。
 - `status` 语义：三张表齐且零缺口 → `completed`；有缺口 → `partial`；缺利润表 → `blocked`。
   `partial` 不是失败，是"这几项没算"的诚实表达，如实转述。
+
+**`returns_risk`（单价格序列）**
+
+- 吃一份价格序列 Dataset：时间列（`time_coverage` 列或 `date` / `trade_date_ms` 等）＋正价格列
+  （`close` / `adj_close` / `close_price` / `price` / `nav`）；可选第二份做基准（beta / 相关）。
+- `params`：`price_dataset_id` / `benchmark_dataset_id`（同型多份时指名）、`risk_free_rate`（年化小数，
+  省略按 0 并在摘要与假设里披露）、`confidence`（VaR 默认 0.95）、`periods_per_year`（默认 252）、
+  `timezone`（数值时间轴标日期用）。有效观测少于 3 个 → `blocked`；坏行跳过并写进 `data_gaps`。
+- `metrics`：区间/年化收益、年化波动、最大回撤、夏普 / 索提诺 / Calmar、历史 VaR / CVaR，给了基准才
+  有 beta / 相关。样本少于 30 个收益只是"方向性参考"，模块会写进 limitations。
+
+**`scenario_sensitivity`（假设网格）**
+
+- **不读 Dataset**，只吃 `params`：`target_name` + 1–4 个 `factors`（`base`，可选 `exponent`）＋
+  `grid`（因子扫描值）和/或 `scenarios`（具名情景）；`model` = `product`（Π factor^exponent）或
+  `sum`（Σ factor×exponent）。
+- 因子基准值来自已核过的结果（如 `financial_quality` 的 `metrics` 或 profile 事实），不要凭记忆填；
+  情景里没写的因子继承基准，输出的 `inherited` 会标出来。
+- 输出是**调用方恒等式在不同假设下的取值**：不是概率、不是预测；网格最小/最大不是置信区间，也不是目标价。
 
 ## 7. 证据不足也要给结论
 

@@ -1,0 +1,22 @@
+{
+  "target_name": "net_profit",
+  "model": "product",
+  "factors": [
+    {
+      "name": "revenue",
+      "base": 1000
+    },
+    {
+      "name": "net_margin",
+      "base": 0.2
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "s",
+      "values": {
+        "unknown": 1
+      }
+    }
+  ]
+}

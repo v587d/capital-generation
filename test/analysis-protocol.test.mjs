@@ -75,7 +75,7 @@ function artifact(overrides = {}) {
 
 test('模块 registry：hello 与 financial_quality 显式登记，manifest 字段齐全且声明 senior_analyst', () => {
   const modules = listAnalysisModules()
-  assert.deepEqual(modules.map((entry) => entry.manifest.id), ['hello', 'financial_quality'], 'registry 是静态白名单：新增模块必须改这里')
+  assert.deepEqual(modules.map((entry) => entry.manifest.id), ['hello', 'financial_quality', 'returns_risk', 'scenario_sensitivity'], 'registry 是静态白名单：新增模块必须改这里')
   for (const entry of modules) {
     // `roles` uses the semantic key, never the preset id.
     assert.equal(entry.manifest.roles.includes('senior_analyst'), true, `${entry.manifest.id} 的 roles 必须是语义键`)

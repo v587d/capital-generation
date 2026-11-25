@@ -147,7 +147,7 @@ async function moduleRunDir(root, record) {
 
 test('financial_quality 登记在静态 registry，manifest 声明可复算与来源', async () => {
   const ids = listAnalysisModules().map((entry) => entry.manifest.id)
-  assert.deepEqual(ids, ['hello', 'financial_quality'], 'registry 是静态白名单，按登记顺序列出')
+  assert.deepEqual(ids, ['hello', 'financial_quality', 'returns_risk', 'scenario_sensitivity'], 'registry 是静态白名单，按登记顺序列出')
 
   const entry = analysisModuleById(MODULE)
   assert.equal(entry.manifest.version, '1.0.0')
