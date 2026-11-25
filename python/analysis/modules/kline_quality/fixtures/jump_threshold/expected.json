@@ -1,0 +1,24 @@
+{
+  "status": "completed",
+  "metrics": {
+    "rows_total": 5,
+    "rows_cleaned": 5,
+    "rejected_rows": 0,
+    "suspect_rows": 0,
+    "volume_missing_rows": 0,
+    "duplicate_dates": 0,
+    "trading_days": 5,
+    "jump_threshold": 0.7,
+    "max_abs_daily_change": 0.6,
+    "rejected_time_unparseable": 0,
+    "rejected_price_invalid": 0,
+    "rejected_high_below_max": 0,
+    "rejected_low_above_min": 0,
+    "rejected_duplicate_date": 0,
+    "first_date": "2024-01-02",
+    "last_date": "2024-01-08",
+    "first_close": 100,
+    "last_close": 158
+  },
+  "data_gaps": []
+}

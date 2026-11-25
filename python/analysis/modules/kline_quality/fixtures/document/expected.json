@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "analysis_input_invalid",
+    "message_contains": ["document 型", "表格数据"]
+  }
+}

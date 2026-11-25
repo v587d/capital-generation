@@ -7,6 +7,50 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**、2.9.0 的选择器收敛与质检前置——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [2.31.4] - 2026-11-25
+
+高级分析师 §9.3 的 P1 分析模块全部落地：新增 8 颗受控模块，静态 registry 从 4 颗扩到 12 颗，
+输入形状从「三表 / 序列 / 参数」扩到五类（三表勾稽、两期利润表、OHLC 日 K、peers 横截面、
+组合权重+窗口）。每颗都带手算 golden fixtures、失败路径与单测；缺数据写缺口、不填默认值，
+不评级、不给目标价。
+
+### Added
+
+- **`statement_integrity 1.0.0`**：资产负债恒等式、经营/投资/筹资现金流对账、留存收益滚动；差异与
+  容差写进结果（默认 0.1%），差异是发现不是缺口；缺 `retained_earnings` / `dividends_paid` 时只报缺口。
+- **`kline_quality 1.0.0`**：OHLC 日 K 清洗；非正价格、high/low 关系、重复日期逐行拒绝并计数，
+  跳变只标 suspect（默认 50%）、不删除，缺失成交量不当 0；输出清洗序列与完整拒绝清单。
+- **`valuation_sensitivity 1.0.0`**：显式 FCF + WACC（或 CAPM 推导）+ 终值增长，算 EV → 股权 → 每股
+  模型值与 WACC×g 二维网格；`wacc ≤ g` 的格点写 null + 缺口；摘要明确「不是目标价、不是预测」。
+- **`comps_valuation 1.0.0`**：peers 横截面算 P/E、P/B、P/S、EV/EBITDA 中位数与有效样本数，可选
+  subject 相对溢价；亏损公司 P/E 退出样本并单独计数。
+- **`earnings_bridge 1.0.0`**：两期净利润差额拆成收入/净利率/交互与税前/税率/交互两组恒等式，
+  三项效应必须加回原差额。
+- **`technical_indicators 1.0.0`**：SMA / EMA / RSI / MACD / 布林带 / ATR 最新值与交叉状态；
+  窗口不完整只报缺口，不缩短窗口。
+- **`simple_backtest 1.0.0`**：`sma_cross` / `price_above_sma` 样本内回测，t+1 收盘成交、单边手续费、
+  净值曲线/交易记录/回撤；参数由调用方给定，不做寻优。
+- **`portfolio_stress 1.0.0`**：给定权重与历史窗口，组合收益、逐持仓贡献、HHI 与最大权重；
+  窗口越界写缺口、不借日期。
+- 每颗模块都带 `module.json` + `module.py` + `fixtures/`（正常/边界/失败，**手算** golden，独立
+  `.npmignore` 排除出发布包）+ `LICENSE` + `test/analysis-*.test.mjs`；跑 Python 的用例都带
+  `runtimeReady()` 守卫（CI 无私有运行时则 skip）。
+
+### Changed
+
+- 静态 registry 12 颗；`list_analysis_modules` / `describe_analysis_module` 直接可见，不需要文档同步。
+- `capital-analysis-evidence` §6 改成 12 颗模块的输入契约；`capital-senior-analysis` §5 按输入形状挑模块。
+- README「高级分析师」快速了解改成 11 颗模块的「输入 / 模块 / 能回答什么」表；插件页中英文索引与
+  `docs/agent-roles.md` 同步。
+
+### Notes
+
+- 回归：`npm test` **1898 pass / 0 fail**；CI 形态（空 `DSH_HOME`）**1801 pass / 97 skip / 0 fail**；
+  `npm run smoke:boot` 五颗角色 preset `broken: null`；`npm run check:dsh` 40/40。
+- 版本：根包 + 四个随包嵌套包（chart-ui / config / watchlist / automation）+
+  `LOCAL_FETCH_CLIENT_VERSION` / `WIND_CLIENT_VERSION` 同步 2.31.4。
+- 剩余：§9.4 暂不做；P1 清单已清空，后续按需补模块与数据面。
+
 ## [2.31.3] - 2026-11-25
 
 高级分析师 Phase 6 收口：7 案真实会话评测、成本观测工具、D1 可编辑脚本重评估，以及评测暴露的路由与

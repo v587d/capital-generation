@@ -1,0 +1,10 @@
+{
+  "projections": [
+    100,
+    110
+  ],
+  "wacc": 0.08,
+  "terminal_growth": 0.08,
+  "net_debt": 0,
+  "shares_outstanding": 100
+}

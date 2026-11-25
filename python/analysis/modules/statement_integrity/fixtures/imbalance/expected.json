@@ -1,0 +1,26 @@
+{
+  "status": "completed",
+  "metrics": {
+    "balance_checked": true,
+    "balance_residual": 600000000,
+    "balance_scale": 300000000000,
+    "balance_residual_ratio": 0.002,
+    "balance_within_tolerance": false,
+    "cash_checked": true,
+    "cash_residual": 0,
+    "cash_scale": 25000000000,
+    "cash_residual_ratio": 0,
+    "cash_within_tolerance": true,
+    "retained_earnings_checked": true,
+    "retained_earnings_residual": 0,
+    "retained_earnings_scale": 98000000000,
+    "retained_earnings_residual_ratio": 0,
+    "retained_earnings_within_tolerance": true,
+    "checks_run": 3,
+    "checks_failed": 1,
+    "tolerance_ratio": 0.001,
+    "tolerance_abs": 0,
+    "currency": "CNY"
+  },
+  "data_gaps": []
+}

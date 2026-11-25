@@ -1,0 +1,22 @@
+{
+  "status": "blocked",
+  "metrics": {
+    "rows_total": 3,
+    "rows_cleaned": 0,
+    "rejected_rows": 3,
+    "suspect_rows": 0,
+    "volume_missing_rows": 0,
+    "duplicate_dates": 0,
+    "trading_days": 0,
+    "jump_threshold": 0.5,
+    "max_abs_daily_change": 0.0,
+    "rejected_time_unparseable": 1,
+    "rejected_price_invalid": 1,
+    "rejected_high_below_max": 1,
+    "rejected_low_above_min": 0,
+    "rejected_duplicate_date": 0
+  },
+  "data_gaps": [
+    "清洗后没有合法 bar：3 行全部被拒绝（time_unparseable 1、price_invalid 1、high_below_max 1）：明细见 outputs/kline_quality.json"
+  ]
+}

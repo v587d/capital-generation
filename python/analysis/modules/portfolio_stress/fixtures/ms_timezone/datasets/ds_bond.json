@@ -1,0 +1,15 @@
+{
+  "dataset_id": "ds_bond",
+  "rows": [
+    { "trade_date_ms": 1704124800000, "close": 50 },
+    { "trade_date_ms": 1704211200000, "close": 50.5 },
+    { "trade_date_ms": 1704297600000, "close": 51 },
+    { "trade_date_ms": 1704384000000, "close": 52 }
+  ],
+  "time_coverage": {
+    "column": "trade_date_ms",
+    "from": "2024-01-02",
+    "to": "2024-01-05",
+    "format": "epoch_ms"
+  }
+}

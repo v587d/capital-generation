@@ -1,0 +1,7 @@
+{
+  "dataset_id": "ds_kline",
+  "rows": [
+    { "date": "2024-01-02", "close": 101, "volume": 1000 },
+    { "date": "2024-01-03", "close": 102, "volume": 1100 }
+  ]
+}

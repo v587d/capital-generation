@@ -1,0 +1,62 @@
+{
+  "id": "statement_integrity",
+  "version": "1.0.0",
+  "entrypoint": "module.py",
+  "runtime": "python",
+  "description": "三表勾稽自检：资产负债恒等式、经营/投资/筹资现金流与现金净增加额对账、留存收益滚动；只报差异与缺口，不评级、不判断造假",
+  "roles": ["senior_analyst"],
+  "capabilities": ["dataset.read"],
+  "required_fields": [],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "period": { "type": "string", "maxLength": 32, "description": "报告期：2024 / 2024-FY / 2024-12-30 都认，缺省取最新一期；报错会列出可选报告期" },
+      "balance_dataset_id": { "type": "string", "maxLength": 128 },
+      "income_dataset_id": { "type": "string", "maxLength": 128 },
+      "cashflow_dataset_id": { "type": "string", "maxLength": 128 },
+      "tolerance_ratio": { "type": "number", "minimum": 0, "description": "差异容差（占对账基准的比例，默认 0.001 = 0.1%）；原样写进结果，不隐含行业或规模假设" },
+      "tolerance_abs": { "type": "number", "minimum": 0, "description": "差异容差的绝对项（原币元，默认 0）；与比例项相加后比较" }
+    },
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": { "type": "string", "enum": ["completed", "partial", "blocked", "failed"] },
+      "summary": { "type": "string" },
+      "metrics": { "type": "object" },
+      "claims": { "type": "array" },
+      "assumptions": { "type": "array" },
+      "methodology_log": { "type": "array" },
+      "sensitivity": { "type": "object" },
+      "limitations": { "type": "array" },
+      "data_gaps": { "type": "array" },
+      "outputs": { "type": "array" }
+    },
+    "required": [
+      "status", "summary", "metrics", "claims", "assumptions", "methodology_log",
+      "sensitivity", "limitations", "data_gaps", "outputs"
+    ],
+    "additionalProperties": false
+  },
+  "assumptions": [
+    "资产负债恒等式按 assets_total = total_debt + holder_equity_total 校验；total_debt 是「负债合计」，不区分有息与无息",
+    "现金流对账按 act_cash_flow_net + invest_cash_flow_net + financing_cash_flow_net = cash_equivalents_net_addition；只有数据集含 effect_of_exchange_rate_changes 列时才把汇率影响计入左边",
+    "留存收益滚动只在资产负债表有 retained_earnings 列且找到上一期时校验：RE_end = RE_prev + net_profit - dividends_paid - 盈余公积增加（balance 有 surplus_reserve 列时扣除其增量）",
+    "容差由参数显式给出：|差异| ≤ tolerance_abs + tolerance_ratio × 对账基准；基准取同一恒等式两边绝对值中的较大者，不按行业或规模另设阈值",
+    "差异是数据质量信号，不是投资结论：本模块不判断报表是否造假、不评级，也不给目标价"
+  ],
+  "applicability": [
+    "三张报表各一份 Dataset（与 financial_quality 可共用同一批），需要 period_end_ms 或 period 作为共同报告期键",
+    "A 股与美股合并报表均可；金额按数据集原币，不做币种换算",
+    "留存收益滚动需要额外的资产负债表列（retained_earnings，及可选的 surplus_reserve、dividends_paid）；缺列时只报缺口，不估算",
+    "只校验恒等式，不检查科目口径、会计政策或附注披露；差异为 0 也不证明报表真实"
+  ],
+  "limits": {
+    "timeout_ms": 30000,
+    "max_input_rows": 200000,
+    "max_output_bytes": 1048576,
+    "max_log_bytes": 65536
+  },
+  "provenance": { "source_type": "original", "license": "MIT" }
+}

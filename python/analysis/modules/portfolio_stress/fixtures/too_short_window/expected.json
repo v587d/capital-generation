@@ -1,0 +1,17 @@
+{
+  "status": "partial",
+  "metrics": {
+    "positions_count": 2,
+    "windows_count": 2,
+    "hhi": 0.52,
+    "max_weight": 0.6,
+    "window_2_return": 0.064,
+    "worst_window_return": 0.064,
+    "best_window_return": 0.064
+  },
+  "data_gaps": [
+    "窗口 只有单点（2024-03-04..2024-03-05）：ds_equity 窗口内只有 1 个可用价格（至少 2 个才能算收益）",
+    "窗口 只有单点（2024-03-04..2024-03-05）：ds_bond 窗口内只有 1 个可用价格（至少 2 个才能算收益）",
+    "窗口 只有单点（2024-03-04..2024-03-05）：2/2 个持仓缺区间收益，组合收益未计算（不按剩余权重重归一化）"
+  ]
+}

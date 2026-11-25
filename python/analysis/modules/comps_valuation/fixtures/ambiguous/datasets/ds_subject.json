@@ -1,0 +1,15 @@
+{
+  "dataset_id": "ds_subject",
+  "rows": [
+    {
+      "ticker": "T",
+      "currency": "CNY",
+      "market_cap": 2200,
+      "net_profit": 100,
+      "equity": 1000,
+      "revenue": 1100,
+      "enterprise_value": 2400,
+      "ebitda": 200
+    }
+  ]
+}

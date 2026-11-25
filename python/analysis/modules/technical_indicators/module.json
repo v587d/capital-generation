@@ -1,0 +1,170 @@
+{
+  "id": "technical_indicators",
+  "version": "1.0.0",
+  "entrypoint": "module.py",
+  "runtime": "python",
+  "description": "技术指标复盘：对价格序列算 SMA/EMA、RSI、MACD、布林带与 ATR 的最新值与交叉状态，逐项披露窗口与样本不足；不预测方向、不评级",
+  "roles": [
+    "senior_analyst"
+  ],
+  "capabilities": [
+    "dataset.read"
+  ],
+  "required_fields": [],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "price_dataset_id": {
+        "type": "string",
+        "maxLength": 128,
+        "description": "价格序列 Dataset；只有一份像日线序列时可省略"
+      },
+      "price_column": {
+        "type": "string",
+        "maxLength": 64,
+        "description": "价格列名；省略按 close / adj_close / close_price / price 识别"
+      },
+      "time_column": {
+        "type": "string",
+        "maxLength": 64,
+        "description": "时间列名；省略优先用 time_coverage 列，再按 trade_date_ms / date 等识别"
+      },
+      "timezone": {
+        "type": "string",
+        "maxLength": 64,
+        "description": "数值时间轴（epoch 毫秒）标注日期用的 IANA 时区；省略按 UTC"
+      },
+      "sma_windows": {
+        "type": "array",
+        "maxItems": 4,
+        "items": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "description": "SMA 窗口列表，如 [5, 10, 20, 60]；省略不算 SMA"
+      },
+      "ema_windows": {
+        "type": "array",
+        "maxItems": 4,
+        "items": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "description": "EMA 窗口列表；省略不算 EMA"
+      },
+      "rsi_period": {
+        "type": "integer",
+        "minimum": 2,
+        "description": "RSI 周期（如 14）；省略不算 RSI"
+      },
+      "macd_fast": {
+        "type": "integer",
+        "minimum": 2,
+        "description": "MACD 快线周期（默认 12；给出任一 macd_* 参数即按默认补齐计算 MACD）"
+      },
+      "macd_slow": {
+        "type": "integer",
+        "minimum": 2,
+        "description": "MACD 慢线周期（默认 26；必须大于 macd_fast）"
+      },
+      "macd_signal": {
+        "type": "integer",
+        "minimum": 2,
+        "description": "MACD 信号线周期（默认 9）"
+      },
+      "boll_period": {
+        "type": "integer",
+        "minimum": 2,
+        "description": "布林带均线周期（默认 20；给出 boll_period 或 boll_multiplier 即计算布林带）"
+      },
+      "boll_multiplier": {
+        "type": "number",
+        "minimum": 0,
+        "description": "布林带标准差倍数（默认 2）"
+      },
+      "atr_period": {
+        "type": "integer",
+        "minimum": 2,
+        "description": "ATR 周期（省略不算 ATR；常用 14）；需要 high/low/close 三列"
+      }
+    },
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string",
+        "enum": [
+          "completed",
+          "partial",
+          "blocked",
+          "failed"
+        ]
+      },
+      "summary": {
+        "type": "string"
+      },
+      "metrics": {
+        "type": "object"
+      },
+      "claims": {
+        "type": "array"
+      },
+      "assumptions": {
+        "type": "array"
+      },
+      "methodology_log": {
+        "type": "array"
+      },
+      "sensitivity": {
+        "type": "object"
+      },
+      "limitations": {
+        "type": "array"
+      },
+      "data_gaps": {
+        "type": "array"
+      },
+      "outputs": {
+        "type": "array"
+      }
+    },
+    "required": [
+      "status",
+      "summary",
+      "metrics",
+      "claims",
+      "assumptions",
+      "methodology_log",
+      "sensitivity",
+      "limitations",
+      "data_gaps",
+      "outputs"
+    ],
+    "additionalProperties": false
+  },
+  "assumptions": [
+    "价格口径沿用 Dataset 的取数参数（qfq / hfq / none），本模块不检测也不做复权调整",
+    "所有指标只用收盘价序列按标准公式计算：SMA 算术平均、EMA 平滑系数 2/(n+1)、RSI 用 Wilder 平滑、MACD 为 EMA 差与信号线 EMA、布林带为 SMA ± 倍数×总体标准差、ATR 用真实波幅的 Wilder 平滑",
+    "指标值只在窗口完整时给出；样本不足的窗口写进 data_gaps，不用更短窗口或默认值凑数",
+    "交叉状态是「最新一根与前一根的相对位置」，是复盘条件，不是买卖信号或方向预测",
+    "指标对复权口径与停牌处理敏感；不同数据源的复权价不可混算"
+  ],
+  "applicability": [
+    "单只标的的日频或周频价格序列：一行一个时间点，价格为正数；至少 2 个观测，指标窗口不足时只报缺口",
+    "ATR 需要 open/high/low/close 中的 high/low/close 三列；缺列时 ATR 写缺口，不影响其他指标",
+    "A 股、港股、美股与指数均可；分钟级高频、跨市场拼接或缺失大段区间的数据不适用",
+    "不适用于形态识别、量价择时、分钟级信号或任何形式的交易建议"
+  ],
+  "limits": {
+    "timeout_ms": 30000,
+    "max_input_rows": 200000,
+    "max_output_bytes": 1048576,
+    "max_log_bytes": 65536
+  },
+  "provenance": {
+    "source_type": "original",
+    "license": "MIT"
+  }
+}

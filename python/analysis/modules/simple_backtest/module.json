@@ -1,0 +1,66 @@
+{
+  "id": "simple_backtest",
+  "version": "1.0.0",
+  "entrypoint": "module.py",
+  "runtime": "python",
+  "description": "单标的均线规则的历史回测：按下一根收盘执行、默认含手续费，输出净值曲线、交易记录与区间统计；只说明历史上发生了什么，不预测、不评级",
+  "roles": ["senior_analyst"],
+  "capabilities": ["dataset.read"],
+  "required_fields": [],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "price_dataset_id": { "type": "string", "maxLength": 128, "description": "价格序列 Dataset；只有一份像日线序列时可省略" },
+      "price_column": { "type": "string", "maxLength": 64, "description": "价格列名；省略按 close / adj_close / close_price / price 识别" },
+      "time_column": { "type": "string", "maxLength": 64, "description": "时间列名；省略优先用 time_coverage 列，再按 trade_date_ms / date 等识别" },
+      "timezone": { "type": "string", "maxLength": 64, "description": "数值时间轴（epoch 毫秒）标注日期用的 IANA 时区；省略按 UTC" },
+      "rule": { "type": "string", "enum": ["sma_cross", "price_above_sma"], "description": "sma_cross = 快线上穿慢线持有、下穿空仓；price_above_sma = 收盘价高于均线持有、否则空仓" },
+      "fast_window": { "type": "integer", "minimum": 2, "description": "快线 / 单均线窗口（如 5）" },
+      "slow_window": { "type": "integer", "minimum": 2, "description": "慢线窗口（仅 sma_cross 需要，如 20；必须大于 fast_window）" },
+      "initial_capital": { "type": "number", "minimum": 1, "description": "初始资金（原币），默认 1；只影响金额规模，不影响收益率" },
+      "fee_rate": { "type": "number", "minimum": 0, "description": "单边手续费率（小数，0.001 = 0.1%），默认 0 并在结果里披露" }
+    },
+    "required": ["rule", "fast_window"],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": { "type": "string", "enum": ["completed", "partial", "blocked", "failed"] },
+      "summary": { "type": "string" },
+      "metrics": { "type": "object" },
+      "claims": { "type": "array" },
+      "assumptions": { "type": "array" },
+      "methodology_log": { "type": "array" },
+      "sensitivity": { "type": "object" },
+      "limitations": { "type": "array" },
+      "data_gaps": { "type": "array" },
+      "outputs": { "type": "array" }
+    },
+    "required": [
+      "status", "summary", "metrics", "claims", "assumptions", "methodology_log",
+      "sensitivity", "limitations", "data_gaps", "outputs"
+    ],
+    "additionalProperties": false
+  },
+  "assumptions": [
+    "信号在第 t 根收盘算出、按第 t+1 根收盘执行：不使用未来数据，也不假设盘中成交",
+    "只做多、空仓二态：持有期收益按收盘价到收盘价，卖出后空仓收益为 0",
+    "手续费按单边 fee_rate 从每次买入与卖出金额中扣除；默认 0 时必须原样披露“未扣手续费”",
+    "回测使用样本内价格：参数是调用方给的，模块不做参数寻优、不选择最佳窗口，也不做样本外检验",
+    "结果只描述这段历史上该规则发生了什么；不构成策略推荐、收益预测或评级"
+  ],
+  "applicability": [
+    "单只标的的日频或周频价格序列：一行一个时间点，价格为正数；有效观测至少为 max(窗口) + 2",
+    "只支持 sma_cross 与 price_above_sma 两条规则；需要其他规则时本模块不适用",
+    "A 股、港股、美股与指数均可；复权口径由调用方选定，跨口径比较不适用",
+    "不适用于高频、做空、杠杆、组合层回测或需要交易成本模型的场景"
+  ],
+  "limits": {
+    "timeout_ms": 30000,
+    "max_input_rows": 200000,
+    "max_output_bytes": 1048576,
+    "max_log_bytes": 65536
+  },
+  "provenance": { "source_type": "original", "license": "MIT" }
+}

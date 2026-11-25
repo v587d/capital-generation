@@ -708,6 +708,13 @@ src/analysis/registry.ts
 - `kline_quality`（OHLC 清洗、异常 bar 拒绝、缺失成交量不当零）
 - `comps_valuation` / `earnings_bridge` / `portfolio_stress` / `technical_indicators` / `simple_backtest`
 
+**进度（2026-11-25）**：八颗全部实现，登记进静态 registry（12 颗：4 颗既有 + 8 颗 P1）。
+每颗都有 `module.json` / `module.py` / 手算 golden fixtures（正常 / 边界 / 失败）/ `fixtures/README.md` /
+`LICENSE`，并配 `test/analysis-*.test.mjs` 单测；`fixtures/` 由各目录 `.npmignore` 排除出发布包。
+输入形状在三种基础上扩到五类：三表（+勾稽）、利润表两期、价格序列、peers 横截面、组合权重+窗口，
+参数型仍不读 Dataset。共同纪律：缺数据写 `data_gaps`、不填默认值、不输出评级/目标价/收益承诺；
+回测类写明样本内与参数由调用方给定、不做寻优。回归见 `npm test` 与各 `test/analysis-*` 用例。
+
 ### 9.4 暂不做
 
 - 通用因子挖掘；机器学习；期权定价；银行/保险专用模型；私人市场估值；税务优化；
@@ -1519,10 +1526,10 @@ test/senior-analyst.test.mjs
    （千分位金额被拆 token、"沪深300"简称数字）同步修复并加回归。发布见 2.31.3。
 
 > **阶段收口（2026-11-25）**：Phase 0–6 全部完成。发布对应关系：2.31.0（P0–P3）→ 2.31.1（P4）→
-> 2.31.2（P5；CI 环境缺口导致 npm 发布失败，内容随 2.31.3 一并发布）→ 2.31.3（P6 + CI 修复，
-> npm `latest`）。之后只剩 §9.3 的 P1 模块与数据面按需补，不再有阶段性前置。
+> 2.31.2（P5；CI 环境缺口导致 npm 发布失败，内容随 2.31.3 一并发布）→ 2.31.3（P6 + CI 修复）→
+> 2.31.4（§9.3 P1 八颗模块，registry 12 颗）。P1 清单至此清空，后续只剩数据面与 §9.4 明确不做的项。
 > 用户文档已同步：README「高级分析师」快速了解与问答、`docs/agent-roles.md` 的高级分析师小节、
-> 插件页中英文索引。
+> 插件页中英文索引（2.31.4 起 README 快速了解按输入形状列 11 颗模块）。
 
 ---
 

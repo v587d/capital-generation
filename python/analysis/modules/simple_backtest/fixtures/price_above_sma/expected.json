@@ -1,0 +1,33 @@
+{
+  "status": "completed",
+  "metrics": {
+    "observations": 7,
+    "total_return": -0.029126,
+    "buy_and_hold_return": 0.0,
+    "max_drawdown": -0.029126,
+    "final_equity": 0.970874,
+    "trade_count": 1,
+    "exposure_bars": 2,
+    "exposure_ratio": 0.285714,
+    "win_rate": 0.0
+  },
+  "data_gaps": [],
+  "trades": [
+    {
+      "trade": 1,
+      "open": false,
+      "entry_date": "2024-02-07",
+      "entry_price": 103,
+      "entry_index": 4,
+      "exit_date": "2024-02-09",
+      "exit_price": 100,
+      "exit_index": 6,
+      "bars": 2,
+      "price_return": -0.029126,
+      "net_return": -0.029126,
+      "win": false
+    }
+  ],
+  "position": [0, 0, 0, 0, 1, 1, 0],
+  "equity": [1, 1, 1, 1, 1, 0.980583, 0.970874]
+}

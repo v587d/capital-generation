@@ -1,0 +1,16 @@
+{
+  "status": "partial",
+  "metrics": {
+    "positions_count": 2,
+    "windows_count": 2,
+    "hhi": 0.58,
+    "max_weight": 0.7,
+    "window_2_return": 0.066902,
+    "worst_window_return": 0.066902,
+    "best_window_return": 0.066902
+  },
+  "data_gaps": [
+    "窗口 短覆盖缺口（2024-02-01..2024-02-05）：ds_bond 起点 2024-02-01 早于序列覆盖（首日 2024-02-05）",
+    "窗口 短覆盖缺口（2024-02-01..2024-02-05）：1/2 个持仓缺区间收益，组合收益未计算（不按剩余权重重归一化）"
+  ]
+}

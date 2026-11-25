@@ -1,0 +1,10 @@
+{
+  "positions": [
+    { "dataset_id": "ds_equity", "weight": 0.6 },
+    { "dataset_id": "ds_bond", "weight": 0.4 }
+  ],
+  "windows": [
+    { "name": "只有单点", "start": "2024-03-04", "end": "2024-03-05" },
+    { "name": "完整窗口", "start": "2024-03-01", "end": "2024-03-08" }
+  ]
+}

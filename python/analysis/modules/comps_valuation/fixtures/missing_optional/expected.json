@@ -1,0 +1,18 @@
+{
+  "status": "partial",
+  "metrics": {
+    "peers_rows": 3,
+    "peers_used": 3,
+    "pe_count": 3,
+    "pe_median": 20,
+    "pb_count": 0,
+    "ps_count": 0,
+    "ev_ebitda_count": 0,
+    "subject_available": false
+  },
+  "data_gaps": [
+    "P/B 未计算：peers 表没有可用的 P/B 样本（缺列、分母 ≤ 0 或全被剔除）",
+    "P/S 未计算：peers 表没有可用的 P/S 样本（缺列、分母 ≤ 0 或全被剔除）",
+    "EV/EBITDA 未计算：peers 表没有可用的 EV/EBITDA 样本（缺列、分母 ≤ 0 或全被剔除）"
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "dataset_id": "ds_income",
+  "rows": [
+    {
+      "thscode": "600519.SH",
+      "currency": "CNY",
+      "period_end_ms": 1735603200000,
+      "fiscal_year": 2024,
+      "operating_income": 200000000000,
+      "net_profit": 24000000000
+    }
+  ],
+  "time_coverage": {
+    "column": "period_end_ms",
+    "from": "2024-12-31",
+    "to": "2024-12-31",
+    "format": "epoch_ms"
+  }
+}

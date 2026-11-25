@@ -1,0 +1,15 @@
+{
+  "status": "partial",
+  "metrics": {
+    "positions_count": 2,
+    "windows_count": 1,
+    "hhi": 0.5,
+    "max_weight": 0.5,
+    "window_1_return": 0.04,
+    "worst_window_return": 0.04,
+    "best_window_return": 0.04
+  },
+  "data_gaps": [
+    "Dataset ds_equity：跳过 3 行（时间无法解析、价格缺失或非正）：2024-04-02、2024-04-03、<缺失>"
+  ]
+}

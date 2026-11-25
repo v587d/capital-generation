@@ -1,0 +1,31 @@
+{
+  "status": "partial",
+  "metrics": {
+    "observations": 5,
+    "total_return": 0.019608,
+    "buy_and_hold_return": 0.04,
+    "max_drawdown": 0.0,
+    "final_equity": 1.019608,
+    "trade_count": 0,
+    "exposure_bars": 3,
+    "exposure_ratio": 0.6
+  },
+  "data_gaps": [
+    "没有已平仓交易：win_rate 无定义（不写 0）"
+  ],
+  "trades": [
+    {
+      "trade": 1,
+      "open": true,
+      "entry_date": "2024-03-06",
+      "entry_price": 102,
+      "entry_index": 2,
+      "last_date": "2024-03-08",
+      "last_price": 104,
+      "bars": 3,
+      "price_return": 0.019608
+    }
+  ],
+  "position": [0, 0, 1, 1, 1],
+  "equity": [1, 1, 1, 1.009804, 1.019608]
+}

@@ -1,0 +1,10 @@
+{
+  "positions": [
+    { "dataset_id": "ds_equity", "weight": 0.5 },
+    { "dataset_id": "ds_bond", "weight": 0.5 }
+  ],
+  "windows": [
+    { "name": "早于覆盖", "start": "2024-05-01", "end": "2024-05-31" },
+    { "name": "晚于覆盖", "start": "2024-06-10", "end": "2024-06-14" }
+  ]
+}

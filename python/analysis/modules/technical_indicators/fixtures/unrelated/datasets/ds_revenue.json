@@ -1,0 +1,13 @@
+{
+  "dataset_id": "ds_revenue",
+  "rows": [
+    {
+      "date": "2024-01-02",
+      "revenue": 100
+    },
+    {
+      "date": "2024-01-03",
+      "revenue": 110
+    }
+  ]
+}

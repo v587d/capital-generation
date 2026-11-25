@@ -1,0 +1,12 @@
+{
+  "projections": [
+    100,
+    110
+  ],
+  "terminal_growth": 0.02,
+  "net_debt": 0,
+  "shares_outstanding": 100,
+  "risk_free_rate": 0.03,
+  "beta": 1.2,
+  "equity_risk_premium": 0.05
+}

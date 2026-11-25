@@ -1,0 +1,58 @@
+{
+  "id": "earnings_bridge",
+  "version": "1.0.0",
+  "entrypoint": "module.py",
+  "runtime": "python",
+  "description": "净利润变动归因（两期收入/净利率分解 + 税前利润/税率分解）：把两期净利润差拆成可复算的效应，逐项校验加总回到原差额；不预测、不评级",
+  "roles": ["senior_analyst"],
+  "capabilities": ["dataset.read"],
+  "required_fields": [],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "period": { "type": "string", "maxLength": 32, "description": "本期报告期：2024 / 2024-FY / 2024-12-30 都认，缺省取最新一期；上一期取早于它的最近一期" },
+      "income_dataset_id": { "type": "string", "maxLength": 128, "description": "利润表序列 Dataset；只有一份像利润表时可省略" }
+    },
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": { "type": "string", "enum": ["completed", "partial", "blocked", "failed"] },
+      "summary": { "type": "string" },
+      "metrics": { "type": "object" },
+      "claims": { "type": "array" },
+      "assumptions": { "type": "array" },
+      "methodology_log": { "type": "array" },
+      "sensitivity": { "type": "object" },
+      "limitations": { "type": "array" },
+      "data_gaps": { "type": "array" },
+      "outputs": { "type": "array" }
+    },
+    "required": [
+      "status", "summary", "metrics", "claims", "assumptions", "methodology_log",
+      "sensitivity", "limitations", "data_gaps", "outputs"
+    ],
+    "additionalProperties": false
+  },
+  "assumptions": [
+    "收入/净利率分解：net_profit = operating_income × net_margin，差额拆成收入效应、净利率效应与两者交互项，三项之和必须等于净利润差额",
+    "税前/税率分解：net_profit = profit_total × (1 − tax_rate)，tax_rate = income_tax_expense / profit_total，只对 profit_total > 0 的两期计算；三期效应之和必须等于净利润差额",
+    "两期必须来自同一份利润表 Dataset、同一币种与同一合并口径；模块不检查会计政策变更或追溯调整",
+    "效应为正表示对净利润变动是正贡献；交互项是两因子同时变动的交叉部分，不小到可以忽略时不得略去",
+    "不输出评级、目标价或预测：归因只解释已经发生的差额，不外推下一期"
+  ],
+  "applicability": [
+    "利润表序列至少两期，含 operating_income 与 net_profit 两列；税前/税率分解另需 profit_total 与 income_tax_expense 列",
+    "报告期键为 period_end_ms 或 period；同一报告期只能一行，报告期格式需一致",
+    "A 股与美股利润表均可；累计口径（一季报/中报/三季报）只能与同口径的上期比，本模块不换算年度化",
+    "不适用于跨币种、跨合并范围、金融企业专用口径或需要调整一次性项目的场景"
+  ],
+  "limits": {
+    "timeout_ms": 30000,
+    "max_input_rows": 200000,
+    "max_output_bytes": 1048576,
+    "max_log_bytes": 65536
+  },
+  "provenance": { "source_type": "original", "license": "MIT" }
+}

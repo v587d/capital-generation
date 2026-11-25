@@ -25,7 +25,10 @@ const SESSION = { id: 'session-analysis-returns-risk', header: { cwd: '/workspac
 
 test('returns_risk 登记在静态 registry，manifest 声明序列口径与来源', async () => {
   const ids = listAnalysisModules().map((entry) => entry.manifest.id)
-  assert.deepEqual(ids, ['hello', 'financial_quality', 'returns_risk', 'scenario_sensitivity'], 'registry 是静态白名单，按登记顺序列出')
+  assert.deepEqual(ids, ['hello', 'financial_quality', 'returns_risk', 'scenario_sensitivity',
+    'statement_integrity', 'kline_quality', 'valuation_sensitivity',
+    'comps_valuation', 'earnings_bridge',
+    'technical_indicators', 'simple_backtest', 'portfolio_stress'], 'registry 是静态白名单，按登记顺序列出')
 
   const entry = analysisModuleById(MODULE)
   assert.equal(entry.manifest.version, '1.0.0')

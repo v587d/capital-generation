@@ -1,0 +1,13 @@
+{
+  "status": "partial",
+  "metrics": {
+    "close": 16.0,
+    "observations": 8,
+    "sma_2": 15.5,
+    "atr_3": 1.737037,
+    "close_above_sma_2": true
+  },
+  "data_gaps": [
+    "价格列 close 有 3 行不是正数或时间无法解析（已跳过）：第 2 行 2024-01-03（价格非正 close=0）、第 4 行 2024-13-40（时间无法解析）、第 6 行 2024-01-09（价格非正 close=-3）"
+  ]
+}

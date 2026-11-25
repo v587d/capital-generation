@@ -1,0 +1,52 @@
+{
+  "status": "completed",
+  "metrics": {
+    "enterprise_value": 2121.15428,
+    "equity_value": 1921.15428,
+    "value_per_share": 19.211543,
+    "terminal_value": 1835.142159,
+    "terminal_value_nominal": 2275.023041,
+    "terminal_value_share": 0.865162,
+    "wacc": 0.07425,
+    "terminal_growth": 0.02,
+    "projection_years": 3,
+    "net_debt": 200,
+    "minority_interest": 0,
+    "shares_outstanding": 100
+  },
+  "data_gaps": [],
+  "sensitivity": {
+    "center": {
+      "wacc": 0.07425,
+      "terminal_growth": 0.02,
+      "value_per_share": 19.211543
+    },
+    "wacc_1pp_value_per_share": -3.333889,
+    "growth_1pp_value_per_share": 4.367789,
+    "wacc_plus_1pp_cell_value_per_share": 15.877654,
+    "growth_plus_1pp_cell_value_per_share": 23.579332,
+    "wacc_grid": [
+      0.06425,
+      0.07425,
+      0.08425
+    ],
+    "terminal_growth_grid": [
+      0.01,
+      0.02,
+      0.03
+    ],
+    "cells": 9,
+    "null_cells": 0
+  },
+  "grid_cells": {
+    "0.06425,0.01": 19.603206,
+    "0.07425,0.01": 16.203377,
+    "0.08425,0.01": 13.720123,
+    "0.06425,0.02": 24.053463,
+    "0.07425,0.02": 19.211543,
+    "0.08425,0.02": 15.877654,
+    "0.06425,0.03": 31.102409,
+    "0.07425,0.03": 23.579332,
+    "0.08425,0.03": 18.830587
+  }
+}

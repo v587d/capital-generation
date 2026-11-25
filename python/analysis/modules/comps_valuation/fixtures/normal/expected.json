@@ -1,0 +1,25 @@
+{
+  "status": "completed",
+  "metrics": {
+    "peers_rows": 5,
+    "peers_used": 5,
+    "pe_count": 5,
+    "pe_median": 20,
+    "pe_subject": 22,
+    "pe_premium": 0.1,
+    "pb_count": 5,
+    "pb_median": 2,
+    "pb_subject": 2.2,
+    "pb_premium": 0.1,
+    "ps_count": 5,
+    "ps_median": 1.25,
+    "ps_subject": 2,
+    "ps_premium": 0.6,
+    "ev_ebitda_count": 5,
+    "ev_ebitda_median": 12,
+    "ev_ebitda_subject": 12,
+    "ev_ebitda_premium": 0,
+    "subject_available": true
+  },
+  "data_gaps": []
+}

@@ -1,0 +1,5 @@
+{
+  "rule": "sma_cross",
+  "fast_window": 2,
+  "slow_window": 3
+}

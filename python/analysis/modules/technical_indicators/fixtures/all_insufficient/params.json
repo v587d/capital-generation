@@ -1,0 +1,14 @@
+{
+  "sma_windows": [
+    5
+  ],
+  "ema_windows": [
+    10
+  ],
+  "rsi_period": 14,
+  "macd_fast": 12,
+  "macd_slow": 26,
+  "macd_signal": 9,
+  "boll_period": 20,
+  "atr_period": 14
+}

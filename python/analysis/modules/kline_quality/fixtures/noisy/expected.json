@@ -1,0 +1,26 @@
+{
+  "status": "partial",
+  "metrics": {
+    "rows_total": 10,
+    "rows_cleaned": 4,
+    "rejected_rows": 6,
+    "suspect_rows": 0,
+    "volume_missing_rows": 1,
+    "duplicate_dates": 1,
+    "trading_days": 4,
+    "jump_threshold": 0.5,
+    "max_abs_daily_change": 0.029412,
+    "rejected_time_unparseable": 1,
+    "rejected_price_invalid": 1,
+    "rejected_high_below_max": 2,
+    "rejected_low_above_min": 1,
+    "rejected_duplicate_date": 1,
+    "first_date": "2024-01-02",
+    "last_date": "2024-01-12",
+    "first_close": 101,
+    "last_close": 108
+  },
+  "data_gaps": [
+    "硬校验拒绝 6 行（time_unparseable 1、price_invalid 1、high_below_max 2、low_above_min 1、duplicate_date 1）：明细见 outputs/kline_quality.json"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "status": "blocked",
+  "metrics": {},
+  "data_gaps": [
+    "有效观测不足 7 个（实际 3 个）：sma_cross 用 fast_window=2 / slow_window=5，需要 max 窗口 + 2 = 7 个有效观测（填满窗口才出信号、下一根才成交）"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "status": "partial",
+  "metrics": {
+    "close": 12.0,
+    "observations": 3,
+    "sma_2": 11.5,
+    "ema_3": 11.0,
+    "close_above_sma_2": true,
+    "close_above_ema_3": true
+  },
+  "data_gaps": [
+    "SMA(5) 未计算：需要 5 根收盘价，实际 3 根（窗口不完整，不用更短窗口或默认值代替）"
+  ]
+}

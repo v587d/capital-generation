@@ -24,7 +24,7 @@ Capital Generation 是运行在 [DeepSeek Harness](https://github.com/deepseek-a
 
 需要判断的问题（财务质量、收益与风险、事件影响、趋势、估值、情景）会在自动模式里交给**高级分析师**：它在固定分析模块里算指标、写结论，结论中的数字要能对回数据，并附正反论据与失效条件。它不取数、不出图、不写最终答复，也不给买卖、仓位或目标价建议。
 
-三颗模块、能回答的问题与边界见 [README 高级分析师](https://github.com/v587d/capital-generation#senior-analyst)。
+内置模块、能回答的问题与边界见 [README 高级分析师](https://github.com/v587d/capital-generation#senior-analyst)。
 
 ## CapGen 投研自动化
 

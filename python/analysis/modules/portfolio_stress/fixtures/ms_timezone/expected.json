@@ -1,0 +1,13 @@
+{
+  "status": "completed",
+  "metrics": {
+    "positions_count": 2,
+    "windows_count": 1,
+    "hhi": 0.5,
+    "max_weight": 0.5,
+    "window_1_return": 0.05,
+    "worst_window_return": 0.05,
+    "best_window_return": 0.05
+  },
+  "data_gaps": []
+}

@@ -1,0 +1,73 @@
+{
+  "id": "valuation_sensitivity",
+  "version": "1.0.0",
+  "entrypoint": "module.py",
+  "runtime": "python",
+  "description": "DCF 模型值与敏感性：按调用方给的显式假设算企业价值、EV→股权桥与每股模型值，输出 WACC×终值增长二维敏感性；不预测、不评级、不是目标价",
+  "roles": ["senior_analyst"],
+  "capabilities": [],
+  "required_fields": [],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "projections": { "type": "array", "maxItems": 20, "items": { "type": "number" }, "description": "显式预测期自由现金流（原币，按年顺序），至少 1 期；由调用方从数据或研究给出，模块不估计" },
+      "wacc": { "type": "number", "minimum": 0, "description": "折现率（小数，0.10 = 10%）；给了 wacc 就不再用 CAPM 参数" },
+      "terminal_growth": { "type": "number", "minimum": 0, "description": "终值永续增长率（小数）；必须小于 wacc，否则无经济含义，直接拒" },
+      "net_debt": { "type": "number", "description": "净负债 = 有息负债 − 现金（原币）；净现金状态给负数" },
+      "shares_outstanding": { "type": "number", "minimum": 0, "description": "稀释后总股本（股）；必须 > 0" },
+      "minority_interest": { "type": "number", "minimum": 0, "description": "少数股东权益（原币，从 EV 里扣除）；省略为 0 并在假设里披露" },
+      "mid_year": { "type": "boolean", "description": "是否按年中折现（默认 false = 年末折现）" },
+      "wacc_grid": { "type": "array", "maxItems": 9, "items": { "type": "number" }, "description": "敏感性网格的 WACC 列；省略时围绕 wacc 取 ±2 个标准点" },
+      "terminal_growth_grid": { "type": "array", "maxItems": 9, "items": { "type": "number" }, "description": "敏感性网格的终值增长行；省略时围绕 terminal_growth 取 ±2 个标准点" },
+      "risk_free_rate": { "type": "number", "description": "CAPM 无风险利率（小数）；与 beta / equity_risk_premium 一起提供时用来推 WACC" },
+      "beta": { "type": "number", "description": "CAPM beta" },
+      "equity_risk_premium": { "type": "number", "description": "CAPM 股权风险溢价（小数）" },
+      "cost_of_debt": { "type": "number", "minimum": 0, "description": "税前债务成本（小数）" },
+      "tax_rate": { "type": "number", "minimum": 0, "description": "边际税率（小数）" },
+      "debt_weight": { "type": "number", "minimum": 0, "description": "资本结构中的债务权重（小数，0.3 = 30%）；用于 CAPM 推 WACC" },
+      "currency": { "type": "string", "maxLength": 8, "description": "金额币种（如 CNY / USD）；只用于标注，不做换算" }
+    },
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": { "type": "string", "enum": ["completed", "partial", "blocked", "failed"] },
+      "summary": { "type": "string" },
+      "metrics": { "type": "object" },
+      "claims": { "type": "array" },
+      "assumptions": { "type": "array" },
+      "methodology_log": { "type": "array" },
+      "sensitivity": { "type": "object" },
+      "limitations": { "type": "array" },
+      "data_gaps": { "type": "array" },
+      "outputs": { "type": "array" }
+    },
+    "required": [
+      "status", "summary", "metrics", "claims", "assumptions", "methodology_log",
+      "sensitivity", "limitations", "data_gaps", "outputs"
+    ],
+    "additionalProperties": false
+  },
+  "assumptions": [
+    "预测期自由现金流与全部假设由调用方显式给出：模块只做折现与终值算术，不估计 FCF、增长率、WACC 或市场价格",
+    "终值用戈登永续：TV_n = FCF_n × (1 + terminal_growth) / (wacc − terminal_growth)，再折现 n 期；wacc ≤ terminal_growth 直接拒绝",
+    "企业价值 EV = Σ FCF_t/(1+wacc)^t + TV_n/(1+wacc)^n；mid_year 时每期指数为 t − 0.5，否则为 t",
+    "股权价值 = EV − net_debt − minority_interest；每股模型值 = 股权价值 / shares_outstanding",
+    "CAPM 路径：Ke = risk_free_rate + beta × equity_risk_premium；WACC = (1 − debt_weight) × Ke + debt_weight × cost_of_debt × (1 − tax_rate)；只作为 wacc 的推导口径，不代替市场利率",
+    "输出是「给定假设下的模型值」：不是目标价、不是概率，也不代表市场价格应到哪；敏感性网格只是假设区间，不是置信区间"
+  ],
+  "applicability": [
+    "需要明确预测期 FCF、折现率（或 CAPM 输入）、终值增长、净负债与股本；缺任何一项都不估算、不填默认值",
+    "适用于现金流可稳定外推的成熟公司；亏损、周期性极强、金融企业或需要多阶段增长模型的场景不适用",
+    "金额与股本口径必须与预测 FCF 一致（原币、稀释后股本）；跨币种不做换算",
+    "不输出评级、目标价、买卖建议或收益承诺"
+  ],
+  "limits": {
+    "timeout_ms": 30000,
+    "max_input_rows": 200000,
+    "max_output_bytes": 1048576,
+    "max_log_bytes": 65536
+  },
+  "provenance": { "source_type": "original", "license": "MIT" }
+}

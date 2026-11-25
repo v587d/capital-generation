@@ -1,0 +1,24 @@
+{
+  "status": "partial",
+  "metrics": {
+    "balance_checked": true,
+    "balance_residual": 0,
+    "balance_scale": 300000000000,
+    "balance_residual_ratio": 0,
+    "balance_within_tolerance": true,
+    "cash_checked": true,
+    "cash_residual": 0,
+    "cash_scale": 26000000000,
+    "cash_residual_ratio": 0,
+    "cash_within_tolerance": true,
+    "retained_earnings_checked": false,
+    "checks_run": 2,
+    "checks_failed": 0,
+    "tolerance_ratio": 0.001,
+    "tolerance_abs": 0,
+    "currency": "CNY"
+  },
+  "data_gaps": [
+    "留存收益滚动未校验：2024-12-31 资产负债表没有 retained_earnings 列，无法核对留存收益滚动"
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "dataset_id": "ds_peers",
+  "rows": [
+    {
+      "ticker": "A",
+      "currency": "CNY",
+      "market_cap": 1000,
+      "net_profit": 50,
+      "equity": 500,
+      "revenue": 800,
+      "enterprise_value": 1200,
+      "ebitda": 100
+    },
+    {
+      "ticker": "A",
+      "currency": "CNY",
+      "market_cap": 2000,
+      "net_profit": 100,
+      "equity": 1000,
+      "revenue": 1000,
+      "enterprise_value": 2200,
+      "ebitda": 200
+    }
+  ]
+}

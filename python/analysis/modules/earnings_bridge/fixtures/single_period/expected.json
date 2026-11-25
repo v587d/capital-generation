@@ -1,0 +1,9 @@
+{
+  "status": "blocked",
+  "metrics": {
+    "net_profit_current": 18000000000
+  },
+  "data_gaps": [
+    "没有早于 2024-12-31 的报告期：两期归因无法计算"
+  ]
+}

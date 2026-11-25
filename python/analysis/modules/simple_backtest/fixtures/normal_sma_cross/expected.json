@@ -1,0 +1,44 @@
+{
+  "status": "completed",
+  "metrics": {
+    "observations": 10,
+    "total_return": -0.050671,
+    "buy_and_hold_return": 0.06,
+    "max_drawdown": -0.050671,
+    "final_equity": 0.949329,
+    "trade_count": 1,
+    "exposure_bars": 4,
+    "exposure_ratio": 0.4,
+    "win_rate": 0.0
+  },
+  "data_gaps": [],
+  "trades": [
+    {
+      "trade": 1,
+      "open": false,
+      "entry_date": "2024-01-05",
+      "entry_price": 103,
+      "entry_index": 3,
+      "exit_date": "2024-01-09",
+      "exit_price": 99,
+      "exit_index": 5,
+      "bars": 2,
+      "price_return": -0.038835,
+      "net_return": -0.040756,
+      "win": false
+    },
+    {
+      "trade": 2,
+      "open": true,
+      "entry_date": "2024-01-12",
+      "entry_price": 107,
+      "entry_index": 8,
+      "last_date": "2024-01-15",
+      "last_price": 106,
+      "bars": 2,
+      "price_return": -0.009346
+    }
+  ],
+  "position": [0, 0, 0, 1, 1, 0, 0, 0, 1, 1],
+  "equity": [1, 1, 1, 0.999, 0.979602, 0.959244, 0.959244, 0.959244, 0.958284, 0.949329]
+}

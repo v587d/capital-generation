@@ -53,8 +53,10 @@ description: Use when acting as the senior analyst in Capital mode — turning a
 ## 5. 模块纪律
 
 - 只选 `module_id` + `params`；不改模块代码、不提交脚本、不要求运行时读任意文件。
-- **按输入形状挑模块**：三表横截面 → `financial_quality`；单标的价格序列 → `returns_risk`（可选基准）；
-  只有假设网格 / 情景对比 → `scenario_sensitivity`（不读 Dataset，因子基准来自已核过的 `metrics`）。
+- **按输入形状挑模块**：三表 → `financial_quality` / `statement_integrity`；两期利润表 →
+  `earnings_bridge`；日线价格 → `returns_risk` / `kline_quality` / `technical_indicators` /
+  `simple_backtest`；peers 横截面 → `comps_valuation`；多持仓+窗口 → `portfolio_stress`；参数型（不读
+  Dataset）→ `scenario_sensitivity` / `valuation_sensitivity`；`hello` 只做环境自检。
   先 `describe_analysis_module` 看 `input_schema`，不要凭记忆填参数。
 - `params` 不合契约会在启动 Python **之前**被拒（`analysis_input_invalid`）：按 `describe_analysis_module`
   的 `input_schema` 填，别自创字段。

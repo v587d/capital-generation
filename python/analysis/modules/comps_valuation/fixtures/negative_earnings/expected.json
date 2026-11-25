@@ -1,0 +1,17 @@
+{
+  "status": "completed",
+  "metrics": {
+    "peers_rows": 4,
+    "peers_used": 4,
+    "pe_count": 3,
+    "pe_median": 20,
+    "pb_count": 4,
+    "pb_median": 2,
+    "ps_count": 4,
+    "ps_median": 1.25,
+    "ev_ebitda_count": 4,
+    "ev_ebitda_median": 12,
+    "subject_available": false
+  },
+  "data_gaps": []
+}

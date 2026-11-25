@@ -1,0 +1,17 @@
+{
+  "projections": [
+    100,
+    110,
+    121
+  ],
+  "terminal_growth": 0.02,
+  "net_debt": 200,
+  "shares_outstanding": 100,
+  "risk_free_rate": 0.03,
+  "beta": 1.2,
+  "equity_risk_premium": 0.05,
+  "cost_of_debt": 0.05,
+  "tax_rate": 0.25,
+  "debt_weight": 0.3,
+  "currency": "CNY"
+}

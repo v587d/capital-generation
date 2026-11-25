@@ -1,0 +1,4 @@
+{
+  "rule": "momentum_reversal",
+  "fast_window": 2
+}

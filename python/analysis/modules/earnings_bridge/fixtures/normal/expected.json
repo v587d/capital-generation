@@ -1,0 +1,25 @@
+{
+  "status": "completed",
+  "metrics": {
+    "net_profit_previous": 10000000000,
+    "net_profit_current": 18000000000,
+    "net_profit_change": 8000000000,
+    "revenue_previous": 100000000000,
+    "revenue_current": 120000000000,
+    "net_margin_previous": 0.1,
+    "net_margin_current": 0.15,
+    "revenue_effect": 2000000000,
+    "margin_effect": 5000000000,
+    "interaction_effect": 1000000000,
+    "bridge_residual": 0,
+    "profit_total_previous": 12500000000,
+    "profit_total_current": 20000000000,
+    "tax_rate_previous": 0.2,
+    "tax_rate_current": 0.1,
+    "pretax_effect": 6000000000,
+    "tax_rate_effect": 1250000000,
+    "tax_interaction_effect": 750000000,
+    "tax_bridge_residual": 0
+  },
+  "data_gaps": []
+}

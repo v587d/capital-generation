@@ -1,0 +1,7 @@
+{
+  "dataset_id": "ds_bond",
+  "rows": [
+    { "date": "2024-07-01", "close": 50 },
+    { "date": "2024-07-02", "close": 50.5 }
+  ]
+}

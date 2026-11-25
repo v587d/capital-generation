@@ -1,0 +1,4 @@
+{
+  "rule": "price_above_sma",
+  "fast_window": 2
+}

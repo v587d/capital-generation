@@ -1,0 +1,9 @@
+{
+  "positions": [
+    { "dataset_id": "ds_equity", "weight": 0.6 },
+    { "dataset_id": "ds_bond", "weight": 0.3 }
+  ],
+  "windows": [
+    { "name": "权重不足一", "start": "2024-07-01", "end": "2024-07-02" }
+  ]
+}

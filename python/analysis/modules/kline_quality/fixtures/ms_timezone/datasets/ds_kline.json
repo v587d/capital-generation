@@ -1,0 +1,14 @@
+{
+  "dataset_id": "ds_kline",
+  "rows": [
+    { "trade_date_ms": 1704124800000, "open": 100, "high": 102, "low": 99, "close": 101, "volume": 1000 },
+    { "trade_date_ms": 1704211200000, "open": 101, "high": 103, "low": 100, "close": 102, "volume": 1100 },
+    { "trade_date_ms": 1704297600000, "open": 102, "high": 104, "low": 101, "close": 103, "volume": 1200 }
+  ],
+  "time_coverage": {
+    "column": "trade_date_ms",
+    "from": "2024-01-02",
+    "to": "2024-01-04",
+    "format": "epoch_ms"
+  }
+}

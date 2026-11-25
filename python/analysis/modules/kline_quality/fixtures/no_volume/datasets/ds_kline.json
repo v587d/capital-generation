@@ -1,0 +1,8 @@
+{
+  "dataset_id": "ds_kline",
+  "rows": [
+    { "date": "2024-01-02", "open": 49, "high": 51, "low": 48.5, "close": 50 },
+    { "date": "2024-01-03", "open": 50, "high": 52, "low": 49.5, "close": 51.5 },
+    { "date": "2024-01-04", "open": 51.5, "high": 53, "low": 51, "close": 53 }
+  ]
+}

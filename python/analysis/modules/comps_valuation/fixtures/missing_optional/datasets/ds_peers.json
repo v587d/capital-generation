@@ -1,0 +1,20 @@
+{
+  "dataset_id": "ds_peers",
+  "rows": [
+    {
+      "ticker": "A",
+      "market_cap": 1000,
+      "net_profit": 50
+    },
+    {
+      "ticker": "B",
+      "market_cap": 2000,
+      "net_profit": 100
+    },
+    {
+      "ticker": "C",
+      "market_cap": 1500,
+      "net_profit": 60
+    }
+  ]
+}

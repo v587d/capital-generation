@@ -1,0 +1,9 @@
+{
+  "dataset_id": "ds_prices",
+  "rows": [
+    {
+      "trade_date_ms": 1735603200000,
+      "close": 100.0
+    }
+  ]
+}

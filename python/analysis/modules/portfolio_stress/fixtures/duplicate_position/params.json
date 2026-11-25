@@ -1,0 +1,9 @@
+{
+  "positions": [
+    { "dataset_id": "ds_equity", "weight": 0.5 },
+    { "dataset_id": "ds_equity", "weight": 0.5 }
+  ],
+  "windows": [
+    { "name": "重复持仓", "start": "2024-08-01", "end": "2024-08-02" }
+  ]
+}

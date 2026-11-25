@@ -1,0 +1,45 @@
+{
+  "dataset_id": "ds_peers",
+  "rows": [
+    {
+      "ticker": "A",
+      "currency": "CNY",
+      "market_cap": 1000,
+      "net_profit": 50,
+      "equity": 500,
+      "revenue": 800,
+      "enterprise_value": 1200,
+      "ebitda": 100
+    },
+    {
+      "ticker": "B",
+      "currency": "CNY",
+      "market_cap": 2000,
+      "net_profit": -20,
+      "equity": 1000,
+      "revenue": 1000,
+      "enterprise_value": 2200,
+      "ebitda": 200
+    },
+    {
+      "ticker": "C",
+      "currency": "CNY",
+      "market_cap": 1500,
+      "net_profit": 60,
+      "equity": 750,
+      "revenue": 1500,
+      "enterprise_value": 1800,
+      "ebitda": 150
+    },
+    {
+      "ticker": "D",
+      "currency": "CNY",
+      "market_cap": 800,
+      "net_profit": 40,
+      "equity": 400,
+      "revenue": 640,
+      "enterprise_value": 1000,
+      "ebitda": 80
+    }
+  ]
+}

@@ -75,43 +75,53 @@ description: Use when freezing or reviewing the inputs of a Capital analysis —
 - `blocking: false` 表示可以先出降级结论；`true` 表示没有它就只能 blocked。
 - 不要在请求里指定数据源或给服务商键名——那是主 Agent 和取数侧的事。
 
-## 6. 三个模块的输入契约
+## 6. 模块输入契约
 
-**`financial_quality`（三表横截面）**
+先 `list_analysis_modules` → `describe_analysis_module` 看 `input_schema`，再按形状取用；`params` 自创字段会被拒。
 
-- 吃**三份 Dataset**：利润表（`operating_income` + `net_profit`）、资产负债表（`assets_total` +
-  `holder_equity_total`）、现金流量表（`act_cash_flow_net`）。靠列签名识别，不需要预拼宽表。
-- 三份都要有公共报告期键：优先 `period_end_ms`，否则 `period`；同一报表同一报告期只能一行。
-- `params`：`period`（可选，默认最新一期；`2024`、`2024-FY`、`2024-12-30` 都认，报错会列出可选报告期）、
-  `compare_previous`（可选，默认 true 算环比）、以及 `income_dataset_id` / `balance_dataset_id` /
-  `cashflow_dataset_id`（多份同型时报错时用来指名）。
-- **报告期标签来自报告期键，不来自数据源的 `period` 列**：A 股三表的 `period` 列实测是常量 `annual`，
-  每期都一样；选期用 `period_end_ms` 的日期（如 `2024-12-30`）或 `fiscal_year`（如 `2024`）。
-  `financial_indicators` 这类 **document 型 Dataset 不能当分析输入**（没有行数组），不要塞进快照。
-- 返回：`metrics`（比率 6 位小数、金额原币元、`currency` 记币种）、`assumptions`（EBIT 近似、
-  期末余额口径、`total_debt` 是负债合计不是有息负债、累计口径、不换汇）、`data_gaps`（缺表/缺列/
-  分母无经济含义）、`outputs`（每个指标的公式与输入值，可逐项复算）。
-- `status` 语义：三张表齐且零缺口 → `completed`；有缺口 → `partial`；缺利润表 → `blocked`。
-  `partial` 不是失败，是"这几项没算"的诚实表达，如实转述。
+**三表横截面**
 
-**`returns_risk`（单价格序列）**
+- `financial_quality`：三份 Dataset（利润表 `operating_income`+`net_profit`；资产负债表 `assets_total`+
+  `holder_equity_total`；现金流量表 `act_cash_flow_net`），按 `period_end_ms`/`period` 对齐；`params`
+  `period`、`compare_previous`、`{role}_dataset_id`。A 股 `period` 列实测是常量 `annual`，选期用日期或
+  `fiscal_year`。缺整张利润表 → `blocked`，缺列/分母无意义 → `partial`。
+- `statement_integrity`：同样三份表；校验资产负债恒等式、现金流对账、留存收益滚动；`params` `period`、
+  `tolerance_ratio`（默认 0.1%）、`tolerance_abs`。差异是发现不是缺口；缺 `retained_earnings` /
+  `dividends_paid` 时只报缺口，不估算。
 
-- 吃一份价格序列 Dataset：时间列（`time_coverage` 列或 `date` / `trade_date_ms` 等）＋正价格列
-  （`close` / `adj_close` / `close_price` / `price` / `nav`）；可选第二份做基准（beta / 相关）。
-- `params`：`price_dataset_id` / `benchmark_dataset_id`（同型多份时指名）、`risk_free_rate`（年化小数，
-  省略按 0 并在摘要与假设里披露）、`confidence`（VaR 默认 0.95）、`periods_per_year`（默认 252）、
-  `timezone`（数值时间轴标日期用）。有效观测少于 3 个 → `blocked`；坏行跳过并写进 `data_gaps`。
-- `metrics`：区间/年化收益、年化波动、最大回撤、夏普 / 索提诺 / Calmar、历史 VaR / CVaR，给了基准才
-  有 beta / 相关。样本少于 30 个收益只是"方向性参考"，模块会写进 limitations。
+**利润表两期**
 
-**`scenario_sensitivity`（假设网格）**
+- `earnings_bridge`：一份利润表序列（≥2 期，`operating_income`+`net_profit`；税前分解另需
+  `profit_total`+`income_tax_expense`）；`params` `period`、`income_dataset_id`。收入/净利率与税前/税率
+  两条恒等式的效应必须加回净利润差额；只有一期 → `blocked`。
 
-- **不读 Dataset**，只吃 `params`：`target_name` + 1–4 个 `factors`（`base`，可选 `exponent`）＋
-  `grid`（因子扫描值）和/或 `scenarios`（具名情景）；`model` = `product`（Π factor^exponent）或
-  `sum`（Σ factor×exponent）。
-- 因子基准值来自已核过的结果（如 `financial_quality` 的 `metrics` 或 profile 事实），不要凭记忆填；
-  情景里没写的因子继承基准，输出的 `inherited` 会标出来。
-- 输出是**调用方恒等式在不同假设下的取值**：不是概率、不是预测；网格最小/最大不是置信区间，也不是目标价。
+**价格序列**
+
+- `returns_risk`：一份时间列+正价格列，可选基准 Dataset；`params` `risk_free_rate`、`confidence`、
+  `periods_per_year`、`timezone`。有效观测 <3 → `blocked`，<30 只作方向性参考。
+- `kline_quality`：一份 OHLC 日 K（open/high/low/close 必需，volume 可选）；`params` `jump_threshold`
+  （默认 0.5，只标 suspect 不删）。输出清洗序列 + 逐行拒绝原因；全被拒 → `blocked`。
+- `technical_indicators`：同一价格序列 + 指标窗口（`sma_windows`/`ema_windows`/`rsi_period`/`macd_*`/
+  `boll_*`/`atr_period`，至少给一组）；窗口不足的指标写缺口。指标是复盘条件，不是方向预测。
+- `simple_backtest`：价格序列 + `rule`（`sma_cross`/`price_above_sma`）+ `fast_window`（`sma_cross` 另给
+  `slow_window`）+ `fee_rate`；信号 t 根收盘、t+1 根收盘执行；样本内、参数由你给，不做寻优，结果不许
+  写成策略推荐。
+
+**横截面 / 组合**
+
+- `comps_valuation`：peers 横截面（一行一家，`market_cap`+`net_profit`，可选 `equity`/`revenue`/
+  `enterprise_value`/`ebitda`）；可选 `subject_dataset_id` 只比一只标的；多份同型表必须用
+  `peers_dataset_id` 指名。中位数只描述样本，不是目标价。
+- `portfolio_stress`：`positions[]`（dataset_id + weight，权重和 = 1）+ `windows[]`（name/start/end 历史
+  区间）；每个持仓一份价格序列。窗口越界写缺口、不借日期；历史回放不是假设情景。
+
+**参数型（不读 Dataset）**
+
+- `scenario_sensitivity`：显式恒等式（`product`/`sum`）+ 1–4 因子基准 + 网格/情景；因子基准必须来自已核过
+  的 `metrics` 或 profile，不凭记忆填；输出是算术取值，不是概率或预测。
+- `valuation_sensitivity`：`projections`（显式 FCF 序列）+ `wacc` 或完整 CAPM 参数 + `terminal_growth`、
+  `net_debt`、`shares_outstanding`；输出模型值与 WACC×g 格点，**不是目标价**；`wacc ≤ g` 的格点写 null+缺口。
+- `hello`：只做环境自检，不产出结论，不要用它回答研究问题。
 
 ## 7. 证据不足也要给结论
 

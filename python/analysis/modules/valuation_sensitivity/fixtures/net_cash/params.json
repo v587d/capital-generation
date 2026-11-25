@@ -1,0 +1,13 @@
+{
+  "projections": [
+    100,
+    105,
+    110
+  ],
+  "wacc": 0.09,
+  "terminal_growth": 0.02,
+  "net_debt": -150,
+  "minority_interest": 25,
+  "shares_outstanding": 100,
+  "currency": "CNY"
+}

@@ -1,0 +1,2 @@
+# Fixtures stay in the repo: goldens are test data, not package payload (design §15.3).
+**/*

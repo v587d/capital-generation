@@ -1,0 +1,11 @@
+{
+  "dataset_id": "ds_kline",
+  "rows": [
+    { "date": "2024-01-02", "open": 100, "high": 102, "low": 99, "close": 101, "volume": 1000 },
+    { "date": "2024-01-03", "open": 101, "high": 103, "low": 100, "close": 102, "volume": 1200 },
+    { "date": "2024-01-04", "open": 102, "high": 103, "low": 101, "close": 101.5, "volume": 0 },
+    { "date": "2024-01-05", "open": 101.5, "high": 104, "low": 101, "close": 103, "volume": 900 },
+    { "date": "2024-01-08", "open": 103, "high": 105, "low": 102, "close": 104, "volume": 1100 },
+    { "date": "2024-01-09", "open": 104, "high": 106, "low": 103, "close": 105, "volume": 1300 }
+  ]
+}

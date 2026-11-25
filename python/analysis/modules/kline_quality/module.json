@@ -1,0 +1,61 @@
+{
+  "id": "kline_quality",
+  "version": "1.0.0",
+  "entrypoint": "module.py",
+  "runtime": "python",
+  "description": "日 K 线清洗与体检：OHLC 关系、非正价格、重复日期、缺失成交量与异常跳变逐行留痕，输出可直接用于下游的清洗序列；不预测、不评级",
+  "roles": ["senior_analyst"],
+  "capabilities": ["dataset.read"],
+  "required_fields": [],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "price_dataset_id": { "type": "string", "maxLength": 128, "description": "K 线 Dataset；只有一份像 OHLC 表时可省略" },
+      "time_column": { "type": "string", "maxLength": 64, "description": "时间列名；省略时优先用 Dataset 的 time_coverage 列，再按 trade_date_ms / date / time 等识别" },
+      "timezone": { "type": "string", "maxLength": 64, "description": "数值时间轴（epoch 毫秒）标注日期用的 IANA 时区，如 Asia/Shanghai；省略按 UTC 标注" },
+      "jump_threshold": { "type": "number", "minimum": 0, "description": "相邻收盘价涨跌幅超过该值（小数，默认 0.5 = 50%）标为可疑 bar；只标记不删除，阈值原样写进结果" }
+    },
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": { "type": "string", "enum": ["completed", "partial", "blocked", "failed"] },
+      "summary": { "type": "string" },
+      "metrics": { "type": "object" },
+      "claims": { "type": "array" },
+      "assumptions": { "type": "array" },
+      "methodology_log": { "type": "array" },
+      "sensitivity": { "type": "object" },
+      "limitations": { "type": "array" },
+      "data_gaps": { "type": "array" },
+      "outputs": { "type": "array" }
+    },
+    "required": [
+      "status", "summary", "metrics", "claims", "assumptions", "methodology_log",
+      "sensitivity", "limitations", "data_gaps", "outputs"
+    ],
+    "additionalProperties": false
+  },
+  "assumptions": [
+    "一根 bar 合法当且仅当：时间可解析、open/high/low/close 都是正数、high ≥ max(open, close, low)、low ≤ min(open, close, high)",
+    "时间列是 ISO 日期（YYYY-MM-DD）或 epoch 毫秒；同一交易日出现多行时保留第一行时间，其余行以 duplicate_date 拒绝并计数",
+    "成交量缺失或为 0 不当作 0 参与统计：只标 volume_missing，价格 bar 仍进清洗序列",
+    "价格口径沿用 Dataset 的取数参数（qfq / hfq / none）；本模块不检测也不做复权调整，除权日的跳变可能被标成可疑",
+    "jump_threshold 只用于标记可疑 bar，不删除、不改写价格；阈值由调用方给出并写进结果，不是涨跌预测",
+    "清洗序列只是通过硬校验的 bar：不代表数据完整，也不代表可以据此交易"
+  ],
+  "applicability": [
+    "单只标的的日频 K 线：一行一个交易日，含 open/high/low/close（volume 可选）",
+    "A 股、港股、美股与指数的日 K 均可；分钟级、跨市场拼接或缺失整段时间的数据不适用",
+    "停牌日若源端给的是重复收盘价，按正常 bar 保留，只在摘要里提示成交量为 0",
+    "不适用于检测财务造假、不复权序列的公司行为还原或 tick 级数据清洗"
+  ],
+  "limits": {
+    "timeout_ms": 30000,
+    "max_input_rows": 200000,
+    "max_output_bytes": 1048576,
+    "max_log_bytes": 65536
+  },
+  "provenance": { "source_type": "original", "license": "MIT" }
+}

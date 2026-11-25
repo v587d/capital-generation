@@ -1,0 +1,31 @@
+{
+  "status": "completed",
+  "metrics": {
+    "close": 15.0,
+    "observations": 10,
+    "sma_2": 15.5,
+    "sma_3": 15.333333,
+    "ema_3": 15.0,
+    "rsi_3": 61.296509,
+    "macd": 0.153864,
+    "macd_signal": 0.242798,
+    "macd_hist": -0.088935,
+    "boll_upper": 16.276142,
+    "boll_middle": 15.333333,
+    "boll_lower": 14.390524,
+    "atr_3": 1.744033,
+    "close_above_sma_2": false,
+    "close_above_sma_3": false,
+    "sma_2_above_sma_3": true,
+    "sma_2_crossed_above_sma_3": false,
+    "sma_2_crossed_below_sma_3": false,
+    "close_above_ema_3": false,
+    "macd_above_signal": false,
+    "macd_crossed_above_signal": false,
+    "macd_crossed_below_signal": true,
+    "close_above_boll_middle": false,
+    "close_above_boll_upper": false,
+    "close_below_boll_lower": false
+  },
+  "data_gaps": []
+}

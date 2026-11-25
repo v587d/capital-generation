@@ -22,7 +22,12 @@ export interface AnalysisModuleEntry {
 const MODULE_ROOT = fileURLToPath(new URL('../../python/analysis/modules/', import.meta.url))
 
 /** Registered ids, in listing order. Adding a module means adding its id here. */
-const REGISTERED_MODULE_IDS = ['hello', 'financial_quality', 'returns_risk', 'scenario_sensitivity'] as const
+const REGISTERED_MODULE_IDS = [
+  'hello', 'financial_quality', 'returns_risk', 'scenario_sensitivity',
+  'statement_integrity', 'kline_quality', 'valuation_sensitivity',
+  'comps_valuation', 'earnings_bridge',
+  'technical_indicators', 'simple_backtest', 'portfolio_stress',
+] as const
 
 const cache = new Map<string, AnalysisModuleEntry>()
 

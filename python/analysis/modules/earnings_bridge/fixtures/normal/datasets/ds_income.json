@@ -1,0 +1,31 @@
+{
+  "dataset_id": "ds_income",
+  "rows": [
+    {
+      "thscode": "600519.SH",
+      "currency": "CNY",
+      "period_end_ms": 1703980800000,
+      "fiscal_year": 2023,
+      "operating_income": 100000000000,
+      "profit_total": 12500000000,
+      "income_tax_expense": 2500000000,
+      "net_profit": 10000000000
+    },
+    {
+      "thscode": "600519.SH",
+      "currency": "CNY",
+      "period_end_ms": 1735603200000,
+      "fiscal_year": 2024,
+      "operating_income": 120000000000,
+      "profit_total": 20000000000,
+      "income_tax_expense": 2000000000,
+      "net_profit": 18000000000
+    }
+  ],
+  "time_coverage": {
+    "column": "period_end_ms",
+    "from": "2023-12-31",
+    "to": "2024-12-31",
+    "format": "epoch_ms"
+  }
+}

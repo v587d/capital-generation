@@ -1,0 +1,19 @@
+{
+  "status": "partial",
+  "metrics": {
+    "observations": 5,
+    "total_return": 0.0,
+    "buy_and_hold_return": 0.0,
+    "max_drawdown": 0.0,
+    "final_equity": 1.0,
+    "trade_count": 0,
+    "exposure_bars": 0,
+    "exposure_ratio": 0.0
+  },
+  "data_gaps": [
+    "没有已平仓交易：win_rate 无定义（不写 0）"
+  ],
+  "trades": [],
+  "position": [0, 0, 0, 0, 0],
+  "equity": [1, 1, 1, 1, 1]
+}

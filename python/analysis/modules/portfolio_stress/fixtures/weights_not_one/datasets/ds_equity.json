@@ -1,0 +1,7 @@
+{
+  "dataset_id": "ds_equity",
+  "rows": [
+    { "date": "2024-07-01", "close": 100 },
+    { "date": "2024-07-02", "close": 102 }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "dataset_id": "ds_balance",
+  "rows": [
+    {
+      "thscode": "600519.SH",
+      "currency": "CNY",
+      "period_end_ms": 1703980800000,
+      "fiscal_year": 2023,
+      "assets_total": 280000000000,
+      "total_debt": 115000000000,
+      "holder_equity_total": 165000000000,
+      "retained_earnings": 80000000000,
+      "surplus_reserve": 20000000000
+    },
+    {
+      "thscode": "600519.SH",
+      "currency": "CNY",
+      "period_end_ms": 1735603200000,
+      "fiscal_year": 2024,
+      "assets_total": 300000000000,
+      "total_debt": 120000000000,
+      "holder_equity_total": 180000000000,
+      "retained_earnings": 98000000000,
+      "surplus_reserve": 21000000000
+    }
+  ],
+  "time_coverage": {
+    "column": "period_end_ms",
+    "from": "2023-12-31",
+    "to": "2024-12-31",
+    "format": "epoch_ms"
+  }
+}

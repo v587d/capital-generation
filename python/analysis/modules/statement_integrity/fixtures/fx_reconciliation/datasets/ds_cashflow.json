@@ -1,0 +1,23 @@
+{
+  "dataset_id": "ds_cashflow",
+  "rows": [
+    {
+      "thscode": "600519.SH",
+      "currency": "CNY",
+      "period": "annual",
+      "period_end_ms": 1735603200000,
+      "fiscal_year": 2024,
+      "act_cash_flow_net": 60000000000,
+      "invest_cash_flow_net": -20000000000,
+      "financing_cash_flow_net": -15000000000,
+      "cash_equivalents_net_addition": 26500000000,
+      "effect_of_exchange_rate_changes": 1500000000
+    }
+  ],
+  "time_coverage": {
+    "column": "period_end_ms",
+    "from": "2024-12-31",
+    "to": "2024-12-31",
+    "format": "epoch_ms"
+  }
+}

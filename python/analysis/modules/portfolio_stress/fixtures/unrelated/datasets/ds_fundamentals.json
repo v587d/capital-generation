@@ -1,0 +1,7 @@
+{
+  "dataset_id": "ds_fundamentals",
+  "rows": [
+    { "date": "2024-05-06", "revenue": 1200 },
+    { "date": "2024-05-07", "revenue": 1300 }
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "id": "comps_valuation",
+  "version": "1.0.0",
+  "entrypoint": "module.py",
+  "runtime": "python",
+  "description": "可比倍数横截面：按同口径 peers 表算 P/E、P/B、P/S、EV/EBITDA 的截面中位数与计数，可选一只标的做相对溢价/折价；不评级、不给目标价",
+  "roles": ["senior_analyst"],
+  "capabilities": ["dataset.read"],
+  "required_fields": [],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "peers_dataset_id": { "type": "string", "maxLength": 128, "description": "可比公司横截面 Dataset（一行一家）；只有一份像 peers 表时可省略" },
+      "subject_dataset_id": { "type": "string", "maxLength": 128, "description": "可选：被比较标的的横截面 Dataset（一行）；不给就只报 peers 中位数" },
+      "ticker_column": { "type": "string", "maxLength": 64, "description": "公司标识列名；省略按 ticker / thscode / code 识别，找不到就用行号" },
+      "period_note": { "type": "string", "maxLength": 64, "description": "口径备注（如 2024-TTM / 2024-12-31）；只写入结果，不参与计算" }
+    },
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": { "type": "string", "enum": ["completed", "partial", "blocked", "failed"] },
+      "summary": { "type": "string" },
+      "metrics": { "type": "object" },
+      "claims": { "type": "array" },
+      "assumptions": { "type": "array" },
+      "methodology_log": { "type": "array" },
+      "sensitivity": { "type": "object" },
+      "limitations": { "type": "array" },
+      "data_gaps": { "type": "array" },
+      "outputs": { "type": "array" }
+    },
+    "required": [
+      "status", "summary", "metrics", "claims", "assumptions", "methodology_log",
+      "sensitivity", "limitations", "data_gaps", "outputs"
+    ],
+    "additionalProperties": false
+  },
+  "assumptions": [
+    "一行是一家公司的一个同口径截面：市值、净利润、净资产、营收、企业价值与 EBITDA 必须同为同一报告期、同一币种；模块不检查跨期或跨币种混用",
+    "P/E = market_cap / net_profit，只对净利润 > 0 的公司计算；亏损公司的 P/E 无经济含义，剔除并计数，不用负值参与中位数",
+    "P/B = market_cap / equity、P/S = market_cap / revenue 只对分母 > 0 的公司计算",
+    "EV/EBITDA 使用数据集自带的 enterprise_value 与 ebitda 两列；缺任一一列就不算，不用 market_cap + net_debt 反推",
+    "截面统计只报中位数与有效样本数：样本 < 3 时中位数没有横截面意义，写进 limitations；不把均值或最高/最低值当估值结论",
+    "可选标的的相对位置只是 same-period 截面上的溢价/折价，不构成目标价、评级或买卖建议"
+  ],
+  "applicability": [
+    "peers 表至少 2 列：market_cap 与 net_profit；equity / revenue / enterprise_value / ebitda 为可选列，缺列只影响对应倍数",
+    "同一行的所有金额列必须同币种、同报告期；一行一家公司，ticker 重复视为输入错误",
+    "适用成熟上市公司之间的相对估值；亏损、金融企业、重组或跨行业混用会显著削弱可比性，需调用方自行披露",
+    "不适用于绝对估值、DCF、交易可比（并购溢价）或需要调整报表口径的场景"
+  ],
+  "limits": {
+    "timeout_ms": 30000,
+    "max_input_rows": 200000,
+    "max_output_bytes": 1048576,
+    "max_log_bytes": 65536
+  },
+  "provenance": { "source_type": "original", "license": "MIT" }
+}

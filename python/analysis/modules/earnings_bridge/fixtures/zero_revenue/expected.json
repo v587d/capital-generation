@@ -1,0 +1,19 @@
+{
+  "status": "partial",
+  "metrics": {
+    "net_profit_previous": 10000000000,
+    "net_profit_current": 18000000000,
+    "net_profit_change": 8000000000,
+    "profit_total_previous": 12500000000,
+    "profit_total_current": 20000000000,
+    "tax_rate_previous": 0.2,
+    "tax_rate_current": 0.1,
+    "pretax_effect": 6000000000,
+    "tax_rate_effect": 1250000000,
+    "tax_interaction_effect": 750000000,
+    "tax_bridge_residual": 0
+  },
+  "data_gaps": [
+    "收入/净利率分解未执行：两期营业收入存在 ≤ 0：净利率没有经济含义，收入/净利率分解无法计算"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "sma_windows": [
+    2,
+    5
+  ],
+  "ema_windows": [
+    3
+  ]
+}

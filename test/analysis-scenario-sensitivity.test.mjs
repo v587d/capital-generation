@@ -24,7 +24,10 @@ const SESSION = { id: 'session-analysis-scenario-sensitivity', header: { cwd: '/
 
 test('scenario_sensitivity 登记在静态 registry，manifest 声明参数形状与来源', async () => {
   const ids = listAnalysisModules().map((entry) => entry.manifest.id)
-  assert.deepEqual(ids, ['hello', 'financial_quality', 'returns_risk', 'scenario_sensitivity'])
+  assert.deepEqual(ids, ['hello', 'financial_quality', 'returns_risk', 'scenario_sensitivity',
+    'statement_integrity', 'kline_quality', 'valuation_sensitivity',
+    'comps_valuation', 'earnings_bridge',
+    'technical_indicators', 'simple_backtest', 'portfolio_stress'])
 
   const entry = analysisModuleById(MODULE)
   assert.equal(entry.manifest.version, '1.0.0')

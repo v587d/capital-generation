@@ -1,0 +1,22 @@
+{
+  "status": "partial",
+  "metrics": {
+    "balance_checked": false,
+    "cash_checked": true,
+    "cash_residual": 0,
+    "cash_scale": 26000000000,
+    "cash_residual_ratio": 0,
+    "cash_within_tolerance": true,
+    "retained_earnings_checked": false,
+    "checks_run": 1,
+    "checks_failed": 0,
+    "tolerance_ratio": 0.001,
+    "tolerance_abs": 0,
+    "currency": "CNY"
+  },
+  "data_gaps": [
+    "缺少资产负债表数据集：相关勾稽未校验",
+    "资产负债恒等式未校验：缺少资产负债表数据集",
+    "留存收益滚动未校验：2024-12-31 没有资产负债表数据行"
+  ]
+}

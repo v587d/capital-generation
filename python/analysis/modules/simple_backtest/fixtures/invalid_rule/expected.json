@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "analysis_input_invalid",
+    "message_contains": ["params.rule", "sma_cross / price_above_sma"]
+  }
+}

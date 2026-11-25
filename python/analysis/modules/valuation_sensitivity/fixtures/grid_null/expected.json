@@ -1,0 +1,54 @@
+{
+  "status": "partial",
+  "metrics": {
+    "enterprise_value": 1431.818182,
+    "equity_value": 1231.818182,
+    "value_per_share": 12.318182,
+    "terminal_value": 1159.090909,
+    "terminal_value_nominal": 1542.75,
+    "terminal_value_share": 0.809524,
+    "wacc": 0.1,
+    "terminal_growth": 0.02,
+    "projection_years": 3,
+    "net_debt": 200,
+    "minority_interest": 0,
+    "shares_outstanding": 100
+  },
+  "data_gaps": [
+    "敏感性网格格点无定义：wacc=0.03 ≤ terminal_growth=0.03，Gordon 终值分母 ≤ 0，该格写 null"
+  ],
+  "sensitivity": {
+    "center": {
+      "wacc": 0.1,
+      "terminal_growth": 0.02,
+      "value_per_share": 12.318182
+    },
+    "wacc_1pp_value_per_share": -1.612684,
+    "growth_1pp_value_per_share": 1.785714,
+    "wacc_plus_1pp_cell_value_per_share": 10.705498,
+    "growth_plus_1pp_cell_value_per_share": 14.103896,
+    "wacc_grid": [
+      0.03,
+      0.1,
+      0.11
+    ],
+    "terminal_growth_grid": [
+      0.01,
+      0.02,
+      0.03
+    ],
+    "cells": 9,
+    "null_cells": 1
+  },
+  "grid_cells": {
+    "0.03,0.01": 57.034782,
+    "0.1,0.01": 10.929293,
+    "0.11,0.01": 9.614317,
+    "0.03,0.02": 114.061834,
+    "0.1,0.02": 12.318182,
+    "0.11,0.02": 10.705498,
+    "0.03,0.03": null,
+    "0.1,0.03": 14.103896,
+    "0.11,0.03": 12.069475
+  }
+}

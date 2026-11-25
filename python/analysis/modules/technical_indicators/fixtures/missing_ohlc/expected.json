@@ -1,0 +1,12 @@
+{
+  "status": "partial",
+  "metrics": {
+    "close": 14.0,
+    "observations": 5,
+    "sma_2": 13.5,
+    "close_above_sma_2": true
+  },
+  "data_gaps": [
+    "ATR(3) 未计算：需要 high / low / close 三列，Dataset 缺 high、low（ATR 要用真实波幅）"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "dataset_id": "ds_prices",
+  "rows": [
+    {
+      "trade_date_ms": 1735603200000,
+      "close": 100.0
+    }
+  ],
+  "time_coverage": {
+    "column": "trade_date_ms",
+    "from": "2024-12-31",
+    "to": "2024-12-31",
+    "format": "epoch_ms"
+  }
+}

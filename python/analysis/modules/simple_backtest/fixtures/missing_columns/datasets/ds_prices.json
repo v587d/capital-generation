@@ -1,0 +1,8 @@
+{
+  "dataset_id": "ds_prices",
+  "rows": [
+    { "date": "2024-08-01", "volume": 1200 },
+    { "date": "2024-08-02", "volume": 900 },
+    { "date": "2024-08-05", "volume": 1100 }
+  ]
+}

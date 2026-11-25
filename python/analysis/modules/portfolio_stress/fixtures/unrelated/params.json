@@ -1,0 +1,8 @@
+{
+  "positions": [
+    { "dataset_id": "ds_fundamentals", "weight": 1.0 }
+  ],
+  "windows": [
+    { "name": "非价格序列", "start": "2024-05-06", "end": "2024-05-07" }
+  ]
+}

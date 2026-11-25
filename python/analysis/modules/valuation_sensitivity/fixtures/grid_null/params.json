@@ -1,0 +1,21 @@
+{
+  "projections": [
+    100,
+    110,
+    121
+  ],
+  "wacc": 0.1,
+  "terminal_growth": 0.02,
+  "net_debt": 200,
+  "shares_outstanding": 100,
+  "wacc_grid": [
+    0.03,
+    0.1,
+    0.11
+  ],
+  "terminal_growth_grid": [
+    0.01,
+    0.02,
+    0.03
+  ]
+}
