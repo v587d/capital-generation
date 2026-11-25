@@ -120,7 +120,8 @@ test('zero_base：基准为 0 时变化率无定义 → partial + 缺口，不�
   assert.equal(payload.scenarios[0].target, 100)
 })
 
-test('invalid_negative：负基准配小数指数在启动计算前响亮拒绝', async () => {
+test('invalid_negative：负基准配小数指数在启动计算前响亮拒绝', async (t) => {
+  if (!(await runtimeReady())) return t.skip('私有 Python runtime 未准备')
   resetAnalysisRuntimeState()
   const workspace = await setupCase({ caseDir: caseDir('invalid_negative'), moduleId: MODULE })
   const params = JSON.parse(await readFile(join(caseDir('invalid_negative'), 'params.json'), 'utf8'))
@@ -139,7 +140,8 @@ test('invalid_negative：负基准配小数指数在启动计算前响亮拒绝'
   )
 })
 
-test('invalid_scenario：情景里出现未声明因子被拒，不悄悄忽略', async () => {
+test('invalid_scenario：情景里出现未声明因子被拒，不悄悄忽略', async (t) => {
+  if (!(await runtimeReady())) return t.skip('私有 Python runtime 未准备')
   resetAnalysisRuntimeState()
   const workspace = await setupCase({ caseDir: caseDir('invalid_scenario'), moduleId: MODULE })
   const params = JSON.parse(await readFile(join(caseDir('invalid_scenario'), 'params.json'), 'utf8'))
@@ -158,7 +160,8 @@ test('invalid_scenario：情景里出现未声明因子被拒，不悄悄忽略'
   )
 })
 
-test('没有 grid 也没有 scenarios：只有基准值 → 输入错误，不产出空结果', async () => {
+test('没有 grid 也没有 scenarios：只有基准值 → 输入错误，不产出空结果', async (t) => {
+  if (!(await runtimeReady())) return t.skip('私有 Python runtime 未准备')
   resetAnalysisRuntimeState()
   const workspace = await setupCase({ caseDir: caseDir('normal_grid'), moduleId: MODULE })
   await assert.rejects(

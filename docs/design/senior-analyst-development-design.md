@@ -1497,6 +1497,27 @@ test/senior-analyst.test.mjs
 3. 重新评估 D1 的可编辑脚本路径（§13.5）。
 4. 文档与发布。
 
+**进度（2026-11-25，2.31.3）**：四步完成。
+
+1. **评测集固定**：`docs/design/senior-analyst-eval.md`——7 个固定题面逐字落库、七项检查表、
+   首轮 7 案判定与 after 复测记录；D8 的"人工逐案 pass/fail、不做百分比阈值、不得用投资收益证明
+   质量"原样写进文档。首轮结论：协议层（不编造 / 缺口 / 报价口径）明显好于路由层——5 个需要判断的
+   案子里只有 1 个派了 senior，4 个由 lead 自写结论（其中 2 个带可执行建议）；2 案在等用户澄清时
+   结束（行为正确，记 blocked）。
+2. **性能与成本观测**：`scripts/analysis-eval-metrics.mjs` + `scripts/lib/session-metrics.mjs` 读
+   宿主会话事件，按会话汇总时长 / 轮数 / 工具调用 / 工具错误 / input-output-cache tokens；10 场
+   会话的基线写进评测文档 §4.1（root + 3–5 子 Agent、80–218 颗工具、8 万–48 万 input tokens，
+   单场 8–22 min）。只作趋势记录，不设阈值。
+3. **D1 重评估**：三条前置只有 ①成立（固定模块链路已在真实会话端到端验收，artifact / 审计 /
+   保留期齐备）；②无容器或"可信本机执行"授权模型；③ bad case 的归因是缺模块（估值 / DCF、美股
+   报表）与路由错误，不是"固定模块 + 参数"表达力不足。结论：**继续固定模块路线**，不重启可编辑
+   `analysis.py` + shell；下一步按需补 P1 模块与数据面。
+4. **收口修复**：主 persona 增加判断类硬路由（复核 / 对比 / 趋势 / 影响 / 风险 / 估值 / 情景结论 →
+   senior；junior 只给数值、禁止 lead 据此写结论），最终答复模板"防守选项"改为"应对边界（不得给
+   买卖 / 仓位 / 目标价建议）"；`capital-orchestration` 路由表同步。首轮 after 复测 3/3 都派了
+   senior 并产出 artifact，ETF / event 两案最终答复无买卖建议字样。after 轮撞到的两个锚点误判
+   （千分位金额被拆 token、"沪深300"简称数字）同步修复并加回归。发布见 2.31.3。
+
 ---
 
 ## 18. 测试与验收
@@ -1548,6 +1569,8 @@ test/senior-analyst.test.mjs
 缺口识别率、冲突识别率、假设披露完整率、运行时间与 token 成本）只作**趋势记录**。
 
 **不得用投资收益证明 Analyst 质量。**
+>
+> 评测集、逐案检查表、首轮与 after 记录、耗时 / token 基线：`docs/design/senior-analyst-eval.md`。
 
 ---
 

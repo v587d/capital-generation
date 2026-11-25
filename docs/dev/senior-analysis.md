@@ -120,7 +120,7 @@ capital-analysis/runs/<analysis_id>/
 - 模块可以在异常上声明 `analysis_code`（如 `analysis_input_invalid`）：worker 透传 → `manager` 带出 → `runtime`
   只认 `ANALYSIS_ERROR_CODES` 里的码。没声明的异常一律 `MODULE_ERROR` → `analysis_output_invalid`；模块不能
   借这条冒充宿主侧失败。
-- 可复算：模块把每个指标的公式与输入值写进 `outputs/<name>.json`，`result.json` 记 Python 版本与耗时。
+- 可复算：模块把每个指标的公式与输入值写进 `outputs/<name>.json`，`result.json` 记 Python 版本与耗时；评测集与观测口径见 `docs/design/senior-analyst-eval.md`（Phase 6 / D8）。
 - **"不提供"不等于"不可能"**：Python 进程内仍可 `import socket`；首版的真实控制是随包发布 +
   代码审查 + registry 白名单，不是运行时拦截，别写成安全边界。
 

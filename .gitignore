@@ -70,6 +70,8 @@ docs/design/*
 # docs/dev/senior-analysis.md 与后续 Phase 都指向它；v1 留档是为了让取代关系能对照，不删。
 !docs/design/data-analyst-architecture.md
 !docs/design/senior-analyst-development-design.md
+# Phase 6 评测集与逐案记录（固定题面、检查表、首轮/after 结果、成本基线）是 D8 的验收依据，随代码入库。
+!docs/design/senior-analyst-eval.md
 docs/reference/*
 !docs/reference/dsh-surface-ledger.md
 !docs/reference/external-skill-scan-2026-10.md

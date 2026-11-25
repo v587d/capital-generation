@@ -7,6 +7,51 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**、2.9.0 的选择器收敛与质检前置——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [2.31.3] - 2026-11-25
+
+高级分析师 Phase 6 收口：7 案真实会话评测、成本观测工具、D1 可编辑脚本重评估，以及评测暴露的路由与
+锚点修复。senior analyst 的 P0–P6 至此全部完成；后续只按需补 P1 模块与数据面。
+
+### Added
+
+- **评测集 `docs/design/senior-analyst-eval.md`**：7 个固定题面逐字落库、七项检查表、首轮 7 案
+  pass/fail/blocked 与 after 复测记录；D8 口径（人工逐案判、不做百分比阈值、不得用投资收益证明质量）。
+- **成本观测工具**：`scripts/analysis-eval-metrics.mjs` + `scripts/lib/session-metrics.mjs` 读宿主会话
+  事件，按会话汇总时长 / 轮数 / 工具调用 / 工具错误 / input-output-cache tokens；10 场真实会话的基线
+  写进评测文档（只作趋势记录）。
+- 回归：`test/session-metrics.test.mjs`（宿主没记 usage 时不给 0、空 workspace 可见 skip）、
+  `test/analysis-validation.test.mjs` 的千分位与指数简称用例。
+
+### Changed
+
+- **判断类硬路由**：主 persona 把"复核 / 评估 / 对比 / 趋势 / 影响 / 风险特征 / 估值 / 情景结论"
+  写成必须派 `senior_analyst`；junior 的数值只是输入，禁止 lead 据此写结论或自己下判断；
+  `capital-orchestration` 路由表同步。修复首轮评测 4/5 案不派 senior 的问题。
+- **最终答复模板**：主 persona 的"观察 / 验证 / 防守选项"改为"观察 / 验证 / 应对边界（不得给买卖、
+  仓位或目标价建议）"，修掉评测里"降仓位 / 换资产"式建议。
+- **D1 结论**：继续固定模块路线——三条前置只有 ①成立（真实会话端到端验收），②无容器或"可信本机
+  执行"授权，③ bad case 归因是缺模块 / 数据与路由，不是"模块 + 参数"表达力不足；证据写进评测文档 §5。
+
+### Fixed
+
+- **千分位金额被拆成多个无锚点 token**：`30,000,515,859.60` 旧 tokenizer 拆成 30/000/515/859.60，
+  真实会话被拒两次；现在数字 token 与单位常数都认千分位。
+- **指数简称里的数字被当成待溯源量**："沪深300"的 300 会被判无锚点；现在沪深300 / 中证500 / 科创50
+  一类简称进豁免集。
+- **路由缺陷（评测发现）**：首轮 5 个判断类 case 只有 1 个派 senior、4 个由 lead 自写结论；修复后
+  after 复测 3/3 派 senior 且 artifact 落盘（period 的 v2 还是 completed / pass）。
+
+### Notes
+
+- 版本：根包 + 四个随包嵌套包（chart-ui / config / watchlist / automation）+
+  `LOCAL_FETCH_CLIENT_VERSION` / `WIND_CLIENT_VERSION` 同步 2.31.3。
+- 回归：`npm test` **1812 pass / 0 fail**；`smoke:boot` 五颗角色 preset 全 `broken: null`、族行 23/23；
+  `check:dsh` 40/40。
+- 评测基线：10 场真实会话、约 80 分钟 wall time；单场 root + 3–5 子 Agent、80–218 颗工具、8–48 万
+  input tokens、8–34 min。换模型 / 宿主 / 模块后按 3 案抽样复测即可，不必全跑。
+- 剩余（不在本版）：P1 的 `valuation_sensitivity` 等模块、美股报表与事件数据能力，按需补；
+  不重启可编辑 `analysis.py` + shell（D1 不变）。
+
 ## [2.31.2] - 2026-11-25
 
 高级分析师 Phase 5：补上 `returns_risk`（序列形状）与 `scenario_sensitivity`（假设网格形状）两颗分析模块。

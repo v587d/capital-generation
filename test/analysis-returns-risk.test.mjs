@@ -101,7 +101,8 @@ test('bad_rows：坏价格与坏日期跳过并点名，partial 不填 0', async
   assert.match(outcome.summary, /有缺口/u)
 })
 
-test('duplicate：同一日期多行是输入错误，不静默取一行', async () => {
+test('duplicate：同一日期多行是输入错误，不静默取一行', async (t) => {
+  if (!(await runtimeReady())) return t.skip('私有 Python runtime 未准备')
   resetAnalysisRuntimeState()
   const workspace = await setupCase({ caseDir: caseDir('duplicate'), moduleId: MODULE })
   await assert.rejects(

@@ -540,6 +540,15 @@ test('主 persona：数据调度纪律——通过 list_agents + send_message �
   // Phase 3 enabled the analyst: the main persona routes conclusion work to it instead of around it.
   assertRule(MAIN_PERSONA, /结论层复核 → senior_analyst/, '主 persona 必须把结论层复核路由给 senior_analyst')
   assertRule(MAIN_PERSONA, /逐行 \/ 专业分析、财务质量复核 → 委派 senior_analyst/, '逐行 / 专业分析必须派 senior')
+  // Phase 6 evaluation found the lead writing conclusions from junior numbers (no senior dispatch).
+  // The gate must name the judgement triggers and forbid using junior output as a conclusion.
+  assertRule(MAIN_PERSONA, /判断类（复核\/评估\/对比\/趋势\/影响\/风险\/估值\/情景结论）必须派 senior/,
+    '主 persona 必须把判断类问题（而不只是"财务质量复核"字样）硬路由给 senior')
+  assertRule(MAIN_PERSONA, /junior 只是数值输入，禁止你据此写结论或自己下判断/,
+    '主 persona 必须禁止用 junior 的数值直接写结论')
+  assertRule(MAIN_PERSONA, /观察 \/ 验证 \/ 应对边界（不得给买卖、仓位或目标价建议）/,
+    '最终答复模板必须是"应对边界"而不是可执行的防守/仓位建议')
+  assertNoRule(MAIN_PERSONA, /防守选项/, '最终答复模板不得再出现"防守选项"（评测里被写成降仓位/换资产建议）')
   assertRule(MAIN_PERSONA, /dataset_session_mismatch/)
   assertRule(MAIN_PERSONA, /不要重试直读/)
   assertRule(MAIN_PERSONA, /媒体转述旁证/)

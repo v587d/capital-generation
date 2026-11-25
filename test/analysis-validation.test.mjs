@@ -119,6 +119,28 @@ test('锚点放宽：显示精度四舍五入、证券代码、结构性计数�
   assert.match(repeated.tier1[0].detail, /：12\.345$/u)
 })
 
+test('数字 token：千分位是一个数字；指数简称里的 300 不算量', () => {
+  // 2026-11-25 真实会话：senior 把 30,000,515,859.60 写成千分位，旧 tokenizer 拆成
+  // 30/000/515/859.60 五个 token，逐条报"没有来源锚点"，产物被拒两次。
+  const grouped = validateArtifact(artifact({
+    headline: '分红合计 30,000,515,859.60 元',
+    support_claims: [claim({
+      statement: '分红合计 30000515859.60 元',
+      number_anchors: [{ value: 30000515859.6, unit: 'CNY', source: { kind: 'dataset', ref: 'ds_income' }, precision: 2 }],
+    })],
+  }), SNAPSHOT)
+  assert.deepEqual(codes(grouped.tier1), [], '千分位与无分隔写法必须命中同一个锚点')
+
+  const indexName = validateArtifact(artifact({
+    headline: '沪深300 指数 beta 0.97（基准 000300.SH）',
+    support_claims: [claim({
+      statement: '沪深300 指数 beta 0.9703',
+      number_anchors: [{ value: 0.9703, unit: 'ratio', source: { kind: 'dataset', ref: 'ds_income' }, precision: 4 }],
+    })],
+  }), SNAPSHOT)
+  assert.deepEqual(codes(indexName.tier1), [], '指数简称里的数字是专名，不是待溯源的量')
+})
+
 test('数字豁免集：年份、第 N 期、单位常数与标识符里的数字不算结论数字', () => {
   const result = validateArtifact(artifact({
     thesis: '2025 年第二期毛利率与 FY2024 同期相比变化 100000000 以内（口径见 claim_1）',

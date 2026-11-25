@@ -157,12 +157,17 @@ export interface ArtifactValidation {
 
 const UNIT_CONSTANTS = new Set([1e4, 1e6, 1e8, 1e12])
 const YEAR = /^(?:19|20)\d{2}$/u
-const NUMBER_TOKEN = /-?\d+(?:\.\d+)?/gu
+// Thousands separators are display formatting, not a digit boundary: `30,000,515,859.60` is one
+// number. Without this a comma-grouped amount becomes five unrelated tokens and every one of them
+// looks unanchored (2026-11-25 real session: submit rejected with 30/000/515/859.60 …).
+const NUMBER_TOKEN = /-?\d{1,3}(?:,\d{3})+(?:\.\d+)?|-?\d+(?:\.\d+)?/gu
 const PERCENT_AFTER = /^\s*[%％]/u
 // Six-digit securities codes (`600519`, `000858`, `300750`, `920000`, funds `510300`) are identifiers,
 // not measured values. Amounts that start with 1 or 2 still need an anchor.
 const SECURITY_CODE = /^(?:0|[3-9])\d{5}$/u
 const COUNT_CLASSIFIER = /^\s*[个条项期只家次类轮档组段页册笔位名张份套种年]/u
+/** Index short-name numbers that must never be read as measured values. */
+const INDEX_NAME_VALUES = new Set([50, 100, 300, 500, 1000])
 
 interface NumberToken {
   readonly text: string
@@ -177,7 +182,7 @@ export function numberTokens(text: string): NumberToken[] {
   for (const match of text.matchAll(NUMBER_TOKEN)) {
     const start = match.index ?? 0
     const raw = match[0]
-    const value = Number(raw)
+    const value = Number(raw.replace(/,/gu, ''))
     if (!Number.isFinite(value)) continue
     tokens.push({ text: raw, value, percent: PERCENT_AFTER.test(text.slice(start + raw.length)), start })
   }
@@ -203,7 +208,12 @@ function exemptToken(token: NumberToken, source: string): boolean {
     // Structural counts ("5 条"、"0 次"、"3 个情景") are not quantities to trace either.
     if (!token.percent && COUNT_CLASSIFIER.test(source.slice(token.start + token.text.length))) return true
   }
-  if (UNIT_CONSTANTS.has(token.value) && /^\d+$/u.test(token.text)) return true
+  if (UNIT_CONSTANTS.has(token.value) && /^(?:\d+|\d{1,3}(?:,\d{3})+)$/u.test(token.text)) return true
+  // Index short names are proper nouns, not quantities: 沪深300 / 中证500 / 科创50.
+  if (!token.percent && INDEX_NAME_VALUES.has(token.value)
+    && /(?:沪深|中证|上证|深证|科创|创业板|北证|恒生)\s*$/u.test(source.slice(Math.max(0, token.start - 4), token.start))) {
+    return true
+  }
   return false
 }
 
