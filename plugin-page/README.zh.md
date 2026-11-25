@@ -20,6 +20,12 @@ Capital Generation 是运行在 [DeepSeek Harness](https://github.com/deepseek-a
 
 自动模式不直接取数，也不直接画图；每个数字都要有来源与截止时间。完整说明见 [README 三种模式](https://github.com/v587d/capital-generation#快速上手)。
 
+## 高级分析师
+
+需要判断的问题（财务质量、收益与风险、事件影响、趋势、估值、情景）会在自动模式里交给**高级分析师**：它在固定分析模块里算指标、写结论，结论中的数字要能对回数据，并附正反论据与失效条件。它不取数、不出图、不写最终答复，也不给买卖、仓位或目标价建议。
+
+三颗模块、能回答的问题与边界见 [README 高级分析师](https://github.com/v587d/capital-generation#senior-analyst)。
+
 ## CapGen 投研自动化
 
 内置多套任务模板，覆盖资讯、行情、复盘、研究、组合与监控；到点自动新建会话执行，也能手动运行。任务、看板、运行热力图与通知在同一页。看板 TODO 由默认启用的「TODO 核验」在收盘后主动核验，触发或需要你确认时写入任务通知。
@@ -37,6 +43,7 @@ Capital Generation 是运行在 [DeepSeek Harness](https://github.com/deepseek-a
 - [完整 README](https://github.com/v587d/capital-generation#readme)
 - [数据收集能力表](https://github.com/v587d/capital-generation/blob/main/docs/data-collector-capabilities.md)
 - [网页检索能力表](https://github.com/v587d/capital-generation/blob/main/docs/web-retriever-capabilities.md)
+- [高级分析师](https://github.com/v587d/capital-generation#senior-analyst)
 - [投研自动化](https://github.com/v587d/capital-generation#capgen-automation)
 - [常见问题](https://github.com/v587d/capital-generation#常见问题)
 - [更新日志](https://github.com/v587d/capital-generation/blob/main/CHANGELOG.md)

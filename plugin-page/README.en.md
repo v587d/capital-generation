@@ -21,6 +21,12 @@ See [README quick start](https://github.com/v587d/capital-generation#快速上�
 
 Auto never fetches data or draws charts directly; every number needs a source and an as-of time. See [README modes](https://github.com/v587d/capital-generation#快速上手) for the full table.
 
+## Senior analyst
+
+Questions that need judgement (financial quality, returns and risk, event impact, trends, valuation, scenarios) are handed to the **senior analyst** inside Auto: it runs fixed analysis modules and writes the conclusion with numbers that trace back to the data, plus counter-arguments and invalidation conditions. It does not fetch data, draw charts or write the final answer, and gives no buy/sell, position-size or target-price advice.
+
+See [README senior analyst](https://github.com/v587d/capital-generation#senior-analyst) for the modules, example questions and limits.
+
 ## CapGen research automation
 
 Built-in task templates cover news, quotes, reviews, research, portfolios and monitoring; they start a new session on schedule and can also be run manually. Tasks, the board, the run heatmap and notifications live on one page. Board TODOs are checked by the default-enabled TODO Verifier after the A/H close; when a condition triggers or needs your confirmation, it lands in task notifications.
@@ -38,6 +44,7 @@ See [README CapGen automation](https://github.com/v587d/capital-generation#capge
 - [Full README](https://github.com/v587d/capital-generation#readme)
 - [Data collection capabilities](https://github.com/v587d/capital-generation/blob/main/docs/data-collector-capabilities.md)
 - [Web retrieval capabilities](https://github.com/v587d/capital-generation/blob/main/docs/web-retriever-capabilities.md)
+- [Senior analyst](https://github.com/v587d/capital-generation#senior-analyst)
 - [Research automation](https://github.com/v587d/capital-generation#capgen-automation)
 - [FAQ](https://github.com/v587d/capital-generation#常见问题)
 - [Changelog](https://github.com/v587d/capital-generation/blob/main/CHANGELOG.md)
