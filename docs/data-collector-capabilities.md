@@ -2,7 +2,7 @@
 
 > 本表由 `npm run docs:capabilities` 从各 source 定义生成（Fuyao、Tencent、Eastmoney、Sina、交易所/货币网官方、中证指数、私有 Python 通道、Wind、FTShare），并由 `test/data-collector-capabilities.test.mjs` 断言与实现同步：新增端点若忘了重新生成，测试会失败。
 
-当前共 **162 个 capability**：同花顺 Fuyao 64 个，腾讯公开 HTTP 10 个，东方财富 HTTP 38 个，新浪公开 HTTP 4 个，交易所与货币网官方 3 个，中证指数 1 个，同花顺网页直连 2 个，私有 Python 通道 3 个，Wind 金融数据服务 3 个，FTShare（非凸科技） 34 个。参数后带 **\*** 表示必填。
+当前共 **173 个 capability**：同花顺 Fuyao 64 个，腾讯公开 HTTP 10 个，东方财富 HTTP 40 个，新浪公开 HTTP 4 个，交易所与货币网官方 3 个，美国官方与监管数据 9 个，中证指数 1 个，同花顺网页直连 2 个，私有 Python 通道 3 个，Wind 金融数据服务 3 个，FTShare（非凸科技） 34 个。参数后带 **\*** 表示必填。
 
 **复核方式**：Fuyao 能力可用 `npm run smoke:fuyao` 真实复核；Tencent 能力使用最小 smoke fixture 或按需真实请求复核；Eastmoney 能力使用固定 fixture，并按需执行公开网页 JSON smoke；新浪 / 交易所与货币网官方 / 中证指数走 `npm run contract:probe` 的日档巡检（零 key）；私有 Python 通道那三条需要本机私有运行时，巡检标记为 excluded、按需手跑；Wind 能力用 `npm run smoke:wind` 真实复核（需要 `WIND_API_KEY`，**按次消耗上游积分**）；FTShare 那几条同样走 `npm run contract:probe`（需要 `FTSHARE_API_KEY`；**免费档限流 10 QPS / burst 20**，取数一律经本模块的进程级节流链）。
 
@@ -207,6 +207,13 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 | `eastmoney_retail_sales` | `macro` | `/eastmoney/retail_sales` | `start_date`\* `end_date`\* `page` `size` | 是 | 社会消费品零售总额（月度） |
 | `eastmoney_deposit_reserve` | `macro` | `/eastmoney/deposit_reserve` | `start_date`\* `end_date`\* `page` `size` | 是 | 存款准备金率调整事件（历次） |
 
+## 东方财富 HTTP（港美股财务）
+
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `eastmoney_offshore_statements` | `financials` | `/eastmoney/offshore_statements` | `secucode`\* `statement` `periods` | 否 | 港美股三表（一行一个科目） |
+| `eastmoney_offshore_indicators` | `financials` | `/eastmoney/offshore_indicators` | `secucode`\* `periods` | 否 | 港美股关键财务指标（按报告期） |
+
 ## 东方财富 HTTP（资金与筹码）
 
 | capability | topic | 端点 | 主要参数 | 分页 | 用途 |
@@ -255,6 +262,20 @@ data_collector 是唯一持有结构化行情/财务数据入口的子 Agent，�
 | `sse_etf_shares` | `flow` | `/official/sse_etf_shares` | `trade_date` | 否 | 上交所 ETF 份额（按日归档，可查历史） |
 | `szse_etf_shares` | `flow` | `/official/szse_etf_shares` | `trade_date` | 否 | 深交所 ETF 份额（仅最新一天快照） |
 | `chinamoney_repo_fixing` | `macro` | `/official/chinamoney_repo_fixing` | `start_date` `end_date` | 否 | 银行间回购定盘利率 FR/FDR 全历史 |
+
+## 美国官方与监管数据（Treasury 收益率、NY Fed 基准利率、FINRA 做空、SEC 披露）
+
+| capability | topic | 端点 | 主要参数 | 分页 | 用途 |
+|---|---|---|---|---|---|
+| `us_treasury_yield_curve` | `macro` | `/us-official/us_treasury_yield_curve` | `start_date`\* `end_date`\* | 否 | 美债收益率曲线（按年文件拼接，日频） |
+| `nyfed_reference_rates` | `macro` | `/us-official/nyfed_reference_rates` | `rate`\* `start_date`\* `end_date`\* | 否 | 纽约联储基准利率（SOFR/EFFR 等，日频） |
+| `finra_short_volume` | `flow` | `/us-official/finra_short_volume` | `trade_date` `symbols` | 否 | FINRA 做空成交量（日频，全市场文件） |
+| `finra_short_interest` | `flow` | `/us-official/finra_short_interest` | `symbols`\* `settlement_date` | 否 | FINRA 做空余额（双周，按结算日） |
+| `sec_ticker_cik` | `meta` | `/us-official/sec_ticker_cik` | `tickers`\* | 否 | 美股 ticker → SEC CIK（批量） |
+| `sec_filings` | `events` | `/us-official/sec_filings` | `ticker` `cik` `form` `limit` | 否 | SEC 申报列表（submissions，按公司） |
+| `sec_daily_filings` | `events` | `/us-official/sec_daily_filings` | `filing_date`\* `form` | 否 | SEC 日索引（某美东申报日的全部申报） |
+| `sec_fulltext_search` | `events` | `/us-official/sec_fulltext_search` | `q`\* `forms` `start_date` `end_date` `limit` | 否 | SEC 全文检索（EDGAR FTS） |
+| `sec_market_frame` | `financials` | `/us-official/sec_market_frame` | `tag`\* `unit` `period`\* | 否 | SEC XBRL frames（同 tag 全市场横截面） |
 
 ## 中证指数（指数估值）
 

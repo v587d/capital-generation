@@ -72,6 +72,12 @@ const DATA_TIME_CONTRACTS: Record<string, DataTimeContract> = {
   eastmoney_customs_trade: { kind: 'date_range', fields: ['start_date', 'end_date'] },
   eastmoney_retail_sales: { kind: 'date_range', fields: ['start_date', 'end_date'] },
   eastmoney_deposit_reserve: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: '存准率是**调整事件表**：区间里没有调整就是真实空结果，不是取数失败，不要重试' },
+  // US official data: business days in US/Eastern, not Asia/Shanghai.
+  us_treasury_yield_curve: { kind: 'date_range', fields: ['start_date', 'end_date'], maxDays: 1830, warning: '日期是**美东业务日**（节假日没有行），不是北京时间；收益率是百分数原值' },
+  nyfed_reference_rates: { kind: 'date_range', fields: ['start_date', 'end_date'], maxDays: 1830, warning: 'effective_date 是**美东业务日**（周末与假日没有行）；利率是百分数原值' },
+  finra_short_volume: { kind: 'date', fields: ['trade_date'], maxDays: 366, warning: '美东业务日：周末/假日/尚未发布日没有文件；省略 trade_date 会自动取最近已发布日' },
+  sec_daily_filings: { kind: 'date', fields: ['filing_date'], maxDays: 366, warning: '美东申报日：周末与假日没有日索引文件' },
+  sec_fulltext_search: { kind: 'date_range', fields: ['start_date', 'end_date'], maxDays: 3660, warning: '美东申报日区间；两个参数必须成对给' },
   eastmoney_mutual_flow: { kind: 'date_range', fields: ['start_date', 'end_date'] },
   eastmoney_dividend_plan: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: '区间过滤的是**除权除息日**，不是报告期' },
   eastmoney_margin_trading: { kind: 'date_range', fields: ['start_date', 'end_date'], warning: '两融披露沪市比深市快一个交易日：跨市场同日比较前先对齐到共同日期' },

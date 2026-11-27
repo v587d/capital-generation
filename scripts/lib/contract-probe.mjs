@@ -12,6 +12,7 @@ import { createEastmoneySources } from '../../lib/sources/eastmoney-http.js'
 import { createTencentSources } from '../../lib/sources/tencent-http.js'
 import { createSinaSources } from '../../lib/sources/sina-http.js'
 import { createOfficialSources } from '../../lib/sources/official-http.js'
+import { createUsOfficialSources } from '../../lib/sources/us-official-http.js'
 import { createCsindexSources } from '../../lib/sources/csindex-http.js'
 import { createThsSources } from '../../lib/sources/ths-http.js'
 import { createPythonSources } from '../../lib/sources/python-remote.js'
@@ -121,6 +122,7 @@ function buildSources() {
     ...createFtshareSources(async () => ftshareKey),
     ...createSinaSources(),
     ...createOfficialSources(),
+    ...createUsOfficialSources(),
     ...createCsindexSources(),
     ...createThsSources(),
     // Every python capability is `excluded` (needs the private runtime); the stub only satisfies registration.

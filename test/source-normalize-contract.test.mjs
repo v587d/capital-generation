@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { createEastmoneySources } from '../lib/sources/eastmoney-http.js'
 import { createSinaSources } from '../lib/sources/sina-http.js'
 import { createOfficialSources } from '../lib/sources/official-http.js'
+import { createUsOfficialSources } from '../lib/sources/us-official-http.js'
 import { createCsindexSources } from '../lib/sources/csindex-http.js'
 import { createThsSources } from '../lib/sources/ths-http.js'
 import { createPythonSources } from '../lib/sources/python-remote.js'
@@ -39,6 +40,8 @@ const SAMPLES = {
   eastmoney_convertible_bond_list: { start_date: '2026-01-01', end_date: '2026-09-30', stock_code: '600519' },
   eastmoney_global_quote: { symbols: ['SPX', 'HSI'] },
   eastmoney_global_kline: { symbol: 'NDX', start_date: '2026-11-01', end_date: '2026-11-14' },
+  eastmoney_offshore_statements: { secucode: 'AAPL.O', statement: 'balance' },
+  eastmoney_offshore_indicators: { secucode: '00700.HK' },
   eastmoney_margin_total: { start_date: '2026-11-01', end_date: '2026-11-14', market: 'all' },
   tencent_quote: { codes: ['600519.SH', '000001.SZ'] },
   tencent_kline: { code: '600519.SH', period: 'day', adjust: 'none', count: 5 },
@@ -58,6 +61,15 @@ const SAMPLES = {
   eastmoney_pledge: {},
   eastmoney_new_stock: {},
   sina_etf_option_contracts: { underlying: '510050', side: 'call' },
+  us_treasury_yield_curve: { start_date: '2026-11-01', end_date: '2026-11-21' },
+  nyfed_reference_rates: { rate: 'sofr', start_date: '2026-11-01', end_date: '2026-11-21' },
+  finra_short_volume: { symbols: ['AAPL'] },
+  finra_short_interest: { symbols: ['AAPL'] },
+  sec_ticker_cik: { tickers: ['AAPL'] },
+  sec_filings: { ticker: 'AAPL', limit: 5 },
+  sec_daily_filings: { filing_date: '2026-11-25' },
+  sec_fulltext_search: { q: '"apple"', forms: ['8-K'], limit: 3 },
+  sec_market_frame: { tag: 'Assets', period: 'CY2025Q1I' },
   sina_etf_option_tquote: { codes: ['10012837'] },
   sina_etf_option_greeks: { codes: ['10012837'] },
   sina_a50_futures: {},
@@ -82,7 +94,7 @@ const SAMPLES = {
   wind_stock_kline: { code: '600519.SH', start_date: '2026-08-01', end_date: '2026-08-15' },
 }
 
-const sources = [...createEastmoneySources(), ...createTencentSources(), ...createSinaSources(), ...createOfficialSources(), ...createCsindexSources(), ...createThsSources(), ...createPythonSources(async () => { throw new Error('normalize only') }), ...createWindSources(async () => 'secret')]
+const sources = [...createEastmoneySources(), ...createTencentSources(), ...createSinaSources(), ...createOfficialSources(), ...createUsOfficialSources(), ...createCsindexSources(), ...createThsSources(), ...createPythonSources(async () => { throw new Error('normalize only') }), ...createWindSources(async () => 'secret')]
 
 test('参数样例表必须覆盖全部已注册的公开 HTTP 能力：新增没登记就失败，不静默少测', () => {
   const registered = sources.map((source) => source.schema.capability).sort()

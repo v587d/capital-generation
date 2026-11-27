@@ -7,6 +7,7 @@ import { createTencentSources } from '../lib/sources/tencent-http.js'
 import { createEastmoneySources } from '../lib/sources/eastmoney-http.js'
 import { createSinaSources } from '../lib/sources/sina-http.js'
 import { createOfficialSources } from '../lib/sources/official-http.js'
+import { createUsOfficialSources } from '../lib/sources/us-official-http.js'
 import { createCsindexSources } from '../lib/sources/csindex-http.js'
 import { createThsSources } from '../lib/sources/ths-http.js'
 import { createPythonSources } from '../lib/sources/python-remote.js'
@@ -26,7 +27,7 @@ const documented = [...table.matchAll(/^\|\s`([a-z0-9_]+)`\s\|/gm)].map((match) 
 
 function registered() {
   const hub = new DataCollectorHub({ store: { async save() { throw new Error('unused') } } })
-  for (const source of [...createFuyaoRestSources(async () => 'unused'), ...createTencentSources(), ...createEastmoneySources(), ...createSinaSources(), ...createOfficialSources(), ...createCsindexSources(), ...createThsSources(), ...createPythonSources(async () => { throw new Error('catalog only') }), ...createWindSources(async () => 'unused'), ...createFtshareSources(async () => 'unused')]) hub.registerSource(source)
+  for (const source of [...createFuyaoRestSources(async () => 'unused'), ...createTencentSources(), ...createEastmoneySources(), ...createSinaSources(), ...createOfficialSources(), ...createUsOfficialSources(), ...createCsindexSources(), ...createThsSources(), ...createPythonSources(async () => { throw new Error('catalog only') }), ...createWindSources(async () => 'unused'), ...createFtshareSources(async () => 'unused')]) hub.registerSource(source)
   return hub
 }
 
@@ -48,7 +49,7 @@ test('能力总表：每个 capability 都带端点路径、参数列与非空�
     assert.ok(row, `${capability} 缺少表格行`)
     const cells = row.split('|').map((cell) => cell.trim())
     assert.match(cells[2], /^`[a-z]+`$/, `${capability} 的 topic 列必须是反引号包裹的主题名`)
-    assert.ok(['`/api/', '`/tencent/', '`/eastmoney/', '`/sina/', '`/official/', '`/csindex/', '`/ths/', '`/python/', '`/wind/', '`/ftshare/'].some((prefix) => cells[3].startsWith(prefix)), `${capability} 的端点列应为已注册来源的路径（Fuyao/Tencent/Eastmoney/Sina/Official/Csindex/Python/Wind/FTShare）`)
+    assert.ok(['`/api/', '`/tencent/', '`/eastmoney/', '`/sina/', '`/official/', '`/us-official/', '`/csindex/', '`/ths/', '`/python/', '`/wind/', '`/ftshare/'].some((prefix) => cells[3].startsWith(prefix)), `${capability} 的端点列应为已注册来源的路径（Fuyao/Tencent/Eastmoney/Sina/Official/Csindex/Python/Wind/FTShare）`)
     assert.ok(cells[4].length > 0, `${capability} 的参数列不应为空（无参数写「无参数」）`)
     assert.equal(cells[5], hub.describeCapability(capability).paginated ? '是' : '否', `${capability} 的分页列与实现不一致`)
     assert.ok(cells[6].length > 0, `${capability} 的用途列不应为空`)

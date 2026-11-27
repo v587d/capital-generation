@@ -42,8 +42,10 @@ const EVENT_CAPABILITIES = ['eastmoney_institution_research', 'eastmoney_holder_
 const SNAPSHOT_CAPABILITIES = ['eastmoney_security_profile', 'eastmoney_st_stock_list', 'eastmoney_limit_up_pool', 'eastmoney_limit_break_pool', 'eastmoney_limit_down_pool', 'eastmoney_yesterday_limit_up_pool', 'eastmoney_stock_hot_concepts']
 const SNAKE_CASE_CAPABILITIES = [...MACRO_CAPABILITIES, 'eastmoney_mutual_flow', 'eastmoney_mutual_quota', 'eastmoney_main_capital_snapshot', 'eastmoney_dividend_plan', 'eastmoney_holder_number_snapshot', 'eastmoney_margin_trading', 'eastmoney_margin_total', 'eastmoney_convertible_bond_list', ...EVENT_CAPABILITIES, 'eastmoney_price_anomaly_list', 'eastmoney_price_anomaly_count']
 const ARRAY_CAPABILITIES = ['eastmoney_global_quote', 'eastmoney_global_kline']
+// Offshore F10 long tables: `{ item }` envelope, no upstream pagination surface (periods, not pages).
+const OFFSHORE_CAPABILITIES = ['eastmoney_offshore_statements', 'eastmoney_offshore_indicators']
 
-test('Eastmoney source：注册三十八个 capability 与内部身份', () => {
+test('Eastmoney source：注册四十个 capability 与内部身份', () => {
   const sources = createEastmoneySources()
   assert.deepEqual(sources.map((source) => source.schema.capability), [
     'eastmoney_top_buy_sell_market', 'eastmoney_top_buy_sell_ticker', 'eastmoney_lockup_expiry',
@@ -54,9 +56,9 @@ test('Eastmoney source：注册三十八个 capability 与内部身份', () => {
     'eastmoney_security_profile', 'eastmoney_st_stock_list', ...EVENT_CAPABILITIES,
     'eastmoney_limit_up_pool', 'eastmoney_limit_break_pool', 'eastmoney_limit_down_pool',
     'eastmoney_yesterday_limit_up_pool', 'eastmoney_price_anomaly_list', 'eastmoney_price_anomaly_count',
-    'eastmoney_stock_hot_concepts',
+    'eastmoney_stock_hot_concepts', ...OFFSHORE_CAPABILITIES,
   ])
-  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 38)
+  assert.equal(new Set(sources.map((source) => source.schema.data_key)).size, 40)
   for (const source of sources) {
     assert.equal(source.schema.source_label, 'eastmoney')
     assert.match(source.schema.data_key, /^eastmoney\.http\./)
@@ -66,7 +68,7 @@ test('Eastmoney source：注册三十八个 capability 与内部身份', () => {
 })
 
 test('Eastmoney 宏观表：行键名一律 ASCII snake_case（§10.6 不许透传上游缩写）', () => {
-  for (const capability of [...SNAKE_CASE_CAPABILITIES, ...SNAPSHOT_CAPABILITIES, ...ARRAY_CAPABILITIES]) {
+  for (const capability of [...SNAKE_CASE_CAPABILITIES, ...SNAPSHOT_CAPABILITIES, ...ARRAY_CAPABILITIES, ...OFFSHORE_CAPABILITIES]) {
     const source = sourceMap()[capability]
     assert.ok(source, `${capability} 必须已注册`)
     const schema = source.schema.output_schema
@@ -93,6 +95,11 @@ test('Eastmoney 宏观表：行键名一律 ASCII snake_case（§10.6 不许透�
     const source = sourceMap()[capability]
     assert.equal(source.schema.paginated, false, '全球行情是数组，不是分页 datacenter 形状')
     assert.deepEqual(source.schema.rowShape, { rootArray: true })
+  }
+  for (const capability of OFFSHORE_CAPABILITIES) {
+    const source = sourceMap()[capability]
+    assert.equal(source.schema.paginated, false, `${capability} 按报告期取数，不是上游分页`)
+    assert.deepEqual(source.schema.rowShape, { rowKey: 'item' })
   }
 })
 
@@ -969,5 +976,102 @@ test('eastmoney_margin_total：未知市场/未知 SCDM 与空结果的处理', 
     globalThis.fetch = async () => response({ success: false, code: 9201, message: '返回数据为空' })
     const empty = await source.execute({ capability: 'eastmoney_margin_total', params: { start_date: '2026-11-12', end_date: '2026-11-13' }, session }, signal)
     assert.deepEqual([empty.data.item, empty.data.pagination.total], [[], 0])
+  } finally { globalThis.fetch = originalFetch }
+})
+
+// ── 港美股三表 / 指标（datacenter F10）────────────────────────────────────────
+
+const OFFSHORE_ROW = (over = {}) => ({
+  SECUCODE: 'AAPL.O', SECURITY_NAME_ABBR: '苹果', REPORT_DATE: '2026-09-26 00:00:00',
+  START_DATE: null, REPORT: '2026/FY', REPORT_TYPE: '年报', STD_ITEM_CODE: '004001001',
+  ITEM_NAME: '现金及现金等价物', AMOUNT: 36305000000, CURRENCY: '美元', CURRENCY_ABBR: 'USD',
+  ACCOUNT_STANDARD: '美国会计准则', YOY_RATIO: 1.032, REMARK: null, ...over,
+})
+
+test('eastmoney_offshore_statements：按报告期取满，period_type 区分口径，未声明列丢弃', async () => {
+  const originalFetch = globalThis.fetch
+  const calls = []
+  const page1 = [
+    OFFSHORE_ROW(),
+    OFFSHORE_ROW({ REPORT_TYPE: '单季报', REPORT: '2026/Q4' }),
+    OFFSHORE_ROW({ REPORT_DATE: '2026-06-27 00:00:00', REPORT_TYPE: '累计季报', REPORT: '2026/Q9' }),
+  ]
+  const page2 = [
+    OFFSHORE_ROW({ REPORT_DATE: '2026-06-27 00:00:00', REPORT_TYPE: '累计季报', REPORT: '2026/Q9', STD_ITEM_CODE: '004001002', ITEM_NAME: '应收账款' }),
+    OFFSHORE_ROW({ REPORT_DATE: '2026-03-28 00:00:00', REPORT_TYPE: '累计季报', REPORT: '2026/Q6' }),
+  ]
+  globalThis.fetch = async (url) => {
+    const u = new URL(url)
+    calls.push(u)
+    const page = Number(u.searchParams.get('pageNumber'))
+    return response({ success: true, code: 0, result: { pages: 2, count: 5, data: page === 1 ? page1 : page2 } })
+  }
+  try {
+    const source = sourceMap().eastmoney_offshore_statements
+    const result = await source.execute({ capability: 'eastmoney_offshore_statements', params: { secucode: 'aapl.o', statement: 'income', periods: 2 }, session }, signal)
+    assert.equal(calls.length, 2, '两期要翻到第二页；第 3 个日期只作哨兵')
+    assert.equal(calls[0].searchParams.get('reportName'), 'RPT_USF10_FN_INCOME')
+    assert.equal(calls[0].searchParams.get('filter'), '(SECUCODE="AAPL.O")')
+    assert.equal(calls[0].searchParams.get('sortColumns'), 'REPORT_DATE')
+    assert.equal(calls[0].searchParams.get('sortTypes'), '-1')
+    assert.equal(calls[0].searchParams.get('pageSize'), '500')
+    assert.equal(result.data.item.length, 4, '只回前两期：跨页的 B 期两行都收，哨兵日期不进入结果')
+    assert.deepEqual([...new Set(result.data.item.map((row) => row.report_date))], ['2026-09-26', '2026-06-27'])
+    assert.deepEqual(result.data.item.map((row) => row.period_type), ['cumulative', 'single', 'cumulative', 'cumulative'])
+    const [row] = result.data.item
+    assert.equal(row.amount_raw, 36305000000)
+    assert.equal(row.currency_code, 'USD')
+    assert.equal(row.start_date, null, '缺 START_DATE 时是 null，不是 0')
+    assert.ok(!('YOY_RATIO' in row) && !('REMARK' in row), '口径不一致/未声明列必须丢弃')
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_offshore_statements：9201 是合法空；裸码、越界 periods、重复行键都响亮失败', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => response({ success: false, code: 9201, message: '返回数据为空' })
+  try {
+    const source = sourceMap().eastmoney_offshore_statements
+    const empty = await source.execute({ capability: 'eastmoney_offshore_statements', params: { secucode: '00005.HK', statement: 'balance' }, session }, signal)
+    assert.deepEqual(empty.data.item, [])
+    await assert.rejects(
+      () => source.execute({ capability: 'eastmoney_offshore_statements', params: { secucode: 'AAPL' }, session }, signal),
+      /market suffix/,
+    )
+    await assert.rejects(
+      () => source.execute({ capability: 'eastmoney_offshore_statements', params: { secucode: 'AAPL.O', statement: 'cashflow', periods: 41 }, session }, signal),
+      /periods must be an integer/,
+    )
+    globalThis.fetch = async () => response({ success: true, code: 0, result: { pages: 1, count: 2, data: [OFFSHORE_ROW(), OFFSHORE_ROW()] } })
+    await assert.rejects(
+      () => source.execute({ capability: 'eastmoney_offshore_statements', params: { secucode: 'AAPL.O', statement: 'balance' }, session }, signal),
+      /duplicate row key/,
+    )
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('eastmoney_offshore_indicators：单季与累计同日并存、按市场统一命名、比例列不混口径', async () => {
+  const originalFetch = globalThis.fetch
+  const base = {
+    SECUCODE: 'AAPL.O', SECURITY_NAME_ABBR: '苹果', REPORT_DATE: '2026-09-26 00:00:00',
+    START_DATE: '2025-09-28 00:00:00', NOTICE_DATE: '2026-11-02 00:00:00', REPORT_TYPE: '2026/Q4', DATE_TYPE: '单季报',
+    CURRENCY: '美元', CURRENCY_ABBR: 'USD', ACCOUNTING_STANDARDS: '美国会计准则',
+    OPERATE_INCOME: 114477000000, OPERATE_INCOME_YOY: 8.1, GROSS_PROFIT: 54321000000, GROSS_PROFIT_YOY: 9.2,
+    PARENT_HOLDER_NETPROFIT: 28700000000, PARENT_HOLDER_NETPROFIT_YOY: 10.3,
+    BASIC_EPS: 2.11, DILUTED_EPS: 2.09, BASIC_EPS_YOY: 12.5,
+    GROSS_PROFIT_RATIO: 47.4, NET_PROFIT_RATIO: 25.1, ROE_AVG: 27.96, ROA: 18.2,
+    CURRENT_RATIO: 0.87, DEBT_ASSET_RATIO: 84.1, EQUITY_RATIO: 596.1, OCF_LIQDEBT: 0.26,
+  }
+  globalThis.fetch = async () => response({ success: true, code: 0, result: { pages: 1, count: 2, data: [base, { ...base, REPORT_TYPE: '2026/FY', DATE_TYPE: '年报' }] } })
+  try {
+    const source = sourceMap().eastmoney_offshore_indicators
+    const result = await source.execute({ capability: 'eastmoney_offshore_indicators', params: { secucode: 'AAPL.O', periods: 1 }, session }, signal)
+    assert.equal(result.data.item.length, 2, '同一报告日的单季与累计是两行，不可合并')
+    assert.deepEqual(result.data.item.map((row) => row.period_type), ['single', 'cumulative'])
+    const [row] = result.data.item
+    assert.equal(row.net_profit, 28700000000, '美股净利用 PARENT_HOLDER_NETPROFIT')
+    assert.equal(row.basic_eps_yoy, 12.5, '美股 EPS 同比用 BASIC_EPS_YOY')
+    assert.equal(row.current_ratio, 0.87, 'current_ratio 是比例')
+    assert.equal(row.debt_asset_ratio, 84.1, 'debt_asset_ratio 是百分数原值')
+    assert.ok(!('EQUITY_RATIO' in row) && !('OCF_LIQDEBT' in row), '两市场口径不一致的列不得入库')
   } finally { globalThis.fetch = originalFetch }
 })

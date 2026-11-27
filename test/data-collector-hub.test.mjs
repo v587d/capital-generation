@@ -8,6 +8,7 @@ import { createTencentSources } from '../lib/sources/tencent-http.js'
 import { createEastmoneySources } from '../lib/sources/eastmoney-http.js'
 import { createSinaSources } from '../lib/sources/sina-http.js'
 import { createOfficialSources } from '../lib/sources/official-http.js'
+import { createUsOfficialSources } from '../lib/sources/us-official-http.js'
 import { createCsindexSources } from '../lib/sources/csindex-http.js'
 import { createThsSources } from '../lib/sources/ths-http.js'
 import { createPythonSources } from '../lib/sources/python-remote.js'
@@ -401,9 +402,9 @@ test('describeCapability：返回单个能力详情，未知名字返回 undefin
 
 test('能力目录分片：taxonomy 完整、索引与单片预算各自成立，不靠单份全目录', async () => {
   const { hub } = makeHub()
-  for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources(), ...createSinaSources(), ...createOfficialSources(), ...createCsindexSources(), ...createThsSources(), ...createPythonSources(async () => { throw new Error('catalog only') }), ...createWindSources(async () => 'key'), ...createFtshareSources(async () => 'key')]) hub.registerSource(dataSource)
+  for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources(), ...createSinaSources(), ...createOfficialSources(), ...createUsOfficialSources(), ...createCsindexSources(), ...createThsSources(), ...createPythonSources(async () => { throw new Error('catalog only') }), ...createWindSources(async () => 'key'), ...createFtshareSources(async () => 'key')]) hub.registerSource(dataSource)
   const names = hub.capabilityNames()
-  assert.equal(names.length, 162, '端点数量回归：分片断言必须覆盖全部已注册能力（含新浪 / 官方 / 中证 / 私有 Python 通道）')
+  assert.equal(names.length, 173, '端点数量回归：分片断言必须覆盖全部已注册能力（含新浪 / 官方 / 中证 / 私有 Python 通道）')
 
   // A missing production entry would fall into `meta`; stale entries would never be visible.
   assert.deepEqual(names.filter((name) => !Object.hasOwn(CATALOG_TAXONOMY, name)), [], '每个生产能力都必须在 catalog-taxonomy 里有 topic')
@@ -468,7 +469,7 @@ test('宽表详情预算：字段字典让 72 列的能力留在预算内（直�
 
 test('单能力详情体积预算：字典投影后仍不许逼近剪枝阈值', async () => {
   const { hub } = makeHub()
-  for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources(), ...createSinaSources(), ...createOfficialSources(), ...createCsindexSources(), ...createThsSources(), ...createPythonSources(async () => { throw new Error('catalog only') }), ...createWindSources(async () => 'key'), ...createFtshareSources(async () => 'key')]) hub.registerSource(dataSource)
+  for (const dataSource of [...createFuyaoRestSources(async () => 'key'), ...createTencentSources(), ...createEastmoneySources(), ...createSinaSources(), ...createOfficialSources(), ...createUsOfficialSources(), ...createCsindexSources(), ...createThsSources(), ...createPythonSources(async () => { throw new Error('catalog only') }), ...createWindSources(async () => 'key'), ...createFtshareSources(async () => 'key')]) hub.registerSource(dataSource)
   // Detail is returned per call, so it gets a tighter 4096-codepoint guard.
   // Every new source family must be registered here or it escapes the check.
   const details = hub.capabilityNames().map((capability) => JSON.stringify(hub.describeCapability(capability)))

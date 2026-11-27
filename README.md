@@ -156,7 +156,7 @@ Capital Generation 是运行在 [DeepSeek Harness（DSH）](https://github.com/d
 
 ## 还能做什么
 
-- **查数据和资料：** 覆盖 A 股、港股、美股与期货等品种，由专用角色按需获取行情、财务、指数、基金、宏观行业与期货数据，检索公告、新闻和研报。共计 **162** 个数据收集能力和 **17** 个网页检索能力，部分公开数据源无需额外密钥；具体覆盖范围见 [数据收集能力表](docs/data-collector-capabilities.md) 和 [网页检索能力表](docs/web-retriever-capabilities.md)。
+- **查数据和资料：** 覆盖 A 股、港股、美股与期货等品种，由专用角色按需获取行情、财务、指数、基金、宏观行业与期货数据，检索公告、新闻和研报。共计 **173** 个数据收集能力和 **17** 个网页检索能力，部分公开数据源无需额外密钥；具体覆盖范围见 [数据收集能力表](docs/data-collector-capabilities.md) 和 [网页检索能力表](docs/web-retriever-capabilities.md)。
 - **数据质检：** 结构化数据不会直接进入模型上下文。每份数据先由分析师检查结构、时间轴、缺失与基础统计，再按受控方式汇总；原始数据行始终留在工具层。
 
 <a id="senior-analyst" name="senior-analyst"></a>

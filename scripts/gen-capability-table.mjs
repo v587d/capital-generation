@@ -11,6 +11,7 @@ import { createFuyaoRestSources } from '../lib/sources/fuyao-rest.js'
 import { createTencentSources } from '../lib/sources/tencent-http.js'
 import { createSinaSources } from '../lib/sources/sina-http.js'
 import { createOfficialSources } from '../lib/sources/official-http.js'
+import { createUsOfficialSources } from '../lib/sources/us-official-http.js'
 import { createCsindexSources } from '../lib/sources/csindex-http.js'
 import { createThsSources } from '../lib/sources/ths-http.js'
 import { createPythonSources } from '../lib/sources/python-remote.js'
@@ -25,7 +26,7 @@ const OUTPUT = fileURLToPath(new URL('../docs/data-collector-capabilities.md', i
 const hub = new DataCollectorHub({ store: { async save() { throw new Error('unused') } } })
 // The python factory only needs a runner for assemble/describe; its capabilities are excluded from
 // contract probing (private runtime), but their schemas must still reach the catalog.
-const sources = [...createFuyaoRestSources(async () => 'unused'), ...createTencentSources(), ...createEastmoneySources(), ...createSinaSources(), ...createOfficialSources(), ...createCsindexSources(), ...createThsSources(), ...createPythonSources(async () => { throw new Error('docs generation does not run python') }), ...createWindSources(async () => 'unused'), ...createFtshareSources(async () => 'unused')]
+const sources = [...createFuyaoRestSources(async () => 'unused'), ...createTencentSources(), ...createEastmoneySources(), ...createSinaSources(), ...createOfficialSources(), ...createUsOfficialSources(), ...createCsindexSources(), ...createThsSources(), ...createPythonSources(async () => { throw new Error('docs generation does not run python') }), ...createWindSources(async () => 'unused'), ...createFtshareSources(async () => 'unused')]
 for (const source of sources) hub.registerSource(source)
 
 const pathOf = (source) => source.schema.source_label === 'tencent'
@@ -42,6 +43,8 @@ const pathOf = (source) => source.schema.source_label === 'tencent'
             ? `/csindex/${source.schema.capability.replace(/^csindex_/, '')}`
             : source.schema.source_label === 'ths'
               ? `/ths/${source.schema.capability.replace(/^ths_/, '')}`
+            : source.schema.source_label === 'us_official'
+              ? `/us-official/${source.schema.capability}`
             : source.schema.source_label === 'official'
               ? `/official/${source.schema.capability}`
               : source.schema.source_label === 'python'
@@ -52,6 +55,7 @@ const pathOf = (source) => source.schema.source_label === 'tencent'
 // generic group must exclude the other two path sets or rows show up in two tables.
 const MACRO_PATHS = new Set(['/eastmoney/cpi', '/eastmoney/ppi', '/eastmoney/gdp', '/eastmoney/pmi', '/eastmoney/money_supply', '/eastmoney/rmb_loan', '/eastmoney/customs_trade', '/eastmoney/retail_sales', '/eastmoney/deposit_reserve'])
 const MUTUAL_PATHS = new Set(['/eastmoney/mutual_flow', '/eastmoney/mutual_quota'])
+const OFFSHORE_PATHS = new Set(['/eastmoney/offshore_statements', '/eastmoney/offshore_indicators'])
 
 const GROUPS = [
   ['元数据（代码表与消歧）', (p) => p.startsWith('/api/meta/')],
@@ -70,9 +74,11 @@ const GROUPS = [
   ['腾讯公开 HTTP（fallback）', (p) => p.startsWith('/tencent/')],
   ['东方财富 HTTP（沪深港通）', (p) => MUTUAL_PATHS.has(p)],
   ['东方财富 HTTP（宏观指标）', (p) => MACRO_PATHS.has(p)],
-  ['东方财富 HTTP（资金与筹码）', (p) => p.startsWith('/eastmoney/') && !MACRO_PATHS.has(p) && !MUTUAL_PATHS.has(p)],
+  ['东方财富 HTTP（港美股财务）', (p) => OFFSHORE_PATHS.has(p)],
+  ['东方财富 HTTP（资金与筹码）', (p) => p.startsWith('/eastmoney/') && !MACRO_PATHS.has(p) && !MUTUAL_PATHS.has(p) && !OFFSHORE_PATHS.has(p)],
   ['新浪公开 HTTP（ETF 期权 + A50）', (p) => p.startsWith('/sina/')],
   ['交易所与货币网官方（ETF 份额、回购定盘）', (p) => p.startsWith('/official/')],
+  ['美国官方与监管数据（Treasury 收益率、NY Fed 基准利率、FINRA 做空、SEC 披露）', (p) => p.startsWith('/us-official/')],
   ['中证指数（指数估值）', (p) => p.startsWith('/csindex/')],
   ['同花顺网页直连（热榜概念标签、涨停揭秘板型）', (p) => p.startsWith('/ths/')],
   ['私有 Python 通道（BaoStock 估值/退市信息、人民银行社融）', (p) => p.startsWith('/python/')],
@@ -99,6 +105,7 @@ const SOURCE_LABELS = [
   ['eastmoney', '东方财富 HTTP'],
   ['sina', '新浪公开 HTTP'],
   ['official', '交易所与货币网官方'],
+  ['us_official', '美国官方与监管数据'],
   ['csindex', '中证指数'],
   ['ths', '同花顺网页直连'],
   ['python', '私有 Python 通道'],

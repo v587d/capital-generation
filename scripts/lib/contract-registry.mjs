@@ -191,6 +191,58 @@ const EM = [
   ds('eastmoney', 'eastmoney_global_kline', 'daily', { symbol: 'NDX', start_date: dayShift(-30), end_date: dayShift(-1) }, { expect: { minRows: 1 } }),
   ds('eastmoney', 'eastmoney_margin_total', 'daily', { start_date: dayShift(-30), end_date: dayShift(-1), page: 1, size: 3 }, { expect: { minRows: 1 }, note: '深/京 T+1，最近一天可能只有沪市一行' }),
   ds('eastmoney', 'eastmoney_convertible_bond_list', 'daily', { start_date: dayShift(-180), end_date: dayShift(-1), page: 1, size: 3 }),
+  // 港美股财务（datacenter F10，季度更新）：报告期由 periods 取最近 N 期，probe 不带绝对日期。
+  ds('eastmoney', 'eastmoney_offshore_statements', 'weekly', { secucode: 'AAPL.O', statement: 'balance' }, { expect: { minRows: 1 } }),
+  ds('eastmoney', 'eastmoney_offshore_indicators', 'weekly', { secucode: '00700.HK' }, { expect: { minRows: 1 } }),
+  // 美国官方（零 key）：Treasury 按年文件拼接、NY Fed 按利率查询；日期用 dayShift 保持可复现。
+  ds('official', 'us_treasury_yield_curve', 'daily', { start_date: dayShift(-30), end_date: dayShift(-1) }, { budgetMs: 45_000, expect: { minRows: 1 } }),
+  ds('official', 'nyfed_reference_rates', 'daily', { rate: 'sofr', start_date: dayShift(-30), end_date: dayShift(-1) }, { expect: { minRows: 1 } }),
+  // FINRA：做空成交量每天更新、做空余额双周更新；日期参数省略时能力自己发现最近已发布日。
+  ds('official', 'finra_short_volume', 'daily', {}, { expect: { minRows: 1 } }),
+  ds('official', 'finra_short_interest', 'weekly', { symbols: ['AAPL'] }, { expect: { minRows: 1 }, budgetMs: 30_000 }),
+  // SEC：本机出口被 Akamai 限流（403 Request Rate Threshold Exceeded），字段形状已用宿主出口
+  // web_fetch 核对真报文；巡检照跑留痕，等 CI/其它出口能打时再转 active。
+  ds('official', 'sec_ticker_cik', 'weekly', { tickers: ['AAPL'] }, {
+    shadow: {
+      since: '2026-11-27',
+      verdict: 'HTTP_STATUS 403',
+      evidence: 'Akamai "Request Rate Threshold Exceeded" from this egress (direct); proxy TLS handshake fails; payload shape verified via host egress',
+      revisit: '2026-12-05',
+    },
+  }),
+  ds('official', 'sec_filings', 'weekly', { ticker: 'AAPL', limit: 5 }, {
+    shadow: {
+      since: '2026-11-27',
+      verdict: 'HTTP_STATUS 403',
+      evidence: 'same egress block as sec_ticker_cik; submissions recent shape verified against CIK0000320193/CBRS payloads',
+      revisit: '2026-12-05',
+    },
+  }),
+  ds('official', 'sec_daily_filings', 'weekly', { filing_date: dayShift(-1) }, {
+    shadow: {
+      since: '2026-11-27',
+      verdict: 'HTTP_STATUS 403',
+      evidence: 'same egress block; idx pipe-delimited format documented by SEC index docs, not yet fetched as a live file',
+      revisit: '2026-12-05',
+    },
+  }),
+  ds('official', 'sec_fulltext_search', 'weekly', { q: '"apple"', forms: ['8-K'], limit: 3 }, {
+    shadow: {
+      since: '2026-11-27',
+      verdict: 'HTTP_STATUS 403',
+      evidence: 'same egress block; hits._source.adsh/ciks/display_names verified via host egress',
+      revisit: '2026-12-05',
+    },
+  }),
+  ds('official', 'sec_market_frame', 'weekly', { tag: 'Assets', unit: 'USD', period: 'CY2025Q1I' }, {
+    budgetMs: 40_000,
+    shadow: {
+      since: '2026-11-27',
+      verdict: 'HTTP_STATUS 403',
+      evidence: 'same egress block; frames payload (taxonomy/tag/ccp/uom/pts/data[accn,cik,entityName,loc,end,val]) verified via host egress',
+      revisit: '2026-12-05',
+    },
+  }),
   // push2 系（个股基本面 / ST 名单）：字段已用录制真报文验证，但 2026-11-22 16:00 后本机出口对该域名
   // 连续 46 次 fetch failed（同日 15:54 还 200），与 eastmoney_sector_rotation 的视角差异同因，先挂影子。
   ds('eastmoney', 'eastmoney_security_profile', 'daily', { ticker: A_SHARE }, {

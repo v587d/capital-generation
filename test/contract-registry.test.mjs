@@ -11,6 +11,7 @@ import { createFuyaoRestSources } from '../lib/sources/fuyao-rest.js'
 import { createEastmoneySources } from '../lib/sources/eastmoney-http.js'
 import { createSinaSources } from '../lib/sources/sina-http.js'
 import { createOfficialSources } from '../lib/sources/official-http.js'
+import { createUsOfficialSources } from '../lib/sources/us-official-http.js'
 import { createCsindexSources } from '../lib/sources/csindex-http.js'
 import { createThsSources } from '../lib/sources/ths-http.js'
 import { createPythonSources } from '../lib/sources/python-remote.js'
@@ -30,6 +31,7 @@ for (const [factory, list] of [
   ['eastmoney', createEastmoneySources()],
   ['sina', createSinaSources()],
   ['official', createOfficialSources()],
+  ['us_official', createUsOfficialSources()],
   ['csindex', createCsindexSources()],
   ['ths', createThsSources()],
   ['python', createPythonSources(async () => { throw new Error('coverage-check-only') })],

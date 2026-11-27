@@ -14,6 +14,7 @@ import { createTencentSources } from './sources/tencent-http.js'
 import { createEastmoneySources } from './sources/eastmoney-http.js'
 import { createSinaSources } from './sources/sina-http.js'
 import { createOfficialSources } from './sources/official-http.js'
+import { createUsOfficialSources } from './sources/us-official-http.js'
 import { createCsindexSources } from './sources/csindex-http.js'
 import { createThsSources } from './sources/ths-http.js'
 import { createPythonSources, type PythonScriptRunner } from './sources/python-remote.js'
@@ -128,6 +129,13 @@ function registerSources(ctx: Context, hub: CollectorRuntime['hub'], config: Col
     ctx.logger.info(`capital-generation: 已注册 ${disposers.length} 个交易所/货币网官方数据源（official_*：ETF 份额 + 回购定盘）`)
     return () => { for (const dispose of disposers) dispose() }
   }, 'capital-generation.official-sources()')
+
+  ctx.effect(() => {
+    const sources = createUsOfficialSources()
+    const disposers = sources.map((dataSource) => hub.registerSource(dataSource))
+    ctx.logger.info(`capital-generation: 已注册 ${disposers.length} 个美国官方数据源（us_treasury_yield_curve / nyfed_reference_rates）`)
+    return () => { for (const dispose of disposers) dispose() }
+  }, 'capital-generation.us-official-sources()')
 
   ctx.effect(() => {
     const sources = createThsSources()
