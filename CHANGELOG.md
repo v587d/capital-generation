@@ -7,6 +7,36 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**、2.9.0 的选择器收敛与质检前置——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [2.31.5] - 2026-11-27
+
+数据面扩容：新增 11 条 `data_collector` 能力（162 → 173），覆盖港美股财务、美债与 NY Fed 利率、
+SEC 披露与 XBRL 横截面、FINRA 做空。每批都同步了 capability 目录、契约巡检条目、normalize 样例、
+能力计数与生成文档；`npm test` 1913 通过。
+
+### Added
+
+- **`eastmoney_offshore_statements`**：美股/港股三表长表（一行一个科目），`periods` 取最近 N 个报告期，
+  `period_type` 区分单季/累计/时点；币种逐行取上游字段（不按上市地推断），跨页按 `REPORT_DATE` 证明完整。
+- **`eastmoney_offshore_indicators`**：美股/港股关键指标，按市场显式映射净利/EPS 同比字段，
+  比率列逐列核验单位（百分数原值 vs 比例），两市场口径不一致的列整列丢弃。
+- **`us_treasury_yield_curve`**：美国财政部每日国债收益率曲线，按年文件 800ms 错开并发拼接，
+  缺列输出 null；收益率是百分数原值，日期是美东业务日。
+- **`nyfed_reference_rates`**：纽约联储 SOFR/TGCR/BGCR/EFFR/OBFR，区间用 `search.json`，
+  周末空区间返回成功空数组；`volumeInBillions` 单位为十亿美元。
+- **`sec_ticker_cik` / `sec_filings` / `sec_daily_filings` / `sec_fulltext_search`**：SEC EDGAR 的
+  ticker↔CIK、submissions 申报列表、日索引与全文检索；CIK 统一 10 位补零，`acceptance_datetime` 是 UTC。
+- **`sec_market_frame`**：XBRL frames 全市场横截面（`tag`/`unit`/`period`），instant 与 duration 口径分开，
+  一次返回全部行、不静默截断。
+- **`finra_short_volume` / `finra_short_interest`**：FINRA 做空成交量（文件末尾行数校验、小数成交量）与
+  双周做空余额（settlementDate 分区、204 合法空、最近结算日自动发现）。
+- 新增 `test/sec-source.test.mjs`、`test/us-official-source.test.mjs`，以及东财港美股财务的 fixture 回归。
+
+### Notes
+
+- SEC 五条能力的巡检先挂 `shadow`：本机出口被 Akamai 限流（403），真报文形状已用宿主出口核对，
+  待 CI/其它出口可打后转 active（revisit 2026-12-05）。
+- BLS / DOL 与 Form 4 / 13F 暂缓：本机出口 403、取不到真实 XML 样本，待能访问的出口补齐。
+
 ## [2.31.4] - 2026-11-25
 
 高级分析师 §9.3 的 P1 分析模块全部落地：新增 8 颗受控模块，静态 registry 从 4 颗扩到 12 颗，
