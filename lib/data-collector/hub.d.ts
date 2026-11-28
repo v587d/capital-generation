@@ -55,6 +55,8 @@ export interface CapabilityDetail extends CapabilitySummary {
     input_schema: object;
     output_fields: string | null;
 }
+/** Validate the JSON Schema subset used by DataSource output contracts. */
+export declare function outputSchemaIssues(schema: unknown, value: unknown, path?: string): string[];
 export interface DataSource {
     schema: SchemaDescriptor;
     execute(request: DataRequest, signal: AbortSignal): Promise<{

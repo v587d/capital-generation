@@ -1023,6 +1023,9 @@ test('eastmoney_offshore_statements：按报告期取满，period_type 区分口
     assert.equal(row.currency_code, 'USD')
     assert.equal(row.start_date, null, '缺 START_DATE 时是 null，不是 0')
     assert.ok(!('YOY_RATIO' in row) && !('REMARK' in row), '口径不一致/未声明列必须丢弃')
+    assert.equal(source.validateOutput(result.data), true)
+    assert.equal(source.validateOutput({ item: [{ ...row, rogue: 1 }] }), false)
+    assert.equal(source.validateOutput({ item: result.data.item, rogue: 1 }), false)
   } finally { globalThis.fetch = originalFetch }
 })
 
@@ -1073,5 +1076,8 @@ test('eastmoney_offshore_indicators：单季与累计同日并存、按市场统
     assert.equal(row.current_ratio, 0.87, 'current_ratio 是比例')
     assert.equal(row.debt_asset_ratio, 84.1, 'debt_asset_ratio 是百分数原值')
     assert.ok(!('EQUITY_RATIO' in row) && !('OCF_LIQDEBT' in row), '两市场口径不一致的列不得入库')
+    assert.equal(source.validateOutput(result.data), true)
+    assert.equal(source.validateOutput({ item: [{ ...row, rogue: 1 }] }), false)
+    assert.equal(source.validateOutput({ item: result.data.item, rogue: 1 }), false)
   } finally { globalThis.fetch = originalFetch }
 })

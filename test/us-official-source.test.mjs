@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createUsOfficialSources } from '../lib/sources/us-official-http.js'
+import { createUsOfficialSources, settlementCandidates } from '../lib/sources/us-official-http.js'
 
 const signal = new AbortController().signal
 const session = { id: 'us-official', header: { cwd: '/workspace/project' } }
@@ -11,6 +11,12 @@ function sourceMap() {
 
 function textResponse(body, status = 200) {
   return { ok: status >= 200 && status < 300, status, text: async () => body }
+}
+
+function assertRowGuard(source, rows, row, requiredKey) {
+  assert.equal(source.validateOutput(rows), true)
+  assert.equal(source.validateOutput([{ ...row, rogue: 1 }]), false, 'additionalProperties: false')
+  assert.equal(source.validateOutput([{ ...row, [requiredKey]: undefined }]), false, 'required key')
 }
 
 const TREASURY_2019 = 'Date,"1 Mo","2 Mo","3 Mo","6 Mo","1 Yr","2 Yr","3 Yr","5 Yr","7 Yr","10 Yr","20 Yr","30 Yr"\n'
@@ -38,6 +44,7 @@ test('us_treasury_yield_curve：表头按名字映射，缺列补 null，输出�
     // 2019 文件没有 1.5 Month / 4 Mo 两列：显式 null，不是缺键也不是 0。
     assert.equal(first.d1_5m, null)
     assert.equal(first.d4m, null)
+    assertRowGuard(source, result.data, first, 'date')
   } finally { globalThis.fetch = originalFetch }
 })
 
@@ -53,6 +60,20 @@ test('us_treasury_yield_curve：表头/行宽/日期畸形与同日重复都响�
     await assert.rejects(() => run('Date,"1 Mo"\n12/30/2019,1.51,9.99\n'), /row has 3 cells/)
     await assert.rejects(() => run('Date,"1 Mo"\n2019-12-30,1.51\n'), /M\/D\/YYYY/)
     await assert.rejects(() => run('Date,"1 Mo"\n12/30/2019,1.51\n12/30/2019,1.52\n'), /duplicate date/)
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('us_treasury_yield_curve：1830 天上限在出网前执行', async () => {
+  const originalFetch = globalThis.fetch
+  let calls = 0
+  globalThis.fetch = async () => { calls += 1; return textResponse(TREASURY_2019) }
+  try {
+    const source = sourceMap().us_treasury_yield_curve
+    await assert.rejects(
+      () => source.execute({ capability: 'us_treasury_yield_curve', params: { start_date: '2020-01-01', end_date: '2026-01-01' }, session }, signal),
+      /exceeds maximum 1830 days/,
+    )
+    assert.equal(calls, 0)
   } finally { globalThis.fetch = originalFetch }
 })
 
@@ -78,6 +99,7 @@ test('nyfed_reference_rates：字段映射、百分数原值、空区间是合�
     assert.equal(first.revision_indicator, null, '空串 revisionIndicator 是 null')
     assert.equal(second.target_rate_from, 3.75)
     assert.equal(second.percentile_99, 3.95)
+    assertRowGuard(source, result.data, first, 'effective_date')
 
     globalThis.fetch = async () => textResponse(JSON.stringify({ refRates: [] }))
     const empty = await source.execute({ capability: 'nyfed_reference_rates', params: { rate: 'sofr', start_date: '2026-11-21', end_date: '2026-11-22' }, session }, signal)
@@ -137,6 +159,7 @@ test('finra_short_volume：解析小数成交量与末尾行数校验，symbols 
     assert.equal(row.short_volume, 9758284.194435, '成交量是小数，不是整数')
     assert.equal(row.total_volume, 16888251.033617)
     assert.equal(row.market, 'B,Q,N')
+    assertRowGuard(source, result.data, row, 'trade_date')
   } finally { globalThis.fetch = originalFetch }
 })
 
@@ -187,6 +210,7 @@ test('finra_short_interest：字段映射、204 合法空、未知参数与超�
     assert.equal(row.change_percent, -0.91)
     assert.equal(row.days_to_cover, 2.8)
     assert.equal(row.accounting_year_month, 20261113)
+    assertRowGuard(source, result.data, row, 'settlement_date')
     await assert.rejects(
       () => source.execute({ capability: 'finra_short_interest', params: { symbols: Array.from({ length: 11 }, (_, i) => `S${i}`) }, session }, signal),
       /exceeds maximum 10/,
@@ -195,5 +219,32 @@ test('finra_short_interest：字段映射、204 合法空、未知参数与超�
       () => source.execute({ capability: 'finra_short_interest', params: { symbols: ['AAPL'], settlement_date: '2026-13-01' }, session }, signal),
       /YYYY-MM-DD/,
     )
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test('finra_short_interest：自动发现按全部 symbols 判定，不因首票缺数退到旧结算日', async () => {
+  const originalFetch = globalThis.fetch
+  const latest = settlementCandidates()[0]
+  const requestedDates = new Set()
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(init.body)
+    const date = body.compareFilters[0].fieldValue
+    const symbol = body.compareFilters[1].fieldValue
+    requestedDates.add(date)
+    if (symbol === 'AAPL') return textResponse('', 204)
+    return textResponse(JSON.stringify([{
+      symbolCode: symbol, issueName: 'Microsoft Corp Common Stock', settlementDate: date,
+      currentShortPositionQuantity: 100, previousShortPositionQuantity: 110,
+      changePreviousNumber: -10, changePercent: -9.09, averageDailyVolumeQuantity: 20,
+      daysToCoverQuantity: 5, marketClassCode: 'NNM', issuerServicesGroupExchangeCode: 'Q',
+      stockSplitFlag: null, revisionFlag: null, accountingYearMonthNumber: Number(date.replaceAll('-', '')),
+    }]))
+  }
+  try {
+    const source = sourceMap().finra_short_interest
+    const result = await source.execute({ capability: 'finra_short_interest', params: { symbols: ['AAPL', 'MSFT'] }, session }, signal)
+    assert.deepEqual([...requestedDates], [latest])
+    assert.deepEqual(result.data.map((row) => row.symbol), ['MSFT'])
+    assert.equal(result.data[0].settlement_date, latest)
   } finally { globalThis.fetch = originalFetch }
 })

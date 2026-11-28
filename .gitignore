@@ -45,6 +45,9 @@ docs/*
 !docs/design/
 docs/design/*
 !docs/design/skill-synergy-product-design.md
+# 契约巡检的判据、SOP 与 SEC 转正证据必须随 registry 入库，否则 CI checkout 看不到。
+!docs/design/data-source-contract-probe.md
+!docs/design/data-capability-contract-checklist-2026-11.md
 # 新数据补录的设计文档是本轮实现依据（容量闸门测算、路由判据都只在这份里有），随代码入库。
 !docs/design/data-capability-expansion.md
 # 能力目录分片的协议、容量模型与两次实机读数只在这份里有，data-capability-expansion.md 指向它，随代码入库。

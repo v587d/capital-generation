@@ -2,8 +2,8 @@
  * rows are plain arrays (no upstream pagination). SEC (same file family) is added separately. */
 
 import type { DataRequest, DataSource, SchemaDescriptor } from '../data-collector/hub.js'
-import { buildDataKey } from '../data-collector/hub.js'
-import { getDataTimeContract } from '../time/tools.js'
+import { buildDataKey, outputSchemaIssues } from '../data-collector/hub.js'
+import { dayDistance, getDataTimeContract } from '../time/tools.js'
 import { createRequestThrottle } from '../net/throttle.js'
 import { createSecSources } from './sec-http.js'
 
@@ -91,6 +91,14 @@ function normalizeDateRange(params: Params): Params {
   return { start_date, end_date }
 }
 
+function normalizeTreasury(params: Params): Params {
+  const range = normalizeDateRange(params)
+  if (dayDistance(String(range.start_date), String(range.end_date)) > TREASURY_MAX_DAYS) {
+    throw new Error(`Treasury date range exceeds maximum ${TREASURY_MAX_DAYS} days`)
+  }
+  return range
+}
+
 function createSource(options: {
   capability: string
   name: string
@@ -122,7 +130,7 @@ function createSource(options: {
   return {
     schema,
     normalizeParams: (params: Record<string, unknown>) => options.normalize(params),
-    validateOutput: options.validateOutput,
+    validateOutput: (data) => options.validateOutput(data) && outputSchemaIssues(options.outputSchema, data).length === 0,
     execute: async (request: DataRequest, signal: AbortSignal) => options.execute(options.normalize(request.params), signal),
   }
 }
@@ -506,8 +514,7 @@ function normalizeShortInterest(params: Params): Params {
 }
 
 /** FINRA settles on the 15th and the last business day of each month; probe newest first. */
-function settlementCandidates(): string[] {
-  const today = etToday()
+export function settlementCandidates(today = etToday()): string[] {
   const [year, month] = today.split('-').map(Number)
   const candidates: string[] = []
   for (let back = 0; back < 3; back += 1) {
@@ -560,13 +567,14 @@ async function fetchShortInterest(symbol: string, settlementDate: string, signal
 
 async function executeShortInterest(params: Params, signal: AbortSignal): Promise<{ data: unknown; schema: object }> {
   const symbols = params.symbols as string[]
-  let settlementDate = params.settlement_date === undefined ? undefined : String(params.settlement_date)
+  const settlementDate = params.settlement_date === undefined ? undefined : String(params.settlement_date)
   if (settlementDate === undefined) {
     for (const candidate of settlementCandidates()) {
-      const probe = await fetchShortInterest(symbols[0], candidate, signal)
-      if (probe.length > 0) { settlementDate = candidate; break }
+      const rows: JsonRecord[] = []
+      for (const symbol of symbols) rows.push(...await fetchShortInterest(symbol, candidate, signal))
+      if (rows.length > 0) return { data: rows, schema: finraShortInterestRow }
     }
-    if (settlementDate === undefined) throw sourceError('FINRA short interest has no published settlement date in the last 3 months', 'finra_not_published')
+    throw sourceError('FINRA short interest has no published settlement date in the last 3 months', 'finra_not_published')
   }
   const rows: JsonRecord[] = []
   for (const symbol of symbols) {
@@ -586,7 +594,7 @@ export function createUsOfficialSources(): DataSource[] {
       inputSchema: dateRangeInput,
       outputSchema: { type: 'array', items: treasuryRow },
       allowed: ['start_date', 'end_date'],
-      normalize: normalizeDateRange,
+      normalize: normalizeTreasury,
       validateOutput: (data) => Array.isArray(data) && data.every((row) => isRecord(row) && typeof row.date === 'string'),
       execute: executeTreasury,
     }),

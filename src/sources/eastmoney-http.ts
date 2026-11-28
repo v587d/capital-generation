@@ -1,5 +1,5 @@
 import type { DataRequest, DataSource, SchemaDescriptor } from '../data-collector/hub.js'
-import { buildDataKey } from '../data-collector/hub.js'
+import { buildDataKey, outputSchemaIssues } from '../data-collector/hub.js'
 import { getDataTimeContract } from '../time/tools.js'
 import { sharedEastmoneyClient, sharedEastmoneyThrottle, EastmoneyTransportError } from '../net/eastmoney-client.js'
 import { normalizeEastmoneyAshareIdentity, normalizeEastmoneyBoardIdentity, normalizeEastmoneySecurityIdentity, type EastmoneyBoardIdentity, type EastmoneyMarket } from './security-identity.js'
@@ -1378,7 +1378,8 @@ async function executeBondList(params: Params, signal: AbortSignal): Promise<{ d
 function createSource(options: { capability: string; name: string; summary: string; description: string; inputSchema: object; outputSchema: object; paginated?: boolean; cacheMaxAgeMs?: number; rowShape: SchemaDescriptor['rowShape']; allowed: string[]; normalize: (params: Params) => Params; validateOutput?: (data: unknown) => boolean; execute: (params: Params, signal: AbortSignal) => Promise<{ data: unknown; schema: object }> }): DataSource {
   const schema: SchemaDescriptor = { capability: options.capability, time_contract: getDataTimeContract(options.capability), name: options.name, source: `http:eastmoney.${options.capability}`, data_key: buildDataKey('eastmoney', 'http', options.capability), source_label: 'eastmoney', paginated: options.paginated === true, cacheMaxAgeMs: options.cacheMaxAgeMs, rowShape: options.rowShape, summary: options.summary, description: options.description, input_schema: options.inputSchema, output_schema: options.outputSchema }
   const normalize = (params: Record<string, unknown>): Params => options.normalize(params)
-  const validateOutput = options.validateOutput ?? ((data: unknown) => isRecord(data) && Array.isArray(data.item) && isRecord(data.pagination))
+  const semanticGuard = options.validateOutput ?? ((data: unknown) => isRecord(data) && Array.isArray(data.item) && isRecord(data.pagination))
+  const validateOutput = (data: unknown): boolean => semanticGuard(data) && outputSchemaIssues(options.outputSchema, data).length === 0
   return { schema, normalizeParams: normalize, validateOutput, execute: async (request: DataRequest, signal: AbortSignal) => options.execute(normalize(request.params), signal) }
 }
 

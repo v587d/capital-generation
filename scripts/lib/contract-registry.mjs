@@ -200,46 +200,51 @@ const EM = [
   // FINRA：做空成交量每天更新、做空余额双周更新；日期参数省略时能力自己发现最近已发布日。
   ds('official', 'finra_short_volume', 'daily', {}, { expect: { minRows: 1 } }),
   ds('official', 'finra_short_interest', 'weekly', { symbols: ['AAPL'] }, { expect: { minRows: 1 }, budgetMs: 30_000 }),
-  // SEC：本机出口被 Akamai 限流（403 Request Rate Threshold Exceeded），字段形状已用宿主出口
-  // web_fetch 核对真报文；巡检照跑留痕，等 CI/其它出口能打时再转 active。
+  // SEC: live egress is blocked (direct Akamai 403; proxy TLS reset). Official JSON shapes were
+  // verified through the host egress; keep probing without alarming until a live runner passes.
   ds('official', 'sec_ticker_cik', 'weekly', { tickers: ['AAPL'] }, {
+    expect: { minRows: 1, identity: { field: 'found', value: true } },
     shadow: {
       since: '2026-11-27',
       verdict: 'HTTP_STATUS 403',
-      evidence: 'Akamai "Request Rate Threshold Exceeded" from this egress (direct); proxy TLS handshake fails; payload shape verified via host egress',
+      evidence: '2026-11-28 direct Akamai 403; proxy TLS reset; company_tickers shape verified via host egress',
       revisit: '2026-12-05',
     },
   }),
   ds('official', 'sec_filings', 'weekly', { ticker: 'AAPL', limit: 5 }, {
+    expect: { minRows: 1, identity: { field: 'cik', value: '0000320193' } },
     shadow: {
       since: '2026-11-27',
       verdict: 'HTTP_STATUS 403',
-      evidence: 'same egress block as sec_ticker_cik; submissions recent shape verified against CIK0000320193/CBRS payloads',
+      evidence: '2026-11-28 direct 403/proxy TLS reset; submissions recent columns verified via host egress; recent-only scope',
       revisit: '2026-12-05',
     },
   }),
   ds('official', 'sec_daily_filings', 'weekly', { filing_date: dayShift(-1) }, {
+    expect: { minRows: 1 },
     shadow: {
       since: '2026-11-27',
       verdict: 'HTTP_STATUS 403',
-      evidence: 'same egress block; idx pipe-delimited format documented by SEC index docs, not yet fetched as a live file',
+      evidence: '2026-11-28 direct 403/proxy TLS reset; real idx proves wrapped fixed-width header and QTR path, parser fixed; live 2026 idx still blocked',
       revisit: '2026-12-05',
     },
   }),
   ds('official', 'sec_fulltext_search', 'weekly', { q: '"apple"', forms: ['8-K'], limit: 3 }, {
+    expect: { minRows: 1, identity: { field: 'form', value: '8-K' } },
     shadow: {
       since: '2026-11-27',
       verdict: 'HTTP_STATUS 403',
-      evidence: 'same egress block; hits._source.adsh/ciks/display_names verified via host egress',
+      evidence: '2026-11-28 direct 403/proxy TLS reset; hits._source.adsh/ciks/display_names verified via host egress',
       revisit: '2026-12-05',
     },
   }),
   ds('official', 'sec_market_frame', 'weekly', { tag: 'Assets', unit: 'USD', period: 'CY2025Q1I' }, {
+    expect: { minRows: 1 },
     budgetMs: 40_000,
     shadow: {
       since: '2026-11-27',
       verdict: 'HTTP_STATUS 403',
-      evidence: 'same egress block; frames payload (taxonomy/tag/ccp/uom/pts/data[accn,cik,entityName,loc,end,val]) verified via host egress',
+      evidence: '2026-11-28 direct 403/proxy TLS reset; frames pts=5655 and instant/duration rows verified via host egress',
       revisit: '2026-12-05',
     },
   }),

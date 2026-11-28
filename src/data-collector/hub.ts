@@ -103,6 +103,57 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** Validate the JSON Schema subset used by DataSource output contracts. */
+export function outputSchemaIssues(schema: unknown, value: unknown, path = '$'): string[] {
+  if (!isPlainRecord(schema) || Object.keys(schema).length === 0) return []
+  if (Array.isArray(schema.oneOf)) {
+    const matches = schema.oneOf.filter((branch) => outputSchemaIssues(branch, value, path).length === 0)
+    return matches.length === 1 ? [] : [`${path} must match exactly one oneOf branch (matched ${matches.length})`]
+  }
+  const type = schema.type
+  if (typeof type === 'string' && !matchesOutputType(value, type)) return [`${path} must be ${type}`]
+  if (Array.isArray(schema.enum) && !schema.enum.includes(value)) return [`${path} must be one of ${schema.enum.join(', ')}`]
+  if (Array.isArray(value)) {
+    const issues: string[] = []
+    if (isPlainRecord(schema.items)) {
+      for (let index = 0; index < value.length; index += 1) {
+        if (!(index in value)) issues.push(`${path}[${index}] is an array hole`)
+        else issues.push(...outputSchemaIssues(schema.items, value[index], `${path}[${index}]`))
+      }
+    }
+    return issues
+  }
+  if (!isPlainRecord(value)) return []
+  const properties = isPlainRecord(schema.properties) ? schema.properties : {}
+  const required = Array.isArray(schema.required) ? schema.required : []
+  const issues: string[] = []
+  for (const key of required) {
+    if (typeof key !== 'string' || !Object.hasOwn(value, key) || value[key] === undefined) issues.push(`${path}.${String(key)} is required`)
+  }
+  if (schema.additionalProperties === false) {
+    for (const key of Object.keys(value)) {
+      if (!Object.hasOwn(properties, key)) issues.push(`${path}.${key} is not declared`)
+    }
+  }
+  for (const [key, child] of Object.entries(properties)) {
+    if (Object.hasOwn(value, key) && value[key] !== undefined) issues.push(...outputSchemaIssues(child, value[key], `${path}.${key}`))
+  }
+  return issues
+}
+
+function matchesOutputType(value: unknown, type: string): boolean {
+  switch (type) {
+    case 'object': return isPlainRecord(value)
+    case 'array': return Array.isArray(value)
+    case 'string': return typeof value === 'string'
+    case 'number': return typeof value === 'number' && Number.isFinite(value)
+    case 'integer': return Number.isSafeInteger(value)
+    case 'boolean': return typeof value === 'boolean'
+    case 'null': return value === null
+    default: return true
+  }
+}
+
 function inlineFieldText(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
   const text = value.replace(/\s+/g, ' ').trim()

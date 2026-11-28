@@ -6,7 +6,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { classify, rowsOf, expectedRowKeys, ISSUE_VERDICTS } from '../scripts/lib/contract-probe.mjs'
+import { classify, rowsOf, expectedRowKeys, ISSUE_VERDICTS, runContractProbes } from '../scripts/lib/contract-probe.mjs'
+import { outputSchemaIssues } from '../lib/data-collector/hub.js'
 
 const ok = { minRows: 1, ms: 100, budgetMs: 20_000 }
 
@@ -57,8 +58,30 @@ test('合法空结果与参数被拒各有归属，不许混进 TRANSPORT', () =
   assert.equal(classify({ error: noBillboard, ...ok }), 'EMPTY')
   const notFound = Object.assign(new Error('互动易查不到 600519'), { code: 'NOT_FOUND' })
   assert.equal(classify({ error: notFound, ...ok }), 'EMPTY')
+  const finraUnpublished = Object.assign(new Error('FINRA short volume has no published file'), { code: 'finra_not_published' })
+  assert.equal(classify({ error: finraUnpublished, ...ok }), 'EMPTY')
   const badTicker = Object.assign(new Error('unknown ticker'), { code: 'eastmoney_invalid_ticker' })
   assert.equal(classify({ error: badTicker, ...ok }), 'ENVELOPE', '注册表样本写错了要看得见，别藏在噪声里')
+})
+
+test('解析成功的上游结构错误是 GUARD，不许落进 TRANSPORT', () => {
+  for (const code of ['sec_invalid_response', 'us_official_invalid_response', 'eastmoney_invalid_response']) {
+    const error = Object.assign(new Error('response shape changed'), { code })
+    assert.equal(classify({ error, ...ok }), 'GUARD', `${code} 是我方映射契约失败`)
+  }
+})
+
+test('runner：SEC 解析结构错误记 GUARD，日索引未发布日记 EMPTY', async () => {
+  const originalFetch = globalThis.fetch
+  try {
+    globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => '{}' })
+    const invalid = await runContractProbes({ tier: 'full', only: 'sec_ticker_cik', log: () => {} })
+    assert.equal(invalid.results[0].verdict, 'GUARD')
+
+    globalThis.fetch = async () => ({ ok: false, status: 404, text: async () => '' })
+    const missingDay = await runContractProbes({ tier: 'full', only: 'sec_daily_filings', log: () => {} })
+    assert.equal(missingDay.results[0].verdict, 'EMPTY')
+  } finally { globalThis.fetch = originalFetch }
 })
 
 test('AnySearch 替目标站报的错不算 AnySearch 坏——巡检测的不是 gov.cn 开不开门', () => {
@@ -74,6 +97,21 @@ test('rowsOf 认 rowShape 的三种形状，不猜', () => {
   assert.deepEqual(rowsOf({ rows: [{ a: 1 }] }, { rowKey: 'rows' }), [{ a: 1 }])
   assert.deepEqual(rowsOf(null, undefined), [], '空响应不许抛')
   assert.deepEqual(rowsOf('text', undefined), [], '非对象响应不许抛')
+})
+
+test('outputSchemaIssues：required/additionalProperties/oneOf/有限数都按生产 schema 判', () => {
+  const schema = {
+    type: 'array',
+    items: {
+      type: 'object',
+      properties: { id: { type: 'string' }, value: { oneOf: [{ type: 'number' }, { type: 'null' }] } },
+      required: ['id'], additionalProperties: false,
+    },
+  }
+  assert.deepEqual(outputSchemaIssues(schema, [{ id: 'a', value: null }]), [])
+  assert.ok(outputSchemaIssues(schema, [{ value: 1 }]).length > 0)
+  assert.ok(outputSchemaIssues(schema, [{ id: 'a', rogue: 1 }]).length > 0)
+  assert.ok(outputSchemaIssues(schema, [{ id: 'a', value: Number.NaN }]).length > 0)
 })
 
 test('expectedRowKeys 从 output_schema 取，两种信封都要认', () => {

@@ -42,7 +42,7 @@ concurrency:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    # 无重试意味着一条挂住的探针吃掉自己整份预算：daily ~73 条、weekly ~100 条，
+    # 无重试意味着一条挂住的探针吃掉自己整份预算：daily 140 条、full 186 条，
     # 单条上限最大的那条是 90 s（sseinfo 单公司分支），其余 20–60 s。25 分钟够全量最坏情形，
     # 超了就是 harness 挂了——那本来也该红。
     timeout-minutes: 25

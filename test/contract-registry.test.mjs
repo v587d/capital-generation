@@ -96,6 +96,14 @@ test('excluded / shadow / 已知红都必须带出处：since + 理由，shadow 
   }
 })
 
+test('SEC 转正样本必须非空：空数组或 found=false 不算证据', () => {
+  const sec = CONTRACT_PROBES.filter((entry) => entry.capability.startsWith('sec_'))
+  assert.equal(sec.length, 5)
+  for (const entry of sec) assert.ok(entry.expect?.minRows >= 1, `${entry.capability} 缺 minRows`)
+  assert.deepEqual(sec.find((entry) => entry.capability === 'sec_ticker_cik')?.expect.identity,
+    { field: 'found', value: true })
+})
+
 test('每条 active/shadow 都有延迟预算，且是正有限数', () => {
   for (const entry of CONTRACT_PROBES.filter((e) => !e.excluded)) {
     assert.ok(Number.isFinite(entry.budgetMs) && entry.budgetMs > 0, `${entry.capability} 的 budgetMs 非法：${entry.budgetMs}`)

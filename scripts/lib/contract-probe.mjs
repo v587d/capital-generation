@@ -5,6 +5,7 @@
  * ⛔ Output carries no secrets, query strings or response bodies: issues are public.
  */
 import { createRequestThrottle } from '../../lib/net/throttle.js'
+import { outputSchemaIssues } from '../../lib/data-collector/hub.js'
 import { sharedEastmoneyThrottle, createEastmoneyClient } from '../../lib/net/eastmoney-client.js'
 import { createFuyaoRestSources } from '../../lib/sources/fuyao-rest.js'
 import { createFtshareSources } from '../../lib/sources/ftshare-rest.js'
@@ -58,7 +59,9 @@ function upstreamCodeOf(error) {
 
 // Upstream says "no records for this ticker / range": a legal empty result, not a link fault.
 // Mixing it into TRANSPORT drowns real faults; mixing it into GUARD sends people to fix a good map.
-const EMPTY_RESULT_CODES = new Set(['eastmoney_no_billboard_data', 'NOT_FOUND'])
+const EMPTY_RESULT_CODES = new Set(['eastmoney_no_billboard_data', 'NOT_FOUND', 'finra_not_published'])
+// Parsed envelopes and mapped rows are our contract, not network trouble: these must open issues.
+const STRUCTURAL_ERROR_CODES = new Set(['sec_invalid_response', 'us_official_invalid_response', 'eastmoney_invalid_response'])
 // Upstream rejected our params = the registry sample is wrong, i.e. our defect: let ENVELOPE file it.
 const PARAM_REJECT_CODES = new Set(['eastmoney_invalid_ticker', 'tencent_invalid_param'])
 // AnySearch reporting a target-side error (blocked, unsupported, too large): `/v1/extract` is intact.
@@ -72,6 +75,7 @@ export function classify({ error, guardOk, rowCount, minRows, ms, budgetMs, iden
     const message = String(error.message ?? '')
     const code = upstreamCodeOf(error)
     if (code) return knownCodes.includes(code) ? 'PASS' : 'ENVELOPE'
+    if (STRUCTURAL_ERROR_CODES.has(error.code)) return 'GUARD'
     if (EMPTY_RESULT_CODES.has(error.code)) return 'EMPTY'
     if (PARAM_REJECT_CODES.has(error.code)) return 'ENVELOPE'
     if (TARGET_SIDE_MARKERS.test(message)) return 'PASS'
@@ -243,12 +247,16 @@ async function runOne({ entry, sources, probes, identifiers }) {
     let rows
     let guardOk = true
     let expected = []
+    let detail
     if (entry.face === 'datasource') {
       const source = sources.get(entry.capability)
       const output = await source.execute({ capability: entry.capability, params, session: { id: 'contract-probe' } }, controller.signal)
       rows = rowsOf(output.data, source.schema.rowShape)
-      guardOk = source.validateOutput ? source.validateOutput(output.data) : true
+      const semanticOk = source.validateOutput ? source.validateOutput(output.data) : true
+      const schemaIssues = outputSchemaIssues(source.schema.output_schema, output.data)
+      guardOk = semanticOk && schemaIssues.length === 0
       expected = expectedRowKeys(source.schema.output_schema)
+      if (!guardOk) detail = semanticOk ? schemaIssues[0] : 'validateOutput false'
     } else if (entry.family === 'wind') {
       rows = await runWindProtocol(entry)
     } else {
@@ -270,13 +278,15 @@ async function runOne({ entry, sources, probes, identifiers }) {
       // The most useful column in an issue: expected vs actual keys, names only, no values.
       keyDiff: expected.length > 0 && actual.length > 0 ? diffKeys(expected, actual) : undefined,
       actualKeys: expected.length === 0 && actual.length > 0 ? actual.slice(0, 12) : undefined,
+      ...(detail ? { detail } : {}),
     }
   } catch (error) {
     const aborted = controller.signal.aborted
     const wrapped = aborted ? Object.assign(new Error(`超出 ${abortMs}ms 预算被中止`), { code: 'TIMEOUT' }) : error
+    const verdict = classify({ error: wrapped, budgetMs: entry.budgetMs, knownCodes: entry.knownCodes })
     return {
       ...base, ms: Date.now() - started,
-      verdict: classify({ error: wrapped, budgetMs: entry.budgetMs, knownCodes: entry.knownCodes }),
+      verdict: entry.capability === 'sec_daily_filings' && wrapped?.code === 'sec_not_found' ? 'EMPTY' : verdict,
       code: typeof wrapped?.code === 'string' ? wrapped.code : undefined,
       httpStatus: httpStatusOf(wrapped), upstreamCode: upstreamCodeOf(wrapped),
       detail: String(wrapped?.message ?? wrapped).slice(0, 160),

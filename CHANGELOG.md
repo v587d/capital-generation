@@ -7,6 +7,29 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**、2.9.0 的选择器收敛与质检前置——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [2.31.6] - 2026-11-28
+
+数据契约巡检加固：修复巡检假绿、SEC 日索引解析与路径、FINRA 多票结算日发现，并补齐 11 条新增能力的
+输出护栏与真实 SEC fixture。SEC 五条仍保持巡检 shadow，等待可访问 SEC 的出口完成实时 idx 复核后转正。
+
+### Fixed
+
+- 契约巡检同时校验生产 `validateOutput` 与 `output_schema`；required、额外字段、类型、nullable 与非有限数
+  不再漏报，已解析的上游结构错误统一归 `GUARD`，不再埋进 `TRANSPORT`。
+- `sec_daily_filings` 使用 SEC 官方 `QTR{季}` 目录，支持跨两行的定宽表头，并接受 `YYYYMMDD` / `YYYY-MM-DD`
+  申报日；真实 2018 idx 摘录已写入回归 fixture。
+- SEC 五条巡检样本补 `minRows` 与关键 identity；ticker、submissions、全文检索和 frames fixture 使用真实
+  报文摘录，补齐 instant / duration 两个分支。
+- `finra_short_interest` 自动发现结算日时按全部 symbols 判定，不再因首票缺数误退到旧结算日。
+- Treasury 1830 天区间上限在参数层执行；11 条新增能力的 `validateOutput` 完整执行各自 output schema。
+- 契约巡检清单与设计文档解除 Git 忽略，CI checkout 可以读取转正 SOP 与证据。
+
+### Notes
+
+- `sec_filings` 明确保持 recent-only；更早历史在 `filings.files`，本能力不自动合并。
+- 回归：`npm test` **1919 pass / 0 fail**；双出口复跑 6 条 active 均至少一个出口 PASS，SEC 直连仍 403。
+- 版本：根包 + 四个随包嵌套包 + `LOCAL_FETCH_CLIENT_VERSION` / `WIND_CLIENT_VERSION` 同步 2.31.6。
+
 ## [2.31.5] - 2026-11-27
 
 数据面扩容：新增 11 条 `data_collector` 能力（162 → 173），覆盖港美股财务、美债与 NY Fed 利率、
