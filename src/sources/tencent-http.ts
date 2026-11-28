@@ -364,6 +364,12 @@ async function executeKline(params: Params, signal: AbortSignal): Promise<{ data
   return { data: all, schema: klineOutput }
 }
 
+function todayShanghai(): string {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date())
+  const of = (type: string) => parts.find((part) => part.type === type)?.value ?? ''
+  return `${of('year')}-${of('month')}-${of('day')}`
+}
+
 function parseSnapshot(text: string, symbol: string): { date: string; clock: string; amount: number } {
   const match = new RegExp(`v_${symbol}="([^"]*)"`).exec(text)
   if (!match) throw new Error(`Tencent quote returned no snapshot for ${symbol}`)
@@ -407,7 +413,8 @@ async function executeTicks(params: Params, signal: AbortSignal): Promise<{ data
         side: fields[6],
       }
       const expected = rows.length === 0 ? 0 : Number(rows[rows.length - 1].seq) + 1
-      if (row.seq < expected || (rows.length > 0 && String(row.time) < String(rows[rows.length - 1].time))) throw sourceError(`Tencent ticks ${symbol} sequence or time moved backwards`, 'tencent_invalid_response')
+      // Sequence is authoritative: upstream can correct one timestamp backwards without reordering ticks.
+      if (row.seq < expected) throw sourceError(`Tencent ticks ${symbol} sequence moved backwards`, 'tencent_invalid_response')
       if (row.seq > expected) {
         if (row.time <= TICK_SESSION_END) throw sourceError(`Tencent ticks ${symbol} has missing continuous-session sequence ${expected}-${row.seq - 1}`, 'tencent_incomplete')
         for (let seq = expected; seq < row.seq; seq += 1) missingSeq.push(seq)
@@ -419,7 +426,7 @@ async function executeTicks(params: Params, signal: AbortSignal): Promise<{ data
   const after = parseSnapshot(await getText(`${QUOTE_URL}${symbol}`, signal, 'gbk'), symbol)
   if (after.date !== before.date) throw sourceError(`Tencent ticks crossed trading day ${before.date} -> ${after.date}`, 'tencent_incomplete')
   const continuousAmount = rows.filter((row) => String(row.time) <= TICK_SESSION_END).reduce((sum, row) => sum + Number(row.amount), 0)
-  if (after.amount === before.amount && Math.abs(continuousAmount - before.amount) > before.amount * 0.001 + 1000) throw sourceError(`Tencent ticks ${symbol} amount ${continuousAmount} does not match quote ${before.amount}`, 'tencent_incomplete')
+  if (after.date === todayShanghai() && after.clock >= '150000' && after.amount === before.amount && Math.abs(continuousAmount - before.amount) > before.amount * 0.001 + 1000) throw sourceError(`Tencent ticks ${symbol} amount ${continuousAmount} does not match quote ${before.amount}`, 'tencent_incomplete')
   return {
     data: { date: before.date, code: code.canonical, tencent_symbol: symbol, rows, missing_seq: missingSeq },
     schema: ticksOutput,

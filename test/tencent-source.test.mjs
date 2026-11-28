@@ -634,6 +634,35 @@ test('腾讯出口：信号已取消时不排队，直接原样抛 AbortError（
   }
 })
 
+test('tencent_ticks tolerates a corrected timestamp but rejects sequence regression', async () => {
+  const sources = sourceMap()
+  const originalFetch = globalThis.fetch
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+  let tickBody = 'v_detail_data_sz000001=[0,"0/09:30:00/10/0/1/6000/M|1/09:37:06/10/0/1/2000/M|2/09:36:57/10/0/1/2000/M"];'
+  let quoteTimestamp = '20260924100000'
+  globalThis.fetch = async (url) => {
+    const text = String(url)
+    if (text.includes('qt.gtimg.cn')) return response(quoteText('sz000001', { timestamp: quoteTimestamp, amount: 10000, amountWan: 10000 }))
+    if (text.includes('p=0')) return response(tickBody)
+    return response('v_detail_data_sz000001=[1,""];')
+  }
+  try {
+    const result = await execute(sources.tencent_ticks, { code: '000001.SZ' })
+    assert.deepEqual(result.data.rows.map((row) => row.time), ['09:30:00', '09:37:06', '09:36:57'])
+    assert.deepEqual(result.data.rows.map((row) => row.seq), [0, 1, 2])
+
+    quoteTimestamp = `${today.replaceAll('-', '')}150000`
+    tickBody = 'v_detail_data_sz000001=[0,"0/09:30:00/10/0/1/6000/M|1/09:37:06/10/0/1/2000/M"];'
+    await assert.rejects(() => execute(sources.tencent_ticks, { code: '000001.SZ' }), /amount 8000 does not match quote 10000/)
+
+    quoteTimestamp = '20260924100000'
+    tickBody = 'v_detail_data_sz000001=[0,"0/09:30:00/10/0/1/6000/M|0/09:30:01/10/0/1/4000/M"];'
+    await assert.rejects(() => execute(sources.tencent_ticks, { code: '000001.SZ' }), /sequence moved backwards/)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('tencent_ticks parses paged rows and verifies continuous-session amount', async () => {
   const sources = sourceMap()
   const originalFetch = globalThis.fetch
