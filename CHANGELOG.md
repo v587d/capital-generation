@@ -7,6 +7,25 @@
 - **第三位（patch）**：不破坏既有工具 / 配置 / 会话的新增与修复（如 2.1.1、2.1.2）。
 - **第二位（minor）**：有需要用户知晓的行为变更，且段内附迁移说明（如 2.1.0 的图表呈现通道重做、2.2.0 的数据源与检索来源扩容、2.4.0 的**必须换宿主版本**、2.9.0 的选择器收敛与质检前置——本插件自己的工具与数据契约没变，所以只抬第二位）。
 
+## [2.31.7] - 2026-11-28
+
+修复 GitHub Actions 全量契约巡检暴露的 5 条 Fuyao 契约不一致，并把腾讯已解析结构错误纳入 `GUARD`。
+
+### Fixed
+
+- Fuyao 行 schema 与生产 guard 对齐：required 字段仍必填，但显式 `null` 合法；`json?` 不再生成
+  `oneOf: [{}, {type:'null'}]`，避免 null 命中两个分支。
+- `dragon_tiger.thscode`、`fund_asset_allocation.report_date_ms`、`fund_top_holders.holder_id`
+  的上游真实 null 值不再被误报；描述明确可转债、缺失报告日和持有人 ID 的识别方式。
+- `fund_diagnostics` 的 JSON 字段描述改为可为对象、数组或 null，与真实报文一致。
+- `tencent_invalid_response` 归 `GUARD`，不再埋进 `TRANSPORT`。
+
+### Notes
+
+- 真实 Fuyao 报文复测：上述 5 条 `validateOutput` 与 `output_schema` 均为通过。
+- 回归：`npm test` **1920 pass / 0 fail**。
+- 版本：根包 + 四个随包嵌套包 + `LOCAL_FETCH_CLIENT_VERSION` / `WIND_CLIENT_VERSION` 同步 2.31.7。
+
 ## [2.31.6] - 2026-11-28
 
 数据契约巡检加固：修复巡检假绿、SEC 日索引解析与路径、FINRA 多票结算日发现，并补齐 11 条新增能力的

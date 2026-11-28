@@ -61,7 +61,7 @@ function upstreamCodeOf(error) {
 // Mixing it into TRANSPORT drowns real faults; mixing it into GUARD sends people to fix a good map.
 const EMPTY_RESULT_CODES = new Set(['eastmoney_no_billboard_data', 'NOT_FOUND', 'finra_not_published'])
 // Parsed envelopes and mapped rows are our contract, not network trouble: these must open issues.
-const STRUCTURAL_ERROR_CODES = new Set(['sec_invalid_response', 'us_official_invalid_response', 'eastmoney_invalid_response'])
+const STRUCTURAL_ERROR_CODES = new Set(['sec_invalid_response', 'us_official_invalid_response', 'eastmoney_invalid_response', 'tencent_invalid_response'])
 // Upstream rejected our params = the registry sample is wrong, i.e. our defect: let ENVELOPE file it.
 const PARAM_REJECT_CODES = new Set(['eastmoney_invalid_ticker', 'tencent_invalid_param'])
 // AnySearch reporting a target-side error (blocked, unsupported, too large): `/v1/extract` is intact.

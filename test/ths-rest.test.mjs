@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createFuyaoRestSources, resolveFuyaoApiKey, MAX_HISTORY_WINDOW_MS, MAX_BATCH_CODES } from '../lib/sources/fuyao-rest.js'
+import { outputSchemaViolations } from './output-contract.mjs'
 
 /** All registered capabilities, in registration order. */
 const ALL_CAPABILITIES = [
@@ -822,7 +823,11 @@ test('Phase 3：龙虎榜 board_type/date 校验，行数组是 stock_items 而�
   const stock = { thscode: '002407.SZ', ticker: '002407', name: '多氟多', concept_list: [{ name: '锂电' }], change: 0.09994, net_value: 1786253128.23, net_rate: 0.119, hot_rank: 2, range_days: 3 }
   const container = { timestamp: 1782921600000, board_type: 'all', trade_date: '2026-07-01', count: 80, stock_count: 75, stock_items: [stock], hot_money_items: [] }
   assert.equal(tiger.validateOutput(container), true)
-  assert.equal(tiger.validateOutput({ ...container, hot_money_items: undefined }), false, '缺 hot_money_items 判不符（两类榜单互斥但都存在）')
+  const convertible = { ...stock, thscode: null, ticker: '113677', name: '华懋转债' }
+  const withConvertible = { ...container, stock_items: [convertible] }
+  assert.equal(tiger.validateOutput(withConvertible), true, '可转债 thscode 为 null 时仍按 ticker/name 识别')
+  assert.deepEqual(outputSchemaViolations(tiger.schema.output_schema, withConvertible), [], 'required 字段允许显式 null')
+  assert.equal(tiger.validateOutput({ ...container, hot_money_items: undefined }), false, '缺 hot_money_items 判不符（两类榜单互斥且都存在）')
   assert.equal(tiger.validateOutput({ ...container, stock_items: undefined }), false, '缺 stock_items 判不符')
   assert.equal(tiger.validateOutput({ ...container, trade_date: undefined }), false, '缺 trade_date 判不符')
   assert.equal(tiger.validateOutput({ ...container, stock_items: [{ ticker: '002407' }] }), false, '行缺 thscode 判不符')
@@ -949,7 +954,19 @@ test('Phase 3B：fund_holders 口径枚举与 fund_top_holders 的 limit 边界'
   const row = { holder_id: 'T000280241', holder_code: '015016', holder_name: '某机构', holder_type: '一般法人', rank: 1, hold_share: 1000, hold_rate_pct: 20.5, report_date_ms: 1782748800000, publish_date_ms: 1782748800000 }
   assert.equal(top.validateOutput({ timestamp: 1, limit: 10, item: [row] }), true)
   assert.equal(top.validateOutput({ timestamp: 1, item: [row] }), true, 'data.limit 允许缺席')
+  const unnamedHolder = { ...row, holder_id: null, holder_name: '某机构' }
+  assert.equal(top.validateOutput({ timestamp: 1, item: [unnamedHolder] }), true, 'holder_id 可为 null')
+  assert.deepEqual(outputSchemaViolations(top.schema.output_schema, { timestamp: 1, item: [unnamedHolder] }), [])
   assert.equal(top.validateOutput({ timestamp: 1, limit: 10, item: [{ holder_name: '某机构' }] }), false, '缺 holder_id 判不符')
+})
+
+test('Phase 3B：fund_asset_allocation 的 report_date_ms 允许显式 null', () => {
+  const allocation = byCapability('fund_asset_allocation')
+  const row = { report_date_ms: null, stock_ratio_pct: 95.1, bond_ratio_pct: null, deposit_ratio_pct: 4.9, other_ratio_pct: null }
+  const data = { timestamp: 1, item: [row] }
+  assert.equal(allocation.validateOutput(data), true)
+  assert.deepEqual(outputSchemaViolations(allocation.schema.output_schema, data), [])
+  assert.equal(allocation.validateOutput({ timestamp: 1, item: [{ stock_ratio_pct: 95.1 }] }), false, '缺 report_date_ms 仍判不符')
 })
 
 test('Phase 3B：fund_manager / fund_company 用 id 定位，可空字段放行', () => {
@@ -1065,12 +1082,17 @@ test('Phase 3C：json 字段类型容忍"文档写 object、实际是 array/null
   const base = { thscode: '510300.SH', ticker: '510300', fund_type: 'exchange', peer_code: 'ETF-INDEX' }
   // Upstream emits dimensions/resilience arrays but null probabilities/ranges for this shape.
   assert.equal(diagnostics.validateOutput({ item: [{ ...base, dimensions: [{ year: '2026' }], resilience: [], probabilities: null, ranges: null }] }), true)
+  const nullJson = { item: [{ ...base, dimensions: [{ year: '2026' }], resilience: [], probabilities: null, ranges: null }] }
+  assert.deepEqual(outputSchemaViolations(diagnostics.schema.output_schema, nullJson), [], 'json? 的 null 只能匹配一个分支')
   assert.equal(diagnostics.validateOutput({ item: [{ ...base, dimensions: {}, probabilities: null }] }), true, '对象同样放行（上游结构保留）')
   assert.equal(diagnostics.validateOutput({ item: [{ ...base }] }), true, '缺失也放行：这些字段是"保留上游结构"，不做存在性约束')
   assert.equal(diagnostics.validateOutput({ item: [{ ticker: '510300' }] }), false, '缺 thscode 仍判不符')
 
   const experience = byCapability('fund_manager_experience')
   assert.equal(experience.validateOutput({ item: [{ awards: [], heavy_assets: {}, investment_history: { '460300': { name: 'x', end: '至今' } } }] }), true)
+  const nullAwards = { item: [{ awards: null, heavy_assets: null, investment_history: null }] }
+  assert.equal(experience.validateOutput(nullAwards), true)
+  assert.deepEqual(outputSchemaViolations(experience.schema.output_schema, nullAwards), [], 'awards=null 不得命中两个 oneOf 分支')
 })
 
 test('Phase 3C：经理区间枚举只有 5 个值（与 nav 的 8 值不同）', () => {

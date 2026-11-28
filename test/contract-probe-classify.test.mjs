@@ -65,7 +65,7 @@ test('合法空结果与参数被拒各有归属，不许混进 TRANSPORT', () =
 })
 
 test('解析成功的上游结构错误是 GUARD，不许落进 TRANSPORT', () => {
-  for (const code of ['sec_invalid_response', 'us_official_invalid_response', 'eastmoney_invalid_response']) {
+  for (const code of ['sec_invalid_response', 'us_official_invalid_response', 'eastmoney_invalid_response', 'tencent_invalid_response']) {
     const error = Object.assign(new Error('response shape changed'), { code })
     assert.equal(classify({ error, ...ok }), 'GUARD', `${code} 是我方映射契约失败`)
   }
